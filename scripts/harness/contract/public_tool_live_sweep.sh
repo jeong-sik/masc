@@ -90,9 +90,15 @@ cleanup_contract_task() {
 }
 trap 'cleanup_contract_task' EXIT
 
+public_tool_manifest_exe="${PUBLIC_TOOL_MANIFEST_EXE:-${ROOT_DIR}/_build/default/bin/public_tool_manifest.exe}"
+if [[ ! -x "$public_tool_manifest_exe" ]]; then
+  echo "FAIL: public tool manifest executable not found: ${public_tool_manifest_exe}" >&2
+  echo "Build ./bin/public_tool_manifest.exe before running the contract harness." >&2
+  exit 1
+fi
+
 manifest_json="$(
-  env -u DUNE_RPC \
-    opam exec -- dune exec --root "$ROOT_DIR" bin/public_tool_manifest.exe \
+  "$public_tool_manifest_exe" \
     | awk 'BEGIN { printing = 0 } /^\{/ { printing = 1 } printing { print }'
 )"
 expected_public_tools="$(printf '%s\n' "$manifest_json" | jq -c '.public_tool_names | sort')"
@@ -326,7 +332,19 @@ r_agent_timeline="$(call_tool 5036 "masc_agent_timeline" "$(jq -cn --arg agent_n
 expect_ok "masc_agent_timeline" "$r_agent_timeline"
 
 next_step "masc_transition done"
-r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:"public tool sweep completed"}')")"
+# RFC-0311 Phase 1: the completion gate requires a locally validated
+# evidence_refs entry on done (notes and trace-shaped labels alone no longer
+# satisfy it). Persist a base-path-local proof artifact and submit its relative
+# path so the gate can resolve it deterministically.
+evidence_ref=".masc/harness-evidence/public_tool_live_sweep.json"
+evidence_path="${BASE_PATH}/${evidence_ref}"
+mkdir -p "$(dirname "$evidence_path")"
+jq -cn --arg session_id "$MCP_SESSION_ID" --arg agent_name "$AGENT_NAME" --arg task_id "$task_id" \
+  '{harness:"public_tool_live_sweep",session_id:$session_id,agent_name:$agent_name,task_id:$task_id,status:"completed"}' \
+  >"$evidence_path"
+done_notes="Public MCP tool live sweep completed all requested tool calls and verified each response before task completion."
+done_summary="public tool live sweep verified across the public MCP surface"
+r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 expect_ok "masc_transition done" "$r_done"
 CLEANUP_TASK_FINALIZED=1
 

@@ -13,6 +13,10 @@ let metric_sse_external_subscriber_callback_failures =
   Otel_metric_store_core.declare_counter "masc_sse_external_subscriber_callback_failures_total"
 ;;
 
+let metric_sse_external_fanout_duration_seconds =
+  "masc_sse_external_fanout_duration_seconds"
+;;
+
 let metric_oas_sse_relay_drop_marker_failures =
   Otel_metric_store_core.declare_counter "masc_oas_sse_relay_drop_marker_failures_total"
 ;;
@@ -81,6 +85,22 @@ let metric_discord_outbound_replies =
   Otel_metric_store_core.declare_counter "masc_discord_outbound_replies_total"
 ;;
 
+(* RFC-0317: Slack in-process gateway counters. Mirror the Discord subset that
+   the server-side gateway emits directly (event flow + inbound dispatch +
+   outbound replies). Connection-level counters (reconnect/close) stay in the
+   I/O layer and are added when Slack_socket_client grows observability. *)
+let metric_slack_gateway_events =
+  Otel_metric_store_core.declare_counter "masc_slack_gateway_events_total"
+;;
+
+let metric_slack_inbound_dispatch =
+  Otel_metric_store_core.declare_counter "masc_slack_inbound_dispatch_total"
+;;
+
+let metric_slack_outbound_replies =
+  Otel_metric_store_core.declare_counter "masc_slack_outbound_replies_total"
+;;
+
 let metric_dashboard_execution_render_phase_sec =
   "masc_dashboard_execution_render_phase_seconds"
 ;;
@@ -107,6 +127,11 @@ let metric_ws_slice_fanout_skipped = Otel_metric_store_core.declare_counter "mas
 let metric_ws_bytes_sent = Otel_metric_store_core.declare_counter "masc_ws_bytes_sent_total"
 let metric_grpc_bytes_sent = Otel_metric_store_core.declare_counter "masc_grpc_bytes_sent_total"
 let metric_ws_delta_built = Otel_metric_store_core.declare_counter "masc_ws_delta_built_total"
+
+let metric_ws_delta_payload_serializations =
+  Otel_metric_store_core.declare_counter "masc_ws_delta_payload_serializations_total"
+;;
+
 let metric_ws_message_bytes = "masc_ws_message_bytes"
 
 let metric_grpc_backlog_replay_lines_scanned =

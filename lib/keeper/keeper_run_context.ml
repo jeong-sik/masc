@@ -58,6 +58,9 @@ let build_base_system_prompt
          | None -> None)
       meta.active_goal_ids
   in
+  (* RFC-0324 B-1: no catalog-fed repository list is injected into the
+     prompt any more — the filesystem is the repo truth and the prompt's
+     constant <repositories> block instructs self-discovery. *)
   Keeper_prompt.build_keeper_system_prompt
     ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
     ~instructions:

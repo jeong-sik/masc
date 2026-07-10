@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import * as Vitest from 'vitest'
-import type { DashboardGovernanceResponse, KeeperApprovalQueueItem, KeeperResolvedApprovalItem } from '../../types'
+import type { DashboardGovernanceResponse, KeeperApprovalQueueItem, KeeperApprovalRule, KeeperResolvedApprovalItem } from '../../types'
 
 const { afterEach, beforeEach, describe, expect, it, vi } = Vitest
 
@@ -27,6 +29,13 @@ function queueItem(overrides: Partial<KeeperApprovalQueueItem> & { id: string })
 function responseWithQueue(
   approval_queue: KeeperApprovalQueueItem[],
   recent_resolved: KeeperResolvedApprovalItem[] = [],
+  approval_rules: KeeperApprovalRule[] = [],
+  hitl: DashboardGovernanceResponse['hitl'] = {
+    enabled: true,
+    disabled_by_env: false,
+    env_name: 'MASC_DISABLE_HITL',
+    default_enabled: true,
+  },
 ): DashboardGovernanceResponse {
   return {
     generated_at: '2026-06-19T00:00:00Z',
@@ -37,6 +46,8 @@ function responseWithQueue(
     pending_actions: [],
     approval_queue,
     recent_resolved,
+    approval_rules,
+    hitl,
   } as DashboardGovernanceResponse
 }
 
@@ -45,29 +56,31 @@ function responseWithQueue(
 async function loadSurface(
   approval_queue: KeeperApprovalQueueItem[],
   recent_resolved: KeeperResolvedApprovalItem[] = [],
+  approval_rules: KeeperApprovalRule[] = [],
+  hitl?: DashboardGovernanceResponse['hitl'],
 ) {
   vi.resetModules()
   const resolveGovernanceApproval = vi
     .fn()
     .mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' })
-  vi.doMock('../../api', () => ({
+  const setApprovalMode = vi
+    .fn()
+    .mockResolvedValue({ ok: true, mode: 'auto_low_risk', previous_mode: 'manual', actor: 'op', changed_at: '2026-06-19T00:00:00Z' })
+  const response = hitl
+    ? responseWithQueue(approval_queue, recent_resolved, approval_rules, hitl)
+    : responseWithQueue(approval_queue, recent_resolved, approval_rules)
+  const apiMock = () => ({
     decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-    fetchDashboardGovernance: vi.fn().mockResolvedValue(responseWithQueue(approval_queue, recent_resolved)),
+    fetchDashboardGovernance: vi.fn().mockResolvedValue(response),
     fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
     resolveGovernanceApproval,
     deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+    setApprovalMode,
     submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
     submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
-  }))
-  vi.doMock('../../api/dashboard-governance', () => ({
-    decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-    fetchDashboardGovernance: vi.fn().mockResolvedValue(responseWithQueue(approval_queue, recent_resolved)),
-    fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
-    resolveGovernanceApproval,
-    deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
-    submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
-    submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
-  }))
+  })
+  vi.doMock('../../api', apiMock)
+  vi.doMock('../../api/dashboard-governance', apiMock)
   vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
   // Preserve the real router (route signal etc.) but capture navigate() so the
   // "open keeper conversation" wiring can be asserted without a real route change.
@@ -77,7 +90,7 @@ async function loadSurface(
     navigate,
   }))
   const mod = await import('./approvals-surface')
-  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGovernanceApproval, navigate }
+  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGovernanceApproval, setApprovalMode, navigate }
 }
 
 describe('ApprovalsSurface', () => {
@@ -109,7 +122,11 @@ describe('ApprovalsSurface', () => {
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
-    expect(container.querySelector('[data-testid="approvals-surface"]')).not.toBeNull()
+    const surface = container.querySelector('[data-testid="approvals-surface"]')
+    expect(surface).not.toBeNull()
+    // ap-surface scopes the .ov-scroll overflow override that lets the sticky
+    // detail rail work; without the class the CSS rule below never matches.
+    expect(surface?.className).toContain('ap-surface')
     const cards = container.querySelectorAll('[data-testid="approval-card"]')
     expect(cards.length).toBe(4)
     expect(container.textContent).toContain('masc-improver')
@@ -133,6 +150,25 @@ describe('ApprovalsSurface', () => {
     expect(container.textContent).not.toContain('처리이력')
     // KPI strip counts the queue
     expect(container.querySelector('[data-testid="approvals-queue"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="approvals-aside"]')?.textContent)
+      .toContain('HITL 상태')
+    expect(container.querySelector('[data-testid="approvals-aside"]')?.textContent)
+      .toContain('enabled')
+  }, 20000)
+
+  it('formats a multi-hour HITL wait with an hour tier, not a minute-only breakdown', async () => {
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({ id: 'appr-long', waiting_s: 9000 }), // 2h 30m — previously "150분 0초 대기"
+      queueItem({ id: 'appr-short', waiting_s: 92 }), // 1m 32s
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-approval-id="appr-long"] .ap-age')?.textContent)
+      .toBe('2시간 30분 대기')
+    expect(container.querySelector('[data-approval-id="appr-short"] .ap-age')?.textContent)
+      .toBe('1분 대기')
   }, 20000)
 
   it('renders the HITL context summary (available) inside the pending card', async () => {
@@ -337,7 +373,7 @@ describe('ApprovalsSurface', () => {
     expect(container.textContent).not.toContain('처리이력')
   }, 20000)
 
-  it('keeps prototype-only defer, undo, and history controls out of the live surface', async () => {
+  it('keeps prototype-only defer and undo controls out while exposing backed queue/history tabs', async () => {
     const { ApprovalsSurface } = await loadSurface([
       queueItem({ id: 'appr-no-fake-controls', keeper_name: 'masc-improver' }),
     ])
@@ -346,7 +382,8 @@ describe('ApprovalsSurface', () => {
     await flushUi()
 
     expect(container.querySelector('.ap-act.defer')).toBeNull()
-    expect(container.querySelector('.ap-history')).toBeNull()
+    expect(container.querySelector('.ap-viewseg')).not.toBeNull()
+    expect(container.textContent).toContain('이력')
     expect(container.textContent).not.toContain('보류')
     expect(container.textContent).not.toContain('되돌리기')
     expect(container.textContent).not.toContain('처리이력')
@@ -371,9 +408,12 @@ describe('ApprovalsSurface', () => {
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
-    const history = container.querySelector('[data-testid="approvals-history"]')
+    container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
+    await flushUi()
+
+    const history = container.querySelector('[data-testid="approvals-history-view"]')
     expect(history).not.toBeNull()
-    expect(history?.textContent).toContain('최근 처리 (1)')
+    expect(history?.querySelector('.ap-hist-summary')?.getAttribute('aria-label')).toBe('승인 이력 요약')
     expect(history?.textContent).toContain('거부')
     expect(history?.textContent).toContain('fs_write')
     expect(history?.textContent).toContain('masc-improver')
@@ -381,6 +421,100 @@ describe('ApprovalsSurface', () => {
     expect(history?.querySelector('.ap-history-decision')?.className).toContain('decision-reject')
     expect(history?.querySelector('.ap-history-decision')?.className).not.toContain('operator denied')
     expect(history?.querySelector('.ap-history-at')?.textContent).toContain('2026')
+  }, 20000)
+
+  it('filters resolved approval history and surfaces Always-rule evidence', async () => {
+    const { ApprovalsSurface } = await loadSurface(
+      [],
+      [
+        {
+          id: 'appr-approved',
+          keeper_name: 'keeper-a',
+          tool_name: 'fs_write',
+          risk_level: 'medium',
+          decision: 'approve',
+          resolved_at: '2026-06-27T02:02:03Z',
+          rule_match: { rule_id: 'rule-1', matched_by: 'fingerprint' },
+        },
+        {
+          id: 'appr-rejected',
+          keeper_name: 'keeper-b',
+          tool_name: 'shell',
+          risk_level: 'critical',
+          decision: 'reject',
+          resolved_at: '2026-06-27T01:02:03Z',
+        },
+      ],
+      [
+        {
+          id: 'rule-1',
+          keeper_name: 'keeper-a',
+          tool_name: 'fs_write',
+          max_risk: 'medium',
+          match_count: 3,
+        },
+      ],
+    )
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const aside = container.querySelector('[data-testid="approvals-aside"]')
+    expect(aside?.textContent).toContain('Always Rules')
+    expect(aside?.textContent).toContain('keeper-a')
+    expect(aside?.textContent).toContain('fs_write')
+    expect(aside?.textContent).toContain('match 3')
+
+    container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="approvals-history-view"]')?.textContent)
+      .toContain('rule rule-1')
+
+    const rejectFilter = Array.from(container.querySelectorAll<HTMLButtonElement>('.ap-hist-f'))
+      .find(button => button.textContent === '거부')
+    rejectFilter?.click()
+    await flushUi()
+
+    const history = container.querySelector('[data-testid="approvals-history-view"]')
+    expect(history?.textContent).toContain('appr-rejected')
+    expect(history?.textContent).not.toContain('appr-approved')
+  }, 20000)
+
+  it('makes hidden Always rules explicit when the aside list overflows its cap', async () => {
+    const rules = Array.from({ length: 8 }, (_, i) => ({
+      id: `rule-${i}`,
+      keeper_name: 'keeper-a',
+      tool_name: 'fs_write',
+      max_risk: 'medium',
+      match_count: 1,
+    })) as KeeperApprovalRule[]
+    const { ApprovalsSurface } = await loadSurface([], [], rules)
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    // Only the first 6 rows render, and the remaining 2 are surfaced explicitly
+    // rather than silently dropped (Always rules have no other view).
+    expect(container.querySelectorAll('[data-testid="approval-rule-row"]').length).toBe(6)
+    expect(container.querySelector('[data-testid="approvals-rules-overflow"]')?.textContent)
+      .toContain('외 2건')
+  }, 20000)
+
+  it('omits the rules overflow note when the list fits the cap', async () => {
+    const rules = Array.from({ length: 6 }, (_, i) => ({
+      id: `rule-${i}`,
+      keeper_name: 'k',
+      tool_name: 't',
+      max_risk: 'low',
+      match_count: 1,
+    })) as KeeperApprovalRule[]
+    const { ApprovalsSurface } = await loadSurface([], [], rules)
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="approvals-rules-overflow"]')).toBeNull()
   }, 20000)
 
   it('shows the empty state when no approvals are pending', async () => {
@@ -538,6 +672,89 @@ describe('ApprovalsSurface', () => {
     expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-a', 'approve', true)
   })
 
+  it('binds the RFC-0319 approval-mode toggle to hitl.approval_mode (auto_low_risk → on)', async () => {
+    const { ApprovalsSurface } = await loadSurface([], [], [], {
+      enabled: true,
+      disabled_by_env: false,
+      env_name: 'MASC_DISABLE_HITL',
+      default_enabled: true,
+      approval_mode: { mode: 'auto_low_risk', auto_eligible_bands: ['low'], fail_closed: false },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
+    expect(toggle).not.toBeNull()
+    // A real toggle switch, not the former display-only aria-hidden span.
+    expect(toggle?.getAttribute('role')).toBe('switch')
+    expect(toggle?.getAttribute('aria-checked')).toBe('true')
+    expect(toggle?.className).toContain('on')
+    const aside = container.querySelector('[data-testid="approvals-aside"]')
+    expect(aside?.textContent).toContain('자동 승인 (low-risk)')
+    // the enforced separation-of-duties floor is stated, not decorative
+    expect(aside?.textContent).toContain('비가역·파괴적·high-risk 요청은 항상 수동 결재')
+    expect(aside?.textContent).toContain('자동 승인 대상: low')
+  }, 20000)
+
+  it('defaults the approval-mode toggle to off when hitl.approval_mode is manual', async () => {
+    const { ApprovalsSurface } = await loadSurface([], [], [], {
+      enabled: true,
+      disabled_by_env: false,
+      env_name: 'MASC_DISABLE_HITL',
+      default_enabled: true,
+      approval_mode: { mode: 'manual', auto_eligible_bands: ['low'], fail_closed: false },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
+    expect(toggle?.getAttribute('aria-checked')).toBe('false')
+    expect(toggle?.className).not.toContain('on')
+    expect(container.querySelector('[data-testid="approvals-aside"]')?.textContent).toContain('수동 결재')
+  }, 20000)
+
+  it('routes the approval-mode toggle through setApprovalMode (manual → auto_low_risk)', async () => {
+    const { ApprovalsSurface, setApprovalMode } = await loadSurface([], [], [], {
+      enabled: true,
+      disabled_by_env: false,
+      env_name: 'MASC_DISABLE_HITL',
+      default_enabled: true,
+      approval_mode: { mode: 'manual', auto_eligible_bands: ['low'], fail_closed: false },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
+    expect(toggle?.disabled).toBe(false)
+    toggle?.click()
+    await flushUi()
+
+    expect(setApprovalMode).toHaveBeenCalledWith('auto_low_risk')
+  }, 20000)
+
+  it('disables the approval-mode toggle when HITL is disabled by env (nothing gates)', async () => {
+    const { ApprovalsSurface, setApprovalMode } = await loadSurface([], [], [], {
+      enabled: false,
+      disabled_by_env: true,
+      env_name: 'MASC_DISABLE_HITL',
+      default_enabled: true,
+      approval_mode: { mode: 'manual', auto_eligible_bands: ['low'], fail_closed: false },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="approval-mode-toggle"]')
+    expect(toggle?.disabled).toBe(true)
+    toggle?.click()
+    await flushUi()
+
+    expect(setApprovalMode).not.toHaveBeenCalled()
+  }, 20000)
+
   it('surfaces a visible error and re-enables the actions when a decision fails (no silent failure)', async () => {
     const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([
       queueItem({ id: 'appr-e', keeper_name: 'masc-improver' }),
@@ -604,5 +821,15 @@ describe('ApprovalsSurface', () => {
       expect(el.tagName).toBe('BUTTON')
       expect(el.textContent).not.toContain('sandbox')
     }
+  })
+
+  it('keeps the sticky detail rail working by un-clipping the approvals .ov-scroll', () => {
+    // The rail is position: sticky, but the shared .ov-scroll wrapper's
+    // overflow formed a non-scrolling sticky containing block. approvals-v2.css
+    // must restore overflow:visible on the approvals-scoped wrapper only.
+    const css = readFileSync(resolve(__dirname, '../../styles/approvals-v2.css'), 'utf8')
+    expect(css).toMatch(/\.ap-surface\s*>\s*\.ov-scroll\s*\{[^}]*overflow:\s*visible/)
+    const railRule = css.match(/\.ap-detail-panel\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(railRule).toContain('position: sticky')
   })
 })

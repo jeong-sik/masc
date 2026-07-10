@@ -32,6 +32,18 @@ let has_short_flag args ch =
       String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-' && String.contains arg ch)
     args
 
+(* A [git push] refspec carries its danger in a POSITIONAL (non-flag) token, not
+   a flag: [:dst] (empty source) deletes the remote ref, and [+src[:dst]] (or a
+   bare [+ref]) force-overwrites it. The flag checks ([--delete]/[--force]/[-f])
+   never see these, so [git push origin :refs/heads/main] and
+   [git push origin +refs/heads/main] would grade as an ordinary [Mutating Push]
+   and auto-run. A leading '+' or ':' appears only on a refspec in push args (a
+   remote name or a flag never starts with them), so a leading-char scan is
+   exact. Same class as the leading-flag (#23390) and action-flag (find -delete)
+   bypasses: danger in a non-flag token. *)
+let has_leading_char_token ch args =
+  List.exists (fun arg -> String.length arg > 0 && arg.[0] = ch) args
+
 let rec strip_global_options = function
   | "-C" :: _path :: rest -> strip_global_options rest
   | "-c" :: _binding :: rest -> strip_global_options rest
@@ -76,11 +88,20 @@ let of_argv = function
            if has_flag rest "--force"
               || has_long_flag rest "--force-with-lease"
               || has_short_flag rest 'f'
+              (* [+src[:dst]] / [+ref] force-overwrites the remote ref *)
+              || has_leading_char_token '+' rest
            then
              Ok (Destructive `Push_force)
            else if has_flag rest "--mirror" then
              Ok (Destructive `Push_mirror)
-           else if has_flag rest "--delete" || has_short_flag rest 'd' then
+           else if
+             has_flag rest "--delete" || has_short_flag rest 'd'
+             (* [git push --prune] deletes remote refs that no longer exist
+                locally, so it belongs to the remote-ref deletion floor. *)
+             || has_long_flag rest "--prune"
+             (* [:dst] (empty source) deletes the remote ref *)
+             || has_leading_char_token ':' rest
+           then
              Ok (Destructive `Push_delete)
            else Ok (Mutating `Push)
        | "reset" when has_flag rest "--hard" ->

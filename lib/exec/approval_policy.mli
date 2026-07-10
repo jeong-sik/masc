@@ -23,19 +23,34 @@ val decide :
   caps:Capability.t list ->
   simple:Shell_ir.simple ->
   Verdict.t
-(** Pure policy decision, evaluated in two stages:
+(** Pure policy decision, evaluated in three stages:
 
     1. Trust-independent catastrophic floor (checked first, denied
        regardless of [overlay] — RFC-0254 §5.3):
        - any [Destructive] git op → [Deny Destructive_git];
        - a redirect [Write_path] whose scope is [Outside_workspace] or
          [Absolute_unknown] → [Deny Path_escape];
+       - an irreversible repository-hosting CLI operation ([gh repo delete],
+         [gh api -X DELETE]) → [Deny
+         Destructive_repo_hosting_cli];
        - a catastrophic-by-identity binary (filesystem-format [mkfs], or
          system-power [shutdown]/[reboot]/[halt]/[poweroff]) → [Deny
          Catastrophic_program];
        - a destructive SQL statement ([DROP]/[TRUNCATE]/[DELETE]) handed to a
          database CLI ([psql -c], [mysql -e]) → [Deny Destructive_db].
-    2. Otherwise the highest program risk class is graded by the matching
+    2. Otherwise, a [gh] capability policy denial → [Deny (Policy_deny ...)].
+       This covers a [gh repo create] request that lacks the G-10 contract
+       ([OWNER/NAME] plus exactly one visibility flag), and [gh pr merge
+       --admin], which bypasses merge requirements rather than requesting
+       ordinary merge approval. Invalid requests must be corrected before HITL;
+       the approval queue only receives explicit ownership/visibility metadata
+       and non-bypass merge requests.
+    3. Otherwise, a [gh] verb whose capability disposition is
+       [Requires_approval] → [Ask], independent of the risk overlay. This is
+       how reversible durable-remote mutations such as [gh repo create] and
+       [gh discussion create] enter HITL rather than auto-running or being
+       disabled.
+    4. Otherwise the highest program risk class is graded by the matching
        [overlay.*_trust] level:
        [Enforced] → [Ask], [Auto_safe]/[Observe] → [Allow],
        [Suggest] → [Suggest_confirm].
@@ -48,10 +63,12 @@ val decide :
 
 val catastrophic_floor : Capability.t list -> Verdict.deny_reason option
 (** Stage 1 of [decide] on its own: [Some reason] for a [Destructive] git op, a
-    redirect [Write_path] escaping the workspace, a catastrophic-by-identity
-    binary (filesystem-format [mkfs] or system-power
-    [shutdown]/[reboot]/[halt]/[poweroff]), or a destructive SQL statement on a
-    database CLI ([psql -c "drop …"]); [None] otherwise.
+    redirect [Write_path] escaping the workspace, an irreversible
+    repository-hosting CLI operation ([gh repo delete], [gh api -X DELETE]), a
+    catastrophic-by-identity binary
+    (filesystem-format [mkfs] or system-power [shutdown]/[reboot]/[halt]/
+    [poweroff]), or a destructive SQL statement on a database CLI
+    ([psql -c "drop …"]); [None] otherwise.
 
     Exposed so the always-run dispatch core
     ([Keeper_tool_execute_shell_ir.dispatch_classified]) can enforce the floor

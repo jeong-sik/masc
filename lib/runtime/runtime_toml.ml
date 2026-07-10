@@ -342,10 +342,26 @@ let parse_provider (id : string) (tbl : Otoml.t)
          Otoml.find_opt tbl Fun.id [ "capabilities" ]
          |> Option.map (parse_capabilities ~path)
        in
-       (* [providers.<id>.log] and [providers.<id>.healthcheck] sub-tables are
-          parse-and-ignore: their fields were dropped from
-          {!Runtime_schema.provider}, so they are neither read nor populated.
-          Leaving them in a TOML file is not an error. *)
+       let healthcheck_result =
+         match Otoml.find_opt tbl Fun.id [ "healthcheck" ] with
+         | None -> Ok None
+         | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as healthcheck_tbl) ->
+           (match Otoml.find_opt healthcheck_tbl Otoml.get_string [ "path" ] with
+            | None -> Ok None
+            | Some healthcheck_path when String.length healthcheck_path > 0
+                                      && Char.equal healthcheck_path.[0] '/' ->
+              Ok (Some healthcheck_path)
+            | Some healthcheck_path ->
+              Error
+                (error
+                   (path ^ ".healthcheck.path")
+                   (Printf.sprintf
+                      "healthcheck.path must be absolute, got %S"
+                      healthcheck_path)))
+         | Some _ ->
+           Error
+             (error (path ^ ".healthcheck") "healthcheck must be a TOML table")
+       in
        let headers =
          match Otoml.find_opt tbl Fun.id [ "headers" ] with
          | None -> None
@@ -358,9 +374,9 @@ let parse_provider (id : string) (tbl : Otoml.t)
          strict_float_find path tbl connect_timeout_key
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
-       (match connect_timeout_result with
-        | Error errs -> Error errs
-        | Ok connect_timeout_s ->
+       (match healthcheck_result, connect_timeout_result with
+        | Error errs, _ | _, Error errs -> Error errs
+        | Ok healthcheck_path, Ok connect_timeout_s ->
           Ok
             { Runtime_schema.id
             ; display_name
@@ -370,6 +386,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; is_non_interactive
             ; credentials
             ; capabilities
+            ; healthcheck_path
             ; headers
             ; connect_timeout_s
             }))
@@ -387,20 +404,70 @@ let parse_providers (toml : Otoml.t)
 
 (* --- Layer 2: Models --- *)
 
-let parse_thinking_control_format ~(path : string) (raw : string)
+let thinking_control_token_key = "thinking-control-token"
+
+let exact_non_empty_string_opt_field ~(path : string) (tbl : Otoml.t) (key : string)
+  : (string option, parse_error list) result
+  =
+  match typed_find "string" path tbl key Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when String.trim value = "" ->
+    Error (error (path ^ "." ^ key) (key ^ " must be non-empty"))
+  | Ok (Some value) when value <> String.trim value ->
+    Error (error (path ^ "." ^ key) (key ^ " must not have leading or trailing whitespace"))
+  | Ok (Some value) -> Ok (Some value)
+;;
+
+let parse_thinking_control_format ~(path : string) ~(token : string option) (raw : string)
   : (Runtime_schema.thinking_control_format, parse_error list) result
   =
+  (* Mirrors the OAS catalog contract (oas#2484): [Chat_template_token]
+     carries its token, so a chat-template-token declaration without a
+     [thinking-control-token] key — or a blank/padded token, or a token on a
+     non-token format — fails the load instead of detonating per request. *)
+  let reject_orphan_token format =
+    match token with
+    | None -> Ok format
+    | Some _ ->
+      Error
+        (error
+           (path ^ "." ^ thinking_control_token_key)
+           (Printf.sprintf
+              "thinking-control-token is only valid with \
+               thinking-control-format = \"chat-template-token\" (got %S)"
+              raw))
+  in
   match String.lowercase_ascii (String.trim raw) with
   | "" | "none" | "no-thinking-control" | "no_thinking_control" ->
-    Ok Runtime_schema.No_thinking_control
-  | "thinking-object" | "thinking_object" -> Ok Runtime_schema.Thinking_object
+    reject_orphan_token Runtime_schema.No_thinking_control
+  | "thinking-object" | "thinking_object" ->
+    reject_orphan_token Runtime_schema.Thinking_object
   | "thinking-object-only" | "thinking_object_only" ->
-    Ok Runtime_schema.Thinking_object_only
-  | "chat-template-kwargs" | "chat_template_kwargs" -> Ok Runtime_schema.Chat_template_kwargs
-  | "chat-template-token" | "chat_template_token" -> Ok Runtime_schema.Chat_template_token
-  | "ollama-think" | "ollama_think" -> Ok Runtime_schema.Ollama_think
-  | "reasoning-effort" | "reasoning_effort" -> Ok Runtime_schema.Reasoning_effort
-  | "enable-thinking" | "enable_thinking" -> Ok Runtime_schema.Enable_thinking
+    reject_orphan_token Runtime_schema.Thinking_object_only
+  | "chat-template-kwargs" | "chat_template_kwargs" ->
+    reject_orphan_token Runtime_schema.Chat_template_kwargs
+  | "chat-template-token" | "chat_template_token" ->
+    (match token with
+     | Some t when String.trim t = t && t <> "" ->
+       Ok (Runtime_schema.Chat_template_token t)
+     | Some _ ->
+       Error
+         (error
+            (path ^ "." ^ thinking_control_token_key)
+            "thinking-control-token must be a non-empty string without \
+             leading or trailing whitespace")
+     | None ->
+       Error
+         (error
+            (path ^ ".thinking-control-format")
+            "chat-template-token requires a thinking-control-token key \
+             naming the template token (e.g. \"<|think|>\")"))
+  | "ollama-think" | "ollama_think" -> reject_orphan_token Runtime_schema.Ollama_think
+  | "reasoning-effort" | "reasoning_effort" ->
+    reject_orphan_token Runtime_schema.Reasoning_effort
+  | "enable-thinking" | "enable_thinking" ->
+    reject_orphan_token Runtime_schema.Enable_thinking
   | other ->
     (* Unknown enum members fail the load, mirroring how this parser already
        rejects unknown protocols / credential types. A silent downgrade to
@@ -432,9 +499,21 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       None
   in
   let thinking_control_format_result =
-    match Otoml.find_opt tbl Otoml.get_string [ "thinking-control-format" ] with
-    | None -> Ok Runtime_schema.No_thinking_control
-    | Some raw -> parse_thinking_control_format ~path raw
+    match
+      ( typed_find "string" path tbl "thinking-control-format" Otoml.get_string
+      , exact_non_empty_string_opt_field ~path tbl thinking_control_token_key )
+    with
+    | Error errs, _ | _, Error errs -> Error errs
+    | Ok None, Ok token ->
+      (match token with
+       | None -> Ok Runtime_schema.No_thinking_control
+       | Some _ ->
+         Error
+           (error
+              (path ^ "." ^ thinking_control_token_key)
+              "thinking-control-token requires thinking-control-format = \
+               \"chat-template-token\""))
+    | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
   in
   Result.map
     (fun thinking_control_format ->
@@ -474,16 +553,13 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
    positive-float path. *)
 let temperature_min = 0.0
 let temperature_max = 2.0
+let probability_min = 0.0
+let probability_max = 1.0
 
-(* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)
-   both read as a float so an operator is not tripped by "1 vs 1.0". Absent →
-   [Ok None] (caller keeps its fallback). Wrong type or out of
-   [temperature_min, temperature_max] → parse error: reject at load rather than
-   send an out-of-range value the provider would reject at request time. *)
-let temperature_opt_field ~(path : string) (tbl : Otoml.t)
+let number_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
   : (float option, parse_error list) result
   =
-  match Otoml.find_opt tbl Fun.id [ "temperature" ] with
+  match Otoml.find_opt tbl Fun.id [ key ] with
   | None -> Ok None
   | Some value ->
     let as_float =
@@ -493,19 +569,110 @@ let temperature_opt_field ~(path : string) (tbl : Otoml.t)
       | _ -> None
     in
     (match as_float with
-     | None ->
-       Error (error (path ^ ".temperature") "temperature must be a number (e.g. 1.0)")
-     | Some t when Float.is_finite t && t >= temperature_min && t <= temperature_max ->
-       Ok (Some t)
-     | Some t ->
+     | None -> Error (error (path ^ "." ^ key) (key ^ " must be a number"))
+     | Some value -> Ok (Some value))
+;;
+
+let bounded_number_opt_field
+      ~(path : string)
+      ~(key : string)
+      ~(lower : float)
+      ~(upper : float)
+      (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  match number_opt_field ~path ~key tbl with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when Float.is_finite value && value >= lower && value <= upper ->
+    Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf
+            "%s must be a finite number in [%g, %g]; got %g"
+            key
+            lower
+            upper
+            value))
+;;
+
+(* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)
+   both read as a float so an operator is not tripped by "1 vs 1.0". Absent →
+   [Ok None] (caller keeps its fallback). Wrong type or out of
+   [temperature_min, temperature_max] → parse error: reject at load rather than
+   send an out-of-range value the provider would reject at request time. *)
+let temperature_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  bounded_number_opt_field
+    ~path
+    ~key:"temperature"
+    ~lower:temperature_min
+    ~upper:temperature_max
+    tbl
+;;
+
+let probability_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  bounded_number_opt_field
+    ~path
+    ~key
+    ~lower:probability_min
+    ~upper:probability_max
+    tbl
+;;
+
+let positive_int_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
+  : (int option, parse_error list) result
+  =
+  match typed_find "an integer" path tbl key Otoml.get_integer with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value > 0 -> Ok (Some value)
+  | Ok (Some value) ->
        Error
          (error
-            (path ^ ".temperature")
+            (path ^ "." ^ key)
             (Printf.sprintf
-               "temperature must be a finite number in [%g, %g]; got %g"
-               temperature_min
-               temperature_max
-               t)))
+               "%s must be a positive integer; got %d"
+               key
+               value))
+;;
+
+let sampling_capability_errors
+      ~(path : string)
+      ~(capabilities : Runtime_schema.model_capabilities option)
+      ~(top_k : int option)
+      ~(min_p : float option)
+  : parse_error list
+  =
+  match capabilities with
+  | None -> []
+  | Some capabilities ->
+    let top_k_errors =
+      match top_k with
+      | Some _ when not capabilities.supports_top_k ->
+        error
+          (path ^ ".top-k")
+          (Printf.sprintf
+             "top-k is set but %s.capabilities.supports-top-k is false"
+             path)
+      | Some _ | None -> []
+    in
+    let min_p_errors =
+      match min_p with
+      | Some _ when not capabilities.supports_min_p ->
+        error
+          (path ^ ".min-p")
+          (Printf.sprintf
+             "min-p is set but %s.capabilities.supports-min-p is false"
+             path)
+      | Some _ | None -> []
+    in
+    top_k_errors @ min_p_errors
 ;;
 
 let parse_model (id : string) (tbl : Otoml.t)
@@ -565,22 +732,34 @@ let parse_model (id : string) (tbl : Otoml.t)
            [])
     in
     let temperature_result = temperature_opt_field ~path tbl in
+    let top_p_result = probability_opt_field ~path ~key:"top-p" tbl in
+    let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
+    let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
     let ( let* ) = Result.bind in
     let* capabilities = capabilities_result in
     let* temperature = temperature_result in
-    Ok
-      { Runtime_schema.id
-      ; api_name
-      ; tools_support
-      ; max_context
-      ; thinking_support
-      ; preserve_thinking
-      ; max_thinking_budget
-      ; streaming
-      ; temperature
-      ; capabilities
-      ; match_prefixes
-      })
+    let* top_p = top_p_result in
+    let* top_k = top_k_result in
+    let* min_p = min_p_result in
+    match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
+    | _ :: _ as errors -> Error errors
+    | [] ->
+      Ok
+        { Runtime_schema.id
+        ; api_name
+        ; tools_support
+        ; max_context
+        ; thinking_support
+        ; preserve_thinking
+        ; max_thinking_budget
+        ; streaming
+        ; temperature
+        ; top_p
+        ; top_k
+        ; min_p
+        ; capabilities
+        ; match_prefixes
+        })
 ;;
 
 let parse_models (toml : Otoml.t)
@@ -633,6 +812,9 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
      used as an omission sentinel, and negative values are meaningless. Reject
      them at load time rather than silently downgrading to "no cap". *)
   let is_default_result = typed_find "a boolean" path tbl "is-default" Otoml.get_boolean in
+  let wizard_default_result =
+    typed_find "a boolean" path tbl "wizard-default" Otoml.get_boolean
+  in
   let max_concurrent_result =
     match typed_find "an integer" path tbl "max-concurrent" Otoml.get_integer with
     | Ok None -> Ok None
@@ -653,6 +835,11 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let ( let* ) = Result.bind in
   let* is_default_opt = is_default_result in
   let is_default = Option.value is_default_opt ~default:false (* DET-OK: fallback to false if omitted *) in
+  let* wizard_default_opt = wizard_default_result in
+  let wizard_default =
+    Option.value wizard_default_opt ~default:false
+    (* DET-OK: omitted means not selected for install wizard. *)
+  in
   let* max_concurrent = max_concurrent_result in
   let* price_input = price_input_result in
   let* price_output = price_output_result in
@@ -662,6 +849,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     { Runtime_schema.provider_id
     ; model_id
     ; is_default
+    ; wizard_default
     ; max_concurrent
     ; price_input
     ; price_output
@@ -824,10 +1012,62 @@ let parse_pause_threshold (toml : Otoml.t) : Runtime_schema.pause_threshold =
   }
 ;;
 
+(* [\[pacing\]] section → typed [Runtime_schema.pacing] (RFC-0313 W3).
+
+   Numeric knobs fail soft like [\[pause\]] above (warn + default). [mode]
+   fails closed: an unknown value aborts config load instead of defaulting,
+   because a typo such as "enfoce" silently reverting the W3 behavior flip
+   to shadow is exactly the permissive-default failure the flip removes.
+   Operational callers read this through [Runtime.pacing]. *)
+let parse_pacing (toml : Otoml.t)
+  : (Runtime_schema.pacing, parse_error list) result
+  =
+  let d = Runtime_schema.pacing_default in
+  let read_field ~key ~getter =
+    try Ok (Otoml.find_opt toml getter [ "pacing"; key ]) with
+    | Otoml.Type_error msg -> Error (Printf.sprintf "[pacing].%s: %s" key msg)
+  in
+  let pick_float ~key ~default =
+    match read_field ~key ~getter:Otoml.get_float with
+    | Ok (Some v) -> v
+    | Ok None -> default
+    | Error msg ->
+      Log.Runtime.warn "runtime_toml: %s — using default %g" msg default;
+      default
+  in
+  let mode_result =
+    match read_field ~key:"mode" ~getter:Otoml.get_string with
+    | Ok None -> Ok d.Runtime_schema.pacing_mode
+    | Ok (Some "shadow") -> Ok Runtime_schema.Pacing_shadow
+    | Ok (Some "enforce") -> Ok Runtime_schema.Pacing_enforce
+    | Ok (Some other) ->
+      Error
+        (error
+           "pacing.mode"
+           (Printf.sprintf
+              "unknown pacing mode %S (expected \"shadow\" or \"enforce\")"
+              other))
+    | Error msg -> Error (error "pacing.mode" msg)
+  in
+  match mode_result with
+  | Error _ as e -> e
+  | Ok pacing_mode ->
+    Ok
+      { Runtime_schema.pacing_mode
+      ; pacing_base_sec =
+          pick_float ~key:"base_sec" ~default:d.Runtime_schema.pacing_base_sec
+      ; pacing_multiplier =
+          pick_float ~key:"multiplier" ~default:d.Runtime_schema.pacing_multiplier
+      ; pacing_cap_sec =
+          pick_float ~key:"cap_sec" ~default:d.Runtime_schema.pacing_cap_sec
+      }
+;;
+
 type runtime_section =
   { default_runtime_id : string option
   ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
+  ; hitl_summary_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   }
@@ -836,6 +1076,7 @@ let empty_runtime_section =
   { default_runtime_id = None
   ; librarian_runtime_id = None
   ; structured_judge_runtime_id = None
+  ; hitl_summary_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   }
@@ -892,6 +1133,12 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                   }
                 , errs )
               | Error e -> section, errs @ e)
+           | "hitl_summary" ->
+             (match parse_runtime_string_leaf ~path:"runtime.hitl_summary" ~key value with
+              | Ok hitl_summary_runtime_id ->
+                { section with hitl_summary_runtime_id = Some hitl_summary_runtime_id },
+                errs
+              | Error e -> section, errs @ e)
            | "cross_verifier" ->
              (match
                 parse_runtime_string_leaf ~path:"runtime.cross_verifier" ~key value
@@ -923,8 +1170,9 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    ("runtime." ^ key)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, librarian, \
-                       cross_verifier, media_failover, [runtime.lanes], \
-                       [runtime.assignments], or a table-valued [runtime.<profile>]"
+                       structured_judge, hitl_summary, cross_verifier, \
+                       media_failover, [runtime.lanes], [runtime.assignments], \
+                       or a table-valued [runtime.<profile>]"
                       key) )
         )
         (empty_runtime_section, [])
@@ -998,6 +1246,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let assignments_result = parse_keeper_assignments toml in
   let bindings_result = parse_bindings toml in
   let lanes_result = parse_lanes toml in
+  let pacing_result = parse_pacing toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs providers_result
@@ -1006,6 +1255,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs assignments_result
     @ errs bindings_result
     @ errs lanes_result
+    @ errs pacing_result
   in
   if all_errors <> []
   then Error all_errors
@@ -1026,6 +1276,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lane_decls =
       extract_after_all_errors_guard ~label:"lanes" lanes_result
     in
+    let pacing =
+      extract_after_all_errors_guard ~label:"pacing" pacing_result
+    in
     let pause_threshold = parse_pause_threshold toml in
     Ok
       { Runtime_schema.providers
@@ -1034,10 +1287,12 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; default_runtime_id = runtime_section.default_runtime_id
       ; librarian_runtime_id = runtime_section.librarian_runtime_id
       ; structured_judge_runtime_id = runtime_section.structured_judge_runtime_id
+      ; hitl_summary_runtime_id = runtime_section.hitl_summary_runtime_id
       ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover
       ; pause_threshold
+      ; pacing
       ; lane_decls
       })
 ;;

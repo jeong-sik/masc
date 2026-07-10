@@ -93,6 +93,12 @@
 .v2-app[data-density="compact"] .thread-inner  { gap: 14px; padding: 0 22px; }
 .v2-app[data-density="compact"] .chat-head     { padding: 10px 16px 9px; }
 .v2-app[data-density="compact"] .composer      { padding: 9px 18px 12px; }
+/* Workspace chain exception: .kw-composer-wrap owns ALL outer composer
+   spacing there (keeper-workspace.css). The density paddings above stacked a
+   third bottom pad under .kw-composer-wrap + .kw-composer-inner — ~62px of
+   dead space pushing the textarea up. Non-workspace chat surfaces keep the
+   density padding. */
+.v2-app[data-density] [data-keeper-chat-layout="workspace"] .composer { padding: 0; }
 .v2-app[data-density="compact"] .ctx-scroll    { padding: 11px; gap: 12px; }
 .v2-app[data-density="compact"] .bd-list       { padding: 11px 14px; gap: 8px; }
 .v2-app[data-density="compact"] .set-row       { padding: 10px 0; }

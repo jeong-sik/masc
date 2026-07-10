@@ -9,6 +9,7 @@ import {
   logEntryToSysRow,
   logRowStatus,
   normalizeSettingsSection,
+  settingsControlInventory,
 } from './settings-surface'
 import type {
   ConfigEntry,
@@ -20,6 +21,7 @@ import type {
   RuntimeDefaultsResponse,
 } from '../api/dashboard'
 import { DashboardMain } from './dashboard-shell'
+import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route } from '../router'
 import { connected } from '../sse'
 import { tweaksDensity } from './tweaks-panel'
@@ -163,6 +165,7 @@ function makeRuntimeDefaults(
       keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
       librarian_runtime_id: null,
       structured_judge_runtime_id: null,
+      hitl_summary_runtime_id: null,
       cross_verifier_runtime_id: null,
       media_failover: [],
     },
@@ -491,7 +494,14 @@ describe('SettingsSurface', () => {
     render(html`<${SettingsSurface} />`, container)
 
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent)
-      .toContain('theme/density live')
+      .toContain('browser-local shell state')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
+    expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
+      .toContain('browser shell only')
+    expect(container.querySelector('[data-control-id="settings-theme-density"]')?.getAttribute('data-control-kind'))
+      .toBe('browser-local')
+    expect(container.querySelector('[data-control-id="settings-display-locale"]')?.getAttribute('data-control-kind'))
+      .toBe('unsupported')
     expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
       .toContain('spacious')
 
@@ -727,6 +737,10 @@ describe('SettingsSurface', () => {
       expect(container.textContent).toContain('70%')
       expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live thresholds read-only')
       expect(container.querySelector('[data-testid="notify-routing-readonly"]')?.textContent).toContain('no writer')
+      expect(container.querySelector('[data-control-id="settings-notify-thresholds"]')?.getAttribute('data-control-kind'))
+        .toBe('live-read')
+      expect(container.querySelector('[data-control-id="settings-notify-routing"]')?.getAttribute('data-control-kind'))
+        .toBe('unsupported')
     })
 
     expect(container.querySelector('[data-testid="notify-local-summary"]')).toBeNull()
@@ -1155,6 +1169,7 @@ describe('SettingsSurface', () => {
           keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: 'rt-b',
           structured_judge_runtime_id: 'rt-c',
+          hitl_summary_runtime_id: 'rt-a',
           cross_verifier_runtime_id: 'rt-a',
           media_failover: [],
         },
@@ -1166,12 +1181,18 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Librarian')
+      expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
+        .toContain('PATCH /api/v1/runtime/routing')
+      expect(container.querySelector('[data-control-id="runtime-routing-lanes"]')?.getAttribute('data-control-kind'))
+        .toBe('live-write')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
         .toContain('수동 reroute')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
         .toContain('provider 실패 자동 전환이 아니라')
       expect((container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement | null)?.value)
         .toBe('rt-c')
+      expect((container.querySelector('[data-testid="runtime-routing-hitl-summary"]') as HTMLSelectElement | null)?.value)
+        .toBe('rt-a')
       expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
       const assignments = Array.from(
@@ -1190,6 +1211,7 @@ describe('SettingsSurface', () => {
           keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: 'rt-b',
           structured_judge_runtime_id: null,
+          hitl_summary_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: [],
         },
@@ -1214,6 +1236,37 @@ describe('SettingsSurface', () => {
         .toBe('rt-b')
     })
     expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent).toContain('저장됨')
+  })
+
+  it('patches the HITL summary routing lane from settings', async () => {
+    apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.fetchRuntimeDefaults
+      .mockResolvedValueOnce(makeRuntimeDefaults())
+      .mockResolvedValueOnce(makeRuntimeDefaults({
+        model_routing: {
+          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
+          librarian_runtime_id: null,
+          structured_judge_runtime_id: null,
+          hitl_summary_runtime_id: 'rt-c',
+          cross_verifier_runtime_id: null,
+          media_failover: [],
+        },
+      }))
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-routing-hitl-summary"]')).not.toBeNull()
+    })
+
+    const hitlSummary = container.querySelector('[data-testid="runtime-routing-hitl-summary"]') as HTMLSelectElement
+    await fireEvent.input(hitlSummary, { target: { value: 'rt-c' } })
+
+    await waitFor(() => {
+      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('hitl_summary', 'rt-c')
+      expect((container.querySelector('[data-testid="runtime-routing-hitl-summary"]') as HTMLSelectElement).value)
+        .toBe('rt-c')
+    })
   })
 
   it('routing section exposes a required default lane without an empty option and patches it', async () => {
@@ -1279,6 +1332,7 @@ describe('SettingsSurface', () => {
           keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
+          hitl_summary_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b'],
         },
@@ -1288,6 +1342,7 @@ describe('SettingsSurface', () => {
           keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
+          hitl_summary_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b', 'rt-c'],
         },
@@ -1319,6 +1374,7 @@ describe('SettingsSurface', () => {
           keeper_assignments: [],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
+          hitl_summary_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: [],
         },
@@ -1487,6 +1543,39 @@ describe('SettingsSurface shell route', () => {
 })
 
 describe('settings read-surface helpers', () => {
+  it('settingsControlInventory covers every settings route section with unique ids', () => {
+    const items = SETTINGS_ROUTE_SECTION_IDS.flatMap(section => settingsControlInventory(section))
+    const ids = new Set<string>()
+
+    for (const section of SETTINGS_ROUTE_SECTION_IDS) {
+      expect(settingsControlInventory(section).length).toBeGreaterThan(0)
+    }
+    for (const item of items) {
+      expect(ids.has(item.id)).toBe(false)
+      ids.add(item.id)
+    }
+  })
+
+  it('settingsControlInventory classifies browser-local and unsupported controls explicitly', () => {
+    const displayKinds = settingsControlInventory('display').map(item => [item.id, item.kind])
+    expect(displayKinds).toContainEqual(['settings-theme-density', 'browser-local'])
+    expect(displayKinds).toContainEqual(['settings-display-locale', 'unsupported'])
+
+    const notifyKinds = settingsControlInventory('notify').map(item => [item.id, item.kind])
+    expect(notifyKinds).toContainEqual(['settings-notify-thresholds', 'live-read'])
+    expect(notifyKinds).toContainEqual(['settings-notify-routing', 'unsupported'])
+  })
+
+  it('settingsControlInventory records runtime routing writers as live-backed actions', () => {
+    const routing = settingsControlInventory('routing')
+    expect(routing.map(item => item.id)).toEqual([
+      'runtime-routing-lanes',
+      'runtime-media-failover',
+    ])
+    expect(routing.every(item => item.kind === 'live-write')).toBe(true)
+    expect(routing.map(item => item.action).join('\n')).toContain('/api/v1/runtime/routing')
+  })
+
   it('mcpExposedToolNames keeps only public_mcp tools, sorted', () => {
     const names = mcpExposedToolNames([
       makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),

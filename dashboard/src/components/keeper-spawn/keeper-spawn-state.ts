@@ -93,3 +93,79 @@ export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRu
     spawning.value = false
   }
 }
+
+// ---------------------------------------------------------------------------
+// Persona create/edit state.
+//
+// Completes the persona create/edit UI surface introduced in #23703
+// (persona-form.ts, persona-browser.ts import these). The exports were
+// omitted from that change, leaving the dashboard TypeScript typecheck
+// broken on every branch that runs the Dashboard job. The job does not run
+// on pushes to main, so main itself stays latently green and every PR
+// sitting on top inherits the failure.
+//
+// masc_persona_create / masc_persona_update accept (see keeper_schema.ml):
+// persona_name, display_name, role, trait, goal, instructions,
+// mention_targets, tool_denylist, proactive_enabled, auto_handoff.
+// persona-form.ts additionally collects `mode` and `description`, which are
+// NOT part of the persona schema; they are accepted here only for type
+// compatibility with the form and are deliberately not forwarded. Aligning
+// the form to the real persona field model is tracked separately.
+// ---------------------------------------------------------------------------
+
+export const showCreateForm = signal(false)
+export const editingPersona = signal<PersonaSummary | null>(null)
+
+export async function createPersona(fields: {
+  persona_name: string
+  display_name?: string
+  role?: string
+  mode?: string
+  description?: string
+}): Promise<boolean> {
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    showToast(access.reason ?? '페르소나 생성 권한이 없습니다.', 'error')
+    return false
+  }
+  const args: Record<string, unknown> = { persona_name: fields.persona_name }
+  if (fields.display_name !== undefined) args.display_name = fields.display_name
+  if (fields.role !== undefined) args.role = fields.role
+  try {
+    await callMcpTool('masc_persona_create', args)
+    showToast(`${fields.persona_name} 페르소나 생성 완료`, 'success')
+    void loadPersonas()
+    return true
+  } catch (err) {
+    showToast(`페르소나 생성 실패: ${errorToString(err)}`, 'error')
+    return false
+  }
+}
+
+export async function updatePersona(
+  name: string,
+  patch: {
+    display_name?: string
+    role?: string
+    mode?: string
+    description?: string
+  },
+): Promise<boolean> {
+  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  if (!access.allowed) {
+    showToast(access.reason ?? '페르소나 수정 권한이 없습니다.', 'error')
+    return false
+  }
+  const args: Record<string, unknown> = { persona_name: name }
+  if (patch.display_name !== undefined) args.display_name = patch.display_name
+  if (patch.role !== undefined) args.role = patch.role
+  try {
+    await callMcpTool('masc_persona_update', args)
+    showToast(`${name} 페르소나 수정 완료`, 'success')
+    void loadPersonas()
+    return true
+  } catch (err) {
+    showToast(`페르소나 수정 실패: ${errorToString(err)}`, 'error')
+    return false
+  }
+}

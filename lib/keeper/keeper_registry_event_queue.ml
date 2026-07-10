@@ -99,10 +99,12 @@ let requeue_front ~base_path name stimuli =
        loop ())
 ;;
 
+let ack_consumed_result ~base_path name stimuli =
+  Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
+;;
+
 let ack_consumed ~base_path name stimuli =
-  match
-    Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
-  with
+  match ack_consumed_result ~base_path name stimuli with
   | Ok () -> ()
   | Error msg ->
     Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg
@@ -173,13 +175,13 @@ let dequeue ~base_path name =
     loop ()
 ;;
 
-let drain_board ?window_sec ~base_path name =
+let drain_board ~base_path name =
   match Keeper_registry.get ~base_path name with
   | None -> []
   | Some entry ->
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
-      let board, rest = Keeper_event_queue.drain_board_window ?window_sec cur in
+      let board, rest = Keeper_event_queue.drain_board_all cur in
       Keeper_event_queue_persistence.record_inflight ~base_path ~keeper_name:name board;
       if Atomic.compare_and_set entry.event_queue cur rest
       then (

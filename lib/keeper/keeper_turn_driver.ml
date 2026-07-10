@@ -646,71 +646,103 @@ let run_named
             ~max_concurrent:runtime.Runtime.binding.max_concurrent
             provider_config
         in
-        let name = Printf.sprintf "oas-%s" attempt_runtime_id in
-        let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
-          { runtime_id = attempt_runtime_id
-          ; error_runtime_id
-          ; base_path
-          ; keeper_name
-          ; name
-          ; goal
-          ; goal_blocks
-          ; priority
-          ; session_id
-          ; system_prompt
-          ; tools
-          ; initial_messages
-          ; max_turns
-          ; max_idle_turns
-          ; stream_idle_timeout_s
-          ; execution_idle_timeout_s
-          ; body_timeout_s
-          ; temperature
-          ; max_tokens = inference_policy.attempt_max_tokens
-          ; accept
-          ; guardrails
-          ; hooks
-          ; context_reducer
-          ; raw_trace
-          ; transport_resolved
-          ; runtime_mcp_policy
-          ; allowed_paths
-          ; checkpoint_sidecar
-          ; cache_system_prompt
-          ; yield_on_tool
-          ; compact_ratio
-          ; context_window_tokens
-          ; oas_auto_context_overflow_retry
-          ; checkpoint_dir
-          ; context_injector
-          ; context
-          ; enable_thinking = inference_policy.attempt_enable_thinking
-          ; preserve_thinking = inference_policy.attempt_preserve_thinking
-          ; approval
-          ; exit_condition
-          ; exit_condition_result
-          ; summarizer
-          ; oas_checkpoint
-          ; trace_link
-          ; sw
-          ; net
-          ; on_event
-          ; on_yield
-          ; on_resume
-          ; agent_ref
-          ; on_runtime_observation
-          ; event_bus
-          ; runtime_manifest_context
-          ; runtime_manifest_append
-          ; turn_start
-          ; seq_ref
-          }
-        in
-        let result, checkpoint_after, _success_sample =
-          Keeper_turn_driver_try_provider.run_try_provider
-            try_provider_ctx ?resume_checkpoint ?per_provider_timeout_s candidate
-        in
-        result, checkpoint_after))
+        match provider_cooldown_block ~keeper_name candidate with
+        | Some block ->
+          emit_runtime_manifest
+            ~status:"provider_cooldown"
+            ~decision:(provider_cooldown_block_decision block)
+            Keeper_runtime_manifest.Provider_attempt_finished;
+          ( Error
+              (provider_cooldown_block_error
+                 ~runtime_id:attempt_runtime_id
+                 block)
+          , None )
+        | None ->
+          let name = Printf.sprintf "oas-%s" attempt_runtime_id in
+          let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
+            { runtime_id = attempt_runtime_id
+            ; error_runtime_id
+            ; base_path
+            ; keeper_name
+            ; name
+            ; goal
+            ; goal_blocks
+            ; priority
+            ; session_id
+            ; system_prompt
+            ; tools
+            ; initial_messages
+            ; max_turns
+            ; max_idle_turns
+            ; stream_idle_timeout_s
+            ; execution_idle_timeout_s
+            ; body_timeout_s
+            ; temperature
+            ; max_tokens = inference_policy.attempt_max_tokens
+            ; accept
+            ; guardrails
+            ; hooks
+            ; context_reducer
+            ; raw_trace
+            ; transport_resolved
+            ; runtime_mcp_policy
+            ; allowed_paths
+            ; checkpoint_sidecar
+            ; cache_system_prompt
+            ; yield_on_tool
+            ; compact_ratio
+            ; context_window_tokens
+            ; oas_auto_context_overflow_retry
+            ; checkpoint_dir
+            ; context_injector
+            ; context
+            ; enable_thinking = inference_policy.attempt_enable_thinking
+            ; preserve_thinking = inference_policy.attempt_preserve_thinking
+            ; approval
+            ; exit_condition
+            ; exit_condition_result
+            ; summarizer
+            ; oas_checkpoint
+            ; trace_link
+            ; sw
+            ; net
+            ; on_event
+            ; on_yield
+            ; on_resume
+            ; agent_ref
+            ; on_runtime_observation
+            ; event_bus
+            ; runtime_manifest_context
+            ; runtime_manifest_append
+            ; turn_start
+            ; seq_ref
+            }
+          in
+          let provider_attempt_started_at = Mtime_clock.now () in
+          let result, checkpoint_after, _success_sample =
+            Keeper_turn_driver_try_provider.run_try_provider
+              try_provider_ctx ?resume_checkpoint ?per_provider_timeout_s candidate
+          in
+          let latency_ms =
+            let ns =
+              Mtime.Span.to_uint64_ns
+                (Mtime.span provider_attempt_started_at (Mtime_clock.now ()))
+            in
+            Int64.to_float ns /. 1_000_000.
+          in
+          (match result with
+           | Ok _ ->
+             record_candidate_health_success
+               ~keeper_name
+               candidate
+               ~latency_ms
+           | Error err ->
+             (match classify_masc_internal_error err with
+              | Some (Accept_rejected { reason; _ }) ->
+                record_candidate_health_rejected ~keeper_name candidate ~reason
+              | Some _ | None ->
+                record_candidate_health_error ~keeper_name candidate err));
+          result, checkpoint_after))
     attempt_runtimes
 
 
@@ -718,6 +750,12 @@ module For_testing = struct
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let record_candidate_health_error = record_candidate_health_error
+  let provider_cooldown_block = provider_cooldown_block
+
+  let aggregate_cooldown_cause =
+    Keeper_turn_driver_provider_attempt.aggregate_cooldown_cause
+
+  let provider_cooldown_block_error = provider_cooldown_block_error
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
   let max_execution_time_for_attempt =
     Keeper_turn_driver_try_provider.For_testing.max_execution_time_for_attempt

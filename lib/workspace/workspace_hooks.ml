@@ -169,6 +169,14 @@ let operator_pending_confirm_upsert_fn
     (fun _config _entry ->
       Error "operator pending-confirm callback is not connected")
 
+let operator_pending_confirm_read_result_fn
+  : (Workspace_utils_backend_setup.config ->
+     (operator_pending_confirm_request list, string) result)
+      Atomic.t
+  =
+  Atomic.make
+    (fun _config -> Error "operator pending-confirm callback is not connected")
+
 let operator_pending_confirm_remove_fn
   : (Workspace_utils_backend_setup.config -> string -> (unit, string) result) Atomic.t
   =
@@ -416,16 +424,18 @@ type evidence_gate_verdict =
   | Pass
   | Reject of { reason : string; rule_id : string; hint : string; payload_json : Yojson.Safe.t }
 
-let cdal_evidence_gate_decide_fn
-  : (task_id:string ->
+let task_completion_gate_decide_fn
+  : (base_path:string ->
+     task_id:string ->
      task_opt:Masc_domain.task option ->
      notes:string ->
      handoff:Masc_domain.task_handoff_context option ->
      unit ->
      evidence_gate_verdict)
     Atomic.t
-  = (Atomic.make (fun ~task_id:_ ~task_opt:_ ~notes:_ ~handoff:_ () -> Pass)
-     : (task_id:string ->
+  = (Atomic.make (fun ~base_path:_ ~task_id:_ ~task_opt:_ ~notes:_ ~handoff:_ () -> Pass)
+     : (base_path:string ->
+        task_id:string ->
         task_opt:Masc_domain.task option ->
         notes:string ->
         handoff:Masc_domain.task_handoff_context option ->

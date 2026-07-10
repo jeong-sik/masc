@@ -1,10 +1,7 @@
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
-import { requestConfirm } from './common/confirm-dialog'
 import { ActionButton } from './common/button'
-import { showToast } from './common/toast'
-import { refreshAfterRuntimeAction } from './keeper-detail-helpers'
-import { bootKeeper, shutdownKeeper } from '../api/keeper'
+import { KEEPER_ACTION_LABELS, runKeeperAction } from './keeper-action-panel'
 import type { Keeper } from '../types'
 import { DialogOverlay } from './common/dialog'
 import { TextArea } from './common/input'
@@ -19,54 +16,22 @@ export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Ke
   const isOffline = isOfflineStatus(effectiveStatus)
   const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(effectiveStatus)
 
+  // Both buttons route through runKeeperAction: same toast copy, same
+  // post-action refresh (refreshKeeperRuntimeStatus), and the shutdown
+  // confirm gate lives there — this surface previously duplicated all three.
   if (isOffline) return html`
     <button type="button"
       class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors v2-monitoring-action"
-      title="기동: offline keeper 를 다시 시작합니다 (offline → running)"
-      onClick=${() => {
-        void (async () => {
-          try {
-            const res = await bootKeeper(keeper.name)
-            if (res.ok) {
-              showToast(keeper.name + ' 기동됨', 'success')
-              await refreshAfterRuntimeAction()
-            } else {
-              showToast(res.error ?? '기동 실패', 'error')
-            }
-          } catch {
-            showToast('기동 실패', 'error')
-          }
-        })()
-      }}
-    >기동하기</button>`
+      title=${KEEPER_ACTION_LABELS.boot.title}
+      onClick=${() => { void runKeeperAction(keeper.name, 'boot') }}
+    >${KEEPER_ACTION_LABELS.boot.verb}</button>`
 
   if (isRunning) return html`
     <button type="button"
       class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors v2-monitoring-action"
-      title="종료: keeper 를 완전 종료합니다 (running/paused → offline, fiber + 리소스 정리)"
-      onClick=${() => {
-        void (async () => {
-          const confirmed = await requestConfirm({
-            title: '키퍼 종료',
-            message: keeper.name + ' 키퍼를 종료합니까?',
-            tone: 'danger'
-          })
-          if (confirmed) {
-            try {
-              const res = await shutdownKeeper(keeper.name)
-              if (res.ok) {
-                showToast(keeper.name + ' 종료됨', 'success')
-                await refreshAfterRuntimeAction()
-              } else {
-                showToast(res.error ?? '종료 실패', 'error')
-              }
-            } catch {
-              showToast('종료 실패', 'error')
-            }
-          }
-        })()
-      }}
-    >종료하기</button>`
+      title=${KEEPER_ACTION_LABELS.shutdown.title}
+      onClick=${() => { void runKeeperAction(keeper.name, 'shutdown') }}
+    >${KEEPER_ACTION_LABELS.shutdown.verb}</button>`
 
   return null
 }

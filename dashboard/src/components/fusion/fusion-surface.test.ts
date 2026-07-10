@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost } from '../../types'
 import { route } from '../../router'
 import {
+  fusionBoardError,
   fusionBoardLoading,
   fusionBoardPosts,
   fusionRuns,
@@ -55,6 +56,7 @@ function boardPost(overrides: Partial<BoardPost> & { id: string; meta: BoardPost
     comment_count: 0,
     created_at: '2026-06-19T01:00:00Z',
     updated_at: '2026-06-19T01:02:00Z',
+    origin: null,
     ...rest,
   }
 }
@@ -67,6 +69,7 @@ describe('FusionSurface', () => {
     document.body.appendChild(container)
     window.location.hash = '#fusion'
     route.value = { tab: 'fusion', params: {}, postId: null }
+    fusionBoardError.value = null
     fusionBoardLoading.value = false
     fusionBoardPosts.value = []
     fusionRuns.value = []
@@ -78,6 +81,7 @@ describe('FusionSurface', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
+    fusionBoardError.value = null
     fusionBoardLoading.value = false
     fusionBoardPosts.value = []
     fusionRuns.value = []
@@ -120,6 +124,10 @@ describe('FusionSurface', () => {
             output_tokens: 360,
           },
         },
+        origin: {
+          source: 'fusion',
+          fusion_run_id: 'fus-1',
+        },
       }),
     ]
 
@@ -151,7 +159,69 @@ describe('FusionSurface', () => {
     expect(container.querySelector('.fus-rdot.done')).not.toBeNull()
     expect(container.textContent).toContain('panel ×2')
     expect(container.textContent).toContain('board evidence')
+    expect(container.querySelector('[data-testid="fusion-sink-linkage"]')?.getAttribute('data-linkage-status')).toBe('verified')
+    expect(container.querySelector('[data-testid="fusion-sink-correlation"]')?.getAttribute('data-meta-run-id')).toBe('fus-1')
+    expect(container.querySelector('[data-testid="fusion-sink-correlation"]')?.getAttribute('data-origin-run-id')).toBe('fus-1')
+    expect(container.textContent).toContain('origin verified')
+    expect(container.textContent).toContain('typed origin으로 run linkage 검증')
     expect(container.textContent).not.toContain('chat · board')
+  })
+
+  it('warns when a successful fusion board post lacks typed origin linkage', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-legacy',
+        title: 'Fusion deliberation (run fus-legacy): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-legacy',
+          question: 'Legacy sink?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Use meta only.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Legacy answer.' },
+        },
+        origin: null,
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const linkage = container.querySelector('[data-testid="fusion-sink-linkage"]')
+    const correlation = container.querySelector('[data-testid="fusion-sink-correlation"]')
+    expect(linkage?.getAttribute('data-linkage-status')).toBe('missing')
+    expect(linkage?.textContent).toContain('origin unverified')
+    expect(linkage?.textContent).toContain('typed board origin is absent')
+    expect(correlation?.getAttribute('data-origin-run-id')).toBe('')
+    expect(correlation?.textContent).toContain('origin unverified')
+  })
+
+  it('flags a meta/origin run-id mismatch instead of treating sink projection as verified', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-drift',
+        title: 'Fusion deliberation (run fus-meta): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-meta',
+          question: 'Drifted sink?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Mismatch.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Mismatch answer.' },
+        },
+        origin: {
+          source: 'fusion',
+          fusion_run_id: 'fus-origin',
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const linkage = container.querySelector('[data-testid="fusion-sink-linkage"]')
+    const correlation = container.querySelector('[data-testid="fusion-sink-correlation"]')
+    expect(linkage?.getAttribute('data-linkage-status')).toBe('mismatch')
+    expect(linkage?.textContent).toContain('origin mismatch')
+    expect(linkage?.textContent).toContain('origin.fusion_run_id=fus-origin')
+    expect(correlation?.getAttribute('data-meta-run-id')).toBe('fus-meta')
+    expect(correlation?.getAttribute('data-origin-run-id')).toBe('fus-origin')
   })
 
   it('renders the RFC-0284 judge-node strip for a judge-of-judges run', () => {
@@ -296,9 +366,12 @@ describe('FusionSurface', () => {
     // 3 first-tier nodes become cards (meta is not a card); the failed one is isolated
     expect(grid?.querySelectorAll('.fus-jnode')).toHaveLength(3)
 
-    // decision badges are mapped from the free-form wire decision via the shared spec
-    expect(grid?.textContent).toContain('권고') // skeptic -> Recommend
-    expect(grid?.textContent).toContain('심의 무효') // literalist -> Insufficient
+    // Free-form wire decisions are not substring-promoted into semantic badges.
+    // They stay raw/neutral so protocol drift remains visible.
+    expect(grid?.textContent).toContain('recommend — patch first')
+    expect(grid?.textContent).toContain('insufficient — missing: benchmarks')
+    expect(grid?.textContent).not.toContain('권고')
+    expect(grid?.textContent).not.toContain('심의 무효')
     // resolved-answer gist as the card summary
     expect(grid?.textContent).toContain('Skeptic: patch the isolation first')
 
@@ -597,11 +670,54 @@ describe('FusionSurface', () => {
     render(html`<${FusionSurface} />`, container)
 
     expect(container.querySelector('[data-testid="fusion-empty"]')).not.toBeNull()
-    expect(container.textContent).toContain('No board-sink fusion posts yet')
+    expect(container.textContent).toContain('아직 기록된 보드 심의가 없습니다')
     expect(container.textContent).toContain('/api/v1/dashboard/fusion-runs')
   })
 
-  it('keeps registry-only running rows visible without claiming no fusion runs exist', () => {
+  it('surfaces board-sink fetch failure instead of claiming an empty sink', () => {
+    fusionBoardError.value = 'HTTP 502 board sink unavailable'
+
+    render(html`<${FusionSurface} />`, container)
+
+    const error = container.querySelector('[data-testid="fusion-board-error"]')
+    expect(error).not.toBeNull()
+    expect(error?.getAttribute('data-board-source')).toBe('/api/v1/dashboard/board')
+    expect(error?.getAttribute('data-board-sort')).toBe('recent')
+    expect(error?.getAttribute('data-board-limit')).toBe('500')
+    expect(error?.textContent).toContain('Board sink load failed')
+    expect(error?.textContent).toContain('HTTP 502 board sink unavailable')
+    const empty = container.querySelector('[data-testid="fusion-empty"]')
+    expect(empty?.textContent).toContain('보드 심의 기록을 확인하지 못했습니다')
+    expect(empty?.textContent).toContain('/api/v1/dashboard/board?sort_by=recent&limit=500')
+    expect(empty?.textContent).not.toContain('아직 기록된 보드 심의가 없습니다')
+  })
+
+  it('keeps cached board-sink detail visible while showing a refresh failure', () => {
+    fusionBoardError.value = 'network offline'
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-cached',
+        title: 'Fusion deliberation (run fus-cached): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-cached',
+          question: 'Cached run?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Use cached evidence.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Cached answer.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="fusion-board-error"]')?.textContent).toContain('network offline')
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    expect(detail?.textContent).toContain('fus-cached')
+    expect(detail?.textContent).toContain('Cached answer')
+    expect(container.querySelector('[data-testid="fusion-empty"]')).toBeNull()
+  })
+
+  it('merges a registry-only running run into the master list instead of a separate top panel', () => {
     fusionRuns.value = [
       {
         runId: 'fus-running',
@@ -614,12 +730,19 @@ describe('FusionSurface', () => {
 
     render(html`<${FusionSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="fusion-run-status-card"]')?.textContent).toContain('fus-running')
-    expect(container.querySelector('[data-testid="fusion-empty"]')?.textContent).toContain('No board-sink fusion posts yet')
-    expect(container.textContent).toContain('board runs')
-    expect(container.textContent).toContain('registry')
-    expect(container.textContent).toContain('1 running')
-    expect(container.textContent).not.toContain('No fusion runs found')
+    // Registry-only run now lives in the sidebar master list (2-pane layout),
+    // not the removed top "Run status" panel.
+    expect(container.querySelector('[data-testid="fusion-run-status-card"]')).toBeNull()
+    const row = container.querySelector('[data-testid="fusion-registry-row"]')
+    expect(row?.textContent).toContain('fus-running')
+    // A real run exists, so there is no board-sink empty placeholder — the
+    // registry run is selected by default and shows its own detail.
+    expect(container.querySelector('[data-testid="fusion-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="fusion-registry-detail"]')?.textContent).toContain('fus-running')
+    expect(container.textContent).toContain('보드 런')
+    expect(container.textContent).toContain('레지스트리')
+    // The running count now surfaces as the sidebar live badge, not the removed panel.
+    expect(container.textContent).toContain('1 진행')
   })
 
   it('renders preset from registry when board meta does not carry it', () => {
@@ -703,6 +826,29 @@ describe('FusionSurface', () => {
     expect(cards[0]?.classList.contains('answered')).toBe(true)
     expect(cards[0]?.classList.contains('failed')).toBe(false)
     expect(cards[1]?.classList.contains('failed')).toBe(true)
+  })
+
+  it('does not derive judge run status from status substrings', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-judge-status-substring',
+        title: 'Fusion deliberation (run fus-judge-status-substring): pending',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-judge-status-substring',
+          question: 'Judge status edge cases?',
+          panel: [{ model: 'm1', status: 'answered', answer: 'Panel answer.' }],
+          judge: { status: 'failover' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    expect(detail?.textContent).toContain('running')
+    expect(container.querySelector('.fus-rdot.run')).not.toBeNull()
+    expect(container.querySelector('.fus-rdot.deny')).toBeNull()
   })
 
   it('renders the panel reason_code as a category chip on a failed panel card', () => {

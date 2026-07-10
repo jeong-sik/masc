@@ -1254,6 +1254,7 @@ let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task 
     files = [];
     created_at = "2026-06-26T00:00:00Z";
     created_by = Some "test";
+    predecessor_task_id = None;
     contract = None;
     handoff_context = None;
     cycle_count = 0;
@@ -1540,9 +1541,188 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (reaction_ledger |> member "status" |> to_string);
           Alcotest.(check int) "health reaction ledger pending stimuli" 1
             (reaction_ledger |> member "pending_stimulus_count" |> to_int);
+          Alcotest.(check bool) "health reaction ledger names pending reason" true
+            (reaction_ledger |> member "status_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists (String.equal "reaction_ledger_pending_stimulus"));
+          Alcotest.(check bool)
+            "top-level health preserves reaction ledger reason"
+            true
+            (json |> member "operator_action_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists
+                  (String.equal
+                     "keeper_reaction_ledger:reaction_ledger_pending_stimulus"));
           Alcotest.(check bool) "health reaction ledger asks for operator action"
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
+
+let test_health_json_surfaces_keeper_turn_admission_pressure () =
+  with_temp_dir "health-turn-admission-pressure" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Keeper_turn_admission.For_testing.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Keeper_turn_admission.For_testing.reset ();
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let keeper_name = "example" in
+        Eio.Switch.run (fun sw ->
+          let started, set_started = Eio.Promise.create () in
+          let release, set_release = Eio.Promise.create () in
+          Eio.Fiber.fork ~sw (fun () ->
+            ignore
+              (Keeper_turn_admission.run_serialized
+                 ~base_path:dir
+                 ~keeper_name
+                 (fun () ->
+                   Eio.Promise.resolve set_started ();
+                   Eio.Promise.await release)));
+          Eio.Promise.await started;
+          for _ = 1 to Keeper_turn_admission.max_waiting_chat_requests do
+            Eio.Fiber.fork ~sw (fun () ->
+              ignore
+                (Keeper_turn_admission.run_serialized
+                   ~base_path:dir
+                   ~keeper_name
+                   (fun () -> ())))
+          done;
+          (match
+             Keeper_turn_admission.run_serialized
+               ~base_path:dir
+               ~keeper_name
+               (fun () -> ())
+           with
+           | `Rejected _ -> ()
+           | `Ran () ->
+             Alcotest.fail "chat request beyond the waiting cap was not rejected");
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let admission = json |> member "keeper_turn_admission" in
+          Alcotest.(check string) "turn admission health degraded"
+            "degraded"
+            (admission |> member "status" |> to_string);
+          Alcotest.(check int) "turn admission health full queue count"
+            1
+            (admission |> member "chat_waiting_full_keeper_count" |> to_int);
+          Alcotest.(check int) "turn admission health rejection count"
+            1
+            (admission |> member "chat_rejected_total_count" |> to_int);
+          Alcotest.(check bool) "turn admission health reason surfaced"
+            true
+            (admission |> member "status_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists (String.equal "chat_waiting_queue_full"));
+          Alcotest.(check bool)
+            "top-level health preserves turn admission reason"
+            true
+            (json |> member "operator_action_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists
+                  (String.equal
+                     "keeper_turn_admission:chat_waiting_queue_full"));
+          let runtime_resolution =
+            `Assoc
+              (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ())
+          in
+          let runtime_admission =
+            runtime_resolution |> member "keeper_turn_admission"
+          in
+          Alcotest.(check int)
+            "runtime resolution exposes turn admission full queue count"
+            1
+            (runtime_admission |> member "chat_waiting_full_keeper_count"
+             |> to_int);
+          Alcotest.(check int)
+            "runtime resolution exposes turn admission rejection count"
+            1
+            (runtime_admission |> member "chat_rejected_total_count" |> to_int);
+          let light_runtime_resolution =
+            `Assoc
+              (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
+          in
+          let light_runtime_admission =
+            light_runtime_resolution |> member "keeper_turn_admission"
+          in
+          Alcotest.(check int)
+            "light runtime resolution exposes turn admission full queue count"
+            1
+            (light_runtime_admission |> member "chat_waiting_full_keeper_count"
+             |> to_int);
+          Eio.Promise.resolve set_release ())))
+
+let test_health_json_surfaces_board_event_collection_failure () =
+  with_temp_dir "health-board-event-collection-failure" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Keeper_heartbeat_loop_board_events.For_testing.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Keeper_heartbeat_loop_board_events.For_testing.reset ();
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let keeper_name = "example" in
+        Keeper_heartbeat_loop_board_events.For_testing.record_collection_failure
+          ~base_path:dir
+          ~keeper_name
+          ~message:"board event store unavailable";
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let collection = json |> member "keeper_board_event_collection" in
+        Alcotest.(check string) "board collection health degraded"
+          "degraded"
+          (collection |> member "status" |> to_string);
+        Alcotest.(check int) "board collection failed keeper count"
+          1
+          (collection |> member "failed_keeper_count" |> to_int);
+        Alcotest.(check bool) "board collection failure reason surfaced"
+          true
+          (collection |> member "status_reasons" |> to_list
+           |> List.map to_string
+           |> List.exists (String.equal "board_event_collection_failure"));
+        Alcotest.(check bool)
+          "top-level health preserves board collection failure reason"
+          true
+          (json |> member "operator_action_reasons" |> to_list
+           |> List.map to_string
+           |> List.exists
+                (String.equal
+                   "keeper_board_event_collection:board_event_collection_failure"));
+        let runtime_resolution =
+          `Assoc
+            (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ())
+        in
+        let runtime_collection =
+          runtime_resolution |> member "keeper_board_event_collection"
+        in
+        Alcotest.(check int)
+          "runtime resolution exposes board collection failed keeper count"
+          1
+          (runtime_collection |> member "failed_keeper_count" |> to_int);
+        let light_runtime_resolution =
+          `Assoc
+            (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
+        in
+        let light_runtime_collection =
+          light_runtime_resolution |> member "keeper_board_event_collection"
+        in
+        Alcotest.(check int)
+          "light runtime resolution exposes board collection failed keeper count"
+          1
+          (light_runtime_collection |> member "failed_keeper_count" |> to_int)))
 
 let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
   with_temp_dir "keeper-identity-drift" (fun dir ->
@@ -2966,6 +3146,44 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
           false
           (reaction_ledger |> member "operator_action_required" |> to_bool))))
 
+let test_health_json_reaction_ledger_unavailable_shape () =
+  let previous_state = !Server_auth.server_state in
+  Fun.protect
+    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    (fun () ->
+       Server_auth.server_state := None;
+       let request = Httpun.Request.create `GET "/health" in
+       let json = Server_routes_http_runtime.make_health_json request in
+       let open Yojson.Safe.Util in
+       let reaction_ledger = json |> member "keeper_reaction_ledger" in
+       Alcotest.(check string) "unavailable reaction ledger status" "unavailable"
+         (reaction_ledger |> member "status" |> to_string);
+       Alcotest.(check int) "unavailable reaction ledger reasons empty" 0
+         (reaction_ledger |> member "status_reasons" |> to_list |> List.length);
+       Alcotest.(check int) "unavailable durable queue count" 0
+         (reaction_ledger |> member "durable_event_queue_count" |> to_int);
+       Alcotest.(check int) "unavailable durable discovery count" 0
+         (reaction_ledger
+          |> member "durable_event_queue_discovered_keeper_count"
+          |> to_int);
+       Alcotest.(check bool) "unavailable durable discovery error null" true
+         (reaction_ledger |> member "durable_event_queue_discovery_error" = `Null);
+       ignore
+         (reaction_ledger
+          |> member "durable_event_queue_stale_after_sec"
+          |> to_float);
+       Alcotest.(check int) "unavailable durable stale count" 0
+         (reaction_ledger |> member "durable_event_queue_stale_count" |> to_int);
+       Alcotest.(check int) "unavailable durable stale keeper count" 0
+         (reaction_ledger
+          |> member "durable_event_queue_stale_keeper_count"
+          |> to_int);
+       Alcotest.(check int) "unavailable durable stale rows empty" 0
+         (reaction_ledger
+          |> member "durable_event_queue_stale_by_keeper"
+          |> to_list
+          |> List.length))
+
 let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;
   Log.emit Log.Warn ~module_name:"HealthTest"
@@ -3146,10 +3364,8 @@ let test_health_response_full_query_uses_snapshot_cache () =
             (match first |> member "keeper_reaction_ledger" with
              | `Assoc _ -> true
              | _ -> false);
-          Alcotest.(check bool) "full health response keeps cdal shape" true
-            (match first |> member "cdal" with
-             | `Assoc _ -> true
-             | _ -> false);
+          Alcotest.(check bool) "full health skips retired cdal snapshot" true
+            (first |> member "cdal" = `Null);
           Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now
             request;
           let refreshed =
@@ -3170,11 +3386,10 @@ let test_health_response_full_query_uses_snapshot_cache () =
             (match refreshed |> member "keeper_reaction_ledger" with
              | `Assoc _ -> true
              | _ -> false);
-          Alcotest.(check bool) "refreshed full health keeps cdal snapshot"
+          Alcotest.(check bool)
+            "refreshed full health skips retired cdal snapshot"
             true
-            (match refreshed |> member "cdal" with
-             | `Assoc _ -> true
-             | _ -> false)))
+            (refreshed |> member "cdal" = `Null)))
 
 let test_full_health_refresh_timing_uses_dedicated_budget () =
   let interval_sec, timeout_sec, ttl_sec =
@@ -3255,8 +3470,8 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
     (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
      | `Int age -> age >= 0
      | _ -> false);
-  Alcotest.(check bool) "cold timeout marks component timeout" true
-    (after |> member "cdal" |> member "component_timed_out" |> to_bool)
+  Alcotest.(check bool) "cold timeout omits retired cdal component" true
+    (after |> member "cdal" = `Null)
 
 let test_health_response_survives_deleted_cwd () =
   with_temp_dir "health-deleted-cwd" (fun dir ->
@@ -4431,6 +4646,12 @@ let () =
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
           Alcotest.test_case
+            "health json surfaces turn admission pressure"
+            `Quick test_health_json_surfaces_keeper_turn_admission_pressure;
+          Alcotest.test_case
+            "health json surfaces board event collection failure"
+            `Quick test_health_json_surfaces_board_event_collection_failure;
+          Alcotest.test_case
             "health json surfaces keeper identity config/meta drift"
             `Quick
             test_keeper_identity_drift_health_json_surfaces_config_meta_split;
@@ -4507,6 +4728,9 @@ let () =
           Alcotest.test_case
             "health json reaction ledger cursor sweep clears pending"
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;
+          Alcotest.test_case
+            "health json reaction ledger unavailable shape"
+            `Quick test_health_json_reaction_ledger_unavailable_shape;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case

@@ -843,6 +843,38 @@ let test_validate_args_tool_execute_accepts_typed_exec () =
       "expected typed tool_execute exec to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+let test_validate_args_tool_execute_decodes_json_string_argv () =
+  let expected =
+    `Assoc
+      [ "executable", `String "git"
+      ; "argv", `List [ `String "status"; `String "--short" ]
+      ; "cwd", `String "/tmp"
+      ]
+  in
+  let args =
+    `Assoc
+      [ "executable", `String "git"
+      ; "argv", `String "[\"status\",\"--short\"]"
+      ; "cwd", `String "/tmp"
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool)
+      "json-string argv decoded to typed array"
+      true
+      (Yojson.Safe.equal expected forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected json-string argv to be decoded, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
 let test_validate_args_tool_execute_accepts_typed_pipeline () =
   let args =
     `Assoc
@@ -872,6 +904,42 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
   | Error result ->
     Alcotest.failf
       "expected typed tool_execute pipeline to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+let test_validate_args_masc_transition_decodes_json_string_handoff_context () =
+  let expected_handoff =
+    `Assoc
+      [ "summary", `String "task-1823 edits applied"
+      ; "evidence_refs", `List [ `String "board:task-1823" ]
+      ]
+  in
+  let args =
+    `Assoc
+      [ "agent_name", `String "codex-local-admin"
+      ; "task_id", `String "task-1823"
+      ; "action", `String "release"
+      ; ( "handoff_context"
+        , `String
+            "{\"summary\":\"task-1823 edits applied\",\"evidence_refs\":[\"board:task-1823\"]}"
+        )
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:masc_transition_schema
+      ~name:"masc_transition"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool)
+      "json-string handoff_context decoded to typed object"
+      true
+      (Yojson.Safe.equal expected_handoff
+         (Yojson.Safe.Util.member "handoff_context" forwarded))
+  | Error result ->
+    Alcotest.failf
+      "expected json-string handoff_context to be decoded, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
 let test_validate_args_execute_unwraps_args_object_envelope () =
@@ -1540,6 +1608,14 @@ let test_high_risk_tool_contract_rejection_corpus () =
       , keeper_task_done_schema
       , `Assoc [ "notes", `String "evidence" ]
       , [ "task_id"; "result" ] )
+    ; ( "keeper_task_done requires evidence refs"
+      , "keeper_task_done"
+      , keeper_task_done_schema
+      , `Assoc
+          [ "task_id", `String "task-123"
+          ; "result", `String "implemented and opened PR#123"
+          ]
+      , [ "evidence_refs" ] )
     ; ( "keeper_board_post_get missing post_id"
       , "keeper_board_post_get"
       , keeper_board_post_get_schema
@@ -1581,6 +1657,7 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
        (Yojson.Safe.to_string (Tool_result.data result)));
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "task_id";
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "result";
+  assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "evidence_refs";
   assert_schema_requires
     "keeper_board_post_get schema"
     keeper_board_post_get_schema
@@ -1622,7 +1699,7 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
   assert_contains
     "keeper_task_done hint names evidence"
     capabilities
-    "include the PR URL or artifact reference in `result`";
+    "evidence_refs=[...]";
   assert_not_contains
     "keeper_task_done hint does not regress to notes-only"
     capabilities
@@ -1638,7 +1715,15 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
   assert_not_contains
     "board get hint avoids retired name"
     capabilities
-    "keeper_board_get"
+    "keeper_board_get";
+  assert_contains
+    "keeper capabilities separates schema visibility from approval policy"
+    capabilities
+    "separate active schema visibility from approval policy";
+  assert_not_contains
+    "keeper capabilities avoids retired capacity token"
+    capabilities
+    ("repo" ^ "_cap")
 
 let test_orchestrator_prompt_pins_start_transition () =
   let prompt = read_source_file "config/prompts/system.orchestrator.md" in
@@ -1654,13 +1739,17 @@ let test_task_lifecycle_guidance_is_externalized () =
     read_source_file "config/prompts/tool_contract.task_lifecycle_workflow.md"
   in
   assert_contains
-    "external rule pins start before done"
+    "external rule pins the verification completion path (RFC-0323 G-4)"
     rule
-    "action='start' before action='done'";
+    "a verifier (not the assignee) then approves it to done";
   assert_contains
     "external workflow includes start transition"
     workflow
     "masc_transition(start)";
+  assert_contains
+    "external workflow routes completion through submit (RFC-0323 G-4)"
+    workflow
+    "masc_transition(submit_for_verification)";
   assert_contains
     "external workflow keeps branch-work guidance"
     workflow
@@ -2176,8 +2265,12 @@ let () =
         test_validate_args_tool_execute_rejects_async_lifecycle_fields;
       Alcotest.test_case "tool_execute accepts typed exec" `Quick
         test_validate_args_tool_execute_accepts_typed_exec;
+      Alcotest.test_case "tool_execute decodes json-string argv" `Quick
+        test_validate_args_tool_execute_decodes_json_string_argv;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
         test_validate_args_tool_execute_accepts_typed_pipeline;
+      Alcotest.test_case "masc_transition decodes json-string handoff" `Quick
+        test_validate_args_masc_transition_decodes_json_string_handoff_context;
       Alcotest.test_case "Execute unwraps args object envelope" `Quick
         test_validate_args_execute_unwraps_args_object_envelope;
       Alcotest.test_case "tool_execute unwraps args object envelope" `Quick

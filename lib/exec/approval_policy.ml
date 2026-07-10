@@ -154,6 +154,62 @@ let arg_lit : Shell_ir.arg -> string option = function
   | Shell_ir.Var _ | Shell_ir.Concat _ -> None
 ;;
 
+let repo_hosting_arg_word : Shell_ir.arg -> string = function
+  | Shell_ir.Lit (s, _) -> s
+  | Shell_ir.Var _ | Shell_ir.Concat _ -> ""
+
+let repo_hosting_cli_is_floored (bin : Exec_program.t) (args : Shell_ir.arg list)
+  : bool
+  =
+  match Exec_program.known bin with
+  | Some Exec_program.Gh ->
+    let words = Exec_program.to_string bin :: List.map repo_hosting_arg_word args in
+    (* Classify through [repo_hosting_cli_floor_risk], not the word-list
+       classifier alone: a leading value-taking global flag ([gh --repo o/r pr
+       merge]) shifts the subcommand out of the word-list's position-based
+       slot, so the naive classifier misses the destructive verb and the floor
+       never fires (issue #23390). The typed lowering consumes value-flags like
+       gh does, locating the real subcommand. *)
+    let simple : Shell_ir.simple =
+      { Shell_ir.bin
+      ; args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }
+    in
+    (match Shell_ir_risk.repo_hosting_cli_floor_risk words simple with
+     | R2_Irreversible | Destructive_protected -> true
+     | R0_Read | R1_Reversible_mutation -> false)
+  | Some _ | None -> false
+[@@warning "-4"]
+
+(* Scan for irreversible repository-hosting CLI operations.  This reuses the
+   Shell IR risk SSOT for gh subcommands instead of maintaining a second command
+   table in approval policy.  Non-literal argv is not floored here because the
+   policy layer cannot classify values it cannot inspect; those commands remain
+   in the normal graded path.
+
+   [@@warning "-4"]: the [_ :: rest] arm is a find-first scan that
+   intentionally skips non-matching capabilities, same rationale as
+   [find_destructive_git]. *)
+let find_destructive_repo_hosting_cli (caps : Capability.t list)
+  : Exec_program.t option
+  =
+  let rec scan = function
+    | [] -> None
+    | Capability.Exec_program (bin, args) :: rest ->
+      if repo_hosting_cli_is_floored bin args then Some bin else scan rest
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
+[@@warning "-4"]
+
 (* Pull every literal SQL string out of a database CLI's argv: the token after a
    bare [-c]/[--command] ([-e]/[--execute]), the value attached to the short
    flag ([-cSELECT...]), or after [--command=] ([--execute=]).  Non-literal
@@ -242,12 +298,15 @@ let catastrophic_floor (caps : Capability.t list) : Verdict.deny_reason option =
     (match find_write_escape caps with
      | Some ps -> Some (Verdict.Path_escape ps)
      | None ->
+       (match find_destructive_repo_hosting_cli caps with
+        | Some bin -> Some (Verdict.Destructive_repo_hosting_cli bin)
+        | None ->
        (match find_catastrophic_program caps with
         | Some bin -> Some (Verdict.Catastrophic_program bin)
         | None ->
           (match find_destructive_db caps with
            | Some op -> Some (Verdict.Destructive_db op)
-           | None -> None)))
+           | None -> None))))
 
 (* Highest program risk observed in the full cap tree. *)
 let max_risk (caps : Capability.t list) : Exec_program.risk_class =
@@ -278,6 +337,97 @@ let ask_of policy ~caps ~bin : Verdict.t =
       raw_source = policy.raw_source;
     }
 
+(* RFC-0309 W3 (G-6/G-8): the capability axis, consulted between the
+   catastrophic floor and the risk-graded trust overlay. It is ORTHOGONAL to
+   risk and to the overlay: a gh verb whose [Gh_capability_policy.disposition]
+   is [Requires_approval] produces [Ask] even under the autonomous (all-Observe)
+   overlay, because the non-blocking HITL queue is the resolver the overlay
+   comment (approval_config.ml) said did not exist. [Allowed] verbs fall through
+   to the existing risk grading. [Denied] gh capability rules are handled by
+   [gh_capability_policy_deny_rule] before this approval path, so they cannot
+   fall through to the autonomous overlay. Non-gh commands are unaffected. *)
+let gh_capability_of_simple (simple : Shell_ir.simple)
+  : Gh_capability_policy.disposition option
+  =
+  (* [disposition_of_simple], not [disposition_of]: [gh api graphql ...] lowers
+     to the body-blind [Gh_verb.Api], so the capability axis must see both the
+     literal argv words and any Shell IR opacity in the graphql [query] body. *)
+  Gh_capability_policy.disposition_of_simple simple
+
+let gh_capability_policy_deny_rule_of_simple (simple : Shell_ir.simple)
+  : string option
+  =
+  Gh_capability_policy.policy_deny_rule_of_simple simple
+
+let gh_capability_policy_deny_rule (caps : Capability.t list) : string option =
+  let rec scan = function
+    | [] -> None
+    | Capability.Exec_program (bin, args) :: rest ->
+      (match Exec_program.known bin with
+       | Some Exec_program.Gh ->
+         let simple : Shell_ir.simple =
+           { Shell_ir.bin
+           ; args
+           ; env = []
+           ; cwd = None
+           ; redirects = []
+           ; sandbox = Sandbox_target.host ()
+           }
+         in
+         (match gh_capability_policy_deny_rule_of_simple simple with
+          | Some _ as found -> found
+          | None -> scan rest)
+       | Some _ | None -> scan rest)
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
+[@@warning "-4"]
+
+(* RFC-0309 W3 (pipeline coverage): the capability Ask must fire for a gh
+   durable-remote op in ANY pipeline stage, not only the representative (last)
+   [simple] the caller extracts via [last_simple_of_ir]. [caps] folds over every
+   stage — the same source the catastrophic floor scans — so [gh repo create ...
+   | cat] still reaches the capability axis. Without this the trailing read stage
+   ([cat]) becomes the representative simple, and the R1 durable-remote create —
+   no longer floored after W4 moved it R2->R1 — would auto-run under the
+   autonomous overlay. Returns the first gh binary whose stage requires approval
+   so the [Ask] reports the real command, not the trailing read.
+
+   [@@warning "-4"]: the [_ :: rest] arm is a find-first scan that intentionally
+   skips non-gh capabilities, same rationale as [find_destructive_repo_hosting_cli]. *)
+let gh_cap_requiring_approval (caps : Capability.t list) : Exec_program.t option =
+  let rec scan = function
+    | [] -> None
+    | Capability.Exec_program (bin, args) :: rest ->
+      (match Exec_program.known bin with
+       | Some Exec_program.Gh ->
+         let simple : Shell_ir.simple =
+           { Shell_ir.bin
+           ; args
+           ; env = []
+           ; cwd = None
+           ; redirects = []
+           ; sandbox = Sandbox_target.host ()
+           }
+         in
+         (match gh_capability_of_simple simple with
+          | Some Gh_capability_policy.Requires_approval -> Some bin
+          | Some (Gh_capability_policy.Allowed | Gh_capability_policy.Denied)
+          | None -> scan rest)
+       | Some _ | None -> scan rest)
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
+[@@warning "-4"]
+
 let trust_dispatch ~trust_level ~caps ~policy ~bin ~simple : Verdict.t =
   match trust_level with
   | Approval_config.Enforced -> ask_of policy ~caps ~bin
@@ -298,10 +448,22 @@ let decide (policy : t)
     (* Trust-independent: denied regardless of [overlay] (RFC-0254 §5.3). *)
     Verdict.Deny { caps; reason }
   | None ->
-    (* Non-catastrophic: graded by the per-actor trust overlay.  Under the
-       autonomous overlay every level is [Observe] => [Allow] + telemetry;
-       under [enforced_all] every level is [Enforced] => [Ask]. *)
-    (match max_risk caps with
+    (match gh_capability_policy_deny_rule caps with
+     | Some rule -> Verdict.Deny { caps; reason = Verdict.Policy_deny { rule } }
+     | None ->
+    (match gh_cap_requiring_approval caps with
+     | Some gh_bin ->
+       (* RFC-0309 W3: a gh verb the capability axis marks [Requires_approval]
+          is escalated to [Ask] regardless of overlay. Additive only — reached
+          solely for gh, and only to REQUIRE approval the risk grading would
+          not. Scanned over ALL caps so a gh op in any pipeline stage asks, not
+          only the representative [simple]. *)
+       ask_of policy ~caps ~bin:gh_bin
+     | None ->
+       (* Non-catastrophic: graded by the per-actor trust overlay.  Under the
+          autonomous overlay every level is [Observe] => [Allow] + telemetry;
+          under [enforced_all] every level is [Enforced] => [Ask]. *)
+       (match max_risk caps with
      | `Privileged ->
        trust_dispatch ~trust_level:overlay.privileged_trust
          ~caps ~policy ~bin:simple.bin ~simple
@@ -310,4 +472,4 @@ let decide (policy : t)
          ~caps ~policy ~bin:simple.bin ~simple
      | `Safe ->
        trust_dispatch ~trust_level:overlay.safe_trust
-         ~caps ~policy ~bin:simple.bin ~simple)
+         ~caps ~policy ~bin:simple.bin ~simple)))

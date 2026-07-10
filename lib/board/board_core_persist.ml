@@ -150,6 +150,28 @@ let with_persist_lock store f =
 ;;
 
 (** {1 Sweeper - Aggressive Cleanup} *)
+(* Extract [(target_kind, target_id)] from a vote_log key of the form
+   "post:<id>:<voter>" or "comment:<id>:<voter>".  Mirrors
+   [Board_votes.parse_vote_key], but lives in this lower module so [sweep] can
+   reclaim orphaned votes without an upward dependency on [Board_votes]. *)
+let vote_key_target key =
+  match String.index_opt key ':' with
+  | None -> None
+  | Some i1 ->
+    let kind = String.sub key 0 i1 in
+    let rest = String.sub key (i1 + 1) (String.length key - i1 - 1) in
+    (match String.index_opt rest ':' with
+     | None -> None
+     | Some i2 ->
+       let target_id = String.sub rest 0 i2 in
+       if String.equal target_id "" then None
+       else (
+         match kind with
+         | "post" -> Some (`Post, target_id)
+         | "comment" -> Some (`Comment, target_id)
+         | _ -> None))
+;;
+
 let sweep store =
   with_lock store (fun () ->
     let now = Time_compat.now () in
@@ -240,6 +262,50 @@ let sweep store =
                   Stdlib.incr cap_evicted)
                to_evict))
         author_posts);
+    (* Reclaim reactions and votes whose target post/comment no longer exists.
+       [sweep] removes posts/comments but historically left [store.reactions] and
+       [store.vote_log] resident: those two tables were pruned only by the
+       explicit [delete_post] path, not by the TTL lifecycle, so they grew for
+       the whole process lifetime and reloaded whole from disk on boot.  Pruning
+       by target existence reclaims new expirations AND boot-reloaded orphans
+       (whose targets are already gone, so a per-removal hook would never revisit
+       them).  Work is bounded per pass by [sweeper_batch_size] via [Seq.take],
+       so a large backlog drains across sweeps without a long lock hold; disk is
+       compacted by the next full snapshot flush, which dumps the pruned tables. *)
+    let orphan_reaction_keys =
+      Hashtbl.to_seq store.reactions
+      |> Seq.filter_map (fun (key, (reaction : reaction)) ->
+        let target_present =
+          match reaction.target_type with
+          | Reaction_post -> Hashtbl.mem store.posts reaction.target_id
+          | Reaction_comment -> Hashtbl.mem store.comments reaction.target_id
+        in
+        if target_present then None else Some key)
+      |> Seq.take Limits.sweeper_batch_size
+      |> List.of_seq
+    in
+    List.iter (Hashtbl.remove store.reactions) orphan_reaction_keys;
+    let orphan_vote_keys =
+      Hashtbl.to_seq store.vote_log
+      |> Seq.filter_map (fun (key, _) ->
+        match vote_key_target key with
+        | Some (`Post, target_id) when not (Hashtbl.mem store.posts target_id) ->
+          Some key
+        | Some (`Comment, target_id)
+          when not (Hashtbl.mem store.comments target_id) ->
+          Some key
+        | Some _ | None -> None)
+      |> Seq.take Limits.sweeper_batch_size
+      |> List.of_seq
+    in
+    List.iter (Hashtbl.remove store.vote_log) orphan_vote_keys;
+    let removed_reactions = List.length orphan_reaction_keys in
+    let removed_votes = List.length orphan_vote_keys in
+    if removed_reactions > 0 || removed_votes > 0 then
+      Log.BoardLog.debug
+        "sweep reclaimed %d orphaned reactions, %d orphaned votes"
+        removed_reactions
+        removed_votes;
     let window = Stdlib.Float.of_int Limits.comment_rate_window_sec in
     Board_comment_rate_limit.sweep_stale ~now ~window;
     if !removed_posts > 0 || !cap_evicted > 0 then invalidate_post_caches store;
@@ -359,16 +425,17 @@ let posts_jsonl_unlocked store =
     store.posts;
   Buffer.contents buf
 ;;
-let save_posts_jsonl content =
+let save_posts_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = persist_path () in
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_posts" msg
+    | Ok () -> Ok ()
+    | Error msg -> persist_io_error ~where:"rewrite_posts" msg
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_posts" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg
 ;;
+let save_posts_jsonl content = ignore (save_posts_jsonl_result content)
 let rewrite_posts store =
   let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_posts_jsonl content)
@@ -452,6 +519,28 @@ let rollback_fresh_post store (post : post) =
       invalidate_post_caches store
     | Some _ -> ())
 ;;
+
+let rollback_rolled_up_post store ~(previous : post) ~(rolled_up : post) =
+  let rollback =
+    with_lock store (fun () ->
+      let key = Post_id.to_string previous.id in
+      match Hashtbl.find_opt store.posts key with
+      | Some current when current = rolled_up ->
+        Hashtbl.replace store.posts key previous;
+        mark_dirty_post store key;
+        invalidate_post_caches store;
+        Ok (posts_jsonl_unlocked store)
+      | Some _ -> Error "rollup target changed before rollback"
+      | None -> Error "rollup target missing before rollback")
+  in
+  match rollback with
+  | Error _ as e -> e
+  | Ok posts_jsonl ->
+    (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
+     | Ok () -> Ok ()
+     | Error e -> Error (Board_types.show_board_error e))
+;;
+
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
 let sub_board_access_of_string_opt = Board_sub_board_json.sub_board_access_of_string_opt
 let sub_board_post_counts_unlocked store =
@@ -518,6 +607,7 @@ let status_rollup_task_id = Board_core_status_rollup.status_rollup_task_id
 let is_status_rollup_candidate = Board_core_status_rollup.is_status_rollup_candidate
 let find_status_rollup_target_unlocked = Board_core_status_rollup.find_status_rollup_target_unlocked
 let create_post_with_outcome
+      ?after_rollup_persist
       store
       ~author
       ~content
@@ -694,7 +784,7 @@ let create_post_with_outcome
                       task_id
                       existing_id
                       (String.length normalized_body);
-                    Ok (`Rolled_up (updated, posts_jsonl_unlocked store))
+                    Ok (`Rolled_up (existing, updated, posts_jsonl_unlocked store))
                   | None -> create_fresh ())
                | None -> create_fresh ())))
       in
@@ -716,9 +806,31 @@ let create_post_with_outcome
          | Error e ->
            rollback_fresh_post store post;
            Error e)
-      | Ok (`Rolled_up (post, posts_jsonl)) ->
-        with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
-        Ok (Rolled_up_post post)
+      | Ok (`Rolled_up (previous, post, posts_jsonl)) ->
+        (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
+         | Error persist_error ->
+           let message =
+             "status-rollup persist failed: " ^ Board_types.show_board_error persist_error
+           in
+           (match rollback_rolled_up_post store ~previous ~rolled_up:post with
+            | Ok () -> Error persist_error
+            | Error rollback ->
+              Error
+                (Validation_error (message ^ "; rollback failed: " ^ rollback)))
+         | Ok () ->
+           (match after_rollup_persist with
+            | None -> Ok (Rolled_up_post post)
+            | Some hook ->
+              (match hook post with
+               | Ok () -> Ok (Rolled_up_post post)
+               | Error msg ->
+                 let message = "status-rollup post-persist hook failed: " ^ msg in
+                 (match rollback_rolled_up_post store ~previous ~rolled_up:post with
+                  | Ok () -> Error (Validation_error message)
+                  | Error rollback ->
+                    Error
+                      (Validation_error
+                         (message ^ "; rollback failed: " ^ rollback))))))
       | Ok (`Dedup_hit existing) -> Ok (Dedup_hit existing)
       | Error _ as e -> e)
 ;;

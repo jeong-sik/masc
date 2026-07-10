@@ -40,6 +40,109 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
+(** Format active goals with their titles (RFC-0315). Falls back to
+    [format_goals] at the call site when the caller did not resolve titles. *)
+let format_goal_summaries (summaries : (string * string) list) : string =
+  String.concat "\n"
+    (List.map
+       (fun (gid, title) ->
+         if title = "" then Printf.sprintf "- %s" gid
+         else Printf.sprintf "- %s — %s" gid title)
+       summaries)
+
+let format_goal_summaries_for_active_goals
+    ~(active_goal_ids : string list)
+    (summaries : (string * string) list) : string =
+  let title_for goal_id =
+    match List.assoc_opt goal_id summaries with
+    | Some title -> title
+    | None -> ""
+  in
+  format_goal_summaries
+    (List.map (fun goal_id -> (goal_id, title_for goal_id)) active_goal_ids)
+
+(** Render the keeper's own claimed task as standing context (RFC-0315).
+    A claimed task is what admits scheduled-autonomous turns
+    ([proactive_work_signal_present] counts [current_task_id] as the
+    opportunity), so the turn must show the work that admitted it: id, title,
+    status, and the prior owner's handoff summary when one exists. Without
+    this section the model is never told what it is holding. *)
+let format_current_task (task : Masc_domain.task) : string =
+  let status_line =
+    match task.Masc_domain.task_status with
+    | Masc_domain.Claimed { assignee; claimed_at } ->
+        Printf.sprintf "claimed by %s at %s" assignee claimed_at
+    | Masc_domain.InProgress { assignee; started_at } ->
+        Printf.sprintf "in progress (%s) since %s" assignee started_at
+    | Masc_domain.AwaitingVerification { submitted_at; _ } ->
+        Printf.sprintf "awaiting verification (submitted %s)" submitted_at
+    | Masc_domain.Todo -> "todo"
+    | Masc_domain.Done _ -> "done"
+    | Masc_domain.Cancelled _ -> "cancelled"
+  in
+  let buf = Buffer.create 256 in
+  Buffer.add_string buf "### Current Task (held by you)\n";
+  Buffer.add_string buf
+    (Printf.sprintf "- %s — %s [%s]\n" task.Masc_domain.id
+       task.Masc_domain.title status_line);
+  (match task.Masc_domain.handoff_context with
+   | Some h when h.Masc_domain.summary <> "" ->
+       Buffer.add_string buf
+         (Printf.sprintf "- Prior handoff: %s\n" h.Masc_domain.summary);
+       (match h.Masc_domain.next_step with
+        | Some step when step <> "" ->
+            Buffer.add_string buf
+              (Printf.sprintf "- Suggested next step: %s\n" step)
+        | Some _ | None -> ())
+   | Some _ | None -> ());
+  Buffer.add_string buf
+    "- Continue this task this turn. If you cannot progress it, state the \
+     blocker and release it with a handoff summary (masc_transition release) \
+     so another keeper can take over.\n\n";
+  Buffer.contents buf
+
+(* Open Loops render cap: the ledger's own [compact] already bounds the
+   digest, this is a prompt-size guard only. *)
+let max_open_loops_rendered = 5
+
+(** Render unresolved open loops from the keeper's working-state ledger
+    (RFC-0315). These are the keeper's OWN prior [STATE] obligations that
+    survived compaction/handoff via the sidecar; before this section the
+    ledger was persisted but never shown back to the model. *)
+let format_open_loops (loops : Keeper_working_state.loop list) : string =
+  let buf = Buffer.create 256 in
+  let total = List.length loops in
+  Buffer.add_string buf
+    (Printf.sprintf "### Open Loops (%d unresolved, from your own prior [STATE])\n"
+       total);
+  List.iteri
+    (fun i (loop : Keeper_working_state.loop) ->
+      if i < max_open_loops_rendered then (
+        Buffer.add_string buf
+          (Printf.sprintf "- %s — %s" loop.Keeper_working_state.title
+             loop.Keeper_working_state.six_w.Keeper_working_state.what);
+        (match loop.Keeper_working_state.evidence_refs with
+         | [] -> ()
+         | refs ->
+             Buffer.add_string buf
+               (Printf.sprintf " [%s]"
+                  (String.concat ", "
+                     (List.map
+                        (fun (r : Keeper_working_state.evidence_ref) ->
+                          r.Keeper_working_state.kind ^ ":"
+                          ^ r.Keeper_working_state.target)
+                        refs))));
+        Buffer.add_char buf '\n'))
+    loops;
+  if total > max_open_loops_rendered then
+    Buffer.add_string buf
+      (Printf.sprintf "- [%d more not shown]\n"
+         (total - max_open_loops_rendered));
+  Buffer.add_string buf
+    "- Continue, resolve, or explicitly archive these loops; do not silently \
+     drop them.\n\n";
+  Buffer.contents buf
+
 (** Format one connected-surface presence line (RFC-0223 P2).
     Presence only: lane label + liveness, no content, no counts. *)
 let format_surface_presence (p : Gate_surface.surface_presence) : string =
@@ -141,7 +244,12 @@ let board_event_kind_label = function
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
   | Keeper_world_observation.Bg_completed -> "bg_completed"
+  | Keeper_world_observation.Schedule_due -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
+  | Keeper_world_observation.Goal_verification_failed -> "goal_verification_failed"
+  | Keeper_world_observation.Failure_judgment -> "failure_judgment"
+  | Keeper_world_observation.Goal_assigned -> "goal_assigned"
+  | Keeper_world_observation.Goal_stagnation -> "goal_stagnation"
 ;;
 
 let quote_prompt_field value =
@@ -173,11 +281,23 @@ let board_reaction_note (reaction : Keeper_world_observation.board_reaction_even
 let board_event_note = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
     board_reaction_note reaction
+  | Keeper_world_observation.External_attention ->
+    (* RFC-0320 W3(a): steer a woken keeper to answer back into the connector
+       conversation this attention came from (via keeper_surface_post), instead
+       of only proceeding on its own state. The routing target is deterministic
+       — it is the conversation surface already on this observation; the LLM
+       decides only what to say. *)
+    " [continuation: someone is waiting in this conversation — reply to them \
+     with keeper_surface_post, do not only proceed on your own state]"
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
-  | Keeper_world_observation.External_attention -> ""
+  | Keeper_world_observation.Schedule_due
+  | Keeper_world_observation.Goal_verification_failed
+  | Keeper_world_observation.Failure_judgment
+  | Keeper_world_observation.Goal_assigned
+  | Keeper_world_observation.Goal_stagnation -> ""
 ;;
 
 let format_board_event_text
@@ -617,10 +737,53 @@ let autonomous_trigger_lines
         ]
       in
       List.filter_map Fun.id lines
+  | Keeper_world_observation.Reactive, true ->
+      (* RFC-0315: when the scheduler's real decision is threaded in, a
+         stimulus-driven turn states its wake reasons instead of rendering
+         nothing. Reactive payloads (mentions, board events, scope messages)
+         still render in their own layers; event-queue stimuli (bootstrap,
+         no-progress recovery, schedule-due, connector attention) surface
+         ONLY here — before this arm the model had no trace of why it woke. *)
+      let hitl_continuation_steer =
+        (* RFC-0320 W3b: when this reactive turn was opened by a resolved HITL
+           approval, steer the keeper back to the conversation it asked from.
+           The routing (which surface) stays the keeper's own recent context;
+           this only tells it to answer there rather than proceed silently. A
+           keeper whose original turn already resumed (fast approval) can
+           ignore this soft line, so it does not force a duplicate reply. *)
+        let has_hitl_resolution =
+          match decision.verdict with
+          | Keeper_world_observation.Run { reasons = first, rest } ->
+              List.exists
+                (function
+                  | Keeper_world_observation.Hitl_resolved_pending -> true
+                  | _ -> false)
+                (first :: rest)
+          | Keeper_world_observation.Skip _ -> false
+        in
+        if has_hitl_resolution then
+          [ "- Continuation: an approval you were waiting on was just resolved. \
+             If you requested it inside a conversation (dashboard / Discord / \
+             Slack), reply back into that conversation with keeper_surface_post \
+             instead of only proceeding on your own state." ]
+        else []
+      in
+      ("- Scheduler: reactive turn (external stimulus)."
+       :: (match
+             Keeper_world_observation.verdict_reasons_to_strings decision.verdict
+           with
+           | [] -> []
+           | reasons ->
+               [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ]))
+      @ hitl_continuation_steer
   | _ -> []
 
 let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+    ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
+    ?(current_task : Masc_domain.task option)
+    ?(active_goal_summaries : (string * string) list option)
+    ?(active_open_loops : Keeper_working_state.loop list option)
     ~(observation : Keeper_world_observation.world_observation)
     () : string * string
     =
@@ -659,7 +822,22 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             Do not ask the operator what repo, goal, or task to create unless \
             the operator explicitly requested new repo, goal, or task creation.\n\
             Do not stay silent when you have no goal.\n"
-         else "");
+         else
+           (* RFC-0315: parity with the no-goal branch. Before this, only
+              goalless keepers received a self-direction directive; a keeper
+              WITH goals woke into 'end your turn with the [STATE] block',
+              which legitimized no-op turns. *)
+           "\n\
+            On a turn with no new external signal, advance one of your active \
+            goals:\n\
+            - Break the goal into one concrete claimable task \
+            (keeper_task_create), or claim a matching backlog task.\n\
+            - Post a short progress or plan update to the board so the fleet \
+            can align.\n\
+            - If the goal is blocked, state the blocker and what would unblock \
+            it.\n\
+            Deferring is a valid choice; if you defer, say why in the [STATE] \
+            block.\n");
       ]
   in
   let base_system_prompt =
@@ -720,6 +898,14 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ~enabled:(tool_allowed "keeper_broadcast")
       Keeper_prompt_names.turn_intent_broadcast_guidance
   in
+  let pr_duplicate_search_guidance =
+    load_externalized_bullet
+      ~enabled:
+        (tool_allowed "tool_execute"
+         || tool_allowed "Execute"
+         || tool_allowed "execute")
+      Keeper_prompt_names.turn_intent_pr_duplicate_search_guidance
+  in
   let task_create_guidance =
     load_externalized_bullet
       ~enabled:show_task_create_guidance
@@ -744,6 +930,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ("board_post_guidance", board_post_guidance);
       ("board_curation_guidance", board_curation_guidance);
       ("broadcast_guidance", broadcast_guidance);
+      ("pr_duplicate_search_guidance", pr_duplicate_search_guidance);
       ("state_block_instruction", state_block_instruction_text);
     ]
   in
@@ -777,7 +964,14 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       observation.connected_surfaces
   in
   let turn_decision =
-    Keeper_world_observation.keeper_cycle_decision ~meta observation
+    (* RFC-0315: prefer the scheduler's actual decision (threaded through the
+       turn runner) over a local recompute. The recompute cannot see
+       [reactive_wake] or the drained event-queue triggers, so stimulus-driven
+       wakes would render no wake reason. The recompute remains the fallback
+       for callers that predate the threading. *)
+    match turn_decision with
+    | Some decision -> decision
+    | None -> Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
   let autonomous_trigger =
     autonomous_trigger_lines ~decision:turn_decision ~observation
@@ -795,15 +989,33 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       continuity_for_prompt
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function
-    (* 1. Active goals — stable turn context. *)
+    (* 1. Active goals — stable turn context. Titles render when the caller
+       resolved them (RFC-0315); every id from the world observation remains
+       rendered even when title enrichment is partial. *)
     | Keeper_context_layers.Active_goals ->
       if observation.active_goals <> [] then
         Some
           (Printf.sprintf "### Active Goals (%d)\n"
              (List.length observation.active_goals)
-          ^ format_goals observation.active_goals
+          ^ (match active_goal_summaries with
+             | Some summaries ->
+                 format_goal_summaries_for_active_goals
+                   ~active_goal_ids:observation.active_goals
+                   summaries
+             | None -> format_goals observation.active_goals)
           ^ "\n\n")
       else None
+    (* 1b. Current task — the claim that admitted this turn (RFC-0315).
+       Standing context: changes on claim/release, not per cycle. *)
+    | Keeper_context_layers.Current_task ->
+      Option.map format_current_task current_task
+    (* 1c. Working state — unresolved open loops from the keeper's own prior
+       [STATE] blocks, restored from the working-state sidecar (RFC-0315:
+       the ledger was persisted-but-never-shown before this layer). *)
+    | Keeper_context_layers.Working_state ->
+      (match active_open_loops with
+       | Some (_ :: _ as loops) -> Some (format_open_loops loops)
+       | Some [] | None -> None)
     (* 2. Connected surfaces — connector presence, changes only on bind/unbind
        or transport flaps (RFC-0223 P2). Omitted when only the implicit
        dashboard is attached: every keeper has the dashboard, so dashboard-only

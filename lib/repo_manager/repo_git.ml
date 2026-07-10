@@ -104,7 +104,8 @@ let fetch ~repository : (string list, string) result =
    merge is local; the ref must already be fetched). *)
 let fast_forward ~repository ~target_ref : (unit, string) result =
   match
-    run_git ~cwd:repository.local_path [ "merge"; "--ff-only"; target_ref ]
+    run_git ~cwd:repository.local_path
+      [ "-c"; "core.hooksPath=/dev/null"; "merge"; "--ff-only"; target_ref ]
   with
   | Ok _ -> Ok ()
   | Error msg -> Error msg
@@ -122,6 +123,96 @@ let get_origin_url ~local_path =
   | Ok (url :: _) -> Ok url
   | Ok [] -> Error "git remote get-url origin returned no output"
   | Error msg -> Error msg
+
+let worktree_root ~local_path =
+  match
+    run_git
+      ~cwd:local_path
+      ~env:read_only_git_env
+      ~timeout_sec:status_summary_timeout_sec
+      [ "rev-parse"; "--show-toplevel" ]
+  with
+  | Ok (root :: _) ->
+    let root = String.trim root in
+    if String.equal root ""
+    then Stdlib.Error "git rev-parse --show-toplevel returned blank"
+    else Stdlib.Ok root
+  | Ok [] -> Stdlib.Error "git rev-parse --show-toplevel returned no output"
+  | Error msg -> Stdlib.Error msg
+
+let branch_of_origin_head_ref refname =
+  let refname = String.trim refname in
+  let prefix = "refs/remotes/origin/" in
+  if String.starts_with ~prefix refname
+  then
+    let branch =
+      String.sub refname (String.length prefix) (String.length refname - String.length prefix)
+      |> String.trim
+    in
+    if String.equal branch ""
+    then
+      Stdlib.Error
+        (Printf.sprintf
+           "git symbolic-ref refs/remotes/origin/HEAD returned invalid ref: %S"
+           refname)
+    else Stdlib.Ok branch
+  else
+    Stdlib.Error
+      (Printf.sprintf
+         "git symbolic-ref refs/remotes/origin/HEAD returned invalid ref: %S"
+         refname)
+;;
+
+let origin_head_branch ~local_path =
+  match
+    run_git
+      ~cwd:local_path
+      ~env:read_only_git_env
+      ~timeout_sec:status_summary_timeout_sec
+      [ "symbolic-ref"; "-q"; "refs/remotes/origin/HEAD" ]
+  with
+  | Ok (refname :: _) -> branch_of_origin_head_ref refname
+  | Ok [] -> Stdlib.Error "git symbolic-ref refs/remotes/origin/HEAD returned no output"
+  | Error msg -> Stdlib.Error msg
+
+let inspect_timeout_sec = status_summary_timeout_sec
+
+let current_branch ~repository =
+  match
+    run_git ~cwd:repository.local_path ~env:read_only_git_env
+      ~timeout_sec:inspect_timeout_sec
+      [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
+  with
+  | Ok (name :: _) -> Ok name
+  | Ok [] -> Error "git rev-parse --abbrev-ref HEAD returned no output"
+  | Error msg -> Error msg
+
+let ahead_behind ~repository ~target_ref : (int * int, string) result =
+  match
+    run_git ~cwd:repository.local_path ~env:read_only_git_env
+      ~timeout_sec:inspect_timeout_sec
+      [ "rev-list"; "--left-right"; "--count"; target_ref ^ "...HEAD" ]
+  with
+  | Stdlib.Error msg -> Stdlib.Error msg
+  | Stdlib.Ok [] -> Stdlib.Error "git rev-list --left-right --count returned no output"
+  | Stdlib.Ok (line :: _) -> (
+      match String.split_on_char '\t' (String.trim line) with
+      | [ behind; ahead ] -> (
+          match
+            ( int_of_string_opt (String.trim behind),
+              int_of_string_opt (String.trim ahead) )
+          with
+          | Some behind, Some ahead -> Stdlib.Ok (behind, ahead)
+          | _ ->
+              Stdlib.Error
+                (Printf.sprintf
+                   "git rev-list --left-right --count returned non-numeric output: %S"
+                   line))
+      | _ ->
+          Stdlib.Error
+            (Printf.sprintf
+               "git rev-list --left-right --count returned malformed output: %S"
+               line))
 
 let get_recent_commits ~repository ~branch ~limit =
   match

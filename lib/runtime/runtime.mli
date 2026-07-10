@@ -106,16 +106,19 @@ val load_list :
        * string option
        * string option
        * string option
+       * string option
        * string list
        * Runtime_lane.t list
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
     keeper_assignments, librarian_runtime_id, structured_judge_runtime_id,
-    cross_verifier_runtime_id, media_failover, lanes)]. Fails ([Error]) if
+    hitl_summary_runtime_id, cross_verifier_runtime_id, media_failover, lanes)].
+    Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
     [\[runtime.assignments\]] target does not resolve to a configured runtime, if
     [\[runtime\].librarian] / [\[runtime\].structured_judge] /
+    [\[runtime\].hitl_summary] /
     [\[runtime\].cross_verifier] is set to an unresolved id, if any
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
@@ -208,12 +211,22 @@ val structured_judge_runtime_id : unit -> string option
     [Some] resolves to a configured runtime whose model declares
     [supports-structured-output]. *)
 
+val hitl_summary_runtime_id : unit -> string option
+(** [\[runtime\].hitl_summary] runtime id for HITL approval context summaries,
+    or [None] when unset. Validated at load so a [Some] resolves to a configured
+    runtime. *)
+
 val runtime_id_for_structured_judge : unit -> string
 (** Resolved runtime id for dashboard/operator/governance structured-output judge
     calls. Uses [\[runtime\].structured_judge] first, then the existing
     [\[runtime\].librarian] migration lane, then [\[runtime\].default]. The final
     default path still fails loudly at each caller's schema validation if the
     runtime cannot satisfy provider-native structured output. *)
+
+val runtime_id_for_hitl_summary : unit -> string
+(** Resolved runtime id for HITL approval context summaries. Uses
+    [\[runtime\].hitl_summary] first, then the existing structured-judge routing
+    chain. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a
@@ -240,6 +253,12 @@ val pause_threshold : unit -> pause_threshold
     {!Runtime_schema.pause_threshold_default} when runtime.toml is unavailable or
     invalid. Operational pause decision paths use this accessor instead of the
     legacy top-level fallback constants. *)
+
+val pacing : unit -> pacing
+(** [\[pacing\]] policy from runtime.toml (RFC-0313 W3), or
+    {!Runtime_schema.pacing_default} when runtime.toml is unavailable.
+    An unknown [pacing.mode] value fails config parse at load (fail-closed)
+    rather than defaulting. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
@@ -290,6 +309,19 @@ val temperature_of_runtime_id : string -> float option
     {!Runtime_inference.resolve_temperature}: a keeper turn uses this value when
     set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise.  Required
     for models that reject the default temperature (Kimi K2.7 accepts only 1.0). *)
+
+val top_p_of_runtime_id : string -> float option
+(** Request [top_p] from the materialized OAS provider config for runtime [id],
+    or [None] when the runtime is not configured or no explicit value is
+    declared.  This projects the Provider_config SSOT used for dispatch. *)
+
+val top_k_of_runtime_id : string -> int option
+(** Request [top_k] from the materialized OAS provider config for runtime [id],
+    or [None] when absent. *)
+
+val min_p_of_runtime_id : string -> float option
+(** Request [min_p] from the materialized OAS provider config for runtime [id],
+    or [None] when absent. *)
 
 val preserve_thinking_of_runtime_id : string -> bool option
 (** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,
@@ -361,6 +393,12 @@ val set_runtime_structured_judge :
 (** Persist or clear [\[runtime\]].structured_judge through the runtime.toml
     SSOT writer, validate the resulting config, atomically write it, and refresh
     the in-process runtime cache. *)
+
+val set_runtime_hitl_summary :
+  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
+(** Persist or clear [\[runtime\]].hitl_summary through the runtime.toml SSOT
+    writer, validate the resulting config, atomically write it, and refresh the
+    in-process runtime cache. *)
 
 val set_runtime_cross_verifier :
   ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result

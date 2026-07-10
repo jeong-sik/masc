@@ -1,4 +1,4 @@
-import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import { isRecord, asString, asNumber, asBoolean, asStringArray, asRecordArray, toIsoTimestamp } from './components/common/normalize'
 import {
   parseTaskStatus,
   parseExecutionTone,
@@ -9,7 +9,7 @@ import { normalizeKeeperTrust } from './keeper-store-normalize'
 import { normalizeStopCause } from './lib/stop-cause'
 import { parseAgentStatus } from './lib/agent-status'
 import type {
-  Agent, Task, Message, ServerStatus,
+  Agent, Task, TaskGateEvaluation, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
   DashboardExecutionQueueItem, DashboardExecutionSessionBrief,
   DashboardExecutionWorkerSupportBrief,
@@ -54,6 +54,79 @@ export function normalizeAgentStatus(value: unknown): Agent['status'] {
 
 export function normalizeTaskStatus(value: unknown): Task['status'] {
   return parseTaskStatus(value)
+}
+
+function normalizeTaskGateStatus(value: unknown): {
+  readonly status: TaskGateEvaluation['status']
+  readonly raw: string | null
+} {
+  const raw = asString(value)?.trim() ?? null
+  if (raw === 'ready' || raw === 'blocked' || raw === 'inconclusive') {
+    return { status: raw, raw: null }
+  }
+  return { status: 'unknown', raw }
+}
+
+function normalizeTaskGateCheckOutcome(value: unknown): 'satisfied' | 'missing' | 'failed' | 'unsupported' | null {
+  const raw = asString(value)?.trim()
+  if (raw === 'satisfied' || raw === 'missing' || raw === 'failed' || raw === 'unsupported') return raw
+  return null
+}
+
+function normalizeTaskGateCheck(raw: unknown): NonNullable<TaskGateEvaluation['checks']>[number] | null {
+  if (!isRecord(raw)) return null
+  const outcome = normalizeTaskGateCheckOutcome(raw.outcome)
+  if (!outcome) return null
+  const evidence = asString(raw.evidence, '')
+  const detail = asString(raw.detail, '')
+  if (!evidence && !detail) return null
+  return { evidence, outcome, detail }
+}
+
+function normalizeTaskGateEvaluation(raw: unknown): TaskGateEvaluation | null {
+  if (!isRecord(raw)) return null
+  const statusInput = asString(raw.status)
+  const { status, raw: statusRaw } = normalizeTaskGateStatus(raw.status)
+  const checks = asRecordArray(raw.checks)
+    .map(normalizeTaskGateCheck)
+    .filter((check): check is NonNullable<TaskGateEvaluation['checks']>[number] => check !== null)
+  const reasons = asStringArray(raw.reasons)
+  if (statusRaw) reasons.unshift(`unknown gate status: ${statusRaw}`)
+  if (!statusInput && checks.length === 0 && reasons.length === 0) return null
+  return {
+    status,
+    status_raw: statusRaw,
+    checks,
+    reasons,
+  }
+}
+
+function normalizeTaskGateSnapshot(raw: unknown): Task['gate'] {
+  if (!isRecord(raw)) return null
+  const done = normalizeTaskGateEvaluation(raw.done)
+  const inspect = normalizeTaskGateEvaluation(raw.inspect_to_implement)
+  const verify = normalizeTaskGateEvaluation(raw.verify_to_review)
+  const completionContract = asStringArray(raw.completion_contract)
+  const unmetCompletionContract = asStringArray(raw.unmet_completion_contract)
+  const strict = asBoolean(raw.strict)
+  if (
+    done === null
+    && inspect === null
+    && verify === null
+    && completionContract.length === 0
+    && unmetCompletionContract.length === 0
+    && strict === undefined
+  ) {
+    return null
+  }
+  return {
+    strict,
+    completion_contract: completionContract,
+    unmet_completion_contract: unmetCompletionContract,
+    done: done ?? undefined,
+    inspect_to_implement: inspect,
+    verify_to_review: verify,
+  }
 }
 
 export function normalizeAgent(raw: unknown): Agent | null {
@@ -117,11 +190,13 @@ export function normalizeTask(raw: unknown): Task | null {
         session_id: asString(raw.execution_links.session_id) ?? null,
       }
     : null
+  const gate = normalizeTaskGateSnapshot(raw.gate)
   return {
     id,
     title,
     goal_id: asString(raw.goal_id) ?? null,
     status: normalizeTaskStatus(raw.status),
+    status_raw: asString(raw.status_raw) ?? null,
     priority: asNumber(raw.priority),
     assignee: asString(raw.assignee),
     assignee_kind: asString(raw.assignee_kind) ?? null,
@@ -131,6 +206,7 @@ export function normalizeTask(raw: unknown): Task | null {
     completed_at: asString(raw.completed_at),
     contract,
     handoff_context: handoffContext,
+    gate,
     execution_links: executionLinks,
   }
 }
@@ -530,6 +606,39 @@ function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | n
   }
 }
 
+function normalizeDashboardShellIrApproval(
+  raw: unknown,
+): DashboardRuntimeResolution['shell_ir_approval'] {
+  if (!isRecord(raw)) return null
+  const schema = asString(raw.schema)
+  const enabled = asBoolean(raw.enabled)
+  const envKey = asString(raw.env_key)
+  const rawOverlay = asString(raw.raw_overlay)
+  const reason = asString(raw.reason)
+  const source = asString(raw.source)
+  const trust = isRecord(raw.trust)
+    ? {
+      safe: asString(raw.trust.safe),
+      audited: asString(raw.trust.audited),
+      privileged: asString(raw.trust.privileged),
+    }
+    : null
+  const normalizedTrust =
+    trust === null || trust.safe === undefined || trust.audited === undefined || trust.privileged === undefined
+      ? null
+      : { safe: trust.safe, audited: trust.audited, privileged: trust.privileged }
+  if (schema === undefined || enabled === undefined || envKey === undefined) return null
+  return {
+    schema,
+    enabled,
+    env_key: envKey,
+    raw_overlay: rawOverlay ?? null,
+    trust: normalizedTrust,
+    source: source ?? null,
+    reason: reason ?? null,
+  }
+}
+
 export function normalizeDashboardRuntimeResolution(
   raw: unknown,
   generatedAt?: string,
@@ -564,6 +673,7 @@ export function normalizeDashboardRuntimeResolution(
       .map(normalizeDashboardRuntimeDiagnostic)
       .filter((item): item is DashboardRuntimeDiagnostic => item !== null),
     build,
+    shell_ir_approval: normalizeDashboardShellIrApproval(raw.shell_ir_approval),
     keeper_runtime: normalizeKeeperRuntimeResolved(raw.keeper_runtime),
     fleet_safety: normalizeDashboardFleetSafetyHealth(raw),
     fd_accountant: normalizeDashboardFdAccountant(raw.fd_accountant),

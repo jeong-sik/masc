@@ -51,9 +51,18 @@ type SectionId = SettingsRouteSectionId
 
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
 type RuntimeRoutingSaveState = 'idle' | 'saving' | 'saved' | 'error'
+type SettingsControlKind = 'live-read' | 'live-write' | 'browser-local' | 'unsupported'
 type RuntimeSelectOption = {
   readonly id: string
   readonly label: string
+}
+export type SettingsControlInventoryItem = {
+  readonly id: string
+  readonly section: SectionId
+  readonly label: string
+  readonly kind: SettingsControlKind
+  readonly source: string
+  readonly action: string
 }
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
@@ -92,6 +101,141 @@ const MCP_PUBLIC_SURFACE = 'public_mcp'
 const SETTINGS_LOG_LIMIT = 50
 const SETTINGS_LOG_POLL_MS = 3000
 const DISPLAY_DENSITY_OPTIONS: Density[] = ['compact', 'regular', 'spacious']
+
+const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
+  {
+    id: 'runtime-default-runtime',
+    section: 'runtime',
+    label: 'Default runtime',
+    kind: 'live-write',
+    source: 'GET /api/v1/dashboard/runtime-defaults + runtime provider catalog',
+    action: 'PATCH /api/v1/runtime/routing lane=default',
+  },
+  {
+    id: 'runtime-catalog-summary',
+    section: 'runtime',
+    label: 'Runtime catalog cards',
+    kind: 'live-read',
+    source: 'GET /api/v1/dashboard/runtime-providers, fallback runtime-defaults projection',
+    action: 'read-only projection',
+  },
+  {
+    id: 'runtime-routing-lanes',
+    section: 'routing',
+    label: 'Model routing lanes',
+    kind: 'live-write',
+    source: 'GET /api/v1/dashboard/runtime-defaults',
+    action: 'PATCH /api/v1/runtime/routing for default/librarian/structured_judge/hitl_summary/cross_verifier',
+  },
+  {
+    id: 'runtime-media-failover',
+    section: 'routing',
+    label: 'Media failover list',
+    kind: 'live-write',
+    source: '[runtime].media_failover in runtime.toml',
+    action: 'PATCH /api/v1/runtime/media-failover',
+  },
+  {
+    id: 'runtime-toml-editor',
+    section: 'runtimes',
+    label: 'runtime.toml editor',
+    kind: 'live-write',
+    source: 'GET /api/v1/runtime/config/raw',
+    action: 'PUT /api/v1/runtime/config/raw',
+  },
+  {
+    id: 'settings-path-resolution',
+    section: 'paths',
+    label: 'Resolved paths',
+    kind: 'live-read',
+    source: 'dashboard shell path/config resolution + config projection',
+    action: 'read-only projection',
+  },
+  {
+    id: 'settings-mcp-status',
+    section: 'mcp',
+    label: 'MCP status check',
+    kind: 'live-read',
+    source: 'public MCP server + dashboard tool inventory',
+    action: 'call masc_status; no settings mutation',
+  },
+  {
+    id: 'settings-repositories',
+    section: 'repositories',
+    label: 'Repository settings',
+    kind: 'live-write',
+    source: 'repositories API',
+    action: 'SettingsRepositoriesSection owned writer',
+  },
+  {
+    id: 'settings-notify-thresholds',
+    section: 'notify',
+    label: 'Alert thresholds',
+    kind: 'live-read',
+    source: 'GET /api/v1/dashboard/config',
+    action: 'read-only projection',
+  },
+  {
+    id: 'settings-notify-routing',
+    section: 'notify',
+    label: 'Notification routing',
+    kind: 'unsupported',
+    source: 'no dashboard writer exposed',
+    action: 'render read-only unsupported state',
+  },
+  {
+    id: 'settings-prompts',
+    section: 'prompts',
+    label: 'Prompt registry',
+    kind: 'live-write',
+    source: 'prompt registry API',
+    action: 'PromptRegistryPanel owned writer',
+  },
+  {
+    id: 'settings-fusion',
+    section: 'fusion',
+    label: 'Fusion settings',
+    kind: 'live-write',
+    source: 'runtime.toml fusion settings',
+    action: 'FusionSettingsPanel owned writer',
+  },
+  {
+    id: 'settings-logs',
+    section: 'logs',
+    label: 'System log filters',
+    kind: 'live-read',
+    source: 'GET /api/v1/dashboard/logs',
+    action: 'client-side filter only',
+  },
+  {
+    id: 'settings-theme-density',
+    section: 'display',
+    label: 'Theme and density',
+    kind: 'browser-local',
+    source: 'DOM dataset + localStorage persistent signals',
+    action: 'browser shell only; no server settings write',
+  },
+  {
+    id: 'settings-display-locale',
+    section: 'display',
+    label: 'Locale / time format',
+    kind: 'unsupported',
+    source: 'no renderer-wide setting exposed',
+    action: 'render read-only unsupported state',
+  },
+  {
+    id: 'settings-html-snapshot',
+    section: 'display',
+    label: 'HTML snapshot export',
+    kind: 'browser-local',
+    source: 'current DOM outerHTML',
+    action: 'download DOM snapshot; no standalone resource claim',
+  },
+]
+
+export function settingsControlInventory(section: SectionId): readonly SettingsControlInventoryItem[] {
+  return SETTINGS_CONTROL_INVENTORY.filter(item => item.section === section)
+}
 
 export function normalizeSettingsSection(value: string | null | undefined): SectionId {
   return SETTINGS_ROUTE_SECTION_SET.has(value ?? '') ? (value as SectionId) : DEFAULT_SETTINGS_SECTION
@@ -190,6 +334,42 @@ function PreviewBadge({ label }: { label: string }) {
     >
       ${label}
     </span>
+  `
+}
+
+function settingsControlKindLabel(kind: SettingsControlKind): string {
+  if (kind === 'live-write') return 'live write'
+  if (kind === 'live-read') return 'live read'
+  if (kind === 'browser-local') return 'browser local'
+  return 'unsupported'
+}
+
+function SettingsControlLedger({ section }: { section: SectionId }) {
+  const items = settingsControlInventory(section)
+  if (items.length === 0) return null
+  return html`
+    <section class="set-control-ledger" data-testid="settings-control-ledger">
+      <div class="set-control-ledger-h">
+        <span>Control backing</span>
+        <span class="mono" data-testid="settings-control-ledger-count">${items.length}</span>
+      </div>
+      <div class="set-control-ledger-grid">
+        ${items.map(item => html`
+          <div
+            key=${item.id}
+            class=${`set-control-ledger-row ${item.kind}`}
+            data-testid="settings-control-ledger-row"
+            data-control-id=${item.id}
+            data-control-kind=${item.kind}
+          >
+            <span class="set-control-kind">${settingsControlKindLabel(item.kind)}</span>
+            <span class="set-control-label">${item.label}</span>
+            <span class="set-control-source mono" title=${item.source}>${item.source}</span>
+            <span class="set-control-action" title=${item.action}>${item.action}</span>
+          </div>
+        `)}
+      </div>
+    </section>
   `
 }
 
@@ -638,7 +818,7 @@ function settingsSectionState(
   if (section === 'repositories') return { mode: 'live', label: 'repositories API live-backed' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
   if (section === 'notify') return { mode: 'live', label: 'live thresholds read-only' }
-  if (section === 'display') return { mode: 'live', label: 'theme/density live' }
+  if (section === 'display') return { mode: 'local', label: 'browser-local shell state' }
   return { mode: 'local', label: 'read-only preview' }
 }
 
@@ -1015,6 +1195,7 @@ export function SettingsSurface() {
     : runtimeProviders?.assignment_governance?.assignment_count ?? 0
   const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
   const structuredJudgeRuntime = runtimeDefaults?.model_routing.structured_judge_runtime_id ?? null
+  const hitlSummaryRuntime = runtimeDefaults?.model_routing.hitl_summary_runtime_id ?? null
   const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
   const runtimeSelectOptions = runtimeEntries.length > 0
@@ -1023,6 +1204,7 @@ export function SettingsSurface() {
   const runtimeRoutingSaving = runtimeRoutingStatus === 'saving'
   const runtimeResolution = shellRuntimeResolution.value
   const configResolution = shellConfigResolution.value
+  const shellIrApproval = runtimeResolution?.shell_ir_approval
   const hasRuntimePathResolution = runtimeResolution !== null
   const hasConfigPathResolution = configResolution !== null
   const hasShellPathResolution = hasRuntimePathResolution || hasConfigPathResolution
@@ -1099,6 +1281,7 @@ export function SettingsSurface() {
             data-preview-locked="false"
             data-settings-mode=${sectionState.mode}
           >
+            <${SettingsControlLedger} section=${sec} />
             ${sec === 'mcp' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 현재 대시보드가 사용하는 HTTP MCP 서버 상태와 public MCP 도구 노출 목록입니다. 도구 노출은 서버 capability registry가 SSOT입니다.
@@ -1284,6 +1467,16 @@ export function SettingsSurface() {
                       onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('structured_judge', runtimeId)}
                     />
                     <${RuntimeRoutingSelect}
+                      label="HITL summary"
+                      hint="[runtime].hitl_summary · 승인 컨텍스트 요약"
+                      value=${hitlSummaryRuntime}
+                      fallbackLabel="structured_judge/librarian/default fallback"
+                      options=${runtimeSelectOptions}
+                      disabled=${runtimeRoutingSaving}
+                      testId="runtime-routing-hitl-summary"
+                      onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('hitl_summary', runtimeId)}
+                    />
+                    <${RuntimeRoutingSelect}
                       label="Cross verifier"
                       hint="[runtime].cross_verifier · 반-합리화 평가자"
                       value=${crossVerifierRuntime}
@@ -1377,6 +1570,38 @@ export function SettingsSurface() {
                       <${PathTruthRow} label="Workspace path" item=${runtimeResolution?.workspace_path ?? null} />
                       <${PathTruthRow} label="Data root" item=${runtimeResolution?.data_root ?? null} fallback=${concreteConfigValue(dataDirEntry)} />
                       <${PathTruthRow} label="Prompt markdown dir" item=${runtimeResolution?.prompt_markdown_dir ?? null} />
+                      ${shellIrApproval
+                        ? html`
+                          <div class="set-sub-h">Shell IR approval</div>
+                          <${SetRow} label="gate enabled" hint=${shellIrApproval?.env_key ?? 'shell ir approval'}>
+                            <div class="set-truth-value">
+                              <span class="mono">${shellIrApproval.enabled ? 'enabled' : 'disabled'}</span>
+                              <span class="set-truth-source">${shellIrApproval.source ?? 'runtime projection'}</span>
+                            </div>
+                          <//>
+                          <${SetRow} label="override" hint=${shellIrApproval.env_key}>
+                            <div class="set-truth-value">
+                              <span class="mono">${shellIrApproval.raw_overlay ?? 'default (autonomous)'}</span>
+                            </div>
+                          <//>
+                          <${SetRow} label="trust" hint="safe / audited / privileged">
+                            <div class="set-truth-value">
+                              <span class="mono">${shellIrApproval.trust === null
+                                ? 'unknown'
+                                : `${shellIrApproval.trust.safe}/${shellIrApproval.trust.audited}/${shellIrApproval.trust.privileged}`}</span>
+                            </div>
+                          <//>
+                          ${shellIrApproval.reason
+                            ? html`
+                              <${SetRow} label="reason" hint="projection reason">
+                                <div class="set-truth-value">
+                                  <span class="mono">${shellIrApproval.reason}</span>
+                                </div>
+                              <//>
+                            `
+                            : null}
+                        `
+                        : null}
                     `
                     : null}
                   ${hasConfigPathResolution || runtimeConfigPath

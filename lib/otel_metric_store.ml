@@ -14,6 +14,28 @@ include Otel_policy_metric_names
 include Otel_identity_metric_names
 include Otel_transport_metric_names
 
+let metric_keeper_waiting_count = Otel_metric_names.metric_keeper_waiting_count
+
+let metric_keeper_waiting_age_seconds =
+  Otel_metric_names.metric_keeper_waiting_age_seconds
+;;
+
+let metric_keeper_waiting_keeper_count =
+  Otel_metric_names.metric_keeper_waiting_keeper_count
+;;
+
+let metric_schedule_approval_blocked_count =
+  Otel_metric_names.metric_schedule_approval_blocked_count
+;;
+
+let metric_schedule_approval_wait_seconds =
+  Otel_metric_names.metric_schedule_approval_wait_seconds
+;;
+
+let metric_schedule_payload_unsupported_total =
+  Otel_metric_names.metric_schedule_payload_unsupported_total
+;;
+
 let otel_kind_of_metric_type = function
   | Counter -> Otel_metrics.Counter
   | Gauge -> Otel_metrics.Gauge
@@ -91,6 +113,8 @@ let init () =
     [ 0.001; 0.005; 0.01; 0.025; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0 ];
   reg "masc_keeper_turn_phase_duration_seconds"
     [ 0.1; 0.5; 1.0; 5.0; 10.0; 30.0; 60.0; 120.0; 300.0; 600.0 ];
+  reg "masc_keeper_gated_gh_block_time_seconds"
+    [ 0.0; 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0 ];
   reg "masc_workspace_broadcast_duration_seconds"
     [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0 ];
   reg "masc_file_lock_acquire_seconds"

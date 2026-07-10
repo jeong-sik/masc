@@ -186,6 +186,9 @@ type task =
   ; files : string list [@default []]
   ; created_at : string
   ; created_by : string option [@default None]
+  ; predecessor_task_id : string option [@default None]
+        (** RFC-0323 W2: write-once lineage pointer to the terminal task this
+            one re-runs. Set only at creation; transitions carry it through. *)
   ; contract : task_contract option [@default None]
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
@@ -197,23 +200,21 @@ type task =
 val task_to_yojson : task -> Yojson.Safe.t
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
 
-type task_reclaim_gate =
-  | Reclaim_gate_open
-  | Reclaim_gate_blocked_by_policy of string
-
-val task_reclaim_gate : task -> task_reclaim_gate
-(** Deterministic reclaim gate derived only from typed [reclaim_policy].
-    Free-text [do_not_reclaim_reason] can explain a typed block, but cannot
-    close the gate by itself. *)
-
-val task_reclaim_gate_block_reason : task -> string option
+val task_requires_verification : task -> bool
+(** RFC-0323 W1 Phase A (implements RFC-0308): true when the task's contract
+    opts into strict verification — completion must route through
+    submit -> approve instead of a direct done. Contract presence is not the
+    trigger (creation auto-fills an advisory contract for every task);
+    [strict] is the explicit persisted opt-in. *)
 
 type task_claim_readiness =
   | Claim_ready
 
+(** RFC-0323 G-10: the typed reclaim claim gate is retired (#23661 removed
+    the Todo producer, G-10 the Done producer) — only the status blocks a
+    claim now. [reclaim_policy] survives as release/cancel data plumbing. *)
 type task_claim_block =
   | Claim_block_not_todo of task_status
-  | Claim_block_reclaim_policy of string
 
 type task_claim_decision =
   | Claim_available of task_claim_readiness

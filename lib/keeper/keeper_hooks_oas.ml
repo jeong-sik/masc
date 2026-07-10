@@ -73,6 +73,7 @@ let idle_decision_to_label = function
   | Agent_sdk.Hooks.Skip -> "skip"
   | Agent_sdk.Hooks.Nudge _ -> "nudge"
   | Agent_sdk.Hooks.Override _ -> "override"
+  | Agent_sdk.Hooks.Block _ -> "block"
   | Agent_sdk.Hooks.ApprovalRequired -> "approval_required"
   | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
   | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"

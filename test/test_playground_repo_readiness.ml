@@ -78,7 +78,6 @@ let repo_mapping_decision_metric_total () =
     0.0
     [ Keeper_metrics.KeeperRepoMappingDefaultScopeAllowed;
       Keeper_metrics.KeeperRepoMappingDeniedUnregistered;
-      Keeper_metrics.KeeperRepoMappingDeniedNotInMapping;
       Keeper_metrics.KeeperRepoMappingLoadError;
       Keeper_metrics.KeeperRepoMappingRepositoryIdentityMismatch;
       Keeper_metrics.KeeperRepoMappingRepositoryStoreError;
@@ -103,12 +102,13 @@ let save_repositories base_path repositories =
   | Ok () -> ()
   | Error msg -> fail ("save_repositories failed: " ^ msg)
 
-let repository_fixture ~id ~name ~url ~local_path : Repo_manager_types.repository =
+let repository_fixture ~aliases ~id ~name ~url ~local_path
+  : Repo_manager_types.repository =
   { id
   ; name
   ; url
   ; local_path
-  ; aliases = []
+  ; aliases
   ; default_branch = "main"
   ; keepers = []
   ; status = Repo_manager_types.Active
@@ -195,6 +195,27 @@ let test_invalid_repo_name () =
   check bool "not ok" false (json_bool "ok" json);
   check string "state" "invalid_repo_name" (json_string "state" json)
 
+let test_find_repo_url_uses_registered_alias () =
+  let base_path = temp_dir "masc-repo-readiness" in
+  let config = Masc.Workspace.default_config base_path in
+  let repo_path = Filename.concat base_path ".masc/repos/masc" in
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:repo_path
+        ~aliases:[ "masc-mcp" ]
+    ];
+  match
+    Masc.Playground_repo_readiness.find_repo_url
+      ~config
+      ~repo_name:"masc-mcp"
+  with
+  | Some url ->
+    check string "alias repo url" "https://github.com/jeong-sik/masc.git" url
+  | None -> fail "expected repository URL through explicit alias"
+
 let test_playground_repos_mark_missing_mapping_default_scope_allowed () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
@@ -202,6 +223,7 @@ let test_playground_repos_mark_missing_mapping_default_scope_allowed () =
   let repo_path = playground_repo_path ~config ~meta "masc-mcp" in
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc-mcp"
         ~name:"masc-mcp"
         ~url:"https://github.com/jeong-sik/masc-mcp.git"
@@ -217,22 +239,32 @@ let test_playground_repos_mark_missing_mapping_default_scope_allowed () =
   check bool "policy marks default scope" true
     (json_bool "policy_default_scope" json);
   check string "policy source"
-    Keeper_repo_mapping.mappings_toml_basename
+    Config_dir_resolver.repositories_toml_basename
     (json_string "policy_source" json)
 
-let test_playground_repos_mark_repo_not_in_mapping_denied () =
+let test_playground_repos_mark_registered_repo_outside_mapping_allowed () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc" in
+  save_repositories base_path
+    [ repository_fixture
+        ~aliases:[]
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:repo_path
+    ];
   write_mapping base_path meta.name [ "oas" ];
   create_playground_repo_marker ~config ~meta "masc";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
-  check bool "policy denies unlisted repo" false
+  check bool "policy allows registered repo outside advisory mapping" true
     (json_bool "policy_allowed" json);
   check string "policy status"
-    (Keeper_sandbox_control.playground_policy_status_to_string
-       Policy_denied_not_in_mapping)
-    (json_string "policy_status" json)
+    (Keeper_sandbox_control.playground_policy_status_to_string Policy_allowed)
+    (json_string "policy_status" json);
+  check string "policy repository id" "masc"
+    (json_string "policy_repository_id" json)
 
 let test_playground_repos_mark_wildcard_mapping_allowed () =
   let base_path = temp_dir "masc-playground-repo-policy" in
@@ -241,6 +273,7 @@ let test_playground_repos_mark_wildcard_mapping_allowed () =
   let repo_path = playground_repo_path ~config ~meta "masc" in
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/masc.git"
@@ -255,6 +288,31 @@ let test_playground_repos_mark_wildcard_mapping_allowed () =
     (Keeper_sandbox_control.playground_policy_status_to_string Policy_allowed)
     (json_string "policy_status" json)
 
+let test_playground_repos_mark_unregistered_visible_repo_denied () =
+  let base_path = temp_dir "masc-playground-repo-policy" in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc-mcp" in
+  save_repositories base_path
+    [ repository_fixture
+        ~aliases:[]
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:(Filename.concat base_path ".masc/repos/masc")
+    ];
+  write_mapping base_path meta.name [ "masc" ];
+  mkdir_p (Filename.concat repo_path ".git");
+  let json = playground_repo_entry ~config ~meta ~repo_name:"masc-mcp" in
+  check bool "policy denies visible unregistered repo" false
+    (json_bool "policy_allowed" json);
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string
+       Policy_unregistered_repository)
+    (json_string "policy_status" json);
+  check string "policy repository id is visible repo name" "masc-mcp"
+    (json_string "policy_repository_id" json)
+
 let test_playground_repos_policy_uses_registered_repository_id () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
@@ -263,6 +321,7 @@ let test_playground_repos_policy_uses_registered_repository_id () =
   mkdir_p (Filename.concat repo_path ".git");
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"repo-masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/masc.git"
@@ -286,6 +345,7 @@ let test_playground_repos_mark_repository_identity_mismatch_denied () =
   mkdir_p (Filename.concat repo_path ".git");
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/secret.git"
@@ -325,22 +385,30 @@ let test_playground_repos_mark_repository_store_error_denied () =
   check bool "policy error is surfaced" true
     (String.length (json_string "policy_error" json) > 0)
 
-let test_playground_repos_mark_mapping_load_error_denied () =
+let test_playground_repos_mark_mapping_load_error_allowed_for_registered_repo () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc" in
+  save_repositories base_path
+    [ repository_fixture
+        ~aliases:[]
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:repo_path
+    ];
   write_mapping_raw base_path
     (Printf.sprintf "[mapping.%s]\nrepositories = 42\n" meta.name);
   create_playground_repo_marker ~config ~meta "masc";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
-  check bool "policy denies load error" false
+  check bool "mapping load error does not deny registered repo" true
     (json_bool "policy_allowed" json);
   check string "policy status"
-    (Keeper_sandbox_control.playground_policy_status_to_string
-       Policy_mapping_load_error)
+    (Keeper_sandbox_control.playground_policy_status_to_string Policy_allowed)
     (json_string "policy_status" json);
-  check bool "policy error is surfaced" true
-    (String.length (json_string "policy_error" json) > 0)
+  check bool "mapping error is surfaced" true
+    (String.length (json_string "policy_mapping_error" json) > 0)
 
 let test_playground_repos_projection_does_not_record_policy_metrics () =
   let base_path = temp_dir "masc-playground-repo-policy" in
@@ -349,6 +417,7 @@ let test_playground_repos_projection_does_not_record_policy_metrics () =
   let repo_path = playground_repo_path ~config ~meta "masc" in
   save_repositories base_path
     [ repository_fixture
+        ~aliases:[]
         ~id:"masc"
         ~name:"masc"
         ~url:"https://github.com/jeong-sik/masc.git"
@@ -702,6 +771,8 @@ let () =
         test_case "parent git checkout is not clone" `Quick
           test_parent_git_checkout_does_not_count_as_clone;
         test_case "invalid repo_name" `Quick test_invalid_repo_name;
+        test_case "find repo url uses registered alias" `Quick
+          test_find_repo_url_uses_registered_alias;
         test_case "missing clone skips workspace discovery" `Quick
           test_missing_clone_skips_workspace_discovery;
       ];
@@ -709,18 +780,22 @@ let () =
       [
         test_case "filesystem repo without mapping uses default scope" `Quick
           test_playground_repos_mark_missing_mapping_default_scope_allowed;
-        test_case "filesystem repo outside mapping is marked denied" `Quick
-          test_playground_repos_mark_repo_not_in_mapping_denied;
+        test_case "registered filesystem repo outside mapping is marked allowed"
+          `Quick
+          test_playground_repos_mark_registered_repo_outside_mapping_allowed;
         test_case "filesystem repo under wildcard mapping is marked allowed"
           `Quick test_playground_repos_mark_wildcard_mapping_allowed;
+        test_case "unregistered visible filesystem repo is marked denied"
+          `Quick
+          test_playground_repos_mark_unregistered_visible_repo_denied;
         test_case "filesystem repo policy uses registered repository id"
           `Quick test_playground_repos_policy_uses_registered_repository_id;
         test_case "repository identity mismatch is marked denied" `Quick
           test_playground_repos_mark_repository_identity_mismatch_denied;
         test_case "repository store error is marked denied" `Quick
           test_playground_repos_mark_repository_store_error_denied;
-        test_case "mapping load error is marked denied" `Quick
-          test_playground_repos_mark_mapping_load_error_denied;
+        test_case "mapping load error does not cap registered repo" `Quick
+          test_playground_repos_mark_mapping_load_error_allowed_for_registered_repo;
         test_case "policy projection does not record decision metrics" `Quick
           test_playground_repos_projection_does_not_record_policy_metrics;
       ];

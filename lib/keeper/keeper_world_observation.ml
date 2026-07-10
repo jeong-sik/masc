@@ -44,7 +44,12 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Fusion_completed
   | Bg_completed
+  | Schedule_due
   | External_attention
+  | Goal_verification_failed
+  | Failure_judgment
+  | Goal_assigned
+  | Goal_stagnation
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -122,7 +127,9 @@ type event_queue_trigger =
   Keeper_world_observation_turn_types.event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Scheduled_automation_stimulus
   | Connector_attention_stimulus
+  | Hitl_resolved_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -131,6 +138,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
+  | Hitl_resolved_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of
@@ -341,18 +349,34 @@ let schedule_query_failure_message = function
   | exn -> Printexc.to_string exn
 ;;
 
-let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
+let schedule_visible_to_keeper keeper_name (request : Schedule_domain.schedule_request)
+  =
+  match keeper_name with
+  | None -> true
+  | Some keeper_name ->
+    (match request.scheduled_by.kind with
+     | Schedule_domain.Automated_actor -> String.equal request.scheduled_by.id keeper_name
+     | Schedule_domain.Human_operator | Schedule_domain.System -> false)
+;;
+
+let read_scheduled_automation_observation
+      ~(keeper_name : string option)
+      ~(config : Workspace.config)
+      ~now
+  =
   try
     let state = Schedule_store.read_state config in
+    let schedules =
+      List.filter (schedule_visible_to_keeper keeper_name) state.schedules
+    in
     let due_ready =
       Schedule_store.due_execution_candidates state
+      |> List.filter (schedule_visible_to_keeper keeper_name)
       |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
     in
-    let blocked =
-      state.schedules |> List.filter (schedule_blocked_approval ~now state)
-    in
+    let blocked = schedules |> List.filter (schedule_blocked_approval ~now state) in
     let active_count =
-      state.schedules
+      schedules
       |> List.fold_left
            (fun count request ->
               if schedule_effectively_active ~now request then count + 1 else count)
@@ -369,7 +393,7 @@ let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
     { active_count
     ; due_ready_count = List.length due_ready
     ; blocked_approval_count = List.length blocked
-    ; next_due_at = next_active_schedule_due_at ~now state.schedules
+    ; next_due_at = next_active_schedule_due_at ~now schedules
     ; items =
         due_items @ blocked_items
         |> List.sort compare_schedule_attention_item
@@ -570,6 +594,38 @@ let pending_board_event_of_bg_job_completion
   }
 ;;
 
+let scheduled_automation_actor = "scheduled_automation"
+
+let pending_board_event_of_scheduled_wake
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (sw : Keeper_event_queue.scheduled_wake)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let title =
+    match sw.title with
+    | Some title -> title
+    | None -> Printf.sprintf "Scheduled keeper wake due (schedule %s)" sw.schedule_id
+  in
+  { event_kind = Schedule_due
+  ; post_id = Keeper_event_queue.schedule_due_post_id sw
+  ; author = scheduled_automation_actor
+  ; title
+  ; preview = short_preview ~max_len:fusion_result_preview_max_len sw.message
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author:scheduled_automation_actor
+  }
+;;
+
 let external_attention_actor_label (item : Keeper_external_attention.item) =
   match item.actor.display_name with
   | Some name when String.trim name <> "" -> name
@@ -619,6 +675,177 @@ let pending_board_event_of_external_attention
   }
 ;;
 
+let goal_verification_failure_author =
+  Tool_name.Goal_name.to_string Tool_name.Goal_name.Goal_verify
+;;
+
+let goal_verification_failure_preview
+      (failure : Keeper_event_queue.goal_verification_failure)
+  =
+  let metric_line =
+    match failure.metric, failure.target_value with
+    | Some metric, Some target ->
+      Printf.sprintf " metric=%s target=%s" metric target
+    | Some metric, None -> Printf.sprintf " metric=%s" metric
+    | None, Some target -> Printf.sprintf " target=%s" target
+    | None, None -> ""
+  in
+  let note_line =
+    match failure.note with
+    | Some note when String.trim note <> "" -> " note=" ^ note
+    | Some _ | None -> ""
+  in
+  let evidence_line =
+    match failure.evidence_refs with
+    | [] -> ""
+    | refs -> " evidence_refs=" ^ String.concat "," refs
+  in
+  Printf.sprintf
+    "Goal verification rejected by %s; goal returned to phase=%s.%s%s%s"
+    failure.rejected_by
+    failure.phase
+    metric_line
+    note_line
+    evidence_line
+;;
+
+let pending_board_event_of_goal_verification_failure
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (failure : Keeper_event_queue.goal_verification_failure)
+  : pending_board_event
+  =
+  let author = goal_verification_failure_author in
+  let self_ids = self_ids meta in
+  { event_kind = Goal_verification_failed
+  ; post_id = Keeper_event_queue.goal_verification_failure_post_id failure
+  ; author
+  ; title = Printf.sprintf "Goal verification failed: %s" failure.goal_title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (goal_verification_failure_preview failure)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some failure.rejected_by
+  ; latest_external_preview = failure.note
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+;;
+
+(* RFC-0313 W2: surface a deterministic turn failure as actionable turn input
+   for an LLM-boundary verdict. Same provenance choice as
+   [pending_board_event_of_fusion_completion]: own author + System_post ->
+   Self_narrative -> rendered inside the observational-data envelope
+   (RFC-0247) — a keeper reasons over its own failure, it is not trusted
+   operator instruction. *)
+let pending_board_event_of_failure_judgment
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (fj : Keeper_event_queue.failure_judgment)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let author = meta.name in
+  { event_kind = Failure_judgment
+  ; post_id = Keeper_event_queue.failure_judgment_post_id fj
+  ; author
+  ; title =
+      Printf.sprintf
+        "Turn failure escalated for judgment: %s on %s"
+        (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
+        fj.fj_runtime_id
+  ; preview = short_preview ~max_len:fusion_result_preview_max_len fj.fj_detail
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+
+(* RFC-0315 P3 W0: surface a fresh goal assignment as actionable turn input.
+   Author is the assigning actor (tool caller or "toml_reconcile"), rendered
+   as a System_post inside the observational-data envelope — the keeper
+   decides what to do with the goal; the event only states the fact. *)
+let pending_board_event_of_goal_assignment
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (ga : Keeper_event_queue.goal_assignment)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let author = ga.ga_assigned_by in
+  { event_kind = Goal_assigned
+  ; post_id = Keeper_event_queue.goal_assignment_post_id ga
+  ; author
+  ; title = Printf.sprintf "Goal assigned: %s" ga.ga_goal_title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Goal %s is now in your active goals (assigned by %s). Review it \
+            in Active Goals and either break it into a claimable task or \
+            post your plan."
+           ga.ga_goal_id
+           ga.ga_assigned_by)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some ga.ga_assigned_by
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+;;
+
+let pending_board_event_of_goal_stagnation
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (gs : Keeper_event_queue.goal_stagnation)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let author = "goal_loop" in
+  { event_kind = Goal_stagnation
+  ; post_id = Keeper_event_queue.goal_stagnation_post_id gs
+  ; author
+  ; title = Printf.sprintf "Goal stalled: %s" gs.gs_goal_title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Goal %s has had no progress since %s. Resume it now — advance one \
+            concrete step, or if you are blocked, post a progress note \
+            recording what is blocking and hand off. Do not leave it \
+            untouched."
+           gs.gs_goal_id
+           gs.gs_stale_since)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some author
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~continuity_summary
       ~(meta : keeper_meta)
@@ -638,6 +865,28 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bg_completed c ->
     Some
       (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
+  | Keeper_event_queue.Schedule_due sw ->
+    Some (pending_board_event_of_scheduled_wake ~meta ~arrived_at:stimulus.arrived_at sw)
+  | Keeper_event_queue.Goal_verification_failed failure ->
+    Some
+      (pending_board_event_of_goal_verification_failure
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         failure)
+  | Keeper_event_queue.Failure_judgment fj ->
+    Some (pending_board_event_of_failure_judgment ~meta ~arrived_at:stimulus.arrived_at fj)
+  | Keeper_event_queue.Goal_assigned ga ->
+    Some
+      (pending_board_event_of_goal_assignment
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         ga)
+  | Keeper_event_queue.Goal_stagnation gs ->
+    Some
+      (pending_board_event_of_goal_stagnation
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         gs)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.No_progress_recovery
   | Keeper_event_queue.Connector_attention _
@@ -891,7 +1140,10 @@ let observe
   let running_keeper_fiber_count = count_running_keeper_fibers ~config in
   let idle_seconds = compute_idle_seconds ~meta in
   let scheduled_automation =
-    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+    read_scheduled_automation_observation
+      ~keeper_name:(Some meta.name)
+      ~config
+      ~now:(Time_compat.now ())
   in
   (* Defer the checkpoint load (file read + Yojson parse + sanitize + O(n)
      tool-pair repair) out of [observe]. Most cycles are no-op skips where
@@ -945,7 +1197,10 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
     provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
   in
   let scheduled_automation =
-    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+    read_scheduled_automation_observation
+      ~keeper_name:(Some meta.name)
+      ~config
+      ~now:(Time_compat.now ())
   in
   { pending_mentions = []
   ; pending_board_events = []
@@ -1025,7 +1280,10 @@ let durable_signal_present
       events
   in
   let scheduled_automation =
-    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+    read_scheduled_automation_observation
+      ~keeper_name:(Some meta.name)
+      ~config
+      ~now:(Time_compat.now ())
   in
   pending_mentions <> []
   || pending_board_events <> []
@@ -1080,12 +1338,14 @@ let effective_scheduled_autonomous_cooldown
   : int
   =
   (* Noop backoff: consecutive observation-only cycles multiply the base
-     cooldown by 2^min(n, 2), capping at 4x (see [noop_multiplier] below: the
-     shift is [min consecutive_noop_count 2], i.e. 1, 2, 4). This prevents
-     token waste when the keeper repeatedly reads board_list without acting. *)
+     cooldown by [2^shift], where [shift] is a named runtime policy. This
+     prevents token waste when the keeper repeatedly reads board_list without
+     acting, without burying the cap as a local heuristic. *)
+  let noop_backoff_max_shift = Keeper_config.keeper_proactive_noop_backoff_max_shift () in
   let noop_multiplier =
-    if consecutive_noop_count <= 0 then 1 else 1 lsl min consecutive_noop_count 2
-    (* 1, 2, 4 *)
+    if consecutive_noop_count <= 0
+    then 1
+    else 1 lsl min consecutive_noop_count noop_backoff_max_shift
   in
   let effective_base = base_cooldown * noop_multiplier in
   let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in
@@ -1096,7 +1356,9 @@ let effective_scheduled_autonomous_cooldown
   then effective_base
   else (
     let decay_periods = (since_last - effective_base) / max 1 effective_base in
-    let capped_periods = min decay_periods 4 in
+    let capped_periods =
+      min decay_periods (Keeper_config.keeper_proactive_idle_decay_max_periods ())
+    in
     let factor = 1.0 /. Float.pow 2.0 (float_of_int capped_periods) in
     max floor (int_of_float (Float.round (float_of_int effective_base *. factor))))
 ;;

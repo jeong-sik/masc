@@ -35,6 +35,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  keeperStreamContract,
   setRecordValue,
 } from '../keeper-state'
 import { isDefaultVisibleConversationEntry } from '../keeper-state'
@@ -61,48 +62,18 @@ import {
   removeQueuedMessage,
   type QueuedMessage,
 } from '../keeper-chat-store'
+import { stableAttachmentId } from './chat/attachments'
 import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize, type ChatComposerCommand, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
 import {
+  toolCallOutputHydrationContract,
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
+import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 
-
-const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
-const KEEPER_CHAT_INTERNAL_VISIBLE_KEY = 'masc_keeper_chat_internal_visible'
-
-function readKeeperChatMetadataVisible(): boolean {
-  try {
-    const stored = localStorage.getItem(KEEPER_CHAT_METADATA_VISIBLE_KEY)
-    return stored === null ? false : stored === 'true'
-  } catch {
-    return false
-  }
-}
-
-function writeKeeperChatMetadataVisible(value: boolean): void {
-  try {
-    localStorage.setItem(KEEPER_CHAT_METADATA_VISIBLE_KEY, value ? 'true' : 'false')
-  } catch {}
-}
-
-function readKeeperChatInternalVisible(): boolean {
-  try {
-    const stored = localStorage.getItem(KEEPER_CHAT_INTERNAL_VISIBLE_KEY)
-    return stored === null ? true : stored === 'true'
-  } catch {
-    return true
-  }
-}
-
-function writeKeeperChatInternalVisible(value: boolean): void {
-  try {
-    localStorage.setItem(KEEPER_CHAT_INTERNAL_VISIBLE_KEY, value ? 'true' : 'false')
-  } catch {}
-}
 
 function GhostButton({
   disabled,
@@ -248,6 +219,9 @@ function liveAssistantPlaceholder(keeperName: string): KeeperConversationEntry {
     timestamp: null,
     delivery: 'streaming',
     streamState: 'streaming',
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      reason: 'UI-only placeholder while active stream entry mounts',
+    }),
     details: null,
     error: null,
   }
@@ -267,6 +241,12 @@ function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationE
     timestamp: queuedTimestampIso(msg.timestamp),
     delivery: 'queued',
     streamState: undefined,
+    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
+      deliveryReceipt: 'no_delivery_receipt',
+      reason: 'client-side composer queue item; not yet submitted to keeper runtime',
+    }),
+    queueSeq: msg.sequence,
+    queueClientActionId: msg.clientActionId ?? null,
     attachments: msg.attachments,
     blocks: msg.blocks,
     details: null,
@@ -308,17 +288,32 @@ export function filterConversationEntries(
 }
 
 function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[] {
+  const generatedCounts = new Map<string, number>()
   return blocks
     .filter((b): b is ChatAttachBlock => b.t === 'attach')
-    .map((b) => ({
-      id: b.id ?? `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
-      name: b.name,
-      size: b.sizeBytes ?? 0,
-      mimeType: b.mimeType ?? 'application/octet-stream',
-      data: b.data ?? b.src ?? '',
-      dims: b.dims,
-    }))
+    .map((b) => {
+      const baseId = stableAttachmentId({
+        name: b.name,
+        type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
+        kind: b.kind,
+        mimeType: b.mimeType,
+        size: b.sizeBytes,
+        dims: b.dims,
+        data: b.data ?? b.svg ?? b.ph,
+        src: b.src,
+      })
+      const count = generatedCounts.get(baseId) ?? 0
+      generatedCounts.set(baseId, count + 1)
+      return {
+        id: b.id ?? (count === 0 ? baseId : `${baseId}-${count + 1}`),
+        type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
+        name: b.name,
+        size: b.sizeBytes ?? 0,
+        mimeType: b.mimeType ?? 'application/octet-stream',
+        data: b.data ?? b.src ?? '',
+        dims: b.dims,
+      }
+    })
 }
 
 function blocksToDisplayBlocks(blocks: ChatBlock[]): ChatBlock[] | undefined {
@@ -438,7 +433,12 @@ function QueueItemCard({ keeperName, msg, onMutate }: QueueItemCardProps) {
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5" data-chat-queue-item=${msg.id}>
+    <div
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5"
+      data-chat-queue-item=${msg.id}
+      data-chat-queue-seq=${msg.sequence}
+      data-chat-queue-client-action-id=${msg.clientActionId ?? undefined}
+    >
       ${editing
         ? html`
             <textarea
@@ -505,23 +505,10 @@ export function KeeperConversationPanel({
   composerCommands?: ChatComposerCommand[]
   onInspectTurn?: (entry: KeeperConversationEntry) => void
 }) {
-  const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
-  const [showInternal, setShowInternal] = useState(readKeeperChatInternalVisible())
-
-  const toggleMetadata = () => {
-    setShowMetadata(prev => {
-      const next = !prev
-      writeKeeperChatMetadataVisible(next)
-      return next
-    })
-  }
-  const toggleInternal = () => {
-    setShowInternal(prev => {
-      const next = !prev
-      writeKeeperChatInternalVisible(next)
-      return next
-    })
-  }
+  // Global view prefs (Tweaks panel owns the switches). Reading .value here
+  // subscribes this component, so a Tweaks flip re-renders every mounted panel.
+  const showMetadata = chatShowMetadata.value
+  const showInternal = chatShowInternal.value
 
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -619,7 +606,7 @@ export function KeeperConversationPanel({
   const transcriptEmptyText =
     hasQuery && visibleThreadWithQueue.length > 0
       ? '검색어와 일치하는 메시지가 없습니다.'
-      : '아직 표시할 대화가 없습니다. 내부 메시지는 토글로 볼 수 있습니다.'
+      : '아직 표시할 대화가 없습니다. 내부 메시지는 Tweaks의 "내부 메시지"로 볼 수 있습니다.'
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
   const renderError = (extraClass = 'mt-2') => {
@@ -789,16 +776,6 @@ export function KeeperConversationPanel({
               </span>`
             : null}
           <span class="spacer"></span>
-          <${GhostButton} onClick=${toggleMetadata} ariaExpanded=${showMetadata}>
-            ${showMetadata ? '메타데이터 숨김' : '메타데이터'}
-          <//>
-          <${GhostButton}
-            onClick=${toggleInternal}
-            ariaExpanded=${showInternal}
-            class=${showInternal ? 'border-[var(--info-border)] text-[var(--info-fg)]' : ''}
-          >
-            ${showInternal ? '내부 숨김' : '내부 메시지'}
-          </${GhostButton}>
           ${!historyExpanded
             ? html`
                 <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
@@ -835,6 +812,7 @@ export function KeeperConversationPanel({
               showSourceBadge=${true}
               toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
               toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+              toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
               unreadAfterTs=${unreadAfterTs}
               onSeenBottom=${markTranscriptSeen}
               action=${inspectAction}
@@ -845,7 +823,12 @@ export function KeeperConversationPanel({
         ${!showInternal && hiddenCount > 0
           ? html`
               <div class="mx-10 mb-2 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
-                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지"로 볼 수 있습니다.
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다.
+                <button
+                  type="button"
+                  class="ml-1 cursor-pointer border-0 bg-transparent p-0 text-2xs font-semibold text-[var(--warn-bright)] underline"
+                  onClick=${() => { chatShowInternal.value = true }}
+                >바로 표시</button>
               </div>
             `
           : null}
@@ -928,16 +911,6 @@ export function KeeperConversationPanel({
                   ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
                 </span>`
               : null}
-            <${GhostButton} onClick=${toggleMetadata} ariaExpanded=${showMetadata}>
-              ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
-            <//>
-            <${GhostButton}
-              onClick=${toggleInternal}
-              ariaExpanded=${showInternal}
-              class=${showInternal ? 'border-[var(--info-border)] text-[var(--info-fg)]' : ''}
-            >
-              ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
-            </${GhostButton}>
             ${!historyExpanded
               ? html`
                   <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
@@ -971,6 +944,7 @@ export function KeeperConversationPanel({
           groupToolCalls=${true}
           toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+          toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
           unreadAfterTs=${unreadAfterTs}
           onSeenBottom=${markTranscriptSeen}
           action=${inspectAction}
@@ -979,7 +953,12 @@ export function KeeperConversationPanel({
         ${!showInternal && hiddenCount > 0
           ? html`
               <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
-                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다.
+                <button
+                  type="button"
+                  class="ml-1 cursor-pointer border-0 bg-transparent p-0 text-2xs font-semibold text-[var(--warn-bright)] underline"
+                  onClick=${() => { chatShowInternal.value = true }}
+                >바로 표시</button>
               </div>
             `
           : null}
@@ -1048,16 +1027,6 @@ export function KeeperConversationPanel({
                   ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
                 </span>`
               : null}
-            <${GhostButton} onClick=${toggleMetadata} ariaExpanded=${showMetadata}>
-              ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
-            <//>
-            <${GhostButton}
-              onClick=${toggleInternal}
-              ariaExpanded=${showInternal}
-              class=${showInternal ? 'border-[var(--info-border)] text-[var(--info-fg)]' : ''}
-            >
-              ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
-            </${GhostButton}>
             ${!historyExpanded
               ? html`
                   <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
@@ -1090,6 +1059,7 @@ export function KeeperConversationPanel({
             groupToolCalls=${true}
             toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+            toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
             unreadAfterTs=${unreadAfterTs}
             onSeenBottom=${markTranscriptSeen}
             action=${inspectAction}
@@ -1099,7 +1069,12 @@ export function KeeperConversationPanel({
         ${!showInternal && hiddenCount > 0
           ? html`
               <div class="mx-4 mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
-                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다.
+                <button
+                  type="button"
+                  class="ml-1 cursor-pointer border-0 bg-transparent p-0 text-2xs font-semibold text-[var(--warn-bright)] underline"
+                  onClick=${() => { chatShowInternal.value = true }}
+                >바로 표시</button>
               </div>
             `
           : null}

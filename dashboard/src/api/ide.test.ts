@@ -7,18 +7,20 @@ import {
   fetchIdeEvents,
   fetchIdeRegions,
 } from './ide'
+import { clearStoredToken, setStoredToken } from './core'
 
 const mockFetch = vi.fn()
 
 afterEach(() => {
   mockFetch.mockReset()
   vi.unstubAllGlobals()
+  clearStoredToken()
 })
 
-function stubFetch(response: unknown, ok = true): void {
+function stubFetch(response: unknown, ok = true, status?: number): void {
   mockFetch.mockResolvedValue({
     ok,
-    status: ok ? 200 : 500,
+    status: status ?? (ok ? 200 : 500),
     statusText: ok ? 'OK' : 'Internal Server Error',
     headers: new Headers(),
     json: () => Promise.resolve(response),
@@ -65,6 +67,36 @@ describe('ide API', () => {
     expect(url).toContain('file_path=lib%2Fa.ml')
     expect(url).toContain('keeper=sangsu')
     expect(url).toContain('repo_id=masc')
+  })
+
+  it('fetchIdeAnnotations appends canonical_url scope without repo_id', async () => {
+    stubFetch({ ok: true, data: [annotation] })
+
+    await fetchIdeAnnotations(
+      { file_path: 'lib/a.ml' },
+      {
+        keeper: 'sangsu',
+        scope: {
+          kind: 'canonical_url',
+          canonicalUrl: 'https://github.com/jeong-sik/masc.git',
+        },
+      },
+    )
+
+    const url = String(mockFetch.mock.calls[0]![0])
+    expect(url).toContain('/api/v1/ide/annotations?')
+    expect(url).toContain('canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git')
+    expect(url).not.toContain('repo_id=')
+  })
+
+  it('rejects conflicting IDE scope params before issuing a request', async () => {
+    stubFetch({ ok: true, data: [annotation] })
+
+    await expect(fetchIdeAnnotations({}, {
+      scope: { kind: 'repo_id', repoId: 'masc' },
+      canonicalUrl: 'https://github.com/jeong-sik/masc.git',
+    })).rejects.toThrow('IDE scope must resolve to exactly one')
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('fetchIdeAnnotations rejects failed envelopes instead of returning empty', async () => {
@@ -160,7 +192,8 @@ describe('ide API', () => {
     )
   })
 
-  it('deleteIdeAnnotation relies on token identity and appends repo_id param', async () => {
+  it('deleteIdeAnnotation sends the bearer token and appends repo_id param without keeper_id', async () => {
+    setStoredToken('delete-test-token', { source: 'manual', actor: 'dashboard-user' })
     stubFetch({}, true)
 
     await deleteIdeAnnotation('ann-1', { repoId: 'masc' })
@@ -169,6 +202,51 @@ describe('ide API', () => {
     expect(url).toContain('/api/v1/ide/annotations/ann-1?')
     expect(url).toContain('repo_id=masc')
     expect(url).not.toContain('keeper_id=')
+    // The DELETE route is token-bound (CanBroadcast) — a header-less
+    // request is rejected 401 in every server configuration.
+    const init = mockFetch.mock.calls[0]![1] as RequestInit
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer delete-test-token' })
+  })
+
+  it('deleteIdeAnnotation maps success to deleted', async () => {
+    stubFetch({}, true)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('deleted')
+  })
+
+  it('deleteIdeAnnotation maps the coded 403 (ownership/not-found) to rejected', async () => {
+    stubFetch(
+      { ok: false, error: 'annotation delete rejected', code: 'annotation_delete_rejected' },
+      false,
+      403,
+    )
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('rejected')
+  })
+
+  it('deleteIdeAnnotation maps an uncoded 403 (auth tier) to forbidden', async () => {
+    stubFetch({ ok: false, error: 'permission denied' }, false, 403)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('forbidden')
+  })
+
+  it('deleteIdeAnnotation maps 401 to unauthorized', async () => {
+    stubFetch({ ok: false, error: 'missing token' }, false, 401)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('unauthorized')
+  })
+
+  it('deleteIdeAnnotation maps non-auth failures to error', async () => {
+    stubFetch({}, false)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('error')
+  })
+
+  it('deleteIdeAnnotation maps network failure to error', async () => {
+    mockFetch.mockRejectedValue(new Error('network down'))
+    vi.stubGlobal('fetch', mockFetch)
+
+    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('error')
   })
 
   it('fetchIdeEvents appends event filters and parses bridge events', async () => {
@@ -211,6 +289,31 @@ describe('ide API', () => {
       turn_id: 'turn-1',
       timestamp_ms: 1717400000000,
     })])
+  })
+
+  it('fetchIdeEvents serializes keeper_lane scope without repo params', async () => {
+    stubFetch({ ok: true, data: { events: [] } })
+
+    await fetchIdeEvents({
+      limit: 50,
+      scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
+    })
+
+    const url = String(mockFetch.mock.calls[0]![0])
+    expect(url).toContain('/api/v1/ide/events?')
+    expect(url).toContain('keeper_lane=sangsu')
+    expect(url).not.toContain('repo_id=')
+    expect(url).not.toContain('canonical_url=')
+  })
+
+  it('rejects keeper_lane scope combined with repo_id before issuing a request', async () => {
+    stubFetch({ ok: true, data: { events: [] } })
+
+    await expect(fetchIdeEvents({
+      scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
+      repoId: 'masc',
+    })).rejects.toThrow('IDE scope must resolve to exactly one')
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('fetchIdeEvents rejects malformed event rows instead of dropping them', async () => {

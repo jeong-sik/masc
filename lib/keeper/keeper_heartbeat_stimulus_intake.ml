@@ -29,26 +29,47 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
     stim
 ;;
 
-let record_recovery_stimulus_turn_started
+let record_event_queue_stimulus_reaction
       ~(ctx : _ context)
       ~keeper_name
+      ~reaction_kind
       (stimulus : Keeper_event_queue.stimulus)
   =
   try
     Keeper_reaction_ledger.record_event_queue_reaction
       ~base_path:ctx.config.base_path
       ~keeper_name
-      ~reaction_kind:Keeper_reaction_ledger.Turn_started
+      ~reaction_kind
       stimulus
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.error
-      "turn entry: failed to persist recovery stimulus reaction post_id=%s \
+      "turn entry: failed to persist event queue stimulus reaction post_id=%s \
        (keeper=%s): %s"
       stimulus.post_id
       keeper_name
       (Printexc.to_string exn)
+;;
+
+let record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus =
+  record_event_queue_stimulus_reaction
+    ~ctx
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Turn_started
+    stimulus
+;;
+
+let record_event_queue_stimulus_ack ~ctx ~keeper_name stimulus =
+  record_event_queue_stimulus_reaction
+    ~ctx
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+    stimulus
+;;
+
+let record_recovery_stimulus_turn_started ~ctx ~keeper_name stimulus =
+  record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
 ;;
 
 type heartbeat_event_intake = {
@@ -76,16 +97,27 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Bootstrap -> Some Keeper_world_observation.Bootstrap_stimulus
   | Keeper_event_queue.No_progress_recovery ->
     Some Keeper_world_observation.No_progress_recovery_stimulus
+  | Keeper_event_queue.Schedule_due _ ->
+    Some Keeper_world_observation.Scheduled_automation_stimulus
   | Keeper_event_queue.Connector_attention _ ->
     Some Keeper_world_observation.Connector_attention_stimulus
+  | Keeper_event_queue.Hitl_resolved _ ->
+    (* RFC-0320 W3b: give the HITL-resolution wake a dedicated turn_reason so
+       the prompt can steer the keeper back to the originating conversation
+       instead of silently proceeding on its own state. The [Approval_pending]
+       skip is already gone (the approval left the queue); this changes only
+       how the resumed turn is described, not whether it runs. *)
+    Some Keeper_world_observation.Hitl_resolved_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
-  | Keeper_event_queue.Hitl_resolved _ ->
+  | Keeper_event_queue.Goal_verification_failed _
+  | Keeper_event_queue.Failure_judgment _
+  | Keeper_event_queue.Goal_assigned _
+  | Keeper_event_queue.Goal_stagnation _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
-       stimulus itself forces the keeper to re-run its cycle. Once the resolved
-       approval has left the queue the keeper no longer skips on
-       [Approval_pending] and proceeds on its own state. *)
+       stimulus itself forces the keeper to re-run its cycle and proceed on its
+       own state. *)
     None
 ;;
 
@@ -130,6 +162,68 @@ let consume_single_heartbeat_stimulus
       (match c.bg_outcome with
        | Keeper_event_queue.Bg_ok _ -> true
        | Keeper_event_queue.Bg_failed _ -> false)
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Schedule_due sw ->
+    Log.Keeper.info
+      "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
+      sw.schedule_id
+      sw.due_at
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Goal_verification_failed failure ->
+    (* A rejected completion claim is actionable work for the assigned keeper.
+       Promote it to a pending observation so the cycle does not wake empty. *)
+    Log.Keeper.info
+      "turn entry: goal verification failure delivered goal_id=%s request_id=%s \
+       rejected_by=%s (keeper=%s)"
+      failure.goal_id
+      failure.request_id
+      failure.rejected_by
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Goal_assigned ga ->
+    (* RFC-0315 P3 W0: a newly assigned standing objective is actionable
+       work. Promote it to a pending observation so the assignment turn does
+       not wake empty — returning [] would silently drop the edge. *)
+    Log.Keeper.info
+      "turn entry: goal assignment delivered goal_id=%s assigned_by=%s (keeper=%s)"
+      ga.ga_goal_id
+      ga.ga_assigned_by
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Goal_stagnation gs ->
+    (* RFC-0310 §3.3: a live goal went stale. Promote it to a pending
+       observation so the stagnation turn does not wake empty — returning []
+       would silently drop the edge. *)
+    Log.Keeper.info
+      "turn entry: goal stagnation delivered goal_id=%s stale_since=%s (keeper=%s)"
+      gs.gs_goal_id
+      gs.gs_stale_since
+      meta_after_triage.name;
+    (* Arm [Keeper_goal_stagnation_wake]'s fire-once-per-episode gate. The
+       producer skips re-enqueue only when [turn_started_seen] is true for the
+       episode stimulus id; that flag is set solely from a [Turn_started]
+       reaction row. Without recording it here the gate stays inert, so once
+       [ack_consumed] drops the stimulus the next scan re-detects the same
+       stale episode ((goal_id, updated_at) unchanged) and re-wakes every tick
+       — the blind cadence RFC-0303 forbids and RFC-0310 §3.3 exists to avoid.
+       [stim] carries the episode-pinned [arrived_at], so this row stamps the
+       exact stimulus id the producer recomputes next scan. Mirrors the
+       No_progress_recovery arm below. *)
+    record_event_queue_stimulus_turn_started
+      ~ctx
+      ~keeper_name:meta_after_triage.name
+      stim;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Failure_judgment fj ->
+    (* RFC-0313 W2: a deterministic turn failure awaits an LLM-boundary
+       verdict. Promote it to a pending observation so the judgment turn does
+       not wake empty — returning [] would silently drop the escalation. *)
+    Log.Keeper.info
+      "turn entry: failure judgment delivered runtime=%s class=%s (keeper=%s)"
+      fj.fj_runtime_id
+      (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bootstrap ->
@@ -211,7 +305,7 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
   let batch_len = List.length batch in
   if batch_len > 1 then
     Log.Keeper.info
-      "debounce: coalesced %d board signals (keeper=%s)"
+      "turn digest: coalesced %d board signals into one turn (keeper=%s)"
       batch_len
       meta_after_triage.name;
   List.filter_map
@@ -231,9 +325,11 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
 ;;
 
 let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
-  (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus
-     per turn. Board signals are coalesced by the default debounce
-     window in {!Keeper_event_queue.drain_board_window} (2 s). *)
+  (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus per
+     turn, where the board unit is the turn digest: every queued board
+     signal is consumed as one batch ({!Keeper_event_queue.drain_board_all},
+     RFC-0334 W2 — arrival-window batching is retired), and the non-board
+     fallback below stays a single stimulus. *)
   let board_batch =
     Keeper_registry_event_queue.drain_board
       ~base_path:ctx.config.base_path

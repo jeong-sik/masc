@@ -271,6 +271,16 @@ let board_contributor_quality_fields = function
   | None -> []
   | Some quality -> [ ("contributor_quality", quality) ]
 
+let board_claim_evidence_lookup () =
+  let lookup = Masc_board_handlers.Board_claim_evidence.projection_lookup () in
+  fun post_id ->
+    Option.map Masc_board_handlers.Board_claim_evidence.projection_to_yojson (lookup post_id)
+;;
+
+let board_claim_evidence_fields = function
+  | None -> []
+  | Some projection -> [ ("claim_evidence", projection) ]
+
 let board_comment_dashboard_json ?(include_moderation = false)
     ?(blind_votes = false) ?current_vote ?reactions (c : Board.comment) :
     Yojson.Safe.t =
@@ -302,9 +312,8 @@ let board_comment_dashboard_json ?(include_moderation = false)
   | other -> other
 
 let board_post_dashboard_json ?(include_moderation = false)
-    ?(blind_votes = false) ?contributor_quality ?current_vote ?reactions
-    ~author_karma
-    (p : Board.post) : Yojson.Safe.t =
+    ?(blind_votes = false) ?contributor_quality ?claim_evidence ?current_vote
+    ?reactions ~author_karma (p : Board.post) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string p.author in
   let post_id = Board.Post_id.to_string p.id in
   let base_fields =
@@ -349,6 +358,7 @@ let board_post_dashboard_json ?(include_moderation = false)
           ~target_kind:Board_moderation.Target_post
           ~target_id:post_id
       @ board_contributor_quality_fields contributor_quality
+      @ board_claim_evidence_fields claim_evidence
       @ board_vote_blind_fields ~blind_active
       @ board_vote_state_fields current_vote
       @ board_reaction_fields reactions )

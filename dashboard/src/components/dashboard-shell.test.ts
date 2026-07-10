@@ -1051,9 +1051,11 @@ describe('SideRail v2 chrome', () => {
     expect(container.querySelector('.nav-link.active')?.textContent).toContain('Work')
     expect(container.querySelector('.nav-link.active')?.textContent).not.toContain('Settings')
 
+    // Multiple surfaces render sublists (any surface with 2+ sections), so
+    // anchor on the globally-unique active sublink instead of the first list.
     const sublist = container.querySelector('.nav-sublist')
     expect(sublist).not.toBeNull()
-    const activeSublink = sublist?.querySelector('.nav-sublink.active')
+    const activeSublink = container.querySelector('.nav-sublink.active')
     expect(activeSublink).not.toBeNull()
     expect(activeSublink?.textContent).toContain('Work')
     expect(container.querySelector('.nav-footer .nav-footer-settings')?.textContent).toContain('Settings')

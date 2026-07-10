@@ -77,6 +77,131 @@ let actionable_path_action_for_class
       Printf.sprintf "Check the path. Your playground: %s" playground)
 ;;
 
+let safe_is_dir path =
+  try Sys.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
+;;
+
+let safe_file_exists path =
+  try Sys.file_exists path with
+  | Sys_error _ -> false
+;;
+
+let visible_sandbox_repositories ~config meta =
+  let repos_dir =
+    Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "repos"
+  in
+  if not (safe_is_dir repos_dir)
+  then []
+  else
+    try
+      Sys.readdir repos_dir
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.filter (fun entry ->
+        let candidate = Filename.concat repos_dir entry in
+        safe_is_dir candidate && safe_file_exists (Filename.concat candidate ".git"))
+    with
+    | Sys_error _ -> []
+;;
+
+let visible_repo_hint = function
+  | [ repo ] -> Some repo
+  | _ -> None
+;;
+
+let repos_json repos =
+  `List (List.map (fun repo -> `String ("repos/" ^ repo)) repos)
+;;
+
+let repo_identity_tokens (repo : Repo_manager_types.repository) =
+  repo.id :: repo.name :: repo.aliases
+  |> List.map String.trim
+  |> List.filter (fun token -> not (String.equal token ""))
+  |> List.sort_uniq String.compare
+;;
+
+let repo_identity_paths repo =
+  repo_identity_tokens repo |> List.map (fun token -> "repos/" ^ token)
+;;
+
+let requested_repo_of_raw_path raw_path =
+  match String.split_on_char '/' (String.trim raw_path) with
+  | "repos" :: repo :: _ when not (String.equal repo "") -> Some repo
+  | _ -> None
+;;
+
+type registered_repository_projection_snapshot =
+  { repositories : Repo_manager_types.repository list
+  ; registered_repos : string list
+  ; registered_repo_paths : string list
+  ; registered_repo_aliases : Yojson.Safe.t list
+  }
+
+let registered_repository_projection ~base_path =
+  match Repo_store.load_all ~base_path with
+  | Ok repos ->
+    let registered_repos =
+      repos
+      |> List.map (fun (repo : Repo_manager_types.repository) -> repo.id)
+      |> List.sort_uniq String.compare
+    in
+    let registered_repo_paths =
+      repos
+      |> List.concat_map repo_identity_paths
+      |> List.sort_uniq String.compare
+    in
+    let registered_repo_aliases =
+      repos
+      |> List.concat_map (fun (repo : Repo_manager_types.repository) ->
+        repo.aliases
+        |> List.map String.trim
+        |> List.filter (fun alias -> not (String.equal alias ""))
+        |> List.sort_uniq String.compare
+        |> List.map (fun alias ->
+          `Assoc
+            [ "repo_id", `String repo.id
+            ; "alias", `String alias
+            ; "path", `String ("repos/" ^ alias)
+            ; "canonical_path", `String ("repos/" ^ repo.id)
+            ]))
+    in
+    Ok
+      { repositories = repos
+      ; registered_repos
+      ; registered_repo_paths
+      ; registered_repo_aliases
+      }
+  | Error msg -> Error msg
+;;
+
+let requested_repo_registration_fields ~repositories ~raw_path =
+  match requested_repo_of_raw_path raw_path with
+  | None -> []
+  | Some requested_repo ->
+    let matching_repo =
+      List.find_opt
+        (fun repo ->
+           List.exists (String.equal requested_repo) (repo_identity_tokens repo))
+        repositories
+    in
+    let requested_repo_fields =
+      [ "requested_repo", `String requested_repo
+      ; "requested_repo_path", `String ("repos/" ^ requested_repo)
+      ]
+    in
+    (match matching_repo with
+     | None ->
+       requested_repo_fields
+       @ [ "requested_repo_registered", `Bool false ]
+     | Some repo ->
+       requested_repo_fields
+       @ [ "requested_repo_registered", `Bool true
+         ; "canonical_repo_id", `String repo.id
+         ; "canonical_repo_path", `String ("repos/" ^ repo.id)
+         ])
+;;
+
 (** Actionable error for path resolution failures.
     Follows Samchon harness pattern: field-level diagnostics with
     exact path, expected constraint, and concrete next action.
@@ -94,7 +219,9 @@ let actionable_path_action_for_class
     exposes the typed mapping so Phase B PR-5 can route typed callers
     directly without a redundant classify pass. *)
 let actionable_path_error
+      ~deterministic_reason
       ~(op : string)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(raw_path : string)
       ~(error : string)
@@ -102,15 +229,63 @@ let actionable_path_error
   let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
   let cls = Keeper_failure_circuit_breaker.classify_error error in
   let action = actionable_path_action_for_class ~playground ~raw_path cls in
+  let base_path = Keeper_alerting_path.project_root_of_config config in
+  let available_repos = visible_sandbox_repositories ~config meta in
+  let repo_hint = visible_repo_hint available_repos in
+  let registered_repo_fields, requested_repo_registration_fields, registered_repo_next_action =
+    match registered_repository_projection ~base_path with
+    | Ok
+        { repositories
+        ; registered_repos
+        ; registered_repo_paths
+        ; registered_repo_aliases
+        } ->
+      ( [ "registered_repos", repos_json registered_repos
+        ; ( "registered_repo_paths"
+          , `List (List.map (fun path -> `String path) registered_repo_paths) )
+        ; "registered_repo_aliases", `List registered_repo_aliases
+        ]
+      , requested_repo_registration_fields ~repositories ~raw_path
+      , "Retry with a registered repos/<id> path, or register the visible \
+         checkout name as an explicit repository alias before retrying." )
+    | Error msg ->
+      ( [ "registered_repos_error", `String msg ]
+      , []
+      , "Repository catalog could not be loaded; repair \
+         .masc/config/repositories.toml before retrying repo alias hints." )
+  in
+  let deterministic_retry_fields =
+    match deterministic_reason with
+    | None -> []
+    | Some reason -> Keeper_tool_deterministic_error.deterministic_retry_fields reason
+  in
   Yojson.Safe.to_string
     (`Assoc
-        [ "ok", `Bool false
+       ([ "ok", `Bool false
         ; "op", `String op
         ; "error", `String error
         ; "tried", `String raw_path
         ; "your_playground", `String playground
+        ; "available_repos", repos_json available_repos
+        ; ( "path_resolution"
+          , `Assoc
+              [ "same_path_retry_will_fail", `Bool true
+              ; ( "repo_cwd_hint"
+                , Json_util.string_opt_to_json
+                    (Option.map (fun repo -> "repos/" ^ repo) repo_hint) )
+              ; ( "basis"
+                , `String
+                    "Grep resolves path against the keeper sandbox, then validates \
+                     repository identity against repositories.toml id/name/aliases." )
+              ; ( "requested_repo_registration"
+                , `Assoc requested_repo_registration_fields )
+              ; ( "next_action"
+                , `String registered_repo_next_action )
+              ] )
         ; "action", `String action
-        ])
+        ]
+        @ registered_repo_fields
+        @ deterministic_retry_fields))
 ;;
 
 let file_not_found_prefix = "File not found:"
@@ -159,11 +334,6 @@ let missing_file_recovery_examples ~(raw_path : string option) ~(repo_hint : str
       ]
 ;;
 
-let visible_repo_hint = function
-  | [ repo ] -> Some repo
-  | _ -> None
-;;
-
 let missing_file_error_json
       ~(raw_path : string option)
       ~(cwd : string option)
@@ -180,31 +350,7 @@ let missing_file_error_json
      The generic error string already contains the path that was tried,
      which is sufficient for the LLM to self-correct. *)
   let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-  let safe_is_dir path =
-    try Sys.file_exists path && Sys.is_directory path with
-    | Sys_error _ -> false
-  in
-  let safe_file_exists path =
-    try Sys.file_exists path with
-    | Sys_error _ -> false
-  in
-  let available_repos =
-    let repos_dir =
-      Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "repos"
-    in
-    if not (safe_is_dir repos_dir)
-    then []
-    else
-      try
-        Sys.readdir repos_dir
-        |> Array.to_list
-        |> List.sort String.compare
-        |> List.filter (fun entry ->
-          let candidate = Filename.concat repos_dir entry in
-          safe_is_dir candidate && safe_file_exists (Filename.concat candidate ".git"))
-      with
-      | Sys_error _ -> []
-  in
+  let available_repos = visible_sandbox_repositories ~config meta in
   let repo_hint = visible_repo_hint available_repos in
   let next_action =
     match raw_path, repo_hint with
@@ -228,8 +374,7 @@ let missing_file_error_json
         ; "error", `String error
         ; "path", `String target
         ; "your_playground", `String playground
-        ; ( "available_repos"
-          , `List (List.map (fun repo -> `String ("repos/" ^ repo)) available_repos) )
+        ; "available_repos", repos_json available_repos
         ; "input_file_path", Json_util.string_opt_to_json raw_path
         ; ( "path_resolution"
           , `Assoc
@@ -307,6 +452,53 @@ let keeper_default_write_root ~(config : Workspace.config) ~(meta : keeper_meta)
 
 let keeper_default_read_root ~(config : Workspace.config) ~(meta : keeper_meta) =
   keeper_playground_root ~config ~meta
+;;
+
+(* #23469 (task-1733): observation partitions must interpret keeper-relative
+   tool paths against the same root the file tools resolve against — the
+   keeper's playground sandbox — never the server base path. Unlike
+   [keeper_playground_root] this is a pure path computation: the observation
+   write path is fire-and-forget and must not run the
+   [ensure_sandbox_bundle] directory side effect. Anchored at the normalised
+   project root so a [.masc]-suffixed [config.base_path] cannot double up,
+   and stripped of the bundle-root trailing slash so downstream structural
+   parsers never see an empty path segment. *)
+let keeper_observation_sandbox_root
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+  =
+  Filename.concat
+    (Keeper_alerting_path.project_root_of_config config)
+    (Keeper_alerting_path.strip_trailing_slashes
+       (Keeper_sandbox.host_root_rel_of_meta ~meta))
+;;
+
+let keeper_observation_host_path_of_visible_path
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      raw_path
+  =
+  if Filename.is_relative raw_path
+     || meta.sandbox_profile <> Keeper_types_profile_sandbox.Docker
+  then raw_path
+  else (
+    let strip = Keeper_alerting_path.strip_trailing_slashes in
+    let normalize path = Keeper_alerting_path.normalize_path_for_check_stripped path in
+    let container_root = Keeper_sandbox.container_root meta.name |> normalize in
+    let raw_norm = normalize raw_path in
+    let host_root = keeper_observation_sandbox_root ~config ~meta |> strip in
+    if String.equal raw_norm container_root
+    then host_root
+    else if String.starts_with ~prefix:(container_root ^ "/") raw_norm
+    then (
+      let suffix =
+        String.sub
+          raw_norm
+          (String.length container_root + 1)
+          (String.length raw_norm - String.length container_root - 1)
+      in
+      Filename.concat host_root suffix)
+    else raw_path)
 ;;
 
 let safe_file_exists path =
@@ -542,6 +734,10 @@ let resolve_projected_allowed_path
   in
   if not within_root
   then user_message_error (Keeper_alerting_path.Outside_project_root { raw = raw_for_error })
+  else if Keeper_alerting_path.is_masc_internal_state_norm ~root_norm ~target_norm
+  then
+    user_message_error
+      (Keeper_alerting_path.Task_state_file_path_blocked { raw = raw_for_error })
   else (
     let allowed_norms =
       if allowed_paths = []

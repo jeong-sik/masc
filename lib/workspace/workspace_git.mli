@@ -27,6 +27,11 @@ val is_git_repo : base_path:string -> bool
     reflects whatever the local refs cache holds. *)
 val remote_branch_exists : string -> string -> bool
 
+(** [commit_exists ~root ~commit] checks whether [commit] resolves to a local
+    commit object in [root]. No fetch is performed; this is a deterministic
+    local repository lookup. *)
+val commit_exists : root:string -> commit:string -> bool
+
 (** [origin_head_branch root] returns the branch [origin/HEAD]
     resolves to (typically [main] or [master]).  [None] when
     [origin/HEAD] is not set. *)

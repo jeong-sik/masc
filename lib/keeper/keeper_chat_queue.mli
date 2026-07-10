@@ -32,6 +32,13 @@ type queued_message = {
   source : message_source;
 }
 
+(** [continuation_channel_of_message_source source] converts queued chat
+    provenance into the RFC-0320 continuation-channel type. Dashboard queue
+    sources may supply [dashboard_thread_id] from the local AG-UI thread; when
+    omitted the dashboard surface is preserved as a single route. *)
+val continuation_channel_of_message_source :
+  ?dashboard_thread_id:string -> message_source -> Keeper_continuation_channel.t
+
 (** {1 Queue operations} *)
 
 (** [configure_persistence base_path] enables durable per-keeper queue
@@ -89,6 +96,11 @@ val remove_matching :
 
 (** [length keeper_name] returns the number of queued messages. *)
 val length : keeper_name:string -> int
+
+(** [snapshot keeper_name] returns the queued messages in FIFO order without
+    mutating the queue. Intended for diagnostic projections that need source
+    metadata; consumers must still use {!dequeue_batch} for delivery. *)
+val snapshot : keeper_name:string -> queued_message list
 
 (** [clear keeper_name] empties the queue. *)
 val clear : keeper_name:string -> unit

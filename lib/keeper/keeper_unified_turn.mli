@@ -202,8 +202,10 @@ val run_keeper_cycle
   -> observation:Keeper_world_observation.world_observation
   -> generation:int
   -> ?channel:Keeper_world_observation.keeper_cycle_channel
+  -> ?turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t
+  -> ?hitl_delivery_channel:Keeper_continuation_channel.t
   -> unit
   -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
 
@@ -217,4 +219,8 @@ val run_keeper_cycle
     @param config Workspace configuration
     @param meta Current keeper metadata
     @param observation World state snapshot
-    @param generation Current generation counter *)
+    @param generation Current generation counter
+    @param turn_decision The scheduler's cycle decision that fired this turn
+    (RFC-0315). Threaded into [Keeper_unified_prompt.build_prompt] so the
+    prompt renders the real wake reason instead of a context-blind recompute.
+    Callers that predate the threading may omit it. *)

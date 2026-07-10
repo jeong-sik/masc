@@ -207,12 +207,56 @@ let test_waiting_cap_rejects () =
           check "rejection reports the in-flight lane" true
         | Some _ | None -> check "rejection reports the in-flight lane" false)
      | `Ran () -> check "request beyond the cap is rejected" false);
+    let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+    check
+      "snapshot reports the slot was created"
+      snapshot.Keeper_turn_admission.snapshot_slot_created;
+    check
+      "snapshot reports the full waiting queue"
+      (snapshot.Keeper_turn_admission.snapshot_waiting
+       = Keeper_turn_admission.max_waiting_chat_requests);
+    check
+      "snapshot reports waiting cap"
+      (snapshot.Keeper_turn_admission.snapshot_waiting_cap
+       = Keeper_turn_admission.max_waiting_chat_requests);
+    check
+      "snapshot marks the waiting queue full"
+      snapshot.Keeper_turn_admission.snapshot_waiting_full;
+    check
+      "snapshot counts the rejected chat request"
+      (snapshot.Keeper_turn_admission.snapshot_rejected_chat_count = 1);
+    let health =
+      Keeper_turn_admission.fleet_health_json
+        ~base_path
+        ~keeper_names:[ keeper_name ]
+    in
+    let open Yojson.Safe.Util in
+    check "fleet health degrades while the queue is full"
+      (String.equal "degraded" (health |> member "status" |> to_string));
+    check "fleet health exposes full queue count"
+      (health |> member "chat_waiting_full_keeper_count" |> to_int = 1);
+    check "fleet health exposes rejection counter"
+      (health |> member "chat_rejected_total_count" |> to_int = 1);
+    check "fleet health names the full queue reason"
+      (health |> member "status_reasons" |> to_list
+       |> List.map to_string
+       |> List.exists (String.equal "chat_waiting_queue_full"));
     Eio.Promise.resolve set_release ());
   (* The switch only exits after every parked waiter ran; the slot must be
      fully drained. *)
-  match Keeper_turn_admission.For_testing.peek ~base_path ~keeper_name with
-  | Some (None, 0) -> check "queue fully drained after release" true
-  | Some _ | None -> check "queue fully drained after release" false
+  (match Keeper_turn_admission.For_testing.peek ~base_path ~keeper_name with
+   | Some (None, 0) -> check "queue fully drained after release" true
+   | Some _ | None -> check "queue fully drained after release" false);
+  let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+  check
+    "snapshot clears waiting count after release"
+    (snapshot.Keeper_turn_admission.snapshot_waiting = 0);
+  check
+    "snapshot clears full flag after release"
+    (not snapshot.Keeper_turn_admission.snapshot_waiting_full);
+  check
+    "snapshot retains rejection counter after release"
+    (snapshot.Keeper_turn_admission.snapshot_rejected_chat_count = 1)
 ;;
 
 let test_exception_releases_slot () =
@@ -349,6 +393,44 @@ let test_idle_loop_yields_to_parked_chat () =
   check "parked chat admitted after the autonomous turn yielded" !chat_ran
 ;;
 
+let test_autonomous_yields_to_queued_connector_message () =
+  reset ();
+  Keeper_chat_queue.clear ~keeper_name;
+  Printf.printf
+    "Test 10: autonomous lane yields while a connector/dashboard message is queued\n%!";
+  (* Sanity: an empty queue lets the autonomous lane run. *)
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> 7) with
+   | `Ran 7 -> check "run_if_free admits when the chat queue is empty" true
+   | `Ran _ | `Busy _ -> check "run_if_free admits when the chat queue is empty" false);
+  (* A busy connector (Slack/Discord) message is deferred on the chat queue
+     without parking on the admission slot, so [chat_waiting] stays false. The
+     autonomous lane must still yield, or a long/back-to-back autonomous turn
+     busy-ACKs the connector forever (the starvation this pins). *)
+  Keeper_chat_queue.enqueue ~keeper_name
+    { Keeper_chat_queue.content = "deferred slack mention"
+    ; user_blocks = []
+    ; attachments = []
+    ; timestamp = 1.0
+    ; source = Keeper_chat_queue.Slack { channel = "C-test"; user_id = "U-test" }
+    };
+  check "queue depth is 1 after enqueue" (Keeper_chat_queue.length ~keeper_name = 1);
+  check
+    "a queued connector message is not a parked chat"
+    (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy _ ->
+     check "run_if_free yields (Busy) while a connector message is queued" true
+   | `Ran () ->
+     check "run_if_free must not admit while a connector message is queued" false);
+  (* Draining the queue (what the consumer does in the yielded window) lets the
+     autonomous lane run again. *)
+  ignore (Keeper_chat_queue.dequeue_batch ~keeper_name);
+  check "queue empty after drain" (Keeper_chat_queue.length ~keeper_name = 0);
+  match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "ok") with
+  | `Ran "ok" -> check "run_if_free admits again once the queue is drained" true
+  | `Ran _ | `Busy _ -> check "run_if_free admits again once the queue is drained" false
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   test_free_slot_admits ();
@@ -361,6 +443,7 @@ let () =
   test_cancelled_waiter_leaves_queue ();
   test_autonomous_yields_to_parked_chat ();
   test_idle_loop_yields_to_parked_chat ();
+  test_autonomous_yields_to_queued_connector_message ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

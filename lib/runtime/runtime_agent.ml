@@ -22,6 +22,39 @@ let oas_tool_hook_unset_error () =
      Tool_bridge initialization before Runtime_agent.run_with_masc_tools"
 ;;
 
+let network_error_kind_of_unix_error = function
+  | Unix.ECONNREFUSED | Unix.ECONNRESET -> Llm_provider.Http_client.Connection_refused
+  | Unix.EPIPE -> Llm_provider.Http_client.End_of_file
+  | Unix.ETIMEDOUT -> Llm_provider.Http_client.Timeout
+  | Unix.ENETUNREACH | Unix.EHOSTUNREACH -> Llm_provider.Http_client.Dns_failure
+  | Unix.EMFILE | Unix.ENFILE | Unix.ENOBUFS | Unix.EADDRNOTAVAIL ->
+    Llm_provider.Http_client.Local_resource_exhaustion
+  | _ -> Llm_provider.Http_client.Unknown
+;;
+
+let network_error_kind_of_eio_error = function
+  | Eio.Net.E (Eio.Net.Connection_reset _) -> Some Llm_provider.Http_client.End_of_file
+  | Eio.Net.E (Eio.Net.Connection_failure (Eio.Net.Refused _)) ->
+    Some Llm_provider.Http_client.Connection_refused
+  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.Timeout) ->
+    Some Llm_provider.Http_client.Timeout
+  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.No_matching_addresses) ->
+    Some Llm_provider.Http_client.Dns_failure
+  | Eio.Exn.X _ -> None
+  | _ -> None
+;;
+
+let transport_error_kind_of_exception = function
+  | End_of_file -> Some Llm_provider.Http_client.End_of_file
+  | Eio.Time.Timeout -> Some Llm_provider.Http_client.Timeout
+  | Unix.Unix_error (code, _, _) -> Some (network_error_kind_of_unix_error code)
+  | Eio.Io (err, _) -> network_error_kind_of_eio_error err
+  | Tls_eio.Tls_alert _ | Tls_eio.Tls_failure _ ->
+    Some Llm_provider.Http_client.Tls_error
+  | Sys_error _ | Failure _ -> Some Llm_provider.Http_client.Unknown
+  | _ -> None
+;;
+
 (* ================================================================ *)
 (* Configuration                                                     *)
 (* ================================================================ *)
@@ -83,6 +116,8 @@ type config =
           to scrub [STATE] blocks before the 100-char truncation. *)
   execution_idle_timeout_s : float option;
   thinking_budget : int option;
+  top_p : float option;
+  top_k : int option;
   min_p : float option;
   on_run_complete : (bool -> unit) option;
   disclosure_level : Agent_sdk.Tool.disclosure_level option;
@@ -199,6 +234,11 @@ let request_runtime_fields_on_base_config
     ~(base : Llm_provider.Provider_config.t)
     (req_config : Llm_provider.Provider_config.t)
   =
+  let request_option_or_base req base =
+    match req with
+    | Some _ as value -> value
+    | None -> base
+  in
   let response_format, output_schema =
     match req_config.response_format, req_config.output_schema with
     | Agent_sdk.Types.Off, None -> base.response_format, base.output_schema
@@ -215,9 +255,9 @@ let request_runtime_fields_on_base_config
   { base with
     max_tokens = req_config.max_tokens;
     temperature = req_config.temperature;
-    top_p = req_config.top_p;
-    top_k = req_config.top_k;
-    min_p = req_config.min_p;
+    top_p = request_option_or_base req_config.top_p base.top_p;
+    top_k = request_option_or_base req_config.top_k base.top_k;
+    min_p = request_option_or_base req_config.min_p base.min_p;
     system_prompt = req_config.system_prompt;
     enable_thinking = req_config.enable_thinking;
     preserve_thinking = req_config.preserve_thinking;
@@ -1393,18 +1433,14 @@ let run_blocks
       error_response;
     Log.Misc.error "oas_worker %s: execution exception: %s\nBacktrace: %s"
       config.name (Printexc.to_string exn) bt;
-    (* Keep the typed internal-error envelope, but construct it locally so
-       Runtime_agent does not depend on Keeper_meta_contract. *)
     let typed_internal_error =
-      "[masc_oas_error] "
-      ^ Yojson.Safe.to_string
-          (`Assoc
-            [ "kind", `String "internal_unhandled_exception"
-            ; "site", `String "runtime_runner.execute"
-            ; "exn_repr", `String (Printexc.to_string exn)
-            ])
+      Keeper_internal_error.Internal_unhandled_exception
+        { site = Keeper_internal_error.runtime_runner_execute_site
+        ; exn_repr = Printexc.to_string exn
+        ; transport_error_kind = transport_error_kind_of_exception exn
+        }
     in
-    Error (Agent_sdk.Error.Internal typed_internal_error))
+    Error (Keeper_internal_error.sdk_error_of_masc_internal_error typed_internal_error))
 
 let run
     ~(sw : Eio.Switch.t)

@@ -49,6 +49,14 @@ let record_recovery_stimulus_turn_started =
   Stimulus_intake.record_recovery_stimulus_turn_started
 ;;
 
+let record_event_queue_stimulus_turn_started =
+  Stimulus_intake.record_event_queue_stimulus_turn_started
+;;
+
+let record_event_queue_stimulus_ack =
+  Stimulus_intake.record_event_queue_stimulus_ack
+;;
+
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
@@ -73,6 +81,7 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
   runtime_backpressure : runtime_backpressure_decision;
+  pacing_block : float option;
   should_run_turn : bool;
   verdict_reasons : string list;
   channel : string;
@@ -144,10 +153,55 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Board_signal _
       | Keeper_event_queue.Fusion_completed _
       | Keeper_event_queue.Bg_completed _
+      | Keeper_event_queue.Schedule_due _
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.No_progress_recovery
-      | Keeper_event_queue.Hitl_resolved _ ->
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Goal_verification_failed _
+      | Keeper_event_queue.Failure_judgment _
+      | Keeper_event_queue.Goal_assigned _
+      | Keeper_event_queue.Goal_stagnation _ ->
         None)
+    stimuli
+;;
+
+let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
+  List.iter
+    (fun (stimulus : Keeper_event_queue.stimulus) ->
+       match stimulus.payload with
+       | Keeper_event_queue.Schedule_due _ ->
+         record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
+       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Bg_completed _
+       | Keeper_event_queue.Bootstrap
+       | Keeper_event_queue.No_progress_recovery
+       | Keeper_event_queue.Connector_attention _
+       | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Goal_verification_failed _
+       | Keeper_event_queue.Failure_judgment _
+       | Keeper_event_queue.Goal_assigned _
+       | Keeper_event_queue.Goal_stagnation _ -> ())
+    stimuli
+;;
+
+let record_schedule_due_event_queue_ack_reactions ~ctx ~keeper_name stimuli =
+  List.iter
+    (fun (stimulus : Keeper_event_queue.stimulus) ->
+       match stimulus.payload with
+       | Keeper_event_queue.Schedule_due _ ->
+         record_event_queue_stimulus_ack ~ctx ~keeper_name stimulus
+       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Bg_completed _
+       | Keeper_event_queue.Bootstrap
+       | Keeper_event_queue.No_progress_recovery
+       | Keeper_event_queue.Connector_attention _
+       | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Goal_verification_failed _
+       | Keeper_event_queue.Failure_judgment _
+       | Keeper_event_queue.Goal_assigned _
+       | Keeper_event_queue.Goal_stagnation _ -> ())
     stimuli
 ;;
 
@@ -225,6 +279,24 @@ let run_keepalive_unified_turn
     let consumed_stimuli = ref [] in
     let consumed_stimuli_turn_completed = ref false in
     try
+      (* RFC-0310 §3.3: before intake, surface any live goal that has gone
+         stale as a Goal_stagnation stimulus so it flows through the normal
+         event-queue intake below and drives this turn. The producer is
+         edge-gated (episode key = goal_id + updated_at) and deduped against
+         the reaction ledger, so re-scanning an unadvanced goal each tick does
+         not re-enqueue — no blind cadence is introduced here. *)
+      (if meta_after_triage.active_goal_ids <> []
+       then
+         ignore
+           (Keeper_goal_stagnation_wake.enqueue_goal_stagnation_wakes
+              ~config:ctx.config
+              ~keeper_name:meta_after_triage.name
+              ~active_goal_ids:meta_after_triage.active_goal_ids
+              ~now:(Time_compat.now ())
+              ~threshold_sec:
+                (float_of_int
+                   (Keeper_config.keeper_goal_stagnation_threshold_sec ()))
+              ()));
       let event_intake =
         heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events
       in
@@ -243,6 +315,20 @@ let run_keepalive_unified_turn
           ~keeper_resilience_of_name:(fun keeper_name ->
             if Health.is_healthy ~agent_name:keeper_name then None
             else Some "unhealthy")
+            (* RFC-0313 W3: with [pacing.mode = enforce] the scheduler
+               consumes failure revisit pacing — the next turn waits until
+               the earliest runtime revisit is eligible. Shadow mode keeps
+               the pre-W3 behavior (pacing observed, never consulted).
+               [next_due_remaining] (in-memory) is consulted first so the
+               per-tick hot path only pays the [Runtime.pacing] toml read
+               while a revisit is actually pending. *)
+          ~pacing_block_of_name:(fun keeper_name ->
+            match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
+            | None -> None
+            | Some _ as remaining
+              when Keeper_pacing_shadow.pacing_enforced () ->
+              remaining
+            | Some _ -> None)
           ~stop
           ~meta:meta_after_triage
           obs
@@ -404,10 +490,29 @@ let run_keepalive_unified_turn
              admitted. The four prior inline pressure gates here were removed: they
              ran AFTER intake had already consumed the stimulus, forcing a
              consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
+          record_schedule_due_turn_started_reactions
+            ~ctx
+            ~keeper_name:meta_after_triage.name
+            !consumed_stimuli;
           let event_bus = Keeper_event_bus.get () in
+          (* RFC-0320 W3c: if this cycle was opened by a Hitl_resolved wake,
+             carry that wake's captured originating channel into the turn so the
+             reply is deterministically delivered back to the conversation the
+             approval was requested from. First routable resolution wins; other
+             lanes leave this [None] (fail-closed: no delivery). *)
+          let hitl_delivery_channel =
+            List.find_map
+              (fun (stim : Keeper_event_queue.stimulus) ->
+                match stim.Keeper_event_queue.payload with
+                | Keeper_event_queue.Hitl_resolved resolution ->
+                  Some resolution.Keeper_event_queue.channel
+                | _ -> None)
+              !consumed_stimuli
+          in
           let meta_after_cycle =
             run_keeper_cycle
               ?event_bus
+              ?hitl_delivery_channel
               ~ctx
               ~meta_after_triage
               ~stop
@@ -427,10 +532,27 @@ let run_keepalive_unified_turn
       then
         if !consumed_stimuli_turn_completed
         then (
-          Keeper_registry_event_queue.ack_consumed
-            ~base_path:ctx.config.base_path
-            meta_after_triage.name
-            !consumed_stimuli;
+          (match
+             Keeper_registry_event_queue.ack_consumed_result
+               ~base_path:ctx.config.base_path
+               meta_after_triage.name
+               !consumed_stimuli
+           with
+           | Ok () ->
+             record_schedule_due_event_queue_ack_reactions
+               ~ctx
+               ~keeper_name:meta_after_triage.name
+               !consumed_stimuli
+           | Error msg ->
+             Log.Keeper.warn
+               "registry: ack_consumed failed name=%s: %s"
+               meta_after_triage.name
+               msg);
+          (*
+             Connector post-turn handling preserves the existing behavior:
+             it is an external-attention lifecycle update, while
+             [event_queue_ack] evidence above is emitted only after durable
+             event-queue acknowledgement succeeds. *)
           mark_connector_attention_ignored_after_turn
             ~base_path:ctx.config.base_path
             ~keeper_name:meta_after_triage.name
@@ -880,6 +1002,19 @@ let run_heartbeat_loop
           | Keeper_pressure_admission.Admitted -> true
           | Keeper_pressure_admission.Blocked _ -> false
         in
+        let approval_pending =
+          Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta_current.name
+        in
+        let keeper_health_blocker =
+          if Health.is_healthy ~agent_name:meta_current.name then None else Some "unhealthy"
+        in
+        let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta_current in
+        let provider_cooldown_remaining_sec =
+          Keeper_world_observation.provider_cooldown_remaining_sec_for_runtime
+            ~keeper_name:meta_current.name
+            ~runtime_id
+        in
+        let provider_cooldown_pending = Option.is_some provider_cooldown_remaining_sec in
         (match turn_admission with
          | Keeper_pressure_admission.Admitted -> ()
          | Keeper_pressure_admission.Blocked block ->
@@ -890,9 +1025,38 @@ let run_heartbeat_loop
            Keeper_registry.touch_last_turn_ts
              ~base_path:ctx.config.base_path
              meta_current.name);
+        (match keeper_health_blocker with
+         | None -> ()
+         | Some blocker when admitted_turn && proactive_warmup_elapsed ->
+           record_runtime_backpressure_observation
+             ~base_path:ctx.config.base_path
+             ~keeper_name:meta_current.name
+             ~reason:("keeper_health_" ^ blocker)
+         | Some _ -> ());
+        (match provider_cooldown_remaining_sec with
+         | None -> ()
+         | Some remaining_sec when admitted_turn && proactive_warmup_elapsed ->
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_current.name
+             ~reasons:
+               [ Keeper_world_observation.skip_reason_to_string
+                   (Keeper_world_observation.Provider_cooldown_pending { remaining_sec })
+               ];
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_current.name
+         | Some _ -> ());
         let pending_board_events, meta_after_triage =
           if admitted_turn
-          then collect_keepalive_board_events ~ctx ~meta_current ~proactive_warmup_elapsed
+          then
+            collect_keepalive_board_events
+              ~ctx
+              ~meta_current
+              ~proactive_warmup_elapsed
+              ~approval_pending
+              ~keeper_backpressured:(Option.is_some keeper_health_blocker)
+              ~provider_cooldown_pending
           else [], meta_current
         in
         let t_board_end = Time_compat.now () in

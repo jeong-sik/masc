@@ -230,6 +230,31 @@ let test_keeper_prompt_preserves_snapshot_delta_anchors () =
     (has_in prompt "State block template");
   check bool "world anchor present" true (has_in prompt "<world>")
 
+let test_no_catalog_repository_injection () =
+  (* RFC-0324 B-1 regression guard: the prompt must never re-grow a
+     catalog-fed repository list. The old <registered_repositories> block
+     asserted that every repositories.toml id "resolves under repos/<name>/"
+     while the sandbox held a different (or empty) set of checkouts —
+     keepers that trusted it referenced un-cloned repos (path_not_found,
+     379/24h in the 2026-07-08 tool-error audit). Filesystem is the truth;
+     the prompt carries only the constant self-discovery instruction. *)
+  let prompt =
+    KP.build_keeper_system_prompt
+      ~goal:"Work on repositories"
+      ~instructions:""
+      ()
+  in
+  check bool "catalog injection block stays removed" false
+    (has_in prompt "<registered_repositories>");
+  check bool "constant repositories block present" true
+    (has_in prompt "<repositories>");
+  check bool "names the filesystem as the source of truth" true
+    (has_in prompt "filesystem is the source of truth");
+  check bool "instructs listing repos/ before referencing" true
+    (has_in prompt "list repos/");
+  check bool "warns registration does not imply a checkout" true
+    (has_in prompt "registration does not imply a checkout")
+
 let test_prompt_recovery_guard_restores_missing_anchors () =
   let prompt =
     KP.ensure_critical_prompt_anchors
@@ -519,6 +544,8 @@ let () =
             test_direct_reply_prompt_matches_server_managed_heartbeat_policy;
           test_case "keeper prompt preserves snapshot delta anchors" `Quick
             test_keeper_prompt_preserves_snapshot_delta_anchors;
+          test_case "no catalog repository injection (RFC-0324 B-1)" `Quick
+            test_no_catalog_repository_injection;
           test_case "prompt recovery guard restores missing anchors" `Quick
             test_prompt_recovery_guard_restores_missing_anchors;
           test_case "prompt recovery guard survives empty registry value"

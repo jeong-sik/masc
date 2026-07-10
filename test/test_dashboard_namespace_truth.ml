@@ -67,6 +67,42 @@ sandbox_profile = "local"
 goal = "Dashboard keeper fixture"
 |}
 
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let init_runtime_default_for_tests dir =
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path test_runtime_toml;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> failf "Runtime.init_default failed: %s" e
+
+let with_runtime_default_for_tests dir f =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+      init_runtime_default_for_tests dir;
+      f ())
+
 let save_jsonl path entries =
   let body =
     entries
@@ -294,6 +330,7 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
     (fun () ->
       with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
       write_keeper_toml ~keepers_dir ~name:"sangsu";
+      with_runtime_default_for_tests dir @@ fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
@@ -338,6 +375,7 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
     (fun () ->
       with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
       write_keeper_toml ~keepers_dir ~name:"sangsu";
+      with_runtime_default_for_tests dir @@ fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in

@@ -1,4 +1,4 @@
-import { get, post, fetchWithTimeout, type GetOptions } from './core'
+import { get, post, fetchWithTimeout, authHeaders, type GetOptions } from './core'
 import {
   type IdeAnnotation,
   type IdeCodeRegion,
@@ -10,8 +10,24 @@ export type { IdeAnnotation, IdeCodeRegion, AnnotationKind } from './schemas/ide
 
 export interface IdeApiOptions extends GetOptions {
   readonly keeper?: string
+  readonly scope?: IdeScope | null
   readonly repoId?: string | null
+  readonly canonicalUrl?: string | null
 }
+
+export type IdeScope =
+  | { readonly kind: 'repo_id'; readonly repoId: string }
+  | { readonly kind: 'canonical_url'; readonly canonicalUrl: string }
+  /**
+   * Read-only scope over the repo-unattributed observation lane. Keeper
+   * turn/coordination events carry no file, so the server stores them
+   * outside any repo partition; this scope is the only address for that
+   * data. Mutations sent with it are refused server-side
+   * (keeper_lane_read_only).
+   */
+  | { readonly kind: 'keeper_lane'; readonly keeperId: string }
+
+export type IdeScopeOptions = Pick<IdeApiOptions, 'scope' | 'repoId' | 'canonicalUrl'>
 
 export type IdeEventKind = 'tool' | 'turn' | 'pr'
 
@@ -126,12 +142,63 @@ function appendFilterParams(
   if (filter.task_id) params.set('task_id', filter.task_id)
 }
 
+function trimmedNonEmpty(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+export function ideScopeFromRepoId(repoId: string | null | undefined): IdeScope | null {
+  const trimmed = trimmedNonEmpty(repoId)
+  return trimmed ? { kind: 'repo_id', repoId: trimmed } : null
+}
+
+export function ideScopeFromCanonicalUrl(canonicalUrl: string | null | undefined): IdeScope | null {
+  const trimmed = trimmedNonEmpty(canonicalUrl)
+  return trimmed ? { kind: 'canonical_url', canonicalUrl: trimmed } : null
+}
+
+export function ideScopeFromKeeperLane(keeperId: string | null | undefined): IdeScope | null {
+  const trimmed = trimmedNonEmpty(keeperId)
+  return trimmed ? { kind: 'keeper_lane', keeperId: trimmed } : null
+}
+
+function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
+  const candidates: IdeScope[] = []
+  if (opts.scope) candidates.push(opts.scope)
+  const repoScope = ideScopeFromRepoId(opts.repoId)
+  if (repoScope) candidates.push(repoScope)
+  const canonicalScope = ideScopeFromCanonicalUrl(opts.canonicalUrl)
+  if (canonicalScope) candidates.push(canonicalScope)
+  if (candidates.length > 1) {
+    throw new Error(
+      'IDE scope must resolve to exactly one of repo_id, canonical_url, or keeper_lane',
+    )
+  }
+  return candidates[0] ?? null
+}
+
+export function appendIdeScopeParams(params: URLSearchParams, opts: IdeScopeOptions): void {
+  const scope = resolveIdeScope(opts)
+  if (!scope) return
+  switch (scope.kind) {
+    case 'repo_id':
+      params.set('repo_id', scope.repoId)
+      break
+    case 'canonical_url':
+      params.set('canonical_url', scope.canonicalUrl)
+      break
+    case 'keeper_lane':
+      params.set('keeper_lane', scope.keeperId)
+      break
+  }
+}
+
 function appendWorkspaceParams(
   params: URLSearchParams,
   opts: IdeApiOptions,
 ): void {
   if (opts.keeper) params.set('keeper', opts.keeper)
-  if (opts.repoId) params.set('repo_id', opts.repoId)
+  appendIdeScopeParams(params, opts)
 }
 
 function ideEnvelopeData(raw: unknown, operation: string): unknown {
@@ -332,19 +399,57 @@ export async function createIdeAnnotation(
   return parseStrictRow('createIdeAnnotation', ideEnvelopeData(raw, 'createIdeAnnotation'), parseStrictIdeAnnotation)
 }
 
+// Typed outcome of a DELETE (task-1736 B3 route, token-bound):
+// - 'rejected'     403 with the server's annotation_delete_rejected code —
+//                  the stored annotation is not owned by the token identity,
+//                  or it no longer exists (the server flattens the two).
+// - 'forbidden'    403 from the auth layer — the token's tier lacks the
+//                  write permission; ownership was never evaluated.
+// - 'unauthorized' 401 — missing/expired bearer token.
+// - 'error'        transport failure or any other server error.
+export type IdeAnnotationDeleteOutcome =
+  | 'deleted'
+  | 'rejected'
+  | 'forbidden'
+  | 'unauthorized'
+  | 'error'
+
+// Wire constant mirrored from server_ide_http.ml annotation_delete_rejected_code.
+const ANNOTATION_DELETE_REJECTED_CODE = 'annotation_delete_rejected'
+
+async function responseErrorCode(res: Response): Promise<string | null> {
+  try {
+    const body: unknown = await res.json()
+    if (isRecord(body) && typeof body.code === 'string') return body.code
+    return null
+  } catch {
+    return null
+  }
+}
+
 export async function deleteIdeAnnotation(
   id: string,
   opts: IdeApiOptions = {},
-): Promise<boolean> {
+): Promise<IdeAnnotationDeleteOutcome> {
   const params = new URLSearchParams()
   appendWorkspaceParams(params, opts)
   const query = params.size > 0 ? `?${params.toString()}` : ''
   const path = `/api/v1/ide/annotations/${encodeURIComponent(id)}${query}`
   try {
-    const res = await fetchWithTimeout(path, { method: 'DELETE' }, 15_000)
-    return res.ok
+    const res = await fetchWithTimeout(
+      path,
+      { method: 'DELETE', headers: authHeaders() },
+      15_000,
+    )
+    if (res.ok) return 'deleted'
+    if (res.status === 401) return 'unauthorized'
+    if (res.status === 403) {
+      const code = await responseErrorCode(res)
+      return code === ANNOTATION_DELETE_REJECTED_CODE ? 'rejected' : 'forbidden'
+    }
+    return 'error'
   } catch {
-    return false
+    return 'error'
   }
 }
 

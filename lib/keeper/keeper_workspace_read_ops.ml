@@ -35,6 +35,12 @@ let validate_rg_inputs ~pattern:_ ~file_type =
   | Error _ as e -> e
   | Ok () -> Ok ()
 ;;
+
+type read_target_result =
+  | Read_target of string
+  | Read_target_error of string
+  | Read_target_policy_response of string
+
 let try_handle
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -47,23 +53,35 @@ let try_handle
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
+  let path_error ?deterministic_reason e =
+    actionable_path_error ~deterministic_reason ~op ~config ~meta ~raw_path
+      ~error:e
+  in
   let repo_check target =
-    Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
-      ~base_path:root ~path:target
+    match
+      Keeper_repo_claim_hitl.request_path_access
+        ~keeper_id:meta.name
+        ~base_path:root
+        ~path:target
+    with
+    | Keeper_repo_claim_hitl.Access_allowed -> Read_target target
+    | Keeper_repo_claim_hitl.Access_denied detail ->
+      Read_target_policy_response
+        (path_error
+           ~deterministic_reason:Keeper_tool_deterministic_error.Policy_blocked
+           detail)
+    | access_result ->
+      Read_target_policy_response
+        (Yojson.Safe.to_string
+           (Keeper_repo_claim_hitl.tool_response_json ~path:target access_result))
   in
   let read_target () =
     match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
-    | Error _ as e -> e
+    | Error e -> Read_target_error e
     | Ok target ->
       (match containment_check target with
-       | Error msg -> Error msg
-       | Ok () ->
-         match repo_check target with
-         | Error msg -> Error msg
-         | Ok () -> Ok target)
-  in
-  let path_error e =
-    actionable_path_error ~op ~meta ~raw_path ~error:e
+       | Error msg -> Read_target_error msg
+       | Ok () -> repo_check target)
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
@@ -100,6 +118,18 @@ let try_handle
   in
   let run_readonly_in_sandbox ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
+    (* Pre-flight parity with [Keeper_sandbox_read_backend.read_file]: verify
+       the host target exists before spawning a container, so a wrong
+       repos/<segment> guess fails with a precise host-path error instead of
+       burning a docker run that ends in "No such file or directory". *)
+    if not (Sys.file_exists target) then
+      Error
+        (sandbox_read_error ~target
+           (Printf.sprintf
+              "path_not_found: %s (host path does not exist; list repos/ to \
+               see your actual checkouts before searching)"
+              target))
+    else
     let max_eintr_retries = 8 in
     let rec loop attempts_left =
       match
@@ -138,8 +168,9 @@ let try_handle
          | Error msg -> error_json ~fields:[ "op", `String op ] msg
          | Ok () -> (
            match read_target () with
-           | Error e -> path_error e
-           | Ok target ->
+           | Read_target_error e -> path_error e
+           | Read_target_policy_response response -> response
+           | Read_target target ->
              let limit = shell_readonly_limit args in
              let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
              if Keeper_sandbox_read_runner.should_route_read ~meta then
@@ -149,7 +180,11 @@ let try_handle
                (match
                   run_readonly_in_sandbox ~target
                     ~command_argv:(fun cpath ->
-                      base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
+                      (* [-e] marks the pattern as a pattern even when it
+                         starts with a dash — without it a model-authored
+                         leading-dash pattern parses as an rg flag (latent
+                         argv-injection-shaped failure; 24h audit #7). *)
+                      base_argv @ type_argv @ glob_argv @ [ "-e"; pattern; cpath ])
                     ~ok_exit_codes:[ 0; 1 ]
                     ~max_bytes:1_000_000
                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
@@ -180,7 +215,8 @@ let try_handle
                  @ (if glob <> "" then
                       [ "--glob"; glob ]
                     else [])
-                 @ [ pattern; target ]
+                 (* [-e]: same leading-dash guard as the sandbox lane. *)
+                 @ [ "-e"; pattern; target ]
                in
                let ir = Keeper_tool_execute_shell_ir.simple Masc_exec.Exec_program.Rg argv in
                run_host_shell_ir

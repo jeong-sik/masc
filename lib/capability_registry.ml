@@ -269,7 +269,16 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
       else
         with_local_worker
     in
-    with_keeper_wrapper
+    if List.mem name Tool_catalog_surfaces.keeper_schedule_surface_tools then
+      with_keeper_wrapper
+      @ [
+          make_seed ~risk_class ~audiences:[ Keeper_agent ]
+            ~supports_audit_evidence
+            ~supports_direct_user_discovery:false ~surface:Keeper_standard
+            schema;
+        ]
+    else
+      with_keeper_wrapper
   in
   public_schemas |> List.concat_map make_public_seed
 

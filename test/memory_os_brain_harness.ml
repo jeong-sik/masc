@@ -318,7 +318,7 @@ let scenario_truth_anchor_refresh () =
       Memory_io.merge_and_cap_facts
         ~now:later
         ~keeper_id:kid
-        ~merge:(Policy.reobserve_fact ~now:later)
+        ~merge:(Policy.reobserve_fact ~now:later ~provenance:Policy.Independent_observation)
         ~incoming
         ~keep:window
         ~trigger:(window + (window / 2))

@@ -27,6 +27,9 @@ val collect_keepalive_board_events :
   ctx:'a context ->
   meta_current:keeper_meta ->
   proactive_warmup_elapsed:bool ->
+  approval_pending:bool ->
+  keeper_backpressured:bool ->
+  provider_cooldown_pending:bool ->
   Keeper_world_observation.pending_board_event list * keeper_meta
 
 val in_turn_liveness_pulse_interval_sec : unit -> float
@@ -65,6 +68,7 @@ type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
   runtime_backpressure : Keeper_heartbeat_loop_observations.runtime_backpressure_decision;
+  pacing_block : float option;
   should_run_turn : bool;
   verdict_reasons : string list;
   channel : string;
@@ -74,6 +78,7 @@ val decide_keepalive_scheduling :
   ?runtime_id_of_meta:(keeper_meta -> string) ->
   ?runtime_resilience_of_name:(string -> string option) ->
   ?keeper_resilience_of_name:(string -> string option) ->
+  ?pacing_block_of_name:(string -> float option) ->
   ?reactive_wake:bool ->
   ?event_queue_triggers:Keeper_world_observation.event_queue_trigger list ->
   stop:bool Atomic.t ->

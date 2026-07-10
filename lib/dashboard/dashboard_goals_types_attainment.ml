@@ -33,9 +33,10 @@ let metric_evaluation_of_string = function
   | "absent" -> Some Metric_absent
   | _ -> None
 
-(* A goal with a declared metric is always [Metric_unevaluated]: no evaluator
-   is wired (Convergence.check_convergence has no caller), so [goal.metric] is
-   never turned into an observed value. See the type comment in
+(* A goal with a declared metric is always [Metric_unevaluated]: the task
+   convergence gate may use [Convergence.check_convergence], but no metric
+   measurement source is wired yet, so [goal.metric] is never turned into an
+   observed value. See the type comment in
    Dashboard_goals_types_accessor. *)
 let metric_evaluation_of_goal (goal : Goal_store.goal) =
   match goal.metric with

@@ -115,12 +115,11 @@ let taskboard_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_task_done"
     ; description =
-        "Mark your claimed task as complete with a result summary. The task must \
-         be claimed by you. For tasks with a verification contract, the LLM \
-         completion reviewer checks the result summary against the contract; \
-         include concrete evidence such as files changed, PR number, commit \
-         hash, trace id, or test output. Pure-placeholder notes ('done', \
-         'ok', etc.) are rejected."
+        "Mark your claimed task as complete with a result summary and trusted \
+         evidence_refs. The task must be claimed by you. The completion gate \
+         accepts task completion only when evidence_refs contains a \
+         reviewer-inspectable PR, commit, trace, receipt, or URL reference; \
+         pure-placeholder results ('done', 'ok', etc.) are rejected."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -140,6 +139,20 @@ let taskboard_tools : Masc_domain.tool_schema list =
                             "What was done: files changed, tests run, outcome observed" )
                       ; "minLength", `Int 1
                       ] )
+                ; ( "evidence_refs"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", `Assoc [ "type", `String "string" ]
+                      ; "minItems", `Int 1
+                      ; ( "description"
+                        , `String
+                            "Trusted references substantiating completion. At least \
+                             one reference must validate against local state: an \
+                             existing base-path file/file:// URI, local git commit \
+                             hash, or .masc trace/turn/receipt ref that resolves on \
+                             disk. Result text, URLs, PR numbers, and trace-shaped \
+                             labels alone do not satisfy the task-completion gate." )
+                      ] )
                 ; ( "notes"
                   , `Assoc
                       [ "type", `String "string"
@@ -152,7 +165,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                         )
                       ] )
                 ] )
-          ; "required", `List [ `String "task_id"; `String "result" ]
+          ; "required", `List [ `String "task_id"; `String "result"; `String "evidence_refs" ]
           ]
     }
   ; { name = "keeper_task_create"

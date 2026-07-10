@@ -423,6 +423,7 @@ describe('keeperActivityDisplay', () => {
     ).toEqual({
       source: 'heartbeat',
       label: '하트비트',
+      detail: null,
       timestamp: '2026-04-24T17:54:00Z',
       ageSeconds: 360,
     })
@@ -438,6 +439,7 @@ describe('keeperActivityDisplay', () => {
     ).toEqual({
       source: 'approval_pending',
       label: '승인 대기',
+      detail: null,
       timestamp: '2026-04-24T17:59:30Z',
       ageSeconds: 30,
     })
@@ -449,6 +451,48 @@ describe('keeperActivityDisplay', () => {
     })
     expect(toolActivity.source).toBe('tool_call')
     expect(toolActivity.label).toBe('도구 활동')
+  })
+
+  it('surfaces the tool name behind tool_call / approval_pending activity', () => {
+    expect(
+      keeperActivityDisplay({
+        last_activity_at: '2026-04-24T17:59:30Z',
+        last_activity_source: 'tool_call',
+        live_activity: { source: 'tool_call', tool: 'masc_status' },
+      }),
+    ).toEqual({
+      source: 'tool_call',
+      label: '도구 활동',
+      detail: 'masc_status',
+      timestamp: '2026-04-24T17:59:30Z',
+      ageSeconds: 30,
+    })
+  })
+
+  it('keeps the source label and tool detail on the ago_s fallback path', () => {
+    expect(
+      keeperActivityDisplay({
+        last_activity_ago_s: 75,
+        last_activity_source: 'tool_call',
+        live_activity: { source: 'tool_call', tool: 'masc_board_list' },
+      }),
+    ).toEqual({
+      source: 'last_activity',
+      label: '도구 활동',
+      detail: 'masc_board_list',
+      timestamp: null,
+      ageSeconds: 75,
+    })
+  })
+
+  it('drops the tool detail when live_activity disagrees with last_activity_source', () => {
+    expect(
+      keeperActivityDisplay({
+        last_activity_at: '2026-04-24T17:59:30Z',
+        last_activity_source: 'keeper_meta',
+        live_activity: { source: 'tool_call', tool: 'masc_status' },
+      }).detail,
+    ).toBeNull()
   })
 
   it('does not let agent last_seen override keeper runtime signals', () => {
@@ -478,6 +522,7 @@ describe('keeperActivityDisplay', () => {
     ).toEqual({
       source: 'last_activity',
       label: '최근 활동',
+      detail: null,
       timestamp: null,
       ageSeconds: 75,
     })

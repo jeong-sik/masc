@@ -44,7 +44,7 @@ bonsai-dashboard-if-available:
 	  $(MAKE) bonsai-dashboard; \
 	else \
 	  echo "==> bonsai-dashboard switch not found — skipping Bonsai island."; \
-	  echo "    Run \`opam switch create bonsai-dashboard ocaml-variants.5.2.0+ox\`"; \
+	  echo "    Run \`opam switch create bonsai-dashboard ocaml-variants.5.5.0+options\`"; \
 	  echo "    (see docs/bonsai-migration/phase-0-report.md) to enable."; \
 	fi
 

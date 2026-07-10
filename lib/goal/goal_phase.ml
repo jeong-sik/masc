@@ -54,6 +54,17 @@ let all =
   ; Dropped
   ]
 
+(* Phases from which a keeper can make self-directed progress on the goal.
+   RFC-0310 §3.3: only [Executing] qualifies for a stagnation wake — the
+   others are terminal ([Completed]/[Dropped]), operator-gated
+   ([Paused]/[Blocked]), or waiting on an external verdict ([Awaiting_*]),
+   so waking the keeper cannot advance them. Exhaustive: a new phase forces
+   a decision here rather than silently admitting or suppressing a wake. *)
+let admits_self_directed_progress = function
+  | Executing -> true
+  | Awaiting_verification | Awaiting_approval | Blocked | Paused | Completed
+  | Dropped -> false
+
 type action =
   | Request_complete
   | Approve_completion

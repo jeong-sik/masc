@@ -130,6 +130,27 @@ val parse_self_model_opt : Yojson.Safe.t -> string -> string option
 
 (** {1 Compaction Configuration} *)
 
+(** HOW a checkpoint is summarized (orthogonal to [profile], which decides
+    WHEN to compact). [Deterministic] = the extractive OAS strategy chain
+    (fail-closed default); [Llm] = opt-in provider-backed summarizer on the
+    librarian lane (wired in W2). *)
+type compaction_mode =
+  | Deterministic
+  | Llm
+
+val default_compaction_mode : compaction_mode
+val compaction_mode_to_string : compaction_mode -> string
+
+(** Parse a mode string; unknown → [Error] (never a permissive default). *)
+val compaction_mode_of_string : string -> (compaction_mode, string) result
+
+val keeper_compaction_mode_env_key : string
+
+(** Global default mode from [MASC_KEEPER_COMPACTION_MODE]. Unset →
+    [default_compaction_mode]; set-but-invalid → [invalid_arg] (fail-closed
+    at load), mirroring the MASC_RUNTIME_ATTEMPT_LIVENESS precedent. *)
+val keeper_compaction_mode_default : unit -> compaction_mode
+
 val default_compaction_profile : string
 val canonical_compaction_profile : string -> string option
 val parse_compaction_profile_opt :
@@ -191,8 +212,15 @@ val keeper_bootstrap_retry_interval_sec : unit -> int
 
 val keeper_proactive_min_cooldown_sec : unit -> int
 val keeper_proactive_min_interval_sec : unit -> int
+
+val keeper_goal_stagnation_threshold_sec : unit -> int
+(** RFC-0310 §3.3: seconds a live goal may sit untouched before a one-shot
+    stagnation wake (default 3600). Edge-gated on the goal's updated_at, so
+    it is not a blind cadence. *)
 val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
+val keeper_proactive_noop_backoff_max_shift : unit -> int
+val keeper_proactive_idle_decay_max_periods : unit -> int
 
 val keeper_batch_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool

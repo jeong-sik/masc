@@ -2,6 +2,7 @@
 
 module Types = Masc.Keeper_memory_os_types
 module Consolidation = Masc.Keeper_memory_os_consolidation
+module Consolidator = Masc.Keeper_memory_os_consolidator
 
 let now = 1_000_000.0
 
@@ -560,6 +561,60 @@ let () =
             "keeps one fact per prompt line"
             `Quick
             test_render_numbered_facts_keeps_one_fact_per_line
+        ] )
+    ; ( "staleness_gate"
+      , [ Alcotest.test_case "fresh verified fact passes not_stale" `Quick
+            (fun () ->
+               let fresh = fact ~last_verified_at:(now -. 3600.) "fresh" in
+               Alcotest.(check bool) "fresh" true (Consolidator.not_stale ~now fresh))
+        ; Alcotest.test_case "stale verified fact fails not_stale" `Quick
+            (fun () ->
+               let stale = fact ~last_verified_at:(now -. 90000.) "stale" in
+               Alcotest.(check bool) "stale" false (Consolidator.not_stale ~now stale))
+        ; Alcotest.test_case "unverified fact falls back to first_seen" `Quick
+            (fun () ->
+               let old =
+                 { (fact ~first_seen:(now -. 90000.) "old") with Types.last_verified_at = None }
+               in
+               Alcotest.(check bool) "old unverified" false (Consolidator.not_stale ~now old);
+               let young =
+                 { (fact ~first_seen:(now -. 100.0) "young") with Types.last_verified_at = None }
+               in
+               Alcotest.(check bool) "young unverified" true (Consolidator.not_stale ~now young))
+        ; Alcotest.test_case "eligible ~now filters stale Durable_knowledge" `Quick
+            (fun () ->
+               (* [eligible] also gates on category
+                  ([is_outcome_positive_for_shared_promotion]): the fixture
+                  default [Fact] is rejected there, which would mask the
+                  staleness axis this case isolates. Pin an outcome-positive
+                  category so only [not_stale] varies between the two facts. *)
+               let stale_dk = fact ~category:Types.Validated_approach
+                 ~last_verified_at:(now -. 90000.)
+                 ~claim_kind:(Some Types.Durable_knowledge) "stale_dk" in
+               Alcotest.(check bool) "stale dk" false (Consolidator.eligible ~now stale_dk);
+               let fresh_dk = fact ~category:Types.Validated_approach
+                 ~last_verified_at:(now -. 10.0)
+                 ~claim_kind:(Some Types.Durable_knowledge) "fresh_dk" in
+               Alcotest.(check bool) "fresh dk" true (Consolidator.eligible ~now fresh_dk))
+        ; Alcotest.test_case "not_stale delegates to fact_effective_valid_until first" `Quick
+            (fun () ->
+               (* P1 regression: fact with valid_until in the future passes
+                  even when last_verified_at is old. *)
+               let old_but_valid =
+                 fact ~last_verified_at:(now -. 50. *. 86400.)
+                   ~valid_until:(now +. 365. *. 86400.)
+                   ~claim_kind:(Some Types.External_state) "external"
+               in
+               Alcotest.(check bool) "valid_until overrides staleness"
+                 true (Consolidator.not_stale ~now old_but_valid);
+               (* Expired valid_until blocks even if recently verified. *)
+               let fresh_but_expired =
+                 fact ~last_verified_at:(now -. 1.0)
+                   ~valid_until:(now -. 100.0)
+                   ~claim_kind:(Some Types.External_state) "expired"
+               in
+               Alcotest.(check bool) "expired valid_until blocks"
+                 false (Consolidator.not_stale ~now fresh_but_expired))
         ] )
 	    ]
 ;;

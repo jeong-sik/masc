@@ -4140,7 +4140,9 @@ parse None false false false args|}
     }
   ; { name = "Gh"
     ; anon_pattern = "Gh _"
-    ; bind_pattern = "Gh { subcommand; action; draft; squash; delete_branch; body; title; rest }"
+    ; bind_pattern =
+        "Gh { subcommand; action; draft; squash; delete_branch; body; title; \
+         search; state; rest }"
     ; risk = "`Audited"
     ; sandbox = "`Host"
     ; to_simple_body =
@@ -4152,6 +4154,8 @@ parse None false false false args|}
       let args = if delete_branch then args @ [ "--delete-branch" ] else args in
       let args = match body with Some b -> args @ [ "--body"; b ] | None -> args in
       let args = match title with Some t -> args @ [ "--title"; t ] | None -> args in
+      let args = match search with Some q -> args @ [ "--search"; q ] | None -> args in
+      let args = match state with Some s -> args @ [ "--state"; s ] | None -> args in
       let args = args @ rest in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Gh
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
@@ -4164,7 +4168,7 @@ parse None false false false args|}
     ; parse_body =
         Some
           {|
-let rec parse subcmd act draft squash del_branch body title rest = function
+let rec parse subcmd act draft squash del_branch body title search state rest = function
   | [] ->
     (match subcmd with
      | Some s ->
@@ -4178,54 +4182,78 @@ let rec parse subcmd act draft squash del_branch body title rest = function
                ; delete_branch = del_branch
                ; body
                ; title
+               ; search
+               ; state
                ; rest = List.rev rest
                }))
      | None -> None)
   | arg :: args ->
-    (match subcmd with
-     | None -> parse (Some arg) act draft squash del_branch body title rest args
-     | Some _ when act = None && String.length arg > 0 && arg.[0] <> '-' ->
-       parse subcmd (Some arg) draft squash del_branch body title rest args
-     | Some _ ->
+    let is_flag = String.length arg > 0 && arg.[0] = '-' in
+    (match subcmd, act with
+     (* First non-flag token is the subcommand; the second is the action.
+        Flags — whether they appear BEFORE the subcommand (gh/Cobra accepts
+        global flags like [--repo o/r] ahead of the subcommand) or after it —
+        fall through to the flag handling below, which consumes value-taking
+        flags. Routing leading flags through the same handling keeps the real
+        subcommand from being shadowed by a flag or its value (issue #23390). *)
+     | None, _ when not is_flag ->
+       parse (Some arg) act draft squash del_branch body title search state rest args
+     | Some _, None when not is_flag ->
+       parse subcmd (Some arg) draft squash del_branch body title search state rest args
+     | _ ->
        (match arg with
-        | "--draft" -> parse subcmd act true squash del_branch body title rest args
-        | "--squash" -> parse subcmd act draft true del_branch body title rest args
-        | "--delete-branch" -> parse subcmd act draft squash true body title rest args
+        | "--draft" -> parse subcmd act true squash del_branch body title search state rest args
+        | "--squash" -> parse subcmd act draft true del_branch body title search state rest args
+        | "--delete-branch" -> parse subcmd act draft squash true body title search state rest args
         | "--body" ->
           (match args with
-           | v :: rest' -> parse subcmd act draft squash del_branch (Some v) title rest rest'
-           | [] -> parse subcmd act draft squash del_branch body title rest args)
+           | v :: rest' -> parse subcmd act draft squash del_branch (Some v) title search state rest rest'
+           | [] -> parse subcmd act draft squash del_branch body title search state rest args)
         | "--title" ->
           (match args with
-           | v :: rest' -> parse subcmd act draft squash del_branch body (Some v) rest rest'
-           | [] -> parse subcmd act draft squash del_branch body title rest args)
+           | v :: rest' -> parse subcmd act draft squash del_branch body (Some v) search state rest rest'
+           | [] -> parse subcmd act draft squash del_branch body title search state rest args)
+        | "--search" ->
+          (match args with
+           | v :: rest' -> parse subcmd act draft squash del_branch body title (Some v) state rest rest'
+           | [] -> parse subcmd act draft squash del_branch body title search state rest args)
+        | "--state" ->
+          (match args with
+           | v :: rest' -> parse subcmd act draft squash del_branch body title search (Some v) rest rest'
+           | [] -> parse subcmd act draft squash del_branch body title search state rest args)
         | arg when Shell_ir_typed_types.is_eq_form_flag arg ["--body"] ->
           let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--body"]) in
-          parse subcmd act draft squash del_branch (Some v) title rest args
+          parse subcmd act draft squash del_branch (Some v) title search state rest args
         | arg when Shell_ir_typed_types.is_eq_form_flag arg ["--title"] ->
           let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--title"]) in
-          parse subcmd act draft squash del_branch body (Some v) rest args
+          parse subcmd act draft squash del_branch body (Some v) search state rest args
+        | arg when Shell_ir_typed_types.is_eq_form_flag arg ["--search"] ->
+          let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--search"]) in
+          parse subcmd act draft squash del_branch body title (Some v) state rest args
+        | arg when Shell_ir_typed_types.is_eq_form_flag arg ["--state"] ->
+          let v = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--state"]) in
+          parse subcmd act draft squash del_branch body title search (Some v) rest args
         | "--repo" | "--assignee" | "--label" | "--milestone" | "--project"
         | "--reviewer" | "--base" | "--head" | "--editor" | "--hostname"
-        | "--jq" | "--template" | "--limit" | "--state"
+        | "--jq" | "--template" | "--limit"
         | "-R" | "-a" | "-l" | "-p" | "-r" | "-B" | "-H" ->
           (match args with
-           | _ :: rest' -> parse subcmd act draft squash del_branch body title rest rest'
-           | [] -> parse subcmd act draft squash del_branch body title rest args)
+           | _ :: rest' -> parse subcmd act draft squash del_branch body title search state rest rest'
+           | [] -> parse subcmd act draft squash del_branch body title search state rest args)
         | "--" ->
           (* POSIX end-of-options: remaining args go to rest *)
-          parse subcmd act draft squash del_branch body title (List.rev args @ rest) []
+          parse subcmd act draft squash del_branch body title search state (List.rev args @ rest) []
         | _ when String.length arg > 1 && arg.[0] = '-' && arg.[1] = '-' ->
           (match String.index_opt arg '=' with
-           | Some _ -> parse subcmd act draft squash del_branch body title rest args
+           | Some _ -> parse subcmd act draft squash del_branch body title search state rest args
            | None ->
              (match args with
               | v :: rest' when String.length v > 0 && v.[0] <> '-' ->
-                parse subcmd act draft squash del_branch body title rest rest'
-              | _ -> parse subcmd act draft squash del_branch body title rest args))
-        | _ -> parse subcmd act draft squash del_branch body title (arg :: rest) args))
+                parse subcmd act draft squash del_branch body title search state rest rest'
+              | _ -> parse subcmd act draft squash del_branch body title search state rest args))
+        | _ -> parse subcmd act draft squash del_branch body title search state (arg :: rest) args))
 in
-parse None None false false false None None [] args|}
+parse None None false false false None None None None [] args|}
     ; no_expand_combined = false
     }
   ; { name = "Chmod"

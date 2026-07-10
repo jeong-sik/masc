@@ -68,6 +68,7 @@ let masc_board_tools_with_keeper_wrappers =
   [
     "masc_board_comment";
     "masc_board_curation_submit";
+    "masc_board_cleanup";
     "masc_board_post";
     "masc_board_vote";
     "masc_board_delete";
@@ -165,6 +166,7 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
        | Some Tool_dispatch.Mod_schedule
        | Some Tool_dispatch.Mod_misc
        | Some Tool_dispatch.Mod_library
+       | Some Tool_dispatch.Mod_recurring
        | Some Tool_dispatch.Mod_external
        | Some Tool_dispatch.Mod_shard
        | Some Tool_dispatch.Mod_keeper_task ->

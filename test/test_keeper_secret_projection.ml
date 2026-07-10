@@ -142,6 +142,7 @@ let test_missing_secret_dir_is_noop () =
       ~base_path:base
       ~keeper_name:"minjae"
       ~container_name:"container"
+      ()
   with
   | Error err -> Alcotest.fail err
   | Ok projection ->
@@ -167,6 +168,7 @@ let test_env_and_files_project_to_docker_args () =
       ~base_path:base
       ~keeper_name:"MinJae"
       ~container_name:"container"
+      ()
   with
   | Error err -> Alcotest.fail err
   | Ok projection ->
@@ -209,6 +211,7 @@ let test_secret_dir_override_uses_keeper_subdir () =
            ~base_path:base
            ~keeper_name:"MinJae"
            ~container_name:"container"
+           ()
        with
        | Error err -> Alcotest.fail err
        | Ok projection ->
@@ -238,6 +241,7 @@ let test_base_secret_env_and_files_project_to_keeper_docker_args () =
       ~base_path:base
       ~keeper_name:"idealist"
       ~container_name:"container"
+      ()
   with
   | Error err -> Alcotest.fail err
   | Ok projection ->
@@ -311,6 +315,7 @@ let test_keeper_secret_overrides_base_secret_entries () =
       ~base_path:base
       ~keeper_name:"idealist"
       ~container_name:"container"
+      ()
   with
   | Error err -> Alcotest.fail err
   | Ok projection ->
@@ -489,6 +494,7 @@ let test_invalid_env_name_rejects () =
       ~base_path:base
       ~keeper_name:"minjae"
       ~container_name:"container"
+      ()
   with
   | Ok _ -> Alcotest.fail "expected invalid env name rejection"
   | Error err ->
@@ -513,6 +519,7 @@ let test_symlink_file_rejects () =
       ~base_path:base
       ~keeper_name:"minjae"
       ~container_name:"container"
+      ()
   with
   | Ok _ -> Alcotest.fail "expected symlink rejection"
   | Error err ->
@@ -539,6 +546,7 @@ let test_symlink_env_dir_rejects () =
            ~base_path:base
            ~keeper_name:"minjae"
            ~container_name:"container"
+           ()
        with
        | Ok _ -> Alcotest.fail "expected env directory symlink rejection"
        | Error err ->
@@ -797,6 +805,7 @@ let test_set_and_delete_file_entry_updates_projection () =
        ~base_path:base
        ~keeper_name:"minjae"
        ~container_name:"container"
+       ()
    with
    | Error msg -> Alcotest.fail msg
    | Ok projection ->
@@ -827,6 +836,7 @@ let test_set_and_delete_file_entry_updates_projection () =
        ~base_path:base
        ~keeper_name:"minjae"
        ~container_name:"container"
+       ()
    with
    | Error msg -> Alcotest.fail msg
    | Ok projection ->
@@ -898,6 +908,7 @@ let test_env_value_leading_hash_rejects () =
       ~base_path:base
       ~keeper_name:"minjae"
       ~container_name:"container"
+      ()
   with
   | Ok _ -> Alcotest.fail "expected leading-hash env value rejection"
   | Error err ->

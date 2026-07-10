@@ -30,7 +30,10 @@ val actionable_path_action_for_class
     [error] via [Keeper_failure_circuit_breaker.classify_error]
     and routes to [actionable_path_action_for_class]. *)
 val actionable_path_error
-  :  op:string
+  :  deterministic_reason:
+       Keeper_tool_deterministic_error.deterministic_reason option
+  -> op:string
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
   -> error:string
@@ -77,6 +80,25 @@ val keeper_default_write_root
 val keeper_default_read_root
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> string
+
+(** [keeper_observation_sandbox_root ~config ~meta] is the keeper's
+    playground sandbox root anchored at the normalised project root.
+    Pure path computation for the observation write path — unlike
+    {!keeper_default_read_root} it never creates the sandbox bundle. *)
+val keeper_observation_sandbox_root
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> string
+
+(** [keeper_observation_host_path_of_visible_path ~config ~meta path] maps a
+    Docker keeper's sandbox-visible absolute path to the corresponding host
+    playground path without creating the sandbox bundle. Local keepers, relative
+    paths, and unrelated absolute paths are returned unchanged. *)
+val keeper_observation_host_path_of_visible_path
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> string
   -> string
 
 val project_relative_host_path : config:Workspace.config -> string -> string option

@@ -29,12 +29,36 @@ type rejection =
     (** the turn holding the slot, if observable at rejection time *)
   }
 
+type slot_snapshot =
+  { snapshot_keeper_name : string
+  ; snapshot_slot_created : bool
+  ; snapshot_in_flight : in_flight_info option
+  ; snapshot_waiting : int
+  ; snapshot_waiting_since : float option
+  ; snapshot_waiting_cap : int
+  ; snapshot_waiting_full : bool
+  ; snapshot_rejected_chat_count : int
+  }
+
+type fleet_snapshot =
+  { fleet_keeper_count : int
+  ; fleet_waiting_keeper_count : int
+  ; fleet_waiting_total : int
+  ; fleet_waiting_full_keeper_count : int
+  ; fleet_rejected_chat_total : int
+  ; fleet_in_flight_keeper_count : int
+  ; fleet_slots : slot_snapshot list
+  }
+
 val lane_to_string : lane -> string
 
 val max_waiting_chat_requests : int
 (** Upper bound on chat requests parked on one keeper's slot. Beyond this
     [run_serialized] rejects instead of queueing, so a message burst cannot
-    pile up unbounded waiting fibers behind a long autonomous turn. *)
+    pile up unbounded waiting fibers behind a long autonomous turn. The value
+    comes from the keeper runtime policy surface:
+    [MASC_KEEPER_TURN_CHAT_WAITING_CAP] / runtime.toml
+    [turn.chat_waiting_cap]. *)
 
 val run_if_free
   :  base_path:string
@@ -49,11 +73,18 @@ val run_if_free
     (including [Eio.Cancel.Cancelled]) release the slot and re-raise.
 
     Also returns [`Busy] without attempting the lock when a chat request is
-    already parked on this slot ([chat_waiting] is true). Eio.Mutex hands a
-    released slot directly to the next parked waiter, so a new autonomous
-    cycle would not overtake a queued chat regardless; this pre-check makes
-    the yield explicit and keeps a heartbeat-scheduled cycle from competing
-    for a slot a dashboard/connector message is already waiting on. *)
+    already parked on this slot ([chat_waiting] is true), or when a busy
+    connector/dashboard message is deferred in [Keeper_chat_queue] for this
+    keeper ([Keeper_chat_queue.length] > 0). Eio.Mutex hands a released slot
+    directly to the next parked waiter, so a new autonomous cycle would not
+    overtake a queued chat regardless; these pre-checks make the yield
+    explicit and keep a heartbeat-scheduled cycle from competing for a slot
+    a dashboard/connector message is already waiting on or queued behind.
+    The [Keeper_chat_queue] half closes the starvation gap where a long or
+    back-to-back autonomous turn could otherwise busy-ACK a connector
+    forever: the autonomous lane yields on the same backlog the consumer
+    drains, so the consumer's [in_flight = None] window opens
+    deterministically. *)
 
 val chat_waiting : base_path:string -> keeper_name:string -> bool
 (** [true] when at least one chat request is parked on this keeper's slot
@@ -66,6 +97,11 @@ val chat_waiting : base_path:string -> keeper_name:string -> bool
     turn's longer budget. Only counts *parked* waiters, never an already
     admitted (in-flight) turn — an admitted chat holds the slot and is no
     longer waiting. *)
+
+val chat_waiting_since : base_path:string -> keeper_name:string -> float option
+(** Unix epoch seconds for the oldest currently parked chat waiter on this
+    keeper's slot, or [None] when no chat request is waiting or the keeper slot
+    is unknown. *)
 
 val run_serialized
   :  base_path:string
@@ -106,6 +142,26 @@ val in_flight
     while a turn runs) tolerate the narrow window where a holder has
     locked the slot but not yet published its info — a turn forked on a
     stale [None] simply waits at the slot. *)
+
+val snapshot_for : base_path:string -> keeper_name:string -> slot_snapshot
+(** Raw, read-only admission state for one keeper. Unknown keepers return a
+    zero-valued snapshot with [snapshot_slot_created = false]; no slot is
+    allocated by observation. *)
+
+val fleet_snapshot : base_path:string -> keeper_names:string list -> fleet_snapshot
+(** Fleet-level admission state for configured [keeper_names] plus any live
+    slot already observed under [base_path]. This keeps dashboard/health
+    observability from hiding an active slot simply because the meta/config
+    scan missed it. *)
+
+val slot_snapshot_to_yojson : slot_snapshot -> Yojson.Safe.t
+
+val fleet_health_json :
+  base_path:string -> keeper_names:string list -> Yojson.Safe.t
+(** Health component for [/health] and dashboard runtime resolution. Waiting
+    pressure is exposed as raw counts plus [snapshot_waiting_full]; no ratio
+    or heuristic threshold is computed. Historical rejections are counters,
+    while operator action is required only when a queue is currently full. *)
 
 module For_testing : sig
   val reset : unit -> unit

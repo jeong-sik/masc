@@ -1,7 +1,8 @@
 (** Harness tests for WARN root cause fixes.
 
-    1. Tool access discovery: core_discovery_tools stay candidate-visible
-       across narrow tool_access lists and are hidden by denylist
+    1. Tool access discovery: the per-turn core surface
+       (effective_core_tools) stays visible across narrow tool_access lists
+       and is hidden by denylist
     2. Atomic agent JSON writes: no empty-file race condition *)
 
 open Alcotest
@@ -72,12 +73,17 @@ let build_policy_allowed_tool_set (meta : Keeper_meta_contract.keeper_meta) =
     (Keeper_tool_policy.StringSet.union internal_set public_set)
     (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
 
-(** Filter core_discovery_tools through the current policy-visible set. *)
+(** Filter the PRODUCTION per-turn core surface through the current
+    policy-visible set. [effective_core_tools ()] is the exact function the
+    keeper turn loop uses to build the always-visible core (see
+    [Keeper_run_tools_setup.compute_tool_surface]); asserting against it — not
+    the static [core_discovery_tools] discovery pool — is what makes the #23440
+    shadowing/exclusion regression fail CI. *)
 let filter_core_by_tool_access (meta : Keeper_meta_contract.keeper_meta) =
   let policy_allowed_tool_set = build_policy_allowed_tool_set meta in
   List.filter
     (fun name -> Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set)
-    Keeper_tool_registry.core_discovery_tools
+    (Keeper_tool_dispatch_runtime.effective_core_tools ())
 
 let write_tools = [ "Edit" ]
 
@@ -94,10 +100,13 @@ let test_core_tools_visible_with_empty_tool_access () =
       tool_access = [];
       tool_denylist = [] }
   in
-  (* Precondition: descriptor-backed public tools are in unfiltered core. *)
+  (* Precondition: the native-executor code tools are in the unfiltered
+     production core surface, so a filtered-out result below is the policy
+     filter's doing rather than an absent base entry. *)
+  let unfiltered_core = Keeper_tool_dispatch_runtime.effective_core_tools () in
   List.iter (fun t ->
-    if not (List.mem t Keeper_tool_registry.core_discovery_tools) then
-      fail (Printf.sprintf "precondition: %s missing from core_discovery_tools" t)
+    if not (List.mem t unfiltered_core) then
+      fail (Printf.sprintf "precondition: %s missing from effective_core_tools" t)
   ) (write_tools @ read_alias_tools);
   let filtered = filter_core_by_tool_access meta in
   List.iter (fun t ->

@@ -9,9 +9,9 @@
     This module is data only. The enqueue side is wired:
     [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
     before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
-    [keeper_heartbeat_loop.ml] drains the board-signal batch within the
-    debounce window via [Keeper_registry_event_queue.drain_board] (a CAS loop
-    over [drain_board_window]) and falls back to a single non-board
+    [keeper_heartbeat_loop.ml] drains every queued board signal at turn
+    start via [Keeper_registry_event_queue.drain_board] (a CAS loop
+    over [drain_board_all], RFC-0334 W2) and falls back to a single non-board
     [dequeue_event] when that batch is empty — either path pins the
     [Conservation] invariant. [run_smart_heartbeat_gate] then snapshots
     the queue and forces [Emit] when it is non-empty (pinning
@@ -70,6 +70,10 @@ type stimulus_payload =
   | No_progress_recovery
   | Fusion_completed of fusion_completion
   | Bg_completed of bg_job_completion
+  | Schedule_due of scheduled_wake
+      (** A scheduled automation request has reached its due time and directly
+          targeted this keeper. The Scheduler owns timing/approval; the keeper
+          receives only a typed wake with the operator-authored message. *)
   | Connector_attention of connector_attention
       (** RFC-connector-ambient-attention-wake: an ambient connector message
           recorded as [Keeper_external_attention]. Carries the [event_id]
@@ -83,6 +87,18 @@ type stimulus_payload =
           Wakes the keeper so it re-evaluates immediately instead of stalling
           until an unrelated stimulus, no-progress recovery, or the 30-minute
           approval janitor. Mirrors [Fusion_completed]/[Bg_completed]. *)
+  | Goal_verification_failed of goal_verification_failure
+      (** A goal completion verification was rejected for a goal assigned to
+          this keeper. Wakes the keeper lane so it resumes work on the goal
+          after the goal phase returns to [executing], instead of waiting for
+          unrelated board/task activity. *)
+  | Failure_judgment of failure_judgment
+      (** RFC-0313 deterministic failure class was rejected/blocked and should
+          produce an LLM-boundary verdict prompt on the keeper lane. *)
+  | Goal_assigned of goal_assignment
+      (** A goal was newly added to this keeper's [active_goal_ids]. *)
+  | Goal_stagnation of goal_stagnation
+      (** A live goal has been stale longer than the configured threshold. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -130,6 +146,7 @@ and hitl_resolution_decision =
 and hitl_resolution = {
   approval_id : string;
   decision : hitl_resolution_decision;
+  channel : Keeper_continuation_channel.t;
 }
 (** Payload for [Hitl_resolved]: [approval_id] correlates to the resolved
     pending-approval queue entry; [decision] is the resolved label
@@ -137,10 +154,61 @@ and hitl_resolution = {
     re-evaluates from its own state once the approval leaves the queue, so the
     decision is not itself control flow. *)
 
-and connector_attention = { event_id : string }
+and connector_attention = {
+  event_id : string;
+  channel : Keeper_continuation_channel.t;
+}
 (** RFC-connector-ambient-attention-wake payload for [Connector_attention]:
     [event_id] is the pointer into [Keeper_external_attention] for the ambient
     message; content/surface are read from that store on the turn path. *)
+
+and scheduled_wake = {
+  schedule_id : string;
+  due_at : float;
+  payload_digest : string;
+  title : string option;
+  message : string;
+}
+(** Payload for [Schedule_due]: the schedule consumer has already validated the
+    request and enqueued this wake for the named keeper. [payload_digest]
+    preserves a stable audit correlation to the schedule payload without
+    duplicating its raw JSON envelope in the keeper queue. *)
+
+and goal_verification_failure = {
+  goal_id : string;
+  request_id : string;
+  goal_title : string;
+  phase : string;
+  metric : string option;
+  target_value : string option;
+  rejected_by : string;
+  note : string option;
+  evidence_refs : string list;
+}
+(** Payload for [Goal_verification_failed]. The queue stores the durable
+    verification result summary needed by the next keeper prompt; [phase] is
+    display-only and produced by the goal phase SSOT at enqueue time. *)
+
+and failure_judgment = {
+  fj_runtime_id : string;
+  fj_judgment : Keeper_runtime_failure_route.judgment_class;
+  fj_detail : string;
+}
+(** Payload for [Failure_judgment]. *)
+
+and goal_assignment = {
+  ga_goal_id : string;
+  ga_goal_title : string;
+  ga_assigned_by : string;
+}
+(** Payload for [Goal_assigned]. *)
+
+and goal_stagnation = {
+  gs_goal_id : string;
+  gs_stale_since : string;
+  gs_goal_title : string;
+}
+(** Payload for [Goal_stagnation]. *)
 
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
@@ -151,10 +219,22 @@ val bg_job_completion_post_id : bg_job_completion -> post_id
 (** RFC-0290 dedup/correlation id for [Bg_completed]. Uses [bg_board_post_id]
     when the producer set it, otherwise falls back to ["bg-run:<run_id>"]. *)
 
+val schedule_due_post_id : scheduled_wake -> post_id
+(** Dedup/correlation id for [Schedule_due]: ["schedule-due:<schedule_id>"]. *)
+
 val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
     De-dups repeat resolve wakes for the same approval within the dedup
     window. *)
+
+val goal_verification_failure_post_id : goal_verification_failure -> post_id
+(** Dedup/correlation id for [Goal_verification_failed]. *)
+
+val failure_judgment_post_id : failure_judgment -> post_id
+
+val goal_assignment_post_id : goal_assignment -> post_id
+
+val goal_stagnation_post_id : goal_stagnation -> post_id
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)
@@ -232,15 +312,20 @@ val payload_kind_label : stimulus_payload -> string
 (** Stable short label for logs/metrics: ["board_signal"], ["bootstrap"],
     ["no_progress_recovery"], ["fusion_completed"], or ["bg_completed"]. *)
 
+val urgency_to_string : urgency -> string
+val urgency_of_string : string -> (urgency, string) result
+
 val is_board_signal : stimulus_payload -> bool
 (** [true] iff the payload is a [Board_signal]. *)
 
-val drain_board_window : ?window_sec:float -> t -> stimulus list * t
-(** [drain_board_window q] separates board-signal stimuli that arrived
-    within [window_sec] seconds (default [2.0]) of now from the rest of
-    the queue.  Board signals are urgency-sorted; non-board stimuli and
-    board signals outside the window remain in the returned queue in
-    their original order. *)
+val drain_board_all : t -> stimulus list * t
+(** [drain_board_all q] separates every board-signal stimulus from the
+    rest of the queue, regardless of arrival time (RFC-0334 W2: the turn
+    is the batching unit, not an arrival window — identity dedup at
+    enqueue already bounds the batch).  Board signals are urgency-sorted
+    (explicit mentions enqueue as [Immediate], so they surface first);
+    non-board stimuli remain in the returned queue in their original
+    order. *)
 
 val stimulus_to_yojson : stimulus -> Yojson.Safe.t
 (** Stable JSON representation used by MASC-owned durable queue snapshots. *)

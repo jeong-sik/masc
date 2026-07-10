@@ -45,6 +45,18 @@ export {
   channelIcon,
 } from './connector-constants'
 export type { KnownConnectorId, InProcessConnectorId, SidecarCommands } from './connector-constants'
+import {
+  connectorStateLabel,
+  connectorCardBorderClass,
+  connectorStateTone,
+  dotClassForLabel,
+  connectorCardStateClass,
+  connectorStatusPillClass,
+  connectorStatusPillLabel,
+} from './connector-state'
+// Back-compat re-export: connector state mapping now lives in ./connector-state.
+export { connectorStateLabel, connectorCardBorderClass } from './connector-state'
+export type { ConnectorStateLabel } from './connector-state'
 import { formatTimeAgoEn } from '../lib/format-time'
 import { ErrorState } from './common/feedback-state'
 import { ConnectorOverviewSkeleton } from './connector-overview-skeleton'
@@ -102,17 +114,6 @@ function activeConnectorFilter(): string | null {
 // Connector vocabulary (KNOWN_CONNECTOR_IDS, display names, sidecar commands,
 // accent styles, channel icons) lives in ./connector-constants and is imported
 // at the top of this file; re-exported there for back-compat.
-
-const CONNECTOR_STATE_LABELS = ['offline', 'stale', 'connected', 'disconnected'] as const
-export type ConnectorStateLabel = (typeof CONNECTOR_STATE_LABELS)[number]
-
-function isConnectorStateLabel(value: string | undefined): value is ConnectorStateLabel {
-  return value === 'offline' || value === 'stale' || value === 'connected' || value === 'disconnected'
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled connector state label: ${String(value)}`)
-}
 
 interface ConnectorUiState {
   actionLoading: boolean
@@ -323,21 +324,6 @@ function dotClass(state: LivenessState): string {
   }
 }
 
-function dotClassForLabel(label: ConnectorStateLabel): string {
-  switch (label) {
-    case 'connected':
-      return 'bg-[var(--ok-10)]'
-    case 'stale':
-      return 'bg-[var(--warn-10)]'
-    case 'disconnected':
-      return 'bg-[var(--bad-10)]'
-    case 'offline':
-      return 'bg-[var(--color-fg-disabled)]'
-    default:
-      return assertNever(label)
-  }
-}
-
 function uniqueStrings(values: string[]): string[] {
   const seen = new Set<string>()
   const ordered: string[] = []
@@ -354,49 +340,6 @@ function runtimeLabelForKeeper(keeper: GateKeeperInfo | null | undefined): strin
   const runtime = keeper?.agent_name?.trim()
   if (!runtime || runtime === keeper?.name) return ''
   return runtime
-}
-
-export function connectorStateLabel(connector: GateConnectorInfo | null): ConnectorStateLabel {
-  const advertised = connector?.status?.trim().toLowerCase()
-  if (isConnectorStateLabel(advertised)) {
-    return advertised
-  }
-  if (!connector?.available) return 'offline'
-  if (connector.stale) return 'stale'
-  if (connector.connected) return 'connected'
-  return 'disconnected'
-}
-
-/** Pure: Portainer-style left border tone for a connector card.
-    A 4px colored left border lets operators scan a vertical stack of
-    cards and spot problem connectors by color alone — no reading the
-    status pill required. Mapping matches Portainer's container state
-    palette: emerald for connected, amber for stale (intermittent),
-    rose for disconnected (broken), muted for offline (not running). */
-export function connectorCardBorderClass(label: ConnectorStateLabel): string {
-  switch (label) {
-    case 'connected':
-      return 'border-l-4 border-l-emerald-500'
-    case 'stale':
-      return 'border-l-4 border-l-[var(--color-warn)]'
-    case 'disconnected':
-      return 'border-l-4 border-l-rose-500'
-    case 'offline':
-      return 'border-l-4 border-l-[var(--color-border-default)]'
-    default:
-      return assertNever(label)
-  }
-}
-
-function connectorStateTone(connector: GateConnectorInfo | null): string {
-  const label = connectorStateLabel(connector)
-  if (label === 'connected') {
-    return 'border-[var(--ok-border)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-  }
-  if (label === 'disconnected') {
-    return 'border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--bad-light)]'
-  }
-  return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
 }
 
 function findKnownConnector(connectors: GateConnectorInfo[], connectorId: KnownConnectorId): GateConnectorInfo | null {
@@ -499,6 +442,13 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
       runtime_bindings_count: 0,
       configured_bindings_count: 0,
     },
+    source_health: {
+      storage_paths: 'fallback',
+      runtime_summary: 'fallback',
+      binding_summary: 'fallback',
+      names: 'fallback',
+      observed_channel: 'missing',
+    },
     observed_channel: null,
     names_path: '',
     names: {
@@ -508,6 +458,51 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
       updated_at: '',
     },
   }
+}
+
+type ConnectorSourceHealthKey = keyof GateConnectorInfo['source_health']
+
+const CONNECTOR_SOURCE_HEALTH_ROWS: Array<{ key: ConnectorSourceHealthKey; label: string }> = [
+  { key: 'storage_paths', label: 'storage paths' },
+  { key: 'runtime_summary', label: 'runtime summary' },
+  { key: 'binding_summary', label: 'binding summary' },
+  { key: 'names', label: 'names' },
+  { key: 'observed_channel', label: 'observed channel' },
+]
+
+function connectorSourceHealthClass(state: GateConnectorInfo['source_health'][ConnectorSourceHealthKey]): string {
+  switch (state) {
+    case 'present':
+      return 'border-[var(--color-status-ok)] text-[var(--color-status-ok)]'
+    case 'missing':
+      return 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)]'
+    case 'fallback':
+      return 'border-[var(--color-status-warn)] text-[var(--color-status-warn)]'
+  }
+}
+
+function ConnectorSourceHealthStrip({ connector }: { connector: GateConnectorInfo | null }) {
+  const sourceHealth = connector?.source_health
+  return html`
+    <div
+      class="mt-2 flex flex-wrap items-center gap-1.5 text-3xs"
+      data-testid="connector-source-health"
+      aria-label="Connector source health"
+    >
+      <span class="uppercase tracking-4 text-[var(--color-fg-disabled)]">source health</span>
+      ${CONNECTOR_SOURCE_HEALTH_ROWS.map(row => {
+        const state = sourceHealth?.[row.key] ?? 'missing'
+        return html`
+          <span
+            key=${row.key}
+            class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 ${connectorSourceHealthClass(state)}`}
+            data-connector-source-health=${row.key}
+            data-connector-source-health-state=${state}
+          >${row.label} ${state}</span>
+        `
+      })}
+    </div>
+  `
 }
 
 // Native lifecycle hits the new /api/v1/sidecar/{start,stop} endpoints
@@ -857,6 +852,7 @@ function ConnectorLivePanel({
           getRailInflight(connectorId),
         )}
       />
+      <${ConnectorSourceHealthStrip} connector=${connector} />
 
       <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 
@@ -1729,48 +1725,6 @@ function GateStatusStrip({
       <span style=${{ marginLeft: 'auto' }} class="mono">generated_at ${generatedAt}</span>
     </div>
   `
-}
-
-function connectorCardStateClass(label: ConnectorStateLabel): string {
-  switch (label) {
-    case 'connected':
-      return ''
-    case 'stale':
-      return 'stale'
-    case 'offline':
-    case 'disconnected':
-      return 'down'
-    default:
-      return assertNever(label)
-  }
-}
-
-function connectorStatusPillClass(label: ConnectorStateLabel): string {
-  switch (label) {
-    case 'connected':
-      return 'run'
-    case 'stale':
-      return 'pause'
-    case 'offline':
-    case 'disconnected':
-      return 'off'
-    default:
-      return assertNever(label)
-  }
-}
-
-function connectorStatusPillLabel(label: ConnectorStateLabel): string {
-  switch (label) {
-    case 'connected':
-      return 'Connected'
-    case 'stale':
-      return 'Stale'
-    case 'offline':
-    case 'disconnected':
-      return 'Down'
-    default:
-      return assertNever(label)
-  }
 }
 
 function connectorDisplayValue(value: string | number | null | undefined): string {

@@ -144,24 +144,47 @@ let test_visible_mind_read_resolves_to_private_storage () =
   | Error e -> Alcotest.fail ("visible mind path should resolve: " ^ e)
 ;;
 
-let test_direct_private_storage_read_stays_blocked () =
+let test_playground_internal_path_now_allowed () =
+  (* RFC-0006: the keeper playground (.masc/playground/<keeper>/...) is the
+     keeper's own working area — its internal paths (mind/, drafts) are
+     reachable. #23843 unblocked the whole arm; this keeps the playground half
+     unblocked after re-narrowing the helper to exempt .masc/playground. *)
   setup
   @@ fun ~config ~meta ~playground:_ ->
   let private_raw =
     Masc.Keeper_sandbox.allowed_root_rel_of_meta ~meta ^ "mind/README.md"
   in
-  match
-    Keeper_tool_shared_runtime.resolve_keeper_read_path
-      ~config
-      ~meta
-      ~raw_path:private_raw
-  with
-  | Ok path -> Alcotest.fail ("direct private storage path should be blocked: " ^ path)
-  | Error e ->
-    Alcotest.(check bool)
-      "task state/private path blocked"
-      true
-      (String.starts_with ~prefix:"task_state_file_path_blocked:" e)
+  (match
+     Keeper_tool_shared_runtime.resolve_keeper_read_path
+       ~config
+       ~meta
+       ~raw_path:private_raw
+   with
+   | Ok _ ->
+     () (* playground-internal path resolves — keeper may reach its own area *)
+   | Error e -> Alcotest.fail ("playground-internal path should resolve: " ^ e))
+;;
+
+let test_masc_internal_state_read_stays_blocked () =
+  (* The narrowing is load-bearing: workspace-level internal state
+     (.masc/backlog.json, .masc/tasks/) must stay blocked — keepers reach it
+     via keeper_tasks_list / keeper_context_status, not by probing the files.
+     This is the #23807 traversal/symlink write-bypass defence that #23843
+     dropped. *)
+  setup
+  @@ fun ~config ~meta ~playground:_ ->
+  (match
+     Keeper_tool_shared_runtime.resolve_keeper_read_path
+       ~config
+       ~meta
+       ~raw_path:".masc/backlog.json"
+   with
+   | Ok path -> Alcotest.fail (".masc internal state should be blocked: " ^ path)
+   | Error e ->
+     Alcotest.(check bool)
+       "masc internal state blocked"
+       true
+       (String.starts_with ~prefix:"task_state_file_path_blocked:" e))
 ;;
 
 let test_read_with_visible_repo_cwd_and_relative_file_path () =
@@ -258,9 +281,13 @@ let () =
             `Quick
             test_visible_mind_read_resolves_to_private_storage
         ; Alcotest.test_case
-            "direct private storage read stays blocked"
+            "direct private storage read is allowed"
             `Quick
-            test_direct_private_storage_read_stays_blocked
+            test_playground_internal_path_now_allowed
+        ; Alcotest.test_case
+            "internal masc state read stays blocked"
+            `Quick
+            test_masc_internal_state_read_stays_blocked
         ] )
     ; ( "file_tools"
       , [ Alcotest.test_case

@@ -49,6 +49,13 @@ val approval_resolve_decision_required_message : string
 
 (** {1 Board / memory / governance HTTP entries} *)
 
+val handle_repository_observation_snapshot :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  unit
+
 val dashboard_board_json :
   ?config:Workspace.config ->
   ?hearth:string ->
@@ -98,6 +105,11 @@ val dashboard_schedule_resolve_http_json :
   config:Workspace_utils.config ->
   operator_name:string ->
   args:Yojson.Safe.t ->
+  (Yojson.Safe.t, string) result
+
+val dashboard_schedule_prune_http_json :
+  config:Workspace_utils.config ->
+  operator_name:string ->
   (Yojson.Safe.t, string) result
 
 (** {1 Verification + planning + goals} *)

@@ -104,7 +104,11 @@ let canonical_board_author raw =
 
 let record_identity_raw_surface field raw canonical fields =
   if String.equal raw "" || String.equal raw canonical then fields
-  else json_upsert_meta_string_field (field ^ "_raw_agent_name") raw fields
+  else
+    json_upsert_meta_string_field
+      (Board_tool_format.raw_agent_name_meta_key ~field)
+      raw
+      fields
 
 (** #10297: enforce that a board-tool caller cannot author / vote under
     a principal other than the runtime contract's [agent_name].  Pre-fix
@@ -209,7 +213,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   ignore (config, state, sw, clock, start_time);
   let arguments =
     match name with
-    | "masc_board_post" ->
+    | "masc_board_post" | "masc_board_post_update" ->
         enforce_caller_identity ~tool:name ~field:"author" ~agent_name
           arguments
     | "masc_board_comment" ->
@@ -223,6 +227,15 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           arguments
     | "masc_board_sub_board_create" ->
         enforce_caller_identity ~tool:name ~field:"owner" ~agent_name
+          arguments
+    | "masc_board_delete" ->
+        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
+          arguments
+    | "masc_board_sub_board_update" | "masc_board_sub_board_delete" ->
+        enforce_caller_identity ~tool:name ~field:"owner" ~agent_name
+          arguments
+    | "masc_board_curation_submit" ->
+        enforce_caller_identity ~tool:name ~field:"submitted_by" ~agent_name
           arguments
     | _ -> arguments
   in

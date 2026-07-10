@@ -10,24 +10,23 @@ import {
   ChevronLeft,
   Info,
   MoreHorizontal,
-  Pause,
   Play,
-  RotateCcw,
   Search,
   Settings,
-  Square,
 } from 'lucide-preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { navigate } from '../../router'
+import { governanceData } from '../governance-signals'
+import { resolveGovernanceApproval } from '../../api/dashboard-governance'
 import type { ChatComposerCommand } from '../chat/primitives'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { keeperThreads } from '../../keeper-state'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
-import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
+import { KEEPER_ACTION_LABELS, runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { Pill } from '../v2/primitives-v2'
 import {
   WorkspaceSigil,
@@ -60,40 +59,11 @@ interface WorkspaceCommand {
   onClick: () => void | Promise<void>
 }
 
-const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
-  pause: {
-    label: '일시정지',
-    title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다',
-    icon: Pause,
-  },
-  resume: {
-    label: '재개',
-    title: '재개: 일시정지된 keeper 를 다시 실행합니다',
-    icon: Play,
-  },
-  wakeup: {
-    label: '깨우기',
-    title: '깨우기: 다음 turn 을 즉시 시도합니다',
-    icon: RotateCcw,
-  },
-  boot: {
-    label: '기동',
-    title: '기동: offline keeper 를 다시 시작합니다',
-    icon: Play,
-  },
-  shutdown: {
-    label: '종료',
-    title: '종료: keeper 를 완전 종료합니다',
-    icon: Square,
-    danger: true,
-  },
-}
-
 const COMMAND_GLYPHS: Partial<Record<WorkspaceCommandId, string>> = {
   pause: 'Ⅱ',
   resume: '▶',
   wakeup: '↻',
-  boot: '▶',
+  boot: '⏻',
   shutdown: '■',
   turn: '⌕',
   artifacts: '▣',
@@ -111,7 +81,7 @@ function lifecycleCommands(keeper: Keeper): WorkspaceCommand[] {
   if (visibility.canShutdown) keys.push('shutdown')
 
   return keys.map(key => {
-    const copy = LIFECYCLE_COPY[key]
+    const copy = KEEPER_ACTION_LABELS[key]
     return {
       id: key,
       label: copy.label,
@@ -173,11 +143,11 @@ function workspaceUtilityCommands({
 }
 
 function workspaceCommandGroup(command: WorkspaceCommand): string {
-  return command.id in LIFECYCLE_COPY ? '명령' : '이동'
+  return command.id in KEEPER_ACTION_LABELS ? '명령' : '이동'
 }
 
 function isLifecycleWorkspaceCommand(command: WorkspaceCommand): boolean {
-  return command.id in LIFECYCLE_COPY
+  return command.id in KEEPER_ACTION_LABELS
 }
 
 function WorkspaceCommandButtons({
@@ -281,26 +251,36 @@ function WorkspaceCommandButtons({
     `
   }
 
+  const renderIcon = (command: WorkspaceCommand): VNode => {
+    const Icon = command.icon
+    return html`
+      <button
+        key=${command.id}
+        type="button"
+        class=${`kw-chat-command-icon${command.danger ? ' danger' : ''}${command.active ? ' active' : ''} v2-monitoring-action`}
+        aria-label=${command.label}
+        aria-pressed=${command.active ? 'true' : undefined}
+        title=${command.title}
+        disabled=${isLifecycleWorkspaceCommand(command) && busyAction !== null}
+        onClick=${() => { void run(command) }}
+        data-testid=${`kw-chat-command-${command.id}`}
+      >
+        <${Icon} size=${14} aria-hidden="true" />
+      </button>
+    `
+  }
+
+  // Lifecycle (명령) and navigation (이동) commands render as two visually
+  // separated clusters — one flat row of 7 look-alike icons was unreadable.
+  const lifecycle = commands.filter(isLifecycleWorkspaceCommand)
+  const utility = commands.filter(command => !isLifecycleWorkspaceCommand(command))
   return html`
     <div class="kw-chat-command-icons" data-testid="kw-chat-command-icons">
-      ${commands.map(command => {
-        const Icon = command.icon
-        return html`
-          <button
-            key=${command.id}
-            type="button"
-            class=${`kw-chat-command-icon${command.danger ? ' danger' : ''}${command.active ? ' active' : ''} v2-monitoring-action`}
-            aria-label=${command.label}
-            aria-pressed=${command.active ? 'true' : undefined}
-            title=${command.title}
-            disabled=${isLifecycleWorkspaceCommand(command) && busyAction !== null}
-            onClick=${() => { void run(command) }}
-            data-testid=${`kw-chat-command-${command.id}`}
-          >
-            <${Icon} size=${14} aria-hidden="true" />
-          </button>
-        `
-      })}
+      ${lifecycle.map(renderIcon)}
+      ${lifecycle.length > 0 && utility.length > 0
+        ? html`<span class="kw-chat-command-sep" role="separator" aria-orientation="vertical"></span>`
+        : null}
+      ${utility.map(renderIcon)}
     </div>
   `
 }
@@ -331,6 +311,7 @@ function ChatHeader({
   const tone = keeperStatusTone(keeper)
   const pill = statePillTone(tone)
   const live = phasePulse(keeper.lifecycle_phase)
+  const pendingApprovalCount = keeperPendingApprovals(keeper.name).length
 
   // Single-row header: identity + status + actions only. Runtime / model /
   // throughput / scope live in the context rail (ThroughputSection) — the
@@ -355,6 +336,9 @@ function ChatHeader({
       <div class="kw-chat-id">
         <div class="kw-chat-name-row">
           <h2 class="kw-chat-name">${keeper.koreanName ?? keeper.name}</h2>
+          ${pendingApprovalCount > 0
+            ? html`<${Pill} tone="warn" dot="warn" title=${`결재 대기 ${pendingApprovalCount}건`}>${pendingApprovalCount}</${Pill}>`
+            : null}
           <span class=${`kw-state-pill ${pill}`} title=${keeperDisplayStatus(keeper)}>
             <${StatusDot} tone=${tone} pulse=${live} />${keeperPhaseLabel(keeper)}
           </span>
@@ -431,26 +415,53 @@ function TurnInspectorDrawer({
 // top of the conversation so an operator who arrives via "대화에서 검토" sees the
 // keeper is awaiting a decision. Read-only display + a link back to the approvals
 // queue (the single act-point); no approve/reject action here by design.
+// Pending approval queue scoped to this keeper. Reads governance
+// approval_queue (the HITL SSOT) directly instead of keeper.trust.
+// approval_state, which is a separate payload field and diverges from the
+// queue — when it is empty while approval_queue has items, the cue stayed
+// blank and the operator saw no HITL signal inside the chat surface.
+function keeperPendingApprovals(keeperName: string) {
+  const queue = governanceData.value?.approval_queue ?? []
+  return queue.filter((a) => a.keeper_name === keeperName)
+}
+
 function PendingApprovalCue({ keeper }: { keeper: Keeper }): VNode | null {
-  const pending = keeper.trust?.approval_state?.pending_first
-  const id = pending?.id?.trim()
-  if (!id) return null
-  const tool = pending?.tool_name?.trim()
+  const pending = keeperPendingApprovals(keeper.name)
+  if (pending.length === 0) return null
+  const first = pending[0]
+  if (!first) return null
+  const rest = pending.length - 1
+  const tool = first.tool_name?.trim() ?? ''
+  const resolve = (decision: 'approve' | 'reject') => {
+    resolveGovernanceApproval(first.id, decision).catch(() => {})
+  }
   return html`
     <div
       class="kw-chat-pending-cue flex items-center gap-2 px-4 py-2 text-xs text-[var(--color-fg-secondary)]"
       role="status"
       data-testid="keeper-pending-approval-cue"
     >
-      <${Pill} tone="warn" dot="warn">승인 대기</${Pill}>
-      <span>이 keeper는 결재 대기 중입니다${tool ? ` · ${tool}` : ''}</span>
+      <${Pill} tone="warn" dot="warn">승인 대기 ${pending.length}</${Pill}>
+      <span>${tool || '결재 요청'}${rest > 0 ? ` 외 ${rest}건` : ''}</span>
       <span class="flex-1"></span>
       <button
         type="button"
         class="kw-act v2-monitoring-action"
+        onClick=${() => resolve('approve')}
+        title="이 요청을 승인합니다"
+      >승인</button>
+      <button
+        type="button"
+        class="kw-act v2-monitoring-action"
+        onClick=${() => resolve('reject')}
+        title="이 요청을 거부합니다"
+      >거부</button>
+      <button
+        type="button"
+        class="kw-act v2-monitoring-action"
         onClick=${() => navigate('approvals')}
-        title="결재 큐에서 이 요청을 승인·거부합니다"
-      >결재 큐에서 처리 →</button>
+        title="결재 큐에서 모든 요청을 봅니다"
+      >결재 큐 →</button>
     </div>
   `
 }

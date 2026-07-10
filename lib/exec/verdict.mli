@@ -48,6 +48,14 @@ type deny_reason =
           catastrophic floor — the typed replacement for the legacy
           [sql_destructive] substring patterns (RFC
           eliminate-substring-destructive-classifier §3-A). *)
+  | Destructive_repo_hosting_cli of Exec_program.t
+      (** An irreversible repository-hosting CLI operation (for example
+          [gh repo delete] or [gh api -X DELETE]). Part of the
+          trust-independent catastrophic floor so autonomous keepers cannot
+          mutate remote repository state irreversibly through the generic exec
+          surface. Reversible durable-remote mutations such as [gh repo create]
+          and ordinary [gh pr merge] are represented by [Ask] through the gh
+          capability axis instead; admin-bypass merge is [Policy_deny]. *)
   | Catastrophic_program of Exec_program.t
       (** A binary that is never legitimate for a keeper regardless of its
           arguments (e.g. the filesystem-format binary, or system-power

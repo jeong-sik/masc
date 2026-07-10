@@ -31,6 +31,15 @@ type store_error =
 
 val store_error_to_string : store_error -> string
 
+type read_error =
+  | Corrupt_read_ledger of
+      { primary_err : string
+      ; recovery_err : string option
+      }
+      (** Read-only access found a present-but-unparseable ledger. *)
+
+val read_error_to_string : read_error -> string
+
 (** Outcome of loading the durable ledger. [Fresh] is a legitimately absent file
     (empty store); [Corrupt] is a present-but-unparseable file that must not be
     silently defaulted or overwritten. *)
@@ -61,6 +70,11 @@ val load : Workspace_utils.config -> load_outcome
     raises {!Corrupt_ledger_exn} for a corrupt one. Never writes to disk. *)
 val read_state : Workspace_utils.config -> state
 
+(** Result-returning read-only snapshot. Returns the empty [default_state] for a
+    [Fresh] store and [Error (Corrupt_read_ledger _)] for a corrupt one. Never
+    writes to disk. *)
+val read_state_result : Workspace_utils.config -> (state, read_error) result
+
 val default_state : unit -> state
 val state_to_yojson : state -> Yojson.Safe.t
 val state_of_yojson : Yojson.Safe.t -> (state, string) result
@@ -87,6 +101,17 @@ val cancel_request :
   Workspace_utils.config ->
   schedule_id:string ->
   (Schedule_domain.schedule_request, store_error) result
+
+val update_request :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  due_at:float ->
+  expires_at:float option ->
+  payload:Schedule_domain.payload ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Replaces [due_at], [expires_at], and [payload] of a pending or scheduled
+    request. Returns [Invalid_status_transition] for due, terminal, or [Running]
+    requests. *)
 
 val refresh_due :
   Workspace_utils.config ->
@@ -151,3 +176,9 @@ val has_current_approved_grant :
     request's current [schedule_id], payload digest, [risk_class], and [due_at].
     Recurring requests therefore need fresh approval for each new occurrence
     when they require a separate human grant. *)
+
+val prune_completed :
+  Workspace_utils.config ->
+  (state * int, store_error) result
+(** Deletes all terminal (succeeded, failed, rejected, cancelled, expired) schedule requests
+    and their associated execution records and grants. *)

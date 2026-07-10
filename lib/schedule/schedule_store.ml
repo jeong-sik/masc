@@ -23,6 +23,12 @@ type store_error =
       ; recovery_err : string option
       }
 
+type read_error =
+  | Corrupt_read_ledger of
+      { primary_err : string
+      ; recovery_err : string option
+      }
+
 (* RFC-0234: a parsed-or-absent ledger load. [Fresh] = the file is legitimately
    absent (empty store, [default_state] is correct). [Corrupt] = the file is
    present but neither it nor the [.last-good] recovery file parses; callers must
@@ -76,6 +82,11 @@ let store_error_to_string = function
     "grant validation failed: " ^ Schedule_domain.grant_error_to_string err
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
   | Corrupt_ledger { primary_err; recovery_err } ->
+    corrupt_message ~primary_err ~recovery_err
+;;
+
+let read_error_to_string = function
+  | Corrupt_read_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
 ;;
 
@@ -208,11 +219,18 @@ let load config : load_outcome =
    empty default (correct for an uninitialised store); [Corrupt] raises rather
    than returning an empty list, so a corrupt ledger is operator-visible instead
    of masquerading as "no schedules". Does not write to disk. *)
-let read_state config =
+let read_state_result config =
   match load config with
-  | Loaded state -> state
-  | Fresh -> default_state ()
+  | Loaded state -> Ok state
+  | Fresh -> Ok (default_state ())
   | Corrupt { primary_err; recovery_err } ->
+    Error (Corrupt_read_ledger { primary_err; recovery_err })
+;;
+
+let read_state config =
+  match read_state_result config with
+  | Ok state -> state
+  | Error (Corrupt_read_ledger { primary_err; recovery_err }) ->
     raise (Corrupt_ledger_exn { primary_err; recovery_err })
 ;;
 
@@ -458,6 +476,36 @@ let cancel_request config ~schedule_id =
         Ok updated_request)
 ;;
 
+let update_request config ~schedule_id ~due_at ~expires_at ~payload =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some request ->
+      if Schedule_domain.is_terminal request.status
+         || request.status = Running
+         || request.status = Due
+      then
+        Error
+          (Invalid_status_transition
+             "only pending or scheduled requests can be updated")
+      else
+        let updated_request =
+          { request with
+            Schedule_domain.due_at
+          ; expires_at
+          ; payload
+          }
+        in
+        let schedules = replace_schedule state.schedules updated_request in
+        let next_state =
+          bump_state state ~schedules ~grants:state.grants
+            ~executions:state.executions
+        in
+        let* () = write_state config next_state in
+        Ok updated_request)
+;;
+
 let refresh_due config ~now =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
@@ -607,6 +655,40 @@ let fail_due_candidate config ~now ~schedule_id ~error =
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
         let* () = write_state config next_state in
         Ok updated)
+;;
+
+let prune_completed config =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    let before_count = List.length state.schedules in
+    let schedules =
+      List.filter
+        (fun (request : schedule_request) ->
+           match request.status with
+           | Pending_approval | Scheduled | Due | Running -> true
+           | Succeeded | Failed | Rejected | Cancelled | Expired -> false)
+        state.schedules
+    in
+    let after_count = List.length schedules in
+    let pruned_count = before_count - after_count in
+    let remaining_ids =
+      List.map (fun (r : schedule_request) -> r.schedule_id) schedules
+    in
+    let grants =
+      List.filter
+        (fun (grant : execution_grant) ->
+           List.mem grant.schedule_id remaining_ids)
+        state.grants
+    in
+    let executions =
+      List.filter
+        (fun (exec : execution_record) ->
+           List.mem exec.schedule_id remaining_ids)
+        state.executions
+    in
+    let next_state = bump_state state ~schedules ~grants ~executions in
+    let* () = write_state config next_state in
+    Ok (next_state, pruned_count))
 ;;
 
 let due_execution_candidates state =

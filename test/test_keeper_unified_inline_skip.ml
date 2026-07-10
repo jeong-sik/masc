@@ -71,6 +71,39 @@ let test_normalize_override_passthrough () =
   | Error e -> fail ("unexpected error: " ^ e)
 ;;
 
+let contains_substring haystack needle =
+  let hl = String.length haystack and nl = String.length needle in
+  let rec loop i = i + nl <= hl && (String.sub haystack i nl = needle || loop (i + 1)) in
+  nl = 0 || loop 0
+;;
+
+let test_normalize_surfaces_reasoning_on_empty () =
+  (* Empty answer + reasoning: surface the model's reasoning, not just a tool
+     list, so an operator sees why no final reply was produced. *)
+  (match
+     KTR.normalize_response_text
+       ~text:""
+       ~tool_names:[ "masc_schedule_get" ]
+       ~reasoning:"The schedule is pending_approval; the user must approve it."
+       ()
+   with
+   | Ok text ->
+     check bool "surfaces reasoning" true
+       (contains_substring text "the user must approve it");
+     check bool "keeps tool note" true (contains_substring text "masc_schedule_get")
+   | Error e -> fail ("unexpected error: " ^ e));
+  (* Empty answer, no reasoning, tools: prior tool-list fallback is retained. *)
+  (match KTR.normalize_response_text ~text:"" ~tool_names:[ "tool_execute" ] () with
+   | Ok text ->
+     check bool "fallback placeholder retained" true
+       (contains_substring text "Completed without a textual reply")
+   | Error e -> fail ("unexpected error: " ^ e));
+  (* Empty answer, no reasoning, no tools: still an error. *)
+  match KTR.normalize_response_text ~text:"" ~tool_names:[] () with
+  | Ok _ -> fail "expected error for empty turn with no tools or reasoning"
+  | Error _ -> ()
+;;
+
 let () =
   run
     "keeper unified inline skip"
@@ -95,6 +128,10 @@ let () =
             "normalize override passthrough"
             `Quick
             test_normalize_override_passthrough
+        ; test_case
+            "normalize surfaces reasoning on empty answer"
+            `Quick
+            test_normalize_surfaces_reasoning_on_empty
         ] )
     ]
 ;;

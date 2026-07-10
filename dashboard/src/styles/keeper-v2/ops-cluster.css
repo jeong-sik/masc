@@ -18,6 +18,13 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  /* Allow the cluster to shrink below its content width. Between the mobile
+     breakpoint (≤900px, ops hidden) and a wide desktop, a verbose connection/
+     transport status string can push the whole top bar past the viewport; the
+     rightmost item (BuildIdentityBadge) then overflows and is clipped by
+     `.v2-app { overflow-x: hidden }`. min-width:0 lets the status chips below
+     ellipsize instead of shoving the badge off-canvas. */
+  min-width: 0;
 }
 
 /* Leaf chips whose root `.v2-shell-panel` is itself the visible chip
@@ -29,6 +36,17 @@
   font-size: var(--fs-11);
   letter-spacing: 0.04em;
   white-space: nowrap;
+  min-width: 0;
+}
+
+/* The status label truncates (full text stays in the component's title tooltip)
+   so a long "Client WS · open · N deltas / …" string yields space instead of
+   clipping the build badge. Only kicks in when the top bar is space-constrained;
+   at wide widths the flex item keeps its natural width. */
+.v2-top-ops > .v2-shell-panel .status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Root panels that only group a button (AuthStatus, BuildIdentityBadge,

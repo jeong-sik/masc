@@ -54,8 +54,62 @@ let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
   }
 ;;
 
+let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
+  Keeper_event_queue.stimulus
+  =
+  { post_id = "schedule-due:" ^ schedule_id
+  ; urgency = Keeper_event_queue.Immediate
+  ; arrived_at = 1234.5
+  ; payload =
+      Keeper_event_queue.Schedule_due
+        { schedule_id
+        ; due_at = 1200.0
+        ; payload_digest = "payload-digest"
+        ; title = Some "Wake"
+        ; message = "Scheduled lane wake"
+        }
+  }
+;;
+
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
+;;
+
+let result_count_by_label json label =
+  json
+  |> member "completion_contract_result_counts"
+  |> to_list
+  |> List.find_opt (fun item ->
+    match item |> member "result" with
+    | `String value -> String.equal value label
+    | _ -> false)
+;;
+
+let check_list_has_string label expected json =
+  check bool label true
+    (json
+     |> to_list
+     |> List.exists (fun item -> String.equal expected (to_string item)))
+;;
+
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+;;
+
+let event_queue_snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue.json"
 ;;
 
 let latest_row rows =
@@ -98,6 +152,77 @@ let test_event_queue_stimulus_and_turn_reaction () =
     "turn_started"
     "kind"
     (reaction_row |> member "reaction")
+;;
+
+let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "ledger-schedule-keeper" in
+  let stimulus = schedule_due_stimulus () in
+  let unrelated = schedule_due_stimulus ~schedule_id:"sched-ledger-other" () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    unrelated;
+  let stimulus_only =
+    Keeper_reaction_ledger.event_queue_reaction_evidence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  in
+  check bool "exact stimulus seen" true stimulus_only.stimulus_seen;
+  check bool "turn reaction absent" false stimulus_only.turn_started_seen;
+  check bool "event queue ack absent" false stimulus_only.event_queue_ack_seen;
+  check int "one exact row before reaction" 1 stimulus_only.matched_record_count;
+  Keeper_reaction_ledger.record_event_queue_reaction
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Turn_started
+    stimulus;
+  let reacted =
+    Keeper_reaction_ledger.event_queue_reaction_evidence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  in
+  check bool "exact stimulus still seen" true reacted.stimulus_seen;
+  check bool "turn reaction seen" true reacted.turn_started_seen;
+  check bool "event queue ack still absent" false reacted.event_queue_ack_seen;
+  check int "two exact rows after reaction" 2 reacted.matched_record_count;
+  Keeper_reaction_ledger.record_event_queue_reaction
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+    stimulus;
+  let acknowledged =
+    Keeper_reaction_ledger.event_queue_reaction_evidence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  in
+  check bool "event queue ack seen" true acknowledged.event_queue_ack_seen;
+  check int "three exact rows after ack" 3 acknowledged.matched_record_count;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "summary counts event queue ack" 1
+    (summary |> member "event_queue_ack_count" |> to_int);
+  check int "event queue ack is not unknown" 0
+    (summary |> member "unknown_reaction_count" |> to_int);
+  let missing =
+    Keeper_reaction_ledger.event_queue_reaction_evidence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"stimulus:missing"
+  in
+  check bool "missing stimulus absent" false missing.stimulus_seen;
+  check bool "missing reaction absent" false missing.turn_started_seen;
+  check bool "missing ack absent" false missing.event_queue_ack_seen;
+  check int "missing exact rows" 0 missing.matched_record_count
 ;;
 
 let test_cursor_ack_is_replayable_state_entry () =
@@ -165,7 +290,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
     (reaction |> member "receipt")
 ;;
 
-let test_summary_counts_completion_contract_attention_receipts () =
+let test_summary_observes_passive_only_without_attention () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
   let keeper_name = "contract-attention-keeper" in
@@ -209,21 +334,25 @@ let test_summary_counts_completion_contract_attention_receipts () =
     ~current_task_id:"task-satisfied"
     ~completion_contract_result:"satisfied_execution"
     ();
+  record
+    ~trace_id:"trace-violated"
+    ~current_task_id:"task-violated"
+    ~completion_contract_result:"violated"
+    ();
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
   check_member_string "contract summary remains mechanically ok" "ok" "status" summary;
-  check int "completion contract attention count" 2
+  check int "completion contract attention count" 1
     (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "passive-only count" 2
+  check int "passive-only observation count" 2
     (summary |> member "completion_contract_passive_only_count" |> to_int);
-  check string "latest contract attention" "passive_only"
+  check string "latest contract attention" "violated"
     (summary |> member "latest_completion_contract_attention" |> to_string);
   let result_count =
-    summary
-    |> member "completion_contract_result_counts"
-    |> to_list
-    |> List.hd
+    match result_count_by_label summary "passive_only" with
+    | Some value -> value
+    | None -> fail "passive_only observation count missing"
   in
   check_member_string "contract result label" "passive_only" "result" result_count;
   check int "contract result count" 2 (result_count |> member "count" |> to_int);
@@ -233,9 +362,9 @@ let test_summary_counts_completion_contract_attention_receipts () =
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
-  check int "fleet contract attention count" 2
+  check int "fleet contract attention count" 1
     (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet passive-only count" 2
+  check int "fleet passive-only observation count" 2
     (fleet |> member "completion_contract_passive_only_count" |> to_int);
   let keeper_attention =
     fleet
@@ -248,7 +377,7 @@ let test_summary_counts_completion_contract_attention_receipts () =
     keeper_name
     "keeper_name"
     keeper_attention;
-  check int "fleet keeper contract attention count" 2
+  check int "fleet keeper contract attention count" 1
     (keeper_attention |> member "completion_contract_attention_count" |> to_int)
 ;;
 
@@ -348,7 +477,7 @@ let test_completion_contract_result_canonical_roundtrip () =
     ; Receipt.Contract_no_capable_provider, true
     ; Receipt.Contract_claim_only_after_owned_task, true
     ; Receipt.Contract_needs_execution_progress, true
-    ; Receipt.Contract_passive_only, true
+    ; Receipt.Contract_passive_only, false
     ; Receipt.Contract_satisfied_completion, false
     ; Receipt.Contract_satisfied_execution, false
     ]
@@ -379,7 +508,7 @@ let test_completion_contract_result_canonical_roundtrip () =
      |> Option.map Receipt.completion_contract_result_to_string)
 ;;
 
-let test_summary_ignores_passive_only_without_work_scope () =
+let test_summary_observes_passive_only_without_work_scope_attention () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
   let keeper_name = "passive-no-work-keeper" in
@@ -410,7 +539,7 @@ let test_summary_ignores_passive_only_without_work_scope () =
   in
   check int "passive-only no-work attention not counted" 0
     (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "passive-only no-work passive count not counted" 0
+  check int "passive-only no-work observation counted" 1
     (summary |> member "completion_contract_passive_only_count" |> to_int);
   check
     string
@@ -425,7 +554,7 @@ let test_summary_ignores_passive_only_without_work_scope () =
   in
   check int "fleet passive-only no-work attention not counted" 0
     (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet passive-only no-work passive count not counted" 0
+  check int "fleet passive-only no-work observation counted" 1
     (fleet |> member "completion_contract_passive_only_count" |> to_int)
 ;;
 
@@ -707,7 +836,7 @@ let test_no_progress_recovery_cursor_ack_does_not_clear_pending () =
     (cursor_only_summary |> member "cursor_swept_stimulus_count" |> to_int)
 ;;
 
-let test_summary_links_passive_only_attention_to_pending_recovery () =
+let test_summary_links_passive_only_observation_to_pending_recovery () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
   let keeper_name = "passive-recovery-keeper" in
@@ -740,8 +869,10 @@ let test_summary_links_passive_only_attention_to_pending_recovery () =
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
-  check int "passive-only attention counted" 1
+  check int "passive-only observation counted" 1
     (summary |> member "completion_contract_passive_only_count" |> to_int);
+  check int "passive-only does not count as attention" 0
+    (summary |> member "completion_contract_attention_count" |> to_int);
   check int "pending no-progress recovery counted" 1
     (summary |> member "pending_no_progress_recovery_count" |> to_int);
   let fleet =
@@ -750,8 +881,10 @@ let test_summary_links_passive_only_attention_to_pending_recovery () =
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
-  check int "fleet passive-only attention counted" 1
+  check int "fleet passive-only observation counted" 1
     (fleet |> member "completion_contract_passive_only_count" |> to_int);
+  check int "fleet passive-only does not count as attention" 0
+    (fleet |> member "completion_contract_attention_count" |> to_int);
   check int "fleet pending no-progress recovery counted" 1
     (fleet |> member "pending_no_progress_recovery_count" |> to_int);
   let recovery_keeper =
@@ -767,6 +900,319 @@ let test_summary_links_passive_only_attention_to_pending_recovery () =
     recovery_keeper;
   check int "fleet keeper pending recovery count" 1
     (recovery_keeper |> member "pending_no_progress_recovery_count" |> to_int)
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_backlog () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "durable-backlog-keeper" in
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (board_stimulus ~post_id:"post-live-backlog" ());
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (no_progress_recovery_stimulus ~keeper_name ());
+  Keeper_event_queue_persistence.record_inflight
+    ~base_path
+    ~keeper_name
+    [ fusion_completed_stimulus () ];
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string "durable queue backlog degrades fleet summary" "degraded" "status" fleet;
+  check_list_has_string
+    "durable queue stale reason is explicit"
+    "durable_event_queue_stale"
+    (fleet |> member "status_reasons");
+  check bool "durable queue backlog requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "ledger pending rows stay independent" 0
+    (fleet |> member "pending_stimulus_count" |> to_int);
+  check int "durable queue backlog counted" 3
+    (fleet |> member "durable_event_queue_count" |> to_int);
+  check int "durable queue pending backlog counted" 2
+    (fleet |> member "durable_event_queue_pending_count" |> to_int);
+  check int "durable queue inflight backlog counted" 1
+    (fleet |> member "durable_event_queue_inflight_count" |> to_int);
+  check (float 0.001) "default durable queue stale threshold preserves prior behavior"
+    0.0
+    (fleet |> member "durable_event_queue_stale_after_sec" |> to_float);
+  check int "durable queue stale backlog counted" 3
+    (fleet |> member "durable_event_queue_stale_count" |> to_int);
+  check int "durable queue stale keeper counted" 1
+    (fleet |> member "durable_event_queue_stale_keeper_count" |> to_int);
+  let keeper_queue =
+    fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_queue;
+  check int "keeper durable queue backlog counted" 3
+    (keeper_queue |> member "durable_event_queue_count" |> to_int);
+  check int "keeper durable queue pending backlog counted" 2
+    (keeper_queue |> member "durable_event_queue_pending_count" |> to_int);
+  check int "keeper durable queue inflight backlog counted" 1
+    (keeper_queue |> member "durable_event_queue_inflight_count" |> to_int);
+  check int "keeper immediate durable queue backlog counted" 2
+    (keeper_queue |> member "immediate_count" |> to_int);
+  check bool "keeper durable queue is stale by default" true
+    (keeper_queue |> member "stale" |> to_bool);
+  check int "stale keeper list mirrors stale backlog" 1
+    (fleet |> member "durable_event_queue_stale_by_keeper" |> to_list |> List.length);
+  let payload_counts =
+    fleet |> member "durable_event_queue_payload_counts" |> to_list
+  in
+  check bool "board_signal durable payload count is surfaced" true
+    (List.exists
+       (fun json ->
+         String.equal (json |> member "payload_kind" |> to_string) "board_signal"
+         && json |> member "count" |> to_int = 1)
+       payload_counts);
+  check bool "no_progress_recovery durable payload count is surfaced" true
+    (List.exists
+       (fun json ->
+         String.equal
+           (json |> member "payload_kind" |> to_string)
+           "no_progress_recovery"
+         && json |> member "count" |> to_int = 1)
+       payload_counts);
+  check bool "inflight fusion_completed durable payload count is surfaced" true
+    (List.exists
+       (fun json ->
+         String.equal (json |> member "payload_kind" |> to_string) "fusion_completed"
+         && json |> member "count" |> to_int = 1)
+       payload_counts)
+;;
+
+let test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "durable-only-keeper" in
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (board_stimulus ~post_id:"post-durable-only" ());
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable-only queue degrades fleet summary"
+    "degraded"
+    "status"
+    fleet;
+  check int "durable-only keeper is included in fleet count" 1
+    (fleet |> member "keeper_count" |> to_int);
+  check_list_has_string
+    "durable-only keeper name is discovered"
+    keeper_name
+    (fleet |> member "keeper_names");
+  check int "durable-only discovery counted" 1
+    (fleet |> member "durable_event_queue_discovered_keeper_count" |> to_int);
+  check_list_has_string
+    "durable-only discovery names keeper"
+    keeper_name
+    (fleet |> member "durable_event_queue_discovered_keeper_names");
+  check bool "durable-only discovery has no read error" true
+    (match fleet |> member "durable_event_queue_discovery_error" with
+     | `Null -> true
+     | _ -> false);
+  check int "durable-only queue backlog counted" 1
+    (fleet |> member "durable_event_queue_count" |> to_int);
+  let keeper_queue =
+    fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable-only queue keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_queue;
+  check int "durable-only keeper queue backlog counted" 1
+    (keeper_queue |> member "durable_event_queue_count" |> to_int)
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
+  with_temp_base @@ fun base_path ->
+  let invalid_keeper_name = "invalid keeper name" in
+  let invalid_keeper_dir =
+    Filename.concat
+      (Common.keepers_runtime_dir_of_base ~base_path)
+      invalid_keeper_name
+  in
+  mkdir_p invalid_keeper_dir;
+  write_file
+    (Filename.concat invalid_keeper_dir "event-queue.json")
+    (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable queue discovery error makes fleet status unknown"
+    "unknown"
+    "status"
+    fleet;
+  check_list_has_string
+    "durable queue discovery error reason is explicit"
+    "durable_event_queue_discovery_error"
+    (fleet |> member "status_reasons");
+  check bool "durable queue discovery error requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "durable queue discovery error counted" 1
+    (fleet |> member "durable_event_queue_discovery_error_count" |> to_int);
+  check bool "durable queue discovery error message is surfaced" true
+    (match fleet |> member "durable_event_queue_discovery_error" with
+     | `String value -> not (String.equal value "")
+     | _ -> false);
+  check int "invalid durable queue keeper is not accepted as a keeper" 0
+    (fleet |> member "keeper_count" |> to_int)
+;;
+
+let test_fleet_summary_allows_nonstale_durable_event_queue_backlog () =
+  if Sys.getenv_opt "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" <> None then
+    skip ()
+  else
+  Fun.protect
+    ~finally:(fun () -> Config_boot_overrides.reset_for_tests ())
+    (fun () ->
+       Config_boot_overrides.reset_for_tests ();
+       Config_boot_overrides.set "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" "1000000000000.0";
+       with_temp_base @@ fun base_path ->
+       let keeper_name = "fresh-durable-backlog-keeper" in
+       Keeper_registry_event_queue.enqueue
+         ~base_path
+         keeper_name
+         (board_stimulus ~post_id:"post-fresh-backlog" ());
+       let fleet =
+         Keeper_reaction_ledger.fleet_summary_json
+           ~base_path
+           ~keeper_names:[ keeper_name ]
+           ~limit_per_keeper:10
+       in
+       check_member_string
+         "fresh durable backlog remains visible but not degraded"
+         "ok"
+         "status"
+         fleet;
+       check bool "fresh durable backlog does not require operator action" false
+         (fleet |> member "operator_action_required" |> to_bool);
+       check int "fresh durable queue backlog counted" 1
+         (fleet |> member "durable_event_queue_count" |> to_int);
+       check int "fresh durable queue stale count stays zero" 0
+         (fleet |> member "durable_event_queue_stale_count" |> to_int);
+       check int "fresh durable queue stale keeper count stays zero" 0
+         (fleet |> member "durable_event_queue_stale_keeper_count" |> to_int);
+       check (float 0.001) "durable stale threshold comes from boot override"
+         1000000000000.0
+         (fleet |> member "durable_event_queue_stale_after_sec" |> to_float);
+       let keeper_queue =
+         fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
+       in
+       check bool "fresh durable queue is not stale" false
+         (keeper_queue |> member "stale" |> to_bool);
+       check int "fresh durable stale keeper list is empty" 0
+         (fleet |> member "durable_event_queue_stale_by_keeper" |> to_list |> List.length))
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_read_error () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "broken-durable-queue-keeper" in
+  let path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname path);
+  write_file path "{not-json";
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable queue read error makes fleet status unknown"
+    "unknown"
+    "status"
+    fleet;
+  check_list_has_string
+    "durable queue read error reason is explicit"
+    "durable_event_queue_read_error"
+    (fleet |> member "status_reasons");
+  check bool "durable queue read error requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "durable queue read error counted" 1
+    (fleet |> member "durable_event_queue_read_error_count" |> to_int);
+  let keeper_error =
+    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue read error keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_error;
+  check int "keeper durable queue read error counted" 1
+    (keeper_error |> member "read_error_count" |> to_int);
+  let read_error =
+    keeper_error |> member "read_errors" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue read error kind"
+    "read_failed"
+    "kind"
+    read_error;
+  check_member_string "durable queue read error path" path "path" read_error
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "parse-broken-durable-queue-keeper" in
+  let path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname path);
+  write_file path {|{"schema":"keeper.event_queue.v1","items":{}}|};
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable queue parse error makes fleet status unknown"
+    "unknown"
+    "status"
+    fleet;
+  check_list_has_string
+    "durable queue parse error reason is explicit"
+    "durable_event_queue_read_error"
+    (fleet |> member "status_reasons");
+  check bool "durable queue parse error requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "durable queue parse error counted" 1
+    (fleet |> member "durable_event_queue_read_error_count" |> to_int);
+  let keeper_error =
+    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue parse error keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_error;
+  check int "keeper durable queue parse error counted" 1
+    (keeper_error |> member "read_error_count" |> to_int);
+  let read_error =
+    keeper_error |> member "read_errors" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue parse error kind"
+    "parse_failed"
+    "kind"
+    read_error;
+  check_member_string "durable queue parse error path" path "path" read_error
 ;;
 
 let test_unknown_reaction_degrades_summary () =
@@ -842,6 +1288,10 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.No_progress_recovery
     ; Keeper_reaction_ledger.Fusion_completed
     ; Keeper_reaction_ledger.Bg_completed
+    ; Keeper_reaction_ledger.Schedule_due
+    ; Keeper_reaction_ledger.Connector_attention
+    ; Keeper_reaction_ledger.Hitl_resolved
+    ; Keeper_reaction_ledger.Goal_verification_failed
     ];
   check bool "unknown stimulus kind string is None" true
     (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
@@ -862,6 +1312,7 @@ let test_reaction_kind_string_roundtrip () =
     (fun k ->
       check bool "reaction_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Turn_started
+    ; Keeper_reaction_ledger.Event_queue_ack
     ; Keeper_reaction_ledger.Execution_receipt
     ; Keeper_reaction_ledger.Terminal_reason
     ; Keeper_reaction_ledger.Cursor_ack
@@ -882,6 +1333,10 @@ let () =
             `Quick
             test_event_queue_stimulus_and_turn_reaction
         ; test_case
+            "event queue reaction evidence matches exact stimulus id"
+            `Quick
+            test_event_queue_reaction_evidence_matches_exact_stimulus_id
+        ; test_case
             "cursor ack is replayable state entry"
             `Quick
             test_cursor_ack_is_replayable_state_entry
@@ -890,9 +1345,9 @@ let () =
             `Quick
             test_execution_receipt_links_to_reaction_ledger
         ; test_case
-            "summary counts completion-contract attention receipts"
+            "summary observes passive-only without attention"
             `Quick
-            test_summary_counts_completion_contract_attention_receipts
+            test_summary_observes_passive_only_without_attention
         ; test_case
             "summary degrades unknown completion-contract result"
             `Quick
@@ -902,9 +1357,9 @@ let () =
             `Quick
             test_completion_contract_result_canonical_roundtrip
         ; test_case
-            "summary ignores passive-only receipts without work scope"
+            "summary observes passive-only without work-scope attention"
             `Quick
-            test_summary_ignores_passive_only_without_work_scope
+            test_summary_observes_passive_only_without_work_scope_attention
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick
@@ -934,9 +1389,33 @@ let () =
             `Quick
             test_no_progress_recovery_cursor_ack_does_not_clear_pending
         ; test_case
-            "summary links passive-only attention to pending recovery"
+            "summary links passive-only observation to pending recovery"
             `Quick
-            test_summary_links_passive_only_attention_to_pending_recovery
+            test_summary_links_passive_only_observation_to_pending_recovery
+        ; test_case
+            "fleet summary surfaces durable event queue backlog"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_backlog
+        ; test_case
+            "fleet summary discovers durable event queue backlog without meta name"
+            `Quick
+            test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name
+        ; test_case
+            "fleet summary surfaces durable event queue discovery errors"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_discovery_error
+        ; test_case
+            "fleet summary separates fresh durable event queue backlog from stale"
+            `Quick
+            test_fleet_summary_allows_nonstale_durable_event_queue_backlog
+        ; test_case
+            "fleet summary surfaces durable event queue read errors"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_read_error
+        ; test_case
+            "fleet summary surfaces durable event queue parse errors"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_parse_error
         ; test_case
             "unknown reaction degrades summary"
             `Quick

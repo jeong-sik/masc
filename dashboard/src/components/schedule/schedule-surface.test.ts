@@ -1,13 +1,19 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardScheduledAutomation } from '../../api'
+import type {
+  DashboardKeeperBackground,
+  DashboardKeeperWaitingInventory,
+  DashboardScheduledAutomation,
+} from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
   tool_inventory: { tools: unknown[] }
   tool_usage: Record<string, unknown>
   scheduled_automation?: DashboardScheduledAutomation
+  keeper_waiting_inventory?: DashboardKeeperWaitingInventory
+  keeper_background?: DashboardKeeperBackground
 }
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
+  pruneSchedules: vi.fn(),
 }))
 
 vi.mock('../tools/tool-state', () => ({
@@ -22,6 +29,10 @@ vi.mock('../tools/tool-state', () => ({
   toolsData: mocks.toolsData,
   toolsError: mocks.toolsError,
   toolsLoading: mocks.toolsLoading,
+}))
+
+vi.mock('../../api/dashboard-governance', () => ({
+  pruneSchedules: mocks.pruneSchedules,
 }))
 
 import { ScheduleSurface } from './schedule-surface'
@@ -81,6 +92,79 @@ function sampleAutomation(): DashboardScheduledAutomation {
   }
 }
 
+function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
+  return {
+    schema: 'masc.dashboard.keeper_waiting_inventory.v1',
+    source: 'server_keeper_waiting_inventory',
+    keeper_count_known: true,
+    keeper_count: 1,
+    waiting_keeper_count: 1,
+    row_count: 1,
+    global_row_count: 1,
+    global_pending_confirm_count: 0,
+    source_counts: {
+      schedule_waiting: 1,
+      hitl_pending: 1,
+    },
+    keepers: [
+      {
+        keeper_name: 'sangsu',
+        state: 'waiting',
+        waiting_count: 1,
+        sources: { hitl_pending: 1 },
+        waiting_on: [
+          {
+            keeper_name: 'sangsu',
+            source: 'hitl_pending',
+            waiting_on: 'schedule approval',
+            since_iso: '2026-07-04T00:00:00Z',
+            next_action: 'operator_resolve_hitl',
+          },
+        ],
+      },
+    ],
+    global_waiting_on: [
+      {
+        source: 'schedule_waiting',
+        waiting_on: 'masc.board_post',
+        due_at_iso: '2026-07-04T01:00:00Z',
+        next_action: 'schedule_runner_dispatch',
+      },
+    ],
+  }
+}
+
+function sampleKeeperBackground(): DashboardKeeperBackground {
+  return {
+    schema: 'masc.dashboard.keeper_background.v1',
+    source: 'server_keeper_background',
+    keeper_count: 1,
+    recurring_keeper_count: 1,
+    recurring_count: 1,
+    keepers: [
+      {
+        keeper_name: 'sangsu',
+        loop: { phase: 'running', restart_count: 0, started_at_iso: '2026-07-08T00:00:00Z' },
+        recurring_count: 1,
+        recurring: [
+          {
+            id: 'loop-1-1',
+            label: 'heartbeat-check',
+            action_kind: 'broadcast',
+            interval_sec: 30,
+            enabled: true,
+            run_count: 3,
+            failure_count: 0,
+            max_failures: 3,
+            last_run_at_iso: '2026-07-08T00:01:00Z',
+            next_run_at_iso: '2026-07-08T00:01:30Z',
+          },
+        ],
+      },
+    ],
+  }
+}
+
 async function flush(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -95,6 +179,7 @@ describe('ScheduleSurface', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     mocks.loadTools.mockClear()
+    mocks.pruneSchedules.mockReset()
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
     mocks.toolsError.value = null
@@ -115,8 +200,11 @@ describe('ScheduleSurface', () => {
       .toContain('관측 전용')
     expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
       .toContain('keeper turn을 자동 구동하지 않습니다')
-    expect(container.textContent).toContain('예약 자동화')
-    expect(container.textContent).toContain('예약 자동화 projection 없음')
+    // Calendar is the default view; with no projection it renders the empty
+    // agenda/polling states rather than the diagnostic panel's placeholder.
+    expect(container.querySelector('[data-testid="schedule-viewbar"]')).not.toBeNull()
+    expect(container.textContent).toContain('다가오는 7일에 예정된 예약이 없습니다')
+    expect(container.textContent).toContain('활성 폴링 없음')
   })
 
   it('renders backed schedule summary and reuses read-only schedule cards', async () => {
@@ -125,6 +213,8 @@ describe('ScheduleSurface', () => {
       tool_inventory: { tools: [] },
       tool_usage: {},
       scheduled_automation: sampleAutomation(),
+      keeper_waiting_inventory: sampleWaitingInventory(),
+      keeper_background: sampleKeeperBackground(),
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -144,8 +234,28 @@ describe('ScheduleSurface', () => {
     expect(summary?.textContent).not.toContain('활성')
     expect(summary?.textContent).not.toContain('유효 도래')
     expect(summary?.textContent).not.toContain('승인 차단')
-    // The wake-signal feed header is renamed in v2.
+    // The diagnostic wake-signal feed lives in the 목록 (list) view; the surface
+    // now defaults to the 캘린더 view, so toggle before asserting the feed.
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
     expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
+    // The keeper-lane / background diagnostics are collapsed AND lazy-mounted by
+    // default; open them before asserting their content.
+    expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')).toBeNull()
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-diagnostics-toggle"]')?.click()
+    await flush()
+    expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
+      .toContain('Keeper Lanes · wake evidence')
+    expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
+      .toContain('sangsu')
+    expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
+      .toContain('masc.board_post')
+    // Keeper background panel renders as a sibling card on the same surface,
+    // reading data.keeper_background (recurring tasks + loop liveness).
+    expect(container.querySelector('[data-testid="schedule-keeper-background"]')?.textContent)
+      .toContain('Keeper Background · recurring tasks')
+    expect(container.querySelector('[data-testid="schedule-keeper-background"]')?.textContent)
+      .toContain('heartbeat-check')
     // REMOVED: '출처 <signal_source>' feed attribution line is not rendered on
     // the v2 surface (it is diagnostics-only); no equivalent element exists to
     // retarget, so this coverage is dropped rather than weakened.
@@ -210,6 +320,40 @@ describe('ScheduleSurface', () => {
     expect(pendingKpi?.textContent).toContain('2')
   })
 
+  it('counts genuine queue-drain misses in the KPI (not_found queue AND not_found reaction)', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [
+      // Healthy completion: not in queue but the keeper reacted → not a miss.
+      {
+        ...automation.requests[0]!,
+        schedule_id: 'sched-drained',
+        keeper_queue_evidence: { projection_status: 'not_found' },
+        keeper_reaction_evidence: { projection_status: 'matched_turn_started' },
+      },
+      // Genuine miss: dispatched, in no queue, no keeper reaction recorded.
+      {
+        ...automation.requests[0]!,
+        schedule_id: 'sched-miss',
+        keeper_queue_evidence: { projection_status: 'not_found' },
+        keeper_reaction_evidence: { projection_status: 'not_found' },
+      },
+    ]
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: automation,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const missKpi = container.querySelector('[data-testid="schedule-kpi-queue-miss"]')
+    expect(missKpi?.textContent).toContain('큐 누락')
+    expect(missKpi?.textContent).toContain('1')
+    expect(missKpi?.querySelector('.ov-kpi-v')?.className).toContain('warn')
+  })
+
   it('surfaces projection load errors without hiding stale schedule data', async () => {
     mocks.toolsError.value = 'dashboard tools unavailable'
     mocks.toolsData.value = {
@@ -223,5 +367,101 @@ describe('ScheduleSurface', () => {
 
     expect(container.textContent).toContain('dashboard tools unavailable')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
+  })
+
+  it('prunes completed schedules through the live dashboard API and refreshes projection', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: sampleAutomation(),
+    }
+    mocks.pruneSchedules.mockResolvedValue({ ok: true, pruned_count: 5 })
+    const originalConfirm = window.confirm
+    window.confirm = vi.fn().mockReturnValue(true)
+
+    try {
+      render(html`<${ScheduleSurface} />`, container)
+      await flush()
+
+      container.querySelector<HTMLButtonElement>('[data-testid="schedule-prune-btn"]')?.click()
+      await flush()
+
+      expect(window.confirm).toHaveBeenCalledTimes(1)
+      expect(mocks.pruneSchedules).toHaveBeenCalledTimes(1)
+      expect(mocks.loadTools).toHaveBeenCalledTimes(1)
+    } finally {
+      window.confirm = originalConfirm
+    }
+  })
+
+  it('defaults to the calendar view with a cadence filter strip', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: sampleAutomation(),
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    // Calendar view is active by default (aria-selected), and the cadence strip
+    // renders a chip per operator cadence.
+    expect(container.querySelector('[data-testid="schedule-view-calendar"]')?.getAttribute('aria-selected'))
+      .toBe('true')
+    expect(container.querySelector('[data-testid="sch-cadsum"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="sch-cadsum-oneshot"]')).not.toBeNull()
+    // The sample request (one_shot, non-terminal) surfaces as an agenda event,
+    // not the diagnostic list; the wake-signal feed is list-only.
+    expect(container.querySelector('[data-testid="sch-agenda"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('wake signal 피드 · schedule_runner.tick')
+  })
+
+  it('toggles to the list view revealing the diagnostic wake-signal feed', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: sampleAutomation(),
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
+
+    expect(container.querySelector('[data-testid="schedule-view-list"]')?.getAttribute('aria-selected'))
+      .toBe('true')
+    expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
+    // No mutation controls leak onto either view (surface stays read-only).
+    expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
+  })
+
+  it('narrows the list view rows when a cadence chip is active', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [
+      { ...automation.requests[0]!, schedule_id: 'sched-oneshot', recurrence: { kind: 'one_shot' }, recurrence_kind: 'one_shot' },
+      { ...automation.requests[0]!, schedule_id: 'sched-interval', recurrence: { kind: 'interval', interval_sec: 3600 }, recurrence_kind: 'interval' },
+    ]
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: automation,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
+    await flush()
+    container.querySelector<HTMLButtonElement>('[data-testid="sch-cadsum-interval"]')?.click()
+    await flush()
+
+    // Only the interval schedule survives the 폴링 cadence filter in the list.
+    expect(container.querySelector('[data-schedule-id="sched-interval"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-oneshot"]')).toBeNull()
   })
 })

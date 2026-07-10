@@ -138,10 +138,167 @@ let scoped_provider_key ~keeper_name provider_key =
   if String.equal keeper_name "" then provider_key
   else keeper_name ^ "@" ^ provider_key
 
-let record_candidate_health_success ~keeper_name candidate ~latency_ms =
+let scoped_health_keys ~keeper_name candidate =
   Runtime_candidate.health_keys candidate
+  |> List.map (scoped_provider_key ~keeper_name)
+
+let credential_pool_health_keys ~keeper_name candidate =
+  Runtime_candidate.health_keys candidate
+  |> List.concat_map (fun provider_key ->
+    let scoped_key = scoped_provider_key ~keeper_name provider_key in
+    if String.equal scoped_key provider_key
+    then [ provider_key ]
+    else [ scoped_key; provider_key ])
+  |> List.sort_uniq String.compare
+
+type provider_cooldown_block =
+  { blocked_provider_keys : string list
+  ; cooldown_remaining_sec : int
+  ; cooldown_cause : Keeper_internal_error.provider_cooldown_cause option
+  }
+
+(* Map the health tracker's public outcome-kind mirror to the typed cooldown
+   cause carried on the pre-dispatch backpressure envelope.  [Outcome_success]
+   never arms a cooldown, so it has no cause.  #23438. *)
+let provider_cooldown_cause_of_outcome_kind
+    (kind : Keeper_binding_health.outcome_kind)
+  : Keeper_internal_error.provider_cooldown_cause option =
+  match kind with
+  | Keeper_binding_health.Outcome_capacity_backpressure ->
+    Some Keeper_internal_error.Cooldown_provider_capacity
+  | Keeper_binding_health.Outcome_soft_rate_limited ->
+    Some Keeper_internal_error.Cooldown_soft_rate_limited
+  | Keeper_binding_health.Outcome_server_error ->
+    Some Keeper_internal_error.Cooldown_server_error
+  | Keeper_binding_health.Outcome_hard_quota ->
+    Some Keeper_internal_error.Cooldown_hard_quota
+  | Keeper_binding_health.Outcome_terminal_failure ->
+    Some Keeper_internal_error.Cooldown_terminal_failure
+  | Keeper_binding_health.Outcome_failure ->
+    Some Keeper_internal_error.Cooldown_provider_error
+  | Keeper_binding_health.Outcome_rejected ->
+    Some Keeper_internal_error.Cooldown_rejected
+  | Keeper_binding_health.Outcome_success -> None
+
+(* Aggregate the arming cause across every provider blocking this turn.  The
+   turn is blocked because all candidate providers are in cooldown; it remains
+   auto-recoverable as long as at least one blocker has a transient (or unknown)
+   cause that may recover.  Only when every blocker's cause is deterministic
+   does the block escalate — hence "any transient wins".  #23438. *)
+let aggregate_cooldown_cause provider_infos =
+  let cause_options =
+    provider_infos
+    |> List.map (fun (_, info) ->
+      match info.Keeper_binding_health.cooldown_cause with
+      | Some kind -> provider_cooldown_cause_of_outcome_kind kind
+      | None -> None)
+  in
+  let causes =
+    cause_options |> List.filter_map (fun cause -> cause)
+  in
+  match
+    List.find_opt
+      (fun c ->
+        not (Keeper_internal_error.provider_cooldown_cause_is_deterministic c))
+      causes
+  with
+  | Some transient -> Some transient
+  | None ->
+    if List.exists Option.is_none cause_options
+    then None
+    else (match causes with [] -> None | c :: _ -> Some c)
+
+let cooldown_remaining_sec_of_info info =
+  match info.Keeper_binding_health.cooldown_expires_at with
+  | None -> 0
+  | Some expires_at ->
+    int_of_float (Float.max 0.0 (Float.ceil (expires_at -. Time_compat.now ())))
+
+let provider_cooldown_block ~keeper_name candidate =
+  let provider_keys = Runtime_candidate.health_keys candidate in
+  let blocking_info_for_key provider_key =
+    let scoped_key = scoped_provider_key ~keeper_name provider_key in
+    let keys =
+      if String.equal scoped_key provider_key
+      then [ provider_key ]
+      else [ scoped_key; provider_key ]
+    in
+    keys
+    |> List.filter_map (fun provider_key ->
+      Keeper_binding_health.provider_info
+        Keeper_binding_health.global
+        ~provider_key
+      |> Option.map (fun info -> (provider_key, info)))
+    |> List.find_opt (fun (_, info) -> info.Keeper_binding_health.in_cooldown)
+  in
+  match provider_keys with
+  | [] -> None
+  | _ ->
+    let provider_infos =
+      provider_keys
+      |> List.filter_map blocking_info_for_key
+    in
+    if List.length provider_infos <> List.length provider_keys
+    then None
+    else
+      let cooldown_remaining_sec =
+        provider_infos
+        |> List.map (fun (_, info) -> cooldown_remaining_sec_of_info info)
+        |> function
+        | [] -> 0
+        | first :: rest -> List.fold_left min first rest
+      in
+      let blocked_provider_keys = List.map fst provider_infos in
+      let cooldown_cause = aggregate_cooldown_cause provider_infos in
+      Some { blocked_provider_keys; cooldown_remaining_sec; cooldown_cause }
+
+let provider_cooldown_block_decision block =
+  let cooldown_cause_json =
+    match block.cooldown_cause with
+    | Some cause ->
+      `String (Keeper_internal_error.provider_cooldown_cause_to_string cause)
+    | None -> `Null
+  in
+  `Assoc
+    [ "blocker", `String "provider_cooldown"
+    ; "provider_attempt_started", `Bool false
+    ; ( "blocked_provider_keys"
+      , `List (List.map (fun key -> `String key) block.blocked_provider_keys) )
+    ; "cooldown_remaining_sec", `Int block.cooldown_remaining_sec
+    ; "cooldown_cause", cooldown_cause_json
+    ; "retry_after_source", `String "provider_health_cooldown"
+    ]
+
+let provider_cooldown_block_error ~runtime_id block =
+  let retry_after =
+    if block.cooldown_remaining_sec > 0
+    then
+      Keeper_internal_error.Synthetic_default
+        (float_of_int block.cooldown_remaining_sec)
+    else Keeper_internal_error.No_retry_hint
+  in
+  let cause_label =
+    match block.cooldown_cause with
+    | Some cause -> Keeper_internal_error.provider_cooldown_cause_to_string cause
+    | None -> "provider_capacity"
+  in
+  let detail =
+    Printf.sprintf
+      "provider health cooldown active before dispatch (cause=%s)"
+      cause_label
+  in
+  Keeper_internal_error.sdk_error_of_masc_internal_error
+    (Keeper_internal_error.Capacity_backpressure
+       { runtime_id
+       ; source = Keeper_internal_error.Provider_capacity
+       ; detail
+       ; retry_after
+       ; cooldown_cause = block.cooldown_cause
+       })
+
+let record_candidate_health_success ~keeper_name candidate ~latency_ms =
+  scoped_health_keys ~keeper_name candidate
   |> List.iter (fun provider_key ->
-    let provider_key = scoped_provider_key ~keeper_name provider_key in
     Keeper_binding_health.record_success
       Keeper_binding_health.global
       ~provider_key
@@ -150,9 +307,8 @@ let record_candidate_health_success ~keeper_name candidate ~latency_ms =
 
 let record_candidate_health_rejected ~keeper_name candidate ~reason =
   let error_kind = health_error_kind "accept_rejected" in
-  Runtime_candidate.health_keys candidate
+  scoped_health_keys ~keeper_name candidate
   |> List.iter (fun provider_key ->
-    let provider_key = scoped_provider_key ~keeper_name provider_key in
     Keeper_binding_health.record_rejected
       Keeper_binding_health.global
       ~provider_key
@@ -168,7 +324,16 @@ let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
   | Llm_provider.Retry.RateLimited { message; _ } -> Some message
   | Llm_provider.Retry.PaymentRequired { message } -> Some message
   | Llm_provider.Retry.NetworkError { message; _ } -> Some message
-  | Llm_provider.Retry.Overloaded { message } -> Some message
+  (* Overloaded is the typed transient 529/CapacityExhausted signal; OAS
+     [Retry.is_hard_quota (Overloaded _) = false] and [is_retryable = true]. Do
+     NOT scan its message for hard-quota indicators: a transient 529 whose prose
+     coincidentally contains an indicator (e.g. "exhausted your capacity on this
+     model") would be reclassified permanent -> immediate pool-wide 1h
+     Cooldown_hard_quota, stealing it from the transient bucket. Every genuine
+     permanent quota routes to PaymentRequired/RateLimited (caught by the typed
+     [is_hard_quota] tried first), never Overloaded. Full retire of the substring
+     scan is deferred to RFC (typed SDK-boundary parse). *)
+  | Llm_provider.Retry.Overloaded _ -> None
   | Llm_provider.Retry.ServerError { message; _ } -> Some message
   | Llm_provider.Retry.InvalidRequest { message; _ } -> Some message
   | Llm_provider.Retry.AuthError _
@@ -188,7 +353,10 @@ let cli_wrapped_hard_quota_indicators = [
   "org's monthly usage limit";
   "session usage limit";
   "add extra usage";
-  "resets apr ";
+  (* NB: no month-literal indicators — a "resets apr " string matched only April
+     and was a silent dead branch the other 11 months. The month-agnostic
+     "you've hit your limit" / "monthly usage limit" indicators carry the real
+     signal; absolute reset-time parsing is deferred to the typed-root RFC. *)
   "reached your specified api usage limits";
   "you will regain access on";
 ]
@@ -219,16 +387,10 @@ let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> false
 
-let capacity_backpressure_indicators = [
-  "client capacity";
-  "capacity exhausted";
-  "local_resource_exhaustion";
-  "slot full";
-]
-
-let message_looks_like_capacity_backpressure (message : string) : bool =
-  let contains needle = String_util.contains_substring_ci message needle in
-  List.exists contains capacity_backpressure_indicators
+(* [capacity_backpressure_indicators] / [message_looks_like_capacity_backpressure]
+   were removed (#23438): a substring classifier whose only consumer was the
+   deleted [capacity_backpressure_of_sdk_error].  The typed [cooldown_cause] on
+   the pre-dispatch cooldown gate replaces string-based capacity detection. *)
 
 let message_looks_like_terminal_provider_runtime_failure message =
   let contains needle = String_util.contains_substring_ci message needle in
@@ -375,9 +537,8 @@ let record_candidate_health_error ~keeper_name candidate sdk_err =
   if sdk_error_is_hard_quota sdk_err
   then (
     let error_kind = health_error_kind "hard_quota" in
-    health_keys
+    credential_pool_health_keys ~keeper_name candidate
     |> List.iter (fun provider_key ->
-      let provider_key = scoped_provider_key ~keeper_name provider_key in
       Keeper_binding_health.record_hard_quota
         Keeper_binding_health.global
         ~provider_key
@@ -412,9 +573,8 @@ let record_candidate_health_error ~keeper_name candidate sdk_err =
     match sdk_error_soft_rate_limited sdk_err with
     | Some retry_after_s ->
       let error_kind = health_error_kind "soft_rate_limited" in
-      health_keys
+      credential_pool_health_keys ~keeper_name candidate
       |> List.iter (fun provider_key ->
-        let provider_key = scoped_provider_key ~keeper_name provider_key in
         Keeper_binding_health.record_soft_rate_limited
           Keeper_binding_health.global
           ~provider_key

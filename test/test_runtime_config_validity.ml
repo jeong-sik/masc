@@ -429,7 +429,57 @@ let test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
     check bool "RunPod RTX A6000 Gemma seed" true caps.supports_seed;
     check bool "RunPod RTX A6000 Gemma chat-template token thinking" true
       (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_token))
+         caps.thinking_control_format = Chat_template_token "<|think|>"))
+
+let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
+  with_repo_oas_model_catalog @@ fun catalog ->
+  let model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" in
+  let provider_model_id = "ollama/" ^ model_id in
+  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
+   | None -> failf "expected repo OAS catalog row for %s" provider_model_id
+   | Some entry ->
+     check (option string) (provider_model_id ^ " base") (Some "ollama")
+       entry.base_label;
+     check (option int) (provider_model_id ^ " context") (Some 131072)
+       entry.max_context_tokens;
+     check
+       (option bool)
+       (provider_model_id ^ " audio input")
+       (Some true)
+       entry.supports_audio_input;
+     check
+       (option string)
+       (provider_model_id ^ " thinking token")
+       (Some "<|think|>")
+       (match entry.thinking_control_format with
+        | Some (Llm_provider.Capabilities.Chat_template_token token) ->
+          Some token
+        | Some _ | None -> None));
+  match
+    Llm_provider.Capabilities.for_provider_model_id
+      ~allow_bare_fallback:false
+      ~provider_label:"ollama"
+      ~model_id
+  with
+  | None -> failf "local Gemma4 E2B QAT must resolve via strict Ollama gate path"
+  | Some caps ->
+    check (option int) "Local Gemma4 E2B context" (Some 131072)
+      caps.max_context_tokens;
+    check bool "Local Gemma4 E2B tools" true caps.supports_tools;
+    check bool "Local Gemma4 E2B forced tool_choice disabled" false
+      caps.supports_tool_choice;
+    check bool "Local Gemma4 E2B image input" true caps.supports_image_input;
+    check bool "Local Gemma4 E2B audio input" true caps.supports_audio_input;
+    check bool "Local Gemma4 E2B chat-template token thinking" true
+      (Llm_provider.Capabilities.(
+         caps.thinking_control_format = Chat_template_token "<|think|>"));
+    check
+      (option string)
+      "Local Gemma4 E2B thinking token"
+      (Some "<|think|>")
+      (Llm_provider.Capabilities.thinking_control_token_for_provider_model_id
+         ~provider_label:"ollama"
+         ~model_id)
 
 let test_repo_oas_model_catalog_preserve_axes_resolve () =
   with_repo_oas_model_catalog @@ fun catalog ->
@@ -473,8 +523,10 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
          entry.base_label;
-       check (option string) (model_id ^ " no request thinking knob") (Some "none")
-         entry.thinking_control_format;
+       check bool (model_id ^ " no request thinking knob") true
+         (match entry.thinking_control_format with
+          | Some Llm_provider.Capabilities.No_thinking_control -> true
+          | Some _ | None -> false);
        check (option string) (model_id ^ " always preserved thinking")
          (Some "always_preserved")
          entry.preserve_thinking_control_format;
@@ -509,6 +561,7 @@ let test_repo_runtime_bindings_resolve_through_oas_catalog () =
       , _assignments
       , _librarian
       , _structured_judge
+      , _hitl_summary
       , _cross_verifier
       , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
@@ -582,6 +635,7 @@ let test_repo_runtime_toml_loads () =
       , assignments
       , _librarian
       , structured_judge
+      , _hitl_summary
       , _cross_verifier
       , _media_failover , _lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
@@ -625,7 +679,7 @@ let test_repo_runtime_toml_loads () =
           check bool "Gemma4 chat-template-token thinking control" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
-               Runtime_schema.Chat_template_token);
+               (Runtime_schema.Chat_template_token "<|think|>"));
           (* Native Ollama /api/chat never serializes tool_choice
              (oas backend_ollama.ml:24); declaring true here would override
              oas models.toml false while the transport drops forced tool
@@ -633,6 +687,34 @@ let test_repo_runtime_toml_loads () =
           check bool "Gemma4 forced tool_choice disabled" false
             caps.supports_tool_choice
         | None -> fail "expected Gemma4 capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "ollama.gemma4-e2b-it-qat")
+         runtimes
+     with
+     | None -> fail "expected Gemma4 E2B Ollama runtime in seed"
+     | Some runtime ->
+       check string
+         "Gemma4 E2B model api name"
+         "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+         runtime.model.api_name;
+       check int "Gemma4 E2B context" 131072 runtime.model.max_context;
+       check bool "Gemma4 E2B thinking enabled" true
+         runtime.model.thinking_support;
+       check (option bool) "Gemma4 E2B thinking not preserved" (Some false)
+         runtime.model.preserve_thinking;
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "Gemma4 E2B chat-template-token thinking control" true
+            (Runtime_schema.equal_thinking_control_format
+               caps.thinking_control_format
+               (Runtime_schema.Chat_template_token "<|think|>"));
+          check bool "Gemma4 E2B forced tool_choice disabled" false
+            caps.supports_tool_choice;
+          check bool "Gemma4 E2B image input" true caps.supports_image_input;
+          check bool "Gemma4 E2B audio input" true caps.supports_audio_input
+        | None -> fail "expected Gemma4 E2B capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1041,6 +1123,58 @@ let test_runtime_toml_parses_optional_max_concurrent () =
        check (option int) "explicit max-concurrent opt-in" (Some 7)
          binding.Runtime_schema.max_concurrent
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.other]\n\
+     api-name = \"other\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     is-default = true\n\
+     \n\
+     [local.other]\n\
+     wizard-default = true\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse wizard-default separately:\n%s" rendered
+  | Ok cfg ->
+    let binding id =
+      cfg.Runtime_schema.bindings
+      |> List.find_opt (fun (binding : Runtime_schema.binding) ->
+        String.equal (Runtime_schema.binding_key binding) id)
+      |> function
+      | Some binding -> binding
+      | None -> failf "missing binding %s" id
+    in
+    let runtime_default = binding "local.sample" in
+    let wizard_default = binding "local.other" in
+    check bool "is-default remains runtime/default marker" true
+      runtime_default.Runtime_schema.is_default;
+    check bool "is-default does not imply wizard-default" false
+      runtime_default.Runtime_schema.wizard_default;
+    check bool "wizard-default does not imply is-default" false
+      wizard_default.Runtime_schema.is_default;
+    check bool "wizard-default parsed separately" true
+      wizard_default.Runtime_schema.wizard_default
 
 let test_runtime_toml_rejects_non_positive_max_concurrent () =
   let template n =
@@ -1595,8 +1729,10 @@ let test_runtime_toml_max_concurrent_flows_to_candidate () =
         , _assignments
         , _librarian
         , _structured_judge
+        , _hitl_summary
         , _cross_verifier
-        , _media_failover , _lanes ) ->
+        , _media_failover
+        , _lanes ) ->
       let expect id expected =
         match
           List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
@@ -1660,13 +1796,23 @@ let test_librarian_runtime_routing () =
         , _assignments
         , librarian
         , _structured_judge
+        , _hitl_summary
         , _cross_verifier
         , _media_failover , _lanes ) ->
       check (option string) "librarian runtime id" (Some "local.libr") librarian);
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent librarian should load: %s" msg
-    | Ok (_, _, _, librarian, _structured_judge, _cross_verifier, _media_failover, _lanes) ->
+    | Ok
+        ( _
+        , _
+        , _
+        , librarian
+        , _structured_judge
+        , _hitl_summary
+        , _cross_verifier
+        , _media_failover
+        , _lanes ) ->
       check (option string) "librarian unset is None" None librarian);
   with_temp_runtime_toml (base ^ "librarian = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1681,6 +1827,7 @@ let test_librarian_runtime_routing () =
         , _assignments
         , _librarian
         , _structured_judge
+        , _hitl_summary
         , cross_verifier
         , _media_failover , _lanes ) ->
       check (option string) "cross_verifier runtime id" (Some "local.libr")
@@ -1688,7 +1835,16 @@ let test_librarian_runtime_routing () =
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, _structured_judge, cross_verifier, _media_failover, _lanes) ->
+    | Ok
+        ( _
+        , _
+        , _
+        , _
+        , _structured_judge
+        , _hitl_summary
+        , cross_verifier
+        , _media_failover
+        , _lanes ) ->
       check (option string) "cross_verifier unset is None" None cross_verifier);
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1732,7 +1888,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "structured_judge routing should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _hitl_summary, _, _, _) ->
       check
         (option string)
         "structured_judge runtime id"
@@ -1741,7 +1897,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _hitl_summary, _, _, _) ->
       check (option string) "structured_judge unset is None" None structured_judge);
   with_temp_runtime_toml (base ^ "structured_judge = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1809,6 +1965,89 @@ let test_structured_judge_runtime_routing () =
         (String_util.contains_substring
            (Fs_compat.load_file path)
            "structured_judge"))
+
+let test_hitl_summary_runtime_routing () =
+  let base =
+    "[providers.local]\n\
+     display-name = \"Local\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://localhost:11434\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.summary]\n\
+     api-name = \"summary\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [local.summary]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n"
+  in
+  with_temp_runtime_toml (base ^ "hitl_summary = \"local.summary\"\n") (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "hitl_summary routing should load: %s" msg
+    | Ok (_, _, _, _, _structured_judge, hitl_summary, _, _, _) ->
+      check
+        (option string)
+        "hitl_summary runtime id"
+        (Some "local.summary")
+        hitl_summary);
+  with_temp_runtime_toml base (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "absent hitl_summary should load: %s" msg
+    | Ok (_, _, _, _, _structured_judge, hitl_summary, _, _, _) ->
+      check (option string) "hitl_summary unset is None" None hitl_summary);
+  with_temp_runtime_toml (base ^ "hitl_summary = \"local.nope\"\n") (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> failf "unknown [runtime].hitl_summary id must be rejected"
+    | Error _ -> ());
+  let explicit_hitl_summary = base ^ "hitl_summary = \"local.summary\"\n" in
+  with_temp_runtime_toml explicit_hitl_summary (fun path ->
+    match Runtime.save_config_text ~runtime_config_path:path explicit_hitl_summary with
+    | Error msg -> failf "save_config_text should load hitl_summary: %s" msg
+    | Ok () ->
+      check
+        (option string)
+        "saved hitl_summary runtime id"
+        (Some "local.summary")
+        (Runtime.hitl_summary_runtime_id ());
+      check string "resolved HITL summary runtime" "local.summary"
+        (Runtime.runtime_id_for_hitl_summary ()));
+  with_temp_runtime_toml base (fun path ->
+    match
+      Runtime.set_runtime_hitl_summary
+        ~runtime_config_path:path
+        ~runtime_id:(Some "local.summary")
+        ()
+    with
+    | Error msg -> failf "set_runtime_hitl_summary should validate: %s" msg
+    | Ok () ->
+      check
+        (option string)
+        "writer saved hitl_summary runtime id"
+        (Some "local.summary")
+        (Runtime.hitl_summary_runtime_id ());
+      check bool "runtime.toml hitl_summary persisted" true
+        (String_util.contains_substring
+           (Fs_compat.load_file path)
+           "hitl_summary = \"local.summary\""));
+  with_temp_runtime_toml (base ^ "hitl_summary = \"local.summary\"\n") (fun path ->
+    match
+      Runtime.set_runtime_hitl_summary ~runtime_config_path:path ~runtime_id:None ()
+    with
+    | Error msg -> failf "clear hitl_summary should validate: %s" msg
+    | Ok () ->
+      check (option string) "writer cleared hitl_summary" None
+        (Runtime.hitl_summary_runtime_id ());
+      check bool "runtime.toml hitl_summary removed" false
+        (String_util.contains_substring
+           (Fs_compat.load_file path)
+           "hitl_summary"))
 
 let test_save_config_text_refreshes_cross_verifier_runtime () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -1898,6 +2137,9 @@ let () =
             "repo OAS catalog covers live RunPod RTX A6000 Gemma runtime"
             `Quick test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;
           test_case
+            "repo OAS catalog covers local Gemma4 E2B QAT runtime"
+            `Quick test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat;
+          test_case
             "repo OAS catalog preserves typed thinking/replay axes"
             `Quick test_repo_oas_model_catalog_preserve_axes_resolve;
           test_case
@@ -1915,6 +2157,9 @@ let () =
           test_case
             "[runtime].structured_judge resolves and rejects unsupported models"
             `Quick test_structured_judge_runtime_routing;
+          test_case
+            "[runtime].hitl_summary resolves, refreshes, and rejects unknown ids"
+            `Quick test_hitl_summary_runtime_routing;
           test_case
             "save_config_text validates and refreshes cross_verifier runtime"
             `Quick test_save_config_text_refreshes_cross_verifier_runtime;
@@ -1961,6 +2206,8 @@ let () =
             test_runtime_atomic_getters_are_consistent_after_init;
           test_case "max-concurrent is optional opt-in" `Quick
             test_runtime_toml_parses_optional_max_concurrent;
+          test_case "wizard-default is separate from runtime default marker" `Quick
+            test_runtime_toml_separates_wizard_default_from_runtime_default_marker;
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to runtime candidate" `Quick

@@ -163,10 +163,14 @@ val keeper_state_snapshot_of_json :
   Yojson.Safe.t -> keeper_state_snapshot option
 val structured_working_context_of_snapshot :
   keeper_state_snapshot -> Yojson.Safe.t
-val replay_metadata_of_snapshot : keeper_state_snapshot -> Yojson.Safe.t
+val replay_metadata_of_snapshot :
+  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
+  keeper_state_snapshot ->
+  Yojson.Safe.t
 val snapshot_of_replay_metadata :
   Yojson.Safe.t -> keeper_state_snapshot option
 val with_snapshot_metadata :
+  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
   Agent_sdk.Types.message ->
   keeper_state_snapshot -> Agent_sdk.Types.message
 val snapshot_of_message_metadata :
@@ -197,6 +201,9 @@ type candidate_selection_result = {
       (** Drops attributed to per-kind caps, by kind. *)
   dropped_by_total_cap : int;
       (** Drops attributed to the global [total_cap]. *)
+  suppressed_synthetic_candidates : int;
+      (** Otherwise valid candidates intentionally suppressed because the
+          snapshot was synthetic rather than model-authored. *)
 }
 (** Outcome of [select_memory_candidates]. *)
 
@@ -264,9 +271,11 @@ val memory_candidates_from_snapshot_gated :
   is_synthetic:bool ->
   keeper_state_snapshot ->
   candidate_selection_result
-(** Gated variant used by post-turn persistence. When [is_synthetic] (the
-    snapshot was fabricated from run metadata, not model-authored), no durable
-    memory candidates are produced — synthetic snapshots are resume aids only. *)
+  (** Gated variant used by post-turn persistence. When [is_synthetic] (the
+      snapshot was fabricated from run metadata, not model-authored), no durable
+      memory candidates are produced — synthetic snapshots are resume aids only.
+      [suppressed_synthetic_candidates] records how many otherwise valid
+      candidates were intentionally suppressed by this gate. *)
 
 (** {1 Bank wire format} *)
 

@@ -218,6 +218,7 @@ let configure_oas_capability_manifest_env
       ?(load_manifest = Llm_provider.Capability_manifest.load_runtime_file)
       ?(set_manifest = Llm_provider.Capability_manifest.set_global)
       ()
+      : capability_manifest_env_resolution option
   =
   match resolve_oas_capability_manifest_path ~env ~config_root () with
   | Some { source = Capability_manifest_env_var; path } as resolution ->
@@ -1048,6 +1049,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          if DISCORD_BOT_TOKEN is unset the start function logs a
          warning and skips, leaving the server otherwise unaffected. *)
       Server_discord_in_process_gateway.start ~sw ~env ~clock ~state;
+      (* RFC-0317 PR-3: in-process Slack Socket Mode gateway, mirroring the
+         Discord one. Off unless SLACK_APP_TOKEN is set; the start function
+         logs a warning and skips otherwise, leaving the server unaffected. *)
+      Server_slack_in_process_gateway.start ~sw ~env ~state;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
       (* Create the shared Domain_pool for dashboard compute and optional

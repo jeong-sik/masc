@@ -7,6 +7,7 @@ import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
+  BoardClaimEvidenceProjection, BoardClaimEvidenceState,
   BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
@@ -621,8 +622,43 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
     moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     contributor_quality: normalizeBoardContributorQuality(raw.contributor_quality),
+    claim_evidence: normalizeBoardClaimEvidence(raw.claim_evidence),
     ...(reactions !== undefined ? { reactions } : {}),
     origin: normalizeBoardPostOrigin(raw.origin),
+  }
+}
+
+function normalizeBoardClaimEvidenceState(raw: unknown): BoardClaimEvidenceState | null {
+  switch (asString(raw, '').trim()) {
+    case 'needs_evidence':
+    case 'source_snapshot_stale':
+    case 'artifact_missing':
+    case 'verified':
+      return asString(raw, '').trim() as BoardClaimEvidenceState
+    default:
+      return null
+  }
+}
+
+function normalizeBoardClaimEvidence(raw: unknown): BoardClaimEvidenceProjection | null {
+  if (!isRecord(raw)) return null
+  const state = normalizeBoardClaimEvidenceState(raw.state)
+  if (!state) return null
+  return {
+    source: asString(raw.source, '').trim() || undefined,
+    target_post_id: asString(raw.target_post_id, '').trim() || undefined,
+    state,
+    label: asString(raw.label, '').trim() || state,
+    total_count: Math.max(0, Math.trunc(asNumber(raw.total_count, 0))),
+    allowed_count: Math.max(0, Math.trunc(asNumber(raw.allowed_count, 0))),
+    rejected_count: Math.max(0, Math.trunc(asNumber(raw.rejected_count, 0))),
+    artifact_missing_count: Math.max(0, Math.trunc(asNumber(raw.artifact_missing_count, 0))),
+    artifact_unknown_count: Math.max(0, Math.trunc(asNumber(raw.artifact_unknown_count, 0))),
+    missing_source_snapshot_count: Math.max(0, Math.trunc(asNumber(raw.missing_source_snapshot_count, 0))),
+    stale_source_snapshot_count: Math.max(0, Math.trunc(asNumber(raw.stale_source_snapshot_count, 0))),
+    artifact_not_verified_count: Math.max(0, Math.trunc(asNumber(raw.artifact_not_verified_count, 0))),
+    latest_decision: asString(raw.latest_decision, '').trim() || undefined,
+    latest_recorded_at: asNumber(raw.latest_recorded_at),
   }
 }
 
@@ -1061,19 +1097,25 @@ export async function requestBoardContextInference(
   return normalized
 }
 
+export interface CreateBoardPostOptions {
+  hearth?: string
+  meta?: Record<string, unknown>
+}
+
 export function createPost(
   title: string,
   content: string,
   author: string,
-  options: { hearth?: string } = {},
+  options: CreateBoardPostOptions = {},
 ): Promise<unknown> {
-  const body: Record<string, string> = {
+  const body: Record<string, unknown> = {
     title,
     content,
     author,
   }
   const hearth = options.hearth?.trim()
   if (hearth) body.hearth = hearth
+  if (options.meta && Object.keys(options.meta).length > 0) body.meta = options.meta
   return post(`/api/v1/tools/masc_board_post`, body)
 }
 

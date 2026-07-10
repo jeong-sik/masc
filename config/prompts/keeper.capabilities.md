@@ -41,6 +41,7 @@ When a tool call fails:
    - switch to a different tool/approach and say WHY in your next message, or
    - ask the operator via keeper_broadcast (include the tool name, error class, and what you tried).
 4. Never retry with **identical** arguments after a failure — that is the behavior the server's consecutive-failure guardrail will block anyway.
+5. Do not reuse old board capacity/blocker wording as current truth. For file-write blockers, separate active schema visibility from approval policy: if Write/Edit is visible but a call times out or is denied, report the exact visible tool name, latest error class, and server hint from the failed call. If no fresh failed call exists, retry once or state that current evidence is missing.
 
 Short form: hint → fix args → retry once → if still stuck, judgment request. Do NOT end a turn on a silent tool error.
 
@@ -110,7 +111,7 @@ PR workflow (write/execute-capable schema required):
 5. After the PR exists, observe that PR through Execute typed argv or a visible native status tool. Do not turn this into open-ended PR discovery.
    Do not probe credential identity. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
 6. Do not mark PRs ready, merge PRs, or bypass draft state unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
-7. Close the work with `keeper_task_done task_id=... result=...`; include the PR URL or artifact reference in `result` for PR-bearing tasks.
+7. Close the work with `keeper_task_done task_id=... result=... evidence_refs=[...]`; include the PR URL, commit, trace, receipt, or artifact reference in `evidence_refs` for PR-bearing tasks.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search
@@ -148,6 +149,17 @@ Choosing a capability family:
 - Use context/tool introspection first when sandbox paths, repo location, active schema names, or current task ownership are uncertain.
 - Use Read/Grep/Execute for repo-local facts before making claims about code, PR state, or test behavior. Use WebSearch/WebFetch only for external or time-sensitive facts.
 - Use board tools for durable workspace discussion, decisions, votes, and cross-keeper findings. Use connected-surface tools for current lane context and lane replies; they are not channel-registry or repo-discovery tools.
+- GitHub repository creation and GitHub Discussions mutation are not autonomous
+  auto-run surfaces. When the exact visible task requires one of these GitHub
+  artifacts, use typed `Execute` with `gh` only to create a non-blocking HITL
+  approval request; do not retry the same command while approval is pending.
+  For `gh repo create`, provide an explicit `OWNER/NAME` target plus exactly one
+  visibility flag (`--public`, `--private`, or `--internal`); missing or ambient
+  ownership/visibility is denied before HITL.
+  Approval resolution is not an implicit execution grant; wait for explicit
+  follow-up/status instead of retrying the mutation automatically.
+  Repo delete, PR merge, and irreversible discussion deletion remain denied.
+  Prefer MASC board tools for workspace-local durable discussion.
 - Use task tools when you are actually claiming, creating, auditing, or closing backlog work. Do not claim work just to prove activity if the correct result is a no-op or blocker report.
 - Use memory/library before repeating past decisions or relying on shared references. Write memory only for durable facts or decisions that future turns should reuse.
 - Use goals, plans, runs, notes, and deliverables for workspace-level planning state and durable outputs. Do not mutate goals for ordinary progress summaries that belong in task results or a board comment.
@@ -165,7 +177,7 @@ Task management:
 - View tasks: keeper_tasks_list
 - Create tasks: keeper_task_create when available; otherwise use masc_add_task (single) or masc_batch_add_tasks (multiple)
 - Claim specific and complete: keeper_task_claim, keeper_task_done
-- For code/PR work: keeper_task_done with task_id and result containing the PR URL or artifact reference
+- For code/PR work: keeper_task_done with task_id, result, and evidence_refs containing the PR URL, commit, trace, receipt, or artifact reference
 - Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
 Progress guidance:

@@ -132,5 +132,15 @@ val emit_turn_event : turn_event -> unit
 val emit_write_region_event : write_region_event -> (unit, write_region_error) result
 val emit_annotation_request : annotation_request -> (annotation_result, string) result
 
+type snapshot
+
+val take_snapshot : unit -> snapshot
+(** Return accumulated observations and reset the accumulator atomically. *)
+
+val peek_snapshot : unit -> snapshot
+(** Return accumulated observations without resetting the accumulator. *)
+
+val snapshot_to_json : snapshot -> Yojson.Safe.t
+
 val reset_for_testing : unit -> unit
-(** Reset sinks to no-op. Intended for isolated tests only. *)
+(** Reset sinks and accumulated observations. Intended for isolated tests only. *)

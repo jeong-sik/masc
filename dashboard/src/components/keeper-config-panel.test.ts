@@ -9,6 +9,9 @@ import {
   filterHookSlots,
   hookSlotDetails,
   initRuntimeDraftFromConfig,
+  KCF_TAB_IDS,
+  keeperConfigControlContractStatus,
+  keeperConfigControlInventory,
   keeperRuntimeConfigCanWrite,
   keeperRuntimeConfigWriteUnsupportedReason,
   type HookSlotEntry,
@@ -303,6 +306,162 @@ describe('keeperRuntimeConfigCanWrite', () => {
 
     expect(keeperRuntimeConfigCanWrite(c)).toBe(false)
     expect(keeperRuntimeConfigWriteUnsupportedReason(c)).toContain('기본 매니페스트 경로')
+  })
+})
+
+describe('keeperConfigControlInventory', () => {
+  function findItem(tab: (typeof KCF_TAB_IDS)[number], c: KeeperConfig, id: string) {
+    const item = keeperConfigControlInventory(tab, c).find((entry) => entry.id === id)
+    if (!item) throw new Error(`inventory item missing: ${id}`)
+    return item
+  }
+
+  it('backs every tab with at least one uniquely identified row', () => {
+    const c = makeKeeperConfig()
+    const ids = new Set<string>()
+    for (const tab of KCF_TAB_IDS) {
+      const rows = keeperConfigControlInventory(tab, c)
+      expect(rows.length).toBeGreaterThan(0)
+      for (const row of rows) {
+        expect(row.tab).toBe(tab)
+        expect(ids.has(row.id)).toBe(false)
+        ids.add(row.id)
+      }
+    }
+  })
+
+  it('ties every ledger row to structured field, api, local-state, or unsupported contracts', () => {
+    const c = makeKeeperConfig()
+    for (const tab of KCF_TAB_IDS) {
+      for (const row of keeperConfigControlInventory(tab, c)) {
+        expect(row.contracts.length, row.id).toBeGreaterThan(0)
+        const contractKinds = row.contracts.map(contract => contract.kind)
+        if (row.kind === 'browser-local') {
+          expect(contractKinds, row.id).toContain('browser-state')
+          expect(contractKinds, row.id).not.toContain('keeper-config-field')
+        } else if (row.kind === 'unsupported') {
+          expect(contractKinds, row.id).toContain('unsupported')
+        } else {
+          expect(
+            contractKinds.includes('api') || contractKinds.includes('keeper-config-field'),
+            row.id,
+          ).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('records exact api contracts for controls that are easy to drift from their source text', () => {
+    const c = makeKeeperConfig()
+
+    expect(findItem('runtime', c, 'kcf-runtime-catalog').contracts).toContainEqual({
+      kind: 'api',
+      method: 'GET',
+      endpoint: '/api/v1/providers',
+    })
+    expect(findItem('policy', c, 'kcf-policy-tool-policy').contracts).toContainEqual({
+      kind: 'api',
+      method: 'POST',
+      endpoint: '/api/v1/keepers/:name/tools',
+      operation: 'set_policy',
+    })
+    expect(findItem('goals', c, 'kcf-goals-catalog-filter').contracts).toContainEqual({
+      kind: 'api',
+      method: 'GET',
+      endpoint: '/api/v1/dashboard/goals',
+    })
+    expect(findItem('health', c, 'kcf-health-directives').contracts).toContainEqual({
+      kind: 'api',
+      method: 'POST',
+      endpoint: '/api/v1/keepers/:name/directive',
+      operation: 'pause/resume/wakeup',
+    })
+  })
+
+  it('classifies runtime-backed controls from the manifest writer guard', () => {
+    const toml = makeKeeperConfig()
+    const base = makeKeeperConfig()
+    const persona = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: null,
+      },
+    })
+
+    const runtimeWrite = findItem('runtime', toml, 'kcf-runtime-assignment')
+    expect(runtimeWrite.kind).toBe('live-write')
+    expect(runtimeWrite.action).toContain('PATCH /api/v1/keepers/:name/config runtime_id')
+    expect(runtimeWrite.contracts).toContainEqual({
+      kind: 'keeper-config-field',
+      path: 'execution.selected_runtime_id',
+    })
+    expect(runtimeWrite.contracts).toContainEqual({
+      kind: 'api',
+      method: 'PATCH',
+      endpoint: '/api/v1/keepers/:name/config',
+      operation: 'runtime_id',
+    })
+
+    const runtimeUnsupported = findItem('runtime', persona, 'kcf-runtime-assignment')
+    expect(runtimeUnsupported.kind).toBe('unsupported')
+    expect(runtimeUnsupported.action).toContain('현재 기본 소스: persona')
+    expect(runtimeUnsupported.contracts).toContainEqual({
+      kind: 'unsupported',
+      reason: expect.stringContaining('현재 기본 소스: persona'),
+    })
+  })
+
+  it('reports missing optional config fields without treating present nulls as absent', () => {
+    const c = makeKeeperConfig({ hooks: undefined })
+
+    const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
+    const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
+    expect(hookStatus.kind).toBe('missing-config-field')
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.slots', 'hooks.deny_list', 'hooks.cost_budget'])
+
+    const contextOverride = findItem('runtime', c, 'kcf-runtime-context-override')
+    const contextStatus = keeperConfigControlContractStatus(contextOverride.contracts, c)
+    expect(contextStatus.kind).toBe('ok')
+  })
+
+  it('uses backend field-presence proof instead of normalized defaults for contract gaps', () => {
+    const c = makeKeeperConfig({
+      field_presence: {
+        schema: 'keeper.config.field_presence.v1',
+        producer: 'dashboard_http_keeper_snapshot',
+        present_paths: ['hooks', 'hooks.slots'],
+      },
+    })
+
+    const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
+    const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
+
+    expect(c.hooks?.deny_list).toEqual([])
+    expect(hookStatus.kind).toBe('missing-config-field')
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.deny_list', 'hooks.cost_budget'])
+  })
+
+  it('keeps separate API writers live even when runtime manifest writes are unsupported', () => {
+    const base = makeKeeperConfig()
+    const persona = makeKeeperConfig({
+      sources: {
+        ...base.sources,
+        default_source_kind: 'persona',
+        default_manifest_path: null,
+      },
+    })
+
+    expect(findItem('policy', persona, 'kcf-policy-continuity').kind).toBe('unsupported')
+    expect(findItem('policy', persona, 'kcf-policy-tool-policy').kind).toBe('live-write')
+    expect(findItem('health', persona, 'kcf-health-directives').kind).toBe('live-write')
+  })
+
+  it('marks hooks as read-only global state plus browser-local filtering, not a fake editor', () => {
+    const c = makeKeeperConfig()
+    expect(findItem('hooks', c, 'kcf-hooks-slots').kind).toBe('live-read')
+    expect(findItem('hooks', c, 'kcf-hooks-filter').kind).toBe('browser-local')
+    expect(findItem('hooks', c, 'kcf-hooks-editing').kind).toBe('unsupported')
   })
 })
 
@@ -826,6 +985,9 @@ const mocks = vi.hoisted(() => {
     pauseKeeper: vi.fn(async () => ({ ok: true, action: 'pause', name: 'keeper-sangsu' })),
     resumeKeeper: vi.fn(async () => ({ ok: true, action: 'resume', name: 'keeper-sangsu' })),
     wakeKeeper: vi.fn(async () => ({ ok: true, action: 'wakeup', name: 'keeper-sangsu' })),
+    // access tab surfaces the GitHub App panel, which reads secret_projection
+    // from the keeper composite; no existing config in the default fixture.
+    fetchKeeperComposite: vi.fn(async () => ({ secret_projection: null })),
   }
 })
 
@@ -844,6 +1006,7 @@ vi.mock('../api/keeper', () => ({
   pauseKeeper: mocks.pauseKeeper,
   resumeKeeper: mocks.resumeKeeper,
   wakeKeeper: mocks.wakeKeeper,
+  fetchKeeperComposite: mocks.fetchKeeperComposite,
 }))
 
 import {
@@ -891,6 +1054,7 @@ describe('KeeperConfigPanel', () => {
     mocks.pauseKeeper.mockClear()
     mocks.resumeKeeper.mockClear()
     mocks.wakeKeeper.mockClear()
+    mocks.fetchKeeperComposite.mockClear()
   })
 
   afterEach(() => {
@@ -898,6 +1062,25 @@ describe('KeeperConfigPanel', () => {
     container.remove()
     resetKeeperConfig()
     resetRuntimeCatalog()
+  })
+
+  it('surfaces the GitHub App credentials panel under the access tab', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    // The credentials panel is scoped to the access tab, so the default
+    // (identity) tab must not render it.
+    expect(container.querySelector('[data-testid="keeper-github-app-config-panel"]')).toBeNull()
+
+    // 권한·샌드박스 (access) is where operators look for credentials; the panel
+    // is surfaced here in addition to the monitoring detail's 진단/운영 copy.
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    expect(container.querySelector('[data-testid="keeper-github-app-config-panel"]')).not.toBeNull()
+    expect(container.textContent).toContain('GitHub App 자격증명')
+    // The panel's initial projection is loaded from the keeper composite.
+    expect(mocks.fetchKeeperComposite).toHaveBeenCalledWith('keeper-sangsu', expect.anything())
   })
 
   it('separates editable prompt controls from read-only runtime metadata', async () => {
@@ -965,6 +1148,11 @@ describe('KeeperConfigPanel', () => {
     // prompt tab: editable prompt controls.
     selectKcfTab(container, '프롬프트')
     await flush()
+    // The global system-prompt blocks (world/capabilities) are read-only here;
+    // a deep-link routes their editing to the canonical Settings › Prompts.
+    const globalEditLink = container.querySelector('[data-testid="kcf-prompt-global-edit-link"]')
+    expect(globalEditLink).not.toBeNull()
+    expect(globalEditLink?.textContent).toContain('설정 › 프롬프트')
     const editButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('편집'),
     )
@@ -1119,6 +1307,10 @@ describe('KeeperConfigPanel', () => {
 
     selectKcfTab(container, '런타임')
     await flush()
+    expect(container.querySelector('[data-testid="keeper-config-control-ledger"]')?.textContent)
+      .toContain('Control backing')
+    expect(container.querySelector('[data-control-id="kcf-runtime-assignment"]')?.getAttribute('data-control-kind'))
+      .toBe('unsupported')
     expect(container.querySelector('[data-testid="keeper-runtime-write-unsupported"]')).not.toBeNull()
     expect(container.textContent).toContain('현재 기본 소스: persona')
     expect(container.querySelector('select[aria-label="runtime_id"]')).toBeNull()
@@ -1168,6 +1360,28 @@ describe('KeeperConfigPanel', () => {
     )
     expect(runtimeSave).toBeUndefined()
     expect(mocks.patchKeeperConfig).not.toHaveBeenCalled()
+  })
+
+  it('surfaces missing config-field contracts in the rendered ledger', async () => {
+    const noHooksConfig = makeKeeperConfig({ hooks: undefined })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(noHooksConfig)
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '훅')
+    await flush()
+
+    const hookRow = container.querySelector('[data-control-id="kcf-hooks-slots"]')
+    expect(hookRow?.getAttribute('data-control-contract-status')).toBe('missing-config-field')
+    expect(hookRow?.getAttribute('data-control-missing-config-fields'))
+      .toBe('hooks.slots | hooks.deny_list | hooks.cost_budget')
+    expect(hookRow?.textContent).toContain('missing 3 config fields')
+
+    const hookFilter = container.querySelector('[data-control-id="kcf-hooks-filter"]')
+    expect(hookFilter?.getAttribute('data-control-contract-status')).toBe('ok')
+    expect(hookFilter?.getAttribute('data-control-missing-config-fields')).toBe('')
   })
 
   it('saves the tool denylist via set_policy, echoing current tool_access and deduping entries', async () => {

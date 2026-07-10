@@ -33,6 +33,7 @@ type resolved =
   ; keeper_assignments : (string * string) list
   ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
+  ; hitl_summary_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
@@ -79,6 +80,7 @@ let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
           ; "librarian_runtime_id", string_opt_json r.librarian_runtime_id
           ; ( "structured_judge_runtime_id"
             , string_opt_json r.structured_judge_runtime_id )
+          ; "hitl_summary_runtime_id", string_opt_json r.hitl_summary_runtime_id
           ; "cross_verifier_runtime_id", string_opt_json r.cross_verifier_runtime_id
           ; "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
           ] )
@@ -103,6 +105,7 @@ let resolved_of_runtime () : resolved =
   ; keeper_assignments = Runtime.keeper_assignments ()
   ; librarian_runtime_id = Runtime.librarian_runtime_id ()
   ; structured_judge_runtime_id = Runtime.structured_judge_runtime_id ()
+  ; hitl_summary_runtime_id = Runtime.hitl_summary_runtime_id ()
   ; cross_verifier_runtime_id = Runtime.cross_verifier_runtime_id ()
   ; media_failover = Runtime.media_failover ()
   ; config_path = Runtime.config_path ()

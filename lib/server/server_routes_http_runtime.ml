@@ -316,6 +316,13 @@ let otel_health_json () =
     ]
 ;;
 
+let schedule_runner_status_json () =
+  Schedule_runner_status.snapshot ()
+  |> Schedule_runner_status.snapshot_to_yojson
+       ~now:(Time_compat.now ())
+       ~stale_after_sec:Server_schedule_runner_policy.stale_after_sec
+;;
+
 let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
     ?(health_detail = "probe") request =
   let uptime_secs = health_uptime_secs () in
@@ -345,6 +352,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("uptime", `String (health_uptime_string uptime_secs));
       ("sse_clients", `Int (Sse.client_count ()));
       ("startup", Server_startup_state.to_yojson ());
+      ("schedule_runner", schedule_runner_status_json ());
       ("runtime_startup_degradation",
        Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()));
       ("subsystems", Subsystem_health.to_yojson ());
@@ -417,13 +425,23 @@ let assoc_bool_opt name json =
   | Some (`Bool value) -> Some value
   | _ -> None
 
+let assoc_string_list name json =
+  match assoc_member_opt name json with
+  | Some (`List values) ->
+    values
+    |> List.filter_map (function
+      | `String value -> Some value
+      | _ -> None)
+  | _ -> []
+
 let health_status_rank = Health_status.rank_string
 
 let max_health_status = Health_status.max_string
 
 let full_health_operator_summary ~keeper_fleet_safety
-    ~keeper_identity_drift_json ~reaction_ledger_json ~runtime_startup_degradation_json
-    ~keeper_config_schema_status
+    ~keeper_identity_drift_json ~reaction_ledger_json ~turn_admission_json
+    ~board_event_collection_json ~keeper_event_queue_json
+    ~runtime_startup_degradation_json ~keeper_config_schema_status
     ~keeper_config_schema_blocking ~keeper_config_schema_terminal_reason
     ~keeper_config_operator_action_required ~lazy_task_boot_guard_fires_total =
   let status = ref "ok" in
@@ -446,18 +464,31 @@ let full_health_operator_summary ~keeper_fleet_safety
       || Health_status.requires_operator_action parsed_component_status
       || Health_status.equal parsed_component_status Health_status.Unknown
     then
-      let reason =
-        match fallback_reason with
-        | Some value -> value
-        | None -> component_status
+      let component_reasons =
+        match assoc_string_list "status_reasons" json with
+        | [] ->
+          [
+            (match fallback_reason with
+             | Some value -> value
+             | None -> component_status);
+          ]
+        | values -> values
       in
-      reasons := Printf.sprintf "%s:%s" component reason :: !reasons
+      let prefixed_reasons =
+        List.map
+          (fun reason -> Printf.sprintf "%s:%s" component reason)
+          component_reasons
+      in
+      reasons := List.rev_append prefixed_reasons !reasons
   in
   note_status "keeper_fleet_safety" keeper_fleet_safety
     (assoc_string_opt "blocker" keeper_fleet_safety);
   note_status "keeper_identity_drift" keeper_identity_drift_json
     (assoc_string_opt "terminal_reason" keeper_identity_drift_json);
   note_status "keeper_reaction_ledger" reaction_ledger_json None;
+  note_status "keeper_turn_admission" turn_admission_json None;
+  note_status "keeper_board_event_collection" board_event_collection_json None;
+  note_status "keeper_event_queue" keeper_event_queue_json None;
   note_status "runtime_startup_degradation" runtime_startup_degradation_json
     (assoc_string_opt "terminal_reason" runtime_startup_degradation_json);
   status := max_health_status !status keeper_config_schema_status;
@@ -576,6 +607,18 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
       keeper_reaction_ledger_health_json
   in
+  let turn_admission_json =
+    compute_section ~name:"keeper_turn_admission" ?section_timings_ref
+      keeper_turn_admission_health_json
+  in
+  let board_event_collection_json =
+    compute_section ~name:"keeper_board_event_collection" ?section_timings_ref
+      keeper_board_event_collection_health_json
+  in
+  let keeper_event_queue_json =
+    compute_section ~name:"keeper_event_queue" ?section_timings_ref
+      keeper_event_queue_health_json
+  in
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
   in
@@ -613,6 +656,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
       ~keeper_fleet_safety
       ~keeper_identity_drift_json
       ~reaction_ledger_json
+      ~turn_admission_json
+      ~board_event_collection_json
+      ~keeper_event_queue_json
       ~runtime_startup_degradation_json
       ~keeper_config_schema_status:
         (if keeper_config_schema_blocking then "blocked" else "ok")
@@ -663,6 +709,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_identity_drift", keeper_identity_drift_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
+    ("keeper_turn_admission", turn_admission_json);
+    ("keeper_board_event_collection", board_event_collection_json);
+    ("keeper_event_queue", keeper_event_queue_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns, and auto-paused keepers may no longer have a live registry
        entry. The dashboard "깨우기" button now auto-resumes paused keepers,
@@ -762,8 +811,10 @@ let full_health_cached_field_names =
     "keeper_fleet_safety";
     "keeper_identity_drift";
     "keeper_reaction_ledger";
+    "keeper_turn_admission";
+    "keeper_board_event_collection";
+    "keeper_event_queue";
     "paused_keepers";
-    "cdal";
     "keeper_config_parse_error_count";
     "keeper_config_parse_errors";
     "keeper_config_unknown_key_count";
@@ -821,6 +872,31 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "keeper_reaction_ledger",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_reaction_ledger" );
+    ( "keeper_turn_admission",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "keeper_turn_admission" );
+    ( "keeper_board_event_collection",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "keeper_board_event_collection" );
+    ( "keeper_event_queue",
+      `Assoc
+        [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v1")
+        ; ("status", `String status)
+        ; ("operator_action_required", `Bool false)
+        ; ("keeper_count", `Int 0)
+        ; ("keeper_names", `List [])
+        ; ("pending_count", `Int 0)
+        ; ("inflight_count", `Int 0)
+        ; ("total_count", `Int 0)
+        ; ("oldest_arrived_at_unix", `Null)
+        ; ("oldest_age_seconds", `Null)
+        ; ("pending_by_keeper", `List [])
+        ; ("inflight_by_keeper", `List [])
+        ; ("read_error_count", `Int 0)
+        ; ("read_errors", `List [])
+        ; ("keepers", `List [])
+        ; ("component_timed_out", `Bool component_timed_out)
+        ] );
     ( "paused_keepers",
       `Assoc
         [
@@ -829,9 +905,6 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("names", `List []);
           ("component_timed_out", `Bool component_timed_out);
         ] );
-    ( "cdal",
-      full_health_component_placeholder ?error ~component_timed_out ~status
-        "cdal" );
     ("keeper_config_parse_error_count", `Int 0);
     ("keeper_config_parse_errors", `List []);
     ("keeper_config_unknown_key_count", `Int 0);
@@ -1297,9 +1370,10 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
       let contributor_quality =
         board_contributor_quality_lookup ?config () author
       in
+      let claim_evidence = board_claim_evidence_lookup () post_id in
       let post_json =
         board_post_dashboard_json ~include_moderation ~blind_votes ?current_vote
-          ?contributor_quality ~reactions ~author_karma post
+          ?contributor_quality ?claim_evidence ~reactions ~author_karma post
       in
       let comments_json =
         `List (List.map (fun (comment : Board.comment) ->

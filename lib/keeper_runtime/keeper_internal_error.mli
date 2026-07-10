@@ -22,6 +22,29 @@ type capacity_retry_after =
   | Synthetic_default of float
   | No_retry_hint
 
+(** The failure that armed a provider-health cooldown blocking a turn before
+    dispatch.  Mirrors {!Keeper_binding_health.outcome_kind} across the module
+    boundary; carried on {!Capacity_backpressure} so the pre-dispatch cooldown
+    gate reports the true cause instead of unconditionally claiming provider
+    capacity.  #23438. *)
+type provider_cooldown_cause =
+  | Cooldown_provider_capacity
+  | Cooldown_soft_rate_limited
+  | Cooldown_server_error
+  | Cooldown_hard_quota
+  | Cooldown_terminal_failure
+  | Cooldown_provider_error
+  | Cooldown_rejected
+
+val provider_cooldown_cause_to_string : provider_cooldown_cause -> string
+val provider_cooldown_cause_of_string : string -> provider_cooldown_cause option
+
+(** [true] when waiting out the cooldown cannot resolve the cause (deterministic
+    config/build/credential/quota/structural failure); [false] for transient
+    causes expected to recover (capacity, HTTP 429, HTTP 5xx).  Drives whether a
+    cooldown-block turn error is auto-recoverable or escalates.  #23438. *)
+val provider_cooldown_cause_is_deterministic : provider_cooldown_cause -> bool
+
 type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -81,6 +104,9 @@ type masc_internal_error =
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
+      cooldown_cause : provider_cooldown_cause option;
+      (** [Some cause] iff this is a pre-dispatch provider-health cooldown block;
+          [None] for genuine upstream capacity backpressure.  #23438. *)
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -92,6 +118,11 @@ type masc_internal_error =
       model : string option;
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
+      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+         [MaxTokens] on an empty/thinking_only shape marks a truncation, distinct
+         from a clean [EndTurn] no-progress terminal. Groundwork slice: threaded
+         and serialized, not yet consumed by classification. *)
+      stop_reason : Agent_sdk.Types.stop_reason option;
       last_tool_effect : tool_progress_effect option;
       any_mutating_tool : bool option;
       tool_effects_seen : tool_progress_effect list;
@@ -130,6 +161,7 @@ type masc_internal_error =
   | Internal_unhandled_exception of {
       site : string;
       exn_repr : string;
+      transport_error_kind : Llm_provider.Http_client.network_error_kind option;
     }
   | Internal_bridge_exception of {
       caller : string;
@@ -138,6 +170,8 @@ type masc_internal_error =
   | Internal_contract_rejected of { reason : string }
 
 val masc_internal_error_prefix : string
+
+val runtime_runner_execute_site : string
 
 val blocker_detail_structured_max_chars : int
 (** Upper bound (~2000) preserved for a [masc_oas_error] structured payload

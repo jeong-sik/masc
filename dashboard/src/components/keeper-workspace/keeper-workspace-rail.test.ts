@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { shellAuthSummary, tasks } from '../../store'
 import { navigate } from '../../router'
 import { callMcpTool } from '../../api/mcp'
-import { fetchKeeperCompactionSnapshots, fetchRuntimeProviders } from '../../api/dashboard'
+import { fetchKeeperCompactionSnapshots, fetchKeeperTurnRecords, fetchRuntimeProviders } from '../../api/dashboard'
 import { requestConfirm } from '../common/confirm-dialog'
-import { KeeperWorkspaceRail } from './keeper-workspace-rail'
+import { KeeperWorkspaceRail, runtimeRawSpecOpen } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
 import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
@@ -30,6 +30,56 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       entries: [],
     }),
     fetchRuntimeProviders: vi.fn().mockResolvedValue({ providers: [] }),
+    fetchKeeperTurnRecords: vi.fn().mockResolvedValue({
+      keeper: 'masc-improver',
+      count: 2,
+      skipped_rows: 0,
+      source: 'turn_record',
+      producer: 'keeper_agent_run.run_turn|keeper_turn_record_writer',
+      durable_store: '.masc/keepers/masc-improver/turn-records',
+      dashboard_surface: '/api/v1/keepers/:name/turn-records',
+      freshness_slo_s: 300,
+      latest_ts_unix: 1_782_444_590,
+      latest_ts_iso: '2026-06-26T03:03:10Z',
+      latest_age_s: 3,
+      health: 'ok',
+      stale_reason: null,
+      coverage_gaps: [],
+      memory_os: null,
+      user_model: null,
+      entries: [
+        {
+          record: {
+            execution_ids: ['exec-cmp'],
+            keeper: 'masc-improver',
+            trace_id: 'trace-cmp',
+            absolute_turn: 12,
+            blocks: [
+              { block: 'persona', bytes: 2048, digest: 'persona-digest-aaaaaaaa' },
+              { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },
+              { block: 'memory_os_recall', bytes: 512, digest: 'memory-digest-cccccccc' },
+            ],
+            runtime_profile: 'oas-seoul-1',
+            model: 'runtime',
+            finish_reason: 'completed',
+            input_tokens: 33000,
+            output_tokens: 120,
+            context_window: 200000,
+            ts: 1_782_444_590,
+          },
+          diff_vs_prev: {
+            added: [],
+            removed: [],
+            changed: [
+              {
+                prev: { block: 'dynamic_context', bytes: 900, digest: 'old-dynamic' },
+                next: { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },
+              },
+            ],
+          },
+        },
+      ],
+    }),
     fetchKeeperCompactionSnapshots: vi.fn().mockResolvedValue({
       schema: 'keeper.compaction_snapshots.v1',
       keeper: 'masc-improver',
@@ -96,6 +146,7 @@ afterEach(() => {
   tasks.value = []
   shellAuthSummary.value = null
   compactionSnapshots.value = {}
+  runtimeRawSpecOpen.value = false
   vi.clearAllMocks()
   vi.useRealTimers()
   resetRuntimeCatalog()
@@ -330,6 +381,9 @@ describe('KeeperWorkspaceRail', () => {
               max_thinking_budget: 32768,
               streaming: true,
               temperature: 0.65,
+              top_p: 0.91,
+              top_k: 42,
+              min_p: 0.07,
               capabilities: {
                 source: 'runtime.toml',
                 max_output_tokens: 65536,
@@ -393,37 +447,55 @@ describe('KeeperWorkspaceRail', () => {
     const effort = container.querySelector('[data-effort-mode="reasoning-effort"]')
     expect(effort?.textContent).toContain('reasoning-effort')
     expect(effort?.textContent).toContain('조정 가능')
-    expect(container.textContent).toContain('params')
-    expect(container.textContent).toContain('chat_template_kwargs · preserve_always')
+
+    // Raw catalog rows are collapsed by default — only the curated block shows.
+    expect(container.textContent).not.toContain('params')
+    expect(container.textContent).not.toContain('declared')
+    const rawToggle = container.querySelector('[data-testid="runtime-raw-toggle"]') as HTMLButtonElement
+    expect(rawToggle).not.toBeNull()
+    expect(rawToggle.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(rawToggle)
+    await waitFor(() => {
+      expect(container.textContent).toContain('params')
+    })
+    expect(
+      container.querySelector('[data-testid="runtime-raw-toggle"]')?.getAttribute('aria-expanded'),
+    ).toBe('true')
+
+    // Raw rows render via the shared lib/runtime-provider-summary formatters
+    // (colon-separated tokens) — the rail no longer ships its own copies.
+    expect(container.textContent).toContain('wire:chat_template_kwargs · replay:preserve_always')
     expect(container.textContent).toContain('request')
     expect(container.textContent).toContain(
-      'openai_compat · source oas-provider-config · path /chat/completions · out 65536 · ctx 131072',
+      'kind:openai_compat · source:oas-provider-config · path:/chat/completions · out:65536 · ctx:131072',
     )
-    expect(container.textContent).toContain('system prompt')
-    expect(container.textContent).toContain('tool required')
+    expect(container.textContent).toContain('system-prompt')
+    expect(container.textContent).toContain('tool:required')
     expect(container.textContent).toContain('declared')
-    expect(container.textContent).toContain('chat-completions · openai-compatible-http')
-    expect(container.textContent).toContain('transport http')
-    expect(container.textContent).toContain('headers 1')
-    expect(container.textContent).toContain('temp 0.65')
-    expect(container.textContent).toContain('budget 32768')
-    expect(container.textContent).toContain('behavior inline-tools,keeper-bridge')
+    expect(container.textContent).toContain('api:chat-completions · protocol:openai-compatible-http')
+    expect(container.textContent).toContain('transport:http')
+    expect(container.textContent).toContain('headers:1')
+    expect(container.textContent).toContain('temp:0.65')
+    expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
+    expect(container.textContent).toContain('budget:32768')
+    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge')
     expect(container.textContent).toContain(
-      'controls tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
-    expect(container.textContent).toContain('source oas-provider-config-model')
-    expect(container.textContent).toContain('ctx 131072 · out 65536 · tools · tool_choice+required+named+parallel')
-    expect(container.textContent).toContain('ignored temperature,top_p,presence_penalty,frequency_penalty')
-    expect(container.textContent).toContain('input multimodal,image,audio')
-    expect(container.textContent).toContain('modality visual-first')
-    expect(container.textContent).toContain('tool-content null')
-    expect(container.textContent).toContain('extended thinking')
-    expect(container.textContent).toContain('reasoning budget')
-    expect(container.textContent).toContain('effort low,medium,high')
-    expect(container.textContent).toContain('wire chat-template-kwargs')
-    expect(container.textContent).toContain('preserve always-preserved')
-    expect(container.textContent).toContain('reasoning-stream delta-reasoning-field:reasoning_content')
-    expect(container.textContent).toContain('task transcription · native-stream')
+    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
+    expect(container.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
+    expect(container.textContent).toContain('input:multimodal,image,audio')
+    expect(container.textContent).toContain('modality:visual-first')
+    expect(container.textContent).toContain('tool-content:null')
+    expect(container.textContent).toContain('extended-thinking')
+    expect(container.textContent).toContain('reasoning-budget')
+    expect(container.textContent).toContain('effort:low,medium,high')
+    expect(container.textContent).toContain('wire:chat-template-kwargs')
+    expect(container.textContent).toContain('preserve:always-preserved')
+    expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
+    expect(container.textContent).toContain('task:transcription · native-stream')
     // the "no source" stub is replaced once the catalog reports capabilities
     expect(container.textContent).not.toContain('조정 정보 미수신')
   })
@@ -462,6 +534,9 @@ describe('KeeperWorkspaceRail', () => {
     )
     expect(multimodalFlag).not.toBeUndefined()
     expect(multimodalFlag?.textContent).toContain('—')
+    // unknown renders with the dedicated 'na' class, not a false 'off' claim
+    expect(multimodalFlag?.className).toContain('na')
+    expect(multimodalFlag?.className).not.toContain('off')
     // effort is likewise unknown, not the definitive "effort 제어 없음" claim that
     // the default-filled thinking_control_format ('none') would otherwise imply.
     expect(container.textContent).toContain('조정 정보 미수신')
@@ -638,6 +713,13 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('proactive(85%)')
     expect(container.textContent).toContain('runtime_manifest · observed')
     expect(container.textContent).toContain('trace-cmp#12')
+    const promptContext = await findByTestId('compaction-prompt-context')
+    expect(fetchKeeperTurnRecords).toHaveBeenCalledWith('masc-improver', 12, expect.any(Object))
+    expect(promptContext.textContent).toContain('snapshot-linked turn-record')
+    expect(promptContext.textContent).toContain('trace-cmp#12')
+    expect(promptContext.textContent).toContain('dynamic_context')
+    expect(promptContext.textContent).toContain('memory_os_recall')
+    expect(promptContext.textContent).toContain('raw prompt text는 이 화면/API에서 노출하지 않습니다')
   })
 
   it('renders live durable compaction snapshots even when token counts are missing', async () => {
@@ -692,7 +774,9 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('pre_dispatch_hygiene')
     expect(container.textContent).toContain('runtime_manifest · compacted')
     expect(container.textContent).toContain('trace-live')
-    expect(container.textContent).toContain('before/after token count가 없습니다')
+    expect(container.textContent).toContain('before/after token count는 기록하지 않았습니다')
+    expect(container.textContent).toContain('latest turn-record')
+    expect(container.textContent).toContain('선택한 snapshot trace가 최근 2개 turn-records 안에 없어')
     expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
   })
 

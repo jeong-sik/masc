@@ -163,6 +163,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 코드 작성 / 수정 | `Read` / `Grep` -> `Edit` / `Write`, then `Execute` with typed `git` argv |
 | 테스트 실행 | `Execute` with typed argv from the worktree `cwd` |
 | GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
+| GitHub repo 생성 / GitHub Discussions mutation | `Execute` with typed `gh` argv can request reversible repo/discussion mutations through non-blocking HITL approval (`Requires_approval`). `gh repo create` requires explicit `OWNER/NAME` plus exactly one visibility flag before HITL. Repo delete, PR merge, and irreversible discussion deletion stay denied by the Shell IR floor. Prefer MASC board tools for workspace-local durable discussion unless the requested artifact explicitly belongs on GitHub. |
 
 The goal lifecycle surface is descriptor/registry-driven with denylist
 filtering. Social and messaging keepers should keep board/task workspace

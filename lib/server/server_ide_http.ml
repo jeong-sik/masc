@@ -12,6 +12,31 @@ module Http = Http_server_eio
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 let extract_path_param = Server_utils.extract_path_param
 
+type ide_error =
+  { code : string
+  ; message : string
+  }
+
+let ide_error code message = { code; message }
+
+let json_error ?code message =
+  let fields = [ "ok", `Bool false; "error", `String message ] in
+  let fields =
+    match code with
+    | None -> fields
+    | Some code -> fields @ [ "code", `String code ]
+  in
+  `Assoc fields
+;;
+
+let respond_ide_error ~status ~request err reqd =
+  Http.Response.json_value
+    ~status
+    ~request
+    (json_error ~code:err.code err.message)
+    reqd
+;;
+
 let resolve_workspace_base ~state ~uri =
   let project_base = base_path_of_state state in
   let config = (Mcp_server.workspace_config state) in
@@ -35,44 +60,130 @@ let resolve_workspace_base ~state ~uri =
     ~keeper_param:(Uri.get_query_param uri "keeper")
 ;;
 
-(* RFC-0128 §4.5 + IDE Observation Plane v2 §7 — resolve the partition for a
-   query with TYPED reasons (replaces the previous 3-branch collapse into
-   [Orphan]).
+let nonempty_query_param uri key =
+  match Uri.get_query_param uri key with
+  | Some raw ->
+    let value = String.trim raw in
+    if String.equal value "" then None else Some value
+  | None -> None
+;;
 
-   Priority:
-     1. [?canonical_url=...] explicit override (re-normalised so a misspelt
-        query is [No_canonical_url] rather than silently creating a new bucket).
-     2. [?repo_id=...] → lookup repo.url in [Repo_store] → normalise.
-          - repo_id not found            → [Unmatched]
-          - repo found but url blank/    → [No_canonical_url]
-            malformed
-     3. Default (neither param supplied) → [Legacy_default]: traffic that has
-        not been updated to use either parameter is preserved in the unresolved
-        partition, but now typed as structural-default rather than an
-        ambiguous bucket.
+type ide_scope =
+  | Scope_canonical_url of
+      { raw : string
+      ; slug : string
+      }
+  | Scope_repo_id of
+      { repo_id : string
+      ; slug : string
+      }
+  | Scope_keeper_lane of { keeper_id : string }
 
-   Read-side orphan visibility is emitted by [resolve_partition_for_read],
-   not here, so mutation routes can keep using this pure resolver without
-   being counted as reads. *)
-let resolve_partition_for_query ~state ~uri =
+(* Keeper-lane reads address the repo-unattributed observation bucket
+   ([_orphan/] on disk). A keeper turn is a keeper-timeline fact, not a
+   repo fact: turn events and coordination tool events carry no file, so
+   they are written without a [By_url] partition. Before this scope
+   existed, read routes could only address [By_url] partitions, which made
+   that data unreachable from any API while it kept accumulating — the
+   read/write split-brain from the 2026-07-07 IDE observation audit. *)
+let partition_of_ide_scope = function
+  | Scope_canonical_url { slug; _ } | Scope_repo_id { slug; _ } ->
+    Ide_paths.By_url slug
+  | Scope_keeper_lane _ -> Ide_paths.Legacy_default
+;;
+
+let resolve_ide_scope_for_query ~state ~uri =
   let project_base = base_path_of_state state in
-  match Uri.get_query_param uri "canonical_url" with
-  | Some s when String.trim s <> "" ->
-    (* explicit canonical_url: malformed → No_canonical_url, not a silent new bucket *)
-    (match Ide_paths.canonical_url_of_remote s with
-     | Some slug -> Ide_paths.By_url slug
-     | None -> Ide_paths.No_canonical_url)
-  | _ ->
-    (match Uri.get_query_param uri "repo_id" with
-     | Some id when String.trim id <> "" ->
-       (match Repo_store.find_url_by_id ~base_path:project_base id with
-        | Some url ->
-          (* repo found but url blank/malformed → No_canonical_url *)
-          (match Ide_paths.canonical_url_of_remote url with
-           | Some slug -> Ide_paths.By_url slug
-           | None -> Ide_paths.No_canonical_url)
-        | None -> Ide_paths.Unmatched)
-     | _ -> Ide_paths.Legacy_default)
+  match
+    ( nonempty_query_param uri "canonical_url"
+    , nonempty_query_param uri "repo_id"
+    , nonempty_query_param uri "keeper_lane" )
+  with
+  | None, None, None ->
+    Error
+      (ide_error
+         "missing_ide_scope"
+         "IDE scope is required; pass repo_id, canonical_url, or keeper_lane")
+  | Some _, Some _, _ | Some _, _, Some _ | _, Some _, Some _ ->
+    Error
+      (ide_error
+         "conflicting_ide_scope"
+         "IDE scope must specify exactly one of repo_id, canonical_url, or keeper_lane")
+  | Some raw, None, None ->
+    (match Ide_paths.canonical_url_of_remote raw with
+     | Some slug -> Ok (Scope_canonical_url { raw; slug })
+     | None -> Error (ide_error "invalid_canonical_url" "canonical_url is invalid"))
+  | None, Some repo_id, None ->
+    (match Repo_store.find_url_by_id ~base_path:project_base repo_id with
+     | None -> Error (ide_error "unmatched_repo_id" "repo_id does not match a configured repository")
+     | Some url ->
+       (match Ide_paths.canonical_url_of_remote url with
+        | Some slug -> Ok (Scope_repo_id { repo_id; slug })
+        | None ->
+          Error
+            (ide_error
+               "no_canonical_url"
+               "repo_id has no valid canonical URL")))
+  | None, None, Some keeper_id ->
+    (* [keeper_id] is a filter value compared against stored event fields,
+       never a filesystem path, so no registry lookup gates it: validating
+       against currently-active keepers would hide the history of any
+       keeper that is offline or renamed. An unknown id returns an
+       explicitly keeper_lane-scoped empty result. *)
+    Ok (Scope_keeper_lane { keeper_id })
+;;
+
+(* Mutations stay repo-scoped: an observation write without repo identity
+   is exactly the orphan-bucket growth the keeper-lane read scope exists
+   to expose, so the API refuses to mint more of it. *)
+let resolve_partition_for_mutation ~state ~uri =
+  match resolve_ide_scope_for_query ~state ~uri with
+  | Ok (Scope_keeper_lane _) ->
+    Error
+      (ide_error
+         "keeper_lane_read_only"
+         "keeper_lane is a read-only scope; mutations require repo_id or canonical_url")
+  | Ok scope -> Ok (partition_of_ide_scope scope)
+  | Error _ as err -> err
+;;
+
+(* The lane keeper is the mandatory filter for keeper-lane reads; a
+   contradictory explicit [keeper_id] param is a caller bug surfaced as a
+   typed error instead of silently returning another keeper's data. *)
+let keeper_filter_for_scope ~scope ~requested_keeper_id =
+  match scope with
+  | Scope_keeper_lane { keeper_id = lane } ->
+    (match requested_keeper_id with
+     | Some k when not (String.equal k lane) ->
+       Error
+         (ide_error
+            "keeper_lane_filter_conflict"
+            "keeper_id filter must match the keeper_lane scope")
+     | Some _ | None -> Ok (Some lane))
+  | Scope_canonical_url _ | Scope_repo_id _ -> Ok requested_keeper_id
+;;
+
+let with_keeper_lane_read_auth ~state ~request ~reqd ~scope continue =
+  match scope with
+  | Scope_canonical_url _ | Scope_repo_id _ -> continue ()
+  | Scope_keeper_lane { keeper_id = lane } ->
+    let base_path = base_path_of_state state in
+    (match
+       authorize_token_bound_permission_request
+         ~base_path
+         ~permission:Masc_domain.CanReadState
+         request
+     with
+     | Error err -> respond_auth_error request reqd err
+     | Ok agent_name when String.equal agent_name lane -> continue ()
+     | Ok _ ->
+       respond_ide_error
+         ~status:`Forbidden
+         ~request
+         (ide_error
+            "keeper_lane_forbidden"
+            "keeper_lane reads require a bearer token for the requested keeper")
+         reqd)
 ;;
 
 type annotation_scope_error =
@@ -85,12 +196,9 @@ let annotation_scope_error_message = function
     "file_path does not belong to requested canonical_url"
 ;;
 
-let nonempty_query_param uri key =
-  match Uri.get_query_param uri key with
-  | Some raw ->
-    let value = String.trim raw in
-    if String.equal value "" then None else Some value
-  | None -> None
+let annotation_scope_error_code = function
+  | File_path_repo_id_mismatch -> "repo_mismatch"
+  | File_path_canonical_url_mismatch -> "canonical_url_mismatch"
 ;;
 
 let validate_annotation_post_scope ~state ~uri ~file_path =
@@ -121,18 +229,16 @@ let validate_annotation_post_scope ~state ~uri ~file_path =
 ;;
 
 let resolve_partition_for_annotation_post ~state ~uri ~file_path =
-  let partition = resolve_partition_for_query ~state ~uri in
-  match validate_annotation_post_scope ~state ~uri ~file_path with
-  | Ok () -> Ok partition
-  | Error err -> Error (annotation_scope_error_message err)
-;;
-
-let orphan_read_reason_label = function
-  | Ide_paths.By_url _ -> None
-  | Ide_paths.No_canonical_url -> Some "no_canonical_url"
-  | Ide_paths.Unmatched -> Some "unmatched"
-  | Ide_paths.Base_unresolved -> Some "base_unresolved"
-  | Ide_paths.Legacy_default -> Some "legacy_default"
+  match resolve_partition_for_mutation ~state ~uri with
+  | Error _ as err -> err
+  | Ok partition ->
+    (match validate_annotation_post_scope ~state ~uri ~file_path with
+     | Ok () -> Ok partition
+     | Error err ->
+       Error
+         (ide_error
+            (annotation_scope_error_code err)
+            (annotation_scope_error_message err)))
 ;;
 
 let ide_memory_source_kind = "ide_annotation"
@@ -140,28 +246,45 @@ let ide_memory_retrieval_status = "annotation_index_only"
 let ide_memory_semantic_status = "not_configured"
 let ide_memory_episodic_status = "not_configured"
 
-let observe_orphan_read partition =
-  match orphan_read_reason_label partition with
-  | None -> ()
-  | Some reason ->
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_ide_orphan_reads
-      ~labels:[ "reason", reason ]
-      ()
-;;
-
-let resolve_partition_for_read ~state ~uri =
-  let partition = resolve_partition_for_query ~state ~uri in
-  observe_orphan_read partition;
-  partition
-;;
-
-let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
+
+(* ── Observation snapshot endpoint (task-1686) ─────────────────────── *)
+
+(** GET /api/v1/ide/observations/snapshot — returns accumulated observation
+    data (tool events, PR events, turn events, write regions, annotations)
+    from the IDE bridge observation snapshot helper.
+
+    Usage: ?take=true resets accumulators after read (destructive),
+           default is non-destructive peek.
+
+    Callers: IDE Observation Plane frontend for real-time dashboard. *)
+let observation_snapshot_handler request reqd =
+  let uri = Uri.of_string request.Httpun.Request.target in
+  let take =
+    match Uri.get_query_param uri "take" with
+    | Some "true" -> true
+    | _ -> false
+  in
+  let json = Ide_bridge.observation_snapshot_json ~take in
+  let body = json_ok json in
+  Http.Response.json_value
+    ~request
+    ~extra_headers:[ "x-observation-mode", if take then "take" else "peek" ]
+    body
+    reqd
+;;
+
 let keeper_id_not_accepted_error =
   "keeper_id is not accepted; identity is derived from the authentication token"
 
 let annotation_delete_rejected_error = "annotation delete rejected"
+
+(* Machine-readable code for the 403 above. [Ide_annotations.delete]
+   flattens not-found and keeper mismatch into one rejection, and the
+   auth layer also answers 403 when the token tier lacks the permission
+   — the code lets clients tell this rejection apart from a
+   credential-tier 403 without matching on the human message. *)
+let annotation_delete_rejected_code = "annotation_delete_rejected"
 
 let parse_json_body body_str =
   match Yojson.Safe.from_string body_str with
@@ -384,11 +507,12 @@ let build_presence_snapshot state =
     ]
 ;;
 
-let build_cursor_snapshot state uri ~limit ~offset =
+(* [keeper_id] is scope-resolved by the caller ([keeper_filter_for_scope]):
+   a keeper-lane scope forces its lane keeper, repo scopes pass the optional
+   [?keeper_id] query filter through unchanged. *)
+let build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset =
   let base = base_path_of_state state in
   let runtime_id, branch = runtime_id_and_branch state in
-  let partition = resolve_partition_for_read ~state ~uri in
-  let keeper_id = keeper_id_param uri in
   let file_path = file_path_param uri in
   let cursors =
     Ide_bridge.list_cursors
@@ -414,6 +538,7 @@ let build_cursor_snapshot state uri ~limit ~offset =
 let add_routes router =
   Ide_bridge.install_agent_observation_sinks ();
   router
+  |> Http.Router.get "/api/v1/ide/observations/snapshot" observation_snapshot_handler
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
@@ -487,23 +612,32 @@ let add_routes router =
            | Some t when t <> "" -> Some t
            | _ -> None
          in
-         let filter = { Ide_annotation_types.file_path; keeper_id; goal_id; task_id } in
-         let partition = resolve_partition_for_read ~state ~uri in
-         let annotations =
-           Ide_annotations.list
-             ~base_dir:base
-             ~partition
-             ~filter
-             ()
-         in
-         let json =
-           `List (List.map Ide_annotation_types.annotation_to_json annotations)
-         in
-         Http.Response.json_value
-           ~compress:true
-           ~request
-           (json_ok json)
-           reqd)
+         match resolve_ide_scope_for_query ~state ~uri with
+         | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
+         | Ok scope ->
+           (match keeper_filter_for_scope ~scope ~requested_keeper_id:keeper_id with
+            | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
+            | Ok keeper_id ->
+              with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
+              let partition = partition_of_ide_scope scope in
+              let filter =
+                { Ide_annotation_types.file_path; keeper_id; goal_id; task_id }
+              in
+              let annotations =
+                Ide_annotations.list
+                  ~base_dir:base
+                  ~partition
+                  ~filter
+                  ()
+              in
+              let json =
+                `List (List.map Ide_annotation_types.annotation_to_json annotations)
+              in
+              Http.Response.json_value
+                ~compress:true
+                ~request
+                (json_ok json)
+                reqd)))
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
@@ -596,12 +730,8 @@ let add_routes router =
                      (match
                         resolve_partition_for_annotation_post ~state ~uri ~file_path
                       with
-                      | Error msg ->
-                        Http.Response.json_value
-                          ~status:`Bad_request
-                          ~request
-                          (json_error msg)
-                          reqd
+                      | Error err ->
+                        respond_ide_error ~status:`Bad_request ~request err reqd
                       | Ok partition ->
                         (match
                            Ide_annotations.create
@@ -635,7 +765,7 @@ let add_routes router =
                            Http.Response.json_value
                              ~status:`Bad_request
                              ~request
-                             (json_error msg)
+                             (json_error ~code:"observation_write_failed" msg)
                              reqd))))
              | _ ->
                Http.Response.json_value
@@ -709,18 +839,22 @@ let add_routes router =
                (json_error msg)
                reqd
            | Ok keeper_id ->
-             let partition = resolve_partition_for_query ~state ~uri in
-             (match
-                Ide_annotations.delete ~base_dir:base ~partition ~id ~keeper_id ()
-              with
-              | Ok () -> Http.Response.empty ~status:`No_content reqd
-              | Error msg ->
-                log_annotation_delete_rejected ~auth_identity ~id ~reason:msg;
-                Http.Response.json_value
-                  ~status:`Forbidden
-                  ~request
-                  (json_error annotation_delete_rejected_error)
-                  reqd))
+             (match resolve_partition_for_mutation ~state ~uri with
+              | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
+              | Ok partition ->
+                (match
+                   Ide_annotations.delete ~base_dir:base ~partition ~id ~keeper_id ()
+                 with
+                 | Ok () -> Http.Response.empty ~status:`No_content reqd
+                 | Error msg ->
+                   log_annotation_delete_rejected ~auth_identity ~id ~reason:msg;
+                   Http.Response.json_value
+                     ~status:`Forbidden
+                     ~request
+                     (json_error
+                        ~code:annotation_delete_rejected_code
+                        annotation_delete_rejected_error)
+                     reqd)))
            request
            reqd)
   |> Http.Router.get "/api/v1/ide/regions" (fun request reqd ->
@@ -740,20 +874,37 @@ let add_routes router =
            | Some p when p <> "" -> Some p
            | _ -> None
          in
-         let partition = resolve_partition_for_read ~state ~uri in
-         let regions =
-           Ide_region_tracker.read_regions
-             ~base_dir:base
-             ~partition
-             ?file_path
-             ()
-         in
-         let json = `List (List.map Ide_annotation_types.region_to_json regions) in
-         Http.Response.json_value
-           ~compress:true
-           ~request
-           (json_ok json)
-           reqd)
+         match resolve_ide_scope_for_query ~state ~uri with
+         | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
+         | Ok scope ->
+           with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
+           let partition = partition_of_ide_scope scope in
+           let regions =
+             Ide_region_tracker.read_regions
+               ~base_dir:base
+               ~partition
+               ?file_path
+               ()
+           in
+           (* [read_regions] has no keeper filter; a keeper-lane read
+              narrows to the lane keeper here so it never exposes another
+              keeper's lane data under this scope. *)
+           let regions =
+             match scope with
+             | Scope_keeper_lane { keeper_id } ->
+               List.filter
+                 (fun (r : Ide_annotation_types.code_region) ->
+                   String.equal r.keeper_id keeper_id)
+                 regions
+             | Scope_canonical_url _ | Scope_repo_id _ -> regions
+           in
+           let json = `List (List.map Ide_annotation_types.region_to_json regions) in
+           Http.Response.json_value
+             ~compress:true
+             ~request
+             (json_ok json)
+             reqd)
+      )
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/events" (fun request reqd ->
@@ -777,37 +928,48 @@ let add_routes router =
                 reqd
             | Ok (limit, offset) ->
               let base = base_path_of_state state in
-              let partition = resolve_partition_for_read ~state ~uri in
-              let keeper_id = keeper_id_param uri in
-              let events =
-                Ide_bridge.list_events
-                  ~base_path:base
-                  ~partition
-                  ?kind
-                  ?keeper_id
-                  ~limit
-                  ~offset
-                  ()
-              in
-              let kind_json =
-                match kind with
-                | Some k -> `String (Ide_bridge.event_kind_to_string k)
-                | None -> `String "all"
-              in
-              let result =
-                `Assoc
-                  [ "events", `List events
-                  ; "count", `Int (List.length events)
-                  ; "kind", kind_json
-                  ; "limit", `Int limit
-                  ; "offset", `Int offset
-                  ]
-              in
-              Http.Response.json_value
-                ~compress:true
-                ~request
-                (json_ok result)
-                reqd))
+              (match resolve_ide_scope_for_query ~state ~uri with
+               | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
+               | Ok scope ->
+                 (match
+                    keeper_filter_for_scope
+                      ~scope
+                      ~requested_keeper_id:(keeper_id_param uri)
+                  with
+                  | Error err ->
+                    respond_ide_error ~status:`Bad_request ~request err reqd
+                  | Ok keeper_id ->
+                    with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
+                    let partition = partition_of_ide_scope scope in
+                    let events =
+                      Ide_bridge.list_events
+                        ~base_path:base
+                        ~partition
+                        ?kind
+                        ?keeper_id
+                        ~limit
+                        ~offset
+                        ()
+                    in
+                    let kind_json =
+                      match kind with
+                      | Some k -> `String (Ide_bridge.event_kind_to_string k)
+                      | None -> `String "all"
+                    in
+                    let result =
+                      `Assoc
+                        [ "events", `List events
+                        ; "count", `Int (List.length events)
+                        ; "kind", kind_json
+                        ; "limit", `Int limit
+                        ; "offset", `Int offset
+                        ]
+                    in
+                    Http.Response.json_value
+                      ~compress:true
+                      ~request
+                      (json_ok result)
+                      reqd)))))
       request
       reqd)
   (* [build_presence_snapshot] extracted in main — conflict resolved by taking
@@ -835,12 +997,26 @@ let add_routes router =
              (json_error msg)
              reqd
          | Ok (limit, offset) ->
-           let snapshot = build_cursor_snapshot state uri ~limit ~offset in
-           Http.Response.json_value
-             ~compress:true
-             ~request
-             (json_ok snapshot)
-             reqd)
+           (match resolve_ide_scope_for_query ~state ~uri with
+            | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
+            | Ok scope ->
+              (match
+                 keeper_filter_for_scope
+                   ~scope
+                   ~requested_keeper_id:(keeper_id_param uri)
+               with
+               | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
+               | Ok keeper_id ->
+                 with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
+                 let partition = partition_of_ide_scope scope in
+                 let snapshot =
+                   build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset
+                 in
+                 Http.Response.json_value
+                   ~compress:true
+                   ~request
+                   (json_ok snapshot)
+                   reqd))))
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
@@ -853,7 +1029,6 @@ let add_routes router =
       (fun state auth_identity _req reqd ->
          let base = base_path_of_state state in
          let uri = Uri.of_string request.target in
-         let partition = resolve_partition_for_query ~state ~uri in
          Http.Request.read_body_async reqd (fun body_str ->
            match parse_json_body body_str with
            | Error msg ->
@@ -888,7 +1063,7 @@ let add_routes router =
                    Http.Response.json_value
                      ~status:`Bad_request
                      ~request
-                     (json_error msg)
+                     (json_error ~code:"invalid_focus_mode" msg)
                      reqd
                  | Ok focus_mode ->
                    let requested_keeper_id = find_string "keeper_id" in
@@ -909,30 +1084,33 @@ let add_routes router =
                         (json_error msg)
                         reqd
                     | Ok keeper_id ->
-                      (match
-                         Ide_bridge.ingest_cursor_event
-                           ~base_path:base
-                           ~keeper_id
-                           ~file_path
-                           ~line
-                           ?column
-                           ~partition
-                           ?focus_mode
-                           ~source
-                           ()
-                       with
-                       | Ok () ->
-                         Http.Response.json_value
-                           ~status:`Created
-                           ~request
-                           (json_ok (`Assoc [ "ok", `Bool true ]))
-                           reqd
-                       | Error msg ->
-                         Http.Response.json_value
-                           ~status:`Internal_server_error
-                           ~request
-                           (json_error msg)
-                           reqd))))
+                      (match resolve_partition_for_mutation ~state ~uri with
+                       | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
+                       | Ok partition ->
+                         (match
+                            Ide_bridge.ingest_cursor_event
+                              ~base_path:base
+                              ~keeper_id
+                              ~file_path
+                              ~line
+                              ?column
+                              ~partition
+                              ?focus_mode
+                              ~source
+                              ()
+                          with
+                          | Ok () ->
+                            Http.Response.json_value
+                              ~status:`Created
+                              ~request
+                              (json_ok (`Assoc [ "ok", `Bool true ]))
+                              reqd
+                          | Error msg ->
+                            Http.Response.json_value
+                              ~status:`Internal_server_error
+                              ~request
+                              (json_error ~code:"observation_write_failed" msg)
+                              reqd)))))
               | _ ->
                 Http.Response.json_value
                   ~status:`Bad_request
@@ -1000,50 +1178,64 @@ let add_routes router =
              (json_error msg)
              inner_reqd
          | Ok (limit, offset) ->
-           let origin = get_origin request in
-           let headers =
-             Httpun.Headers.of_list
-               ([ "content-type", "text/event-stream"
-                ; "cache-control", "no-cache"
-                ; "connection", "keep-alive"
-                ; "x-accel-buffering", "no"
-                ]
-                @ cors_headers origin)
-           in
-           let response = Httpun.Response.create ~headers `OK in
-           let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
-           let write_snapshot () =
-             let snapshot_json =
-               Yojson.Safe.to_string (build_cursor_snapshot state uri ~limit ~offset)
-             in
-             let event = Printf.sprintf "data: %s\n\n" snapshot_json in
-             Httpun.Body.Writer.write_string writer event
-           in
-           write_snapshot ();
-           (match state.Mcp_server.sw, state.Mcp_server.clock with
-            | Some sw, Some clock ->
-              Eio.Fiber.fork ~sw (fun () ->
-                let rec loop () =
-                  (try
-                     Eio.Time.sleep clock 30.0;
-                     write_snapshot ();
-                     loop ()
-                   with
+           (match resolve_ide_scope_for_query ~state ~uri with
+            | Error err -> respond_ide_error ~status:`Bad_request ~request err inner_reqd
+            | Ok scope ->
+              (match
+                 keeper_filter_for_scope
+                   ~scope
+                   ~requested_keeper_id:(keeper_id_param uri)
+               with
+               | Error err ->
+                 respond_ide_error ~status:`Bad_request ~request err inner_reqd
+               | Ok keeper_id ->
+              with_keeper_lane_read_auth ~state ~request ~reqd:inner_reqd ~scope (fun () ->
+              let partition = partition_of_ide_scope scope in
+              let origin = get_origin request in
+              let headers =
+                Httpun.Headers.of_list
+                  ([ "content-type", "text/event-stream"
+                   ; "cache-control", "no-cache"
+                   ; "connection", "keep-alive"
+                   ; "x-accel-buffering", "no"
+                   ]
+                   @ cors_headers origin)
+              in
+              let response = Httpun.Response.create ~headers `OK in
+              let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
+              let write_snapshot () =
+                let snapshot_json =
+                  Yojson.Safe.to_string
+                    (build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset)
+                in
+                let event = Printf.sprintf "data: %s\n\n" snapshot_json in
+                Httpun.Body.Writer.write_string writer event
+              in
+              write_snapshot ();
+              (match state.Mcp_server.sw, state.Mcp_server.clock with
+               | Some sw, Some clock ->
+                 Eio.Fiber.fork ~sw (fun () ->
+                   let rec loop () =
+                     (try
+                        Eio.Time.sleep clock 30.0;
+                        write_snapshot ();
+                        loop ()
+                      with
+                      | Eio.Cancel.Cancelled _ as e -> raise e
+                      | exn ->
+                        Log.Server.debug
+                          "IDE cursor SSE ping loop error: %s"
+                          (Printexc.to_string exn));
+                     Httpun.Body.Writer.close writer
+                   in
+                   try loop () with
                    | Eio.Cancel.Cancelled _ as e -> raise e
                    | exn ->
-                     Log.Server.debug
-                       "IDE cursor SSE ping loop error: %s"
-                       (Printexc.to_string exn));
-                  Httpun.Body.Writer.close writer
-                in
-                try loop () with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                  Log.Server.error
-                    "IDE cursor SSE loop exited: %s"
-                    (Printexc.to_string exn);
-                  Httpun.Body.Writer.close writer)
-            | _ -> Httpun.Body.Writer.close writer))
+                     Log.Server.error
+                       "IDE cursor SSE loop exited: %s"
+                       (Printexc.to_string exn);
+                     Httpun.Body.Writer.close writer)
+               | _ -> Httpun.Body.Writer.close writer)))))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/memory" (fun request reqd ->
@@ -1067,49 +1259,57 @@ let add_routes router =
            (* Memory tiers: retrospective, episode, semantic.
               Currently returns annotation-based memory entries.
               Future: integrate with Neo4j/pgvector for semantic search. *)
-           let filter : Ide_annotation_types.annotation_filter =
-             { file_path = None; keeper_id; goal_id = None; task_id = None }
-           in
-           let partition = resolve_partition_for_read ~state ~uri in
-           let annotations = Ide_annotations.list ~base_dir:base ~partition ~filter () in
-           let entries =
-             List.map (fun (a : Ide_annotation_types.annotation) ->
-               `Assoc [
-                 ("id", `String a.id);
-                 ("kind", `String (Ide_annotation_types.annotation_kind_to_string a.kind));
-                 ("content", `String a.content);
-                 ("file_path", `String a.file_path);
-                 ("line_start", `Int a.line_start);
-                 ("line_end", `Int a.line_end);
-                 ("keeper_id", `String a.keeper_id);
-                 ("created_at_ms", `Intlit (Int64.to_string a.created_at_ms));
-                 ("source_kind", `String ide_memory_source_kind);
-                 ("retrieval_status", `String ide_memory_retrieval_status);
-                 ("goal_id", (match a.goal_id with Some g -> `String g | None -> `Null));
-                 ("task_id", (match a.task_id with Some t -> `String t | None -> `Null));
-               ])
-             (List.filteri (fun i _ -> i < limit) annotations)
-           in
-           let result = `Assoc [
-             ("entries", `List entries);
-             ("total", `Int (List.length annotations));
-             ("limit", `Int limit);
-             ( "contract"
-             , `Assoc
-                 [ ("source_kind", `String ide_memory_source_kind)
-                 ; ("retrieval_status", `String ide_memory_retrieval_status)
-                 ; ("semantic_memory_status", `String ide_memory_semantic_status)
-                 ; ("episodic_memory_status", `String ide_memory_episodic_status)
-                 ] )
-           ] in
-           let origin = get_origin request in
-           let headers =
-             Httpun.Headers.of_list
-               (("content-type", "application/json") :: cors_headers origin)
-           in
-           let body = Yojson.Safe.to_string result in
-           let response = Httpun.Response.create ~headers `OK in
-           Httpun.Reqd.respond_with_string inner_reqd response body)
+           (match resolve_ide_scope_for_query ~state ~uri with
+            | Error err -> respond_ide_error ~status:`Bad_request ~request err inner_reqd
+            | Ok scope ->
+              (match keeper_filter_for_scope ~scope ~requested_keeper_id:keeper_id with
+               | Error err ->
+                 respond_ide_error ~status:`Bad_request ~request err inner_reqd
+               | Ok keeper_id ->
+              with_keeper_lane_read_auth ~state ~request ~reqd:inner_reqd ~scope (fun () ->
+              let partition = partition_of_ide_scope scope in
+              let filter : Ide_annotation_types.annotation_filter =
+                { file_path = None; keeper_id; goal_id = None; task_id = None }
+              in
+              let annotations = Ide_annotations.list ~base_dir:base ~partition ~filter () in
+              let entries =
+                List.map (fun (a : Ide_annotation_types.annotation) ->
+                  `Assoc [
+                    ("id", `String a.id);
+                    ("kind", `String (Ide_annotation_types.annotation_kind_to_string a.kind));
+                    ("content", `String a.content);
+                    ("file_path", `String a.file_path);
+                    ("line_start", `Int a.line_start);
+                    ("line_end", `Int a.line_end);
+                    ("keeper_id", `String a.keeper_id);
+                    ("created_at_ms", `Intlit (Int64.to_string a.created_at_ms));
+                    ("source_kind", `String ide_memory_source_kind);
+                    ("retrieval_status", `String ide_memory_retrieval_status);
+                    ("goal_id", (match a.goal_id with Some g -> `String g | None -> `Null));
+                    ("task_id", (match a.task_id with Some t -> `String t | None -> `Null));
+                  ])
+                (List.filteri (fun i _ -> i < limit) annotations)
+              in
+              let result = `Assoc [
+                ("entries", `List entries);
+                ("total", `Int (List.length annotations));
+                ("limit", `Int limit);
+                ( "contract"
+                , `Assoc
+                    [ ("source_kind", `String ide_memory_source_kind)
+                    ; ("retrieval_status", `String ide_memory_retrieval_status)
+                    ; ("semantic_memory_status", `String ide_memory_semantic_status)
+                    ; ("episodic_memory_status", `String ide_memory_episodic_status)
+                    ] )
+              ] in
+              let origin = get_origin request in
+              let headers =
+                Httpun.Headers.of_list
+                  (("content-type", "application/json") :: cors_headers origin)
+              in
+              let body = Yojson.Safe.to_string result in
+              let response = Httpun.Response.create ~headers `OK in
+              Httpun.Reqd.respond_with_string inner_reqd response body))))
       request
       reqd)
 ;;

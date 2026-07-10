@@ -48,6 +48,7 @@ type provider =
   ; is_non_interactive : bool
   ; credentials : credential option
   ; capabilities : capabilities option
+  ; healthcheck_path : string option
   ; headers : (string * string) list option
   ; connect_timeout_s : float option
     (** Per-provider override for the OAS connect + initial-response-headers
@@ -70,7 +71,7 @@ type thinking_control_format =
   | Thinking_object_adaptive
   | Thinking_object_only
   | Chat_template_kwargs
-  | Chat_template_token
+  | Chat_template_token of string
   | Ollama_think
   | Reasoning_effort
   | Enable_thinking
@@ -121,6 +122,9 @@ type model_spec =
   ; max_thinking_budget : int option
   ; streaming : bool
   ; temperature : float option
+  ; top_p : float option
+  ; top_k : int option
+  ; min_p : float option
   ; capabilities : model_capabilities option
   ; match_prefixes : string list
   }
@@ -132,6 +136,7 @@ type binding =
   { provider_id : string
   ; model_id : string
   ; is_default : bool
+  ; wizard_default : bool
   ; max_concurrent : int option
   ; price_input : float option
   ; price_output : float option
@@ -152,6 +157,32 @@ type pause_threshold =
 [@@deriving show, eq]
 
 val pause_threshold_default : pause_threshold
+
+(** {1 Pacing (RFC-0313 W3)}
+
+    Per-runtime failure revisit pacing: failure outcomes modulate {i when}
+    the next turn runs, never whether the keeper exists. *)
+
+type pacing_mode =
+  | Pacing_shadow
+    (** Pacing is computed and logged but the legacy failure-driven pause
+        paths and the cycle-cap matrix stay live. Kill-switch position for
+        one release (RFC-0313 W3); the switch is removed in W4. *)
+  | Pacing_enforce
+    (** Failure-driven pause paths are skipped and the scheduler delays the
+        keeper's next turn until the earliest per-runtime revisit becomes
+        eligible. *)
+[@@deriving show, eq]
+
+type pacing =
+  { pacing_mode : pacing_mode
+  ; pacing_base_sec : float
+  ; pacing_multiplier : float
+  ; pacing_cap_sec : float
+  }
+[@@deriving show, eq]
+
+val pacing_default : pacing
 
 (** {1 Lanes}
 
@@ -190,6 +221,12 @@ type config =
         [supports-structured-output]. [None] lets callers use their documented
         migration fallback; schema requests still fail loudly if the resolved
         runtime cannot satisfy them. *)
+  ; hitl_summary_runtime_id : string option
+    (** [\[runtime\].hitl_summary] — runtime id for HITL approval context
+        summaries. When set, it must resolve to a configured runtime. The HITL
+        worker decides native structured vs plain JSON mode at call time, so
+        load-time validation only rejects unknown ids. [None] keeps the legacy
+        structured-judge routing fallback. *)
   ; cross_verifier_runtime_id : string option
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
         evaluator (cross-model task verification). The evaluator requests JSON
@@ -214,6 +251,11 @@ type config =
   ; pause_threshold : pause_threshold
     (** [\[pause\]] — typed SSOT for keeper pause / regime threshold knobs.
         Missing or wrong-typed values fall back to [pause_threshold_default]. *)
+  ; pacing : pacing
+    (** [\[pacing\]] (RFC-0313 W3) — failure revisit pacing policy plus the
+        shadow/enforce switch. Missing section → [pacing_default]. Numeric
+        knobs fail soft like [\[pause\]]; an unknown [mode] value aborts
+        config parse (fail-closed). *)
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

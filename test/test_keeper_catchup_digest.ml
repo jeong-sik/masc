@@ -59,6 +59,24 @@ let str_contains ~needle haystack =
 
 let has_cause cause coverage = List.exists (( = ) cause) coverage.D.causes
 
+let json_assoc_fields = function
+  | `Assoc fields -> fields
+  | _ -> []
+;;
+
+let json_string_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> Some value
+  | Some `Null | None -> None
+  | Some _ -> None
+;;
+
+let json_list_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`List items) -> items
+  | _ -> []
+;;
+
 (* ── store paths (mirror Common.*_from_base_path) ────────────────── *)
 
 let masc base = Filename.concat base ".masc"
@@ -71,10 +89,50 @@ let activity_dir base = Filename.concat (masc base) "activity-events"
 let transition_dir base = Filename.concat (masc base) "transition-audit"
 let chat_file base = Filename.concat (Filename.concat (masc base) "keeper_chat") (keeper ^ ".jsonl")
 let meta_file base = Filename.concat (keepers base) (keeper ^ ".json")
+let backlog_file base = Filename.concat (Filename.concat (masc base) "tasks") "backlog.json"
 
 (* ── fixture row builders ────────────────────────────────────────── *)
 
 let json_line j = Yojson.Safe.to_string j
+
+let handoff_context ?next_step ?(evidence_refs = []) summary
+  : Masc_domain.task_handoff_context
+  =
+  { summary
+  ; reason = None
+  ; next_step
+  ; failure_mode = None
+  ; reclaim_policy = None
+  ; evidence_refs
+  ; updated_at = Some "2026-07-02T00:00:00Z"
+  ; updated_by = Some "digest-test"
+  }
+;;
+
+let task ?handoff_context ~id ~title ~status () : Masc_domain.task =
+  { id
+  ; title
+  ; description = "fixture task"
+  ; task_status = status
+  ; priority = 2
+  ; files = []
+  ; created_at = "2026-07-02T00:00:00Z"
+  ; created_by = Some "digest-test"
+  ; predecessor_task_id = None
+  ; contract = None
+  ; handoff_context
+  ; cycle_count = 0
+  ; reclaim_policy = None
+  ; do_not_reclaim_reason = None
+  }
+;;
+
+let write_backlog base tasks =
+  let backlog : Masc_domain.backlog =
+    { tasks; last_updated = "2026-07-02T00:00:00Z"; version = 1 }
+  in
+  write_file (backlog_file base) (json_line (Masc_domain.backlog_to_yojson backlog))
+;;
 
 let chat_row ?id ?kind ?(content = "x") ~role ~ts () =
   let base = [ "role", `String role; "content", `String content; "ts", `Float ts ] in
@@ -186,6 +244,35 @@ let write_rich_fixture base =
   append_line (af (since_unix +. 400.)) (audit_row ~ts:(since_unix +. 400.) ~agent_id:("keeper:" ^ keeper) ~action:"release_task" ~transition:"release" ~task_id:"task-3");
   append_line (af (since_unix +. 500.)) (audit_row ~ts:(since_unix +. 500.) ~agent_id:"other" ~action:"claim_task" ~transition:"claim" ~task_id:"task-4");
   append_line (af (since_unix -. 200.)) (audit_row ~ts:(since_unix -. 200.) ~agent_id:keeper ~action:"claim_task" ~transition:"claim" ~task_id:"task-5");
+  write_backlog
+    base
+    [ task
+        ~id:"task-1"
+        ~title:"Implement visible-text feedback guard"
+        ~status:
+          (Masc_domain.AwaitingVerification
+             { assignee = keeper
+             ; submitted_at = "2026-07-02T00:10:00Z"
+             ; verification_id = "vrf-task-1"
+             ; phase = Masc_domain.Awaiting_verifier
+             })
+        ~handoff_context:
+          (handoff_context
+             ~next_step:"cross-agent review"
+             ~evidence_refs:[ "PR#23399"; "commit:f2678ed43" ]
+             "PR is open and waiting for verification")
+        ()
+    ; task
+        ~id:"task-2"
+        ~title:"Complete dashboard follow-up"
+        ~status:
+          (Masc_domain.Done
+             { assignee = "keeper-" ^ keeper ^ "-agent"
+             ; completed_at = "2026-07-02T00:20:00Z"
+             ; notes = Some "done"
+             })
+        ()
+    ];
   (* activity-events board.* + keeper.turn_failed for the keeper; a foreign
      board row and a pre-since board row that must be excluded. *)
   let acd = activity_dir base in
@@ -267,6 +354,30 @@ let test_counts_and_boundary () =
     Alcotest.(check int) "tasks.released (keeper: prefix form)" 1 released;
     Alcotest.(check int) "tasks.cancelled" 0 cancelled;
     Alcotest.(check int) "task items (foreign + pre-since excluded)" 3 (List.length task_items);
+    (match List.find_opt (fun item -> String.equal item.D.task_id "task-1") task_items with
+     | Some { D.current_task = Some current; _ } ->
+       Alcotest.(check string)
+         "task-1 current status"
+         "awaiting_verification"
+         current.D.status;
+       Alcotest.(check (option string))
+         "task-1 submitted_at"
+         (Some "2026-07-02T00:10:00Z")
+         current.D.submitted_at;
+       Alcotest.(check (option string))
+         "task-1 handoff summary"
+         (Some "PR is open and waiting for verification")
+         current.D.handoff_summary;
+       Alcotest.(check (list string))
+         "task-1 evidence refs"
+         [ "PR#23399"; "commit:f2678ed43" ]
+         current.D.handoff_evidence_refs
+     | Some { D.current_task = None; _ } -> Alcotest.fail "task-1 must include current_task"
+     | None -> Alcotest.fail "expected task-1 item");
+    (match List.find_opt (fun item -> String.equal item.D.task_id "task-3") task_items with
+     | Some { D.current_task = None; _ } -> ()
+     | Some { D.current_task = Some _; _ } -> Alcotest.fail "task-3 should not have a current_task"
+     | None -> Alcotest.fail "expected task-3 item");
     (* board *)
     Alcotest.(check int) "board.posted" 1 posted;
     Alcotest.(check int) "board.commented" 1 commented;
@@ -469,6 +580,38 @@ let test_to_json_shape () =
               (List.mem_assoc "causes" chat_fields)
           | _ -> Alcotest.fail "coverage.chat must be an object")
        | _ -> Alcotest.fail "coverage must be an object")
+      ;
+      (match List.assoc_opt "tasks" fields with
+       | Some (`Assoc task_fields) ->
+         let item_for_task_1 =
+           json_list_field "items" task_fields
+           |> List.find_opt (fun item ->
+             String.equal
+               (Option.value
+                  (json_string_field "task_id" (json_assoc_fields item))
+                  ~default:"")
+               "task-1")
+         in
+         (match item_for_task_1 with
+          | Some item ->
+            (match List.assoc_opt "current_task" (json_assoc_fields item) with
+             | Some (`Assoc current_fields) ->
+               Alcotest.(check (option string))
+                 "current_task.status serialised"
+                 (Some "awaiting_verification")
+                 (json_string_field "status" current_fields);
+               Alcotest.(check (option string))
+                 "current_task.handoff_next_step serialised"
+                 (Some "cross-agent review")
+                 (json_string_field "handoff_next_step" current_fields);
+               Alcotest.(check int)
+                 "current_task.handoff_evidence_refs serialised"
+                 2
+                 (List.length (json_list_field "handoff_evidence_refs" current_fields))
+             | Some `Null -> Alcotest.fail "task-1 current_task must not be null"
+             | _ -> Alcotest.fail "task-1 current_task must be an object")
+          | None -> Alcotest.fail "expected task-1 JSON item")
+       | _ -> Alcotest.fail "tasks must be an object")
     | _ -> Alcotest.fail "to_json must be a JSON object")
 ;;
 

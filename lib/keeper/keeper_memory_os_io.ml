@@ -566,9 +566,10 @@ let read_facts_for_rewrite ~keeper_id =
 let cap_facts ~now ~keeper_id ~keep ~trigger ~rank =
   let path = facts_path ~keeper_id in
   let all = read_facts_for_rewrite ~keeper_id in
-  (* RFC-0259 §3.6 (P5): drop [valid_until]-expired rows before the trigger gate
+  (* RFC-0259 §3.6 (P5): drop effective-horizon-expired rows before the trigger gate
      and before ranking, so an under-cap store does not retain expired rows on
-     disk until the off-by-default GC sweep. Durable facts are never expired. *)
+     disk until the off-by-default GC sweep. Facts with no effective horizon
+     ([Keeper_memory_os_types.fact_effective_valid_until]) are never expired. *)
   let live, expired = partition_expired ~now all in
   let total = List.length live in
   if expired = [] && total <= trigger
@@ -647,11 +648,11 @@ let merge_episode_facts ~merge ~existing ~incoming =
 let merge_and_cap_facts ~now ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
   let existing = read_facts_for_rewrite ~keeper_id in
   let merged_list, merged, appended = merge_episode_facts ~merge ~existing ~incoming in
-  (* RFC-0259 §3.6 (P5): drop [valid_until]-expired rows on the same boundary the
+  (* RFC-0259 §3.6 (P5): drop effective-horizon-expired rows on the same boundary the
      GC sweep uses, before the trigger gate and ranking, so an under-cap store
      does not retain expired rows on disk. Expired rows are counted in [dropped]
-     alongside rank evictions. Durable facts ([valid_until = None]) are never
-     expired, so durable knowledge is never evicted here. *)
+     alongside rank evictions. Facts with no effective horizon (see
+     [Keeper_memory_os_types.fact_effective_valid_until]) are never expired, so durable knowledge is never evicted here. *)
   let live, expired = partition_expired ~now merged_list in
   let total = List.length live in
   let no_incoming = match incoming with [] -> true | _ :: _ -> false in

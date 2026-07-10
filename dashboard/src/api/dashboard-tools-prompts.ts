@@ -76,6 +76,75 @@ export interface DashboardScheduledAutomationExecution {
   error?: string | null
 }
 
+export interface DashboardScheduledAutomationDispatchReceipt {
+  projection_status: 'recognized' | 'unrecognized_detail'
+  kind?: string
+  queue?: string
+  stimulus?: string
+  stimulus_id?: string | null
+  reaction_ledger_status?: string | null
+  reaction_ledger_error?: string | null
+  keeper_name?: string
+  schedule_id?: string
+  urgency?: string
+  post_id?: string
+  author?: string
+  hearth?: string | null
+  reason?: string
+}
+
+export interface DashboardScheduledAutomationKeeperReactionEvidence {
+  projection_status:
+    | 'matched_consumed_ack'
+    | 'matched_turn_started'
+    | 'matched_stimulus'
+    | 'not_found'
+    | 'missing_stimulus_id'
+    | 'unrecognized_receipt'
+  source?: string
+  keeper_name?: string
+  schedule_id?: string
+  post_id?: string
+  stimulus?: string
+  stimulus_id?: string
+  stimulus_kind?: string
+  reaction_kind?: string
+  stimulus_seen?: boolean
+  turn_started_seen?: boolean
+  event_queue_ack_seen?: boolean
+  matched_record_count?: number
+  stimulus_recorded_at?: number | null
+  stimulus_recorded_at_iso?: string | null
+  turn_started_recorded_at?: number | null
+  turn_started_recorded_at_iso?: string | null
+  event_queue_ack_recorded_at?: number | null
+  event_queue_ack_recorded_at_iso?: string | null
+  latest_recorded_at?: number | null
+  latest_recorded_at_iso?: string | null
+  reason?: string
+}
+
+export interface DashboardScheduledAutomationKeeperQueueEvidence {
+  projection_status: 'matched_pending' | 'matched_inflight' | 'not_found' | 'read_error' | 'unrecognized_receipt'
+  source?: string
+  queue?: string
+  stimulus?: string
+  keeper_name?: string
+  schedule_id?: string
+  post_id?: string
+  pending_count?: number
+  inflight_count?: number
+  matched_bucket?: string
+  matched_post_id?: string
+  matched_schedule_id?: string | null
+  matched_payload_kind?: string
+  matched_arrived_at?: number
+  matched_arrived_at_iso?: string
+  matched_age_seconds?: number
+  read_errors?: Array<{ kind?: string; path?: string | null; message?: string }>
+  reason?: string
+}
+
 export interface DashboardScheduledAutomationKeeperToolStatus {
   name: string
   registered_schema?: boolean
@@ -150,6 +219,9 @@ export interface DashboardScheduledAutomationRequest {
   requires_separate_human_grant?: boolean
   approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
+  dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
+  keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null
+  keeper_reaction_evidence?: DashboardScheduledAutomationKeeperReactionEvidence | null
 }
 
 export interface DashboardScheduledAutomationPayloadSupport {
@@ -157,6 +229,27 @@ export interface DashboardScheduledAutomationPayloadSupport {
   unsupported_request_count?: number
   unsupported_kinds?: Array<{ kind: string; count: number }>
   unknown_request_count?: number
+}
+
+export interface DashboardScheduledAutomationLiveSupportedNonTerminalEvidence {
+  schema?: string
+  source?: string
+  projection_status:
+    | 'matched_supported_non_terminal'
+    | 'no_supported_payload_rows'
+    | 'no_supported_non_terminal'
+  criteria?: string
+  reason?: string
+  request_count?: number
+  supported_request_count?: number
+  supported_non_terminal_count?: number
+  supported_live_count?: number
+  supported_terminal_or_expired_count?: number
+  unsupported_request_count?: number
+  unknown_request_count?: number
+  terminal_or_expired_count?: number
+  matched_schedule_ids?: string[]
+  matched_schedule_id_limit?: number
 }
 
 export interface DashboardScheduledAutomation {
@@ -173,8 +266,106 @@ export interface DashboardScheduledAutomation {
   counts: Record<string, number>
   derived_counts?: Record<string, number>
   payload_support?: DashboardScheduledAutomationPayloadSupport
+  live_supported_non_terminal_evidence?: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence
   fsm: DashboardScheduledAutomationFsm
   requests: DashboardScheduledAutomationRequest[]
+}
+
+export interface DashboardKeeperWaitingRow {
+  keeper_name?: string | null
+  source: string
+  waiting_on: string
+  wake_producer?: string | null
+  since?: number | null
+  since_iso?: string | null
+  due_at?: number | null
+  due_at_iso?: string | null
+  next_action: string
+  detail?: unknown
+}
+
+export interface DashboardKeeperWaitingKeeper {
+  keeper_name: string
+  state: 'idle' | 'busy' | 'waiting' | 'deferred' | string
+  waiting_on: DashboardKeeperWaitingRow[]
+  waiting_count: number
+  waiting_count_truncated?: boolean
+  truncated_sources?: Record<string, boolean>
+  sources?: Record<string, number>
+  since?: number | null
+  since_iso?: string | null
+  due_at?: number | null
+  due_at_iso?: string | null
+  next_action?: string | null
+}
+
+export interface DashboardKeeperWaitingInventory {
+  schema?: string
+  source?: string
+  generated_at?: string
+  supported_states?: string[]
+  keeper_count_known?: boolean
+  keeper_count: number
+  waiting_keeper_count: number
+  row_count: number
+  row_count_truncated?: boolean
+  external_attention_row_limit?: number
+  external_attention_truncated_keeper_count?: number
+  global_row_count?: number
+  global_pending_confirm_count_known?: boolean
+  global_pending_confirm_count?: number
+  source_counts?: Record<string, number>
+  keepers: DashboardKeeperWaitingKeeper[]
+  global_waiting_on?: DashboardKeeperWaitingRow[]
+}
+
+// Keeper autonomous background (server_keeper_background.dashboard_json). Surfaces
+// per-keeper recurring tasks with the owning keeper's loop liveness as context.
+// Deferred async work (bg-shell / fusion / hitl) is NOT here — it is reused from
+// DashboardKeeperWaitingInventory rather than re-projected.
+export interface DashboardKeeperBackgroundLoop {
+  phase: string
+  started_at?: number | null
+  started_at_iso?: string | null
+  restart_count: number
+  last_restart_at?: number | null
+  last_restart_at_iso?: string | null
+  dead_since?: number | null
+  dead_since_iso?: string | null
+}
+
+export interface DashboardKeeperRecurringTask {
+  id: string
+  label: string
+  action_kind: string
+  interval_sec: number
+  enabled: boolean
+  run_count: number
+  failure_count: number
+  max_failures: number
+  // null until the task first runs (never epoch 0), and next_run is null while
+  // the task is paused or has never run.
+  last_run_at?: number | null
+  last_run_at_iso?: string | null
+  next_run_at?: number | null
+  next_run_at_iso?: string | null
+}
+
+export interface DashboardKeeperBackgroundKeeper {
+  keeper_name: string
+  loop: DashboardKeeperBackgroundLoop
+  recurring: DashboardKeeperRecurringTask[]
+  recurring_count: number
+}
+
+export interface DashboardKeeperBackground {
+  schema?: string
+  source?: string
+  generated_at?: string
+  keeper_count: number
+  recurring_keeper_count: number
+  recurring_count: number
+  keepers: DashboardKeeperBackgroundKeeper[]
 }
 
 export interface DashboardToolsResponse {
@@ -187,6 +378,8 @@ export interface DashboardToolsResponse {
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
   scheduled_automation?: DashboardScheduledAutomation
+  keeper_waiting_inventory?: DashboardKeeperWaitingInventory
+  keeper_background?: DashboardKeeperBackground
 }
 
 // --- Runtime probe (KV-cache / model load probe) ---

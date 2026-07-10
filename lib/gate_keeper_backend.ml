@@ -16,16 +16,20 @@
    letting the busy branch route without string-matching the [channel] lane. *)
 type connector_kind =
   | Discord
+  | Slack
+      (** RFC-0317: the in-process Slack Socket Mode gateway
+          ([Server_slack_in_process_gateway]) builds its dispatch with
+          [~connector_kind:Slack]. Like [Discord] it has an outbound adapter
+          ([Keeper_chat_slack.adapter_loop], drained by the serial chat
+          consumer), so a message arriving mid-turn projects onto the chat queue
+          for deferred delivery rather than the outbound-less async poll store.
+          Added together with that gateway, not before. *)
   | Generic
       (** Every connector that is not a wired in-process inbound gateway with its
           own outbound adapter. Today this is the HTTP gate-route lane
           (imessage-bot, cli-connector) which POSTs and awaits synchronously, so
           a busy message keeps the async [masc_keeper_msg] poll path; see
-          RFC-connector-deferred-reply-via-chat-queue §3.3 option (a). Slack is
-          intentionally absent: there is no in-process Slack inbound gateway that
-          calls [dispatch ~connector_kind:Slack], so adding a [Slack] arm here
-          would be a dead supported-looking branch. Add it together with that
-          gateway, not before. *)
+          RFC-connector-deferred-reply-via-chat-queue §3.3 option (a). *)
 
 (* [route_busy_connector] decides where a connector message goes when the keeper
    is already in flight. Pure and exhaustive over [connector_kind] so a new
@@ -38,6 +42,10 @@ let route_busy_connector (kind : connector_kind) ~channel_id ~user_id :
     [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ] =
   match kind with
   | Discord -> `Enqueue_chat_queue (Keeper_chat_queue.Discord { channel_id; user_id })
+  | Slack ->
+    (* [Keeper_chat_queue.Slack] names the channel field [channel], not
+       [channel_id]; the busy Slack message carries the same conversation id. *)
+    `Enqueue_chat_queue (Keeper_chat_queue.Slack { channel = channel_id; user_id })
   | Generic -> `Async_poll
 
 (* ── Keeper response parsing ─────────────────────────────────── *)
@@ -291,13 +299,135 @@ let metadata_value key metadata =
       if value = "" then None else Some value
   | None -> None
 
-let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
+let metadata_value_any keys metadata =
+  List.find_map (fun key -> metadata_value key metadata) keys
+
+let assoc_string_if_present key value =
+  match non_empty_opt value with
+  | None -> []
+  | Some value -> [ (key, value) ]
+
+let opt_assoc_string_if_present key = function
+  | None -> []
+  | Some value -> assoc_string_if_present key value
+
+let gate_address ~channel ~channel_workspace_id ?conversation_id
+    ?external_message_id () =
+  assoc_string_if_present "connector" channel
+  @ assoc_string_if_present "workspace_id" channel_workspace_id
+  @ opt_assoc_string_if_present "conversation_id" conversation_id
+  @ opt_assoc_string_if_present "external_message_id" external_message_id
+
+let discord_channel_id ~channel_workspace_id ~metadata =
+  match metadata_value_any [ "discord.channel_id"; "discord_channel_id" ] metadata with
+  | Some channel_id -> channel_id
+  | None -> String.trim channel_workspace_id
+
+let discord_guild_id metadata =
+  metadata_value_any [ "discord.guild_id"; "discord_guild_id" ] metadata
+
+(* Slack surface derivation (RFC-0317). The in-process gateway sets
+   [channel_workspace_id = channel_id] and mirrors it as [slack.channel_id]
+   metadata; prefer the metadata key, fall back to the workspace id. *)
+let slack_channel_id ~channel_workspace_id ~metadata =
+  match metadata_value_any [ "slack.channel_id"; "slack_channel_id" ] metadata with
+  | Some channel_id -> channel_id
+  | None -> String.trim channel_workspace_id
+
+let slack_team_id metadata =
+  metadata_value_any [ "slack.team_id"; "slack_team_id" ] metadata
+
+let slack_thread_ts metadata =
+  metadata_value_any [ "slack.thread_ts"; "slack_thread_ts" ] metadata
+
+let surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
+    ~metadata ?conversation_id ?external_message_id () =
+  match connector_kind with
+  | Discord ->
+      Surface_ref.Discord
+        {
+          guild_id = discord_guild_id metadata;
+          channel_id = discord_channel_id ~channel_workspace_id ~metadata;
+          parent_channel_id =
+            metadata_value_any
+              [ "discord.parent_channel_id"; "discord_parent_channel_id" ]
+              metadata;
+          thread_id =
+            metadata_value_any [ "discord.thread_id"; "discord_thread_id" ] metadata;
+        }
+  | Slack ->
+      Surface_ref.Slack
+        {
+          team_id = slack_team_id metadata;
+          channel_id = slack_channel_id ~channel_workspace_id ~metadata;
+          thread_ts = slack_thread_ts metadata;
+        }
+  | Generic ->
+      let label =
+        match non_empty_opt channel with
+        | Some lane -> lane
+        | None -> "gate"
+      in
+      Surface_ref.Gate
+        {
+          label;
+          address =
+            gate_address ~channel ~channel_workspace_id ?conversation_id
+              ?external_message_id ();
+        }
+
+let conversation_id_for_channel_context ~connector_kind ~channel
+    ~channel_workspace_id ~metadata =
+  match metadata_value "conversation_id" metadata with
+  | Some value -> Some value
+  | None -> (
+      match connector_kind with
+      | Discord ->
+          let channel_id = discord_channel_id ~channel_workspace_id ~metadata in
+          (match non_empty_opt channel_id with
+           | None -> None
+           | Some channel_id ->
+               let guild_label =
+                 match discord_guild_id metadata with
+                 | Some guild_id -> guild_id
+                 | None -> "dm"
+               in
+               Some (Printf.sprintf "discord:%s:channel:%s" guild_label channel_id))
+      | Slack ->
+          (* Same shape as the in-process gateway's [slack_conversation_id] so
+             the inbound-recorded conversation and the busy-deferred delivery
+             reference one id (Slack threads share the parent channel id). *)
+          let channel_id = slack_channel_id ~channel_workspace_id ~metadata in
+          (match non_empty_opt channel_id with
+           | None -> None
+           | Some channel_id -> Some (Printf.sprintf "slack:channel:%s" channel_id))
+      | Generic ->
+          (match non_empty_opt channel, non_empty_opt channel_workspace_id with
+           | Some lane, Some workspace_id ->
+               Some (Printf.sprintf "gate:%s:workspace:%s" lane workspace_id)
+           | _ -> None))
+
+let external_message_id_for_channel_context ~idempotency_key ~metadata =
+  match metadata_value_any [ "external_message_id"; "discord.message_id" ] metadata with
+  | Some value -> Some value
+  | None -> non_empty_opt idempotency_key
+
+let ensure_metadata key value metadata =
+  match value with
+  | None -> metadata
+  | Some value ->
+      if Option.is_some (List.assoc_opt key metadata) then metadata
+      else metadata @ [ (key, value) ]
+
+let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
     ?conversation_id ?turn_ref ~reply () =
   let content = String.trim reply in
   if content <> "" then begin
-    (* RFC-0232 P5: the gate recorder knows the connector label only;
-       coordinates ride [conversation_id] as before. *)
-    let surface = Surface_ref.Gate { label = source; address = [] } in
+    let surface =
+      match surface with
+      | Some surface -> surface
+      | None -> Surface_ref.Gate { label = source; address = [] }
+    in
     (* RFC-0233 §7: [turn_ref] is the join key the keeper minted into the
        reply payload, carried onto this connector turn's assistant row. *)
     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
@@ -312,7 +442,7 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
 let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
     ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~metadata ~content () =
+    ~keeper_name ~idempotency_key ~metadata ~content () =
   let keeper_name = String.trim keeper_name in
   let redaction =
     Keeper_secret_redaction.snapshot
@@ -344,8 +474,22 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
      history. *)
   let lane = String.trim channel in
   let opt value = match String.trim value with "" -> None | v -> Some v in
-  let conversation_id = metadata_value "conversation_id" metadata in
-  let external_message_id = metadata_value "external_message_id" metadata in
+  let conversation_id =
+    conversation_id_for_channel_context ~connector_kind ~channel
+      ~channel_workspace_id ~metadata
+  in
+  let external_message_id =
+    external_message_id_for_channel_context ~idempotency_key ~metadata
+  in
+  let metadata =
+    metadata
+    |> ensure_metadata "conversation_id" conversation_id
+    |> ensure_metadata "external_message_id" external_message_id
+  in
+  let surface =
+    surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
+      ~metadata ?conversation_id ?external_message_id ()
+  in
   (* RFC-0232 §3.3: the connector decoded a structured mention of this
      channel's bound keeper (e.g. Discord <@snowflake>, invisible to
      the content token parser), so the recorder persists it as an
@@ -360,7 +504,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
     ~base_dir:config.Workspace.base_path
     ~keeper_name
     ~content:(String.trim content)
-    ~surface:(Surface_ref.Gate { label = lane; address = [] })
+    ~surface
     ?conversation_id
     ?external_message_id
     ~speaker:
@@ -387,6 +531,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
          of the generic "agent" source. Internal-only args, same class
          as [direct_reply] / [channel_session_key]. *)
       ("channel", `String channel);
+      ("channel_workspace_id", `String channel_workspace_id);
       ("channel_user_id", `String channel_user_id);
       ("channel_user_name", `String channel_user_name);
       ("channel_metadata", string_assoc_json metadata);
@@ -553,7 +698,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
       in
       persist_connector_assistant_reply
         ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
-        ?conversation_id ?turn_ref ~reply ();
+        ~surface ?conversation_id ?turn_ref ~reply ();
       Gate_protocol.Reply { content = reply; structured; stats; message_request = None }
   | `Async_ack (_, Some result) | `Streaming (Some result) ->
       Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))
@@ -569,14 +714,14 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
    [Generic] default. *)
 let dispatch ~connector_kind ~sw ~clock ~proc_mgr ~net ~config ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-    ~metadata ~content =
+    ~idempotency_key ~metadata ~content =
   dispatch_core ~connector_kind ~sw ~clock ~proc_mgr ~net ~config ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-    ~metadata ~content ()
+    ~idempotency_key ~metadata ~content ()
 
 let dispatch_with_text_snapshot ~connector_kind ~on_text_snapshot ~sw ~clock
     ~proc_mgr ~net ~config ~channel ~channel_user_id ~channel_user_name
-    ~channel_workspace_id ~keeper_name ~metadata ~content =
+    ~channel_workspace_id ~keeper_name ~idempotency_key ~metadata ~content =
   dispatch_core ~connector_kind ~on_text_snapshot ~sw ~clock ~proc_mgr ~net
     ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~metadata ~content ()
+    ~keeper_name ~idempotency_key ~metadata ~content ()

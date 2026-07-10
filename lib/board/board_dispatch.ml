@@ -346,37 +346,70 @@ let matching_post_ids_for_comment_author_filter ~needle (comments : Board.commen
     comments;
   matches
 
-let create_post ~author ~content ?title ?body ~post_kind ?meta_json
-    ?(visibility = Board.Internal)
+let emit_post_created (post : Board.post) =
+  let pid = Board.Post_id.to_string post.id in
+  let auth = Board.Agent_id.to_string post.author in
+  emit_board_signal
+    {
+      kind = Board_post_created;
+      post_id = pid;
+      author = auth;
+      title = post.title;
+      content = post.content;
+      hearth = post.hearth;
+      updated_at = Some post.updated_at;
+    };
+  emit_board_sse_event
+    (Post_created
+       { post_id = pid; author = auth; title = post.title;
+         content = post.content; post_kind = post.post_kind;
+         hearth = post.hearth })
+
+let create_post_with_outcome ?after_fresh_persist ?after_rollup_persist ~author
+    ~content ?title ?body ~post_kind ?meta_json ?(visibility = Board.Internal)
     ?(ttl_hours = Board.Limits.default_ttl_hours) ?hearth ?thread_id ?origin () =
   match backend () with
   | Jsonl store ->
       (match
-         Board.create_post_with_outcome store ~author ~content ?title ?body
-           ~post_kind ?meta_json ~visibility ~ttl_hours ?hearth ?thread_id
-           ?origin ()
+         Board.create_post_with_outcome ?after_rollup_persist store ~author
+           ~content ?title ?body ~post_kind ?meta_json ~visibility ~ttl_hours
+           ?hearth ?thread_id ?origin ()
        with
       | Ok (Board.Fresh_post post) ->
-          let pid = Board.Post_id.to_string post.id in
-          let auth = Board.Agent_id.to_string post.author in
-          emit_board_signal
-            {
-              kind = Board_post_created;
-              post_id = pid;
-              author = auth;
-              title = post.title;
-              content = post.content;
-              hearth = post.hearth;
-              updated_at = Some post.updated_at;
-            };
-          emit_board_sse_event
-            (Post_created
-               { post_id = pid; author = auth; title = post.title;
-                 content = post.content; post_kind = post.post_kind;
-                 hearth = post.hearth });
-          Ok post
-      | Ok (Board.Dedup_hit post) | Ok (Board.Rolled_up_post post) -> Ok post
+          (match after_fresh_persist with
+           | None ->
+               emit_post_created post;
+               Ok (Board.Fresh_post post)
+           | Some hook ->
+               (match hook post with
+                | Ok () ->
+                    emit_post_created post;
+                    Ok (Board.Fresh_post post)
+                | Error msg ->
+                    let post_id = Board.Post_id.to_string post.id in
+                    let rollback_error =
+                      match Board.delete_post store ~post_id with
+                      | Ok () -> None
+                      | Error e -> Some (Board.show_board_error e)
+                    in
+                    let message =
+                      match rollback_error with
+                      | None -> msg
+                      | Some rollback -> msg ^ "; rollback failed: " ^ rollback
+                    in
+                    Error (Board.Validation_error message)))
+      | Ok (Board.Dedup_hit post) -> Ok (Board.Dedup_hit post)
+      | Ok (Board.Rolled_up_post post) -> Ok (Board.Rolled_up_post post)
       | Error _ as err -> err)
+
+let create_post ~author ~content ?title ?body ~post_kind ?meta_json
+    ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
+  match
+    create_post_with_outcome ~author ~content ?title ?body ~post_kind
+      ?meta_json ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
+  with
+  | Ok outcome -> Ok (Board.post_of_create_post_outcome outcome)
+  | Error _ as err -> err
 
 let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with
@@ -428,7 +461,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
         | Trending | Recent | Updated | Discussed -> true
       in
       let fetch_limit =
-        if needs_full_scan then Board.Limits.max_posts else max limit 200
+        if needs_full_scan then Board.Limits.max_posts else max limit 500
       in
       let posts =
         if needs_full_scan then

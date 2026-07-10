@@ -37,27 +37,27 @@ function isWorkSection(v: string | undefined): v is WorkSection {
 
 // Bucket = progress-aggregation axis (done/wip/verify/blocked/todo).
 // cls    = the prototype's CSS modifier on .wk-task-dot/.wk-task-state.
-// They differ on purpose: the vendored v2.css defines dot/state variants
-// `done|wip|verify|claimed|cancelled|todo` (v2.css:832-850) but NOT
-// `review` or `blocked`, so emitting the prototype's exact class names is
-// what gets the row styled. `claimed` keeps its own (info-blue) color
-// instead of folding into wip; `cancelled` keeps the struck-through grey.
+// They differ on purpose: `claimed`, `blocked`, `paused`, and `unknown`
+// preserve protocol truth instead of folding into broader progress states.
 type JobBucket = 'done' | 'wip' | 'verify' | 'blocked' | 'todo'
-type JobStateCls = 'done' | 'wip' | 'verify' | 'claimed' | 'cancelled' | 'todo'
+type JobStateCls = 'done' | 'wip' | 'verify' | 'claimed' | 'cancelled' | 'todo' | 'blocked' | 'paused' | 'unknown'
 
 // ── Kanban view columns ─────────────────────────────────────────────────────
 // Closed tuple — cancelled is excluded by design (it has its own aside panel).
 // Each entry: [task.status value, Korean column label, CSS modifier cls].
 // The cls values come directly from JobStateCls so KanbanCard can reuse the
 // same .wk-kcard.<cls> and .wk-kcol-dot.<cls> rules without extra mapping.
-type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'done'
+type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'blocked' | 'paused' | 'unknown' | 'done'
 type KanbanColumn = readonly [status: KanbanStatus, label: string, cls: JobStateCls]
 
 const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
-  ['todo',                  '미배정', 'todo'],
+  ['todo',                  '백로그', 'todo'],
   ['claimed',               '클레임', 'claimed'],
   ['in_progress',           '진행',   'wip'],
   ['awaiting_verification', '검증',   'verify'],
+  ['blocked',               '차단',   'blocked'],
+  ['paused',                '정지',   'paused'],
+  ['unknown',               '미확인', 'unknown'],
   ['done',                  '완료',   'done'],
 ] as const
 
@@ -73,6 +73,9 @@ function jobStateForTask(task: Task): JobState {
     case 'in_progress': return { label: '진행 중', bucket: 'wip', cls: 'wip' }
     case 'claimed': return { label: '클레임', bucket: 'wip', cls: 'claimed' }
     case 'awaiting_verification': return { label: '검증 대기', bucket: 'verify', cls: 'verify' }
+    case 'blocked': return { label: '차단', bucket: 'blocked', cls: 'blocked' }
+    case 'paused': return { label: '일시정지', bucket: 'blocked', cls: 'paused' }
+    case 'unknown': return { label: '상태 미확인', bucket: 'blocked', cls: 'unknown' }
     case 'cancelled': return { label: '취소', bucket: 'blocked', cls: 'cancelled' }
     case 'todo':
     default: return { label: '대기', bucket: 'todo', cls: 'todo' }
@@ -84,6 +87,19 @@ function blockerNoteForTask(task: Task): string | null {
     return task.handoff_context?.reason
       ?? task.handoff_context?.failure_mode
       ?? 'cancelled'
+  }
+  if (task.status === 'blocked') {
+    return task.handoff_context?.reason
+      ?? task.handoff_context?.failure_mode
+      ?? 'blocked'
+  }
+  if (task.status === 'paused') {
+    return task.handoff_context?.reason
+      ?? task.handoff_context?.failure_mode
+      ?? 'paused'
+  }
+  if (task.status === 'unknown') {
+    return task.status_raw ? `unknown status: ${task.status_raw}` : 'unknown status'
   }
   if (task.status === 'awaiting_verification') {
     return task.handoff_context?.reason ?? '검증 대기'
@@ -209,13 +225,23 @@ const GOAL_STORE_TASK_STATUS: Readonly<Record<string, NonNullable<Task['status']
   completed: 'done',
   done: 'done',
   cancelled: 'cancelled',
-  blocked: 'in_progress',
-  paused: 'in_progress',
+  blocked: 'blocked',
+  paused: 'paused',
+  unknown: 'unknown',
 }
 
-function normalizeGoalStoreTaskStatus(value: unknown): Task['status'] {
-  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  return GOAL_STORE_TASK_STATUS[raw]
+interface GoalStoreTaskStatus {
+  readonly status: NonNullable<Task['status']>
+  readonly status_raw: string | null
+}
+
+function normalizeGoalStoreTaskStatus(value: unknown): GoalStoreTaskStatus {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  const token = raw.toLowerCase()
+  const status = GOAL_STORE_TASK_STATUS[token]
+  return status
+    ? { status, status_raw: status === 'unknown' ? raw : null }
+    : { status: 'unknown', status_raw: raw || null }
 }
 
 function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
@@ -232,17 +258,11 @@ function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
 }
 
 function taskFromGoalTreeTask(task: GoalTreeTask): Task | null {
-  let status = normalizeGoalStoreTaskStatus(task.status)
-  if (!status) {
-    console.warn('[Work] unknown Goal Store task status, falling back to todo', {
-      id: task.id,
-      status: task.status,
-    })
-    status = 'todo'
-  }
+  const status = normalizeGoalStoreTaskStatus(task.status)
   const normalized = normalizeTask({
     ...task,
-    status,
+    status: status.status,
+    status_raw: status.status_raw,
   })
   if (!normalized) {
     console.warn('[Work] dropped Goal Store task', {
@@ -285,6 +305,28 @@ function flattenGoalTreeNodes(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
   }
   walk(nodes)
   return acc
+}
+
+function goalFromGoalTreeNode(node: GoalTreeNode): Goal {
+  return {
+    id: node.id,
+    title: node.title,
+    metric: node.metric,
+    target_value: node.target_value,
+    due_date: node.due_date,
+    priority: node.priority,
+    status: node.status,
+    phase: node.phase,
+    require_completion_approval: node.require_completion_approval,
+    active_verification_request_id:
+      node.active_verification_request?.id
+      ?? node.verification_summary.open_request?.id
+      ?? null,
+    parent_goal_id: node.parent_goal_id,
+    last_review_note: node.status_reason || null,
+    created_at: node.created_at,
+    updated_at: node.updated_at,
+  }
 }
 
 function mergeTaskRecord(goalStoreTask: Task, executionTask: Task): Task {
@@ -356,13 +398,222 @@ function TaskGate({ rows }: { rows: ReturnType<typeof taskGateRows> }) {
   `
 }
 
+interface TaskEvidenceLedgerRow {
+  readonly key: string
+  readonly label: string
+  readonly value: string
+  readonly tone?: 'ok' | 'warn'
+}
+
+function appendEvidenceList(
+  rows: TaskEvidenceLedgerRow[],
+  label: string,
+  values: readonly string[] | undefined,
+  keyPrefix: string,
+) {
+  for (const value of values ?? []) {
+    if (value.trim() === '') continue
+    rows.push({ key: `${keyPrefix}:${value}`, label, value })
+  }
+}
+
+function taskEvidenceLedgerRows(task: Task): TaskEvidenceLedgerRow[] {
+  const rows: TaskEvidenceLedgerRow[] = []
+  const links = task.execution_links
+  if (links?.session_id) rows.push({ key: 'execution:session', label: 'session', value: links.session_id })
+  if (links?.operation_id) rows.push({ key: 'execution:operation', label: 'operation', value: links.operation_id })
+
+  const contract = task.contract
+  if (contract?.strict !== undefined) {
+    rows.push({
+      key: 'contract:strict',
+      label: 'contract',
+      value: contract.strict ? 'strict' : 'advisory',
+      tone: contract.strict ? 'warn' : undefined,
+    })
+  }
+  if (contract?.links?.session_id) {
+    rows.push({ key: 'contract:session', label: 'contract session', value: contract.links.session_id })
+  }
+  if (contract?.links?.operation_id) {
+    rows.push({ key: 'contract:operation', label: 'contract operation', value: contract.links.operation_id })
+  }
+  appendEvidenceList(rows, 'completion', contract?.completion_contract, 'completion')
+  appendEvidenceList(rows, 'required evidence', contract?.required_evidence, 'required')
+  appendEvidenceList(rows, 'inspect evidence', contract?.inspect_gate_evidence, 'inspect')
+  appendEvidenceList(rows, 'verify evidence', contract?.verify_gate_evidence, 'verify')
+
+  const handoff = task.handoff_context
+  appendEvidenceList(rows, 'handoff evidence', handoff?.evidence_refs, 'handoff-evidence')
+  if (handoff?.updated_by) rows.push({ key: 'handoff:updated-by', label: 'handoff by', value: handoff.updated_by })
+  if (handoff?.updated_at) rows.push({ key: 'handoff:updated-at', label: 'handoff at', value: handoff.updated_at })
+
+  if (rows.length > 0) {
+    if (task.created_at) rows.push({ key: 'task:created', label: 'created', value: task.created_at })
+    if (task.updated_at) rows.push({ key: 'task:updated', label: 'updated', value: task.updated_at })
+    if (task.completed_at) rows.push({ key: 'task:completed', label: 'completed', value: task.completed_at, tone: 'ok' })
+  }
+  return rows
+}
+
+function TaskEvidenceLedger({ rows }: { rows: readonly TaskEvidenceLedgerRow[] }) {
+  if (rows.length === 0) return null
+
+  return html`
+    <div
+      class="wk-evidence"
+      data-testid="task-evidence-ledger"
+      data-task-evidence-row-count=${rows.length}
+    >
+      <div class="wk-evidence-h">실행 · 계약 · 증거 링크</div>
+      <div class="wk-evidence-rows">
+        ${rows.map(row => html`
+          <div key=${row.key} class=${`wk-evidence-row ${row.tone ?? ''}`}>
+            <span class="wk-evidence-k mono">${row.label}</span>
+            <span class="wk-evidence-v mono">${row.value}</span>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function verificationSourceForGoal(node: GoalTreeNode): 'open_request' | 'latest_request' | 'policy' | 'none' {
+  if (node.active_verification_request || node.verification_summary.open_request) return 'open_request'
+  if (node.verification_summary.latest_request) return 'latest_request'
+  if (node.effective_verifier_policy || node.verification_summary.effective_policy) return 'policy'
+  return 'none'
+}
+
+function hasGoalBlockingEvidence(node: GoalTreeNode): boolean {
+  return node.blocking_source !== 'none'
+    || node.blocking_reason.trim().length > 0
+    || (node.stalled_since ?? '').trim().length > 0
+}
+
+function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined }) {
+  if (!node) return null
+
+  const verification = node.verification_summary
+  const verificationSource = verificationSourceForGoal(node)
+  const verificationRequest =
+    node.active_verification_request
+    ?? verification.open_request
+    ?? verification.latest_request
+    ?? null
+  const verifierPolicy = node.effective_verifier_policy ?? verification.effective_policy ?? null
+  const completion = node.completion_summary ?? null
+  const showBlocking = hasGoalBlockingEvidence(node)
+
+  return html`
+    <div
+      class="wk-dossier"
+      data-testid="goal-dossier"
+      data-goal-dossier=${node.id}
+      data-goal-dossier-fsm-state=${node.goal_fsm.state}
+      data-goal-dossier-verification=${verificationSource}
+      data-goal-dossier-blocking-source=${node.blocking_source}
+      data-goal-dossier-timeline-count=${node.timeline_events.length}
+    >
+      <div class="wk-dossier-row">
+        <span class="wk-dossier-k">FSM</span>
+        <span class="wk-dossier-chip mono">state ${node.goal_fsm.state}</span>
+        <span class="wk-dossier-chip mono">source ${node.goal_fsm.source}</span>
+        <span class="wk-dossier-chip mono">activity ${node.goal_fsm.activity_observation}</span>
+        <span class="wk-dossier-chip mono">stagnation ${node.goal_fsm.stagnation_status}</span>
+      </div>
+
+      ${node.goal_fsm.next_actions.length > 0 ? html`
+        <div class="wk-dossier-row">
+          <span class="wk-dossier-k">next actions</span>
+          ${node.goal_fsm.next_actions.map((action) => html`
+            <span key=${action} class="wk-dossier-chip mono">${action}</span>
+          `)}
+        </div>
+      ` : null}
+
+      <div class="wk-dossier-row">
+        <span class="wk-dossier-k">verification</span>
+        ${verificationRequest ? html`
+          <span class="wk-dossier-chip mono">${verificationSource} ${verificationRequest.id}</span>
+          <span class="wk-dossier-chip mono">status ${verificationRequest.status}</span>
+          <span class="wk-dossier-chip mono">target ${verificationRequest.target_phase}</span>
+        ` : verifierPolicy ? html`
+          <span class="wk-dossier-chip mono">policy ${verifierPolicy.required_verdicts}/${verifierPolicy.principals.length}</span>
+        ` : html`
+          <span class="wk-dossier-chip mono">none</span>
+        `}
+        <span class="wk-dossier-chip mono">approve ${verification.approve_count}</span>
+        <span class="wk-dossier-chip mono">reject ${verification.reject_count}</span>
+        <span class="wk-dossier-chip mono">remaining ${verification.remaining_possible}</span>
+        ${node.pending_verification_count > 0 ? html`
+          <span class="wk-dossier-chip warn mono">pending ${node.pending_verification_count}</span>
+        ` : null}
+      </div>
+
+      ${completion ? html`
+        <div class="wk-dossier-row">
+          <span class="wk-dossier-k">completion</span>
+          <span class="wk-dossier-chip mono">state ${completion.state}</span>
+          <span class="wk-dossier-chip mono">gate ${completion.gate}</span>
+          <span class="wk-dossier-chip mono">tasks ${completion.task_done}/${completion.task_total}</span>
+          <span class="wk-dossier-chip mono">pct ${completion.pct == null ? 'unmeasured' : `${completion.pct}%`}</span>
+          ${completion.ready_to_request_completion ? html`
+            <span class="wk-dossier-chip ok mono">ready to request</span>
+          ` : null}
+          ${completion.active_verification_request ? html`
+            <span class="wk-dossier-chip warn mono">active verification</span>
+          ` : null}
+        </div>
+      ` : null}
+
+      <div class="wk-dossier-row">
+        <span class="wk-dossier-k">activity</span>
+        ${node.last_activity_at ? html`
+          <span class="wk-dossier-chip mono">last ${node.last_activity_at}</span>
+        ` : html`
+          <span class="wk-dossier-chip mono">last unavailable</span>
+        `}
+        <span class="wk-dossier-chip mono">events ${node.timeline_events.length}</span>
+        <span class="wk-dossier-chip mono">stagnation ${node.stagnation_seconds}s</span>
+        ${node.latest_keeper_ref ? html`<span class="wk-dossier-chip mono">keeper ${node.latest_keeper_ref}</span>` : null}
+        ${node.latest_turn_ref != null ? html`<span class="wk-dossier-chip mono">turn ${node.latest_turn_ref}</span>` : null}
+        ${node.linked_keeper_names.map((name) => html`
+          <span key=${name} class="wk-dossier-chip mono">linked ${name}</span>
+        `)}
+        ${node.pending_approval_count > 0 ? html`
+          <span class="wk-dossier-chip warn mono">approvals ${node.pending_approval_count}</span>
+        ` : null}
+        ${node.infra_risk_count > 0 ? html`
+          <span class="wk-dossier-chip bad mono">infra risk ${node.infra_risk_count}</span>
+        ` : null}
+      </div>
+
+      ${showBlocking ? html`
+        <div class="wk-dossier-row">
+          <span class="wk-dossier-k">blocking</span>
+          <span class="wk-dossier-chip bad mono">source ${node.blocking_source}</span>
+          ${node.blocking_reason ? html`<span class="wk-dossier-text">${node.blocking_reason}</span>` : null}
+          ${node.stalled_since ? html`<span class="wk-dossier-chip warn mono">stalled ${node.stalled_since}</span>` : null}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
 function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void }) {
   const state = jobStateForTask(task)
   const keeper = keeperByName(task.assignee)
   const blocker = blockerNoteForTask(task)
   const gateRows = taskGateRows(task)
   const handoff = task.handoff_context
-  const hasDetail = gateRows.length > 0 || !!handoff?.summary || !!handoff?.next_step || !!handoff?.failure_mode
+  const evidenceRows = taskEvidenceLedgerRows(task)
+  const hasDetail =
+    gateRows.length > 0
+    || evidenceRows.length > 0
+    || !!handoff?.summary
+    || !!handoff?.next_step
+    || !!handoff?.failure_mode
   const [open, setOpen] = useState(false)
 
   const toggle = () => {
@@ -406,11 +657,12 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
                 ＋ claim
               </button>
             `
-            : html`<span class="wk-task-kp none mono">미배정</span>`}
+            : html`<span class="wk-task-kp none mono">담당 없음</span>`}
       </div>
       ${open && hasDetail ? html`
         <div class="wk-task-detail">
           ${gateRows.length > 0 ? html`<${TaskGate} rows=${gateRows} />` : null}
+          ${evidenceRows.length > 0 ? html`<${TaskEvidenceLedger} rows=${evidenceRows} />` : null}
           ${handoff ? html`
             <div class="wk-handoff">
               <div class="wk-handoff-h">핸드오프 컨텍스트</div>
@@ -431,12 +683,14 @@ function GoalCard({
   onToggle,
   goalTasks,
   onClaim,
+  goalNode,
 }: {
   goal: Goal
   open: boolean
   onToggle: () => void
   goalTasks: Task[]
   onClaim: (id: string) => void
+  goalNode?: GoalTreeNode | null
 }) {
   const progress = goalProgressCounts(goalTasks)
   const leadName = leadNameForGoal(goal)
@@ -477,6 +731,7 @@ function GoalCard({
       ${open ? html`
         <div class="wk-jobs">
           ${goal.last_review_note ? html`<div class="wk-note">${goal.last_review_note}</div>` : null}
+          <${GoalProjectionDossier} node=${goalNode} />
           ${goal.require_completion_approval && goal.verifier_policy?.principals.length ? html`
             <div class="wk-verifier">
               완료 승인 정책 · 검증자
@@ -758,7 +1013,7 @@ function KanbanCard({
                 onClick=${(e: Event) => { e.stopPropagation(); onClaim(task.id) }}
               >＋</button>
             `
-            : html`<span class="wk-kcard-kp none mono">미배정</span>`}
+            : html`<span class="wk-kcard-kp none mono">담당 없음</span>`}
       </div>
     </article>
   `
@@ -773,32 +1028,42 @@ function KanbanView({
   onClaim: (id: string) => void
   onJumpGoal: (goalId: string) => void
 }) {
+  const total = kanbanTasks.length
   return html`
-    <div class="wk-kanban" data-testid="work-kanban">
-      ${KANBAN_COLUMNS.map(([status, label, cls]) => {
-        const col = kanbanTasks.filter(t => t.status === status)
-        return html`
-          <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
-            <div class="wk-kcol-h">
-              <span class="wk-kcol-title">${label}</span>
-              <span class="wk-kcol-count">${col.length}</span>
+    <section class="wk-board-section" data-testid="work-board-section">
+      <div class="wk-sec-h">
+        <span class="wk-sec-glyph" aria-hidden="true">▦</span>
+        <span class="wk-sec-t">칸반 · 상태별</span>
+        <span class="wk-sec-n mono">${total}</span>
+        <span class="wk-sec-sub mono">todo → claimed → in_progress → verify → blocked/paused/unknown → done</span>
+      </div>
+      <div class="wk-kanban" data-testid="work-kanban">
+        ${KANBAN_COLUMNS.map(([status, label, cls]) => {
+          const col = kanbanTasks.filter(t => t.status === status)
+          return html`
+            <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
+              <div class="wk-kcol-h">
+                <span class=${`wk-kcol-dot ${cls}`} aria-hidden="true"></span>
+                <span class="wk-kcol-title">${label}</span>
+                <span class="wk-kcol-n mono">${col.length}</span>
+              </div>
+              <div class="wk-kcol-body">
+                ${col.length === 0
+                  ? html`<div class="wk-kcol-empty mono">—</div>`
+                  : col.map(t => html`
+                    <${KanbanCard}
+                      key=${t.id}
+                      task=${t}
+                      onClaim=${onClaim}
+                      onJumpGoal=${onJumpGoal}
+                    />
+                  `)}
+              </div>
             </div>
-            <div class="wk-kcol-body">
-              ${col.length === 0
-                ? html`<div class="wk-kcol-empty mono">—</div>`
-                : col.map(t => html`
-                  <${KanbanCard}
-                    key=${t.id}
-                    task=${t}
-                    onClaim=${onClaim}
-                    onJumpGoal=${onJumpGoal}
-                  />
-                `)}
-            </div>
-          </div>
-        `
-      })}
-    </div>
+          `
+        })}
+      </div>
+    </section>
   `
 }
 
@@ -929,7 +1194,7 @@ function WorkAside({
           <span class=${`wka-hud-v ${counts.verify ? 'volt' : ''}`}>${counts.verify}</span>
         </div>
         <div class="wka-hud-c">
-          <span class="wka-hud-k">미배정</span>
+          <span class="wka-hud-k">백로그</span>
           <span class=${`wka-hud-v ${counts.backlog ? 'warn' : ''}`}>${counts.backlog}</span>
         </div>
         <div class="wka-hud-c">
@@ -1083,6 +1348,17 @@ function WorkSurfaceV2() {
     () => flattenGoalTreeNodes(goalTreeSnapshot?.tree ?? []),
     [goalTreeSnapshot],
   )
+  const goalTreeNodeById = useMemo(() => {
+    const map = new Map<string, GoalTreeNode>()
+    for (const node of treeGoals) map.set(node.id, node)
+    return map
+  }, [treeGoals])
+  const displayGoals = useMemo(() => {
+    const map = new Map<string, Goal>()
+    for (const node of treeGoals) map.set(node.id, goalFromGoalTreeNode(node))
+    for (const goal of goalList) map.set(goal.id, goal)
+    return Array.from(map.values())
+  }, [goalList, treeGoals])
 
   const [view, setView] = useState<WorkView>(readStoredWorkView)
   const [openSet, setOpenSet] = useState<Set<string>>(new Set())
@@ -1091,7 +1367,7 @@ function WorkSurfaceV2() {
   useEffect(() => {
     setOpenSet(prev => {
       const next = new Set(prev)
-      for (const g of goalList) {
+      for (const g of displayGoals) {
         const progress = goalProgressCounts(allTasks.filter(t => t.goal_id === g.id))
         // Prototype auto-expands attention goals (priority >= 7 || at_risk ||
         // verifying, work.jsx:138). The live priority scale (1=top vs 9=top)
@@ -1102,7 +1378,7 @@ function WorkSurfaceV2() {
       }
       return next
     })
-  }, [goalList, allTasks])
+  }, [displayGoals, allTasks])
 
   const claimTask = (taskId: string) => {
     setClaimed(prev => {
@@ -1146,7 +1422,7 @@ function WorkSurfaceV2() {
 
   const tasksByGoalId = useMemo(() => {
     const map = new Map<string, Task[]>()
-    for (const g of goalList) map.set(g.id, [])
+    for (const g of displayGoals) map.set(g.id, [])
     for (const g of treeGoals) {
       if (!map.has(g.id)) map.set(g.id, [])
     }
@@ -1157,7 +1433,7 @@ function WorkSurfaceV2() {
       }
     }
     return map
-  }, [goalList, treeGoals, claimedTasks])
+  }, [displayGoals, treeGoals, claimedTasks])
 
   const backlogTasks = useMemo(() => {
     return claimedTasks
@@ -1331,7 +1607,7 @@ function WorkSurfaceV2() {
           <div>
             <span class="ov-eyebrow">GOAL STORE</span>
             <h1>작업 · 목표</h1>
-            <p class="ov-sub">Goal → Task → keeper · 우선순위 순 정렬과 게이트 증거로 검증</p>
+            <p class="ov-sub">Goals · Tasks · Keepers · 우선순위와 검증 상태</p>
           </div>
           <div class="wk-head-r">
             <div class="wk-viewseg" role="tablist" data-testid="work-viewseg">
@@ -1370,7 +1646,7 @@ function WorkSurfaceV2() {
               <div class="wk-kpi-v brass" data-testid="kpi-goals">${totals.goals}</div>
             </div>
             <div class="wk-kpi">
-              <div class="wk-kpi-k">목표 TASK</div>
+              <div class="wk-kpi-k">전체 작업</div>
               <div class="wk-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
             </div>
             <div class="wk-kpi">
@@ -1382,7 +1658,7 @@ function WorkSurfaceV2() {
               <div class=${`wk-kpi-v ${totals.verify > 0 ? 'volt' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
             </div>
             <div class="wk-kpi">
-              <div class="wk-kpi-k">미배정</div>
+              <div class="wk-kpi-k">백로그</div>
               <div class=${`wk-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
             </div>
           </section>
@@ -1391,7 +1667,7 @@ function WorkSurfaceV2() {
             <section class="wk-backlog" data-testid="work-backlog">
               <div class="wk-backlog-h">
                 <span class="wk-backlog-glyph" aria-hidden="true">⊕</span>
-                클레임 가능 미배정
+                클레임 가능 백로그
                 <span class="n">${backlogTasks.length}</span>
                 <span class="wk-backlog-sub mono">keeper_task_claim — 미배정 task</span>
               </div>
@@ -1414,9 +1690,9 @@ function WorkSurfaceV2() {
 
           ${view === 'list'
             ? /* RFC-0294: flat priority-sorted list replaces horizon grouping */
-              goalList.length > 0 ? html`
+              displayGoals.length > 0 ? html`
                 <div class="wk-list" data-testid="work-goal-list">
-                  ${[...goalList]
+                  ${[...displayGoals]
                     .sort((a, b) => (a.priority ?? GOAL_PRIORITY_MAX) - (b.priority ?? GOAL_PRIORITY_MAX) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
                     .map(g => html`
                     <${GoalCard}
@@ -1426,6 +1702,7 @@ function WorkSurfaceV2() {
                       onToggle=${() => toggleGoal(g.id)}
                       goalTasks=${tasksByGoalId.get(g.id) ?? []}
                       onClaim=${claimTask}
+                      goalNode=${goalTreeNodeById.get(g.id) ?? null}
                     />
                   `)}
                 </div>
@@ -1438,7 +1715,7 @@ function WorkSurfaceV2() {
               />
             `}
 
-          <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 claim</div>
+          <div class="wk-foot mono">목표 지표 · 작업 상태 흐름 · keeper 배정 · done은 gate 증거 후 완료 · 미배정 task는 백로그에서 claim</div>
       </div>
       ${goalCreateOpen ? html`<${GoalCreateForm} />` : html`
         <${WorkAside}

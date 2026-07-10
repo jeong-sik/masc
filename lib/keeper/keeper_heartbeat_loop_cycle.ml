@@ -45,6 +45,7 @@ module Observations = Keeper_heartbeat_loop_observations
    must not interleave with this lane's meta writes (RFC-0225 §1). *)
 let run_keeper_cycle_admitted
       ?event_bus
+      ?hitl_delivery_channel
       ~ctx
       ~meta_after_triage
       ~stop
@@ -61,6 +62,10 @@ let run_keeper_cycle_admitted
         ~observation:obs
         ~generation:meta_after_triage.runtime.generation
         ~channel:turn_decision.channel
+        ?hitl_delivery_channel
+        (* RFC-0315: pass the whole decision, not just its channel — the
+           prompt renders the verdict reasons so the turn knows why it woke. *)
+        ~turn_decision
         ~shared_context
         ?event_bus
         ())
@@ -129,6 +134,7 @@ let run_keeper_cycle_admitted
 
 let run_keeper_cycle
       ?event_bus
+      ?hitl_delivery_channel
       ~ctx
       ~meta_after_triage
       ~stop
@@ -148,7 +154,8 @@ let run_keeper_cycle
          ~obs
          ~turn_decision
          ~shared_context
-         ?event_bus)
+         ?event_bus
+         ?hitl_delivery_channel)
   with
   | `Ran updated -> updated
   | `Busy in_flight ->

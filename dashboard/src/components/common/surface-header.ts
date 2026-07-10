@@ -83,6 +83,11 @@ export function SurfaceHeader(): VNode | null {
   const trail = currentSection !== null
     ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
     : []
+  // The <h1> is intentionally class-less: it is styled by the T1 surface-title
+  // group in keeper-v2/surfaces.css (`.v2-surface-header h1`). Tailwind text
+  // utilities do not work here — the unlayered global `h1` (colors_and_type.css:
+  // 42px display + glow) beats layered utilities and blew the title up to 42px
+  // uppercase across every generic-header surface (monitoring/command/lab).
   return html`
     <header class="v2-surface-header mb-3 flex flex-col gap-1.5" data-testid="surface-header">
       ${trail.length > 0
@@ -94,9 +99,7 @@ export function SurfaceHeader(): VNode | null {
           />`
         : null}
       <div class="flex items-center gap-2">
-        <h1 class="text-lg font-semibold leading-tight tracking-normal normal-case text-[var(--color-fg-secondary)]" style="text-shadow: none;">
-          ${title}
-        </h1>
+        <h1>${title}</h1>
         <${SurfaceHeaderActions} label=${title} />
       </div>
       ${description

@@ -9,6 +9,7 @@ val metric_sse_broadcast_duration : string
 val metric_sse_broadcast_events : string
 val metric_sse_broadcast_failures : string
 val metric_sse_external_subscriber_callback_failures : string
+val metric_sse_external_fanout_duration_seconds : string
 val metric_oas_sse_relay_drop_marker_failures : string
 val metric_sse_stream_queue_depth : string
 val metric_sse_queue_depth_avg : string
@@ -84,6 +85,20 @@ val metric_discord_ambient_record : string
     Labels: [outcome] = [sent | send_error | empty]. *)
 val metric_discord_outbound_replies : string
 
+(** Slack Socket Mode gateway events surfaced by the in-process gateway.
+    Labels: [event], [route]. RFC-0317. *)
+val metric_slack_gateway_events : string
+
+(** Triggered Slack inbound messages after keeper binding lookup.
+    Labels: [outcome] =
+    [dropped_unbound | dispatch_unavailable | gate_error | empty_reply |
+     reply_sent | reply_send_error]. RFC-0317. *)
+val metric_slack_inbound_dispatch : string
+
+(** Slack REST replies attempted by the gateway reply path.
+    Labels: [outcome] = [sent | send_error | empty]. RFC-0317. *)
+val metric_slack_outbound_replies : string
+
 (** Dashboard execution render phase latency histogram. Labels:
     [phase] = total | snapshot | operations | enrich | enrich_per_keeper
             | data_load | assemble.
@@ -148,6 +163,7 @@ val metric_ws_slice_fanout_skipped : string
 val metric_ws_bytes_sent : string
 val metric_grpc_bytes_sent : string
 val metric_ws_delta_built : string
+val metric_ws_delta_payload_serializations : string
 
 (** Histogram of WebSocket message payload size in bytes, observed at
     the wire boundary. Labels: [direction = send | recv]. Complements

@@ -26,8 +26,10 @@ let run_keeper_cycle
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
       ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
+      ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
       ?shared_context
       ?event_bus
+      ?hitl_delivery_channel
       ()
   : (keeper_meta, Agent_sdk.Error.sdk_error) result
   =
@@ -202,17 +204,22 @@ let run_keeper_cycle
               (Keeper_turn_fsm.Failed failure_reason);
             Error err, turn_state
           | Ok initial_execution ->
-            record_pre_dispatch_terminal_observation
-              ~config
-              ~meta
-              ~generation
-              ~runtime_id:effective_runtime_runtime_name
-              ~outcome:`Ok
-              ~terminal_reason_code:"pre_dispatch_success"
-              ~activity_kind:"keeper.turn_pre_dispatch_ok"
-              ~trajectory_outcome:Trajectory.Completed
-              ~keeper_turn_id
-              ();
+            let turn_state =
+              Keeper_unified_turn_manifest.append_manifest
+                ~config
+                ~runtime_manifest_context
+                ~turn_start
+                ~turn_state
+                ~site:"runtime_execution_built"
+                ~runtime_id:effective_runtime_runtime_name
+                ~decision:
+                  (`Assoc
+                    [ "runtime_execution_built", `Bool true
+                    ; "routing_action", `String "runtime_execution_built"
+                    ; "routing_reason", `String "pre_dispatch_success"
+                    ])
+                Keeper_runtime_manifest.Runtime_execution_built
+            in
             Keeper_event_publisher.publish_runtime_execution_built
               ~keeper_name:meta.name
               ~runtime_id:initial_execution.runtime_id
@@ -252,11 +259,51 @@ let run_keeper_cycle
                Eio.Fiber.yield ();
                (* 2. Build unified prompt — diversity entropy recorded in decision_audit
          (keeper_keepalive.ml), not injected into prompt (#6814). *)
+               (* RFC-0315: resolve the claimed task and goal titles here (the
+                  turn runner owns config), so the prompt can render what the
+                  keeper holds and why it woke. Both reads are total: a failed
+                  backlog read yields None, an unknown goal id remains a bare
+                  id instead of disappearing from the prompt. *)
+               let current_task =
+                 Keeper_world_observation_inputs.read_current_task ~config ~meta
+               in
+               let active_goal_summaries =
+                 List.map
+                   (fun goal_id ->
+                     match Goal_store.get_goal config ~goal_id with
+                     | Some { Goal_store.title; _ } -> (goal_id, title)
+                     | None -> (goal_id, ""))
+                   meta.active_goal_ids
+               in
+               (* RFC-0315: surface the working-state ledger's unresolved
+                  loops. The sidecar has persisted (and resume-merged) them
+                  since KeeperWorkingStateLifecycle landed, but no prompt ever
+                  read them back — persisted-but-never-shown. *)
+               let active_open_loops =
+                 let session_dir =
+                   Filename.concat
+                     (session_base_dir config)
+                     (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                 in
+                 match
+                   Keeper_agent_run_sidecar.read_persisted_working_state
+                     ~keeper_name:meta.name
+                     ~latest_path:
+                       (Keeper_agent_run_sidecar.latest_working_state_path
+                          ~session_dir)
+                 with
+                 | None -> []
+                 | Some state -> state.Keeper_working_state.active_loops
+               in
                let system_prompt, user_message =
                  Keeper_unified_prompt.build_prompt
                    ~meta
                    ~base_path:config.base_path
                    ~profile_defaults
+                   ?turn_decision
+                   ?current_task
+                   ~active_goal_summaries
+                   ~active_open_loops
                    ~observation
                    ()
                in
@@ -464,6 +511,7 @@ let run_keeper_cycle
                            ; base_dir
                            ; build_turn_prompt
                            ; channel
+                           ; hitl_delivery_channel
                            ; cleanup
                            ; committed_mutating_tools_snapshot
                            ; config
@@ -911,11 +959,56 @@ dominant source of the observed CAS race exhaustion after
                       (String.concat ", " committed_tools)
                       turn_event_summary.event_count
                       (String.concat ", " turn_event_summary.payload_kinds));
+                  (* RFC-0313 W2: route the failure (total over sdk_error) and
+                     record alongside the legacy machinery. The route is
+                     observe-only until the W3 flip: pacing shadow takes the
+                     typed retry_after hint, the route counter feeds Grafana,
+                     and Escalate_judgment enqueues a judgment stimulus
+                     ([enqueue_if_missing] identity-dedups repeats; no
+                     dedicated turn_reason, so scheduling cooldowns are
+                     unchanged). Placed before the escalate call, which may
+                     raise [Keeper_fiber_crash] and must not skip the
+                     observations. *)
+                  let failure_route = Keeper_runtime_failure_route.route_of_error err in
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string FailureRoute)
+                    ~labels:
+                      [ "keeper", meta.name
+                      ; (* RFC-0132-EXEMPT: internal observability — real runtime identity on a metric label, not a redacted public surface *)
+                        "runtime", final_execution.runtime_id
+                      ; "route", Keeper_runtime_failure_route.route_kind_label failure_route
+                      ; "class", Keeper_runtime_failure_route.route_class_label failure_route
+                      ]
+                    ();
+                  Keeper_pacing_shadow.observe_failure
+                    ~keeper_name:meta.name
+                    ~runtime_id:final_execution.runtime_id
+                    ~retry_after:
+                      (Keeper_runtime_failure_route.retry_after_of_route failure_route);
+                  (match failure_route with
+                   | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
+                     let fj : Keeper_event_queue.failure_judgment =
+                       { fj_runtime_id = final_execution.runtime_id
+                       ; fj_judgment = judgment
+                       ; fj_detail = detail
+                       }
+                     in
+                     Keeper_registry_event_queue.enqueue
+                       ~base_path:config.base_path
+                       meta.name
+                       { post_id = Keeper_event_queue.failure_judgment_post_id fj
+                       ; urgency = Keeper_event_queue.Normal
+                       ; arrived_at = Time_compat.now ()
+                       ; payload = Keeper_event_queue.Failure_judgment fj
+                       }
+                   | Keeper_runtime_failure_route.Retry_after_pacing _
+                   | Keeper_runtime_failure_route.Rotate_now _ -> ());
                   Keeper_unified_turn_failure.record_failure_and_maybe_escalate
                     ~config
                     ~meta
                     ~updated_meta
                     ~is_auto_recoverable
+                    ~pacing_enforced:(Keeper_pacing_shadow.pacing_enforced ())
                     ~err
                     ~error_text:e_str;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths
@@ -940,6 +1033,11 @@ dominant source of the observed CAS race exhaustion after
                        ~keeper_name:meta.name
                        trajectory_acc
                        Trajectory.Completed;
+                  (* RFC-0313 W1 shadow: a success clears this runtime's
+                     shadow revisit. *)
+                  Keeper_pacing_shadow.observe_success
+                    ~keeper_name:meta.name
+                    ~runtime_id:final_execution.runtime_id;
                   (* SSOT: success-path terminal FSM transitions
                      (Streaming -> Completing -> Done) are emitted once inside
                      [Keeper_unified_turn_success.handle]. Do not duplicate them

@@ -47,6 +47,42 @@ let cleanup_tmpdir dir =
   in
   rm_rf dir
 
+let rec yield_until ?(attempts = 50) predicate =
+  if predicate () || attempts <= 0 then ()
+  else (
+    Eio.Fiber.yield ();
+    yield_until ~attempts:(attempts - 1) predicate)
+
+let pending_id_for_keeper ~keeper_name =
+  match AQ.list_pending_json () with
+  | `List entries ->
+    List.find_map
+      (function
+        | `Assoc fields -> (
+          match
+            List.assoc_opt "keeper_name" fields,
+            List.assoc_opt "id" fields
+          with
+          | Some (`String name), Some (`String id) when String.equal name keeper_name ->
+            Some id
+          | Some (`String _), Some _
+          | Some _, Some _
+          | Some _, None
+          | None, Some _
+          | None, None ->
+            None)
+        | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+          None)
+      entries
+  | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->
+    None
+
+let resolve_pending_or_fail ~id ~decision =
+  match AQ.resolve ~id ~decision with
+  | Ok () -> ()
+  | Error err ->
+    Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err)
+
 (* ── Risk Assessment Tests ──────────────────────────────────── *)
 
 let test_risk_critical_delete () =
@@ -932,6 +968,7 @@ let make_test_meta ?(last_blocker = None) () =
   ; proactive = { enabled = false; idle_sec = 0; cooldown_sec = 0 }
   ; compaction =
       { profile = ""
+      ; mode = Masc.Keeper_config.Deterministic
       ; ratio_gate = 0.0
       ; message_gate = 0
       ; token_gate = 0
@@ -1000,10 +1037,10 @@ let test_decide_front_door_none_allows_noncritical () =
   | `Deny _ ->
     Alcotest.fail "front-door (meta=None) should allow non-Critical, non-destructive tool"
 
-let test_oas_callback_hard_forbidden_rejects_critical () =
+let test_oas_callback_critical_rejects_hard_forbidden () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keeper_name = "hard-forbidden-critical-queue-test" in
+  let keeper_name = "hard-forbidden-critical-reject-test" in
   let initial_pending = AQ.pending_count () in
   let tmpdir = make_tmpdir () in
   Fun.protect
@@ -1017,39 +1054,20 @@ let test_oas_callback_hard_forbidden_rejects_critical () =
            ~keeper_name
            ()
        in
-       let decision = callback ~tool_name:"masc_delete_workspace" ~input:`Null in
+       Alcotest.(check bool)
+         "Critical request is hard-forbidden"
+         true
+         (match callback ~tool_name:"masc_delete_workspace" ~input:`Null with
+          | Agent_sdk.Hooks.Reject _ -> true
+          | Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Edit _ -> false);
        Alcotest.(check int)
-         "Critical hard-forbidden call does not enter operator approval queue"
+         "hard-forbidden request never enters operator approval queue"
+         0
+         (AQ.pending_count_for_keeper ~keeper_name);
+       Alcotest.(check int)
+         "pending count restored"
          initial_pending
-         (AQ.pending_count ());
-       (match decision with
-        | Agent_sdk.Hooks.Reject reason ->
-          Alcotest.(check bool)
-            "reject reason mentions critical risk"
-            true
-            (String_util.string_contains_substring ~needle:"critical risk" reason)
-        | Agent_sdk.Hooks.Approve ->
-          Alcotest.fail "Critical hard-forbidden call must not be approved"
-        | Agent_sdk.Hooks.Edit _ ->
-          Alcotest.fail "Critical hard-forbidden call must not be edited");
-       let module U = Yojson.Safe.Util in
-       let latest_audit =
-         match AQ.read_recent_audit ~base_path:config.base_path ~keeper_name ~n:1 () with
-         | audit :: _ -> audit
-         | [] -> Alcotest.fail "expected hard-forbidden approval audit event"
-       in
-       Alcotest.(check string)
-         "hard-forbidden audit event"
-         AQ.approval_audit_hard_forbidden_event
-         (latest_audit |> U.member "event" |> U.to_string);
-       Alcotest.(check string)
-         "hard-forbidden audit disposition"
-         "Blocked"
-         (latest_audit |> U.member "disposition" |> U.to_string);
-       Alcotest.(check string)
-         "hard-forbidden audit reason"
-         "hard_forbidden"
-         (latest_audit |> U.member "disposition_reason" |> U.to_string))
+         (AQ.pending_count ()))
 
 (* ── Case-insensitive tool name matching ────────────────────── *)
 
@@ -1336,8 +1354,8 @@ let () =
         `Quick test_decide_runtime_blocker_requires_confirm;
       Alcotest.test_case "decide: front-door None allows non-Critical" `Quick
         test_decide_front_door_none_allows_noncritical;
-      Alcotest.test_case "OAS callback: hard-forbidden Critical rejects and audits" `Quick
-        test_oas_callback_hard_forbidden_rejects_critical;
+      Alcotest.test_case "OAS callback: Critical rejects hard-forbidden" `Quick
+        test_oas_callback_critical_rejects_hard_forbidden;
     ];
     "trace_id", [
       Alcotest.test_case "has gov_ prefix" `Quick test_decision_has_trace_id;

@@ -49,6 +49,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.text).toBe('안녕')
     expect(entry?.delivery).toBe('streaming')
     expect(entry?.streamState).toBe('streaming')
+    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
   })
 
   it('ignores retired TEXT_DELTA events', () => {
@@ -87,6 +88,7 @@ describe('applyKeeperStreamEvent', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('queued')
     expect(entry?.streamState).toBe('opening')
+    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
   })
 
   it('surfaces failed request terminal events before stream error close', () => {
@@ -107,6 +109,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBeNull()
     expect(entry?.error).toBe('Timeout after 630.0s')
     expect(entry?.text).toBe('Keeper request failed: Timeout after 630.0s')
+    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
   })
 
   it('renders cancelled request terminal events without an error bubble', () => {
@@ -127,6 +130,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBeNull()
     expect(entry?.error).toBeNull()
     expect(entry?.text).toBe('요청이 취소되었습니다.')
+    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
   })
 
   it('finalizes successful request terminal events after streamed thinking', () => {
@@ -165,6 +169,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.delivery).toBe('delivered')
     expect(entry?.streamState).toBeNull()
     expect(entry?.error).toBeNull()
+    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
     expect(activeStreamRequestId('sangsu')).toBeNull()
   })
 

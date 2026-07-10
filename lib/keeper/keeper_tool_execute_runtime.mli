@@ -22,6 +22,52 @@ module For_testing : sig
     cwd:string ->
     sandbox_extra_fields:(string * Yojson.Safe.t) list ->
     Yojson.Safe.t
+  val record_pr_action_metric :
+    keeper_name:string ->
+    risk_class:Masc_exec.Shell_ir_risk.risk_class ->
+    status:Unix.process_status ->
+    Masc_exec.Shell_ir.t ->
+    unit
+  val record_gh_classification_metric :
+    keeper_name:string ->
+    risk_class:Masc_exec.Shell_ir_risk.risk_class ->
+    typed_hit:bool ->
+    Masc_exec.Shell_ir.t ->
+    unit
+  val shell_ir_approval_input :
+    cmd:string ->
+    cwd:string ->
+    bin:string ->
+    summary:string ->
+    sandbox_profile:string ->
+    sandbox_target:string ->
+    risk_class:Masc_exec.Shell_ir_risk.risk_class ->
+    typed_hit:bool ->
+    ?repo_create_contract:Yojson.Safe.t ->
+    unit ->
+    Yojson.Safe.t
+  val submit_shell_ir_approval_pending :
+    base_path:string ->
+    keeper_name:string ->
+    ?task_id:string ->
+    ?goal_ids:string list ->
+    cmd:string ->
+    cwd:string ->
+    bin:string ->
+    summary:string ->
+    sandbox_profile:string ->
+    sandbox_target:string ->
+    risk_class:Masc_exec.Shell_ir_risk.risk_class ->
+    typed_hit:bool ->
+    ?repo_create_contract:Yojson.Safe.t ->
+    unit ->
+    string
+  val redact_execute_output :
+    base_path:string ->
+    keeper_name:string ->
+    stdout:string ->
+    stderr:string ->
+    string * string * string
   val dispatch_error_deterministic_retry_fields :
     Keeper_tool_execute_shell_ir.dispatch_error -> (string * Yojson.Safe.t) list
 end

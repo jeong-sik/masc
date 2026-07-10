@@ -71,7 +71,10 @@ let test_interrupt_cancels_turn () =
   Masc_test_deps.init_eio_clock env;
   let clock = Eio.Stdenv.clock env in
   ignore (Keeper_registry.register ~base_path:base name (make_meta name));
-  Keeper_registry.mark_turn_started ~base_path:base name;
+  Keeper_registry.mark_turn_started
+    ~base_path:base
+    ~wake:Keeper_registry.Proactive_tick
+    name;
   Eio.Switch.run
   @@ fun sw ->
   let cancelled, set_cancelled = Eio.Promise.create () in

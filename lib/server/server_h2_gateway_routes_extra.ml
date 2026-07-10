@@ -5,7 +5,9 @@ open Server_routes_http
 open Server_h2_gateway_helpers
 
 (* Dispatch board, governance, voice, karma, and static asset routes.
-   Returns [true] if the route was handled, [false] otherwise. *)
+   Returns [true] if the route was handled, [false] otherwise.
+   TEL-OK: route-level public-read telemetry is emitted by [with_public_read]
+   at the H2 gateway boundary; individual pure projections do not duplicate it. *)
 let dispatch ~with_public_read ~h2_reqd ~httpun_request ~cors ~path ~config
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =

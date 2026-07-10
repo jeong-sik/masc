@@ -1700,7 +1700,11 @@ let expire_stale ~max_wait_s =
   in
   let candidates = list_pending_entries () |> List.filter is_stale in
   List.iter
-    (fun candidate ->
+    (* The annotation is load-bearing: [approval_rule] is declared after
+       [pending_approval] in [Keeper_approval_queue_rules_types] and also has
+       an [id] field, so a bare [candidate.id] projection resolves to
+       [approval_rule] and rejects the [pending_approval list] argument. *)
+    (fun (candidate : pending_approval) ->
        let id = candidate.id in
        if claim_resolution id
        then

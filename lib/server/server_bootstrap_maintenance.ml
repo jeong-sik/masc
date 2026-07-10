@@ -496,15 +496,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     (fun () ->
     let last_prune = ref (Unix.gettimeofday ()) in
     let base_path = (Mcp_server.workspace_config state).base_path in
-    (* Restore MCP transport sessions from disk before first cleanup cycle.
-       Grace period timestamps survive server restart, so recently-active
-       clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
-    (try
-       Server_mcp_transport_http_session.load_sessions_from_file ~base_path ()
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
       (try
@@ -526,21 +517,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          if evicted > 0 then Log.Server.info "Cache: evicted %d expired entries" evicted;
          let sse_guards_reaped = Server_mcp_transport_http_sse.reap_stale_guards () in
          let http_guards_reaped = Server_mcp_transport_http.reap_stale_guards () in
-         let is_active sid =
-           Server_mcp_transport_http_sse.is_active_sse_session sid
-           || Server_mcp_transport_http.is_active_sse_session sid
-         in
-         let sessions_reaped =
-           Server_mcp_transport_http_session.reap_stale_sessions
-             ~base_path ~is_active_session:is_active
-         in
-         if sse_guards_reaped + http_guards_reaped + sessions_reaped > 0
+         if sse_guards_reaped + http_guards_reaped > 0
          then
            Log.Server.info
-             "reaped %d SSE guards + %d HTTP guards + %d stale sessions"
+             "reaped %d SSE guards + %d HTTP guards"
              sse_guards_reaped
-             http_guards_reaped
-             sessions_reaped;
+             http_guards_reaped;
          let ext_reaped = Sse.reap_dead_external_subscribers () in
          Transport_metrics.set_grpc_subscribers
            (Sse.external_subscriber_count_with_prefix "grpc-subscribe-");

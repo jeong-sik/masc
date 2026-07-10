@@ -105,10 +105,14 @@ let guard_deadline state =
 let guard_expired ~now ~session_id state =
   not (SMap.mem session_id (Atomic.get sse_conn_by_session)) && now >= guard_deadline state
 
-(** Register an SSE connection under [sse_registry_mutex].
-    All call sites must use this instead of direct [Hashtbl.replace]. *)
-let register_sse_conn ~session_id ~info =
-  atomic_update sse_conn_by_session (fun map -> SMap.add session_id info map)
+(** Publish [info] only while no newer connection owns [session_id]. *)
+let rec register_sse_conn_if_absent ~session_id ~info =
+  let map = Atomic.get sse_conn_by_session in
+  if SMap.mem session_id map then false
+  else
+    let updated = SMap.add session_id info map in
+    if Atomic.compare_and_set sse_conn_by_session map updated then true
+    else register_sse_conn_if_absent ~session_id ~info
 
 (* Claim the single close of [info]: returns [true] for exactly one caller even
    under concurrent close paths (a disconnect on one domain racing eviction or
@@ -133,15 +137,21 @@ let close_sse_conn info =
        mutex or in an exception handler after [use_rw] has returned), so this is
        deadlock-free even though [Eio.Mutex] is not reentrant.  Requires an Eio
        context, which every production close path already runs within. *)
-    (try
-       Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
-           Httpun.Body.Writer.close info.writer)
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Misc.debug "close_sse_conn: %s"
-         (Printexc.to_string exn));
-    Sse.unregister_if_current info.session_id info.client_id)
+    Fun.protect
+      ~finally:(fun () ->
+        (* Client removal is generation-bound and must complete even when the
+           writer mutex/close is the cancellation point.  Otherwise the old
+           client record would permanently fail [No_current_client]. *)
+        Sse.unregister_if_current info.session_id info.client_id)
+      (fun () ->
+        try
+          Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
+              Httpun.Body.Writer.close info.writer)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Misc.debug "close_sse_conn: %s"
+            (Printexc.to_string exn)))
 
 let stop_sse_session_impl ~clear_guard session_id =
   let info_opt = ref None in
@@ -163,6 +173,16 @@ let stop_sse_session session_id =
 
 let stop_sse_session_preserve_guard session_id =
   stop_sse_session_impl ~clear_guard:false session_id
+
+let rec stop_sse_session_if_current_preserve_guard session_id client_id =
+  let map = Atomic.get sse_conn_by_session in
+  match SMap.find_opt session_id map with
+  | Some info when info.client_id = client_id ->
+      let updated = SMap.remove session_id map in
+      if Atomic.compare_and_set sse_conn_by_session map updated then
+        close_sse_conn info
+      else stop_sse_session_if_current_preserve_guard session_id client_id
+  | Some _ | None -> ()
 
 (* RFC-0099 PR-3: evicting variant. Writes an SSE [event: evicted]
    close frame to the client (best-effort) BEFORE the writer is
@@ -215,6 +235,10 @@ let stop_sse_session_evict session_id
 
 let is_active_sse_session session_id =
   SMap.mem session_id (Atomic.get sse_conn_by_session)
+
+let current_sse_connection_client_id session_id =
+  SMap.find_opt session_id (Atomic.get sse_conn_by_session)
+  |> Option.map (fun info -> info.client_id)
 
 (** Number of active SSE connections. *)
 let active_session_count () =

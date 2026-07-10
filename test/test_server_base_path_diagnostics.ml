@@ -269,7 +269,7 @@ let test_default_base_path_ignores_parent_base_path_override_in_tests () =
   Alcotest.(check string)
     "default base path ignores parent base path override in tests"
     (canonical_path repo)
-    (Server_mcp_transport_http.default_base_path () |> canonical_path)
+    (Server_routes_http_common.default_base_path () |> canonical_path)
 
 let test_default_base_path_preserves_base_path_override_with_opt_in () =
   with_temp_dir "base-path-default-optin" @@ fun root ->
@@ -284,7 +284,7 @@ let test_default_base_path_preserves_base_path_override_with_opt_in () =
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   Alcotest.(check string) "base path override preserved with opt-in"
     (canonical_path base_path)
-    (Server_mcp_transport_http.default_base_path () |> canonical_path)
+    (Server_routes_http_common.default_base_path () |> canonical_path)
 
 let test_default_base_path_ignores_base_path_override_without_local_masc () =
   with_temp_dir "base-path-default-no-local-masc" @@ fun root ->
@@ -299,7 +299,7 @@ let test_default_base_path_ignores_base_path_override_without_local_masc () =
   Alcotest.(check string)
     "default base path ignores base path override without local .masc"
     (canonical_path repo)
-    (Server_mcp_transport_http.default_base_path () |> canonical_path)
+    (Server_routes_http_common.default_base_path () |> canonical_path)
 
 let test_default_base_path_uses_cwd_when_unset () =
   with_temp_dir "base-path-default-cwd" @@ fun root ->
@@ -314,7 +314,7 @@ let test_default_base_path_uses_cwd_when_unset () =
   with_env "HOME" (Some home) @@ fun () ->
   Alcotest.(check string) "default base path uses cwd"
     (canonical_path repo)
-    (Server_mcp_transport_http.default_base_path () |> canonical_path)
+    (Server_routes_http_common.default_base_path () |> canonical_path)
 
 let () =
   Alcotest.run "Server_base_path_diagnostics"

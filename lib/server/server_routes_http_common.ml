@@ -34,26 +34,20 @@ module Safe_ops = Safe_ops
 module Board_tool = Board_tool
 module Process_eio = Process_eio
 module Server_mcp_transport_http = Server_mcp_transport_http
+module Transport_session_store = Server_mcp_transport_session_store
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
 
 let mcp_protocol_version_default =
   Server_mcp_transport_http.mcp_protocol_version_default
 
-let default_base_path = Server_mcp_transport_http.default_base_path
+let default_base_path () =
+  Config_dir_resolver.current_working_dir ()
+  |> Workspace_utils_backend_setup.resolve_server_default_base_path
+;;
 
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
-
-let remember_protocol_version =
-  Server_mcp_transport_http.remember_protocol_version
-
-let remember_protocol_version_if_initialize_succeeded =
-  Server_mcp_transport_http.remember_protocol_version_if_initialize_succeeded
-
-let remember_mcp_profile = Server_mcp_transport_http.remember_mcp_profile
-
-let forget_mcp_session = Server_mcp_transport_http.forget_mcp_session
 
 let validate_mcp_session_profile =
   Server_mcp_transport_http.validate_mcp_session_profile
@@ -210,11 +204,20 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
                   }
             | None, _ -> Error "Eio switch not available"
             | _, None -> Error "Eio clock not available"));
+    get_mcp_http_transport =
+      (fun () ->
+        match current_server_state_opt () with
+        | Some { Mcp_server.mcp_http_transport = Some transport; _ } ->
+            Ok transport
+        | Some _ -> Error "MCP HTTP transport session store is unavailable"
+        | None -> Error "Server state not initialized");
     get_base_path =
       (fun () ->
         match current_server_state_opt () with
         | Some state -> (Mcp_server.workspace_config state).base_path
-        | None -> Server_mcp_transport_http.default_base_path ());
+        | None ->
+            invalid_arg
+              "mcp_transport_http_deps.get_base_path: server state not initialized");
   }
 
 let mcp_transport_json_headers session_id protocol_version origin =

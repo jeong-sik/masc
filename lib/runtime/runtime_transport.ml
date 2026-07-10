@@ -44,9 +44,8 @@ let dedupe_preserve_order (items : string list) =
 ;;
 
 let upsert_http_header = Runtime_transport_authorization.upsert_http_header
-(* String_util.trim_nonempty + first_nonempty_env + runtime-MCP policy header helpers
-   extracted to [Runtime_transport_mcp_policy_helpers] (godfile decomp). *)
-let first_nonempty_env = Runtime_transport_mcp_policy_helpers.first_nonempty_env
+(* Runtime-MCP policy header helpers extracted to
+   [Runtime_transport_mcp_policy_helpers] (godfile decomp). *)
 let keeper_name_of_agent_name = Runtime_transport_authorization.keeper_name_of_agent_name
 
 let runtime_mcp_policy_with_masc_agent_name =
@@ -57,8 +56,6 @@ let runtime_mcp_policy_without_http_headers =
   Runtime_transport_mcp_policy_helpers.runtime_mcp_policy_without_http_headers
 ;;
 
-let is_authorization_header = Runtime_transport_authorization.is_authorization_header
-let authorization_header_from_policy = Runtime_transport_authorization.authorization_header_from_policy
 let per_keeper_authorization_header = Runtime_transport_authorization.per_keeper_authorization_header
 let runtime_mcp_policy_uses_bound_actor_tools = Runtime_transport_authorization.runtime_mcp_policy_uses_bound_actor_tools
 let add_masc_authorization_header = Runtime_transport_authorization.add_masc_authorization_header
@@ -141,7 +138,7 @@ let resolve_tool_lane_for_oas_tools
     | Some agent_name
       when requires_per_keeper_bridging
            && Option.is_some (keeper_name_of_agent_name agent_name) ->
-      Option.is_some (per_keeper_authorization_header ~base_path ~agent_name)
+      Result.is_ok (per_keeper_authorization_header ~base_path ~agent_name)
     | _ -> false
   in
   let omitted_keeper_bound_actor_tools =
@@ -186,37 +183,33 @@ let resolve_tool_lane_for_oas_tools
     let runtime_mcp_policy =
       if runtime_tool_names = [] && omitted_keeper_bound_actor_tools <> []
       then (
-        let env_token = first_nonempty_env [ "MASC_TOKEN" ] in
-        let per_keeper_token =
-          match env_token, requested_agent_name with
-          | None, Some name ->
-            Auth.load_raw_token base_path ~agent_name:name
-          | _ -> None
+        let resolved =
+          Auth_resolve.resolve_runtime_mcp ~base_path
+            ~agent_name:requested_agent_name
         in
-        let auth_headers =
-          match env_token, per_keeper_token with
-          | Some raw, _ -> [ "Authorization", "Bearer " ^ raw ]
-          | None, Some raw -> [ "Authorization", "Bearer " ^ raw ]
-          | None, None -> []
-        in
-        Some
-          { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
-            servers =
-              [ Llm_provider.Llm_transport.Http_server
-                  { name = "masc"
-                  ; url = Env_config_runtime.Local_runtime.mcp_url ()
-                  ; headers = auth_headers
-                  }
-              ]
-          ; allowed_server_names = [ "masc" ]
-          ; allowed_tool_names = []
-          ; strict = false
-          ; disable_builtin_tools = false
-          }
-        |> runtime_mcp_policy_for_provider
-             ~base_path
-             ~provider_cfg
-             ~agent_name:(Option.value ~default:"" requested_agent_name))
+        Auth_resolve.emit_resolution_trace ~runtime:"runtime_mcp_connect_only"
+          ~keeper_id:
+            (Option.bind requested_agent_name keeper_name_of_agent_name)
+          ~provider_label:(provider_label provider_cfg) ~outcome:resolved;
+        match resolved with
+        | Error _ -> None
+        | Ok { Auth_resolve.raw; _ } ->
+            Some
+              { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+                servers =
+                  [ Llm_provider.Llm_transport.Http_server
+                      { name = "masc"
+                      ; url = Env_config_runtime.Local_runtime.mcp_url ()
+                      ; headers = [ "Authorization", "Bearer " ^ raw ]
+                      }
+                  ]
+              ; allowed_server_names = [ "masc" ]
+              ; allowed_tool_names = []
+              ; strict = false
+              ; disable_builtin_tools = false
+              }
+            |> runtime_mcp_policy_for_provider ~base_path ~provider_cfg
+                 ~agent_name:(Option.value ~default:"" requested_agent_name))
       else
         runtime_mcp_policy_of_tool_names
           ~base_path

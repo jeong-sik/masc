@@ -8,7 +8,9 @@ module Board_dispatch = Masc.Board_dispatch
 
 open Cmdliner
 
-let default_base_path () = Server_mcp_transport_http.default_base_path ()
+let default_base_path () =
+  Config_dir_resolver.current_working_dir ()
+  |> Workspace_utils_backend_setup.resolve_server_default_base_path
 
 let base_path =
   let doc =

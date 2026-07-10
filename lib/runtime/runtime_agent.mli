@@ -165,7 +165,6 @@ val provider_label : Llm_provider.Provider_config.t -> string
 
 val runtime_mcp_tool_requires_bound_actor : string -> bool
 val runtime_mcp_policy_with_masc_agent_name :
-  ?include_internal_token:bool ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy
@@ -173,7 +172,7 @@ val codex_cli_can_auth_keeper_bound_runtime_mcp :
   base_path:string ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
-  bool
+  (bool, Auth_resolve.auth_error) result
 val runtime_mcp_policy_for_provider :
   base_path:string ->
   provider_cfg:Llm_provider.Provider_config.t ->

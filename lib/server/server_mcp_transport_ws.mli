@@ -208,15 +208,13 @@ val heartbeat_should_close :
     [threshold] whole [interval_s]-second intervals with no pong (i.e.
     [now -. last_pong_at > threshold * interval_s]).  A client that keeps
     answering refreshes [last_pong_at] and is never closed.  [threshold <= 0]
-    disables the guard.  Shared by the /ws upgrade heartbeat and the standalone
-    heartbeat so liveness is single-source (#21509). *)
-(** Refresh [last_pong_at] and reset the missed-pong counter.  Called by the
-    WS frame handler on every [Pong] frame. *)
+    disables the guard.  Used by the same-origin [/ws] upgrade heartbeat
+    (#21509). *)
 
 val cleanup_session : string -> unit
 (** Removes the session from {!sessions} (and the
-    slice-fanout side index).  Idempotent — calling on
-    an unknown id is a silent no-op. *)
+    slice-fanout side index).  Idempotent: an unknown id is treated as already
+    cleaned up. *)
 
 val close_all : unit -> int
 (** Closes every live WS session.  Returns the number of

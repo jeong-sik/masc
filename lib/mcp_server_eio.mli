@@ -81,6 +81,7 @@ val create_state : ?test_mode:bool -> base_path:string -> unit -> server_state
     @param net Eio network capability for HTTP/TLS calls
     @param base_path Workspace/base path; MASC data lives under [<base_path>/.masc]. *)
 val create_state_eio :
+  ?mcp_http_transport:Server_mcp_transport_http_sse_owner.t ->
   sw:Eio.Switch.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
   fs:Eio.Fs.dir_ty Eio.Path.t ->

@@ -28,6 +28,7 @@ type client = {
   last_event_id : int Atomic.t;
   created_at : float;
   last_seen_at : float Atomic.t;
+  on_disconnect : (unit -> unit) option;
 }
 
 type client_registry_state = {
@@ -60,6 +61,10 @@ type registration_auth = {
   token : string option;
 }
 
+type registration_precondition =
+  | Any_current_client
+  | No_current_client
+
 (** Failure modes for SSE registration.  Transport callers translate these
     into typed HTTP responses and close the connection cleanly. *)
 type registration_error =
@@ -70,21 +75,25 @@ type registration_error =
   | Unknown_session of { session_id : string }
   | Session_expired of { session_id : string }
   | Session_owner_mismatch of { session_agent : string; token_agent : string }
+  | Registration_superseded of { session_id : string; current_client_id : int }
 
 val registration_error_to_string : registration_error -> string
 
 (** {1 Session Management} *)
 
 val register :
-  ?kind:session_kind -> ?on_disconnect:(unit -> unit) ->
+  ?kind:session_kind -> ?precondition:registration_precondition ->
+  ?on_disconnect:(int -> unit) ->
   auth:registration_auth -> string -> last_event_id:int ->
   (int * string Eio.Stream.t * string option, registration_error) result
 (** [register ~auth session_id ~last_event_id] validates the supplied
     bearer token and MCP session pair before admitting the client.
 
-    [?on_disconnect] is installed atomically with registration via
-    {!set_disconnect_hook} before the client becomes broadcast-visible,
-    so a concurrent queue-overflow [unregister] always finds the hook.
+    [No_current_client] makes publication fail explicitly if a newer client
+    already owns the wire id.  [?on_disconnect] receives the immutable client
+    id and is installed before the client becomes broadcast-visible, so a
+    concurrent queue-overflow [unregister] always finds the generation-bound
+    hook.
 
     On validation failure a typed [registration_error] is returned so the
     transport layer can respond with an auth error and close the connection
@@ -93,26 +102,9 @@ val register :
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit
 
-(** [set_disconnect_hook session_id hook] arranges for [hook ()] to fire
-    exactly once when the session is removed from the broadcast registry
-    (via [unregister] or [unregister_if_current]).  The hook is the
-    transport layer's wakeup signal for its drain fiber; without it, a
-    queue-overflow [unregister] from [broadcast_impl] leaves the drain
-    fiber blocked on [Eio.Stream.take] and the HTTP body writer open
-    until socket keep-alive timeout reaps it.
-
-    Callers MUST invoke this immediately after a successful [register]
-    and SHOULD invoke [clear_disconnect_hook] before re-registering the
-    same session_id so a stale hook from a prior connection does not
-    fire against the new one. *)
-val set_disconnect_hook : string -> (unit -> unit) -> unit
-
-(** [clear_disconnect_hook session_id] removes any hook previously
-    installed for [session_id].  Idempotent — safe to call when no hook
-    exists. *)
-val clear_disconnect_hook : string -> unit
-
 val exists : string -> bool
+val current_client_id : string -> int option
+(** Returns the immutable generation id of the currently published client. *)
 val touch : string -> unit
 val update_last_event_id : string -> int -> unit
 val all_session_ids : unit -> string list

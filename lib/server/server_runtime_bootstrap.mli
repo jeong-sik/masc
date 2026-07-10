@@ -100,6 +100,7 @@ val init_runtime_context :
 (** {1 Server State Lifecycle} *)
 
 val create_server_state :
+  ?mcp_http_transport:Server_mcp_transport_http_sse_owner.t ->
   sw:Eio.Switch.t ->
   base_path:string ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

@@ -175,6 +175,7 @@ val schema_markdown : string
 type server_state = {
   workspace_config : Workspace.config Atomic.t;
   session_registry : Session.registry;
+  mcp_http_transport : Server_mcp_transport_http_sse_owner.t option;
   on_sse_broadcast :
     (Yojson.Safe.t -> unit) option Atomic.t;
   sw : Eio.Switch.t option;
@@ -195,7 +196,10 @@ val workspace_config : server_state -> Workspace.config
 (** Current workspace configuration. *)
 
 val set_workspace_config : server_state -> Workspace.config -> unit
-(** Atomically replace the active workspace configuration. *)
+(** Atomically replace the active workspace configuration. A live HTTP MCP
+    transport pins its BasePath for the process lifetime; attempting to switch
+    that path is rejected explicitly so session persistence cannot cross
+    workspace boundaries. *)
 
 val create_state : base_path:string -> server_state
 (** Legacy bootstrap.  Every Eio handle is [None]; the
@@ -204,6 +208,7 @@ val create_state : base_path:string -> server_state
     runtime fibers (test fixtures, replay harnesses). *)
 
 val create_state_eio :
+  ?mcp_http_transport:Server_mcp_transport_http_sse_owner.t ->
   sw:Eio.Switch.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
   fs:Eio.Fs.dir_ty Eio.Path.t ->

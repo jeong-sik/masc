@@ -252,7 +252,9 @@ module Transport = struct
   let grpc_unary_timeout_default_sec = 30.0
 
   (** Deadline for finite unary gRPC calls. Streaming calls intentionally do
-      not inherit this deadline. *)
+      not inherit this deadline.
+      @category Timeouts
+      @ops_class operator *)
   let grpc_unary_timeout_sec () =
     let value =
       get_float_nonneg

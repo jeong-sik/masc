@@ -407,8 +407,8 @@ let ensure_thompson_persistence ~base_path =
     Shutdown.register ~name:"thompson_sampling_save" ~priority:24 (fun () ->
       Thompson_sampling.save_stats ())
 
-let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
-    ?env ()
+let create_server_state ?mcp_http_transport ~sw ~base_path ~clock ~mono_clock
+    ~net ~proc_mgr ~fs ?env ()
     : Mcp_server.server_state =
   let input_base_path =
     match String.trim base_path with
@@ -416,6 +416,18 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     | raw -> Some raw
   in
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
+  Option.iter
+    (fun transport ->
+      let transport_base_path =
+        Server_mcp_transport_http_sse_owner.sessions transport
+        |> Server_mcp_transport_session_store.base_path
+      in
+      if not (String.equal transport_base_path base_path) then
+        invalid_arg
+          (Printf.sprintf
+             "MCP HTTP transport BasePath mismatch: state=%s transport=%s"
+             base_path transport_base_path))
+    mcp_http_transport;
   Runtime_params.initialize ~base_path;
   Fs_compat.set_fs fs;
   (* RFC-0266 §7 Phase D: replay persisted fusion run history into the
@@ -471,7 +483,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Keeper_runtime_resolved.init ();
   Keeper_task_owner_backend.install_hooks ();
   let state =
-    Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
+    Mcp_eio.create_state_eio ?mcp_http_transport ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net
       ~base_path
   in
@@ -530,7 +542,6 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   Config_dir_resolver.reset ();
   let (_init_msg : string) = Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
-
 
 type lazy_startup_execution =
   | Parallel
@@ -818,9 +829,29 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          agent_sdk is a silent drop. *)
       Agent_sdk_log_bridge.install ();
       Log.Server.info "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
+      let normalized_base_path =
+        Env_config_core.normalize_masc_base_path_input base_path
+      in
+      let mcp_http_transport =
+        match
+          Server_mcp_transport_session_store.open_ ~sw
+            ~base_path:normalized_base_path
+        with
+        | Ok sessions ->
+            Some (Server_mcp_transport_http_sse_owner.create ~sessions)
+        | Error error ->
+            let message =
+              Server_mcp_transport_session_store.open_error_to_string error
+            in
+            Log.Server.error
+              "MCP HTTP transport session store unavailable; MCP HTTP routes remain disabled while other server subsystems continue: %s"
+              message;
+            None
+      in
       let state =
-        create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr
-          ~fs ~env ()
+        create_server_state ?mcp_http_transport ~sw
+          ~base_path:normalized_base_path ~clock
+          ~mono_clock ~net ~proc_mgr ~fs ~env ()
       in
       (* Initialize the default Runtime singleton from runtime TOML.
          Must happen after Config_dir_resolver is set up (inside
@@ -1217,6 +1248,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                     Server_mcp_transport_ws.finish_inbound_dispatch session)
                   (fun () ->
                     try
+                      let body_str =
+                        Server_mcp_actor_injection.reduce
+                          ~actor:(Some session.authenticated_agent)
+                          ~auth_token body_str
+                      in
                       let response_json =
                         Mcp_eio.handle_request ~clock ~sw
                           ~mcp_session_id:ws_session_id ?auth_token state body_str
@@ -1264,6 +1300,16 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           (fun admission peer_id body_str ->
             Eio.Fiber.fork ~sw (fun () ->
               try
+                let body_str =
+                  Server_mcp_actor_injection.reduce
+                    ~actor:
+                      (Some
+                         admission.Server_transport_admission.identity.agent_name)
+                    ~auth_token:
+                      (Some
+                         admission.Server_transport_admission.auth_token)
+                    body_str
+                in
                 let response_json =
                   Mcp_eio.handle_request ~clock ~sw
                     ~mcp_session_id:peer_id

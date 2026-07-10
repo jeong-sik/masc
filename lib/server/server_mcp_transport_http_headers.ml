@@ -207,11 +207,26 @@ let get_last_event_id (request : Httpun.Request.t) =
       int_of_string_opt (id))
   | None -> None
 
+let protocol_headers protocol_version =
+  [ ("mcp-protocol-version", protocol_version) ]
+
+type session_header_visibility =
+  | Expose_session
+  | Protocol_only
+
+let session_header_visibility ~session_was_provided ~initialized =
+  if session_was_provided || initialized then Expose_session else Protocol_only
+
 let mcp_headers session_id protocol_version =
   if Mcp_transport_protocol.is_stateless_protocol_version protocol_version then
-    [ ("mcp-protocol-version", protocol_version) ]
+    protocol_headers protocol_version
   else
-    [ ("mcp-session-id", session_id); ("mcp-protocol-version", protocol_version) ]
+    ("mcp-session-id", session_id) :: protocol_headers protocol_version
+
+let mcp_response_headers ~visibility ~session_id ~protocol_version =
+  match visibility with
+  | Expose_session -> mcp_headers session_id protocol_version
+  | Protocol_only -> protocol_headers protocol_version
 
 let session_cookie_header session_id =
   ( "set-cookie",
@@ -222,11 +237,26 @@ let session_cookie_headers protocol_version session_id =
   if Mcp_transport_protocol.is_stateless_protocol_version protocol_version then []
   else [ session_cookie_header session_id ]
 
-let sse_headers ~(deps : deps) session_id protocol_version origin =
+let sse_response_headers
+      ~(deps : deps)
+      ~visibility
+      ~session_id
+      ~protocol_version
+      ~origin
+  =
+  let session_headers =
+    match visibility with
+    | Expose_session -> session_cookie_headers protocol_version session_id
+    | Protocol_only -> []
+  in
   [ ("content-type", Http_negotiation.sse_content_type) ]
-  @ session_cookie_headers protocol_version session_id
-  @ mcp_headers session_id protocol_version
+  @ session_headers
+  @ mcp_response_headers ~visibility ~session_id ~protocol_version
   @ deps.cors_headers origin
+
+let sse_headers ~(deps : deps) session_id protocol_version origin =
+  sse_response_headers ~deps ~visibility:Expose_session ~session_id
+    ~protocol_version ~origin
 
 let sse_stream_headers ~(deps : deps) session_id protocol_version origin =
   [
@@ -238,7 +268,22 @@ let sse_stream_headers ~(deps : deps) session_id protocol_version origin =
   @ mcp_headers session_id protocol_version
   @ deps.cors_headers origin
 
-let json_headers ~(deps : deps) session_id protocol_version origin =
+let json_response_headers
+      ~(deps : deps)
+      ~visibility
+      ~session_id
+      ~protocol_version
+      ~origin
+  =
   [ ("content-type", "application/json") ]
-  @ mcp_headers session_id protocol_version
+  @ mcp_response_headers ~visibility ~session_id ~protocol_version
+  @ deps.cors_headers origin
+
+let json_headers ~(deps : deps) session_id protocol_version origin =
+  json_response_headers ~deps ~visibility:Expose_session ~session_id
+    ~protocol_version ~origin
+
+let json_headers_without_session_id ~(deps : deps) protocol_version origin =
+  [ ("content-type", "application/json") ]
+  @ protocol_headers protocol_version
   @ deps.cors_headers origin

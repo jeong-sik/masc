@@ -41,8 +41,10 @@ let create_state ?test_mode ~base_path () =
    | _ -> ());
   state
 
-let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
+let create_state_eio ?mcp_http_transport ~sw ~proc_mgr ~fs ~clock ~mono_clock
+    ~net ~base_path =
   Mcp_server.create_state_eio
+    ?mcp_http_transport
     ~sw
     ~proc_mgr
     ~fs

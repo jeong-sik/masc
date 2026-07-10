@@ -62,23 +62,8 @@ let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
 let mcp_protocol_version_default =
   Server_mcp_transport_http.mcp_protocol_version_default
 
-let default_base_path = Server_mcp_transport_http.default_base_path
-
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
-
-let remember_protocol_version =
-  Server_mcp_transport_http.remember_protocol_version
-
-let remember_mcp_profile = Server_mcp_transport_http.remember_mcp_profile
-
-let forget_mcp_session = Server_mcp_transport_http.forget_mcp_session
-
-let validate_mcp_session_profile =
-  Server_mcp_transport_http.validate_mcp_session_profile
-
-let validate_mcp_session_delete_profile =
-  Server_mcp_transport_http.validate_mcp_session_delete_profile
 
 let protocol_version_from_body =
   Server_mcp_transport_http.protocol_version_from_body
@@ -244,6 +229,20 @@ let try_internal_error_response reqd msg =
           Log.Http.warn "main_eio internal_error response failed: %s"
             (Printexc.to_string exn))
 
+let protocol_version_for_request ~is_mcp_like request =
+  if not is_mcp_like then Ok (get_protocol_version request)
+  else
+    let deps = mcp_transport_http_deps () in
+    match deps.get_mcp_http_transport () with
+    | Error _ as error -> error
+    | Ok transport ->
+        let sessions =
+          Server_mcp_transport_http.mcp_transport_sessions transport
+        in
+        let session_id = get_session_id_any request in
+        Ok
+          (get_protocol_version_for_session ~sessions ?session_id request)
+
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =
   fun client_addr gluten_reqd ->
@@ -260,13 +259,17 @@ let make_extended_handler routes =
     else
     try
       let is_mcp_like = is_mcp_like_path path in
-      let session_id_for_version = get_session_id_any request in
-      let protocol_version =
-        get_protocol_version_for_session ?session_id:session_id_for_version request
-      in
-      let origin = get_origin request in
-      if try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd then ()
-      else dispatch_route ~router:routes ~request ~path ~upgrade reqd
+      match protocol_version_for_request ~is_mcp_like request with
+      | Error message ->
+          Log.Server.error "MCP HTTP transport unavailable: %s" message;
+          try_internal_error_response reqd message
+      | Ok protocol_version ->
+          let origin = get_origin request in
+          if
+            try_mcp_validation_block ~is_mcp_like ~request ~protocol_version
+              ~origin reqd
+          then ()
+          else dispatch_route ~router:routes ~request ~path ~upgrade reqd
     with
     (* Re-raise cancellation so Eio structured concurrency propagates cleanly.
        Previously the catch-all swallowed Cancelled and tried to write a 500

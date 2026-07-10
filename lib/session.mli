@@ -164,10 +164,6 @@ module McpSessionStore : sig
       Does not update activity when returning an existing session. *)
   val get_or_create : id:string -> ?agent_name:string -> unit -> mcp_session
 
-  (** Remove stale sessions exceeding max age.
-      Returns the number removed. *)
-  val cleanup_stale : unit -> int
-
   (** Serialize an MCP session to JSON. *)
   val to_json : mcp_session -> Yojson.Safe.t
 
@@ -177,12 +173,6 @@ module McpSessionStore : sig
   (** Remove an MCP session by ID.  Returns [true] if found. *)
   val remove : string -> bool
 end
-
-(** Start a background fiber that periodically cleans up stale
-    MCP sessions.  Call once at server startup. *)
-val start_mcp_session_cleanup_loop :
-  sw:Eio.Switch.t -> clock:_ Eio.Time.clock ->
-  ?interval:float -> unit -> unit
 
 (** {1 MCP Session Helpers} *)
 

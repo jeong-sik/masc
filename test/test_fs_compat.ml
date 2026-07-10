@@ -6,6 +6,8 @@
 
 open Alcotest
 
+module Strict_atomic = Fs_compat.Atomic_write
+
 let with_tmp_dir (f : string -> unit) : unit =
   let tmp = Filename.temp_file "masc_fs_compat_" ".tmp" in
   Sys.remove tmp;
@@ -102,6 +104,73 @@ let test_save_file_atomic_overwrites_existing () =
    | Ok () -> ()
    | Error msg -> fail msg);
   check string "overwrite succeeded" "new" (Fs_compat.load_file target)
+;;
+
+let test_strict_atomic_write_commits_and_cleans_temp () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "strict.json" in
+  (match Strict_atomic.save_file_atomic_strict target "durable" with
+   | Ok () -> ()
+   | Error error -> fail (Strict_atomic.strict_write_error_to_string error));
+  check string "strict content" "durable" (Fs_compat.load_file target);
+  let leftovers =
+    Sys.readdir base
+    |> Array.to_list
+    |> List.filter Strict_atomic.is_atomic_orphan_name
+  in
+  check (list string) "strict writer leaves no temp" [] leftovers
+;;
+
+let test_strict_atomic_write_missing_parent_is_not_committed () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "missing/strict.json" in
+  match Strict_atomic.save_file_atomic_strict target "value" with
+  | Error
+      (Strict_atomic.Not_committed
+        { stage = Strict_atomic.Open_parent_directory
+        ; cleanup = Strict_atomic.No_temporary
+        ; _
+        }) ->
+    check bool "target remains absent" false (Sys.file_exists target)
+  | Ok () -> fail "missing parent must not commit"
+  | Error error ->
+    failf
+      "unexpected strict failure: %s"
+      (Strict_atomic.strict_write_error_to_string error)
+;;
+
+let test_strict_atomic_write_rename_failure_is_commit_unknown () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "target-directory" in
+  Unix.mkdir target 0o755;
+  (match Strict_atomic.save_file_atomic_strict target "value" with
+   | Error
+       (Strict_atomic.Commit_durability_unknown
+         { stage = Strict_atomic.Rename_target
+         ; cleanup =
+             (Strict_atomic.Temporary_removed _
+             | Strict_atomic.Temporary_absent _)
+         ; _
+         }) ->
+     ()
+   | Ok () -> fail "renaming a file over a directory must fail"
+   | Error error ->
+     failf
+       "unexpected strict rename failure: %s"
+       (Strict_atomic.strict_write_error_to_string error));
+  check bool "destination directory is unchanged" true (Sys.is_directory target);
+  let leftovers =
+    Sys.readdir base
+    |> Array.to_list
+    |> List.filter Strict_atomic.is_atomic_orphan_name
+  in
+  check (list string) "failed rename leaves no temp" [] leftovers
 ;;
 
 let with_redirected_stderr (f : unit -> 'a) : 'a * string =
@@ -323,6 +392,18 @@ let () =
             "overwrites existing target"
             `Quick
             test_save_file_atomic_overwrites_existing
+        ; test_case
+            "strict commit cleans temp"
+            `Quick
+            test_strict_atomic_write_commits_and_cleans_temp
+        ; test_case
+            "strict missing parent is not committed"
+            `Quick
+            test_strict_atomic_write_missing_parent_is_not_committed
+        ; test_case
+            "strict rejected rename cleans temp"
+            `Quick
+            test_strict_atomic_write_rename_failure_is_commit_unknown
         ] )
     ; ( "load_jsonl_diagnostics"
       , [ test_case

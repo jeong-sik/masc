@@ -54,29 +54,29 @@ describe('buildDashboardSseUrl', () => {
     clearStoredToken()
   })
 
-  it('keeps the stored bearer out of the URL while preserving agent scope', () => {
+  it('keeps bearer and page actor claims out of the credential-owned URL', () => {
     setStoredToken('secret')
-    expect(
-      buildDashboardSseUrl('dash_test', '?agent=keeper-a'),
-    ).toBe('/mcp?agent=keeper-a&session_id=dash_test&sse_kind=observer')
+    expect(buildDashboardSseUrl('dash_test')).toBe(
+      '/mcp?session_id=dash_test&sse_kind=observer',
+    )
   })
 
   it('never projects blank raw stored tokens into the URL', () => {
     sessionStorage.setItem('masc_bearer_token', '   ')
 
-    expect(buildDashboardSseUrl('dash_test', '?agent=keeper-a')).toBe(
-      '/mcp?agent=keeper-a&session_id=dash_test&sse_kind=observer',
+    expect(buildDashboardSseUrl('dash_test')).toBe(
+      '/mcp?session_id=dash_test&sse_kind=observer',
     )
   })
 
   it('omits token when sessionStorage is empty', () => {
-    expect(buildDashboardSseUrl('dash_test', '?agent=keeper-a')).toBe(
-      '/mcp?agent=keeper-a&session_id=dash_test&sse_kind=observer',
+    expect(buildDashboardSseUrl('dash_test')).toBe(
+      '/mcp?session_id=dash_test&sse_kind=observer',
     )
   })
 
   it('omits optional params when they are absent', () => {
-    expect(buildDashboardSseUrl('dash_test', '')).toBe(
+    expect(buildDashboardSseUrl('dash_test')).toBe(
       '/mcp?session_id=dash_test&sse_kind=observer',
     )
   })

@@ -48,91 +48,99 @@ let presence_stream_headers ~deps raw_session_id protocol_version origin =
 let presence_session_id raw_session_id = "presence:" ^ raw_session_id
 
 let with_owned_sse_admission ~deps ~request ~reqd ~origin ~session_id
-      ?related_transport_session_id ~response_session_id ~protocol_version
-      ~sse_kind on_admitted =
+      ?related_transport_session_id ~response_session_id ~sse_kind on_admitted =
   let base_path = deps.get_base_path () in
+  let fallback_protocol_version = get_protocol_version request in
   match
     Server_auth.authorize_token_bound_admission_request ~base_path
       ~permission:Masc_domain.CanReadState request
   with
   | Error err ->
       respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd
-        ~session_id:response_session_id ~protocol_version
+        ~session_id:response_session_id
+        ~protocol_version:fallback_protocol_version
         (Masc_domain.masc_error_to_string err)
   | Ok admission -> (
-      match
-        match related_transport_session_id with
-        | None -> Ok ()
-        | Some related_session_id ->
-            Sse_owner.validate_mcp_session_owner_for_request
-              ~session_id:related_session_id ~requester:admission.identity
-      with
-      | Error msg ->
-          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd
-            ~session_id:response_session_id ~protocol_version msg
-      | Ok () -> (
+      match deps.get_mcp_http_transport () with
+      | Error message ->
+          Log.Server.error "MCP HTTP transport unavailable: %s" message;
+          respond_not_ready ~deps request reqd
+      | Ok transport -> (
+          let protocol_version =
+            get_protocol_version_for_session
+              ~sessions:(Sse_owner.sessions transport)
+              ~session_id:response_session_id request
+          in
           match
-            Sse_owner.validate_mcp_sse_session_owner_for_request ~session_id
+            Sse_owner.claim_mcp_sse_session_owner_for_request transport
+              ~session_id ?lifecycle_session_id:related_transport_session_id
               ~sse_kind ~requester:admission.identity
           with
           | Error msg ->
               respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request
                 reqd ~session_id:response_session_id ~protocol_version msg
-          | Ok () -> (
+          | Ok lease -> (
           match check_sse_connect_guard session_id with
           | Error (reason, retry_after_s) ->
+              Sse_owner.release transport lease;
               respond_sse_rate_limited ~deps ~origin ~session_id
                 ~protocol_version ~reason ~retry_after_s reqd
           | Ok () -> (
               match
-                Sse_owner.claim_mcp_sse_session_owner_for_request ~session_id
-                  ~sse_kind ~requester:admission.identity
+                Sse_owner.ensure_backing_session_for_owner transport ~session_id
+                  ~requester:admission.identity
               with
               | Error msg ->
+                  Sse_owner.release transport lease;
                   respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps
                     request reqd ~session_id:response_session_id
                     ~protocol_version msg
-              | Ok lease -> (
-                  match
-                    Sse_owner.ensure_backing_session_for_owner ~session_id
-                      ~requester:admission.identity
-                  with
-                  | Error msg ->
-                      Sse_owner.release lease;
-                      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps
-                        request reqd ~session_id:response_session_id
-                        ~protocol_version msg
-                  | Ok () -> on_admitted base_path admission lease)))))
+              | Ok () ->
+                  on_admitted transport base_path admission lease
+                    protocol_version))))
 
 let register_owned_sse ~deps ~reqd ~origin ~session_id
-      ~protocol_version ~sse_kind ~last_event_id ~base_path ~admission ~lease
-      ~headers on_connected =
+      ~protocol_version ~sse_kind ~last_event_id ~transport ~base_path
+      ~admission ~lease ~headers on_connected =
   let registered_client_id = ref None in
-  let release () = Sse_owner.release lease in
+  let release () = Sse_owner.release transport lease in
   let cleanup_failed_setup () =
     match !registered_client_id with
-    | Some client_id -> Sse.unregister_if_current session_id client_id
+    | Some client_id ->
+        stop_sse_session_if_current_preserve_guard session_id client_id;
+        Sse.unregister_if_current session_id client_id;
+        release ()
     | None -> release ()
   in
   try
-    Sse.clear_disconnect_hook session_id;
-    stop_sse_session_preserve_guard session_id;
-    Sse_owner.discard_previous lease;
-    let auth =
-      { Sse.config = base_path; token = Some admission.auth_token }
-    in
-    match
-      Sse.register ~kind:sse_kind ~auth session_id ~last_event_id
-        ~on_disconnect:(fun () ->
-          release ();
-          stop_sse_session_preserve_guard session_id)
-    with
-    | Error reg_err ->
+    match Sse_owner.commit_previous_retirement transport lease with
+    | Error msg ->
         release ();
-        let msg = Sse.registration_error_to_string reg_err in
         Log.Server.warn "%s" msg;
         respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
-    | Ok (client_id, event_stream, evicted) ->
+    | Ok previous_client_id ->
+      Option.iter
+        (fun client_id ->
+          stop_sse_session_if_current_preserve_guard session_id client_id;
+          Sse.unregister_if_current session_id client_id)
+        previous_client_id;
+      let auth =
+        { Sse.config = base_path; token = Some admission.auth_token }
+      in
+      (match
+         Sse.register ~kind:sse_kind
+           ~precondition:Sse.No_current_client ~auth session_id ~last_event_id
+           ~on_disconnect:(fun disconnected_client_id ->
+             release ();
+             stop_sse_session_if_current_preserve_guard session_id
+               disconnected_client_id)
+       with
+       | Error reg_err ->
+           release ();
+           let msg = Sse.registration_error_to_string reg_err in
+           Log.Server.warn "%s" msg;
+           respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
+       | Ok (client_id, event_stream, evicted) ->
         registered_client_id := Some client_id;
         let response = Httpun.Response.create ~headers `OK in
         let writer = Httpun.Reqd.respond_with_streaming reqd response in
@@ -143,14 +151,20 @@ let register_owned_sse ~deps ~reqd ~origin ~session_id
               ~reason:Session_lifecycle_event.Cap_exceeded
         | None -> ());
         let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
-        register_sse_conn ~session_id ~info;
-        (match Sse_owner.activate lease with
-        | Error msg ->
-            cleanup_failed_setup ();
-            Log.Server.warn
-              "SSE owner activation failed after connection publication for %s: %s"
-              session_id msg
-        | Ok () -> on_connected info event_stream)
+        if not (register_sse_conn_if_absent ~session_id ~info) then (
+          close_sse_conn info;
+          release ();
+          Log.Server.warn
+            "SSE connection publication superseded for session %s client=%d"
+            session_id client_id)
+        else
+          match Sse_owner.activate transport lease ~client_id with
+          | Error msg ->
+              cleanup_failed_setup ();
+              Log.Server.warn
+                "SSE owner activation failed after connection publication for %s: %s"
+                session_id msg
+          | Ok () -> on_connected info event_stream)
   with
   | Eio.Cancel.Cancelled _ as e ->
       cleanup_failed_setup ();
@@ -160,9 +174,10 @@ let register_owned_sse ~deps ~reqd ~origin ~session_id
       raise exn
 
 let handle_ag_ui_events ~deps request reqd =
+  if not (deps.is_ready ()) then respond_not_ready ~deps request reqd
+  else
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
-  let protocol_version = get_protocol_version_for_session ~session_id request in
   (* workspace query param ignored — namespace retired *)
   let last_event_id =
     match Httpun.Headers.get request.Httpun.Request.headers "last-event-id" with
@@ -170,13 +185,13 @@ let handle_ag_ui_events ~deps request reqd =
     | None -> None
   in
   with_owned_sse_admission ~deps ~request ~reqd ~origin ~session_id
-    ~response_session_id:session_id ~protocol_version ~sse_kind:Sse.Observer
-    (fun base_path admission lease ->
+    ~response_session_id:session_id ~sse_kind:Sse.Observer
+    (fun transport base_path admission lease protocol_version ->
       let headers =
         Httpun.Headers.of_list
           (sse_stream_headers ~deps session_id protocol_version origin)
       in
-      register_owned_sse ~deps ~reqd ~origin ~session_id
+      register_owned_sse ~deps ~reqd ~origin ~session_id ~transport
         ~protocol_version ~sse_kind:Sse.Observer
         ~last_event_id:(Option.value ~default:0 last_event_id) ~base_path
         ~admission ~lease ~headers (fun info event_stream ->
@@ -225,7 +240,8 @@ let handle_ag_ui_events ~deps request reqd =
                     | exn ->
                         Log.Server.error "ag-ui drain write error: %s"
                           (Printexc.to_string exn);
-                        stop_sse_session_preserve_guard info.session_id);
+                        stop_sse_session_if_current_preserve_guard
+                          info.session_id info.client_id);
                     if not (Atomic.get info.stop) then drain ()
                   in
                   try drain () with
@@ -244,7 +260,8 @@ let handle_ag_ui_events ~deps request reqd =
                             (Printexc.to_string exn));
                       (try
                          if Atomic.get info.closed then
-                           stop_sse_session_preserve_guard info.session_id
+                           stop_sse_session_if_current_preserve_guard
+                             info.session_id info.client_id
                          else if not (Atomic.get info.stop) then
                            if not (send_raw info ": ping\n\n") then
                              Log.Server.debug
@@ -256,7 +273,8 @@ let handle_ag_ui_events ~deps request reqd =
                           Log.Server.warn
                             "AG-UI SSE ping send failed for session %s: %s"
                             info.session_id (Printexc.to_string exn);
-                          stop_sse_session_preserve_guard info.session_id);
+                          stop_sse_session_if_current_preserve_guard
+                            info.session_id info.client_id);
                       loop ())
                   in
                   try loop () with
@@ -269,22 +287,22 @@ let handle_ag_ui_events ~deps request reqd =
               Log.Server.error
                 "AG-UI SSE runtime unavailable after registration for session %s: %s"
                 session_id msg;
-              stop_sse_session_preserve_guard session_id))
+              stop_sse_session_if_current_preserve_guard session_id
+                info.client_id))
 let handle_presence_events ~deps request reqd =
+  if not (deps.is_ready ()) then respond_not_ready ~deps request reqd
+  else
   let origin = deps.get_origin request in
   let raw_session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let session_id = presence_session_id raw_session_id in
-  let protocol_version =
-    get_protocol_version_for_session ~session_id:raw_session_id request
-  in
   with_owned_sse_admission ~deps ~request ~reqd ~origin ~session_id
     ~related_transport_session_id:raw_session_id
-    ~response_session_id:raw_session_id ~protocol_version
-    ~sse_kind:Sse.Presence (fun base_path admission lease ->
+    ~response_session_id:raw_session_id ~sse_kind:Sse.Presence
+    (fun transport base_path admission lease protocol_version ->
       let headers =
         presence_stream_headers ~deps raw_session_id protocol_version origin
       in
-      register_owned_sse ~deps ~reqd ~origin ~session_id
+      register_owned_sse ~deps ~reqd ~origin ~session_id ~transport
         ~protocol_version ~sse_kind:Sse.Presence ~last_event_id:0 ~base_path
         ~admission ~lease ~headers (fun info event_stream ->
           if
@@ -316,7 +334,8 @@ let handle_presence_events ~deps request reqd =
                     | exn ->
                         Log.Server.error "presence drain write error: %s"
                           (Printexc.to_string exn);
-                        stop_sse_session_preserve_guard info.session_id);
+                        stop_sse_session_if_current_preserve_guard
+                          info.session_id info.client_id);
                     if not (Atomic.get info.stop) then drain ()
                   in
                   try drain () with
@@ -335,7 +354,8 @@ let handle_presence_events ~deps request reqd =
                             (Printexc.to_string exn));
                       (try
                          if Atomic.get info.closed then
-                           stop_sse_session_preserve_guard info.session_id
+                           stop_sse_session_if_current_preserve_guard
+                             info.session_id info.client_id
                          else if not (Atomic.get info.stop) then
                            if not (send_raw info ": ping\n\n") then
                              Log.Server.debug
@@ -347,7 +367,8 @@ let handle_presence_events ~deps request reqd =
                           Log.Server.warn
                             "presence ping send failed for session %s: %s"
                             info.session_id (Printexc.to_string exn);
-                          stop_sse_session_preserve_guard info.session_id);
+                          stop_sse_session_if_current_preserve_guard
+                            info.session_id info.client_id);
                       loop ())
                   in
                   try loop () with
@@ -360,4 +381,5 @@ let handle_presence_events ~deps request reqd =
               Log.Server.error
                 "Presence SSE runtime unavailable after registration for session %s: %s"
                 session_id msg;
-              stop_sse_session_preserve_guard session_id))
+              stop_sse_session_if_current_preserve_guard session_id
+                info.client_id))

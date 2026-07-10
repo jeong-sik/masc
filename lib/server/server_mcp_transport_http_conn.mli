@@ -68,12 +68,10 @@ val sse_connect_max_in_window : int
 
 (** {1 Connection registry} *)
 
-val register_sse_conn :
-  session_id:string -> info:sse_conn_info -> unit
-(** [register_sse_conn ~session_id ~info] adds [info] to the
-    SSE registry under [session_id].  Replaces any prior entry
-    for the same session — callers responsible for stopping
-    the previous connection first via {!stop_sse_session}. *)
+val register_sse_conn_if_absent :
+  session_id:string -> info:sse_conn_info -> bool
+(** Publishes [info] only if [session_id] has no connection.  Returns [false]
+    instead of overwriting a newer generation that won a DELETE/reconnect race. *)
 
 val close_sse_conn : sse_conn_info -> unit
 (** [close_sse_conn info] sets [info.closed = true] / [info.stop = true]
@@ -130,7 +128,14 @@ val stop_sse_session_preserve_guard : string -> unit
     (e.g. AG-UI bridge replay) so the rate guard does not
     re-arm and reject the re-connect. *)
 
+val stop_sse_session_if_current_preserve_guard : string -> int -> unit
+(** Stops only the connection whose immutable SSE client id matches.  Stale
+    pumps and reconnect fibers cannot detach a newer connection that reused the
+    same wire session id. *)
+
 val is_active_sse_session : string -> bool
+val current_sse_connection_client_id : string -> int option
+(** Returns the immutable client generation in the HTTP connection registry. *)
 val active_session_count : unit -> int
 
 val reap_stale_guards : unit -> int

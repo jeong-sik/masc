@@ -1,11 +1,6 @@
-(** test_auth_resolve_labels — pure helpers of [Auth_resolve].
-
-    Step 15 (partial) of the bloodflow restoration plan. Covers the
-    label / show / pp helpers added by Step 1 (Auth_resolve typed
-    Result). The [resolve] function itself depends on filesystem +
-    env state, so it is exercised in higher-level integration tests;
-    this file pins the pure formatting surface so a variant rename or
-    addition cannot silently break operator-facing trace messages. *)
+(** Pure formatting contracts for typed [Auth_resolve] outcomes. Filesystem,
+    credential, corruption, and expiry behavior is covered by
+    [test_runtime_mcp_policy_auth]. *)
 
 open Masc
 
@@ -30,8 +25,6 @@ let contains haystack needle =
 
 let all_token_sources : Auth_resolve.token_source list =
   [
-    Internal_keeper_token;
-    Internal_keeper_env;
     Mcp_bearer_env;
     Per_keeper_token_file;
     Provider_api_key_env { var_name = "ANTHROPIC_API_KEY" };
@@ -57,38 +50,33 @@ let test_per_keeper_token_file_label_is_stable () =
 
 (* ── auth_error: show / pp surface payload ────────────────────── *)
 
-let test_show_token_hash_missing_includes_path () =
+let test_show_verification_failure_is_typed_and_secret_free () =
   let s =
     Auth_resolve.show_auth_error
-      (Token_hash_missing { path = "/tmp/keeper.token.hash" })
-  in
-  Alcotest.(check bool)
-    "show_auth_error embeds path"
-    true
-    (contains s "/tmp/keeper.token.hash")
-
-let test_show_token_hash_mismatch_includes_keeper_id_and_source () =
-  let s =
-    Auth_resolve.show_auth_error
-      (Token_hash_mismatch
+      (Credential_verification_failed
          {
-           keeper_id = "vincent";
-           presented_source = Mcp_bearer_env;
+           agent_name = "keeper-vincent-agent";
+           presented_source = Per_keeper_token_file;
+           failure = Invalid_token;
          })
   in
   Alcotest.(check bool)
-    "show_auth_error embeds keeper_id"
-    true (contains s "vincent");
+    "show_auth_error embeds agent"
+    true (contains s "keeper-vincent-agent");
   Alcotest.(check bool)
     "show_auth_error embeds presented_source label"
-    true (contains s "mcp_bearer_env")
+    true (contains s "per_keeper_token_file");
+  Alcotest.(check bool) "show_auth_error embeds typed reason" true
+    (contains s "invalid_token");
+  Alcotest.(check bool) "show_auth_error never embeds bearer material" false
+    (contains s "super-secret-bearer")
 
-let test_show_credential_file_missing_includes_path () =
+let test_show_raw_token_unavailable_includes_agent () =
   let s =
     Auth_resolve.show_auth_error
-      (Credential_file_missing { path = "/tmp/agents/x.json" })
+      (Raw_token_unavailable { agent_name = "keeper-x-agent" })
   in
-  Alcotest.(check bool) "embeds path" true (contains s "/tmp/agents/x.json")
+  Alcotest.(check bool) "embeds agent" true (contains s "keeper-x-agent")
 
 let test_show_api_key_env_unset_includes_var_name () =
   let s =
@@ -100,7 +88,8 @@ let test_show_api_key_env_unset_includes_var_name () =
 
 let test_pp_auth_error_matches_show () =
   let err : Auth_resolve.auth_error =
-    Token_hash_missing { path = "/p" }
+    Unbound_token_verification_failed
+      { presented_source = Mcp_bearer_env; failure = Token_expired { agent_name = "x" } }
   in
   let buf = Buffer.create 16 in
   let fmt = Format.formatter_of_buffer buf in
@@ -127,12 +116,10 @@ let () =
         ] );
       ( "auth_error",
         [
-          Alcotest.test_case "Token_hash_missing surfaces path" `Quick
-            test_show_token_hash_missing_includes_path;
-          Alcotest.test_case "Token_hash_mismatch surfaces keeper+source"
-            `Quick test_show_token_hash_mismatch_includes_keeper_id_and_source;
-          Alcotest.test_case "Credential_file_missing surfaces path" `Quick
-            test_show_credential_file_missing_includes_path;
+          Alcotest.test_case "verification failure is typed and secret-free"
+            `Quick test_show_verification_failure_is_typed_and_secret_free;
+          Alcotest.test_case "Raw_token_unavailable surfaces agent" `Quick
+            test_show_raw_token_unavailable_includes_agent;
           Alcotest.test_case "Api_key_env_unset surfaces var_name" `Quick
             test_show_api_key_env_unset_includes_var_name;
           Alcotest.test_case "pp_auth_error == show_auth_error" `Quick

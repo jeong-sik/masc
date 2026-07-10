@@ -197,7 +197,11 @@ let () =
     mcp_respond_src
     "2026-05-05 OAS cancel race";
   assert_contains
-    ~label:"MR3: SSE register error helper emits fresh session id"
+    ~label:"MR3: SSE register error omits unreserved session id"
+    mcp_respond_src
+    "json_headers_without_session_id ~deps protocol_version origin";
+  assert_not_contains
+    ~label:"MR3b: SSE register error does not mint an unreserved session id"
     mcp_respond_src
     "let new_session_id = Mcp_session.generate ()";
   assert_contains

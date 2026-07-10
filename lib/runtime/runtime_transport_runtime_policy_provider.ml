@@ -35,7 +35,16 @@ let runtime_mcp_policy_for_provider
     (* Per-request HTTP headers are stripped and only MASC identity headers
          plus the per-keeper [Authorization] header survive — so runtime MCP
          tools still authenticate without leaking secrets via argv. *)
-    Some (Auth_bridging.bridged_runtime_mcp_policy_for_agent ~base_path ~agent_name policy)
+    (match
+       Auth_bridging.bridged_runtime_mcp_policy_for_agent ~base_path ~agent_name
+         policy
+     with
+    | Ok bridged -> Some bridged
+    | Error _ ->
+        (* Resolution emitted a structured, secret-free trace. Returning [None]
+           preserves the provider-policy option boundary while ensuring an auth
+           failure can never become a headerless protected policy. *)
+        None)
   | Some _policy, true, None ->
     (* No keeper identity means no safe per-keeper bridge. Returning
        [None] makes the caller either fall back to inline tools (when

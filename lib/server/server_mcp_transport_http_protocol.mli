@@ -37,6 +37,8 @@ type deps = Server_mcp_transport_http_types.deps = {
   is_ready : unit -> bool;
   get_runtime_result :
     unit -> (Server_mcp_transport_http_types.runtime, string) result;
+  get_mcp_http_transport :
+    unit -> (Server_mcp_transport_http_sse_owner.t, string) result;
   get_base_path : unit -> string;
 }
 (** Transparent alias of {!Server_mcp_transport_http_types.deps}.
@@ -79,14 +81,12 @@ val validate_session_known :
   string ->
   (unit, string) result
 (** RFC-0100 PR-3 — Q3 default. Reject [POST /mcp] when the client
-    echoes an [Mcp-Session-Id] the server has no state for. Returns
-    [Ok ()] when [session_was_provided = false] (a missing header is
-    handled by {!validate_session_requirement}), when [is_known = true],
-    when the body declares a stateless 2026-07-28 protocol version, or
-    when the JSON-RPC method is one of the bootstrap/probe set
-    ([initialize] / [notifications/initialized] / [ping] /
-    [server/discover]). Otherwise returns [Error] with a message
-    suitable for a [404 Not Found] response body. *)
+    echoes an [Mcp-Session-Id] the server has no state for, including
+    bootstrap and stateless requests. Returns [Ok ()] only when
+    [session_was_provided = false] (the initial server-assigned session
+    handshake) or [is_known = true]. [Error] instructs the client to retry
+    [initialize] without the header and is suitable for a [404 Not Found]
+    response body. *)
 
 (** {1 Re-exports} *)
 

@@ -139,6 +139,35 @@ let test_register_returns_unique_id () =
   Sse.unregister session1;
   Sse.unregister session2
 
+let test_no_current_precondition_preserves_current_disconnect_callback () =
+  let session_id = "test_generation_guard_" ^ string_of_int (Random.int 10000) in
+  let current_disconnect = ref None in
+  let rejected_disconnect = ref None in
+  let current_id, _, _ =
+    register_exn
+      ~on_disconnect:(fun client_id -> current_disconnect := Some client_id)
+      session_id ~last_event_id:0
+  in
+  (match
+     Sse.register ~precondition:Sse.No_current_client
+       ~on_disconnect:(fun client_id -> rejected_disconnect := Some client_id)
+       ~auth session_id ~last_event_id:0
+   with
+   | Error
+       (Sse.Registration_superseded
+         { current_client_id; session_id = rejected_session_id }) ->
+       check int "reports current generation" current_id current_client_id;
+       check string "reports guarded session" session_id rejected_session_id
+   | Error err ->
+       failf "expected Registration_superseded, got %s"
+         (Sse.registration_error_to_string err)
+   | Ok _ -> fail "No_current_client must reject a replacement");
+  Sse.unregister session_id;
+  check (option int) "current generation callback is preserved"
+    (Some current_id) !current_disconnect;
+  check (option int) "rejected generation callback is never published" None
+    !rejected_disconnect
+
 let test_register_uses_successful_commit_time_after_retry () =
   let session_id = "register_retry_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
@@ -536,6 +565,8 @@ let () =
       test_case "unregister removes" `Quick test_unregister_removes_client;
       test_case "exists false for unknown" `Quick test_exists_false_for_unknown;
       test_case "unique ids" `Quick test_register_returns_unique_id;
+      test_case "absent precondition preserves current callback" `Quick
+        test_no_current_precondition_preserves_current_disconnect_callback;
       test_case "retry uses successful commit time" `Quick
         test_register_uses_successful_commit_time_after_retry;
     ];

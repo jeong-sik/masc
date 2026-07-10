@@ -17,6 +17,8 @@ type deps = Server_mcp_transport_http_types.deps = {
   is_ready : unit -> bool;
   get_runtime_result :
     unit -> (Server_mcp_transport_http_types.runtime, string) result;
+  get_mcp_http_transport :
+    unit -> (Server_mcp_transport_http_sse_owner.t, string) result;
   get_base_path : unit -> string;
 }
 
@@ -44,29 +46,19 @@ let validate_session_requirement ~session_was_provided body_str =
           "Mcp-Session-Id header required. Call initialize first to obtain a \
            session."
 
-(** RFC-0100 PR-3 — Q3 default: reject [POST /mcp] requests that echo an
-    [Mcp-Session-Id] header the server has no state for. Returns [Ok ()]
-    when the request is the initial handshake ([initialize]/[ping]/init
-    notification — these legitimately mint a new session) or when the
-    session is already known to the server.
-
-    Methods that require an existing session (everything other than the
-    handshake set) receive [Error] when the client supplied an unknown id.
-    The transport responds with [404 Not Found] and a freshly minted
-    [Mcp-Session-Id] header so the client can re-handshake. *)
-let validate_session_known ~session_was_provided ~is_known body_str =
+(** Reject every client-supplied [Mcp-Session-Id] for which the server has no
+    state. Session identifiers are server-issued capabilities: an initial
+    [initialize] omits the header, then the server returns the identifier to
+    use on subsequent requests. Accepting an unknown supplied identifier for
+    selected methods would let a deleted session id be recreated while an
+    earlier DELETE is still retiring its transport resources. *)
+let validate_session_known ~session_was_provided ~is_known _body_str =
   if not session_was_provided then Ok ()
   else if is_known then Ok ()
-  else if Mcp_transport_protocol.body_uses_stateless_protocol body_str then Ok ()
   else
-    match method_from_body body_str with
-    | Some "initialize" | Some "notifications/initialized" | Some "ping"
-    | Some "server/discover" ->
-        Ok ()
-    | Some _ | None ->
-        Error
-          "Unknown Mcp-Session-Id. The server has no state for the supplied \
-           session id. Re-initialize to obtain a fresh session."
+    Error
+      "Unknown Mcp-Session-Id. The server has no state for the supplied \
+       session id. Retry initialize without the Mcp-Session-Id header."
 
 let protocol_version_from_body = Mcp_transport_protocol.protocol_version_from_body
 

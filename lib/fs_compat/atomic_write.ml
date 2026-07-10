@@ -22,15 +22,290 @@ let fsync_path path =
         ())
 ;;
 
+type not_committed_stage =
+  | Open_parent_directory
+  | Create_temporary
+  | Configure_temporary
+  | Write_temporary
+  | Sync_temporary
+  | Close_temporary
+
+type uncertain_commit_stage =
+  | Rename_target
+  | Sync_parent_directory
+  | Close_parent_directory
+
+type temporary_cleanup =
+  | No_temporary
+  | Temporary_removed of { temporary_path : string }
+  | Temporary_absent of { temporary_path : string }
+  | Temporary_cleanup_failed of
+      { temporary_path : string
+      ; message : string
+      }
+
+type strict_write_error =
+  | Not_committed of
+      { path : string
+      ; stage : not_committed_stage
+      ; message : string
+      ; cleanup : temporary_cleanup
+      }
+  | Commit_durability_unknown of
+      { path : string
+      ; stage : uncertain_commit_stage
+      ; message : string
+      ; cleanup : temporary_cleanup
+      }
+
+(* Keep the producer and orphan-sweep matcher on one filename SSOT. *)
+let atomic_tmp_prefix = ".atomic_"
+let atomic_tmp_suffix = ".tmp"
+
+let not_committed_stage_label = function
+  | Open_parent_directory -> "open_parent_directory"
+  | Create_temporary -> "create_temporary"
+  | Configure_temporary -> "configure_temporary"
+  | Write_temporary -> "write_temporary"
+  | Sync_temporary -> "sync_temporary"
+  | Close_temporary -> "close_temporary"
+;;
+
+let uncertain_commit_stage_label = function
+  | Rename_target -> "rename_target"
+  | Sync_parent_directory -> "sync_parent_directory"
+  | Close_parent_directory -> "close_parent_directory"
+;;
+
+let temporary_cleanup_label = function
+  | No_temporary -> "none"
+  | Temporary_removed { temporary_path } -> "removed:" ^ temporary_path
+  | Temporary_absent { temporary_path } -> "absent:" ^ temporary_path
+  | Temporary_cleanup_failed { temporary_path; message } ->
+    Printf.sprintf "failed:%s:%s" temporary_path message
+;;
+
+let strict_write_error_to_string = function
+  | Not_committed { path; stage; message; cleanup } ->
+    Printf.sprintf
+      "atomic write not committed: path=%s stage=%s cleanup=%s error=%s"
+      path
+      (not_committed_stage_label stage)
+      (temporary_cleanup_label cleanup)
+      message
+  | Commit_durability_unknown { path; stage; message; cleanup } ->
+    Printf.sprintf
+      "atomic write commit durability unknown: path=%s stage=%s cleanup=%s error=%s"
+      path
+      (uncertain_commit_stage_label stage)
+      (temporary_cleanup_label cleanup)
+      message
+;;
+
+let exception_message = function
+  | Unix.Unix_error (error, operation, argument) ->
+    Printf.sprintf
+      "%s (%s %s)"
+      (Unix.error_message error)
+      operation
+      argument
+  | exn -> Printexc.to_string exn
+;;
+
+let cleanup_temporary temporary_path =
+  try
+    Unix.unlink temporary_path;
+    Temporary_removed { temporary_path }
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    Temporary_absent { temporary_path }
+  | exn ->
+    Temporary_cleanup_failed
+      { temporary_path; message = exception_message exn }
+;;
+
+let append_parent_close_error error close_error =
+  let suffix = "; parent directory close failed: " ^ close_error in
+  match error with
+  | Not_committed details ->
+    Not_committed { details with message = details.message ^ suffix }
+  | Commit_durability_unknown details ->
+    Commit_durability_unknown
+      { details with message = details.message ^ suffix }
+;;
+
+let save_file_atomic_strict (path : string) (content : string) =
+  let dir = Filename.dirname path in
+  match
+    try
+      let fd = Unix.openfile dir [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+      Ok fd
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Error
+        (Not_committed
+           { path
+           ; stage = Open_parent_directory
+           ; message = exception_message exn
+           ; cleanup = No_temporary
+           })
+  with
+  | Error error -> Error error
+  | Ok parent_fd ->
+    let cancelled = ref None in
+    let outcome =
+      try
+        Some
+          (match
+             try
+               let temporary_path, channel =
+                 Filename.open_temp_file
+                   ~temp_dir:dir
+                   atomic_tmp_prefix
+                   atomic_tmp_suffix
+               in
+               Ok (temporary_path, channel)
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Error
+                 (Not_committed
+                    { path
+                    ; stage = Create_temporary
+                    ; message = exception_message exn
+                    ; cleanup = No_temporary
+                    })
+           with
+      | Error error -> Error error
+      | Ok (temporary_path, channel) ->
+        let fd = Unix.descr_of_out_channel channel in
+        let fail_precommit stage exn =
+          close_out_noerr channel;
+          let cleanup = cleanup_temporary temporary_path in
+          match exn with
+          | Eio.Cancel.Cancelled _ ->
+            (match cleanup with
+             | Temporary_cleanup_failed { message; _ } ->
+               Printf.eprintf
+                 "[fs_compat] cancelled strict atomic-write cleanup failed: %s\n%!"
+                 message
+             | No_temporary | Temporary_removed _ | Temporary_absent _ -> ());
+            raise exn
+          | _ ->
+            Error
+              (Not_committed
+                 { path
+                 ; stage
+                 ; message = exception_message exn
+                 ; cleanup
+                 })
+        in
+        (match
+           try
+             Unix.set_close_on_exec fd;
+             Ok ()
+           with exn -> fail_precommit Configure_temporary exn
+         with
+        | Error _ as error -> error
+        | Ok () -> (
+          match
+            try
+              output_string channel content;
+              flush channel;
+              Ok ()
+            with exn -> fail_precommit Write_temporary exn
+          with
+          | Error _ as error -> error
+          | Ok () -> (
+            match
+              try
+                Unix.fsync fd;
+                Ok ()
+              with exn -> fail_precommit Sync_temporary exn
+            with
+            | Error _ as error -> error
+            | Ok () -> (
+              match
+                try
+                  close_out channel;
+                  Ok ()
+                with exn ->
+                  close_out_noerr channel;
+                  fail_precommit Close_temporary exn
+              with
+              | Error _ as error -> error
+              | Ok () ->
+                let rename_outcome =
+                  try
+                    Unix.rename temporary_path path;
+                    Ok ()
+                  with
+                  | exn ->
+                    Error
+                      (Commit_durability_unknown
+                         { path
+                         ; stage = Rename_target
+                         ; message = exception_message exn
+                         ; cleanup = cleanup_temporary temporary_path
+                         })
+                in
+                (match rename_outcome with
+                | Error _ as error -> error
+                | Ok () ->
+                  (try
+                     Unix.fsync parent_fd;
+                     Ok ()
+                   with exn ->
+                     Error
+                       (Commit_durability_unknown
+                          { path
+                          ; stage = Sync_parent_directory
+                          ; message = exception_message exn
+                          ; cleanup = No_temporary
+                          }))))))))
+      with Eio.Cancel.Cancelled _ as exn ->
+        cancelled := Some exn;
+        None
+    in
+    let parent_close_error =
+      try
+        Unix.close parent_fd;
+        None
+      with exn -> Some (exception_message exn)
+    in
+    (match !cancelled with
+     | Some exn ->
+       Option.iter
+         (fun close_error ->
+           Printf.eprintf
+             "[fs_compat] cancelled strict atomic-write parent close failed: %s\n%!"
+             close_error)
+         parent_close_error;
+       raise exn
+     | None ->
+       (match outcome, parent_close_error with
+        | Some (Ok ()), None -> Ok ()
+        | Some (Ok ()), Some message ->
+          Error
+            (Commit_durability_unknown
+               { path
+               ; stage = Close_parent_directory
+               ; message
+               ; cleanup = No_temporary
+               })
+        | Some (Error error), None -> Error error
+        | Some (Error error), Some close_error ->
+          Error (append_parent_close_error error close_error)
+        | None, _ -> assert false))
+;;
+
 (* #10205 finding 2: keep the atomic-tmp filename shape in one place
    so the writer ([save_file_atomic]) and the orphan-sweep matcher
    ([is_atomic_orphan_name]) cannot drift independently. A
    prefix/suffix change on one side without the other would cause
    the sweep to either miss live orphans or scoop unrelated tmp
    files. *)
-let atomic_tmp_prefix = ".atomic_"
-let atomic_tmp_suffix = ".tmp"
-
 let save_file_atomic
   ~(save_file : string -> string -> unit)
   (path : string)

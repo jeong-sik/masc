@@ -183,9 +183,14 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
     | Some agent_name, Some policy
       when Option.is_some
 	             ((require_keeper_name_xlat ()).keeper_name_from_agent_name agent_name) ->
-      (not
-         (Runtime_agent.codex_cli_can_auth_keeper_bound_runtime_mcp ~base_path ~agent_name policy))
-      && List.exists
-           Runtime_agent.runtime_mcp_tool_requires_bound_actor
-           policy.allowed_tool_names
+      let has_bound_actor_tools =
+        List.exists Runtime_agent.runtime_mcp_tool_requires_bound_actor
+          policy.allowed_tool_names
+      in
+      (match
+         Runtime_agent.codex_cli_can_auth_keeper_bound_runtime_mcp ~base_path
+           ~agent_name policy
+       with
+      | Ok can_auth -> (not can_auth) && has_bound_actor_tools
+      | Error _ -> has_bound_actor_tools)
     | _ -> false)

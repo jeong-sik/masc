@@ -253,11 +253,8 @@ export function resumeQueuedOasRuntimeIngress(): void {
   }
 }
 
-export function buildDashboardSseUrl(sessionId: string, locationSearch = window.location.search): string {
-  const urlParams = new URLSearchParams(locationSearch)
+export function buildDashboardSseUrl(sessionId: string): string {
   const sseParams = new URLSearchParams()
-  const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
-  if (agent) sseParams.set('agent', agent)
   sseParams.set('session_id', sessionId)
   sseParams.set('sse_kind', 'observer')
   return `/mcp?${sseParams.toString()}`

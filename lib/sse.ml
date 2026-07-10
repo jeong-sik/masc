@@ -30,6 +30,10 @@ type registration_auth = {
   token : string option;
 }
 
+type registration_precondition =
+  | Any_current_client
+  | No_current_client
+
 (** Failure modes for SSE registration. *)
 type registration_error =
   | Missing_token
@@ -39,6 +43,7 @@ type registration_error =
   | Unknown_session of { session_id : string }
   | Session_expired of { session_id : string }
   | Session_owner_mismatch of { session_agent : string; token_agent : string }
+  | Registration_superseded of { session_id : string; current_client_id : int }
 
 let registration_error_to_string = function
   | Missing_token -> "SSE registration failed: bearer token is required"
@@ -57,6 +62,10 @@ let registration_error_to_string = function
       Printf.sprintf
         "SSE registration failed: session belongs to %s but token belongs to %s"
         session_agent token_agent
+  | Registration_superseded { session_id; current_client_id } ->
+      Printf.sprintf
+        "SSE registration failed: session %s now belongs to newer client %d"
+        session_id current_client_id
 
 (** Classification of an SSE session's traffic role. *)
 module SMap = Set_util.StringMap
@@ -120,6 +129,7 @@ type client = {
   last_event_id: int Atomic.t;
   created_at: float;
   last_seen_at: float Atomic.t;
+  on_disconnect: (unit -> unit) option;
 }
 
 type client_registry_state = {
@@ -444,10 +454,10 @@ let next_id () =
   (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
   Atomic.fetch_and_add event_counter 1 + 1
 
-(** Per-session disconnect hook registry.
+(** Per-client disconnect callback.
 
-    A disconnect hook fires when [unregister] / [unregister_if_current]
-    removes a session from [clients].  Its purpose is to wake the
+    The callback fires when [unregister] / [unregister_if_current]
+    removes the exact client generation from [clients].  Its purpose is to wake the
     transport-layer drain fiber that is otherwise blocked on
     [Eio.Stream.take]: removing the session from the broadcast registry
     stops new events from arriving, but the drain fiber holds the HTTP
@@ -460,35 +470,14 @@ let next_id () =
     minutes later.  This was the silent half of the
     [Transport_metrics.inc_broadcast_failure] path.
 
-    The hook is invoked exactly once: it is removed from the registry
-    inside the same atomic update that observes its presence, so even
-    racing [unregister] / [unregister_if_current] calls cannot double-fire.
+    The callback is stored in the immutable client record and returned by the
+    same CAS update that removes that record, so racing generations cannot
+    replace or clear one another's cleanup.
     Hook callbacks are wrapped in try/with — exceptions are logged and
     swallowed (except [Eio.Cancel.Cancelled]) so a misbehaving callback
     cannot strand the broadcast fan-out. *)
-let session_disconnect_hooks : (unit -> unit) SMap.t Atomic.t =
-  Atomic.make SMap.empty
-
-let set_disconnect_hook session_id hook =
-  Lockfree_atomic.update_with_commit session_disconnect_hooks (fun map ->
-    { next_state = SMap.add session_id hook map; result = () })
-
-let clear_disconnect_hook session_id =
-  Lockfree_atomic.update_with_commit session_disconnect_hooks (fun map ->
-    { next_state = SMap.remove session_id map; result = () })
-
-let take_disconnect_hook session_id =
-  let hook_ref = ref None in
-  Lockfree_atomic.update_with_commit session_disconnect_hooks (fun map ->
-    match SMap.find_opt session_id map with
-    | None -> { next_state = map; result = () }
-    | Some hook ->
-        hook_ref := Some hook;
-        { next_state = SMap.remove session_id map; result = () });
-  !hook_ref
-
-let invoke_disconnect_hook_for session_id =
-  match take_disconnect_hook session_id with
+let invoke_disconnect_hook_for session_id client =
+  match client.on_disconnect with
   | None -> ()
   | Some hook ->
       (try hook () with
@@ -541,14 +530,14 @@ let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.
     published to [clients] — closes the race window where a concurrent
     [broadcast] could observe the new entry, hit queue overflow, fire
     [unregister], and find no hook to wake the drain fiber. *)
-let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) session_id ~last_event_id =
+let register ?(kind = Agent_stream) ?(precondition = Any_current_client)
+    ?on_disconnect ~(auth : registration_auth) session_id ~last_event_id =
   match validate_registration ~auth session_id with
   | Error e -> Error e
   | Ok _credential ->
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
   let last_event_id = Atomic.make last_event_id in
   let event_stream = Eio.Stream.create stream_capacity in
-  Option.iter (fun hook -> set_disconnect_hook session_id hook) on_disconnect;
   let base_client = {
     id = client_id;
     kind;
@@ -556,49 +545,60 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
     last_event_id;
     created_at = 0.0;
     last_seen_at = Atomic.make 0.0;
+    on_disconnect = Option.map (fun hook () -> hook client_id) on_disconnect;
   } in
-  let evicted =
+  let registration =
     Lockfree_atomic.update_with_commit clients (fun state ->
       run_test_hook register_commit_test_hook;
-      let evicted =
-        if state.count >= max_clients && not (SMap.mem session_id state.entries) then
-          let oldest =
-            SMap.fold
-              (fun sid existing acc ->
-                match acc with
-                | None -> Some (sid, existing)
-                | Some (_, current_oldest) ->
-                    if existing.created_at < current_oldest.created_at
-                    then Some (sid, existing)
-                    else acc)
-              state.entries None
+      match precondition, SMap.find_opt session_id state.entries with
+      | No_current_client, Some current ->
+          { next_state = state; result = `Superseded current.id }
+      | (Any_current_client, _ | No_current_client, None) ->
+          let evicted =
+            if
+              state.count >= max_clients
+              && not (SMap.mem session_id state.entries)
+            then
+              SMap.fold
+                (fun sid existing acc ->
+                  match acc with
+                  | None -> Some (sid, existing)
+                  | Some (_, current_oldest) ->
+                      if existing.created_at < current_oldest.created_at
+                      then Some (sid, existing)
+                      else acc)
+                state.entries None
+            else None
           in
-          Option.map fst oldest
-        else
-          None
-      in
-      let entries_after_eviction =
-        match evicted with
-        | Some sid -> SMap.remove sid state.entries
-        | None -> state.entries
-      in
-      let install_time = Time_compat.now () in
-      let client = {
-        base_client with
-        created_at = install_time;
-        last_seen_at = Atomic.make install_time;
-      } in
-      let next_entries = SMap.add session_id client entries_after_eviction in
-      {
-        next_state = {
-          entries = next_entries;
-          count = SMap.cardinal next_entries;
-        };
-        result = evicted;
-      })
+          let entries_after_eviction =
+            match evicted with
+            | Some (sid, _) -> SMap.remove sid state.entries
+            | None -> state.entries
+          in
+          let install_time = Time_compat.now () in
+          let client =
+            {
+              base_client with
+              created_at = install_time;
+              last_seen_at = Atomic.make install_time;
+            }
+          in
+          let next_entries = SMap.add session_id client entries_after_eviction in
+          {
+            next_state =
+              {
+                entries = next_entries;
+                count = SMap.cardinal next_entries;
+              };
+            result = `Registered evicted;
+          })
   in
-  (match evicted with
-   | Some sid ->
+  match registration with
+  | `Superseded current_client_id ->
+      Error (Registration_superseded { session_id; current_client_id })
+  | `Registered evicted ->
+    (match evicted with
+   | Some (sid, evicted_client) ->
        Transport_metrics.inc_sse_client_evicted ();
        Log.Server.info "Evicting oldest client %s (at cap %d)" sid max_clients;
        (* Eviction is a form of disconnect: the broadcast-registry entry
@@ -607,17 +607,18 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
           invoke [stop_sse_session evicted_sid] explicitly today (legacy
           path); that double-invocation is idempotent because
           [close_sse_conn] guards on [info.closed]. *)
-       invoke_disconnect_hook_for sid
+       invoke_disconnect_hook_for sid evicted_client
    | None ->
        ());
-  sync_transport_snapshot ~force:true ();
-  Ok (client_id, event_stream, evicted)
+    sync_transport_snapshot ~force:true ();
+    Ok (client_id, event_stream, Option.map fst evicted)
 
 (** Unregister an SSE client *)
 let unregister session_id =
   let removed =
     Lockfree_atomic.update_with_commit clients (fun state ->
-      if SMap.mem session_id state.entries then
+      match SMap.find_opt session_id state.entries with
+      | Some client ->
         let next_entries = SMap.remove session_id state.entries in
         (* [state.count] is the authoritative cardinality maintained
            by every other [update_with_commit] in this module, so
@@ -631,15 +632,16 @@ let unregister session_id =
             entries = next_entries;
             count = state.count - 1;
           };
-          result = true;
+          result = Some client;
         }
-      else
+      | None ->
         {
           next_state = state;
-          result = false;
+          result = None;
         })
   in
-  if removed then begin
+  match removed with
+  | Some client ->
     (* Invoke the per-session disconnect hook BEFORE [sync_transport_snapshot].
        The hook typically calls back into [Server_mcp_transport_http_conn.
        stop_sse_session], which closes the HTTP body writer and re-enters
@@ -647,12 +649,9 @@ let unregister session_id =
        already removed the entry above, so there is no double-decrement risk
        and no infinite-loop risk.  Snapshot recording is sequenced AFTER the
        hook so observers see [info.closed = true] in the same tick. *)
-    invoke_disconnect_hook_for session_id;
+    invoke_disconnect_hook_for session_id client;
     sync_transport_snapshot ~force:true ()
-  end else
-    (* Even on no-op unregister we still clear any orphaned hook to avoid
-       slow leaks across reconnects.  [clear_disconnect_hook] is idempotent. *)
-    clear_disconnect_hook session_id
+  | None -> ()
 
 (** Unregister only if the current client matches the given client_id.
     Prevents an old connection's cleanup from unregistering a newer connection
@@ -670,23 +669,30 @@ let unregister_if_current session_id client_id =
               entries = next_entries;
               count = state.count - 1;
             };
-            result = true;
+            result = Some client;
           }
       | _ ->
           {
             next_state = state;
-            result = false;
+            result = None;
           })
   in
-  if removed then begin
+  match removed with
+  | Some client ->
     (* See [unregister] for the hook ordering rationale. *)
-    invoke_disconnect_hook_for session_id;
+    (* [client_id] matched the removed immutable record, so no newer
+       generation's callback can be observed here. *)
+    invoke_disconnect_hook_for session_id client;
     sync_transport_snapshot ~force:true ()
-  end
+  | None -> ()
 
 (** Check if client exists *)
 let exists session_id =
   SMap.mem session_id (Atomic.get clients).entries
+
+let current_client_id session_id =
+  SMap.find_opt session_id (Atomic.get clients).entries
+  |> Option.map (fun client -> client.id)
 
 (** Mark a client as recently active *)
 let touch session_id =
@@ -1098,16 +1104,17 @@ let all_session_ids () =
 (** Close all SSE clients - for graceful shutdown.
     Returns the number of clients that were closed. *)
 let close_all_clients () =
-  let sessions =
+  let removed =
     Lockfree_atomic.update_with_commit clients (fun state ->
-      let sessions = SMap.fold (fun sid _ acc -> sid :: acc) state.entries [] in
+      let removed = SMap.bindings state.entries in
       {
         next_state = empty_client_registry_state;
-        result = sessions;
+        result = removed;
       })
   in
+  List.iter (fun (sid, client) -> invoke_disconnect_hook_for sid client) removed;
   sync_transport_snapshot ~force:true ();
-  List.length sessions
+  List.length removed
 
 (** Remove clients idle longer than max_age_s (default 30 min).
     Returns list of evicted session_ids so caller can clean up writers. *)

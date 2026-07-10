@@ -557,22 +557,18 @@ module McpSessionStore = struct
     | Get of string * float * mcp_session option Eio.Promise.u
     | Peek of string * mcp_session option Eio.Promise.u
     | Get_or_create of string * string option * float * mcp_session Eio.Promise.u
-    | Cleanup_stale of float * float * int Eio.Promise.u
     | List_all of mcp_session list Eio.Promise.u
     | Remove of string * bool Eio.Promise.u
 
-  (* Bound: same rationale as [max_registry_mailbox] above. McpSessionStore
-     handles 4 message types (Put/Get/Cleanup_stale/List_all/Remove); 10k
-     entries is well above any realistic concurrent HTTP request burst and
-     prevents heap exhaustion if the consumer fiber stalls. *)
+  (* Bound: same rationale as [max_registry_mailbox] above. 10k entries is
+     above any realistic concurrent HTTP request burst and prevents heap
+     exhaustion if the consumer fiber stalls. *)
   let max_mcp_session_mailbox = 10_000
 
   let mailbox = Eio.Stream.create max_mcp_session_mailbox
   let state = ref AgentMap.empty
   let state_mutex = Mutex.create ()
   let loop_started = Atomic.make false
-
-  let max_age = Env_config.Session.max_age_seconds
 
   let process_msg state msg =
     match msg with
@@ -635,18 +631,6 @@ module McpSessionStore = struct
              Eio.Promise.resolve p session;
              AgentMap.add id session state)
 
-    | Cleanup_stale (now, max_age_val, p) ->
-        let state', stale_count =
-          AgentMap.fold (fun id session (acc_state, acc_count) ->
-            if now -. session.last_activity > max_age_val then
-              (AgentMap.remove id acc_state, acc_count + 1)
-            else
-              (acc_state, acc_count)
-          ) state (state, 0)
-        in
-        Eio.Promise.resolve p stale_count;
-        state'
-
     | List_all p ->
         let all = AgentMap.fold (fun _ s acc -> s :: acc) state [] in
         Eio.Promise.resolve p all;
@@ -706,11 +690,6 @@ module McpSessionStore = struct
     dispatch (Get_or_create (id, agent_name, Time_compat.now (), r));
     await_if_needed p
 
-  let cleanup_stale () =
-    let p, r = Eio.Promise.create () in
-    dispatch (Cleanup_stale (Time_compat.now (), max_age, r));
-    await_if_needed p
-
   let to_json (s : mcp_session) : Yojson.Safe.t =
     `Assoc [
       ("id", `String s.id);
@@ -731,26 +710,6 @@ module McpSessionStore = struct
     dispatch (Remove (id, r));
     await_if_needed p
 end
-
-let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_age_seconds /. 10.0) () =
-  (* Also start the store loop since we refactored it to Actor *)
-  McpSessionStore.start_loop ~sw;
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock interval;
-      (try
-        let removed = McpSessionStore.cleanup_stale () in
-        if removed > 0 then
-          Log.Session.info "Cleaned up %d stale MCP sessions" removed
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Session.warn "mcp session cleanup failed: %s"
-           (Printexc.to_string exn));
-      loop ()
-    in
-    loop ()
-  )
 
 let extract_mcp_session_id (headers : Cohttp.Header.t) : string option =
   match Cohttp.Header.get headers "Mcp-Session-Id" with

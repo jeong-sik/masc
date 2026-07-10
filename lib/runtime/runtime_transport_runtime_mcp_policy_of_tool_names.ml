@@ -2,20 +2,15 @@
     [runtime_transport.ml] (godfile decomp).
 
     - [runtime_mcp_policy_of_tool_names] — builds a runtime MCP policy
-      pinned to the local [masc] HTTP server. Resolves
-      [Authorization]/internal-keeper headers via:
-      1. [MASC_INTERNAL_MCP_TOKEN] env + keeper-name when a
-         [Agent_internal] surface tool is requested, OR
-      2. [MASC_TOKEN] env, falling back to the per-keeper raw
-         token at [<base_path>/.masc/auth/<agent_name>.token]
-         (Phase A F1: CLI-spawned subprocesses without parent env).
-      Returns [None] when the tools aren't runtime-MCP-eligible, or
-      when a Agent_internal tool was requested without
-      keeper_name/internal_keeper_token.
+      pinned to the local [masc] HTTP server. Actor-bound policies use only
+      the exact raw credential at
+      [<base_path>/.masc/auth/<agent_name>.token]. Unbound policies may use
+      [MASC_TOKEN]. Shared internal tokens never authenticate this protected
+      transport. Returns [None] when the tools aren't runtime-MCP-eligible or
+      no exact credential is available.
     - [public_mcp_runtime_policy_of_tool_names] — public-only
       forwarder (no [allow_agent_internal] knob). *)
 
-module Mcp_policy_helpers = Runtime_transport_mcp_policy_helpers
 module Authorization = Runtime_transport_authorization
 module Mcp_tool_classifier = Runtime_transport_mcp_tool_classifier
 
@@ -31,21 +26,6 @@ let dedupe_preserve_order (items : string list) =
          Hashtbl.add seen item ();
          true))
     items
-;;
-
-(* Duplicated locally for the same reason — 4-line idempotent helper
-   used only by this sibling. *)
-;;
-
-let workspace_auth_requires_bearer ~base_path =
-  try
-    let auth_config = Auth.load_auth_config base_path in
-    auth_config.Masc_domain.enabled && auth_config.Masc_domain.require_token
-  with
-  | Sys_error _ | Unix.Unix_error _ ->
-    (* No resolvable workspace auth state means we cannot safely build an
-       unauthenticated local-MASC runtime policy. *)
-    true
 ;;
 
 let runtime_mcp_policy_of_tool_names
@@ -66,57 +46,16 @@ let runtime_mcp_policy_of_tool_names
   else (
     let agent_name = Option.bind agent_name String_util.trim_nonempty in
     let keeper_name = Option.bind agent_name Authorization.keeper_name_of_agent_name in
-    let internal_keeper_token =
-      Mcp_policy_helpers.first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ]
-    in
+    let resolved = Auth_resolve.resolve_runtime_mcp ~base_path ~agent_name in
     let masc_headers =
-        match keeper_name, internal_keeper_token with
-        | Some keeper_name, Some token ->
-          let agent_header =
-            match agent_name with
-            | Some agent_name -> [ "x-masc-agent-name", agent_name ]
-            | None -> []
-          in
-          Auth_resolve.emit_resolution_trace
-            ~runtime:"runtime_mcp_policy"
-            ~keeper_id:(Some keeper_name)
-            ~provider_label:"masc"
-            ~outcome:
-              (Ok { Auth_resolve.raw = token; source = Auth_resolve.Internal_keeper_env });
-          Some
-            (("x-masc-internal-token", token)
-             :: ("x-masc-keeper-name", keeper_name)
-             :: agent_header)
-        | _ ->
-          let env_token = Mcp_policy_helpers.first_nonempty_env [ "MASC_TOKEN" ] in
-          (* Phase A F1: when MASC_TOKEN is unset, fall back to the
-             per-keeper raw token at <base_path>/.masc/auth/<agent_name>.token.
-             This wires CLI-spawned subprocesses that callback to masc tools
-             but do not inherit the parent process env. *)
-          let per_keeper_token =
-            match env_token, agent_name with
-            | None, Some name ->
-              Auth.load_raw_token base_path ~agent_name:name
-            | _ -> None
-          in
-          let resolved : (Auth_resolve.token, Auth_resolve.auth_error) result =
-            match env_token, per_keeper_token with
-            | Some raw, _ -> Ok { Auth_resolve.raw; source = Auth_resolve.Mcp_bearer_env }
-            | None, Some raw ->
-              Ok { Auth_resolve.raw; source = Auth_resolve.Per_keeper_token_file }
-            | None, None ->
-              Error (Auth_resolve.Api_key_env_unset { var_name = "MASC_TOKEN" })
-          in
-          (match resolved with
-           | Ok { raw; _ } ->
-             Auth_resolve.emit_resolution_trace
-               ~runtime:"runtime_mcp_policy"
-               ~keeper_id:keeper_name
-               ~provider_label:"masc"
-               ~outcome:resolved;
-             Some [ "Authorization", "Bearer " ^ raw ]
-           | Error _ when workspace_auth_requires_bearer ~base_path -> None
-           | Error _ -> Some [])
+      Auth_resolve.emit_resolution_trace
+        ~runtime:"runtime_mcp_policy"
+        ~keeper_id:keeper_name
+        ~provider_label:"masc"
+        ~outcome:resolved;
+      match resolved with
+      | Ok { raw; _ } -> Some [ "Authorization", "Bearer " ^ raw ]
+      | Error _ -> None
       in
       Option.map
         (fun masc_headers ->

@@ -65,34 +65,23 @@ module Server_mcp_transport_http = Server_mcp_transport_http
 
 (** {1 Protocol version + session profile} *)
 
+module Transport_session_store = Server_mcp_transport_session_store
+
 val mcp_protocol_versions : string list
 val mcp_protocol_version_default : string
 val default_base_path : unit -> string
+(** Launcher/boot-diagnostic path resolution delegated to
+    {!Workspace_utils_backend_setup.resolve_server_default_base_path}. This
+    helper never opens or selects an MCP transport-session store. Live request
+    handlers use the BasePath and store handle already owned by server state. *)
 val is_valid_protocol_version : string -> bool
-val remember_protocol_version :
-  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
-  string ->
-  string ->
-  unit
-
-val remember_protocol_version_if_initialize_succeeded :
-  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
-  string ->
-  request_body:string ->
-  response_json:Yojson.Safe.t ->
-  unit
-
-val remember_mcp_profile :
-  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
-  string ->
-  Server_mcp_transport_http.tool_profile ->
-  unit
-val forget_mcp_session : string -> unit
 val validate_mcp_session_profile :
+  sessions:Transport_session_store.t ->
   profile:Server_mcp_transport_http.tool_profile ->
   string ->
   (unit, string) result
 val validate_mcp_session_delete_profile :
+  sessions:Transport_session_store.t ->
   profile:Server_mcp_transport_http.tool_profile ->
   string ->
   (unit, string) result
@@ -108,7 +97,10 @@ val get_cookie_value :
 val get_session_id_any : Httpun.Request.t -> string option
 val get_protocol_version : Httpun.Request.t -> string
 val get_protocol_version_for_session :
-  ?session_id:string -> Httpun.Request.t -> string
+  sessions:Transport_session_store.t ->
+  ?session_id:string ->
+  Httpun.Request.t ->
+  string
 
 (** {1 Server state} *)
 

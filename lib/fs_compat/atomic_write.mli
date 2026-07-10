@@ -30,6 +30,59 @@ val save_file_atomic
   -> string
   -> (unit, string) Result.t
 
+type not_committed_stage =
+  | Open_parent_directory
+  | Create_temporary
+  | Configure_temporary
+  | Write_temporary
+  | Sync_temporary
+  | Close_temporary
+
+type uncertain_commit_stage =
+  | Rename_target
+  | Sync_parent_directory
+  | Close_parent_directory
+
+type temporary_cleanup =
+  | No_temporary
+  | Temporary_removed of { temporary_path : string }
+  | Temporary_absent of { temporary_path : string }
+  | Temporary_cleanup_failed of
+      { temporary_path : string
+      ; message : string
+      }
+
+type strict_write_error =
+  | Not_committed of
+      { path : string
+      ; stage : not_committed_stage
+      ; message : string
+      ; cleanup : temporary_cleanup
+      }
+  | Commit_durability_unknown of
+      { path : string
+      ; stage : uncertain_commit_stage
+      ; message : string
+      ; cleanup : temporary_cleanup
+      }
+
+val not_committed_stage_label : not_committed_stage -> string
+val uncertain_commit_stage_label : uncertain_commit_stage -> string
+val temporary_cleanup_label : temporary_cleanup -> string
+val strict_write_error_to_string : strict_write_error -> string
+
+val save_file_atomic_strict
+  : string -> string -> (unit, strict_write_error) result
+(** Same atomic replacement contract as {!save_file_atomic}, but parent
+    directory fd is opened before the temp file and fsynced after rename.
+    Failures proven to precede the rename call return {!Not_committed}.  Every
+    rename failure and every post-rename failure returns
+    {!Commit_durability_unknown}: errno classification is not evidence that a
+    namespace mutation did not occur on every supported filesystem, so callers
+    must not reopen a deletion gate after the rename boundary.  The
+    implementation owns and closes the temp channel, so buffer flush and fsync
+    cannot drift from the write contract. *)
+
 (** [true] iff [name] matches the [.atomic_*.tmp] shape produced
     by {!save_file_atomic}. Exposed so a periodic sweep can match
     the same filename pattern without re-deriving the prefix and

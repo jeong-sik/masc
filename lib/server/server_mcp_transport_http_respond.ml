@@ -43,6 +43,9 @@ let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 
 let json_headers = Server_mcp_transport_http_headers.json_headers
 
+let json_headers_without_session_id =
+  Server_mcp_transport_http_headers.json_headers_without_session_id
+
 (* RFC-0098 — typed SSOT for transport-boundary error envelopes. *)
 
 (** Pure-JSON body builder shared by [respond_mcp_error] and
@@ -131,21 +134,20 @@ let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request req
   safe_respond_with_string reqd response body
 
 (** [respond_sse_register_error] — SSE GET register 검증(unknown/expired session) 실패 시,
-    200 스트림을 열기 전에 404 + 새 [Mcp-Session-Id] 로 응답한다. 기존엔 200 송출 후
+    200 스트림을 열기 전에 session id 없는 404 로 응답한다. 기존엔 200 송출 후
     [Writer.close] 만 해 "200 OK + 즉시 닫힌 빈 스트림"이 되어 MCP 클라이언트가 정상
     종료와 구분 못 하고 같은 stale [Mcp-Session-Id] 로 무한 재시도했다(2026-06-28
     진단). POST JSON-RPC 경로([server_mcp_transport_http.ml] 의 [Unknown_session] 분기)와
-    동일 패턴 — 404 + 새 session 헤더로 클라이언트가 [initialize] 를 재수행하게 한다. *)
+    동일 패턴 — 클라이언트는 session 헤더 없이 [initialize] 를 재수행해야 한다. *)
 let respond_sse_register_error ~(deps : Server_mcp_transport_http_types.deps)
     ~origin ~protocol_version reqd msg =
-  let new_session_id = Mcp_session.generate () in
   let body =
     Yojson.Safe.to_string (error_body ~code:Mcp_error_code.Invalid_request msg)
   in
   let headers =
     Httpun.Headers.of_list
       ( ("content-length", string_of_int (String.length body))
-      :: json_headers ~deps new_session_id protocol_version origin )
+      :: json_headers_without_session_id ~deps protocol_version origin )
   in
   safe_respond_with_string reqd (Httpun.Response.create ~headers `Not_found) body
 

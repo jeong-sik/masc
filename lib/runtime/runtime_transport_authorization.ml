@@ -1,8 +1,9 @@
-(** Authorization header helpers for runtime runtime MCP transport,
+(** Authorization header helpers for runtime MCP transport,
     extracted from runtime_transport.ml.
 
-    Pure functions over runtime-MCP policy + per-keeper auth headers;
-    no protocol/transport state owned here. *)
+    Header transforms are pure. Per-agent header resolution delegates to the
+    credential-verifying [Auth_resolve] SSOT and emits secret-free traces; no
+    protocol/transport state is owned here. *)
 
 let upsert_http_header ~key ~value headers =
   let key_lc = String.lowercase_ascii key in
@@ -30,33 +31,17 @@ let keeper_name_of_agent_name agent_name =
   else None
 ;;
 
-let is_authorization_header (key, value) =
-  String.equal (String.lowercase_ascii (String.trim key)) "authorization"
-  && String.starts_with ~prefix:"Bearer " (String.trim value)
-;;
-
-let authorization_header_from_policy
-      (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
-  =
-  List.find_map
-    (function
-      | Llm_provider.Llm_transport.Http_server { name = "masc"; headers; _ } ->
-        List.find_opt is_authorization_header headers
-      (* Only the [Http_server] entry whose [name = "masc"] carries the
-         per-request Authorization header. Other named [Http_server]s and
-         [Stdio_server]s contribute no auth header on this lane. New
-         transport variants must re-decide explicitly. *)
-      | Llm_provider.Llm_transport.Http_server _
-      | Llm_provider.Llm_transport.Stdio_server _ -> None)
-    policy.servers
-;;
-
 let per_keeper_authorization_header ~base_path ~agent_name =
-  match keeper_name_of_agent_name agent_name with
-  | None -> None
-  | Some _ ->
-    Auth.load_raw_token base_path ~agent_name
-    |> Option.map (fun raw -> "Authorization", "Bearer " ^ raw)
+  let keeper_id = keeper_name_of_agent_name agent_name in
+  let outcome =
+    Auth_resolve.resolve_runtime_mcp ~base_path ~agent_name:(Some agent_name)
+  in
+  Auth_resolve.emit_resolution_trace ~runtime:"runtime_mcp_auth_bridge"
+    ~keeper_id ~provider_label:"masc" ~outcome;
+  Result.map
+    (fun ({ Auth_resolve.raw; _ } : Auth_resolve.token) ->
+      "Authorization", "Bearer " ^ raw)
+    outcome
 ;;
 
 let runtime_mcp_policy_uses_bound_actor_tools

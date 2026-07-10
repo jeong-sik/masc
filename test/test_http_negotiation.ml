@@ -1,5 +1,55 @@
 open Alcotest
 
+module Session = Server_mcp_transport_http
+module Store = Server_mcp_transport_session_store
+
+let with_initialized_session ~session_id ~protocol_version f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "masc-http-negotiation-" "" in
+  Eio.Switch.run @@ fun cleanup_sw ->
+  Eio.Switch.on_release cleanup_sw (fun () -> Fs_compat.remove_tree base_path);
+  Eio.Switch.run @@ fun store_sw ->
+  match Store.open_ ~sw:store_sw ~base_path with
+  | Error error ->
+      failf "failed to open explicit session store: %s"
+        (Store.open_error_to_string error)
+  | Ok sessions ->
+      let initialized_at = Unix.gettimeofday () in
+      let session : Store.session =
+        {
+          session_id;
+          protocol_version;
+          tool_profile = Session.Full;
+          owner =
+            {
+              Server_transport_admission.agent_name =
+                "http-negotiation-owner";
+              role = Masc_domain.Worker;
+          };
+          started_at = initialized_at;
+          transport_context = None;
+        }
+      in
+      (match Store.initialize sessions session with
+      | Error error ->
+          failf "failed to initialize explicit session: %s"
+            (Store.mutation_error_to_string error)
+      | Ok () -> (
+          match Store.find sessions ~session_id with
+          | Some (Store.Stable_state (Store.Active _)) -> f sessions
+          | Some
+              (Store.Pending_state
+                { indeterminate; intended = Store.Active _ }) ->
+              failf "initialized session is durability-pending: %s"
+                (Store.mutation_error_to_string
+                   (Store.Persistence_indeterminate indeterminate))
+          | Some (Store.Pending_state { intended = Store.Deleted _; _ }) ->
+              fail "initialized session unexpectedly has a pending tombstone"
+          | Some (Store.Stable_state (Store.Deleted _)) ->
+              fail "initialized session unexpectedly resolved to a tombstone"
+          | None -> fail "initialized session is absent from Store.find"))
+
 let test_accepts_sse_header () =
   let open Mcp_transport_protocol.Http_negotiation in
   check bool "missing accept" false (accepts_sse_header None);
@@ -66,49 +116,40 @@ let test_is_json_content_type () =
   ()
 
 let test_protocol_continuity_allows_missing_header () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let module Session = Server_mcp_transport_http in
   let session_id = "compat-session-missing-header" in
   let headers = Httpun.Headers.of_list [] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
-  Session.remember_protocol_version session_id "2025-11-25";
-  Fun.protect
-    ~finally:(fun () -> Session.forget_mcp_session session_id)
-    (fun () ->
-      match Session.validate_protocol_version_continuity ~session_id request with
+  with_initialized_session ~session_id ~protocol_version:"2025-11-25"
+    (fun sessions ->
+      match
+        Session.validate_protocol_version_continuity ~sessions ~session_id
+          request
+      with
       | Ok () -> ()
       | Error msg ->
           failf "expected missing protocol header to use session continuity, got %s" msg)
 
 let test_protocol_version_for_session_falls_back_to_negotiated_version () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let module Session = Server_mcp_transport_http in
   let session_id = "compat-session-negotiated-version" in
   let headers = Httpun.Headers.of_list [] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
-  Session.remember_protocol_version session_id "2025-03-26";
-  Fun.protect
-    ~finally:(fun () -> Session.forget_mcp_session session_id)
-    (fun () ->
+  with_initialized_session ~session_id ~protocol_version:"2025-03-26"
+    (fun sessions ->
       check string "falls back to remembered session version" "2025-03-26"
-        (Session.get_protocol_version_for_session ~session_id request))
+        (Session.get_protocol_version_for_session ~sessions ~session_id request))
 
 let test_protocol_continuity_rejects_mismatch () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let module Session = Server_mcp_transport_http in
   let session_id = "compat-session-mismatch" in
   let headers =
     Httpun.Headers.of_list [("mcp-protocol-version", "2025-03-26")]
   in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
-  Session.remember_protocol_version session_id "2025-11-25";
-  Fun.protect
-    ~finally:(fun () -> Session.forget_mcp_session session_id)
-    (fun () ->
-      match Session.validate_protocol_version_continuity ~session_id request with
+  with_initialized_session ~session_id ~protocol_version:"2025-11-25"
+    (fun sessions ->
+      match
+        Session.validate_protocol_version_continuity ~sessions ~session_id
+          request
+      with
       | Ok () -> fail "expected mismatched protocol version to be rejected"
       | Error msg ->
           check bool "mentions mismatch" true
@@ -304,8 +345,6 @@ let test_preserve_guard_keeps_ag_ui_cooldown () =
       ignore (Cleanup_view.reap_stale_guards ())
 
 let () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "http_negotiation"
     [
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);

@@ -2,9 +2,9 @@
     [runtime_transport.ml]. Two pure transforms over
     [Llm_provider.Llm_transport.runtime_mcp_policy]:
 
-    - [runtime_mcp_policy_with_masc_agent_name] injects x-masc-agent-name
-      (+ optional internal token / keeper-name) into the "masc" HTTP
-      server headers.
+    - [runtime_mcp_policy_with_masc_agent_name] injects non-secret
+      x-masc-agent-name / x-masc-keeper-name identity headers into the
+      "masc" HTTP server entry.
     - [runtime_mcp_policy_without_http_headers] strips all headers from
       every HTTP server. *)
 
@@ -13,12 +13,7 @@ let keeper_name_of_agent_name = Runtime_transport_authorization.keeper_name_of_a
 
 ;;
 
-let first_nonempty_env names =
-  List.find_map (fun name -> Sys.getenv_opt name |> String_util.option_trim) names
-;;
-
 let runtime_mcp_policy_with_masc_agent_name
-      ?(include_internal_token = true)
       ~(agent_name : string)
       (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
   =
@@ -33,18 +28,6 @@ let runtime_mcp_policy_with_masc_agent_name
             when String.equal name "masc" ->
             let headers =
               upsert_http_header ~key:"x-masc-agent-name" ~value:agent_name headers
-            in
-            let headers =
-              if include_internal_token
-              then (
-                match
-                  ( first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ]
-                  , keeper_name_of_agent_name agent_name )
-                with
-                | Some token, Some _ ->
-                  upsert_http_header ~key:"x-masc-internal-token" ~value:token headers
-                | _ -> headers)
-              else headers
             in
             let headers =
               match keeper_name_of_agent_name agent_name with

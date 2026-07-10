@@ -25,5 +25,7 @@ type deps = {
   auth_token_from_request : Httpun.Request.t -> string option;
   is_ready : unit -> bool;
   get_runtime_result : unit -> (runtime, string) result;
+  get_mcp_http_transport :
+    unit -> (Server_mcp_transport_http_sse_owner.t, string) result;
   get_base_path : unit -> string;
 }

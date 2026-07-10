@@ -33,24 +33,24 @@ let test_validate_session_known_unknown_id_blocks_non_handshake () =
       check bool "error message names the session id" true
         (String.length msg > 0)
 
-let test_validate_session_known_allows_handshake_methods () =
-  (* The handshake set ([initialize] / [ping] /
-     [notifications/initialized]) is exempt from the Q3 check —
-     those methods are what *establish* a known session. *)
-  let check_ok method_ =
+let test_validate_session_known_rejects_unknown_for_all_methods () =
+  (* Session ids are server-issued. Even bootstrap methods must omit the
+     header when starting a new stateful session; otherwise a deleted id could
+     be recreated while its old transport generation is still retiring. *)
+  let check_error method_ =
     let result =
       Http_transport.validate_session_known
         ~session_was_provided:true
         ~is_known:false
         (request_body ~method_)
     in
-    check bool (Printf.sprintf "%s passes Q3 even when unknown" method_)
-      true
-      (Result.is_ok result)
+    check bool (Printf.sprintf "%s rejects an unknown supplied id" method_)
+      true (Result.is_error result)
   in
-  check_ok "initialize";
-  check_ok "ping";
-  check_ok "notifications/initialized"
+  check_error "initialize";
+  check_error "ping";
+  check_error "notifications/initialized";
+  check_error "server/discover"
 
 let test_validate_session_known_passes_when_known () =
   (* A known session id with any method passes. *)
@@ -88,16 +88,15 @@ let test_session_id_echo_across_requests () =
   check string "echo 2 preserves id" id echoed_2;
   check string "echo 3 preserves id" id echoed_3
 
-let test_unknown_id_mints_fresh_when_replacing () =
-  (* The 404 path mints a fresh id to return in the response header
-     so the client has something concrete to handshake against on
-     the next [initialize]. The fresh id must be valid and distinct
-     from the one the client supplied. *)
-  let supplied = "deadbeef-not-a-known-session" in
-  let fresh = Session.generate () in
-  check bool "fresh id is valid" true (Session.is_valid fresh);
-  check bool "fresh id distinct from supplied" true
-    (not (String.equal supplied fresh))
+let test_unknown_id_response_headers_do_not_mint_session () =
+  let headers =
+    Server_mcp_transport_http_headers.protocol_headers "2025-11-25"
+  in
+  check (option string) "protocol version remains explicit"
+    (Some "2025-11-25")
+    (List.assoc_opt "mcp-protocol-version" headers);
+  check (option string) "unknown-id response does not issue a session" None
+    (List.assoc_opt "mcp-session-id" headers)
 
 let () =
   Alcotest.run "test_mcp_session_id_header"
@@ -106,8 +105,8 @@ let () =
         [
           test_case "unknown id + tools/call rejected" `Quick
             test_validate_session_known_unknown_id_blocks_non_handshake;
-          test_case "handshake methods exempt" `Quick
-            test_validate_session_known_allows_handshake_methods;
+          test_case "unknown id rejected for bootstrap methods" `Quick
+            test_validate_session_known_rejects_unknown_for_all_methods;
           test_case "known id always passes" `Quick
             test_validate_session_known_passes_when_known;
           test_case "missing header bypasses Q3" `Quick
@@ -117,7 +116,7 @@ let () =
         [
           test_case "echo across 3 requests preserves id" `Quick
             test_session_id_echo_across_requests;
-          test_case "fresh id is valid and distinct" `Quick
-            test_unknown_id_mints_fresh_when_replacing;
+          test_case "unknown-id response does not mint a session" `Quick
+            test_unknown_id_response_headers_do_not_mint_session;
         ] );
     ]

@@ -72,13 +72,9 @@ val public_mcp_tool_requires_bound_actor : string -> bool
 
 (** Inject identity headers ([x-masc-agent-name], [x-masc-keeper-name]) into
     the [masc] HTTP server entry of [policy] when [agent_name] is non-empty.
-    [x-masc-internal-token] is also injected by default when
-    [MASC_INTERNAL_MCP_TOKEN] is available; pass
-    [~include_internal_token:false] for providers such as [codex_cli] that
-    cannot carry auth-bearing request headers.  Other servers are passed
-    through. *)
+    Authentication is never synthesized here; the policy builder must already
+    carry the exact actor credential. Other servers are passed through. *)
 val runtime_mcp_policy_with_masc_agent_name :
-  ?include_internal_token:bool ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy
@@ -87,11 +83,10 @@ val codex_cli_can_auth_keeper_bound_runtime_mcp :
   base_path:string ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
-  bool
-(** [true] when [agent_name] maps to a keeper with a persisted raw bearer
-    token and [policy] contains actor-bound runtime MCP tools.  The
-    codex_cli transport can carry that token via OAS [bearer_token_env_var]
-    without placing it in argv. *)
+  (bool, Auth_resolve.auth_error) result
+(** [Ok true] when [agent_name] has an exact, current credential and [policy]
+    contains actor-bound runtime MCP tools. Credential failures remain typed
+    and are traced without exposing the bearer. *)
 
 (** Provider-specific shaping of the runtime MCP policy.  For Cli_tool_a the
     policy is stripped to client-safe headers: [Authorization: Bearer ...]

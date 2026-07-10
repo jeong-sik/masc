@@ -479,6 +479,7 @@ let schema_markdown =
 type server_state = {
   workspace_config: Workspace.config Atomic.t;  (* Atomic swap so workspace-switch tools update without data races. *)
   session_registry: Session.registry;
+  mcp_http_transport: Server_mcp_transport_http_sse_owner.t option;
   on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option; (* For agent spawning *)
@@ -489,7 +490,22 @@ type server_state = {
 }
 
 let workspace_config state = Atomic.get state.workspace_config
-let set_workspace_config state config = Atomic.set state.workspace_config config
+let set_workspace_config state config =
+  (match state.mcp_http_transport with
+   | Some transport ->
+     let transport_base_path =
+       Server_mcp_transport_http_sse_owner.sessions transport
+       |> Server_mcp_transport_session_store.base_path
+     in
+     if not (String.equal transport_base_path config.Workspace.base_path)
+     then
+       invalid_arg
+         (Printf.sprintf
+            "workspace BasePath cannot change while the MCP HTTP transport store is active: transport=%s requested=%s"
+            transport_base_path
+            config.base_path)
+   | None -> ());
+  Atomic.set state.workspace_config config
 
 let create_state ~base_path =
   let config = Workspace.default_config base_path in
@@ -501,6 +517,7 @@ let create_state ~base_path =
   let state = {
     workspace_config = Atomic.make config;
     session_registry = registry;
+    mcp_http_transport = None;
     on_sse_broadcast = Atomic.make None;
     sw = None;
     proc_mgr = None;
@@ -515,7 +532,8 @@ let create_state ~base_path =
   state
 
 (** Create state with Eio context. *)
-let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
+let create_state_eio ?mcp_http_transport ~sw ~proc_mgr ~fs ~clock ~mono_clock
+    ~net ~base_path =
   let config =
     Workspace.default_config_eio ~sw
       ~on_backend_ready:(fun _backend ->
@@ -560,6 +578,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   let state = {
     workspace_config = Atomic.make config;
     session_registry = registry;
+    mcp_http_transport;
     on_sse_broadcast = Atomic.make None;
     sw = Some sw;
     proc_mgr = Some proc_mgr;

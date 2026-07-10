@@ -98,6 +98,29 @@ val force_json_response : bool
 
 (** {1 Header builders} *)
 
+val protocol_headers : string -> (string * string) list
+(** [protocol_headers protocol_version] returns the MCP protocol-version
+    response header without asserting ownership of a stateful session id. *)
+
+type session_header_visibility =
+  | Expose_session
+  | Protocol_only
+
+val session_header_visibility :
+  session_was_provided:bool ->
+  initialized:bool ->
+  session_header_visibility
+(** Returns [Expose_session] exactly when the request already carried a
+    session id or the current fresh request durably initialized one. *)
+
+val mcp_response_headers :
+  visibility:session_header_visibility ->
+  session_id:string ->
+  protocol_version:string ->
+  (string * string) list
+(** Emits the session id only for [Expose_session]; [Protocol_only] emits only
+    the negotiated protocol version. *)
+
 val mcp_headers : string -> string -> (string * string) list
 (** [mcp_headers session_id protocol_version] returns MCP envelope
     headers. Legacy protocol revisions include [mcp-session-id] and
@@ -137,6 +160,33 @@ val json_headers :
     [content-type: application/json] + {!mcp_headers} +
     [deps.cors_headers origin].  The canonical "JSON response"
     builder used by every JSON-bodied response in the transport. *)
+
+val json_headers_without_session_id :
+  deps:deps -> string -> string -> (string * string) list
+(** [json_headers_without_session_id ~deps protocol_version origin] returns
+    JSON, protocol-version, and CORS headers without [Mcp-Session-Id]. Used
+    when rejecting an unknown client-supplied id: the client must retry
+    [initialize] without a header instead of treating an unreserved id as a
+    server-issued session. *)
+
+val json_response_headers :
+  deps:deps ->
+  visibility:session_header_visibility ->
+  session_id:string ->
+  protocol_version:string ->
+  origin:string ->
+  (string * string) list
+(** JSON response headers governed by an explicit session visibility value. *)
+
+val sse_response_headers :
+  deps:deps ->
+  visibility:session_header_visibility ->
+  session_id:string ->
+  protocol_version:string ->
+  origin:string ->
+  (string * string) list
+(** One-shot SSE headers governed by the same visibility value.  A session
+    cookie is emitted only for [Expose_session]. *)
 
 (** {1 SSE constants} *)
 

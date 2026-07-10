@@ -123,8 +123,8 @@ let sync_test_base_path_env resolved_path =
 
 (** Dedupe MASC-base-path log lines across back-to-back identical resolutions.
 
-    [resolve_masc_base_path] is called on every HTTP request (see
-    [server_mcp_transport_http_session.default_base_path]). cwd and
+    [resolve_masc_base_path] is called by server bootstrap/diagnostic path
+    resolution. cwd and
     [MASC_BASE_PATH] are invariant per server lifetime, so every call
     produces the same log lines — which used to spam the log every few
     seconds. The resolver still runs in full (so env changes in tests

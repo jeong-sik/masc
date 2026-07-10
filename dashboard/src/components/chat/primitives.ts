@@ -86,20 +86,18 @@ function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'o
   return TRACE_TOOL_STATUS_UI[status ?? 'pending']
 }
 
-function oasBlockBadge(index: number | undefined): string | null {
-  return index === undefined ? null : `OAS #${index}`
-}
-
 function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
-  const oasBlock = step.kind === 'think' || step.kind === 'tool'
-    ? oasBlockBadge(step.oasBlockIndex)
-    : null
+  // The stream content-block index (oasBlockIndex) is provenance detail, not
+  // an identity: it stays in the hover title and in the
+  // data-chat-trace-oas-block-index attribute, while the visible label keeps
+  // the stable channel name. An "OAS #3" badge told the operator nothing
+  // about where the step came from (bug #11).
   if (step.kind === 'think') {
     return {
-      label: oasBlock ?? 'thinking_delta',
-      title: oasBlock
-        ? `source: KEEPER_THINKING_DELTA, content block ${step.oasBlockIndex}`
-        : 'source: KEEPER_THINKING_DELTA',
+      label: 'thinking_delta',
+      title: step.oasBlockIndex === undefined
+        ? 'source: KEEPER_THINKING_DELTA'
+        : `source: KEEPER_THINKING_DELTA, content block ${step.oasBlockIndex}`,
       tone: 'stream',
     }
   }
@@ -113,10 +111,10 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
   const callId = step.toolCallId?.trim()
   if (callId) {
     return {
-      label: oasBlock ?? 'tool_call_id',
-      title: oasBlock
-        ? `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.oasBlockIndex}`
-        : `source: TOOL_CALL_*, tool_call_id=${callId}`,
+      label: 'tool_call_id',
+      title: step.oasBlockIndex === undefined
+        ? `source: TOOL_CALL_*, tool_call_id=${callId}`
+        : `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.oasBlockIndex}`,
       tone: 'tool',
     }
   }

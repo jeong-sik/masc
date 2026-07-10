@@ -10,8 +10,8 @@
     - {b Default}: registered template registered through
       {!register_default} during plugin init.
 
-    Persistence: {!persist_overrides} writes the override
-    map to [.masc/prompt_overrides.json];
+    Persistence: {!persist_overrides} writes a versioned,
+    contract-bound envelope to [.masc/prompt_overrides.json];
     {!restore_overrides} reapplies it through the same
     validation as {!set_override} — including the
     [{{ident}}] placeholder check, which applies even to
@@ -21,9 +21,11 @@
     fallback to the file/default value instead of silently
     accepted.
 
-    Concurrency: every state mutation goes through the
-    [with_mutex] guard around
-    {!Prompt_registry_store.t.mutex}.  File reads
+    Concurrency: override and prompt-contract mutations first take the
+    dedicated mutation mutex, then use [with_mutex] around
+    {!Prompt_registry_store.t.mutex} for the in-memory commit.  Persistence I/O
+    holds only the mutation mutex, so readers keep observing the previous
+    complete table until commit.  Other file reads
     ({!resolve_prompt}, {!list_prompts},
     {!validate_prompt_templates}) snapshot under the lock,
     release it, then read disk so concurrent readers do
@@ -42,8 +44,8 @@
     [build_resolved_from_snapshot], [resolved_of_snapshot],
     [unexpected_template_variables],
     [prompt_item_json_of_resolved], [compare_prompt_items],
-    [register_prompt], [register_default],
-    [apply_override_validated], [prompt_snapshot] type,
+    [register_prompt], [register_prompt_unlocked], [register_default],
+    [validated_override], [prompt_snapshot] type,
     [register], [init], [render]). *)
 
 (** {1 Type re-exports} *)
@@ -104,6 +106,10 @@ type prompt_resolution = Prompt_registry_types.prompt_resolution = {
   has_override : bool;
 }
 
+type persisted_mutation_error =
+  | Validation_error of string
+  | Persistence_error of string
+
 (** {1 Markdown directory} *)
 
 val set_markdown_dir : string -> unit
@@ -156,25 +162,40 @@ val set_override : string -> string -> (unit, string) result
     keys, empty / oversized (>10000 chars) values, and
     unexpected template variables (a variable in the
     template that the registered [meta_tbl] entry does
-    not declare).  Validation + write happen inside a
-    single [with_mutex] block to prevent a concurrent
-    [register_prompt] from invalidating the decision
-    after validation but before the write. *)
+    not declare). *)
 
 val clear_prompt_override : string -> unit
 (** Removes the override for [key] (no-op when absent).
     Falls back to file → default on next resolution. *)
 
-val persist_overrides : string -> unit
+val persist_overrides : string -> (unit, string) result
 (** Writes the current override table to
-    [<base_path>/.masc/prompt_overrides.json].  Idempotent. *)
+    [<base_path>/.masc/prompt_overrides.json] through an atomic replacement.
+    Returns an explicit error when the persistence boundary fails. *)
+
+val set_override_persisted :
+  base_path:string ->
+  string ->
+  string ->
+  (unit, persisted_mutation_error) result
+(** Validate an override, atomically persist the complete candidate table,
+    then commit it to memory.  A persistence failure leaves the live table
+    unchanged. *)
+
+val clear_prompt_override_persisted :
+  base_path:string -> string -> (unit, string) result
+(** Atomically persist the candidate table without [key], then commit it to
+    memory.  A persistence failure leaves the live table unchanged. *)
 
 val restore_overrides : string -> unit
 (** Reads
     [<base_path>/.masc/prompt_overrides.json] and reapplies
-    every entry through {!set_override}'s validation.
-    Stale or manually-edited entries are skipped with a
-    [Log.Misc.warn] instead of being silently accepted. *)
+    every entry through {!set_override}'s validation after verifying its
+    contract revision.  The validated candidate set replaces the live table
+    in one mutex transaction, so rejected entries cannot leave stale live
+    overrides behind.  Legacy envelopes, malformed entries, and stale or
+    manually-edited entries are rejected with an observable error and fallback
+    to file/default content. *)
 
 val set_restore_failure_observer : (unit -> unit) -> unit
 (** Installs the process-local observer called whenever override

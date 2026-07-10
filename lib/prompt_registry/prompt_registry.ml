@@ -86,6 +86,10 @@ type prompt_resolution = Types.prompt_resolution = {
   has_override: bool;
 }
 
+type persisted_mutation_error =
+  | Validation_error of string
+  | Persistence_error of string
+
 (** {1 Frontmatter Parsing} *)
 
 (** Parse YAML-style frontmatter from a markdown file.
@@ -148,6 +152,9 @@ let meta_tbl = store.meta_tbl
 
 let with_mutex f = Prompt_registry_store.with_lock store f
 
+let with_override_mutation_lock f =
+  Prompt_registry_store.with_override_mutation_lock store f
+
 (** {1 Persistence} *)
 
 (** File-based persistence directory *)
@@ -161,39 +168,54 @@ let make_key ~id ~version = Printf.sprintf "%s@%s" id version
 
 (** Initialize the registry with optional file persistence *)
 let init ?persist_dir () =
-  prompts_dir := persist_dir;
-  match persist_dir with
-  | Some dir ->
-      (* Load existing prompts from directory *)
-      if Sys.file_exists dir && Sys.is_directory dir then begin
-        let files = Sys.readdir dir in
-        Array.iter (fun file ->
-          if Filename.check_suffix file ".json" then begin
-            let path = Filename.concat dir file in
-            try
-              let content = In_channel.with_open_text path In_channel.input_all in
-              let json = Yojson.Safe.from_string content in
-              match prompt_entry_of_yojson json with
-              | Ok entry ->
-                  let key = make_key ~id:entry.id ~version:entry.version in
-                  Hashtbl.replace registry key entry;
-                  (* Update version index *)
-                  let versions = match Hashtbl.find_opt version_index entry.id with
-                    | Some vs -> if List.mem entry.version vs then vs else entry.version :: vs
-                    | None -> [entry.version]
-                  in
-                  Hashtbl.replace version_index entry.id versions
-              | Error msg ->
-                Log.Misc.error "Failed to parse %s: %s" file msg
-            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Log.Misc.error "Failed to parse %s: %s" file (Printexc.to_string exn)
-          end
-        ) files
-      end
-  | None -> ()
+  with_override_mutation_lock (fun () ->
+      let loaded =
+        match persist_dir with
+        | Some dir when Sys.file_exists dir && Sys.is_directory dir ->
+            Sys.readdir dir
+            |> Array.fold_left
+                 (fun entries file ->
+                   if not (Filename.check_suffix file ".json") then entries
+                   else
+                     let path = Filename.concat dir file in
+                     try
+                       let content =
+                         In_channel.with_open_text path In_channel.input_all
+                       in
+                       let json = Yojson.Safe.from_string content in
+                       match prompt_entry_of_yojson json with
+                       | Ok entry -> entry :: entries
+                       | Error message ->
+                           Log.Misc.error "Failed to parse %s: %s" file message;
+                           entries
+                     with
+                     | Eio.Cancel.Cancelled _ as error -> raise error
+                     | exn ->
+                         Log.Misc.error "Failed to parse %s: %s" file
+                           (Printexc.to_string exn);
+                         entries)
+                 []
+        | None | Some _ -> []
+      in
+      with_mutex (fun () ->
+          prompts_dir := persist_dir;
+          List.iter
+            (fun entry ->
+              let key = make_key ~id:entry.id ~version:entry.version in
+              Hashtbl.replace registry key entry;
+              let versions =
+                match Hashtbl.find_opt version_index entry.id with
+                | Some versions ->
+                    if List.mem entry.version versions then versions
+                    else entry.version :: versions
+                | None -> [ entry.version ]
+              in
+              Hashtbl.replace version_index entry.id versions)
+            loaded))
 
 let set_markdown_dir dir =
-  markdown_dir := Some dir
+  with_override_mutation_lock (fun () ->
+      with_mutex (fun () -> markdown_dir := Some dir))
 
 let get_markdown_dir () = !markdown_dir
 
@@ -224,7 +246,8 @@ let read_file_if_exists path =
 (** Register a prompt entry in the registry.
     Automatically extracts variables if not provided. *)
 let register (entry : prompt_entry) : unit =
-  with_mutex (fun () ->
+  with_override_mutation_lock (fun () ->
+   with_mutex (fun () ->
     (* Auto-extract variables if empty *)
     let entry =
       if entry.variables = [] then
@@ -252,7 +275,7 @@ let register (entry : prompt_entry) : unit =
           Out_channel.output_string oc (Yojson.Safe.pretty_to_string json)
         )
     | None -> ()
-  )
+  ))
 
 (** Get a prompt entry by ID and optional version.
     If version is not specified, returns the latest non-deprecated version. *)
@@ -314,7 +337,8 @@ let exists ~id ?version () : bool =
 
 (** Unregister a prompt entry *)
 let unregister ~id ?version () : bool =
-  with_mutex (fun () ->
+  with_override_mutation_lock (fun () ->
+   with_mutex (fun () ->
     match version with
     | Some v ->
         let key = make_key ~id ~version:v in
@@ -353,7 +377,7 @@ let unregister ~id ?version () : bool =
             ) versions;
             Hashtbl.remove version_index id;
             true
-  )
+  ))
 
 (** Mark a prompt as deprecated *)
 let deprecate ~id ~version () : bool =
@@ -486,7 +510,8 @@ let stats () : registry_stats =
 
 (** Clear all registered prompts *)
 let clear () : unit =
-  with_mutex (fun () ->
+  with_override_mutation_lock (fun () ->
+   with_mutex (fun () ->
     let persisted_dir = !prompts_dir in
     Hashtbl.clear registry;
     Hashtbl.clear version_index;
@@ -503,7 +528,7 @@ let clear () : unit =
             Sys.remove (Filename.concat dir file)
         ) files
     | None | Some _ -> ()
-  )
+  ))
 
 (** Count of registered prompts (all versions) *)
 let count () : int =
@@ -654,7 +679,7 @@ let compare_prompt_items a b =
   in
   String.compare (get_key a) (get_key b)
 
-let register_prompt ~key ~description ?(category = "general")
+let register_prompt_unlocked ~key ~description ?(category = "general")
     ?(required_file = false) ?(template_variables = []) () =
   with_mutex (fun () ->
       Hashtbl.replace meta_tbl key
@@ -664,6 +689,12 @@ let register_prompt ~key ~description ?(category = "general")
           required_file;
           template_variables = List.sort_uniq String.compare template_variables;
         })
+
+let register_prompt ~key ~description ?(category = "general")
+    ?(required_file = false) ?(template_variables = []) () =
+  with_override_mutation_lock (fun () ->
+      register_prompt_unlocked ~key ~description ~category ~required_file
+        ~template_variables ())
 
 (** Auto-discover and register prompts from markdown files with frontmatter.
     Scans [dir] for [*.md] files. Files with YAML frontmatter get metadata
@@ -681,42 +712,49 @@ let register_prompt ~key ~description ?(category = "general")
 
     The key is derived from the filename: [keeper.constitution.md] -> [keeper.constitution]. *)
 let load_prompts_from_directory dir =
-  if Sys.file_exists dir && Sys.is_directory dir then begin
-    let files = Sys.readdir dir in
-    Array.iter (fun file ->
-      if Filename.check_suffix file ".md" then begin
-        let key = Filename.remove_extension file in
-        if is_valid_prompt_key key then begin
-          let path = Filename.concat dir file in
-          try
-            let content = In_channel.with_open_text path In_channel.input_all in
-            let meta_pairs, _body = parse_frontmatter content in
-            match List.assoc_opt "description" meta_pairs with
-            | None -> ()  (* no frontmatter or no description — skip *)
-            | Some description ->
-                let category =
-                  Option.value ~default:"general"
-                    (List.assoc_opt "category" meta_pairs)
-                in
-                let template_variables =
-                  match List.assoc_opt "template_variables" meta_pairs with
-                  | Some v -> parse_list_value v
-                  | None -> []
-                in
-                register_prompt ~key ~description ~category ~required_file:true
-                  ~template_variables ()
-          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Log.Misc.error "load_prompts_from_directory: failed to read %s: %s"
-              file (Printexc.to_string exn)
-        end
-      end
-    ) files
-  end
+  with_override_mutation_lock (fun () ->
+      if Sys.file_exists dir && Sys.is_directory dir then begin
+        let files = Sys.readdir dir in
+        Array.iter (fun file ->
+          if Filename.check_suffix file ".md" then begin
+            let key = Filename.remove_extension file in
+            if is_valid_prompt_key key then begin
+              let path = Filename.concat dir file in
+              try
+                let content = In_channel.with_open_text path In_channel.input_all in
+                let meta_pairs, _body = parse_frontmatter content in
+                match List.assoc_opt "description" meta_pairs with
+                | None -> ()  (* no frontmatter or no description — skip *)
+                | Some description ->
+                    (* DET-OK: [category] is optional frontmatter with the
+                       documented schema default [general]; the default does
+                       not depend on time, environment, or iteration order. *)
+                    let category =
+                      match List.assoc_opt "category" meta_pairs with
+                      | Some category -> category
+                      | None -> "general"
+                    in
+                    let template_variables =
+                      match List.assoc_opt "template_variables" meta_pairs with
+                      | Some v -> parse_list_value v
+                      | None -> []
+                    in
+                    register_prompt_unlocked ~key ~description ~category
+                      ~required_file:true ~template_variables ()
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                Log.Misc.error
+                  "load_prompts_from_directory: failed to read %s: %s"
+                  file (Printexc.to_string exn)
+            end
+          end
+        ) files
+      end)
 
 (** Register a hardcoded prompt with its default value.
     This also registers it in the versioned template system as a fallback. *)
 let register_default ~key ~default ~description ?(category="general") () =
-  with_mutex (fun () ->
+  with_override_mutation_lock (fun () ->
+   with_mutex (fun () ->
     Hashtbl.replace meta_tbl key
       {
         description;
@@ -740,7 +778,7 @@ let register_default ~key ~default ~description ?(category="general") () =
       | None -> ["default"]
     in
       Hashtbl.replace version_index key versions
-  )
+  ))
 
 (** Resolve a prompt with file I/O performed outside the mutex.
     Reads the markdown file first, then acquires the mutex for
@@ -750,7 +788,11 @@ let resolve_prompt key =
   let file_path = prompt_markdown_path key in
   let file_value = Option.bind file_path read_file_if_exists in
   with_mutex (fun () ->
-    let override_value = Hashtbl.find_opt override_tbl key in
+    let override_value =
+      Hashtbl.find_opt override_tbl key
+      |> Option.map (fun (entry : Prompt_override_persistence.entry) ->
+             entry.value)
+    in
     let default_value = default_prompt_value_unlocked key in
     let source, effective =
       match override_value with
@@ -818,8 +860,11 @@ let render_prompt_template key vars =
     them could invalidate the validation decision (e.g. overwrite a
     key's metadata with a different [template_variables] set after
     we validated but before we wrote the override). *)
-let apply_override_validated key value =
+let validated_override ?expected_contract_revision key value =
   let trimmed = String.trim value in
+  let file_value =
+    Option.bind (prompt_markdown_path key) read_file_if_exists
+  in
   if not (is_valid_prompt_key key) then Error "Invalid prompt key"
   else if trimmed = "" then Error "Prompt cannot be empty"
   else if String.length trimmed > 10000 then Error "Prompt too long (max 10000 chars)"
@@ -827,23 +872,58 @@ let apply_override_validated key value =
     with_mutex (fun () ->
         match Hashtbl.find_opt meta_tbl key with
         | None -> Error "Unknown prompt key"
-        | Some meta ->
-            let unexpected = unexpected_template_variables meta trimmed in
-            if unexpected <> [] then
-              Error
-                (Printf.sprintf "Unknown template variables: %s"
-                   (String.concat ", " unexpected))
-            else begin
-              Hashtbl.replace override_tbl key trimmed;
-              Ok ()
-            end)
+        | Some meta -> (
+            let contract_body =
+              match file_value with
+              | Some body -> Some body
+              | None -> default_prompt_value_unlocked key
+            in
+            match contract_body with
+            | None -> Error "Prompt contract body is missing"
+            | Some body ->
+                let current_contract_revision =
+                  Prompt_override_persistence.contract_revision ~body
+                    ~template_variables:meta.template_variables
+                in
+                (match expected_contract_revision with
+                 | Some persisted_revision
+                   when not
+                          (String.equal persisted_revision
+                             current_contract_revision) ->
+                     Error
+                       (Printf.sprintf
+                          "Prompt contract revision mismatch (persisted=%s, current=%s)"
+                          persisted_revision current_contract_revision)
+                 | None | Some _ ->
+                     let unexpected =
+                       unexpected_template_variables meta trimmed
+                     in
+                     if unexpected <> [] then
+                       Error
+                         (Printf.sprintf "Unknown template variables: %s"
+                            (String.concat ", " unexpected))
+                     else
+                       Ok
+                         Prompt_override_persistence.
+                           {
+                             key;
+                             value = trimmed;
+                             contract_revision = current_contract_revision;
+                           })))
 
 (** Set an override for a prompt *)
-let set_override key value = apply_override_validated key value
+let set_override key value =
+  with_override_mutation_lock (fun () ->
+      match validated_override key value with
+      | Error _ as error -> error
+      | Ok entry ->
+          with_mutex (fun () -> Hashtbl.replace override_tbl key entry);
+          Ok ())
 
 (** Clear override, reverting to file or default *)
 let clear_prompt_override key =
-  with_mutex (fun () -> Hashtbl.remove override_tbl key)
+  with_override_mutation_lock (fun () ->
+      with_mutex (fun () -> Hashtbl.remove override_tbl key))
 
 (** Get source of current value *)
 let prompt_source key = (resolve_prompt key).source
@@ -872,7 +952,11 @@ let validate_prompt_templates () =
         (fun key meta acc ->
           { snap_key = key;
             snap_meta = meta;
-            snap_override_value = Hashtbl.find_opt override_tbl key;
+            snap_override_value =
+              Hashtbl.find_opt override_tbl key
+              |> Option.map
+                   (fun (entry : Prompt_override_persistence.entry) ->
+                     entry.value);
             snap_default_value = default_prompt_value_unlocked key;
           } :: acc)
         meta_tbl [])
@@ -912,7 +996,11 @@ let list_prompts () =
         (fun key meta acc ->
           { snap_key = key;
             snap_meta = meta;
-            snap_override_value = Hashtbl.find_opt override_tbl key;
+            snap_override_value =
+              Hashtbl.find_opt override_tbl key
+              |> Option.map
+                   (fun (entry : Prompt_override_persistence.entry) ->
+                     entry.value);
             snap_default_value = default_prompt_value_unlocked key;
           } :: acc)
         meta_tbl [])
@@ -930,18 +1018,70 @@ let prompts_json () =
   ]
 
 (** Persist overrides to JSON file *)
-let persist_overrides base_path =
+let save_override_entries base_path entries =
   let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
-  Fs_compat.mkdir_p masc_dir;
-  let path = Filename.concat masc_dir "prompt_overrides.json" in
-  let json = with_mutex (fun () ->
-    Hashtbl.fold (fun key value acc ->
-      (key, `String value) :: acc
-    ) override_tbl []
-  ) in
-  let content = Yojson.Safe.pretty_to_string (`Assoc json) in
-  Out_channel.with_open_text path (fun oc ->
-    Out_channel.output_string oc content)
+  try
+    Fs_compat.mkdir_p masc_dir;
+    let path = Filename.concat masc_dir "prompt_overrides.json" in
+    Prompt_override_persistence.save ~path entries
+    |> Result.map_error Prompt_override_persistence.error_to_string
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | Sys_error message -> Error message
+  | Unix.Unix_error (error, operation, argument) ->
+      Error
+        (Printf.sprintf "%s(%s): %s" operation argument
+           (Unix.error_message error))
+
+let override_entries () =
+  with_mutex (fun () ->
+      Hashtbl.fold (fun _ entry acc -> entry :: acc) override_tbl [])
+
+let replace_override_entries entries =
+  with_mutex (fun () ->
+      Hashtbl.clear override_tbl;
+      List.iter
+        (fun (entry : Prompt_override_persistence.entry) ->
+          Hashtbl.replace override_tbl entry.key entry)
+        entries)
+
+let upsert_override_entry
+    (entry : Prompt_override_persistence.entry) entries =
+  entry
+  :: List.filter
+       (fun (current : Prompt_override_persistence.entry) ->
+         not (String.equal current.key entry.key))
+       entries
+
+let persist_overrides base_path =
+  with_override_mutation_lock (fun () ->
+      save_override_entries base_path (override_entries ()))
+
+let set_override_persisted ~base_path key value =
+  with_override_mutation_lock (fun () ->
+      match validated_override key value with
+      | Error message -> Error (Validation_error message)
+      | Ok entry ->
+          let candidate = upsert_override_entry entry (override_entries ()) in
+          (match save_override_entries base_path candidate with
+           | Error message -> Error (Persistence_error message)
+           | Ok () ->
+               replace_override_entries candidate;
+               Ok ()))
+
+let clear_prompt_override_persisted ~base_path key =
+  with_override_mutation_lock (fun () ->
+      let candidate =
+        override_entries ()
+        |> List.filter
+             (fun (entry : Prompt_override_persistence.entry) ->
+               not (String.equal entry.key key))
+      in
+      match save_override_entries base_path candidate with
+      | Error _ as error -> error
+      | Ok () ->
+          replace_override_entries candidate;
+          Ok ())
 
 (** Restore overrides from JSON file, applying the same validation as
     [set_override] so that stale or manually-edited entries are rejected. *)
@@ -959,25 +1099,44 @@ let restore_overrides base_path =
       (Workspace_utils.masc_dir_from_base_path ~base_path)
       "prompt_overrides.json"
   in
-  if Sys.file_exists path then begin
-    try
-      let content = In_channel.with_open_text path In_channel.input_all in
-      let json = Yojson.Safe.from_string content in
-      match json with
-      | `Assoc pairs ->
-        List.iter (fun (key, value) ->
-          match value with
-          | `String s -> (
-              match apply_override_validated key s with
-              | Ok () -> ()
-              | Error reason ->
-                  record_override_restore_failure ();
-                  Log.Misc.error "prompt override restore: rejected %s, falling back to file/default value: %s"
-                    key reason)
-          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> ()
-        ) pairs
-      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ()
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      record_override_restore_failure ();
-      Log.Misc.warn "prompt override restore failed: %s" (Printexc.to_string exn)
-  end
+  with_override_mutation_lock (fun () ->
+      let candidate, failures =
+        if not (Sys.file_exists path) then ([], [])
+        else
+          match Prompt_override_persistence.load ~path with
+          | Error error ->
+              ( [],
+                [
+                  ( None,
+                    Prompt_override_persistence.error_to_string error );
+                ] )
+          | Ok entries ->
+              List.fold_left
+                (fun (accepted, rejected)
+                     (entry : Prompt_override_persistence.entry) ->
+                  match
+                    validated_override
+                      ~expected_contract_revision:entry.contract_revision
+                      entry.key entry.value
+                  with
+                  | Ok validated -> (validated :: accepted, rejected)
+                  | Error reason ->
+                      (accepted, (Some entry.key, reason) :: rejected))
+                ([], []) entries
+      in
+      (* Commit the fully validated candidate before invoking observers.  A
+         faulty observer must not leave a pre-existing stale override live. *)
+      replace_override_entries candidate;
+      List.iter
+        (fun (key, reason) ->
+          record_override_restore_failure ();
+          match key with
+          | None ->
+              Log.Misc.error
+                "prompt override restore: rejected persistence file, falling back to file/default values: %s"
+                reason
+          | Some key ->
+              Log.Misc.error
+                "prompt override restore: rejected %s, falling back to file/default value: %s"
+                key reason)
+        failures)

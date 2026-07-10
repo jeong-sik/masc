@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Fixed
-- Prompt override restore now rejects `{{ident}}` placeholder syntax for prompts with no declared `template_variables` (e.g. `keeper.constitution`), instead of silently accepting it. Closes an asymmetry left by #23929, where dropping `template_variables: [state_block_instruction]` from the constitution frontmatter also disabled the placeholder guard, letting a pre-upgrade `.masc/prompt_overrides.json` entry reinstate the retired `{{state_block_instruction}}`/`[STATE]` protocol on boot with no warning.
+- Prompt overrides now persist in a schema-versioned envelope bound to the SHA256 revision of each prompt body and template-variable contract. Legacy or malformed files and contract-drifted entries fail closed with observable fallback, writes use atomic replacement, and dashboard set/clear mutations commit to memory only after persistence succeeds.
 
 ## [0.20.1] - 2026-07-10
 

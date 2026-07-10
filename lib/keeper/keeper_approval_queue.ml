@@ -1308,6 +1308,7 @@ let submit_pending
       ?disposition
       ?disposition_reason
       ?continuation_channel
+      ?channel
       ?(lane_policy = Nonblocking)
       ~on_resolution
       ()

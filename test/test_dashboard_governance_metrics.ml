@@ -63,14 +63,20 @@ let test_ring_caps_oldest_event () =
   check int "kept count" max_ring_size count
 
 let test_approval_summary_empty () =
-  let summary = GM.approval_queue_summary () in
+  let summary = GM.approval_queue_summary ~base_path:"" in
   check int "empty queue depth" 0 summary.depth;
   check bool "p50 None" true (Option.is_none summary.p50_wait_sec);
   check bool "oldest None" true (Option.is_none summary.oldest_pending_sec)
 
 let test_json_shape () =
   inject ~tool:"bash" ~reason:"policy" ();
-  let json = GM.governance_tool_events_json ~now_ts:(now +. 1.0) ~window_minutes:60 () in
+  let json =
+    GM.governance_tool_events_json
+      ~now_ts:(now +. 1.0)
+      ~base_path:""
+      ~window_minutes:60
+      ()
+  in
   let open Yojson.Safe.Util in
   let rejections = json |> member "tool_rejections" |> to_list in
   check bool "has rejections" true (List.length rejections > 0);

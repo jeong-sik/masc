@@ -549,7 +549,7 @@ let submit_shell_ir_approval_pending
       cmd
   in
   let approval_id =
-    Keeper_approval_queue.submit_pending
+    Keeper_approval_queue.submit_pending_observer
       ~keeper_name
       ~tool_name:"tool_execute"
       ~input
@@ -561,7 +561,7 @@ let submit_shell_ir_approval_pending
       ~sandbox_profile
       ~disposition:"requires_approval"
       ~disposition_reason:summary
-      ~on_resolution
+      ~on_resolution_observer:on_resolution
       ()
   in
   record_gated_gh_lifecycle ~keeper_name ~event:"requested" ~risk_class ~typed_hit;

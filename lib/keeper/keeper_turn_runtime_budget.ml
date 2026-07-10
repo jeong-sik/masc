@@ -11,6 +11,10 @@ open Keeper_types_profile
 open Keeper_context_runtime
 module EC = Keeper_error_classify
 module StringMap = Set_util.StringMap
+let ( let* ) = Result.bind
+
+exception Partial_commit_gate_sync_failed of string
+exception Partial_commit_gate_edit_unsupported
 
 type runtime_execution = {
   runtime_id : string;
@@ -734,7 +738,21 @@ let pause_keeper_for_overflow
       Keeper_state_machine.Operator_pause;
     paused_meta)
 
+let wake_resumed_keeper_fiber ~(config : Workspace.config) ~keeper_name () =
+  match Keeper_registry.get ~base_path:config.base_path keeper_name with
+  | Some entry ->
+    (* tla-lint: allow-mutation: keeper resume signal after durable state commit *)
+    Atomic.set entry.fiber_wakeup true
+  | None ->
+    Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+      ~config
+      ~keeper_name
+      ~side_effect:"resume sync fiber wakeup"
+      "registry entry missing after metadata update"
+;;
+
 let sync_keeper_paused_state_impl
+    ~wake_after_resume
     ~(resume_policy : Keeper_supervisor_pause_policy.crash_pause_resume_policy option)
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
@@ -743,15 +761,18 @@ let sync_keeper_paused_state_impl
     match paused, resume_policy with
     | true, Some policy ->
       Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy meta policy
-    | _ -> meta.auto_resume_after_sec
+    | true, None -> meta.auto_resume_after_sec
+    | false, _ -> None
   in
   let synced_meta =
-    {
-      meta with
-      paused;
-      auto_resume_after_sec;
-      updated_at = now_iso ();
-    }
+    let base = { meta with paused; auto_resume_after_sec; updated_at = now_iso () } in
+    if paused
+    then base
+    else
+      { base with
+        latched_reason = None
+      ; runtime = { base.runtime with last_blocker = None }
+      }
   in
   (* #9733: pause/resume sync is operator-driven; the [paused]
      field is cycle-owned at this site, so use the same merged-CAS
@@ -761,9 +782,10 @@ let sync_keeper_paused_state_impl
      reports failure) which leaves the registry update unsync'd
      with disk. *)
   match
-    write_meta_with_merge
-      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-      config synced_meta
+    write_meta_with_merge_returning
+         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+         config
+         synced_meta
   with
   | Error err ->
       Otel_metric_store.inc_counter
@@ -779,31 +801,28 @@ let sync_keeper_paused_state_impl
                         (if paused then "pause" else "resume"))
         ~severity:`Error
         err;
-      Error (Printf.sprintf "failed to write meta: %s" err)
-  | Ok () ->
-      Keeper_registry.update_meta ~base_path:config.base_path meta.name synced_meta;
-      Keeper_turn_helpers.dispatch_keeper_phase_event_checked
-        ~config
-        ~keeper_name:meta.name
-        ~side_effect:(Printf.sprintf "%s sync phase update"
-                        (if paused then "pause" else "resume"))
-        (if paused
-         then Keeper_state_machine.Operator_pause
-         else Keeper_state_machine.Operator_resume);
-      let synced_meta =
-        if paused
-        then
-          match
+    Error (Printf.sprintf "failed to write meta: %s" err)
+  | Ok persisted_meta ->
+    (* The merge may preserve a newer, distinct operator pause. Project the
+       exact persisted version into the registry; the version-gated CAS also
+       participates in registration, closing stale-entry installation races. *)
+    Keeper_registry.sync_persisted_meta_if_newer
+      ~base_path:config.base_path
+      meta.name
+      persisted_meta;
+    if paused
+    then
+      (match
             Keeper_supervisor_pause_policy.release_owned_active_tasks_after_typed_pause
               ~config
-              ~meta:synced_meta
+              ~meta:persisted_meta
               ~reason_tag:"pause_sync"
           with
-          | Ok released_meta -> released_meta
+          | Ok released_meta -> Ok released_meta
           | Error err ->
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string RuntimeSyncFailures)
-              ~labels:[("keeper", meta.name); ("site", "pause_sync_task_release")]
+              ~labels:[ "keeper", meta.name; "site", "pause_sync_task_release" ]
               ();
             Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
               ~config
@@ -811,24 +830,20 @@ let sync_keeper_paused_state_impl
               ~side_effect:"pause sync task release"
               ~severity:`Error
               err;
-            synced_meta
-        else synced_meta
-      in
-      (if not paused then
-         match Keeper_registry.get ~base_path:config.base_path meta.name with
-         (* tla-lint: allow-mutation: fiber signal — wake on resume from runtime budget gate *)
-         | Some entry -> Atomic.set entry.fiber_wakeup true
-         | None ->
-             Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
-               ~config
-               ~keeper_name:meta.name
-               ~side_effect:"resume sync fiber wakeup"
-               "registry entry missing after metadata update");
-      Ok synced_meta
+            Error ("failed to release paused keeper tasks: " ^ err))
+    else (
+      if wake_after_resume && not persisted_meta.paused
+      then wake_resumed_keeper_fiber ~config ~keeper_name:meta.name ();
+      Ok persisted_meta)
 
 let sync_keeper_paused_state ~(config : Workspace.config) ~(meta : keeper_meta) ~paused
   =
-  sync_keeper_paused_state_impl ~resume_policy:None ~config ~meta ~paused
+  sync_keeper_paused_state_impl
+    ~wake_after_resume:true
+    ~resume_policy:None
+    ~config
+    ~meta
+    ~paused
 
 let sync_keeper_paused_state_with_resume_policy
     ~(config : Workspace.config)
@@ -838,6 +853,7 @@ let sync_keeper_paused_state_with_resume_policy
   : (keeper_meta, string) result
   =
   sync_keeper_paused_state_impl
+    ~wake_after_resume:true
     ~resume_policy:(Some resume_policy)
     ~config
     ~meta
@@ -1038,67 +1054,141 @@ let post_turn_resilience_handles
           sync_lifecycle_meta;
         }
 
-let enqueue_partial_commit_continue_gate
+let persist_and_enqueue_partial_commit_continue_gate
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(failure_reason : Keeper_registry.failure_reason)
     ~(committed_tools : string list)
-    ~(error_detail : string) : string =
+    ~(error_detail : string) : ((keeper_meta * string), string) result =
+  let gate_id = Keeper_hitl_continue_gate.generate_id () in
+  let* paused_meta =
+    Keeper_hitl_continue_gate.install
+      ~config
+      ~meta
+      ~gate_id
+      ~origin:Keeper_latched_reason.Partial_commit
+      ~committed_tools
+  in
   let reason_text = Keeper_registry.failure_reason_to_string failure_reason in
   let input =
     `Assoc [
       ("kind", `String "continue_gate_required");
-      ("keeper_name", `String meta.name);
+      ("keeper_name", `String paused_meta.name);
+      ("gate_id", `String gate_id);
       ("failure_reason", `String reason_text);
       ("error_detail", `String error_detail);
       ("committed_tools", `List (List.map (fun tool -> `String tool) committed_tools));
     ]
   in
-  Keeper_approval_queue.submit_pending
-    ~keeper_name:meta.name
-    ~tool_name:"keeper_continue_after_partial_commit"
-    ~input
-    ~risk_level:Keeper_approval_queue.Critical
-    ~base_path:config.base_path
-    ~lane_policy:Keeper_approval_queue.Blocking
-    ~on_resolution:(fun decision ->
-      let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
-      match decision with
-      | Agent_sdk.Hooks.Approve
-      | Agent_sdk.Hooks.Edit _ ->
-        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false with
-         | Ok resumed_meta ->
-             Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
-             Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
-             Log.Keeper.info
-               "%s: partial-commit continue gate approved; auto-resumed keeper"
-               resumed_meta.name
-         | Error err ->
-             Log.Keeper.error
-               "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
-               meta.name err);
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string RuntimeSyncFailures)
-               ~labels:[("keeper", meta.name); ("site", "resume_sync")]
-               ()
-      | Agent_sdk.Hooks.Reject reason ->
-        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
-         | Ok paused_meta ->
-             Keeper_registry.set_failure_reason
-               ~base_path:config.base_path meta.name
-               (Some failure_reason);
-             Log.Keeper.warn
-               "%s: partial-commit continue gate rejected; keeper remains paused (%s)"
-               paused_meta.name reason
-         | Error err ->
-             Log.Keeper.error
-               "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
-               meta.name err reason);
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string RuntimeSyncFailures)
-               ~labels:[("keeper", meta.name); ("site", "pause_sync")]
-               ())
-    ()
+  let approval_id =
+    Keeper_approval_queue.submit_pending_blocking
+      ~keeper_name:paused_meta.name
+      ~tool_name:"keeper_continue_after_partial_commit"
+      ~input
+      ~risk_level:Keeper_approval_queue.Critical
+      ~base_path:config.base_path
+      ~on_resolution:(fun ~approval_id:_ decision ->
+        let plan commit =
+          Keeper_approval_queue.blocking_resolution_plan
+            ~effect_key:("continue_gate:" ^ gate_id)
+            ~commit
+        in
+        match decision with
+        | Agent_sdk.Hooks.Edit _ -> raise Partial_commit_gate_edit_unsupported
+        | Agent_sdk.Hooks.Approve ->
+          plan (fun () ->
+            match
+              Keeper_hitl_continue_gate.resolve
+                ~config
+                ~keeper_name:paused_meta.name
+                ~gate_id
+                ~decision:Keeper_hitl_continue_gate.Approve
+            with
+            | Ok resumed_meta ->
+            Keeper_registry.set_failure_reason
+              ~base_path:config.base_path
+              paused_meta.name
+              None;
+            Keeper_registry.reset_turn_failures
+              ~base_path:config.base_path
+              paused_meta.name;
+            fun () ->
+              (match read_meta config resumed_meta.name with
+               | Ok (Some authoritative_meta) ->
+                 Keeper_registry.sync_persisted_meta_if_newer
+                   ~base_path:config.base_path
+                   authoritative_meta.name
+                   authoritative_meta;
+                 if authoritative_meta.paused
+                 then
+                   Log.Keeper.info
+                     "%s: partial-commit gate approved; a newer operator pause remains authoritative"
+                     authoritative_meta.name
+                 else (
+                   wake_resumed_keeper_fiber
+                     ~config
+                     ~keeper_name:authoritative_meta.name
+                     ();
+                   Log.Keeper.info
+                     "%s: partial-commit continue gate approved; auto-resumed keeper"
+                     authoritative_meta.name)
+               | Ok None ->
+                 Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+                   ~config
+                   ~keeper_name:resumed_meta.name
+                   ~side_effect:"partial-commit resume post-removal meta refresh"
+                   ~severity:`Error
+                   "persisted keeper metadata disappeared after approval"
+               | Error err ->
+                 Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+                   ~config
+                   ~keeper_name:resumed_meta.name
+                   ~side_effect:"partial-commit resume post-removal meta refresh"
+                   ~severity:`Error
+                   err)
+            | Error err ->
+            Log.Keeper.error
+              "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
+              paused_meta.name
+              err;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RuntimeSyncFailures)
+              ~labels:[ "keeper", meta.name; "site", "resume_sync" ]
+              ();
+            raise (Partial_commit_gate_sync_failed err))
+        | Agent_sdk.Hooks.Reject reason ->
+          plan (fun () ->
+            match
+              Keeper_hitl_continue_gate.resolve
+                ~config
+                ~keeper_name:paused_meta.name
+                ~gate_id
+                ~decision:Keeper_hitl_continue_gate.Reject
+            with
+            | Ok rejected_meta ->
+            fun () ->
+              Keeper_registry.set_failure_reason
+                ~base_path:config.base_path
+                rejected_meta.name
+                None;
+              Log.Keeper.warn
+                "%s: partial-commit continue gate rejected; keeper remains operator-paused (%s)"
+                rejected_meta.name
+                reason
+            | Error err ->
+            Log.Keeper.error
+              "%s: partial-commit continue gate rejection persistence failed: %s (reason=%s)"
+              paused_meta.name
+              err
+              reason;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RuntimeSyncFailures)
+              ~labels:[ "keeper", meta.name; "site", "pause_sync" ]
+              ();
+            raise (Partial_commit_gate_sync_failed err)))
+      ()
+  in
+  Ok (paused_meta, approval_id)
 
 (* Dedupe "mixed runtime context budget" log: the values are constant
    per (keeper_name, primary_budget, runtime_budget) because runtime config

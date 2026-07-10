@@ -751,7 +751,10 @@ let dashboard_json config =
   let keeper_names, keeper_name_read_error_rows =
     keeper_names_or_error_rows config
   in
-  let pending_approvals = Keeper_approval_queue.list_pending_entries () in
+  let pending_approvals =
+    Keeper_approval_queue.list_pending_entries
+      ~base_path:config.Workspace.base_path
+  in
   let fusion_runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
   let pending_confirms, pending_confirm_read_error_rows =
     pending_confirms_or_error_rows config

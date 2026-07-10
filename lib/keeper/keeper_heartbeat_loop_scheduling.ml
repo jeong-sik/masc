@@ -33,6 +33,7 @@ let decide_keepalive_scheduling
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
       ~stop
+      ~base_path
       ~meta
       obs
   =
@@ -40,6 +41,7 @@ let decide_keepalive_scheduling
     Keeper_world_observation.keeper_cycle_decision
       ~reactive_wake
       ~event_queue_triggers
+      ~base_path
       ~meta
       obs
   in

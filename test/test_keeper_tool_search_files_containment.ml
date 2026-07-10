@@ -192,10 +192,15 @@ let assert_repository_registration_policy_response ~raw =
     (Json.member "approval_pending" json |> Json.member "reason"
     |> Json.to_string_option);
   Alcotest.(check (option bool))
-    "approval is non-blocking"
-    (Some true)
+    "approval owns the blocking lane"
+    (Some false)
     (Json.member "approval_pending" json |> Json.member "non_blocking"
     |> Json.to_bool_option);
+  Alcotest.(check (option string))
+    "approval lane policy"
+    (Some "blocking")
+    (Json.member "approval_pending" json |> Json.member "lane_policy"
+    |> Json.to_string_option);
   Alcotest.(check (option string))
     "deterministic retry reason"
     (Some "policy_blocked")
@@ -864,7 +869,7 @@ let test_rg_unregistered_clone_queues_repository_hitl () =
     in
     assert_repository_registration_policy_response ~raw;
     match
-      AQ.list_pending_entries ()
+      AQ.list_pending_entries ~base_path:config.base_path
       |> List.filter (fun (entry : AQ.pending_approval) ->
         String.equal entry.keeper_name meta.name)
     with
@@ -911,7 +916,7 @@ let test_read_unregistered_clone_surfaces_repository_hitl () =
     in
     assert_repository_registration_policy_response ~raw;
     match
-      AQ.list_pending_entries ()
+      AQ.list_pending_entries ~base_path:config.base_path
       |> List.filter (fun (entry : AQ.pending_approval) ->
         String.equal entry.keeper_name meta.name)
     with

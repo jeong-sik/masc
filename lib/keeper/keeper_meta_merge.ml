@@ -54,6 +54,52 @@ let preserve_operator_pause_from_disk
 
 let heartbeat_fields_from_disk = preserve_operator_pause_from_disk
 
+let operator_control_fields_from_caller
+      ~(latest : Keeper_meta_contract.keeper_meta)
+      ~(caller : Keeper_meta_contract.keeper_meta)
+  =
+  let merged = monotonic_usage_counters ~latest ~caller in
+  { merged with
+    paused = caller.paused
+  ; latched_reason = caller.latched_reason
+  ; auto_resume_after_sec = caller.auto_resume_after_sec
+  ; runtime = { merged.runtime with last_blocker = caller.runtime.last_blocker }
+  }
+
+let non_operator_control_fields_from_disk
+      ~(latest : Keeper_meta_contract.keeper_meta)
+      ~(caller : Keeper_meta_contract.keeper_meta)
+  =
+  let merged = monotonic_usage_counters ~latest ~caller in
+  { merged with
+    paused = latest.paused
+  ; latched_reason = latest.latched_reason
+  ; auto_resume_after_sec = latest.auto_resume_after_sec
+  ; runtime = { merged.runtime with last_blocker = latest.runtime.last_blocker }
+  }
+
+let identity_repair_fields_from_caller
+      ~(latest : Keeper_meta_contract.keeper_meta)
+      ~(caller : Keeper_meta_contract.keeper_meta)
+  =
+  let usage = (monotonic_usage_counters ~latest ~caller).runtime.usage in
+  let trace_history =
+    Json_util.dedupe_keep_order
+      (caller.runtime.trace_history @ latest.runtime.trace_history)
+  in
+  { latest with
+    meta_version = latest.meta_version
+  ; agent_name = caller.agent_name
+  ; updated_at = caller.updated_at
+  ; runtime =
+      { latest.runtime with
+        trace_id = caller.runtime.trace_id
+      ; trace_history
+      ; generation = max latest.runtime.generation caller.runtime.generation
+      ; usage
+      }
+  }
+
 (* Dead-tombstone cleanup is the authoritative writer of [paused] and
    [latched_reason]: it records that the supervisor is tearing the keeper down
    as a dead tombstone. This is the inverse ownership of

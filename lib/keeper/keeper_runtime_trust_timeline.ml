@@ -435,8 +435,8 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
 let latest_tool_call_json ~(keeper_name : string) =
   Keeper_tool_call_log.read_latest ~keeper_name ()
 
-let pending_approval_json ~(keeper_name : string) =
-  match Keeper_approval_queue.list_pending_dashboard_json () with
+let pending_approval_json ~base_path ~(keeper_name : string) =
+  match Keeper_approval_queue.list_pending_dashboard_json ~base_path with
   | `List entries ->
       entries
       |> List.filter (fun json ->

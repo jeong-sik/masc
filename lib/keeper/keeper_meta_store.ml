@@ -23,6 +23,19 @@ let register_runtime_meta_write_sync f =
 
 let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
 
+let with_meta_cas_lock path f =
+  let lock_key = path ^ ".cas" in
+  Fs_compat.mkdir_p (Filename.dirname lock_key);
+  try File_lock_eio.with_lock lock_key f with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "failed to acquire meta CAS lock %s.lock: %s"
+         lock_key
+         (Printexc.to_string exn))
+;;
+
 let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
   if not (Fs_compat.file_exists path)
   then Ok None
@@ -308,27 +321,33 @@ let persist_meta config path persisted =
    counters are a monotone invariant (RFC-0225 §3.2, RFC-0237); a caller that
    lost the race must resolve the conflict through [write_meta_with_merge],
    never overwrite the disk snapshot. *)
-let write_meta config (m : Keeper_meta_contract.keeper_meta) : (unit, string) result =
+let write_meta_returning config (m : Keeper_meta_contract.keeper_meta)
+    : (Keeper_meta_contract.keeper_meta, string) result =
   let path = keeper_meta_path config m.name in
-  match read_meta_file_path path with
-  | Ok (Some existing) ->
-    if existing.meta_version <> m.meta_version
-    then
-      Error
-        (Printf.sprintf
-           "meta version conflict for %s: expected %d, disk has %d"
-           m.name
-           m.meta_version
-           existing.meta_version)
-    else (
-      let persisted = { m with meta_version = m.meta_version + 1 } in
-      persist_meta config path persisted)
-  | Ok None ->
-    (* No existing file: initial write. *)
-    let persisted = { m with meta_version = 1 } in
-    persist_meta config path persisted
-  | Error msg ->
-    Error (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg)
+  with_meta_cas_lock path (fun () ->
+    match read_meta_file_path path with
+    | Ok (Some existing) ->
+      if existing.meta_version <> m.meta_version
+      then
+        Error
+          (Printf.sprintf
+             "meta version conflict for %s: expected %d, disk has %d"
+             m.name
+             m.meta_version
+             existing.meta_version)
+      else (
+        let persisted = { m with meta_version = m.meta_version + 1 } in
+        Result.map (fun () -> persisted) (persist_meta config path persisted))
+    | Ok None ->
+      (* No existing file: initial write. *)
+      let persisted = { m with meta_version = 1 } in
+      Result.map (fun () -> persisted) (persist_meta config path persisted)
+    | Error msg ->
+      Error (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg))
+;;
+
+let write_meta config m =
+  Result.map (fun _persisted -> ()) (write_meta_returning config m)
 ;;
 
 let is_version_conflict_error msg =
@@ -411,17 +430,17 @@ let migrate_retired_keeper_meta_keys config =
 (* #9769 root fix: CAS retry with explicit field ownership. The
    turn-failure/cycle path uses [Keeper_meta_merge.heartbeat_fields_from_disk]
    now only carries the disk meta_version forward. *)
-let write_meta_with_merge
+let write_meta_with_merge_returning
       ?(max_retries = 3)
       ~(merge : latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta)
       config
       (m : Keeper_meta_contract.keeper_meta)
-  : (unit, string) result
+  : (Keeper_meta_contract.keeper_meta, string) result
   =
   let path = keeper_meta_path config m.name in
   let rec attempt n (caller : Keeper_meta_contract.keeper_meta) =
-    match write_meta config caller with
-    | Ok () -> Ok ()
+    match write_meta_returning config caller with
+    | Ok persisted -> Ok persisted
     | Error msg when n >= max_retries -> Error msg
     | Error msg when not (is_version_conflict_error msg) -> Error msg
     | Error _ ->
@@ -446,4 +465,9 @@ let write_meta_with_merge
          Error (Printf.sprintf "write_meta retry: failed to re-read for CAS: %s" read_msg))
   in
   attempt 0 m
+;;
+
+let write_meta_with_merge ?max_retries ~merge config m =
+  write_meta_with_merge_returning ?max_retries ~merge config m
+  |> Result.map (fun _persisted -> ())
 ;;

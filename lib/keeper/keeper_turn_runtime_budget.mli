@@ -345,13 +345,16 @@ val post_turn_resilience_handles :
     per keeper to respect [Shared_audit.Store]'s single-writer chain
     contract. *)
 
-val enqueue_partial_commit_continue_gate :
+val persist_and_enqueue_partial_commit_continue_gate :
   config:Workspace.config ->
   meta:keeper_meta ->
   failure_reason:Keeper_registry.failure_reason ->
   committed_tools:string list ->
   error_detail:string ->
-  string
+  ((keeper_meta * string), string) result
+(** Persist an exact typed partial-commit gate before installing its in-memory
+    approval callback. This ordering lets supervisor restart recovery rebuild
+    the same [gate_id] after a crash. *)
 
 val resolved_max_context_for_turn : meta:keeper_meta -> int
 (** Resolve the initial keeper turn context budget from the keeper's routed

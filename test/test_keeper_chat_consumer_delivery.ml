@@ -45,6 +45,7 @@ let with_env body =
   Unix.mkdir base 0o755;
   Fun.protect
     ~finally:(fun () ->
+      Keeper_chat_consumer.For_testing.clear_after_lease_hook ();
       ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
     (fun () ->
       Eio_main.run @@ fun env ->
@@ -53,6 +54,7 @@ let with_env body =
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
+      Keeper_chat_consumer.For_testing.clear_after_lease_hook ();
       (* Full registry reset, not just [clear ~keeper_name]: several tests
          below use derived names ([keeper_name ^ "-a"/"-b"]) that a prior
          test's dispatch fiber can leave with a message requeued by
@@ -126,6 +128,153 @@ exception Stop
 
 let with_consumer_switch f =
   try Eio.Switch.run (fun sw -> f sw; raise Stop) with Stop -> ()
+
+let submit_blocking_approval ~base ~keeper_name ~kind =
+  Keeper_approval_queue.submit_pending_blocking
+    ~keeper_name
+    ~tool_name:"queued_chat_blocking_gate_test"
+    ~input:(`Assoc [ "kind", `String kind ])
+    ~risk_level:Keeper_approval_queue.Critical
+    ~base_path:base
+    ~on_resolution:(fun ~approval_id decision ->
+      Keeper_approval_queue.blocking_resolution_plan
+        ~effect_key:("queued_chat_gate_test:" ^ approval_id)
+        ~commit:(fun () ->
+          let (_ : Agent_sdk.Hooks.approval_decision) = decision in
+          fun () -> ()))
+    ()
+
+let resolve_blocking_approval ~base id =
+  match
+    Keeper_approval_queue.resolve
+      ~base_path:base
+      ~id
+      ~decision:(Agent_sdk.Hooks.Reject "focused queued-chat test cleanup")
+  with
+  | Ok () -> ()
+  | Error err ->
+      check
+        ("Blocking approval cleanup: "
+         ^ Keeper_approval_queue.resolve_error_to_string err)
+        false
+
+let has_transport_failure_row ~base ~keeper_name =
+  Keeper_chat_store.load ~base_dir:base ~keeper_name
+  |> List.exists (fun message ->
+         Keeper_chat_store.Row_kind.equal
+           message.Keeper_chat_store.kind
+           Keeper_chat_store.Row_kind.Transport_failure)
+
+(* Sentinel for the historical failure path: if the consumer dispatches while
+   a Blocking approval owns the lane, this writes the exact durable row the
+   production body guard used to create before the consumer ACKed the lease. *)
+let transport_failure_sentinel ~base calls ~sw:_ ~keeper_name ~queued_message =
+  incr calls;
+  Keeper_chat_store.append_turn
+    ~base_dir:base
+    ~keeper_name
+    ~user_content:queued_message.Keeper_chat_queue.content
+    ~user_attachments:queued_message.attachments
+    ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+    ~assistant_content:"sentinel: Blocking precondition was dispatched"
+    ()
+
+let drain_after_resolution ~base ~clock ~keeper_name =
+  let captured, first, handle_turn = capturing () in
+  with_consumer_switch (fun sw ->
+    Keeper_chat_consumer.start ~sw ~clock ~base_path:base
+      ~dispatch_deadline_sec:test_dispatch_deadline_sec
+      ~on_stalled:unexpected_on_stalled ~handle_turn;
+    match await_or_timeout ~clock ~secs:5.0 first with
+    | `Got -> ()
+    | `Timeout -> check "deferred lease drains after approval resolution" false);
+  check "deferred lease is delivered exactly once after resolution"
+    (List.length !captured = 1);
+  check "resolved Blocking gate permits ACK" (Keeper_chat_queue.length ~keeper_name = 0)
+
+let test_prelease_blocking_approval_leaves_message_retryable () =
+  Printf.printf
+    "Test: pre-lease Blocking ownership leaves queued chat retryable\n%!";
+  with_env (fun ~base ~clock ->
+    Keeper_chat_queue.configure_persistence ~base_path:base;
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name
+         (discord_msg ~content:"wait for approval" ~channel_id:"chan-prelease"
+            ~user_id:"u-prelease" ~ts:1.0)
+        : string);
+    let approval_id =
+      submit_blocking_approval ~base ~keeper_name ~kind:"prelease"
+    in
+    let calls = ref 0 in
+    let handle_turn = transport_failure_sentinel ~base calls in
+    with_consumer_switch (fun sw ->
+      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
+        ~dispatch_deadline_sec:test_dispatch_deadline_sec
+        ~on_stalled:unexpected_on_stalled ~handle_turn;
+      (* The consumer polls immediately; this bounded window lets that first
+         admission decision run without waiting for the one-second cadence. *)
+      Eio.Time.sleep clock 0.3);
+    check "pre-lease gate does not dispatch the queued turn" (!calls = 0);
+    check "pre-lease gate leaves the message queued"
+      (Keeper_chat_queue.length ~keeper_name = 1);
+    check "pre-lease gate creates no transport-failure row"
+      (not (has_transport_failure_row ~base ~keeper_name));
+    resolve_blocking_approval ~base approval_id;
+    drain_after_resolution ~base ~clock ~keeper_name)
+
+let test_postlease_blocking_approval_nacks_without_failure_row () =
+  Printf.printf
+    "Test: Blocking ownership won after lease nacks queued chat for retry\n%!";
+  with_env (fun ~base ~clock ->
+    Keeper_chat_queue.configure_persistence ~base_path:base;
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name
+         (discord_msg ~content:"approval raced the lease"
+            ~channel_id:"chan-postlease" ~user_id:"u-postlease" ~ts:1.0)
+        : string);
+    let hook_ran, set_hook_ran = Eio.Promise.create () in
+    let approval_id = ref None in
+    Keeper_chat_consumer.For_testing.set_after_lease_hook
+      (fun ~base_path ~keeper_name:leased_keeper ~lease_id ->
+        check "post-lease hook receives the active workspace"
+          (String.equal base_path base);
+        check "post-lease hook receives the leased keeper"
+          (String.equal leased_keeper keeper_name);
+        check "post-lease hook receives a concrete lease id"
+          (String.trim lease_id <> "");
+        approval_id :=
+          Some
+            (submit_blocking_approval ~base:base_path
+               ~keeper_name:leased_keeper ~kind:"postlease");
+        Eio.Promise.resolve set_hook_ran ());
+    let calls = ref 0 in
+    let handle_turn = transport_failure_sentinel ~base calls in
+    with_consumer_switch (fun sw ->
+      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
+        ~dispatch_deadline_sec:test_dispatch_deadline_sec
+        ~on_stalled:unexpected_on_stalled ~handle_turn;
+      (match await_or_timeout ~clock ~secs:5.0 hook_ran with
+       | `Got -> ()
+       | `Timeout -> check "post-lease race hook ran" false);
+      match
+        await_queue_depth_or_timeout ~clock ~keeper_name ~expected:1 ~secs:3.0
+      with
+      | `Got -> ()
+      | `Timeout -> check "post-lease Blocking winner nacks the lease" false);
+    Keeper_chat_consumer.For_testing.clear_after_lease_hook ();
+    check "post-lease Blocking winner does not dispatch" (!calls = 0);
+    check "post-lease Blocking winner keeps the message retryable"
+      (Keeper_chat_queue.length ~keeper_name = 1);
+    check "post-lease Blocking winner creates no transport-failure row"
+      (not (has_transport_failure_row ~base ~keeper_name));
+    Keeper_chat_queue.For_testing.reset ();
+    Keeper_chat_queue.configure_persistence ~base_path:base;
+    check "nacked lease replays as queued after restart"
+      (Keeper_chat_queue.length ~keeper_name = 1);
+    (match !approval_id with
+     | Some id -> resolve_blocking_approval ~base id
+     | None -> check "post-lease Blocking approval was installed" false);
+    drain_after_resolution ~base ~clock ~keeper_name)
 
 let test_drains_discord_to_handle_turn () =
   Printf.printf "Test: consumer drains a Discord queue entry to handle_turn\n%!";
@@ -354,6 +503,8 @@ let test_failed_nack_persist_retries_without_wedging_keeper () =
         check "failed nack persistence is retried and requeues" false))
 
 let () =
+  test_prelease_blocking_approval_leaves_message_retryable ();
+  test_postlease_blocking_approval_nacks_without_failure_row ();
   test_drains_discord_to_handle_turn ();
   test_coalesces_same_source_run ();
   test_gates_while_turn_in_flight ();

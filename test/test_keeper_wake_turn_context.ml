@@ -222,6 +222,7 @@ let test_threaded_stimulus_decision_renders_wake_reason () =
      scheduler decision knows the trigger, the legacy recompute cannot. *)
   let decision =
     WO.keeper_cycle_decision
+      ~base_path:""
       ~event_queue_triggers:[ WO.Bootstrap_stimulus ]
       ~meta base_observation
   in
@@ -240,6 +241,7 @@ let test_hitl_resolution_steers_continuation () =
      keeper_surface_post instead of only proceeding on its own state. *)
   let decision =
     WO.keeper_cycle_decision
+      ~base_path:""
       ~event_queue_triggers:[ WO.Hitl_resolved_stimulus ]
       ~meta base_observation
   in

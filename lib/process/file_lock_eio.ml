@@ -1,12 +1,12 @@
-(** File_lock_eio — Cooperative per-key locking via Eio.Mutex + flock.
+(** File_lock_eio — Cooperative per-key atomic locking + flock.
 
     Two-layer locking for local filesystem paths:
-    1. Eio.Mutex (cooperative) — prevents blocking the Eio fiber scheduler
+    1. Atomic per-path ownership — cross-domain safe; contended Eio fibers yield
     2. Unix.lockf F_TLOCK (non-blocking) — preserves cross-process safety
 
-    The Eio.Mutex serializes fibers within the process so most contention
-    is resolved cooperatively.  The flock is acquired non-blocking after
-    the Eio.Mutex; if another process holds it, we yield and retry.
+    Atomic ownership serializes callers within the process without depending on
+    global Eio runtime registration. The flock is acquired non-blocking after
+    that lock; if another process holds it, we yield and retry.
 
     Distributed backend paths (Some key in workspace_utils_ops.ml) are not
     affected — this only replaces the local filesystem lock path. *)
@@ -63,19 +63,10 @@ let rec atomic_update atomic f =
     atomic_update atomic f
   end
 
-let rec atomic_update_with_result atomic f =
-  let old_val = Atomic.get atomic in
-  let new_val, result = f old_val in
-  if Atomic.compare_and_set atomic old_val new_val then result
-  else begin
-    observe_cas_retry ();
-    atomic_update_with_result atomic f
-  end
-
 type lock_entry = {
-  mu : Eio.Mutex.t;
+  held : bool Atomic.t;
   mutable last_used : float;
-  active : int Atomic.t;   (** Number of fibers currently holding or waiting on this mutex *)
+  active : int Atomic.t;   (** Number of fibers currently holding or waiting on this lock *)
 }
 
 type table_state = {
@@ -114,22 +105,51 @@ let prune_stale_entries () =
     (e.g. in unit tests that don't use Eio_main.run). *)
 let get_entry path =
   prune_stale_entries ();
-  let entry =
-    atomic_update_with_result table (fun state ->
+  let rec acquire_reference () =
+    let state = Atomic.get table in
+    let entry, updated_state =
       match SMap.find_opt path state.entries with
-      | Some entry ->
-        entry.last_used <- Time_compat.now ();
-        (state, entry)
+      | Some entry -> entry, state
       | None ->
-        let entry = { mu = Eio.Mutex.create (); last_used = Time_compat.now (); active = Atomic.make 0 } in
-        let entries = SMap.add path entry state.entries in
-        (publish_entries state entries, entry))
+        let entry =
+          { held = Atomic.make false
+          ; last_used = Time_compat.now ()
+          ; active = Atomic.make 0
+          }
+        in
+        entry, publish_entries state (SMap.add path entry state.entries)
+    in
+    (* Mark the entry active before publishing/confirming the table snapshot.
+       Otherwise a concurrent prune can remove an inactive entry after lookup
+       but before this increment, allowing a second lock for the same path. *)
+    Atomic.incr entry.active;
+    if Atomic.compare_and_set table state updated_state
+    then (
+      entry.last_used <- Time_compat.now ();
+      entry)
+    else (
+      let _previous_active = Atomic.fetch_and_add entry.active (-1) in
+      observe_cas_retry ();
+      acquire_reference ())
   in
-  Atomic.incr entry.active;
-  entry
+  acquire_reference ()
 
 let release_entry entry =
-  ignore (Atomic.fetch_and_add entry.active (-1))
+  let _previous_active = Atomic.fetch_and_add entry.active (-1) in
+  ()
+
+let yield_while_contended () =
+  try Eio.Fiber.yield () with
+  | Effect.Unhandled _ -> Unix.sleepf 0.0005
+
+let rec acquire_entry_lock entry =
+  if Atomic.compare_and_set entry.held false true
+  then ()
+  else (
+    yield_while_contended ();
+    acquire_entry_lock entry)
+
+let release_entry_lock entry = Atomic.set entry.held false
 
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
@@ -225,16 +245,22 @@ let release_flock_fd fd =
       (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
       Unix.close fd)
 
-(** Run [f] while holding only the cooperative per-path mutex.
+(** Run [f] while holding only the cooperative per-path atomic lock.
     Use this for in-memory backends that need single-process fiber
     serialization but do not have a real filesystem artifact to flock. *)
 let with_mutex path f =
   let entry = get_entry path in
   Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
     ~finally:(fun () -> release_entry entry)
-    (fun () -> Eio_guard.with_mutex entry.mu f)
+    (fun () ->
+      acquire_entry_lock entry;
+      Common.protect
+        ~module_name:"file_lock_eio"
+        ~finally_label:"release_entry_lock"
+        ~finally:(fun () -> release_entry_lock entry)
+        f)
 
-(** Run [f] while holding both the cooperative Eio.Mutex and an
+(** Run [f] while holding both the cooperative per-path lock and an
     OS-level flock on [path].lock. The flock uses non-blocking F_TLOCK
     retries; sleep/yield stays scheduler-friendly whether or not a clock
     is provided. Max 200 attempts (~2s with sleeps). *)
@@ -249,7 +275,7 @@ let with_lock ?clock path f =
       ~finally:(fun () -> release_flock_fd fd)
       f
   in
-  with_mutex path (fun () -> run_with_flock ())
+  with_mutex path run_with_flock
 
 (** Number of tracked lock paths (for diagnostics). *)
 let lock_count () = SMap.cardinal (Atomic.get table).entries

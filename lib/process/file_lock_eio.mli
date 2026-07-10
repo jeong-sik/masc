@@ -1,12 +1,11 @@
-(** File_lock_eio — cooperative per-key locking via [Eio.Mutex] + [flock].
+(** File_lock_eio — cooperative per-key atomic locking + [flock].
 
     Two-layer locking for local filesystem paths:
 
-    + {b Eio.Mutex} (cooperative) — prevents blocking the Eio fiber
-      scheduler; serialises fibers within the process so most contention
-      is resolved cooperatively.
+    + {b Atomic per-path ownership} — cross-domain safe; contended Eio fibers
+      yield, and callers do not depend on global Eio runtime registration.
     + {b Unix.lockf F_TLOCK} (non-blocking) — preserves cross-process
-      safety; acquired after the Eio.Mutex. If another process holds
+      safety; acquired after the per-path lock. If another process holds
       the flock the caller yields and retries.
 
     Distributed backend paths (non-local keys in
@@ -71,14 +70,15 @@ val release_flock_fd : Unix.file_descr -> unit
 
 (** {1 High-level scoped locking} *)
 
-(** [with_mutex path f] runs [f] while holding the cooperative
-    per-[path] Eio.Mutex only. Use for in-memory backends that need
-    single-process fiber serialisation but have no filesystem
+(** [with_mutex path f] runs [f] while holding the cooperative,
+    cross-domain-safe per-[path] lock only. Contended Eio callers yield; callers
+    outside an Eio runtime use a short blocking backoff. Use for in-memory
+    backends that need single-process serialisation but have no filesystem
     artifact to flock. *)
 val with_mutex : string -> (unit -> 'a) -> 'a
 
 (** [with_lock ?clock path f] runs [f] while holding both the
-    cooperative Eio.Mutex and an OS-level flock on [path ^ ".lock"].
+    cooperative per-path lock and an OS-level flock on [path ^ ".lock"].
     The flock uses non-blocking F_TLOCK retries — max 200 attempts,
     ~2s total with default sleeps. *)
 val with_lock :

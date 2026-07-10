@@ -7,7 +7,7 @@
        to capture the same (tool_name, reason_code) emitted on SSE. The ring
        gives operators a "last N minutes" view without tailing JSONL.
     2. Live approval queue state returned by
-       [Keeper_approval_queue.list_pending_json ()]. Approval queue metrics
+       [Keeper_approval_queue.list_pending_json ~base_path]. Approval queue metrics
        are computed from the current pending set; this module does not parse
        the approval audit JSONL.
 
@@ -175,8 +175,8 @@ type approval_summary = {
   oldest_pending_sec : float option;
 }
 
-let approval_queue_summary () : approval_summary =
-  let pending_json = Keeper_approval_queue.list_pending_json () in
+let approval_queue_summary ~base_path : approval_summary =
+  let pending_json = Keeper_approval_queue.list_pending_json ~base_path in
   let waits =
     match pending_json with
     | `List items ->
@@ -234,9 +234,9 @@ let approval_queue_json (summary : approval_summary) : Yojson.Safe.t =
 
 (** Top-level endpoint payload. *)
 let governance_tool_events_json ?(now_ts = Unix.gettimeofday ())
-    ~window_minutes () : Yojson.Safe.t =
+    ~base_path ~window_minutes () : Yojson.Safe.t =
   let rejections = tool_rejections_json ~window_minutes ~now_ts () in
-  let approval = approval_queue_summary () in
+  let approval = approval_queue_summary ~base_path in
   `Assoc [
     ("generated_at", `String (Masc_domain.iso8601_of_unix_seconds now_ts));
     ("window_minutes", `Int window_minutes);

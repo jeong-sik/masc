@@ -11,20 +11,77 @@ module Types = Masc_domain
 
 module GP = Masc.Governance_pipeline
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
-module AQ = Masc.Keeper_approval_queue
+module Raw_AQ = Masc.Keeper_approval_queue
+
+module AQ = struct
+  include Raw_AQ
+
+  let pending_scopes : (string, string) Hashtbl.t = Hashtbl.create 64
+
+  let base_path_for_id_opt id =
+    match Hashtbl.find_opt pending_scopes id with
+    | Some _ as scope -> scope
+    | None ->
+      (match For_testing.pending_base_path ~id with
+       | Some base_path ->
+         Hashtbl.replace pending_scopes id base_path;
+         Some base_path
+       | None -> None)
+  ;;
+
+  let resolve ~id ~decision =
+    Raw_AQ.resolve
+      ~base_path:(Option.value ~default:"" (base_path_for_id_opt id))
+      ~id
+      ~decision
+  ;;
+
+  let get_pending_entry ~id =
+    match base_path_for_id_opt id with
+    | Some base_path -> Raw_AQ.get_pending_entry ~base_path ~id
+    | None -> None
+  ;;
+
+  let get_pending_json ~id =
+    match base_path_for_id_opt id with
+    | Some base_path -> Raw_AQ.get_pending_json ~base_path ~id
+    | None -> None
+  ;;
+
+  let pending_count = For_testing.pending_count
+  let pending_count_for_keeper = For_testing.pending_count_for_keeper
+  let has_blocking_pending_for_keeper = For_testing.has_blocking_pending_for_keeper
+  let has_pending_for_keeper = For_testing.has_pending_for_keeper
+  let list_pending_entries = For_testing.list_pending_entries
+end
 module OA = Masc.Operator_approval
 module SDH = Server_dashboard_http
 module KT = Keeper_types
 module Mcp_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
 
-let install_noop_resolution_delivery_hook () =
+let install_durable_resolution_delivery_hook () =
   AQ.set_approval_resolution_wake_hook
     (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-      Ok (fun () -> ()))
+      ~base_path ~keeper_name ~approval_id ~decision ~channel ->
+      let resolution = Keeper_event_queue.{ approval_id; decision; channel } in
+      let stimulus : Keeper_event_queue.stimulus =
+        { post_id = Keeper_event_queue.hitl_resolution_post_id resolution
+        ; urgency = Keeper_event_queue.Immediate
+        ; arrived_at = Unix.gettimeofday ()
+        ; payload = Keeper_event_queue.Hitl_resolved resolution
+        }
+      in
+      match
+        Masc.Keeper_registry_event_queue.enqueue_durable_result
+          ~base_path
+          keeper_name
+          stimulus
+      with
+      | Error _ as err -> err
+      | Ok () -> Ok (fun () -> ()))
 
-let () = install_noop_resolution_delivery_hook ()
+let () = install_durable_resolution_delivery_hook ()
 
 let check = Alcotest.(check string)
 
@@ -84,21 +141,9 @@ let approval_decision_is_reject = function
 ;;
 
 let pending_id_for_keeper ~keeper_name =
-  match AQ.list_pending_json () with
-  | `List entries ->
-    List.find_map
-      (function
-        | `Assoc kvs ->
-          (match
-             List.assoc_opt "keeper_name" kvs,
-             List.assoc_opt "id" kvs
-           with
-           | Some (`String name), Some (`String id)
-             when String.equal name keeper_name -> Some id
-           | _ -> None)
-        | _ -> None)
-      entries
-  | _ -> None
+  AQ.list_pending_entries ()
+  |> List.find_map (fun (entry : AQ.pending_approval) ->
+    if String.equal entry.keeper_name keeper_name then Some entry.id else None)
 
 let with_env key value f =
   let old = Sys.getenv_opt key in
@@ -536,7 +581,7 @@ let test_approval_queue_submit_and_resolve () =
   let pending_count = AQ.pending_count () in
   Alcotest.(check bool) "1 pending" true (pending_count >= 1);
   (* Get pending list to find ID *)
-  let pending_json = AQ.list_pending_json () in
+  let pending_json = AQ.list_pending_json ~base_path in
   let entries = match pending_json with
     | `List entries -> entries
     | _ -> Alcotest.fail "expected list"
@@ -584,7 +629,7 @@ let test_approval_queue_reject () =
     result := Some decision
   );
   Eio.Fiber.yield ();
-  let pending_json = AQ.list_pending_json () in
+  let pending_json = AQ.list_pending_json ~base_path in
   let id = match pending_json with
     | `List (`Assoc kvs :: _) ->
       (match List.assoc_opt "id" kvs with
@@ -645,13 +690,13 @@ let test_approval_queue_expire_skips_critical () =
     (fun () ->
   let resolution = ref None in
   let id =
-    AQ.submit_pending
+    AQ.submit_pending_observer
       ~keeper_name:"test-keeper-critical"
       ~tool_name:"keeper_continue_after_reconcile"
       ~input:(`Assoc [])
       ~base_path
       ~risk_level:AQ.Critical
-      ~on_resolution:(fun decision -> resolution := Some decision)
+      ~on_resolution_observer:(fun decision -> resolution := Some decision)
       ()
   in
   let pending_before = AQ.pending_count_for_keeper ~keeper_name:"test-keeper-critical" in
@@ -962,13 +1007,13 @@ let test_background_pending_callback_and_keeper_lookup () =
   let initial_count = AQ.pending_count () in
   let callback_result = ref None in
   let id =
-    AQ.submit_pending
+    AQ.submit_pending_observer
       ~keeper_name:"gate-keeper"
       ~tool_name:"keeper_continue_after_partial_commit"
       ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
       ~base_path
-      ~on_resolution:(fun decision -> callback_result := Some decision)
+      ~on_resolution_observer:(fun decision -> callback_result := Some decision)
       ()
   in
   Alcotest.(check bool) "keeper has pending approval" true
@@ -997,24 +1042,24 @@ let test_background_pending_reuses_existing_entry () =
   let first_callback = ref None in
   let second_callback = ref None in
   let id1 =
-    AQ.submit_pending
+    AQ.submit_pending_observer
       ~keeper_name:"gate-keeper"
       ~tool_name:"keeper_continue_after_partial_commit"
       ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
       ~base_path
-      ~on_resolution:(fun decision -> first_callback := Some decision)
+      ~on_resolution_observer:(fun decision -> first_callback := Some decision)
       ()
   in
   let after_first = AQ.pending_count () in
   let id2 =
-    AQ.submit_pending
+    AQ.submit_pending_observer
       ~keeper_name:"gate-keeper"
       ~tool_name:"keeper_continue_after_partial_commit"
       ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
       ~base_path
-      ~on_resolution:(fun decision -> second_callback := Some decision)
+      ~on_resolution_observer:(fun decision -> second_callback := Some decision)
       ()
   in
   Alcotest.(check string) "existing pending id reused" id1 id2;
@@ -1039,7 +1084,7 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
   let initial_count = AQ.pending_count () in
   let callback_result = ref [] in
   let id1 =
-    AQ.submit_pending
+    AQ.submit_pending_observer
       ~keeper_name:"gate-keeper"
       ~tool_name:"tool_execute"
       ~input:
@@ -1049,11 +1094,11 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
           ])
       ~risk_level:AQ.Medium
       ~base_path
-      ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
+      ~on_resolution_observer:(fun decision -> callback_result := decision :: !callback_result)
       ()
   in
   let id2 =
-    AQ.submit_pending
+    AQ.submit_pending_observer
       ~keeper_name:"gate-keeper"
       ~tool_name:"tool_execute"
       ~input:
@@ -1063,7 +1108,7 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
           ])
       ~risk_level:AQ.High
       ~base_path
-      ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
+      ~on_resolution_observer:(fun decision -> callback_result := decision :: !callback_result)
       ()
   in
   Alcotest.(check bool) "distinct pending ids" true (id1 <> id2);
@@ -1090,7 +1135,7 @@ let test_approval_queue_get_pending_detail () =
     ]
   in
   let id =
-    AQ.submit_pending
+    AQ.submit_pending_observer
       ~keeper_name:"detail-keeper"
       ~tool_name:"tool_edit_file"
       ~base_path
@@ -1101,7 +1146,7 @@ let test_approval_queue_get_pending_detail () =
       ~goal_id:"goal-runtime-trust"
       ~goal_ids:[ "goal-runtime-trust"; "goal-mid" ]
       ~runtime_contract:(`Assoc [ ("backend", `String "docker") ])
-      ~on_resolution:(fun decision -> callback_result := Some decision)
+      ~on_resolution_observer:(fun decision -> callback_result := Some decision)
       ()
   in
   let open Yojson.Safe.Util in
@@ -1168,7 +1213,7 @@ let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
     false
     (has_assoc_key "sandbox_profile" runtime_contract);
   let id =
-    AQ.submit_pending
+    AQ.submit_pending_observer
       ~keeper_name:"redacted-contract-keeper"
       ~tool_name:"tool_execute"
       ~input:(`Assoc [ ("cmd", `String "git status") ])
@@ -1178,7 +1223,7 @@ let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
       ~backend:"docker"
       ~runtime_contract
       ~base_path
-      ~on_resolution:(fun _ -> ())
+      ~on_resolution_observer:(fun _ -> ())
       ()
   in
   let open Yojson.Safe.Util in
@@ -1206,13 +1251,13 @@ let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
 let test_resolve_with_policy_remembers_medium_allow () =
   with_eio_base_path @@ fun base_path ->
       let id =
-        AQ.submit_pending
+        AQ.submit_pending_observer
           ~base_path
           ~keeper_name:"remember-keeper"
           ~tool_name:"masc_transition"
           ~input:(`Assoc [ ("action", `String "claim") ])
           ~risk_level:AQ.Medium
-          ~on_resolution:(fun _ -> ())
+          ~on_resolution_observer:(fun _ -> ())
           ()
       in
       match
@@ -1234,13 +1279,13 @@ let test_resolve_with_policy_remembers_medium_allow () =
 let test_resolve_with_policy_does_not_remember_high_allow () =
   with_eio_base_path @@ fun base_path ->
       let id =
-        AQ.submit_pending
+        AQ.submit_pending_observer
           ~base_path
           ~keeper_name:"remember-keeper"
           ~tool_name:"tool_edit_file"
           ~input:(`Assoc [("path", `String "lib/example.ml")])
           ~risk_level:AQ.High
-          ~on_resolution:(fun _ -> ())
+          ~on_resolution_observer:(fun _ -> ())
           ()
       in
       match
@@ -1273,13 +1318,13 @@ let test_runtime_contract_policy_uses_workspace_base_path () =
           with_env "MASC_BASE_PATH_INPUT" env_base @@ fun () ->
           let keeper_name = "runtime-contract-policy-keeper" in
           let id =
-            AQ.submit_pending
+            AQ.submit_pending_observer
               ~base_path:config.base_path
               ~keeper_name
               ~tool_name:"masc_transition"
               ~input:(`Assoc [ ("action", `String "claim") ])
               ~risk_level:AQ.Medium
-              ~on_resolution:(fun _ -> ())
+              ~on_resolution_observer:(fun _ -> ())
               ()
           in
           (match
@@ -1341,7 +1386,7 @@ let test_dashboard_resolve_and_delete_rules_use_workspace_base_path () =
       cleanup_dir workspace_base)
     (fun () ->
       let id =
-        AQ.submit_pending
+        AQ.submit_pending_observer
           ~keeper_name:"dashboard-workspace-keeper"
           ~tool_name:"masc_transition"
           ~input:
@@ -1352,7 +1397,7 @@ let test_dashboard_resolve_and_delete_rules_use_workspace_base_path () =
               ])
           ~risk_level:AQ.Medium
           ~base_path:workspace_base
-          ~on_resolution:(fun _ -> ())
+          ~on_resolution_observer:(fun _ -> ())
           ()
       in
       let resolve_args =
@@ -1403,13 +1448,13 @@ let test_approval_resolve_missing_decision_is_rejected () =
     (fun () ->
       let resolved = ref None in
       let id =
-        AQ.submit_pending
+        AQ.submit_pending_observer
           ~keeper_name:"failclosed-keeper"
           ~tool_name:"masc_transition"
           ~input:(`Assoc [ ("action", `String "claim") ])
           ~risk_level:AQ.Medium
           ~base_path:workspace_base
-          ~on_resolution:(fun d -> resolved := Some d)
+          ~on_resolution_observer:(fun d -> resolved := Some d)
           ()
       in
       (* [decision] intentionally omitted. *)
@@ -1439,17 +1484,17 @@ let test_approval_delivery_failure_is_unavailable () =
   AQ.For_testing.clear_approval_resolution_wake_hook ();
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       cleanup_dir workspace_base)
     (fun () ->
        let id =
-         AQ.submit_pending
+         AQ.submit_pending_observer
            ~keeper_name:"dashboard-delivery-failure-keeper"
            ~tool_name:"masc_transition"
            ~input:(`Assoc [ "action", `String "claim" ])
            ~risk_level:AQ.Medium
            ~base_path:workspace_base
-           ~on_resolution:(fun _ -> ())
+           ~on_resolution_observer:(fun _ -> ())
            ()
        in
        let args =
@@ -1495,7 +1540,7 @@ let test_submit_pending_audit_uses_workspace_base_path () =
       cleanup_dir workspace_base)
     (fun () ->
       ignore
-        (AQ.submit_pending
+        (AQ.submit_pending_observer
            ~keeper_name
            ~tool_name:"masc_transition"
            ~input:
@@ -1506,7 +1551,7 @@ let test_submit_pending_audit_uses_workspace_base_path () =
                ])
            ~risk_level:AQ.High
            ~base_path:workspace_base
-           ~on_resolution:(fun _ -> ())
+           ~on_resolution_observer:(fun _ -> ())
            ());
       AQ.expire_stale ~max_wait_s:(-1.0);
       let workspace_events = audit_event_names ~base_path:workspace_base ~keeper_name in
@@ -1764,7 +1809,7 @@ let test_callback_nonblocking_high_returns_without_suspending () =
   AQ.For_testing.reset_audit_store ();
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       AQ.For_testing.reset_audit_store ();
       cleanup_dir base_path)
     (fun () ->
@@ -1896,13 +1941,13 @@ let test_callback_manual_mode_preserves_remembered_medium_policy () =
   Eio.Switch.run @@ fun sw ->
       let keeper_name = "remember-keeper" in
       let id =
-        AQ.submit_pending
+        AQ.submit_pending_observer
           ~base_path
           ~keeper_name
           ~tool_name:"masc_transition"
           ~input:(`Assoc [ ("action", `String "claim") ])
           ~risk_level:AQ.Medium
-          ~on_resolution:(fun _ -> ())
+          ~on_resolution_observer:(fun _ -> ())
           ()
       in
       (match
@@ -1940,13 +1985,13 @@ let test_callback_manual_mode_preserves_remembered_soft_forbidden () =
     "low"
     (GP.assess_risk ~tool_name ~input |> GP.risk_level_to_string);
   let id =
-    AQ.submit_pending
+    AQ.submit_pending_observer
       ~base_path
       ~keeper_name
       ~tool_name
       ~input
       ~risk_level:AQ.Low
-      ~on_resolution:(fun _ -> ())
+      ~on_resolution_observer:(fun _ -> ())
       ()
   in
   (match

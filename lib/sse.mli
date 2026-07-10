@@ -18,12 +18,14 @@ type session_kind =
 type broadcast_target =
   | All
   | Observers
+  | Workspace_observers of string
   | Agent_streams
   | Presence_only
 
 type client = {
   id : int;
   kind : session_kind;
+  base_path : string;
   event_stream : string Eio.Stream.t;
   last_event_id : int Atomic.t;
   created_at : float;
@@ -131,6 +133,10 @@ val current_id : unit -> int
 
 val broadcast : Yojson.Safe.t -> unit
 val broadcast_to : broadcast_target -> Yojson.Safe.t -> unit
+val broadcast_workspace_observers : base_path:string -> Yojson.Safe.t -> unit
+(** Broadcast a live-only refresh hint to observer sessions authenticated for
+    exactly [base_path]. Fleet-wide replay and external subscribers are skipped
+    because those paths cannot preserve workspace authority. *)
 val broadcast_presence : Yojson.Safe.t -> unit
 val send_to : string -> Yojson.Safe.t -> unit
 val pop : string -> string option

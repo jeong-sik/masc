@@ -25,6 +25,12 @@ val enqueue_durable_result :
     write. An existing identical [post_id] is idempotent; the same [post_id]
     with a different typed payload is an explicit conflict. *)
 
+module For_testing : sig
+  val set_before_durable_live_publication_hook : (unit -> unit) option -> unit
+  (** Install a deterministic interleaving point after durable commit and
+      before publication to the current registry entry. Tests must reset it. *)
+end
+
 (** Read-only snapshot of the keeper's queue. If the keeper is not registered,
     read the durable snapshot so diagnostics still expose pending replay. *)
 val snapshot : base_path:string -> string -> Keeper_event_queue.t
@@ -40,8 +46,7 @@ val dequeue_when :
   -> Keeper_event_queue.stimulus option
 (** Remove and return the head stimulus only when [ready head] is [true]. A
     rejected head remains in the live and durable queue without entering the
-    in-flight lease. This is the exact readiness gate for durable events whose
-    producer has not completed its domain callback yet. *)
+    in-flight lease. *)
 
 (** Put previously drained stimuli back at the front of the queue. This is a
     crash-recovery primitive: if the keepalive cycle dies after dequeue/drain

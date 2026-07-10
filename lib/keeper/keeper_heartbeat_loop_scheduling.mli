@@ -21,6 +21,7 @@ val decide_keepalive_scheduling :
   ?reactive_wake:bool ->
   ?event_queue_triggers:Keeper_world_observation.event_queue_trigger list ->
   stop:bool Atomic.t ->
+  base_path:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   keepalive_scheduling_decision

@@ -868,6 +868,7 @@ let test_runtime_backpressure_blocks_requested_turn () =
   in
   let decision =
     KHL.decide_keepalive_scheduling
+      ~base_path:""
       ~runtime_id_of_meta:(fun _ -> "runtime-test")
       ~runtime_resilience_of_name:(fun _ -> Some "provider_capacity")
       ~stop:(Atomic.make false)
@@ -890,6 +891,7 @@ let test_keeper_health_backpressure_uses_keeper_name () =
   let consulted = ref [] in
   let decision =
     KHL.decide_keepalive_scheduling
+      ~base_path:""
       ~runtime_id_of_meta:(fun _ -> "runtime-test")
       ~runtime_resilience_of_name:(fun _ ->
         fail "runtime resilience should not be consulted after keeper health blocks")
@@ -920,6 +922,7 @@ let test_pacing_block_delays_requested_turn () =
   let consulted = ref [] in
   let decision =
     KHL.decide_keepalive_scheduling
+      ~base_path:""
       ~runtime_id_of_meta:(fun _ -> "runtime-test")
       ~pacing_block_of_name:(fun keeper_name ->
         consulted := keeper_name :: !consulted;
@@ -940,6 +943,7 @@ let test_pacing_block_delays_requested_turn () =
     (List.mem "pacing_pending" decision.verdict_reasons);
   let admitted =
     KHL.decide_keepalive_scheduling
+      ~base_path:""
       ~runtime_id_of_meta:(fun _ -> "runtime-test")
       ~stop:(Atomic.make false)
       ~meta

@@ -46,6 +46,7 @@ module Observations = Keeper_heartbeat_loop_observations
 let run_keeper_cycle_admitted
       ?event_bus
       ?hitl_resolution
+      ?on_stop_reason
       ~ctx
       ~meta_after_triage
       ~stop
@@ -70,6 +71,7 @@ let run_keeper_cycle_admitted
         ~turn_decision
         ~shared_context
         ?event_bus
+        ?on_stop_reason
         ())
   with
   | Error err ->
@@ -137,6 +139,7 @@ let run_keeper_cycle_admitted
 let run_keeper_cycle
       ?event_bus
       ?hitl_resolution
+      ?on_stop_reason
       ~ctx
       ~meta_after_triage
       ~stop
@@ -159,7 +162,8 @@ let run_keeper_cycle
          ~shared_context
          ~wake
          ?event_bus
-         ?hitl_resolution)
+         ?hitl_resolution
+         ?on_stop_reason)
   with
   | `Ran updated -> updated
   | `Busy in_flight ->

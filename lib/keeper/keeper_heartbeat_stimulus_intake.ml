@@ -321,11 +321,13 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
     batch
 ;;
 
-let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
+let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
   | Keeper_event_queue.Hitl_resolved resolution ->
     Option.is_none
-      (Keeper_approval_queue.get_pending_entry ~id:resolution.approval_id)
+      (Keeper_approval_queue.get_pending_entry
+         ~base_path
+         ~id:resolution.approval_id)
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.No_progress_recovery
@@ -358,7 +360,7 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
          Keeper_registry_event_queue.dequeue_when
            ~base_path:ctx.config.base_path
            meta_after_triage.name
-           ~ready:stimulus_ready_for_intake
+           ~ready:(stimulus_ready_for_intake ~base_path:ctx.config.base_path)
        with
        | None -> [], []
        | Some stim -> consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim, [ stim ])

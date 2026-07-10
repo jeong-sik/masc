@@ -201,7 +201,11 @@ let test_operator_pause_survives_stale_heartbeat_retry () =
   ensure_fs env;
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"operator-pause-cas" in
@@ -240,21 +244,145 @@ let test_operator_pause_survives_stale_heartbeat_retry () =
         updated_at = Keeper_meta_contract.now_iso ();
       }
     in
-    (match
-       Keeper_meta_store.write_meta_with_merge
-         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk config stale_completion
-     with
-     | Ok () -> ()
-     | Error e -> fail ("stale retry write failed: " ^ e));
+    let persisted =
+      match
+        Keeper_meta_store.write_meta_with_merge_returning
+          ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+          config
+          stale_completion
+      with
+      | Ok persisted -> persisted
+      | Error e -> fail ("stale retry write failed: " ^ e)
+    in
     let final = match Keeper_meta_store.read_meta config "operator-pause-cas" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
     check bool "operator pause survives stale retry" true final.paused;
+    check bool "returned snapshot reports preserved operator pause" true persisted.paused;
+    check int
+      "returned snapshot carries authoritative version"
+      final.meta_version
+      persisted.meta_version;
     check bool "auto resume stays disabled" true
       (Option.is_none final.auto_resume_after_sec);
     check bool "stale blocker stays cleared" true
-      (Option.is_none final.runtime.last_blocker))
+      (Option.is_none final.runtime.last_blocker);
+    ignore
+      (Keeper_registry.register
+         ~base_path:config.base_path
+         final.name
+         stale_completion);
+    let live =
+      match Keeper_registry.get ~base_path:config.base_path final.name with
+      | Some entry -> entry
+      | None -> fail "post-install durable reconciliation lost registry entry"
+    in
+    check int
+      "stale registrar refreshes authoritative meta version"
+      final.meta_version
+      live.meta.meta_version;
+    check bool
+      "stale registrar preserves durable pause"
+      true
+      live.meta.paused;
+    check bool
+      "stale registrar derives Paused FSM"
+      true
+      (live.phase = Keeper_state_machine.Paused))
+
+let test_concurrent_stale_writers_have_one_cas_winner () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let guard_was_ready = Eio_guard.is_ready () in
+  Eio_guard.disable ();
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      if guard_was_ready then Eio_guard.enable () else Eio_guard.disable ();
+      cleanup_dir base_dir)
+    (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let initial = make_meta ~name:"concurrent-cas" in
+    (match Keeper_meta_store.write_meta config initial with
+     | Ok () -> ()
+     | Error err -> fail ("seed write failed: " ^ err));
+    let stale =
+      match Keeper_meta_store.read_meta config initial.name with
+      | Ok (Some meta) -> meta
+      | Ok None -> fail "seed meta disappeared"
+      | Error err -> fail ("seed read failed: " ^ err)
+    in
+    let first = { stale with active_goal_ids = [ "first" ] } in
+    let second = { stale with active_goal_ids = [ "second" ] } in
+    let launch candidate =
+      Eio.Fiber.yield ();
+      Keeper_meta_store.write_meta_returning config candidate
+    in
+    let first_result = ref None in
+    let second_result = ref None in
+    Eio.Fiber.both
+      (fun () -> first_result := Some (launch first))
+      (fun () -> second_result := Some (launch second));
+    let first_result =
+      Option.value
+        ~default:(Error "first concurrent writer did not complete")
+        !first_result
+    in
+    let second_result =
+      Option.value
+        ~default:(Error "second concurrent writer did not complete")
+        !second_result
+    in
+    let successes, conflicts =
+      List.fold_left
+        (fun (successes, conflicts) result ->
+           match result with
+           | Ok persisted -> persisted :: successes, conflicts
+           | Error err when Keeper_meta_store.is_version_conflict_error err ->
+             successes, err :: conflicts
+           | Error err -> fail ("unexpected concurrent CAS error: " ^ err))
+        ([], [])
+        [ first_result; second_result ]
+    in
+    check int "exactly one stale writer commits" 1 (List.length successes);
+    check int "the other stale writer conflicts" 1 (List.length conflicts);
+    let losing_candidate =
+      match first_result, second_result with
+      | Error _, Ok _ -> first
+      | Ok _, Error _ -> second
+      | (Ok _ | Error _), (Ok _ | Error _) -> fail "unexpected CAS result split"
+    in
+    let retried =
+      match
+        Keeper_meta_store.write_meta_with_merge_returning
+          ~merge:Keeper_meta_merge.caller_wins
+          config
+          losing_candidate
+      with
+      | Ok persisted -> persisted
+      | Error err -> fail ("losing writer retry failed: " ^ err)
+    in
+    let final =
+      match Keeper_meta_store.read_meta config initial.name with
+      | Ok (Some meta) -> meta
+      | Ok None -> fail "final meta disappeared"
+      | Error err -> fail ("final read failed: " ^ err)
+    in
+    check int
+      "serialized winner and retry advance two distinct versions"
+      (stale.meta_version + 2)
+      final.meta_version;
+    check int
+      "returned retry snapshot is authoritative"
+      final.meta_version
+      retried.meta_version;
+    check (list string)
+      "retry preserves the losing caller payload"
+      losing_candidate.active_goal_ids
+      final.active_goal_ids)
 
 (* RFC-0237: the [write_meta ~force:true] escape hatch is removed, so the
    counter-rewind path the four keeper-internal sites carried
@@ -311,6 +439,68 @@ let test_stale_write_conflicts_without_force () =
     check int "advanced disk counter survives (no rewind without force)"
       42 final.runtime.usage.total_turns)
 
+let test_non_operator_merges_preserve_typed_control_state () =
+  let base = make_meta ~name:"typed-control-merge" in
+  let blocker =
+    Keeper_meta_contract.blocker_info_of_class
+      ~detail:"operator decision required"
+      Keeper_meta_contract.Ambiguous_post_commit_timeout
+  in
+  let gate =
+    Keeper_latched_reason.Continue_gate_pending
+      { gate_id = "continue-exact"
+      ; origin = Keeper_latched_reason.Partial_commit
+      ; committed_tools = [ "keeper_board_post" ]
+      }
+  in
+  let latest =
+    { base with
+      meta_version = 7
+    ; paused = true
+    ; latched_reason = Some gate
+    ; auto_resume_after_sec = None
+    ; runtime = { base.runtime with last_blocker = Some blocker; generation = 2 }
+    }
+  in
+  let caller_trace = (make_meta ~name:"caller-trace").runtime.trace_id in
+  let caller =
+    { latest with
+      meta_version = 6
+    ; agent_name = "keeper-typed-control-merge-agent"
+    ; paused = false
+    ; latched_reason = None
+    ; auto_resume_after_sec = Some 30.
+    ; runtime =
+        { latest.runtime with
+          trace_id = caller_trace
+        ; generation = 3
+        ; last_blocker = None
+        }
+    }
+  in
+  let presence =
+    Keeper_meta_merge.non_operator_control_fields_from_disk ~latest ~caller
+  in
+  check bool "presence merge preserves durable pause" true presence.paused;
+  check bool "presence merge preserves exact typed gate" true
+    (presence.latched_reason = latest.latched_reason);
+  check bool "presence merge preserves durable blocker" true
+    (presence.runtime.last_blocker = latest.runtime.last_blocker);
+  let repaired =
+    Keeper_meta_merge.identity_repair_fields_from_caller ~latest ~caller
+  in
+  check bool "identity repair preserves durable pause" true repaired.paused;
+  check bool "identity repair preserves exact typed gate" true
+    (repaired.latched_reason = latest.latched_reason);
+  check bool "identity repair preserves durable blocker" true
+    (repaired.runtime.last_blocker = latest.runtime.last_blocker);
+  check string "identity repair copies caller-owned agent name"
+    caller.agent_name repaired.agent_name;
+  check bool "identity repair copies caller-owned trace id" true
+    (repaired.runtime.trace_id = caller.runtime.trace_id);
+  check int "identity repair advances generation"
+    caller.runtime.generation repaired.runtime.generation
+
 let test_is_version_conflict_error_classifies () =
   let conflict_msg = "meta version conflict for foo: expected 3, disk has 4" in
   let other_msg = "failed to write meta /tmp/x: Permission denied" in
@@ -332,6 +522,10 @@ let () =
             `Quick test_monotonic_usage_counters_on_cas_retry;
           test_case "operator pause survives stale heartbeat retry"
             `Quick test_operator_pause_survives_stale_heartbeat_retry;
+          test_case "concurrent stale writers have one CAS winner"
+            `Quick test_concurrent_stale_writers_have_one_cas_winner;
+          test_case "non-operator merges preserve typed control state"
+            `Quick test_non_operator_merges_preserve_typed_control_state;
           test_case "stale write conflicts without force (RFC-0237 escape hatch closed)"
             `Quick test_stale_write_conflicts_without_force;
         ] );

@@ -449,6 +449,21 @@ type approval_resolution_delivery_hook =
 
 let approval_resolution_wake_hook : approval_resolution_delivery_hook option ref = ref None
 
+type resolution_claim_owner =
+  | Operator_resolution
+  | Await_timeout
+  | Await_cancellation
+  | Expiration
+  | Terminal_state_cancellation
+
+let resolution_claim_hook : (resolution_claim_owner -> string -> unit) option ref =
+  ref None
+;;
+
+let run_resolution_claim_hook owner id =
+  Option.iter (fun hook -> hook owner id) !resolution_claim_hook
+;;
+
 let first_cmd_token (cmd : string) =
   Keeper_tool_command_words.first_token_of_cmd cmd
 ;;
@@ -460,9 +475,53 @@ module For_testing = struct
       Hashtbl.clear recent_audit_cache)
   ;;
 
+  let reset_pending () = Atomic.set pending SMap.empty
+
   let first_cmd_token = first_cmd_token
 
   let get_pending_entry ~id = SMap.find_opt id (Atomic.get pending)
+  let pending_base_path ~id =
+    match SMap.find_opt id (Atomic.get pending) with
+    | Some entry -> Some entry.audit_base_path
+    | None -> None
+  ;;
+
+  let list_pending_entries () =
+    SMap.fold (fun _ entry acc -> entry :: acc) (Atomic.get pending) []
+  ;;
+
+  let pending_count () = SMap.cardinal (Atomic.get pending)
+
+  let pending_count_for_keeper ~keeper_name =
+    SMap.fold
+      (fun _ (entry : pending_approval) count ->
+         if String.equal entry.keeper_name keeper_name then count + 1 else count)
+      (Atomic.get pending)
+      0
+  ;;
+
+  let blocking_pending_count_for_keeper ~keeper_name =
+    SMap.fold
+      (fun _ (entry : pending_approval) count ->
+         if String.equal entry.keeper_name keeper_name
+            && entry.lane_policy = Blocking
+         then count + 1
+         else count)
+      (Atomic.get pending)
+      0
+  ;;
+
+  let has_blocking_pending_for_keeper ~keeper_name =
+    blocking_pending_count_for_keeper ~keeper_name > 0
+  ;;
+
+  let has_pending_for_keeper ~keeper_name =
+    pending_count_for_keeper ~keeper_name > 0
+  ;;
+
+  let set_resolution_claim_hook hook = resolution_claim_hook := Some hook
+  let clear_resolution_claim_hook () = resolution_claim_hook := None
+
   let clear_approval_resolution_wake_hook () = approval_resolution_wake_hook := None
 end
 
@@ -531,7 +590,8 @@ let create_entry
       ~lane_policy
       ~audit_base_path
       ~resolver
-      ~on_resolution
+      ~on_resolution_callback
+      ~on_resolution_observer
       ()
   =
   let action_key = action_key_of_input ~tool_name ~input in
@@ -569,10 +629,11 @@ let create_entry
   ; continuation_channel
   ; audit_base_path
   ; resolver
-  ; on_resolution
+  ; on_resolution_callback
+  ; on_resolution_observer
+  ; blocking_resolution_state = Blocking_resolution_open
   ; context_summary = None
   ; summary_status = Summary_not_requested
-  ; channel = Some continuation_channel
   }
 ;;
 
@@ -613,6 +674,11 @@ let pending_entry_json_fields
   ; "risk_level", `String (risk_level_to_string entry.risk_level)
   ; "phase", `String (pending_phase_to_string entry.phase)
   ; "lane_policy", `String (lane_policy_to_string entry.lane_policy)
+  ; ( "blocking_resolution_state"
+    , `String
+        (match entry.blocking_resolution_state with
+         | Blocking_resolution_open -> "open"
+         | Blocking_resolution_committed _ -> "decision_committed") )
   ; "requested_at", `Float entry.requested_at
   ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
@@ -665,7 +731,7 @@ let pending_entry_json_fields
 
 let broadcast_pending entry =
   try
-    Sse.broadcast
+    Sse.broadcast_workspace_observers ~base_path:entry.audit_base_path
       (`Assoc
           [ "type", `String approval_sse_pending_event
           ; ( "payload"
@@ -755,7 +821,7 @@ let record_summary_updated ~now (entry : pending_approval) =
        ~event_type:approval_audit_summary_event
        exn);
   try
-    Sse.broadcast
+    Sse.broadcast_workspace_observers ~base_path:entry.audit_base_path
       (`Assoc
          [ "type", `String approval_sse_summary_event
          ; ( "payload"
@@ -778,8 +844,17 @@ let record_summary_updated ~now (entry : pending_approval) =
 
 (* ── In-place entry updates (copy-on-write) ──────────────── *)
 
-(** Read a pending entry by id. Returns [None] if already resolved. *)
-let get_pending_entry ~id : pending_approval option = SMap.find_opt id (Atomic.get pending)
+(** Read a pending entry by id without applying caller scope. Internal queue
+    workers use this only after obtaining the id from the entry itself. *)
+let get_pending_entry_unscoped ~id : pending_approval option =
+  SMap.find_opt id (Atomic.get pending)
+;;
+
+let get_pending_entry ~base_path ~id : pending_approval option =
+  match get_pending_entry_unscoped ~id with
+  | Some entry when String.equal entry.audit_base_path base_path -> Some entry
+  | Some _ | None -> None
+;;
 
 (** Apply [f] to the pending entry with [id] if it still exists.
     Used by the HITL context-summary worker for non-blocking updates. *)
@@ -794,7 +869,7 @@ let record_summary_failure ~id ~reason ~retryable =
   let now = Time_compat.now () in
   update_pending_entry ~id (fun e ->
     { e with summary_status = Summary_failed { reason; retryable } });
-  match get_pending_entry ~id with
+  match get_pending_entry_unscoped ~id with
   | Some updated -> record_summary_updated ~now updated
   | None -> ()
 ;;
@@ -847,7 +922,7 @@ let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
           context_summary = Some summary
         ; summary_status = Summary_available summary
         });
-      match get_pending_entry ~id:entry.id with
+      match get_pending_entry_unscoped ~id:entry.id with
       | Some updated -> record_summary_updated ~now updated
       | None -> ()
     in
@@ -980,12 +1055,115 @@ let deliver_resolution ~base_path (entry : pending_approval) decision =
      | Ok signal -> Ok (Some signal))
 ;;
 
-let resolve_entry
-      ?(before_terminal_publish = fun () -> ())
-      ~base_path
+let ensure_resolution_delivery_hook (entry : pending_approval) =
+  match entry.lane_policy, !approval_resolution_wake_hook with
+  | Blocking, _ | Nonblocking, Some _ -> Ok ()
+  | Nonblocking, None ->
+    let reason = "approval resolution delivery hook is not installed" in
+    record_resolution_delivery_failure
+      ~keeper_name:entry.keeper_name
+      ~approval_id:entry.id
+      reason;
+    Error reason
+;;
+
+let record_resolution_callback_failure
+      ~callback_site
+      ~failure_site
+      (entry : pending_approval)
+      exn
+  =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LifecycleCallbackFailures)
+    ~labels:[ "keeper", entry.keeper_name; "callback", callback_site ]
+    ();
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ApprovalQueueFailures)
+    ~labels:
+      [ "keeper", entry.keeper_name
+      ; "site", Keeper_approval_queue_failure_site.to_label failure_site
+      ]
+    ();
+  let reason = Printexc.to_string exn in
+  Log.Keeper.error
+    "approval_queue: resolution callback failed id=%s callback=%s err=%s"
+    entry.id
+    callback_site
+    reason;
+  reason
+;;
+
+let apply_blocking_resolution_callback
+      ~callback_site
+      ~failure_site
       (entry : pending_approval)
       (decision : decision)
   =
+  match entry.on_resolution_callback with
+  | None -> Error "blocking approval callback is missing"
+  | Some callback ->
+    Cancel_safe.protect
+      ~on_exn:(fun exn ->
+        Error
+          (record_resolution_callback_failure
+             ~callback_site
+             ~failure_site
+             entry
+             exn))
+      (fun () ->
+         Ok (callback ~approval_id:entry.id decision))
+;;
+
+let observe_nonblocking_resolution
+      ~callback_site
+      ~failure_site
+      (entry : pending_approval)
+      decision
+  =
+  Option.iter
+    (fun observer ->
+       Cancel_safe.observe
+         ~on_exn:(fun exn ->
+           ignore
+             (record_resolution_callback_failure
+                ~callback_site
+                ~failure_site
+                entry
+                exn))
+         (fun () -> observer decision))
+    entry.on_resolution_observer
+;;
+
+let observe_and_signal_nonblocking_resolution
+      ~callback_site
+      ~failure_site
+      (entry : pending_approval)
+      decision
+      signal
+  =
+  let deferred_cancellation =
+    match
+      observe_nonblocking_resolution
+        ~callback_site
+        ~failure_site
+        entry
+        decision
+    with
+    | () -> None
+    | exception (Eio.Cancel.Cancelled _ as exn) ->
+      Some (exn, Printexc.get_raw_backtrace ())
+  in
+  Option.iter
+    (signal_resolution_after_commit
+       ~keeper_name:entry.keeper_name
+       ~approval_id:entry.id)
+    signal;
+  match deferred_cancellation with
+  | None -> ()
+  | Some (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+;;
+
+let publish_resolution ~base_path (entry : pending_approval) (decision : decision) =
   let decision_str = approval_decision_to_string decision in
   Log.Keeper.info
     "HITL_APPROVAL_RESOLVED: id=%s keeper=%s tool=%s decision=%s"
@@ -1011,29 +1189,8 @@ let resolve_entry
     ?disposition_reason:entry.disposition_reason
     ~decision:(Approval_resolved decision)
     ();
-  (match entry.resolver with
-   | Some resolver -> Eio.Promise.resolve resolver decision
-   | None -> ());
-  (match entry.on_resolution with
-   | Some f ->
-     Cancel_safe.observe
-       ~on_exn:(fun exn ->
-         Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
-           ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_resolution") ]
-           ();
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string ApprovalQueueFailures)
-           ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Resolution_callback) ]
-           ();
-         Log.Keeper.warn
-           "approval_queue: resolution callback failed id=%s err=%s"
-           entry.id
-           (Printexc.to_string exn))
-       (fun () -> f decision)
-   | None -> ());
-  before_terminal_publish ();
   try
-    Sse.broadcast
+    Sse.broadcast_workspace_observers ~base_path:entry.audit_base_path
       (`Assoc
           [ "type", `String approval_sse_resolved_event
           ; ( "payload"
@@ -1069,12 +1226,14 @@ let pending_entry_matches
       ~goal_id
       ~sandbox_target
       ~lane_policy
+      ~audit_base_path
   =
   String.equal entry.keeper_name keeper_name
   && String.equal entry.tool_name tool_name
   && String.equal entry.action_key action_key
   && String.equal entry.input_hash input_hash
   && String.equal entry.sandbox_target sandbox_target
+  && String.equal entry.audit_base_path audit_base_path
   && entry.lane_policy = lane_policy
   && entry.task_id = task_id
   && entry.goal_id = goal_id
@@ -1090,6 +1249,7 @@ let find_pending_id_in_map
       ~goal_id
       ~sandbox_target
       ~lane_policy
+      ~audit_base_path
   =
   SMap.fold
     (fun id (entry : pending_approval) acc ->
@@ -1107,6 +1267,7 @@ let find_pending_id_in_map
              ~goal_id
              ~sandbox_target
              ~lane_policy
+             ~audit_base_path
          then Some id
          else None)
     map
@@ -1119,6 +1280,123 @@ let sort_entries_by_requested_at entries =
        let ts_of_json json = (match Json_util.assoc_member_opt "requested_at" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0) in
        Float.compare (ts_of_json left) (ts_of_json right))
     entries
+;;
+
+module Resolution_claims = Set_util.StringSet
+
+let resolution_claims : Resolution_claims.t Atomic.t =
+  Atomic.make Resolution_claims.empty
+;;
+
+let rec claim_resolution id =
+  let claims = Atomic.get resolution_claims in
+  if Resolution_claims.mem id claims
+  then false
+  else
+    let claimed = Resolution_claims.add id claims in
+    if Atomic.compare_and_set resolution_claims claims claimed
+    then true
+    else claim_resolution id
+;;
+
+let release_resolution_claim id =
+  atomic_update resolution_claims (fun claims -> Resolution_claims.remove id claims)
+;;
+
+let run_resolution_transaction f =
+  match Eio_context.get_switch_opt () with
+  | Some _ -> Eio.Cancel.protect f
+  | None -> f ()
+;;
+
+let with_resolution_claim_cleanup ~id f =
+  match f () with
+  | result ->
+    release_resolution_claim id;
+    result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    release_resolution_claim id;
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+let remove_pending_entry ~id =
+  atomic_update pending (fun map -> SMap.remove id map)
+;;
+
+let rec take_pending_entry ~id =
+  let map = Atomic.get pending in
+  match SMap.find_opt id map with
+  | None -> None
+  | Some entry ->
+    if Atomic.compare_and_set pending map (SMap.remove id map)
+    then Some entry
+    else take_pending_entry ~id
+;;
+
+let restore_pending_entry (entry : pending_approval) =
+  atomic_update pending (fun map ->
+    if SMap.mem entry.id map then map else SMap.add entry.id entry map)
+;;
+
+let resolve_claimed_promise_entry (entry : pending_approval) decision =
+  match take_pending_entry ~id:entry.id with
+  | None -> Error "blocking promise disappeared before pending removal"
+  | Some removed_entry ->
+    (match
+       ( removed_entry.resolver
+       , removed_entry.on_resolution_callback
+       , removed_entry.on_resolution_observer )
+     with
+     | Some resolver, None, None ->
+       (match Eio.Promise.resolve resolver decision with
+        | () -> Ok ()
+        | exception (Eio.Cancel.Cancelled _ as exn) ->
+          restore_pending_entry removed_entry;
+          raise exn
+        | exception exn ->
+          restore_pending_entry removed_entry;
+          Error (Printexc.to_string exn))
+     | _ ->
+       restore_pending_entry removed_entry;
+       Error "blocking promise entry has an invalid delivery shape")
+;;
+
+let resolve_terminal_promise ~owner ~id ~decision =
+  if not (claim_resolution id)
+  then `Claimed_by_other
+  else
+    with_resolution_claim_cleanup ~id (fun () ->
+      run_resolution_claim_hook owner id;
+      run_resolution_transaction (fun () ->
+        match SMap.find_opt id (Atomic.get pending) with
+        | None -> `Missing
+        | Some entry ->
+          (match resolve_claimed_promise_entry entry decision with
+           | Ok () -> `Resolved
+           | Error reason -> `Failed reason)))
+;;
+
+let settle_terminal_promise ~owner ~id ~decision ~promise =
+  (* A competing resolver is not proof that the promise will be completed: an
+     authoritative callback, audit hook, or persistence step can still fail
+     and release its claim. Wait cooperatively for either the promise or the
+     claim, then retry under cancellation protection so timeout/cancel cleanup
+     cannot leave a resolver-backed entry orphaned. *)
+  Eio.Cancel.protect (fun () ->
+    let rec loop () =
+      match resolve_terminal_promise ~owner ~id ~decision with
+      | `Resolved -> `Resolved_by_owner
+      | `Missing -> `Missing
+      | `Failed detail -> `Failed detail
+      | `Claimed_by_other ->
+        (match Eio.Promise.peek promise with
+         | Some observed -> `Resolved_by_other observed
+         | None ->
+           Eio.Fiber.yield ();
+           loop ())
+    in
+    loop ())
 ;;
 
 (* ── Submit & await ───────────────────────────────────────── *)
@@ -1184,23 +1462,52 @@ let submit_and_await
       ~lane_policy:Blocking
       ~audit_base_path:base_path
       ~resolver:(Some resolver)
-      ~on_resolution:None
+      ~on_resolution_callback:None
+      ~on_resolution_observer:None
       ()
   in
   atomic_update pending (fun map -> SMap.add id entry map);
   record_pending entry;
   spawn_hitl_summary_worker_on_root_switch ~entry;
-  let timeout_decision reason =
+  let audit_terminal ~event_type reason =
+    audit_approval_event
+      ~base_path:entry.audit_base_path
+      ~event_type
+      ~id
+      ~keeper_name
+      ~tool_name
+      ~risk_level
+      ?turn_id
+      ?task_id
+      ?goal_id
+      ~goal_ids
+      ~sandbox_target:entry.sandbox_target
+      ?runtime_contract
+      ?selected_model
+      ?disposition
+      ?disposition_reason
+      ~decision:(Approval_expired reason)
+      ()
+  in
+  let resolve_timeout reason =
     let decision = Agent_sdk.Hooks.Reject reason in
-    match Eio.Promise.peek promise with
-    | Some observed -> observed
-    | None ->
-      (try Eio.Promise.resolve resolver decision with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | _ -> ());
+    match
+      settle_terminal_promise
+        ~owner:Await_timeout
+        ~id
+        ~decision
+        ~promise
+    with
+    | `Resolved_by_owner ->
+      audit_terminal ~event_type:"approval_timeout" reason;
+      decision
+    | `Resolved_by_other observed -> observed
+    | `Missing ->
       (match Eio.Promise.peek promise with
        | Some observed -> observed
-       | None -> decision)
+       | None -> failwith "approval disappeared without resolving its promise")
+    | `Failed detail ->
+      failwith ("approval timeout delivery failed: " ^ detail)
   in
   let await_with_timeout () =
     match clock, risk_level with
@@ -1215,25 +1522,7 @@ let submit_and_await
        | `Decision d -> d
        | `Timeout ->
          let reason = Printf.sprintf "approval timeout after %.0fs" timeout_s in
-         audit_approval_event
-           ~base_path:entry.audit_base_path
-           ~event_type:"approval_timeout"
-           ~id
-           ~keeper_name
-           ~tool_name
-           ~risk_level
-           ?turn_id
-           ?task_id
-           ?goal_id
-           ~goal_ids
-           ~sandbox_target:entry.sandbox_target
-           ?runtime_contract
-           ?selected_model
-           ~decision:(Approval_expired reason)
-           ();
-         (* Mirror expire_stale's teardown, but preserve any concurrent
-            operator decision that wins the promise resolution race. *)
-         timeout_decision reason)
+         resolve_timeout reason)
     | Some clock, Critical ->
       (match
          Eio.Fiber.first
@@ -1274,28 +1563,24 @@ let submit_and_await
        | Some _ -> ()
        | None ->
          let reason = "approval await cancelled before operator decision" in
-         audit_approval_event
-           ~base_path:entry.audit_base_path
-           ~event_type:"cancelled"
-           ~id
-           ~keeper_name
-           ~tool_name
-           ~risk_level
-           ?turn_id
-           ?task_id
-           ?goal_id
-           ~goal_ids
-           ~sandbox_target:entry.sandbox_target
-           ?runtime_contract
-           ?selected_model
-           ?disposition
-           ?disposition_reason
-           ~decision:(Approval_expired reason)
-           ());
-      atomic_update pending (fun map -> SMap.remove id map)))
+         (match
+            settle_terminal_promise
+              ~owner:Await_cancellation
+              ~id
+              ~decision:(Agent_sdk.Hooks.Reject reason)
+              ~promise
+          with
+          | `Resolved_by_owner -> audit_terminal ~event_type:"cancelled" reason
+          | `Resolved_by_other _ | `Missing -> ()
+          | `Failed detail ->
+            Log.Keeper.error
+              ~keeper_name
+              "approval cancellation delivery failed id=%s: %s"
+              id
+              detail))))
 ;;
 
-let submit_pending
+let submit_pending_internal
       ~keeper_name
       ~tool_name
       ~input
@@ -1313,8 +1598,9 @@ let submit_pending
       ?disposition
       ?disposition_reason
       ?continuation_channel
-      ?(lane_policy = Nonblocking)
-      ~on_resolution
+      ~lane_policy
+      ~on_resolution_callback
+      ~on_resolution_observer
       ()
   : string
   =
@@ -1338,6 +1624,7 @@ let submit_pending
         ~goal_id
         ~sandbox_target
         ~lane_policy
+        ~audit_base_path:base_path
     with
     | Some id -> id
     | None ->
@@ -1364,7 +1651,8 @@ let submit_pending
           ~lane_policy
           ~audit_base_path:base_path
           ~resolver:None
-          ~on_resolution:(Some on_resolution)
+          ~on_resolution_callback
+          ~on_resolution_observer
           ()
       in
       let updated = SMap.add id entry map in
@@ -1376,6 +1664,103 @@ let submit_pending
       else submit ()
   in
   submit ()
+;;
+
+let submit_pending_observer
+      ~keeper_name
+      ~tool_name
+      ~input
+      ~risk_level
+      ~base_path
+      ?turn_id
+      ?task_id
+      ?goal_id
+      ?goal_ids
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
+      ?runtime_contract
+      ?selected_model
+      ?disposition
+      ?disposition_reason
+      ?continuation_channel
+      ~on_resolution_observer
+      ()
+  =
+  submit_pending_internal
+    ~keeper_name
+    ~tool_name
+    ~input
+    ~risk_level
+    ~base_path
+    ?turn_id
+    ?task_id
+    ?goal_id
+    ?goal_ids
+    ?sandbox_target
+    ?sandbox_profile
+    ?backend
+    ?runtime_contract
+    ?selected_model
+    ?disposition
+    ?disposition_reason
+    ?continuation_channel
+    ~lane_policy:Nonblocking
+    ~on_resolution_callback:None
+    ~on_resolution_observer:(Some on_resolution_observer)
+    ()
+;;
+
+let blocking_resolution_plan ~effect_key ~commit =
+  let effect_key = String.trim effect_key in
+  if String.equal effect_key ""
+  then invalid_arg "blocking resolution effect_key must not be empty"
+  else { effect_key; commit }
+;;
+
+let submit_pending_blocking
+      ~keeper_name
+      ~tool_name
+      ~input
+      ~risk_level
+      ~base_path
+      ?turn_id
+      ?task_id
+      ?goal_id
+      ?goal_ids
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
+      ?runtime_contract
+      ?selected_model
+      ?disposition
+      ?disposition_reason
+      ?continuation_channel
+      ~on_resolution
+      ()
+  =
+  submit_pending_internal
+    ~keeper_name
+    ~tool_name
+    ~input
+    ~risk_level
+    ~base_path
+    ?turn_id
+    ?task_id
+    ?goal_id
+    ?goal_ids
+    ?sandbox_target
+    ?sandbox_profile
+    ?backend
+    ?runtime_contract
+    ?selected_model
+    ?disposition
+    ?disposition_reason
+    ?continuation_channel
+    ~lane_policy:Blocking
+    ~on_resolution_callback:(Some on_resolution)
+    ~on_resolution_observer:None
+    ()
 ;;
 
 (* ── Resolve (operator action) ────────────────────────────── *)
@@ -1395,25 +1780,132 @@ let resolve_error_to_string = function
     Printf.sprintf "approval %s resolution delivery failed: %s" approval_id reason
 ;;
 
-module Resolution_claims = Set_util.StringSet
-
-let resolution_claims : Resolution_claims.t Atomic.t =
-  Atomic.make Resolution_claims.empty
+let approval_decision_equal left right =
+  match left, right with
+  | Agent_sdk.Hooks.Approve, Agent_sdk.Hooks.Approve -> true
+  | Agent_sdk.Hooks.Reject _, Agent_sdk.Hooks.Reject _ -> true
+  | Agent_sdk.Hooks.Edit left, Agent_sdk.Hooks.Edit right ->
+    Yojson.Safe.equal left right
+  | (Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Reject _ | Agent_sdk.Hooks.Edit _), _ ->
+    false
 ;;
 
-let rec claim_resolution id =
-  let claims = Atomic.get resolution_claims in
-  if Resolution_claims.mem id claims
-  then false
-  else
-    let claimed = Resolution_claims.add id claims in
-    if Atomic.compare_and_set resolution_claims claims claimed
-    then true
-    else claim_resolution id
+let rec latch_blocking_resolution ~id ~decision ~plan =
+  let map = Atomic.get pending in
+  match SMap.find_opt id map with
+  | None -> Error "blocking approval disappeared before decision commit"
+  | Some entry ->
+    (match entry.blocking_resolution_state with
+     | Blocking_resolution_committed committed ->
+       if approval_decision_equal committed.decision decision
+       then Ok entry
+       else Error "blocking approval already committed a different decision"
+     | Blocking_resolution_open ->
+       let entry =
+         { entry with
+           blocking_resolution_state =
+             Blocking_resolution_committed { decision; plan }
+         }
+       in
+       if Atomic.compare_and_set pending map (SMap.add id entry map)
+       then Ok entry
+       else latch_blocking_resolution ~id ~decision ~plan)
 ;;
 
-let release_resolution_claim id =
-  atomic_update resolution_claims (fun claims -> Resolution_claims.remove id claims)
+let complete_latched_blocking_resolution
+      ~callback_site
+      ~failure_site
+      ~before_remove
+      (entry : pending_approval)
+      (plan : blocking_resolution_plan)
+  =
+  match plan.commit () with
+  | after_pending_removal ->
+    before_remove ();
+    remove_pending_entry ~id:entry.id;
+    Ok after_pending_removal
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Error
+      (record_resolution_callback_failure
+         ~callback_site:(callback_site ^ "_commit")
+         ~failure_site
+         entry
+         exn)
+;;
+
+let complete_blocking_resolution
+      ~callback_site
+      ~failure_site
+      ~before_remove
+      (entry : pending_approval)
+      decision
+  =
+  match
+    entry.resolver, entry.on_resolution_callback, entry.on_resolution_observer
+  with
+  | Some resolver, None, None ->
+    ignore resolver;
+    (* The shared terminal claim excludes timeout/cancel/expiry. Persist a
+       remembered allow rule only after the promise commit succeeds. *)
+    (match resolve_claimed_promise_entry entry decision with
+     | Ok () ->
+       before_remove ();
+       Ok (decision, fun () -> ())
+     | Error reason ->
+       Error
+         (record_resolution_callback_failure
+            ~callback_site:"resolver"
+            ~failure_site
+            entry
+            (Failure reason)))
+  | None, Some _, None ->
+    (match entry.blocking_resolution_state with
+     | Blocking_resolution_committed committed ->
+       if approval_decision_equal committed.decision decision
+       then
+         Result.map
+           (fun after_pending_removal ->
+             committed.decision, after_pending_removal)
+           (complete_latched_blocking_resolution
+              ~callback_site
+              ~failure_site
+              ~before_remove
+              entry
+              committed.plan)
+       else Error "blocking approval already committed a different decision"
+     | Blocking_resolution_open ->
+       (match
+          apply_blocking_resolution_callback
+            ~callback_site
+            ~failure_site
+            entry
+            decision
+        with
+        | Error _ as err -> err
+        | Ok plan ->
+          (match
+             latch_blocking_resolution
+               ~id:entry.id
+               ~decision
+               ~plan
+           with
+           | Error _ as err -> err
+           | Ok committed_entry ->
+             Result.map
+               (fun after_pending_removal -> decision, after_pending_removal)
+               (complete_latched_blocking_resolution
+                  ~callback_site
+                  ~failure_site
+                  ~before_remove
+                  committed_entry
+                  plan))))
+  | Some _, Some _, _ ->
+    Error "blocking approval has both resolver and authoritative callback"
+  | (Some _ | None), _, Some _ ->
+    Error "blocking approval has a non-authoritative observer"
+  | None, None, None ->
+    Error "blocking approval has neither resolver nor callback"
 ;;
 
 let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
@@ -1456,6 +1948,20 @@ let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
       None)
 ;;
 
+let workspace_mismatch_error ~base_path ~id (entry : pending_approval) =
+  let reason =
+    Printf.sprintf
+      "caller workspace mismatch: expected %S, got %S"
+      entry.audit_base_path
+      base_path
+  in
+  record_resolution_delivery_failure
+    ~keeper_name:entry.keeper_name
+    ~approval_id:id
+    reason;
+  Error (Delivery_failed { approval_id = id; reason })
+;;
+
 let resolve_with_policy
       ~base_path
       ~id
@@ -1465,105 +1971,140 @@ let resolve_with_policy
       ()
   : (resolution_result, resolve_error) result
   =
-  if not (claim_resolution id)
-  then Error (Already_resolved id)
-  else
-    Fun.protect
-      ~finally:(fun () -> release_resolution_claim id)
-      (fun () ->
-         match SMap.find_opt id (Atomic.get pending) with
-         | None -> Error (Not_found id)
-         | Some entry ->
-           (match deliver_resolution ~base_path entry decision with
-            | Error reason -> Error (Delivery_failed { approval_id = id; reason })
-            | Ok signal ->
-              (* Durable delivery is the commit point for nonblocking entries.
-                 Keep the approval queryable while its callback applies the
-                 approved domain mutation; intake defers this exact resolution
-                 until the pending id is removed below. Blocking entries retain
-                 their original lane-release-before-resume ordering. *)
-              (match entry.lane_policy with
-               | Blocking -> atomic_update pending (fun map -> SMap.remove id map)
-               | Nonblocking -> ());
-              let remembered_rule =
-                match decision with
-                | Agent_sdk.Hooks.Approve when remember_rule ->
-                  remember_rule_for_entry ~base_path ?created_by entry
-                | _ -> None
-              in
-              let before_terminal_publish () =
-                match entry.lane_policy with
-                | Blocking -> ()
-                | Nonblocking -> atomic_update pending (fun map -> SMap.remove id map)
-              in
-              resolve_entry ~before_terminal_publish ~base_path entry decision;
-              Option.iter
-                (signal_resolution_after_commit
-                   ~keeper_name:entry.keeper_name
-                   ~approval_id:id)
-                signal;
-              Ok { remembered_rule }))
+  match SMap.find_opt id (Atomic.get pending) with
+  | None -> Error (Not_found id)
+  | Some entry when not (String.equal base_path entry.audit_base_path) ->
+    workspace_mismatch_error ~base_path ~id entry
+  | Some _ ->
+    if not (claim_resolution id)
+    then Error (Already_resolved id)
+    else
+      with_resolution_claim_cleanup ~id (fun () ->
+      run_resolution_claim_hook Operator_resolution id;
+      run_resolution_transaction (fun () ->
+        match SMap.find_opt id (Atomic.get pending) with
+        | None -> Error (Not_found id)
+        | Some entry when not (String.equal base_path entry.audit_base_path) ->
+          workspace_mismatch_error ~base_path ~id entry
+        | Some entry ->
+          let base_path = entry.audit_base_path in
+          let remembered_rule = ref None in
+          let remember_before_remove () =
+            remembered_rule :=
+              (match decision with
+               | Agent_sdk.Hooks.Approve when remember_rule ->
+                 remember_rule_for_entry ~base_path ?created_by entry
+               | Agent_sdk.Hooks.Approve
+               | Agent_sdk.Hooks.Reject _
+               | Agent_sdk.Hooks.Edit _ ->
+                 None)
+          in
+          (match entry.lane_policy with
+           | Blocking ->
+             (match
+                complete_blocking_resolution
+                  ~callback_site:"on_resolution"
+                  ~failure_site:Keeper_approval_queue_failure_site.Resolution_callback
+                  ~before_remove:remember_before_remove
+                  entry
+                  decision
+              with
+              | Error reason ->
+                Error (Delivery_failed { approval_id = id; reason })
+              | Ok (committed_decision, after_pending_removal) ->
+                publish_resolution ~base_path entry committed_decision;
+                signal_resolution_after_commit
+                  ~keeper_name:entry.keeper_name
+                  ~approval_id:entry.id
+                  after_pending_removal;
+                Ok { remembered_rule = !remembered_rule })
+           | Nonblocking ->
+             (* Public nonblocking submission accepts only an observer, never
+                an authoritative domain callback. Therefore the durable
+                [Hitl_resolved] event is the sole replayable decision carrier;
+                commit it before acknowledgement and invoke the observer only
+                after the pending id is gone. *)
+             (match ensure_resolution_delivery_hook entry with
+              | Error reason -> Error (Delivery_failed { approval_id = id; reason })
+              | Ok () ->
+                (match deliver_resolution ~base_path entry decision with
+                 | Error reason ->
+                   Error (Delivery_failed { approval_id = id; reason })
+                 | Ok signal ->
+                   remember_before_remove ();
+                   remove_pending_entry ~id;
+                   publish_resolution ~base_path entry decision;
+                   observe_and_signal_nonblocking_resolution
+                     ~callback_site:"on_resolution_observer"
+                     ~failure_site:Keeper_approval_queue_failure_site.Resolution_callback
+                     entry
+                     decision
+                     signal;
+                   Ok { remembered_rule = !remembered_rule })))))
 ;;
 
-(** Resolve a pending approval. Returns [Ok ()] if found and resolved,
+(** Resolve a workspace-scoped pending approval. Returns [Ok ()] if found and resolved,
     [Error (Not_found _)] if the id is not in the queue, or
     [Error (Already_resolved _)] if another resolver currently owns the
     approval claim. A delivery failure leaves the entry pending for retry.
-    Called from the dashboard approval HTTP handler
-    ([server_dashboard_http.ml]) and MCP runtime.
-
-    [base_path] is sourced from the entry's captured [audit_base_path]
-    rather than threaded from the caller: the convenience wrapper takes
-    only an [id], so the entry is the authoritative workspace source
-    (RFC-0274 Wave A). *)
-let resolve ~id ~(decision : Agent_sdk.Hooks.approval_decision)
+    The caller must provide the workspace authority; id uniqueness is not an
+    authorization boundary. *)
+let resolve ~base_path ~id ~(decision : Agent_sdk.Hooks.approval_decision)
   : (unit, resolve_error) result
   =
-  (* The entry is the authoritative base_path source for the convenience
-     wrapper: it has no caller-threaded [base_path], and the pending map
-     is per-workspace so the entry's captured [audit_base_path] is the
-     workspace that owns the approval. RFC-0274 Wave A. *)
-  match SMap.find_opt id (Atomic.get pending) with
-  | None -> Error (Not_found id)
-  | Some entry ->
-    (match resolve_with_policy ~base_path:entry.audit_base_path ~id ~decision () with
-     | Ok _ -> Ok ()
-     | Error _ as err -> err)
+  match resolve_with_policy ~base_path ~id ~decision () with
+  | Ok _ -> Ok ()
+  | Error _ as err -> err
 ;;
 
 (* ── Query ────────────────────────────────────────────────── *)
 
-(** List all pending approvals as JSON. *)
-let list_pending_json () : Yojson.Safe.t =
-  let entries =
-    SMap.fold
-      (fun _id entry acc -> `Assoc (pending_entry_json_fields entry) :: acc)
-      (Atomic.get pending)
-      []
-  in
-  `List (sort_entries_by_requested_at entries)
+let entry_in_workspace ~base_path (entry : pending_approval) =
+  String.equal entry.audit_base_path base_path
 ;;
 
-let list_pending_dashboard_json () : Yojson.Safe.t =
+(** List pending approvals for one workspace as JSON. *)
+let list_pending_json ~base_path : Yojson.Safe.t =
   let entries =
     SMap.fold
       (fun _id entry acc ->
-         `Assoc
-           (pending_entry_json_fields
-              ~include_requested_at_iso:true
-              ~include_runtime_contract:true
-              ~include_input:true
-              entry)
-         :: acc)
+         if entry_in_workspace ~base_path entry
+         then `Assoc (pending_entry_json_fields entry) :: acc
+         else acc)
       (Atomic.get pending)
       []
   in
   `List (sort_entries_by_requested_at entries)
 ;;
 
-let list_pending_entries () : pending_approval list =
+let list_pending_dashboard_json ~base_path : Yojson.Safe.t =
+  let entries =
+    SMap.fold
+      (fun _id entry acc ->
+         if entry_in_workspace ~base_path entry
+         then
+           `Assoc
+             (pending_entry_json_fields
+                ~include_requested_at_iso:true
+                ~include_runtime_contract:true
+                ~include_input:true
+                entry)
+           :: acc
+         else acc)
+      (Atomic.get pending)
+      []
+  in
+  `List (sort_entries_by_requested_at entries)
+;;
+
+let list_pending_entries_unscoped () : pending_approval list =
   SMap.fold (fun _id entry acc -> entry :: acc) (Atomic.get pending) []
   |> List.sort (fun left right -> Float.compare left.requested_at right.requested_at)
+;;
+
+let list_pending_entries ~base_path : pending_approval list =
+  list_pending_entries_unscoped ()
+  |> List.filter (entry_in_workspace ~base_path)
 ;;
 
 let pending_entry_detail_json (entry : pending_approval) : Yojson.Safe.t =
@@ -1575,18 +2116,28 @@ let pending_entry_detail_json (entry : pending_approval) : Yojson.Safe.t =
        entry)
 ;;
 
-let get_pending_json ~id : Yojson.Safe.t option =
+let get_pending_json ~base_path ~id : Yojson.Safe.t option =
   match SMap.find_opt id (Atomic.get pending) with
-  | None -> None
-  | Some entry -> Some (pending_entry_detail_json entry)
+  | Some entry when entry_in_workspace ~base_path entry ->
+    Some (pending_entry_detail_json entry)
+  | Some _ | None -> None
 ;;
 
-let pending_count () : int = SMap.cardinal (Atomic.get pending)
+let pending_count ~base_path : int =
+  SMap.fold
+    (fun _ entry count ->
+       if entry_in_workspace ~base_path entry then count + 1 else count)
+    (Atomic.get pending)
+    0
+;;
 
-let pending_count_for_keeper ~keeper_name : int =
+let pending_count_for_keeper ~base_path ~keeper_name : int =
   SMap.fold
     (fun _ (entry : pending_approval) count ->
-       if String.equal entry.keeper_name keeper_name then count + 1 else count)
+       if entry_in_workspace ~base_path entry
+          && String.equal entry.keeper_name keeper_name
+       then count + 1
+       else count)
     (Atomic.get pending)
     0
 ;;
@@ -1595,10 +2146,11 @@ let pending_count_for_keeper ~keeper_name : int =
    lifecycle continuation (for example, a persisted partial-commit gate).
    Keep that distinction typed at the queue boundary instead of inferring lane
    ownership from a resolver or from tool names. *)
-let blocking_pending_count_for_keeper ~keeper_name : int =
+let blocking_pending_count_for_keeper ~base_path ~keeper_name : int =
   SMap.fold
     (fun _ (entry : pending_approval) count ->
-       if String.equal entry.keeper_name keeper_name
+       if entry_in_workspace ~base_path entry
+          && String.equal entry.keeper_name keeper_name
           && entry.lane_policy = Blocking
        then count + 1
        else count)
@@ -1606,21 +2158,59 @@ let blocking_pending_count_for_keeper ~keeper_name : int =
     0
 ;;
 
-let has_blocking_pending_for_keeper ~keeper_name : bool =
-  blocking_pending_count_for_keeper ~keeper_name > 0
+let has_blocking_pending_for_keeper ~base_path ~keeper_name : bool =
+  blocking_pending_count_for_keeper ~base_path ~keeper_name > 0
 ;;
 
-let has_pending_for_keeper ~keeper_name : bool =
+let has_pending_for_keeper ~base_path ~keeper_name : bool =
   SMap.fold
     (fun _ (entry : pending_approval) acc ->
-       acc || String.equal entry.keeper_name keeper_name)
+       acc
+       || (entry_in_workspace ~base_path entry
+           && String.equal entry.keeper_name keeper_name))
     (Atomic.get pending)
     false
 ;;
 
+let cancel_callback_owned_for_terminal_keeper ~base_path ~keeper_name ~reason =
+  let candidates =
+    list_pending_entries ~base_path
+    |> List.filter (fun (entry : pending_approval) ->
+      String.equal entry.keeper_name keeper_name
+      && entry.lane_policy = Blocking
+      && Option.is_some entry.on_resolution_callback
+      && Option.is_none entry.resolver)
+  in
+  List.fold_left
+    (fun cancelled (candidate : pending_approval) ->
+       let id = candidate.id in
+       if not (claim_resolution id)
+       then cancelled
+       else
+         with_resolution_claim_cleanup ~id (fun () ->
+           run_resolution_claim_hook Terminal_state_cancellation id;
+           run_resolution_transaction (fun () ->
+             match SMap.find_opt id (Atomic.get pending) with
+             | Some entry
+               when entry_in_workspace ~base_path entry
+                    && String.equal entry.keeper_name keeper_name
+                    && entry.lane_policy = Blocking
+                    && Option.is_some entry.on_resolution_callback
+                    && Option.is_none entry.resolver ->
+               remove_pending_entry ~id;
+               publish_resolution
+                 ~base_path
+                 entry
+                 (Agent_sdk.Hooks.Reject reason);
+               cancelled + 1
+             | Some _ | None -> cancelled)))
+    0
+    candidates
+;;
+
 (* ── Timeout cleanup ──────────────────────────────────────── *)
 
-let complete_expiration ~id (entry : pending_approval) ~reason ~decision =
+let publish_expiration ~id (entry : pending_approval) ~reason =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)
     ~labels:
@@ -1650,31 +2240,7 @@ let complete_expiration ~id (entry : pending_approval) ~reason ~decision =
     ?disposition:entry.disposition
     ?disposition_reason:entry.disposition_reason
     ~decision:(Approval_expired reason)
-    ();
-  (match entry.resolver with
-   | Some resolver -> Eio.Promise.resolve resolver decision
-   | None -> ());
-  match entry.on_resolution with
-  | None -> ()
-  | Some f ->
-    Cancel_safe.observe
-      ~on_exn:(fun exn ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string LifecycleCallbackFailures)
-          ~labels:[ "keeper", entry.keeper_name; "callback", "on_approval_expire" ]
-          ();
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string ApprovalQueueFailures)
-          ~labels:
-            [ "keeper", entry.keeper_name
-            ; "site", Keeper_approval_queue_failure_site.(to_label Expire_callback)
-            ]
-          ();
-        Log.Keeper.warn
-          "approval_queue: expire callback failed id=%s err=%s"
-          id
-          (Printexc.to_string exn))
-      (fun () -> f decision)
+    ()
 ;;
 
 (** Reject all approvals that have been waiting longer than [max_wait_s].
@@ -1706,7 +2272,7 @@ let expire_stale ~max_wait_s =
     | Critical -> false
     | Low | Medium | High -> now -. entry.requested_at > max_wait_s
   in
-  let candidates = list_pending_entries () |> List.filter is_stale in
+  let candidates = list_pending_entries_unscoped () |> List.filter is_stale in
   List.iter
     (* The annotation is load-bearing: [approval_rule] is declared after
        [pending_approval] in [Keeper_approval_queue_rules_types] and also has
@@ -1716,33 +2282,60 @@ let expire_stale ~max_wait_s =
        let id = candidate.id in
        if claim_resolution id
        then
-         Fun.protect
-           ~finally:(fun () -> release_resolution_claim id)
-           (fun () ->
-              match SMap.find_opt id (Atomic.get pending) with
-              | None -> ()
-              | Some entry when not (is_stale entry) -> ()
-              | Some entry ->
-                let reason =
-                  Printf.sprintf
-                    "approval timed out after %.0fs"
-                    (now -. entry.requested_at)
-                in
-                let decision = Agent_sdk.Hooks.Reject reason in
-                (match deliver_resolution ~base_path:entry.audit_base_path entry decision with
-                 | Error _ -> ()
-                 | Ok signal ->
-                   (match entry.lane_policy with
-                    | Blocking -> atomic_update pending (fun map -> SMap.remove id map)
-                    | Nonblocking -> ());
-                   complete_expiration ~id entry ~reason ~decision;
-                   (match entry.lane_policy with
-                    | Blocking -> ()
-                    | Nonblocking -> atomic_update pending (fun map -> SMap.remove id map));
-                   Option.iter
-                     (signal_resolution_after_commit
-                        ~keeper_name:entry.keeper_name
-                        ~approval_id:id)
-                     signal)) )
+         with_resolution_claim_cleanup ~id (fun () ->
+           run_resolution_claim_hook Expiration id;
+           run_resolution_transaction (fun () ->
+             match SMap.find_opt id (Atomic.get pending) with
+             | None -> ()
+             | Some entry when not (is_stale entry) -> ()
+             | Some entry ->
+               let reason =
+                 Printf.sprintf
+                   "approval timed out after %.0fs"
+                   (now -. entry.requested_at)
+               in
+               let decision = Agent_sdk.Hooks.Reject reason in
+               (match entry.lane_policy with
+                | Blocking ->
+                  (match
+                     complete_blocking_resolution
+                       ~callback_site:"on_approval_expire"
+                       ~failure_site:Keeper_approval_queue_failure_site.Expire_callback
+                       ~before_remove:(fun () -> ())
+                       entry
+                       decision
+                   with
+                   | Error _ -> ()
+                   | Ok (committed_decision, after_pending_removal) ->
+                     let committed_reason =
+                       match committed_decision with
+                       | Agent_sdk.Hooks.Reject reason -> reason
+                       | Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Edit _ -> reason
+                     in
+                     publish_expiration ~id entry ~reason:committed_reason;
+                     signal_resolution_after_commit
+                       ~keeper_name:entry.keeper_name
+                       ~approval_id:entry.id
+                       after_pending_removal)
+                | Nonblocking ->
+                  (match ensure_resolution_delivery_hook entry with
+                   | Error _ -> ()
+                   | Ok () ->
+                     (match
+                        deliver_resolution
+                          ~base_path:entry.audit_base_path
+                          entry
+                          decision
+                      with
+                      | Error _ -> ()
+                      | Ok signal ->
+                        remove_pending_entry ~id;
+                        publish_expiration ~id entry ~reason;
+                        observe_and_signal_nonblocking_resolution
+                          ~callback_site:"on_approval_expire_observer"
+                          ~failure_site:Keeper_approval_queue_failure_site.Expire_callback
+                          entry
+                          decision
+                          signal))))))
     candidates
 ;;

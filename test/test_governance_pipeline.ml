@@ -7,7 +7,32 @@ module Tool_result = Tool_result
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_id = Keeper_id
-module AQ = Masc.Keeper_approval_queue
+module Raw_AQ = Masc.Keeper_approval_queue
+
+module AQ = struct
+  include Raw_AQ
+
+  let pending_scopes : (string, string) Hashtbl.t = Hashtbl.create 16
+
+  let base_path_for_id id =
+    match Hashtbl.find_opt pending_scopes id with
+    | Some base_path -> base_path
+    | None ->
+      (match For_testing.pending_base_path ~id with
+       | Some base_path ->
+         Hashtbl.replace pending_scopes id base_path;
+         base_path
+       | None -> "")
+  ;;
+
+  let resolve ~id ~decision =
+    Raw_AQ.resolve ~base_path:(base_path_for_id id) ~id ~decision
+  ;;
+
+  let pending_count = For_testing.pending_count
+  let pending_count_for_keeper = For_testing.pending_count_for_keeper
+  let list_pending_entries = For_testing.list_pending_entries
+end
 
 let explicit_claim_tool = "keeper_task_claim"
 let generic_transition_tool = "masc_transition"
@@ -54,28 +79,9 @@ let rec yield_until ?(attempts = 50) predicate =
     yield_until ~attempts:(attempts - 1) predicate)
 
 let pending_id_for_keeper ~keeper_name =
-  match AQ.list_pending_json () with
-  | `List entries ->
-    List.find_map
-      (function
-        | `Assoc fields -> (
-          match
-            List.assoc_opt "keeper_name" fields,
-            List.assoc_opt "id" fields
-          with
-          | Some (`String name), Some (`String id) when String.equal name keeper_name ->
-            Some id
-          | Some (`String _), Some _
-          | Some _, Some _
-          | Some _, None
-          | None, Some _
-          | None, None ->
-            None)
-        | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-          None)
-      entries
-  | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->
-    None
+  AQ.list_pending_entries ()
+  |> List.find_map (fun (entry : AQ.pending_approval) ->
+    if String.equal entry.keeper_name keeper_name then Some entry.id else None)
 
 let resolve_pending_or_fail ~id ~decision =
   match AQ.resolve ~id ~decision with

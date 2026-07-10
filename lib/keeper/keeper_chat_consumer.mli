@@ -14,13 +14,17 @@
     every [MASC_KEEPER_QUEUE_POLL_SEC] seconds (default 1.0).
 
     Per keeper and per tick: when a turn is in flight
-    ([Keeper_turn_admission.in_flight]), queued messages are left to
-    accumulate; once the slot is free, the head run of same-source messages
-    is leased ([Keeper_chat_queue.lease_batch]) and merged into ONE
-    coalesced message ([Keeper_chat_queue.merge_batch]).  The merged turn
-    then runs in a keeper-scoped child fiber, so a slow queued turn for one
-    keeper does not block polling or delivery for other keepers.  A
-    keeper-local dispatch gate preserves the single follow-up turn contract
+    ([Keeper_turn_admission.in_flight]) or a workspace-scoped Blocking HITL
+    approval owns the lane, queued messages are left to accumulate. Once the
+    slot is free, the head run of same-source messages is leased
+    ([Keeper_chat_queue.lease_batch]) and the Blocking predicate is checked
+    again before dispatch. A Blocking approval that wins that race nacks the
+    lease for retry after resolution; it is not dispatched as a failed turn
+    and therefore cannot create a transport-failure row. Otherwise the leased
+    run is merged into ONE coalesced message ([Keeper_chat_queue.merge_batch]).
+    The merged turn then runs in a keeper-scoped child fiber, so a slow queued
+    turn for one keeper does not block polling or delivery for other keepers.
+    A keeper-local dispatch gate preserves the single follow-up turn contract
     for messages sent during an existing queued turn.
 
     Delivery is at-least-once: the lease is acked only once [handle_turn]
@@ -62,4 +66,11 @@ module For_testing : sig
   val is_dispatching : dispatch_state -> string -> bool
   val mark_dispatching : dispatch_state -> string -> bool
   val clear_dispatching : dispatch_state -> string -> unit
+
+  val set_after_lease_hook :
+    (base_path:string -> keeper_name:string -> lease_id:string -> unit) -> unit
+  (** Install a deterministic hook between lease acquisition and the second
+      Blocking-lane admission check. Focused TOCTOU tests only. *)
+
+  val clear_after_lease_hook : unit -> unit
 end

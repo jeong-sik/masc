@@ -62,9 +62,13 @@ val is_stale_paused_meta :
   now:float -> paused_ttl_sec:float -> keeper_meta -> bool
 (** Check if a paused keeper meta file on disk is stale enough to remove. *)
 
+(** Internal: predicate identifying paused metas whose blocker or typed gate
+    requires reconcile recovery instead of straight resume. *)
 val paused_meta_requires_reconcile_recovery : keeper_meta -> bool
-(** Internal: predicate identifying paused metas whose last_blocker class
-    requires reconcile-recovery rather than straight resume. *)
+
+(** [true] when a paused keeper owns a terminal latch that must survive the
+    ordinary stale-paused cleanup sweep until explicit operator recovery. *)
+val paused_meta_latched_terminal_pause : keeper_meta -> bool
 
 val paused_meta_auto_resume_due : now:float -> keeper_meta -> bool
 (** True when [meta] is an auto-paused keeper whose self-healing backoff has

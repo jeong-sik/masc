@@ -128,6 +128,7 @@ let no_signal_obs : WO.world_observation =
 let decide_no_signal () =
   let meta = warm_meta () in
   WO.keeper_cycle_decision
+    ~base_path:""
     ~provider_cooldown_remaining_sec:no_provider_cooldown
     ~reactive_wake:false
     ~meta
@@ -196,6 +197,7 @@ let test_scheduled_automation_attention_runs_after_task_cooldown () =
   let meta = schedule_ready_meta () in
   let d =
     WO.keeper_cycle_decision
+      ~base_path:""
       ~provider_cooldown_remaining_sec:no_provider_cooldown
       ~reactive_wake:false
       ~meta
@@ -209,6 +211,7 @@ let test_bootstrap_event_queue_trigger_runs_warm_keeper () =
   let meta = warm_meta () in
   let d =
     WO.keeper_cycle_decision
+      ~base_path:""
       ~provider_cooldown_remaining_sec:no_provider_cooldown
       ~reactive_wake:false
       ~event_queue_triggers:[ WO.Bootstrap_stimulus ]
@@ -227,6 +230,7 @@ let test_no_progress_event_queue_trigger_runs_warm_keeper () =
   let meta = warm_meta () in
   let d =
     WO.keeper_cycle_decision
+      ~base_path:""
       ~provider_cooldown_remaining_sec:no_provider_cooldown
       ~reactive_wake:false
       ~event_queue_triggers:[ WO.No_progress_recovery_stimulus ]
@@ -241,6 +245,7 @@ let test_scheduled_event_queue_trigger_runs_warm_keeper () =
   let meta = warm_meta () in
   let d =
     WO.keeper_cycle_decision
+      ~base_path:""
       ~provider_cooldown_remaining_sec:no_provider_cooldown
       ~reactive_wake:false
       ~event_queue_triggers:[ WO.Scheduled_automation_stimulus ]
@@ -284,6 +289,7 @@ let test_elapsed_min_interval_no_signal_stays_silent () =
   let meta = elapsed_min_interval_meta () in
   let d =
     WO.keeper_cycle_decision
+      ~base_path:""
       ~provider_cooldown_remaining_sec:no_provider_cooldown
       ~reactive_wake:false
       ~meta
@@ -313,6 +319,7 @@ let test_elapsed_min_interval_with_claimed_task_runs () =
   let meta = { (elapsed_min_interval_meta ()) with current_task_id = Some task_id } in
   let d =
     WO.keeper_cycle_decision
+      ~base_path:""
       ~provider_cooldown_remaining_sec:no_provider_cooldown
       ~reactive_wake:false
       ~meta

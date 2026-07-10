@@ -81,6 +81,7 @@ type session_kind =
 type broadcast_target =
   | All          (** Every connected session (backward-compatible default) *)
   | Observers    (** Only [Observer] sessions *)
+  | Workspace_observers of string (** [Observer] sessions for one workspace *)
   | Agent_streams (** Only [Agent_stream] sessions *)
   | Presence_only (** Only [Presence] sessions; never replay-buffered *)
 
@@ -116,6 +117,7 @@ let stream_capacity =
 type client = {
   id: int;
   kind: session_kind;
+  base_path: string;
   event_stream: string Eio.Stream.t;
   last_event_id: int Atomic.t;
   created_at: float;
@@ -552,6 +554,7 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
   let base_client = {
     id = client_id;
     kind;
+    base_path = auth.config;
     event_stream;
     last_event_id;
     created_at = 0.0;
@@ -710,6 +713,8 @@ let client_matches_target target ~jsonrpc_payload (client : client) =
       | Agent_stream -> jsonrpc_payload
       | Presence -> false)
   | Observers -> client.kind = Observer
+  | Workspace_observers base_path ->
+      client.kind = Observer && String.equal client.base_path base_path
   | Agent_streams -> client.kind = Agent_stream && jsonrpc_payload
   | Presence_only -> client.kind = Presence
 
@@ -946,6 +951,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
   let target_label = match target with
     | All -> "all"
     | Observers -> "observers"
+    | Workspace_observers _ -> "workspace_observers"
     | Agent_streams -> "agent_streams"
     | Presence_only -> "presence"
   in
@@ -1015,6 +1021,17 @@ let broadcast json = broadcast_impl All json
     - [Observers]: dashboard / read-only viewers only
     - [Agent_streams]: MCP agent sessions only *)
 let broadcast_to target json = broadcast_impl target json
+
+let broadcast_workspace_observers ~base_path json =
+  (* Workspace refresh hints are intentionally live-only. The replay buffer
+     and external-subscriber registry are fleet-wide and cannot preserve the
+     workspace authority carried by the connected observer. *)
+  broadcast_impl
+    ~buffer:false
+    ~notify_external:false
+    (Workspace_observers base_path)
+    json
+;;
 
 (** Broadcast an ephemeral presence/awareness event. Presence events are live
     only: they are not replay-buffered and do not fan out through generic

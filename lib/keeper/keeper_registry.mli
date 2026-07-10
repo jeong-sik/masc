@@ -122,6 +122,13 @@ val update_entry_if_registered :
 (** Update the meta for a registered keeper. No-op if not found. *)
 val update_meta : base_path:string -> string -> keeper_meta -> unit
 
+(** Atomically project an authoritative persisted snapshot into a registered
+    keeper when its [meta_version] is not older than the live projection. The
+    FSM [operator_paused] condition and derived phase are updated in the same
+    CAS. No-op for an unregistered keeper or stale snapshot. *)
+val sync_persisted_meta_if_newer :
+  base_path:string -> string -> keeper_meta -> unit
+
 (** Reload a registered keeper's meta from disk and replace the in-memory
     registry copy. Returns [Ok None] when the keeper is not registered or has
     no persisted meta. *)

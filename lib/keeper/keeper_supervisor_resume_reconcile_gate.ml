@@ -14,70 +14,38 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 
+exception Reconcile_resume_persistence_failed of string
+
 let resume_keeper_after_reconcile_gate
       ~(supervise_keepalive : proactive_warmup_sec:int -> _ context -> keeper_meta -> unit)
       (ctx : _ context)
       (meta : keeper_meta)
+      ~gate_id
   =
-  let latest_meta =
-    match read_meta ctx.config meta.name with
-    | Ok (Some latest) -> latest
-    | _ -> meta
-  in
-  (* RFC-0047 §3.2 / plan hypothesis B: clear the completion-contract
-     detector latch *before* the paused/last_blocker reset so the helper
-     sees the un-mutated disk klass. Otherwise the unconditional
-     [runtime.last_blocker = None] below hides the violation and the
-     helper becomes a no-op. *)
-  let latest_meta =
-    Keeper_unified_turn_completion_contract.clear_for_operator_resume
-      ~base_path:ctx.config.base_path
-      latest_meta
-  in
   let resumed_meta =
-    { latest_meta with
-      paused = false
-    ; latched_reason = None
-    ; updated_at = now_iso ()
-    ; runtime = { latest_meta.runtime with last_blocker = None }
-    }
+    match
+      Keeper_hitl_continue_gate.resolve
+        ~config:ctx.config
+        ~keeper_name:meta.name
+        ~gate_id
+        ~decision:Keeper_hitl_continue_gate.Approve
+    with
+    | Ok persisted -> persisted
+    | Error err ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string WriteMetaFailures)
+        ~labels:[ "keeper", meta.name; "phase", "reconcile_resume" ]
+        ();
+      Log.Keeper.error "%s: exact reconcile gate resume failed: %s" meta.name err;
+      raise (Reconcile_resume_persistence_failed err)
   in
-  (* #9733: same race shape as keeper_msg/overflow-pause/sync paths
-     already migrated by #10135 / #10145.  The supervisor reconcile
-     fiber clears [paused] and [runtime.last_blocker] (cycle-owned
-     fields); a heartbeat fiber bumping heartbeat-owned metadata in
-     parallel can still steal the CAS write and silently leave the keeper paused while
-     [Keeper_registry.update_meta] applies the resume in-memory —
-     a registry/disk split that hides the failure. *)
-  (match
-     write_meta_with_merge
-       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-       ctx.config
-       resumed_meta
-   with
-   | Ok () -> ()
-   | Error err when is_version_conflict_error err ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string WriteMetaFailures)
-       ~labels:[ "keeper", resumed_meta.name; "phase", "reconcile_resume_cas_race" ]
-       ();
-     Log.Keeper.warn
-       "%s: reconcile gate resume write_meta lost CAS race after retries: %s"
-       resumed_meta.name
-       err
-   | Error err ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string WriteMetaFailures)
-       ~labels:[ "keeper", resumed_meta.name; "phase", "reconcile_resume" ]
-       ();
-     Log.Keeper.error
-       "%s: reconcile gate resume write_meta failed: %s"
-       resumed_meta.name
-       err);
-  Keeper_registry.update_meta
-    ~base_path:ctx.config.base_path
-    resumed_meta.name
-    resumed_meta;
+  (* [clear_for_operator_resume] also clears the live registry failure latch;
+     run it only after the durable metadata write succeeds. Pass the original
+     meta so the helper still sees the pre-resume blocker classification. *)
+  ignore
+    (Keeper_unified_turn_completion_contract.clear_for_operator_resume
+       ~base_path:ctx.config.base_path
+       meta);
   Keeper_registry.set_failure_reason
     ~base_path:ctx.config.base_path
     resumed_meta.name
@@ -90,16 +58,41 @@ let resume_keeper_after_reconcile_gate
      resume path so the resumed keeper's first livelock block emits at
      ERROR (not silently demoted to DEBUG from a previous lifetime). *)
   Keeper_livelock_state.reset_for_keeper ~keeper:resumed_meta.name;
-  Keeper_registry.dispatch_event_unit
-    ~base_path:ctx.config.base_path
-    resumed_meta.name
-    Keeper_state_machine.Operator_resume;
-  match Keeper_registry.get ~base_path:ctx.config.base_path resumed_meta.name with
-  | Some entry when Option.is_none (Eio.Promise.peek entry.done_p) ->
-    (* tla-lint: allow-mutation: fiber signal — wake the keeper after operator resume *)
-    Atomic.set entry.fiber_wakeup true
-  | Some _ ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path resumed_meta.name;
-    supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
-  | None -> supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
+  fun () ->
+    (* The post-removal hint is non-authoritative. Re-read durable truth so an
+       operator pause/resume committed between the approval write and this
+       closure wins, then version-gate the live projection. *)
+    match read_meta ctx.config resumed_meta.name with
+    | Error err ->
+      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+        ~config:ctx.config
+        ~keeper_name:resumed_meta.name
+        ~side_effect:"reconcile resume post-removal meta refresh"
+        ~severity:`Error
+        err
+    | Ok None ->
+      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+        ~config:ctx.config
+        ~keeper_name:resumed_meta.name
+        ~side_effect:"reconcile resume post-removal meta refresh"
+        ~severity:`Error
+        "persisted keeper metadata disappeared after approval"
+    | Ok (Some authoritative_meta) ->
+      Keeper_registry.sync_persisted_meta_if_newer
+        ~base_path:ctx.config.base_path
+        authoritative_meta.name
+        authoritative_meta;
+      if authoritative_meta.paused
+      then ()
+      else
+        match Keeper_registry.get ~base_path:ctx.config.base_path authoritative_meta.name with
+        | Some entry when Option.is_none (Eio.Promise.peek entry.done_p) ->
+          (* tla-lint: allow-mutation: post-removal keeper resume signal *)
+          Atomic.set entry.fiber_wakeup true
+        | Some _ ->
+          Keeper_registry.unregister
+            ~base_path:ctx.config.base_path
+            authoritative_meta.name;
+          supervise_keepalive ~proactive_warmup_sec:0 ctx authoritative_meta
+        | None -> supervise_keepalive ~proactive_warmup_sec:0 ctx authoritative_meta
 ;;

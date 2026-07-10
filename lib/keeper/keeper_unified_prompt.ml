@@ -630,7 +630,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     ~(observation : Keeper_world_observation.world_observation)
     () : string * string
     =
-  ignore base_path;
   (* Total deterministic resolution between two known instruction sources
      (profile default else meta), not a permissive unknown-input default;
      pre-existing pattern, was the 4th tuple element before RFC-0282. *)
@@ -805,7 +804,8 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
        for callers that predate the threading. *)
     match turn_decision with
     | Some decision -> decision
-    | None -> Keeper_world_observation.keeper_cycle_decision ~meta observation
+    | None ->
+      Keeper_world_observation.keeper_cycle_decision ~base_path ~meta observation
   in
   let autonomous_trigger =
     autonomous_trigger_lines ~decision:turn_decision ~observation

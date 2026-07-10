@@ -326,6 +326,7 @@ let run_keepalive_unified_turn
         decide_keepalive_scheduling
           ~reactive_wake
           ~event_queue_triggers:event_intake.event_queue_triggers
+          ~base_path:ctx.config.base_path
           ~keeper_resilience_of_name:(fun keeper_name ->
             if Health.is_healthy ~agent_name:keeper_name then None
             else Some "unhealthy")
@@ -540,10 +541,21 @@ let run_keepalive_unified_turn
                    !consumed_stimuli)
             else Keeper_registry.Proactive_tick
           in
+          let retain_unobserved_stimuli = ref false in
           let meta_after_cycle =
             run_keeper_cycle
               ?event_bus
               ?hitl_resolution
+              ~on_stop_reason:(function
+                | Runtime_agent.Yielded_to_blocking_approval
+                    { provider_turns_completed = 0; _ } ->
+                  retain_unobserved_stimuli := true
+                | Runtime_agent.Completed
+                | Runtime_agent.TurnBudgetExhausted _
+                | Runtime_agent.MutationBoundaryReached _
+                | Runtime_agent.Yielded_to_chat_waiting _
+                | Runtime_agent.Yielded_to_durable_stimulus _
+                | Runtime_agent.Yielded_to_blocking_approval _ -> ())
               ~ctx
               ~meta_after_triage
               ~stop
@@ -553,7 +565,14 @@ let run_keepalive_unified_turn
               ~wake
               ()
           in
-          consumed_stimuli_turn_completed := true;
+          consumed_stimuli_turn_completed := not !retain_unobserved_stimuli;
+          if !retain_unobserved_stimuli && !consumed_stimuli <> []
+          then
+            Log.Keeper.info
+              "%s: retaining %d leased stimulus/stimuli after a pre-dispatch \
+               Blocking approval yield"
+              meta_after_triage.name
+              (List.length !consumed_stimuli);
           meta_after_cycle)
         else meta_after_triage
       in
@@ -1032,6 +1051,7 @@ let run_heartbeat_loop
         in
         let approval_pending =
           Keeper_approval_queue.has_blocking_pending_for_keeper
+            ~base_path:ctx.config.base_path
             ~keeper_name:meta_current.name
         in
         let intake_admission =

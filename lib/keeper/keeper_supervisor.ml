@@ -220,7 +220,9 @@ let release_dead_keeper_owned_tasks (ctx : _ context) (entry : Keeper_registry.r
 ;;
 
 let pending_hitl_approval_counts config =
-  let pending_entries = Keeper_approval_queue.list_pending_entries () in
+  let pending_entries =
+    Keeper_approval_queue.list_pending_entries ~base_path:config.Workspace.base_path
+  in
   keeper_names config
   |> List.filter_map (fun name ->
        let blocking_count, nonblocking_count =
@@ -841,20 +843,41 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          (* K4c — restart-meta read failure: keeper abandoned, drop. *)
          Keeper_tool_emission_hook.drop_keeper_accumulator old_entry.name)
     restart_list;
-  (* Phase 2: restore paused reconcile gates whose approval queue was lost
-     on restart. The queue itself is in-memory, but paused keeper meta is
-     durable, so rebuild the human gate from persisted blocker evidence. *)
+  (* Phase 2: restore durable repository operations before ordinary reconcile
+     gates. Repository state is written before its pause, so every persisted
+     keeper must be scanned to close a crash between those two writes. The
+     queue itself is in-memory; rebuild the appropriate human gate from the
+     durable operation or paused blocker evidence. *)
   let sweep_names_ym = Eio_guard.create_yield_meter () in
   Keeper_meta_store.keeper_names ctx.config
   |> List.iter (fun name ->
     (match read_meta ctx.config name with
-     | Ok (Some meta)
-       when paused_meta_requires_reconcile_recovery meta
-            && not
-                 (Keeper_approval_queue.has_blocking_pending_for_keeper
-                    ~keeper_name:meta.name)
-       -> restore_reconcile_continue_gate ctx meta
-     | Ok (Some _)
+     | Ok (Some meta) ->
+       let repo_outcome =
+         Keeper_repo_claim_hitl.restore_pending_registration_hitl
+           ~config:ctx.config
+           meta
+       in
+       let repo_gate_restored =
+         match repo_outcome with
+         | Keeper_repo_claim_hitl.Registration_restored -> true
+         | Keeper_repo_claim_hitl.No_registration_record
+         | Keeper_repo_claim_hitl.Registration_superseded -> false
+         | Keeper_repo_claim_hitl.Registration_corrupt detail ->
+           Log.Keeper.error
+             "%s: corrupt repository registration recovery state requires operator repair: %s"
+             meta.name
+             detail;
+           false
+       in
+       if
+         (not repo_gate_restored)
+         && paused_meta_requires_reconcile_recovery meta
+         && not
+              (Keeper_approval_queue.has_blocking_pending_for_keeper
+                 ~base_path
+                 ~keeper_name:meta.name)
+       then restore_reconcile_continue_gate ctx meta
      | Ok None
      | Error _ -> ());
     Eio_guard.yield_step sweep_names_ym);
@@ -870,8 +893,10 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       | Ok (Some meta)
         when is_stale_paused_meta ~now ~paused_ttl_sec meta
              && (not (paused_meta_requires_reconcile_recovery meta))
+             && (not (paused_meta_latched_terminal_pause meta))
              && not
                   (Keeper_approval_queue.has_blocking_pending_for_keeper
+                     ~base_path
                      ~keeper_name:meta.name)
         ->
         let path = Keeper_types_profile.keeper_meta_path ctx.config name in
@@ -950,6 +975,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
         when Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta
              && not
                   (Keeper_approval_queue.has_blocking_pending_for_keeper
+                     ~base_path
                      ~keeper_name:meta.name)
         ->
         (match

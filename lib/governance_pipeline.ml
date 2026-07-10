@@ -615,7 +615,7 @@ let to_oas_approval_callback
               match lane_policy with
               | Keeper_approval_queue.Nonblocking ->
                 let approval_id =
-                  Keeper_approval_queue.submit_pending
+                  Keeper_approval_queue.submit_pending_observer
                     ~keeper_name
                     ~tool_name
                     ~input
@@ -632,9 +632,8 @@ let to_oas_approval_callback
                     ~disposition:"Blocked"
                     ~disposition_reason
                     ?continuation_channel
-                    ~lane_policy
                     ~risk_level
-                    ~on_resolution:(fun decision ->
+                    ~on_resolution_observer:(fun decision ->
                       Log.Governance.info
                         "nonblocking HITL approval resolved keeper=%s tool=%s decision=%s"
                         keeper_name

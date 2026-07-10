@@ -109,6 +109,7 @@ let base_obs : WO.world_observation =
 let decide ~since_sec (obs : WO.world_observation) =
   let meta = warm_meta ~since_sec () in
   (WO.keeper_cycle_decision
+     ~base_path:""
      ~provider_cooldown_remaining_sec:no_provider_cooldown
      ~reactive_wake:false
      ~meta

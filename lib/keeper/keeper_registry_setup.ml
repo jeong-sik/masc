@@ -279,6 +279,66 @@ let update_entry_if_registered_unit ~base_path name f =
   ignore (update_entry_if_registered ~base_path name (fun entry -> f entry, true))
 ;;
 
+(** Project an authoritative persisted meta snapshot into the live registry
+    only when it is at least as new as the current projection. The pause bit is
+    also projected into the FSM conditions in the same registry CAS, so
+    metadata and phase cannot split. This is the registration/resolution
+    handshake for HITL pause transitions: a registrar with a stale captured
+    meta cannot overwrite a newer durable approval decision. *)
+let sync_persisted_meta_if_newer ~base_path name (meta : keeper_meta) =
+  match validate_registry_meta ~base_path name meta with
+  | Error reason ->
+    record_invalid_registry_entry ~operation:"sync_persisted_meta_if_newer" ~name reason
+  | Ok () ->
+    let key = registry_key ~base_path name in
+    let rec loop () =
+      let current = Atomic.get registry in
+      match StringMap.find_opt key current with
+      | None -> ()
+      | Some entry when meta.meta_version < entry.meta.meta_version -> ()
+      | Some entry ->
+        let conditions =
+          { entry.conditions with operator_paused = meta.paused }
+        in
+        let phase = Keeper_state_machine.derive_phase conditions in
+        let updated_entry = { entry with meta; conditions; phase } in
+        (match validate_registry_entry ~base_path name updated_entry with
+         | Error reason ->
+           record_invalid_registry_entry
+             ~operation:"sync_persisted_meta_if_newer"
+             ~name
+             reason
+         | Ok () ->
+           let updated = StringMap.add key updated_entry current in
+           if Atomic.compare_and_set registry current updated
+           then (
+             if entry.phase = Keeper_state_machine.Running
+                && phase <> Keeper_state_machine.Running
+             then decr_running_count_clamped ()
+             else if entry.phase <> Keeper_state_machine.Running
+                     && phase = Keeper_state_machine.Running
+             then Atomic.incr running_count_atomic;
+             Keeper_registry_broadcast.composite_changed
+               ~name
+               ~ts_unix:(Time_compat.now ()))
+           else loop ())
+    in
+    loop ()
+;;
+
+let refresh_registered_meta_from_persistence ~base_path name =
+  let config = Workspace.default_config base_path in
+  match read_meta config name with
+  | Ok (Some persisted) -> sync_persisted_meta_if_newer ~base_path name persisted
+  | Ok None -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "registry: post-install durable meta refresh failed name=%s base_path=%s: %s"
+      name
+      base_path
+      err
+;;
+
 let rec queue_contains_stimulus queue stimulus =
   match Keeper_event_queue.dequeue queue with
   | None -> false
@@ -326,6 +386,8 @@ let register_with_state
       ~(conditions : Keeper_state_machine.conditions)
   =
   let meta = canonicalize_registry_meta ~operation:"register" ~base_path name meta in
+  let conditions = { conditions with operator_paused = meta.paused } in
+  let phase = Keeper_state_machine.derive_phase conditions in
   Log.Keeper.info
     "registry: registering keeper name=%s base_path=%s phase=%s"
     name
@@ -389,6 +451,7 @@ let register_with_state
     "registry: keeper registered name=%s running_count=%d"
     name
     (Atomic.get running_count_atomic);
+  refresh_registered_meta_from_persistence ~base_path name;
   refresh_entry_event_queue_from_persistence ~base_path name entry;
   entry
 ;;
@@ -429,6 +492,7 @@ let register_restarting ~base_path name meta
     { Keeper_state_machine.default_conditions with
       restart_budget_remaining = true
     ; backoff_elapsed = true
+    ; operator_paused = meta.paused
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
@@ -492,6 +556,7 @@ let register_restarting ~base_path name meta
           name
           base_path
           (Keeper_state_machine.phase_to_string phase);
+        refresh_registered_meta_from_persistence ~base_path name;
         refresh_entry_event_queue_from_persistence ~base_path name new_entry;
         Ok new_entry)
       else loop ()

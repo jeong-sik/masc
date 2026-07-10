@@ -61,7 +61,10 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
            | Ok None | Error _ -> None)
   in
   let pending_approvals =
-    match Keeper_approval_queue.list_pending_dashboard_json () with
+    match
+      Keeper_approval_queue.list_pending_dashboard_json
+        ~base_path:config.Workspace.base_path
+    with
     | `List items -> items
     | _ -> []
   in
@@ -337,7 +340,10 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
                | Ok None | Error _ | Ok (Some _) -> None)
       in
       let approvals =
-        match Keeper_approval_queue.list_pending_dashboard_json () with
+        match
+          Keeper_approval_queue.list_pending_dashboard_json
+            ~base_path:config.Workspace.base_path
+        with
         | `List items ->
             items |> List.filter (approval_matches_goal goal_id)
         | _ -> []
@@ -411,7 +417,10 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
     |> List.length
   in
   let pending_approval_total =
-    match Keeper_approval_queue.list_pending_dashboard_json () with
+    match
+      Keeper_approval_queue.list_pending_dashboard_json
+        ~base_path:config.Workspace.base_path
+    with
     | `List items -> List.length items
     | _ -> 0
   in

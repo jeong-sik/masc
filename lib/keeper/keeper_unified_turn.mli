@@ -207,6 +207,7 @@ val run_keeper_cycle
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?on_stop_reason:(Runtime_agent.stop_reason -> unit)
   -> unit
   -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
 
@@ -230,4 +231,7 @@ val run_keeper_cycle
     @param turn_decision The scheduler's cycle decision that fired this turn
     (RFC-0315). Threaded into [Keeper_unified_prompt.build_prompt] so the
     prompt renders the real wake reason instead of a context-blind recompute.
-    Callers that predate the threading may omit it. *)
+    Callers that predate the threading may omit it.
+    @param on_stop_reason Synchronous terminal observation hook for the
+    heartbeat intake owner. It is invoked once for a successful OAS result
+    before success finalization and must not perform fallible side effects. *)

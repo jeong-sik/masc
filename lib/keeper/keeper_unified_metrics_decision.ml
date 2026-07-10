@@ -85,7 +85,9 @@ let append_decision_record
     Keeper_runtime_contract.runtime_observability_contract_json ~config meta
   in
   let pending_approval_count =
-    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+    Keeper_approval_queue.pending_count_for_keeper
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
   in
   let claim_executed =
     List.exists Keeper_tool_progress.is_claim_tool_name tool_names
@@ -297,6 +299,8 @@ let append_decision_record
                       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
                   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
                       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
+                  | Runtime_agent.Yielded_to_blocking_approval { turns_used; _ } ->
+                      Printf.sprintf "yielded_to_blocking_approval(%d)" turns_used
                 in
               let inference_fields =
                 match r.inference_telemetry with

@@ -15,19 +15,24 @@
     Tier B3, PR #11417).
 
     The spec preamble cites this module by function name
-    ([submit_and_await], [submit_pending], [expire_stale]).  It used to
+    ([submit_and_await], [submit_pending_blocking],
+    [submit_pending_observer], [expire_stale]).  It used to
     carry line numbers (751 / 772 / 941) but iter 64 N-2.a removed them
     after the OCaml line drift reached +245..+413 — function names are
     stable, line numbers are not.  This block is the reverse-direction
     citation so code search for "KeeperApprovalQueue" lands here.
 
     Action mapping (TLA+ -> OCaml):
-      Submit                 [submit_and_await] / [submit_pending]
-                             record a new pending entry. [submit_and_await]
-                             suspends the caller on [Eio.Promise.await];
-                             [submit_pending] invokes its callback later and
-                             defaults to an independent Keeper cycle unless
-                             an explicit lifecycle [Blocking] policy is used.
+      Submit                 [submit_and_await], [submit_pending_blocking],
+                             and [submit_pending_observer] record a new pending
+                             entry. [submit_and_await] suspends the caller on
+                             [Eio.Promise.await]. A blocking callback prepares
+                             a side-effect-free plan; the queue latches its
+                             decision, runs the idempotent durable commit, then
+                             removes the entry. Its recovery hint runs only
+                             after terminal audit publication. The
+                             nonblocking observer runs only after durable
+                             [Hitl_resolved] commit and pending removal.
       Resolve                operator approves/rejects via the HTTP
                              handler in [server_dashboard_http.ml],
                              which calls [resolve] on the queue and
@@ -36,14 +41,13 @@
                              and forces
                              [Eio.Promise.resolve resolver (Reject ...)]
                              so no fiber is left blocked indefinitely.
-      ExpireStaleNoResolve   bug action — entries are removed from
-                             [pending] without resolving the promise.
+      ExpireStaleNoResolve   promise-lane bug action — an entry is removed
+                             from [pending] without resolving its promise.
                              Spec invariants SuspensionMatchesPending
-                             and QuiescentImpliesResolved catch this;
-                             in code, the structural invariant is
-                             that every removal from [pending] is
-                             paired with an [Eio.Promise.resolve]
-                             on the same control-flow path.
+                             and QuiescentImpliesResolved catch this. The model
+                             does not cover callback decision latching,
+                             workspace routing, or durable observer delivery;
+                             focused OCaml tests own those contracts.
 
     @since 2.262.0 (#5907) *)
 

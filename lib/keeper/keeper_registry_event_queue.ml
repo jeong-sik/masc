@@ -71,6 +71,32 @@ let enqueue_live_if_missing (entry : Keeper_registry.registry_entry) stimulus =
   loop ()
 ;;
 
+let before_durable_live_publication_hook : (unit -> unit) option ref = ref None
+
+let publish_durable_to_current_live ~base_path name stimulus =
+  Option.iter (fun hook -> hook ()) !before_durable_live_publication_hook;
+  let rec loop () =
+    match Keeper_registry.get ~base_path name with
+    | None -> ()
+    | Some entry ->
+      enqueue_live_if_missing entry stimulus;
+      (* A concurrent register/restart may replace the registry entry after our
+         lookup. Publish again when that happened; registrations that install
+         after this check rehydrate from the durable snapshot before returning. *)
+      (match Keeper_registry.get ~base_path name with
+       | Some current when current == entry -> ()
+       | None -> ()
+       | Some _ -> loop ())
+  in
+  loop ()
+;;
+
+module For_testing = struct
+  let set_before_durable_live_publication_hook hook =
+    before_durable_live_publication_hook := hook
+  ;;
+end
+
 let enqueue ~base_path name stimulus =
   match Keeper_registry.get ~base_path name with
   | None ->
@@ -113,15 +139,11 @@ let enqueue_durable_result ~base_path name stimulus =
      delivery result. This path is intentionally separate from [enqueue]: most
      stimuli already have an upstream replay source, while HITL resolution is
      the sole carrier of an operator decision and must fail closed. *)
-  let after_commit =
-    match Keeper_registry.get ~base_path name with
-    | None -> fun () -> ()
-    | Some entry -> fun () -> enqueue_live_if_missing entry stimulus
-  in
   Keeper_event_queue_persistence.update_checked_result
     ~base_path
     ~keeper_name:name
-    ~after_commit
+    ~after_commit:(fun () ->
+      publish_durable_to_current_live ~base_path name stimulus)
     (fun queue -> enqueue_external_decision queue stimulus)
 ;;
 

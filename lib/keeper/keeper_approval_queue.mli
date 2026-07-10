@@ -48,6 +48,25 @@ type lane_policy =
   | Nonblocking
   | Blocking
 
+type resolution_claim_owner =
+  | Operator_resolution
+  | Await_timeout
+  | Await_cancellation
+  | Expiration
+  | Terminal_state_cancellation
+
+type blocking_resolution_plan =
+  { effect_key : string
+  ; commit : unit -> (unit -> unit)
+  }
+
+type blocking_resolution_state =
+  | Blocking_resolution_open
+  | Blocking_resolution_committed of
+      { decision : Agent_sdk.Hooks.approval_decision
+      ; plan : blocking_resolution_plan
+      }
+
 (** [Agent_sdk.Hooks.approval_decision] alias used as the resolver type. *)
 type decision = Agent_sdk.Hooks.approval_decision
 
@@ -86,10 +105,15 @@ type pending_approval =
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
-  ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
+  ; on_resolution_callback :
+      (approval_id:string ->
+       Agent_sdk.Hooks.approval_decision ->
+       blocking_resolution_plan)
+        option
+  ; on_resolution_observer : (Agent_sdk.Hooks.approval_decision -> unit) option
+  ; blocking_resolution_state : blocking_resolution_state
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
-  ; channel : Keeper_continuation_channel.t option
   }
 
 (** Persisted auto-approval rule that can satisfy a pending entry
@@ -281,7 +305,18 @@ val list_recent_resolved_json :
 
 module For_testing : sig
   val reset_audit_store : unit -> unit
+  val reset_pending : unit -> unit
   val first_cmd_token : string -> string option
+  val pending_base_path : id:string -> string option
+  val list_pending_entries : unit -> pending_approval list
+  val pending_count : unit -> int
+  val pending_count_for_keeper : keeper_name:string -> int
+  val blocking_pending_count_for_keeper : keeper_name:string -> int
+  val has_blocking_pending_for_keeper : keeper_name:string -> bool
+  val has_pending_for_keeper : keeper_name:string -> bool
+  val set_resolution_claim_hook :
+    (resolution_claim_owner -> string -> unit) -> unit
+  val clear_resolution_claim_hook : unit -> unit
   val clear_approval_resolution_wake_hook : unit -> unit
 end
 
@@ -324,13 +359,12 @@ val submit_and_await :
   unit ->
   Agent_sdk.Hooks.approval_decision
 
-(** Submit a tool call for approval without suspending the caller —
-    the supplied [on_resolution] callback is invoked when the
-    operator resolves. [lane_policy] defaults to [Nonblocking]; lifecycle
-    gates that deliberately pause a keeper must pass [Blocking] and resume
-    that pause from their callback. Returns the new pending entry's id, or
-    the existing id when an equivalent entry with the same policy is pending. *)
-val submit_pending :
+(** Submit a nonblocking approval. [on_resolution_observer] is explicitly
+    non-authoritative: the durable [Hitl_resolved] event is the sole replayable
+    decision carrier, and the observer runs only after durable commit and
+    pending removal. Domain mutations must use {!submit_pending_blocking} until
+    they have a typed replayable effect. *)
+val submit_pending_observer :
   keeper_name:string ->
   tool_name:string ->
   input:Yojson.Safe.t ->
@@ -348,8 +382,47 @@ val submit_pending :
   ?disposition:string ->
   ?disposition_reason:string ->
   ?continuation_channel:Keeper_continuation_channel.t ->
-  ?lane_policy:lane_policy ->
-  on_resolution:(Agent_sdk.Hooks.approval_decision -> unit) ->
+  on_resolution_observer:(Agent_sdk.Hooks.approval_decision -> unit) ->
+  unit ->
+  string
+
+(** Build a side-effect-free blocking resolution plan. [commit] must be an
+    idempotent durable domain mutation. It returns a non-authoritative recovery
+    hint that runs only after pending removal and terminal audit publication. *)
+val blocking_resolution_plan :
+  effect_key:string ->
+  commit:(unit -> (unit -> unit)) ->
+  blocking_resolution_plan
+
+(** Submit a callback-owned blocking approval. [on_resolution] receives the
+    approval id and must only prepare a side-effect-free plan. The queue then
+    latches the decision before invoking the plan's idempotent durable commit.
+    Commit failure preserves the entry for a same-decision retry; a
+    contradictory retry is rejected. After commit, the queue removes the id,
+    publishes the terminal audit, and invokes the plan's best-effort recovery
+    hint. *)
+val submit_pending_blocking :
+  keeper_name:string ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  risk_level:risk_level ->
+  base_path:string ->
+  ?turn_id:int ->
+  ?task_id:string ->
+  ?goal_id:string ->
+  ?goal_ids:string list ->
+  ?sandbox_target:string ->
+  ?sandbox_profile:string ->
+  ?backend:string ->
+  ?runtime_contract:Yojson.Safe.t ->
+  ?selected_model:string ->
+  ?disposition:string ->
+  ?disposition_reason:string ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  on_resolution:
+    (approval_id:string ->
+     Agent_sdk.Hooks.approval_decision ->
+     blocking_resolution_plan) ->
   unit ->
   string
 
@@ -363,7 +436,7 @@ val submit_pending :
     [has_blocking_pending_for_keeper]. Before [Server_bootstrap] installs the
     hook, nonblocking resolution fails explicitly and remains pending. A
     successful hook returns the wake signal closure; the queue invokes it only
-    after the resolution callback has completed and the pending id is gone. *)
+    after the pending id is gone and the non-authoritative observer has run. *)
 val set_approval_resolution_wake_hook :
   (base_path:string ->
    keeper_name:string ->
@@ -377,7 +450,15 @@ val set_approval_resolution_wake_hook :
     as a rule. Returns [Not_found] when [id] is absent or
     [Already_resolved] on a concurrent-resolve race. [Delivery_failed]
     preserves the pending entry and reports that no resolution was
-    acknowledged. *)
+    acknowledged. The caller [base_path] must match the pending entry's
+    captured [audit_base_path]; after that check the entry path is the SSOT for
+    callback, audit, rule, and durable-delivery work. A blocking plan's typed
+    decision is latched before its idempotent durable commit; commit failure
+    preserves the entry for the same decision, while a contradictory retry is
+    rejected. After commit, removal and terminal audit precede the
+    non-authoritative recovery hint. Nonblocking resolution commits the
+    replayable [Hitl_resolved] event before removal and invokes only a
+    non-authoritative observer afterward. *)
 val resolve_with_policy :
   base_path:string ->
   id:string ->
@@ -387,39 +468,48 @@ val resolve_with_policy :
   unit ->
   (resolution_result, resolve_error) result
 
-(** Convenience over [resolve_with_policy] that discards the
-    resolution result. Called from the dashboard approval HTTP
-    handler and the MCP runtime. *)
+(** Workspace-scoped convenience over [resolve_with_policy] that discards the
+    resolution result. Id uniqueness is not an authorization boundary. *)
 val resolve :
+  base_path:string ->
   id:string ->
   decision:Agent_sdk.Hooks.approval_decision ->
   (unit, resolve_error) result
 
 (** {1 Query} *)
 
-val list_pending_json : unit -> Yojson.Safe.t
-val list_pending_dashboard_json : unit -> Yojson.Safe.t
-val list_pending_entries : unit -> pending_approval list
+val list_pending_json : base_path:string -> Yojson.Safe.t
+val list_pending_dashboard_json : base_path:string -> Yojson.Safe.t
+val list_pending_entries : base_path:string -> pending_approval list
 
 (** Detail view of a single pending entry with input + runtime
     contract included. *)
-val get_pending_json : id:string -> Yojson.Safe.t option
+val get_pending_json : base_path:string -> id:string -> Yojson.Safe.t option
 
-(** Read a pending entry by id. Returns [None] if already resolved. *)
-val get_pending_entry : id:string -> pending_approval option
+(** Read a pending entry by id within [base_path]. Returns [None] when absent,
+    already resolved, or owned by another workspace. *)
+val get_pending_entry : base_path:string -> id:string -> pending_approval option
 
 (** Apply a copy-on-write update to a pending entry if it still exists. *)
 val update_pending_entry : id:string -> (pending_approval -> pending_approval) -> unit
 
-val pending_count : unit -> int
-val pending_count_for_keeper : keeper_name:string -> int
-val blocking_pending_count_for_keeper : keeper_name:string -> int
+val pending_count : base_path:string -> int
+val pending_count_for_keeper : base_path:string -> keeper_name:string -> int
+val blocking_pending_count_for_keeper : base_path:string -> keeper_name:string -> int
 (** Number of pending approvals with [Blocking] lane policy. *)
 
-val has_blocking_pending_for_keeper : keeper_name:string -> bool
+val has_blocking_pending_for_keeper : base_path:string -> keeper_name:string -> bool
 (** Whether a [Blocking] approval currently owns a live Keeper lane. *)
 
-val has_pending_for_keeper : keeper_name:string -> bool
+val has_pending_for_keeper : base_path:string -> keeper_name:string -> bool
+
+val cancel_callback_owned_for_terminal_keeper :
+  base_path:string -> keeper_name:string -> reason:string -> int
+(** Terminal-cancel callback-owned Blocking entries for [keeper_name] without
+    invoking their domain callbacks. Uses the shared resolution claim, removes
+    only entries still owned by this workspace/keeper, and publishes one
+    terminal Reject audit per cancelled entry. Promise-owned and observer
+    entries are left untouched. *)
 
 (** {1 Timeout cleanup} *)
 

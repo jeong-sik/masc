@@ -80,16 +80,18 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
         }
       in
       (match
-         write_meta_with_merge
-           ~merge:Keeper_meta_merge.monotonic_usage_counters ctx.config repaired
+         write_meta_with_merge_returning
+           ~merge:Keeper_meta_merge.identity_repair_fields_from_caller
+           ctx.config
+           repaired
        with
-       | Ok () ->
+       | Ok persisted ->
          Log.Keeper.warn
            "keepalive repaired identity drift for %s: %s -> %s"
            meta.name
            meta.agent_name
            expected_agent_name;
-         Some repaired
+         Some persisted
        | Error err ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string WriteMetaFailures)
@@ -153,12 +155,12 @@ let sync_keeper_presence
       ();
     note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current;
     match
-      write_meta_with_merge
-        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+      write_meta_with_merge_returning
+        ~merge:Keeper_meta_merge.non_operator_control_fields_from_disk
         ctx.config
         synced
     with
-    | Ok () -> synced
+    | Ok persisted -> persisted
     | Error e ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string WriteMetaFailures)

@@ -229,7 +229,9 @@ let runtime_state_fields_json (config : Workspace_utils.config) (meta : keeper_m
 
 let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
   let pending_approval_count =
-    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+    Keeper_approval_queue.pending_count_for_keeper
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
   in
   let runtime_blocker = runtime_blocker_surface_opt config meta in
   let needs_attention, attention_reason, next_human_action =

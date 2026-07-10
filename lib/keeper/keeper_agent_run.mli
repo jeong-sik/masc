@@ -23,14 +23,16 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_sdk.Raw_trace.t
   | Sink_degraded of Agent_sdk.Error.sdk_error
 
-(** Typed reason and boundary for an autonomous Keeper run to release its lane
-    at an OAS turn boundary. Scheduled-idle chat can yield immediately;
-    reactive chat and durable backlog yield only after the current cycle has
-    completed at least one provider turn, so a leased stimulus is never
-    acknowledged without being observed by the model. *)
+(** Typed reason and boundary for a Keeper run to release its lane at an OAS
+    turn boundary. Blocking approval and scheduled-idle chat can yield
+    immediately; reactive chat and durable backlog yield only after the current
+    cycle has completed at least one provider turn. A Blocking yield records how
+    many provider turns completed so autonomous intake can retain an unobserved
+    leased stimulus. *)
 type autonomous_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
+  | Blocking_approval_waiting
 
 type autonomous_yield_boundary =
   | Yield_immediately
@@ -99,8 +101,14 @@ module For_testing : sig
     -> autonomous_yield_request
     -> bool
 
+  val blocking_approval_yield_request
+    :  base_path:string
+    -> keeper_name:string
+    -> autonomous_yield_request option
+
   val stop_reason_of_autonomous_yield
-    :  turn:int
+    :  start_turn:int
+    -> turn:int
     -> autonomous_yield_request
     -> Runtime_agent.stop_reason
 end
@@ -185,12 +193,11 @@ val run_turn
   -> ?hitl_delivery_channel:Keeper_continuation_channel.t
   -> ?hitl_approval_grant:Governance_pipeline.hitl_approval_grant
   -> ?autonomous_yield_requested:(unit -> autonomous_yield_request option)
-       (* Autonomous-lane hook: evaluated at each OAS agent-loop turn boundary
-          (the same guard point as [max_idle_turns], before the next model
-          dispatch — never mid tool execution). A typed request stops the run
-          gracefully at the boundary allowed by [autonomous_yield_reason],
-          releasing the lane for queued chat or durable stimulus work. Only the
-          heartbeat-scheduled path passes it; a chat turn never receives this
-          hook. *)
+       (* Optional autonomous-lane signals layered behind the built-in Blocking
+          approval gate. Every lane evaluates the combined typed request at
+          each OAS agent-loop turn boundary (the same guard point as
+          [max_idle_turns], before the next model dispatch — never mid tool
+          execution). The heartbeat-scheduled path supplies chat and durable
+          stimulus signals; direct chat relies on the built-in Blocking gate. *)
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

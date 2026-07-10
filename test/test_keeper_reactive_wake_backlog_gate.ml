@@ -118,6 +118,7 @@ let global_backlog_obs : WO.world_observation =
 let decide ~reactive_wake =
   let meta = warm_backlog_meta () in
   WO.keeper_cycle_decision
+    ~base_path:""
     ~provider_cooldown_remaining_sec:no_provider_cooldown
     ~reactive_wake
     ~meta
@@ -158,12 +159,19 @@ let test_live_keeper_count_ignores_empty_agent_registry () =
   let agents_dir = Filename.concat masc_dir "agents" in
   Unix.mkdir masc_dir 0o755;
   Unix.mkdir agents_dir 0o755;
+  let rec remove_tree path =
+    if Sys.is_directory path
+    then (
+      Array.iter
+        (fun name -> remove_tree (Filename.concat path name))
+        (Sys.readdir path);
+      Unix.rmdir path)
+    else Sys.remove path
+  in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_registry.clear ();
-      Unix.rmdir agents_dir;
-      Unix.rmdir masc_dir;
-      Unix.rmdir base_path)
+      remove_tree base_path)
     (fun () ->
       Masc.Keeper_registry.clear ();
       let config = Masc.Workspace.default_config base_path in

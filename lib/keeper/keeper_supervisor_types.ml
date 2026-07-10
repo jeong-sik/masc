@@ -112,14 +112,23 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
 let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   meta.paused
   &&
-  match meta.runtime.last_blocker with
-  | Some info -> blocker_class_continue_gate info.klass
-  | None -> false
+  (match meta.latched_reason with
+   | Some (Keeper_latched_reason.Continue_gate_pending _) -> true
+   | Some (Keeper_latched_reason.Repository_registration_pending _) -> true
+   | Some _ -> false
+   | None ->
+     match meta.runtime.last_blocker with
+     | Some info -> blocker_class_continue_gate info.klass
+     | None -> false)
 ;;
 
 let paused_meta_latched_terminal_pause (meta : keeper_meta) =
   match meta.latched_reason with
   | Some Keeper_latched_reason.Dead_tombstone -> true
+  | Some
+      (Keeper_latched_reason.Operator_paused
+        { operator_actor = Keeper_latched_reason.Hitl_rejection }) ->
+    true
   | Some _
   | None -> false
 ;;

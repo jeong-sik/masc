@@ -32,14 +32,11 @@ let resolve_active_goal_ids config p old_ids =
           (Printf.sprintf "unknown active_goal_ids: %s"
              (String.concat ", " missing))
 
-let blocker_requires_continue_gate (old : keeper_meta) =
-  match old.runtime.last_blocker with
-  | Some info -> blocker_class_continue_gate info.klass
-  | None -> false
-
-let paused_state_requires_approval (old : keeper_meta) =
-  Keeper_approval_queue.has_blocking_pending_for_keeper ~keeper_name:old.name
-  || blocker_requires_continue_gate old
+let paused_state_requires_approval ~base_path (old : keeper_meta) =
+  Keeper_approval_queue.has_blocking_pending_for_keeper
+    ~base_path
+    ~keeper_name:old.name
+  || Keeper_supervisor_types.paused_meta_requires_reconcile_recovery old
 
 let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
@@ -134,7 +131,8 @@ let update_keeper ?(preserve_prompt_defaults = false)
       ~fallback:profile_or_old
   in
   let resume_paused_keeper =
-    old.paused && not (paused_state_requires_approval old)
+    old.paused
+    && not (paused_state_requires_approval ~base_path:ctx.config.base_path old)
   in
   if resume_paused_keeper then (
     let blocker_class, blocker_detail =

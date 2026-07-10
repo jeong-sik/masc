@@ -59,6 +59,27 @@ let test_with_lock_inside_eio () =
   check int "single call" 1 !calls;
   check bool "lock table tracked" true (File_lock_eio.lock_count () >= 1)
 
+let test_concurrent_fibers_serialize_without_guard_registration () =
+  with_temp_path @@ fun path ->
+  Eio_main.run @@ fun _env ->
+  let inside = Atomic.make 0 in
+  let max_inside = Atomic.make 0 in
+  let enter () =
+    File_lock_eio.with_lock path (fun () ->
+        let current = Atomic.fetch_and_add inside 1 + 1 in
+        let rec record_max () =
+          let previous = Atomic.get max_inside in
+          if current > previous
+             && not (Atomic.compare_and_set max_inside previous current)
+          then record_max ()
+        in
+        record_max ();
+        Eio.Fiber.yield ();
+        ignore (Atomic.fetch_and_add inside (-1)))
+  in
+  Eio.Fiber.both enter enter;
+  check int "one fiber owns the path lock at a time" 1 (Atomic.get max_inside)
+
 let () =
   run "file_lock_eio"
     [
@@ -68,5 +89,7 @@ let () =
           test_case "acquire_flock_retry works without Eio context" `Quick
             test_acquire_flock_retry_without_eio;
           test_case "works inside Eio context" `Quick test_with_lock_inside_eio;
+          test_case "serializes concurrent fibers without guard registration" `Quick
+            test_concurrent_fibers_serialize_without_guard_registration;
         ] );
     ]

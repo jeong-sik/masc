@@ -31,6 +31,13 @@ val keeper_msg_timeout_override : Yojson.Safe.t -> (float option, string) result
     lifecycle exposed via [masc_keeper_msg_result]. *)
 
 module For_testing : sig
+  val direct_turn_blocked_by_approval :
+    base_path:string -> Keeper_meta_contract.keeper_meta -> bool
+  (** Exact workspace-scoped direct-turn gate. Blocking approvals own the
+      keeper lane; before the in-memory queue is restored after restart, a
+      persisted typed continue-gate blocker owns it as defense in depth.
+      Nonblocking observers and ordinary paused states do not reject chat. *)
+
   val direct_owner_conversation_context :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->

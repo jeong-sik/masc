@@ -14,6 +14,13 @@ val resolve_active_goal_ids :
   string list ->
   (string list, string) result
 
+(** Defense-in-depth gate shared by keeper reconfiguration and direct-turn
+    admission. A Blocking in-memory approval owns the keeper lane; after a
+    restart, the typed persisted ambiguous-commit blocker keeps that ownership
+    until the approval queue has been rehydrated. *)
+val paused_state_requires_approval :
+  base_path:string -> Keeper_meta_contract.keeper_meta -> bool
+
 (** Update an existing keeper's meta record. Validates tool-access
     transitions, resolves active goals, applies parsed-arg overrides,
     persists the new meta, and broadcasts state-machine events.

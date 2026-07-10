@@ -37,6 +37,18 @@ type lane_policy =
   | Nonblocking
   | Blocking
 
+type blocking_resolution_plan =
+  { effect_key : string
+  ; commit : unit -> (unit -> unit)
+  }
+
+type blocking_resolution_state =
+  | Blocking_resolution_open
+  | Blocking_resolution_committed of
+      { decision : Agent_sdk.Hooks.approval_decision
+      ; plan : blocking_resolution_plan
+      }
+
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -62,10 +74,15 @@ type pending_approval =
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
-  ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
+  ; on_resolution_callback :
+      (approval_id:string ->
+       Agent_sdk.Hooks.approval_decision ->
+       blocking_resolution_plan)
+        option
+  ; on_resolution_observer : (Agent_sdk.Hooks.approval_decision -> unit) option
+  ; blocking_resolution_state : blocking_resolution_state
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
-  ; channel : Keeper_continuation_channel.t option
   }
 
 type decision = Agent_sdk.Hooks.approval_decision

@@ -58,7 +58,8 @@ let budget_exhausted_no_progress_threshold_override
     | Runtime_agent.Completed
     | Runtime_agent.MutationBoundaryReached _
     | Runtime_agent.Yielded_to_chat_waiting _
-    | Runtime_agent.Yielded_to_durable_stimulus _ -> false
+    | Runtime_agent.Yielded_to_durable_stimulus _
+    | Runtime_agent.Yielded_to_blocking_approval _ -> false
   in
   if
     budget_exhausted
@@ -221,7 +222,8 @@ let completion_contract_terminal_failure_reason_code result =
      | Runtime_agent.Completed
      | Runtime_agent.MutationBoundaryReached _
      | Runtime_agent.Yielded_to_chat_waiting _
-     | Runtime_agent.Yielded_to_durable_stimulus _ -> None)
+     | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Yielded_to_blocking_approval _ -> None)
   | Some _ -> None
   | None ->
     Some
@@ -238,7 +240,8 @@ let terminal_outcome_of_result result =
      | Runtime_agent.TurnBudgetExhausted _
      | Runtime_agent.MutationBoundaryReached _
      | Runtime_agent.Yielded_to_chat_waiting _
-     | Runtime_agent.Yielded_to_durable_stimulus _ ->
+     | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Yielded_to_blocking_approval _ ->
        Terminal_checkpoint)
 ;;
 
@@ -451,6 +454,8 @@ let emit_usage_metrics_and_log
       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
+    | Runtime_agent.Yielded_to_blocking_approval { turns_used; _ } ->
+      Printf.sprintf "yielded_to_blocking_approval(%d)" turns_used
   in
   let outcome_label =
     match terminal_outcome with
@@ -463,6 +468,8 @@ let emit_usage_metrics_and_log
        | Runtime_agent.Yielded_to_chat_waiting _ -> "yielded_to_chat_waiting"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
+       | Runtime_agent.Yielded_to_blocking_approval _ ->
+         "yielded_to_blocking_approval"
        | Runtime_agent.Completed -> "success")
   in
   Otel_metric_store.inc_counter
@@ -583,6 +590,7 @@ let terminal_reason_of_outcome result = function
      | Runtime_agent.MutationBoundaryReached _
      | Runtime_agent.Yielded_to_chat_waiting _
      | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Yielded_to_blocking_approval _
      | Runtime_agent.Completed ->
        Keeper_turn_terminal.success ())
   | Terminal_failed_completion_contract _ ->
@@ -676,6 +684,12 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Log.Keeper.info ~keeper_name:updated_meta.name
       "yielded autonomous run for a pending durable stimulus after %d turn(s), \
        checkpoint saved — will resume next cycle"
+      turns_used;
+    reset_failure_state ()
+  | Runtime_agent.Yielded_to_blocking_approval { turns_used; _ } ->
+    Log.Keeper.info ~keeper_name:updated_meta.name
+      "yielded keeper run for a Blocking approval after %d turn(s), checkpoint \
+       saved — operator resolution owns continuation"
       turns_used;
     reset_failure_state ()
   | Runtime_agent.Completed -> reset_failure_state ()

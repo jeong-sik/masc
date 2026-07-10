@@ -385,7 +385,18 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
         (Printf.sprintf "[Co-view context]\n%s"
            (Yojson.Safe.pretty_to_string json))
 
+let direct_turn_blocked_by_approval ~base_path (meta : keeper_meta) =
+  Keeper_turn_up_update.paused_state_requires_approval ~base_path meta
+;;
+
+let direct_turn_blocking_approval_message keeper_name =
+  Printf.sprintf
+    "keeper %s has a blocking HITL approval pending; resolve it before starting a direct turn"
+    keeper_name
+;;
+
 module For_testing = struct
+  let direct_turn_blocked_by_approval = direct_turn_blocked_by_approval
   let direct_owner_conversation_context = direct_owner_conversation_context
   let surface_context_to_instructions = surface_context_to_instructions
   let direct_success_may_clear_no_progress_pause =
@@ -456,6 +467,11 @@ let preflight_keeper_msg ctx args : (unit, string) result =
     | Ok _ ->
     match ensure_keeper_exists ~ctx ~name with
     | Error e -> Error e
+    | Ok meta
+      when direct_turn_blocked_by_approval
+             ~base_path:ctx.config.base_path
+             meta ->
+        Error (direct_turn_blocking_approval_message meta.name)
     | Ok meta ->
       match resolve_turn_runtime_id meta with
       | Error e -> Error e
@@ -644,6 +660,15 @@ let run_keeper_msg_turn_admitted
       ~ctx ~name
     with
     | Error e -> tool_result_error ("" ^ e)
+    | Ok meta0
+      when direct_turn_blocked_by_approval
+             ~base_path:ctx.config.base_path
+             meta0 ->
+        tool_result_error
+          ~class_:Tool_result.Workflow_rejection
+          (error_response_typed
+             ~code:Precondition_failed
+             (direct_turn_blocking_approval_message meta0.name))
     | Ok meta0 ->
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a Delegate keeper,
          evict each image to the artifact store + an eager analyze_image reading

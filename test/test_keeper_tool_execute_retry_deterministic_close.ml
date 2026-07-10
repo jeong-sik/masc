@@ -12,8 +12,60 @@
 module D = Masc.Keeper_tool_deterministic_error
 module Execute_runtime = Masc.Keeper_tool_execute_runtime.For_testing
 module Shell_dispatch = Keeper_tool_execute_shell_ir
-module AQ = Masc.Keeper_approval_queue
+module Raw_AQ = Masc.Keeper_approval_queue
+
+module AQ = struct
+  include Raw_AQ
+
+  let pending_scopes : (string, string) Hashtbl.t = Hashtbl.create 8
+
+  let base_path_for_id id =
+    match Hashtbl.find_opt pending_scopes id with
+    | Some base_path -> base_path
+    | None ->
+      (match For_testing.pending_base_path ~id with
+       | Some base_path ->
+         Hashtbl.replace pending_scopes id base_path;
+         base_path
+       | None -> "")
+  ;;
+
+  let resolve ~id ~decision =
+    Raw_AQ.resolve ~base_path:(base_path_for_id id) ~id ~decision
+  ;;
+
+  let get_pending_entry ~id =
+    let base_path = base_path_for_id id in
+    if String.equal base_path "" then None
+    else Raw_AQ.get_pending_entry ~base_path ~id
+  ;;
+
+  let pending_count = For_testing.pending_count
+end
 module Metrics = Masc.Otel_metric_store
+
+let install_durable_resolution_delivery_hook () =
+  AQ.set_approval_resolution_wake_hook
+    (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
+       let resolution = Keeper_event_queue.{ approval_id; decision; channel } in
+       let stimulus : Keeper_event_queue.stimulus =
+         { post_id = Keeper_event_queue.hitl_resolution_post_id resolution
+         ; urgency = Keeper_event_queue.Immediate
+         ; arrived_at = Unix.gettimeofday ()
+         ; payload = Keeper_event_queue.Hitl_resolved resolution
+         }
+       in
+       match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path
+           keeper_name
+           stimulus
+       with
+       | Error _ as err -> err
+       | Ok () -> Ok (fun () -> ()))
+;;
+
+let () = install_durable_resolution_delivery_hook ()
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 

@@ -52,7 +52,11 @@ let test_of_stop_reason () =
        (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 }));
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
-       (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }))
+       (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
+  check outcome "blocking approval yield -> checkpoint" TO.Continuation_checkpoint
+    (TO.of_stop_reason
+       (Runtime_agent.Yielded_to_blocking_approval
+          { turns_used = 2; provider_turns_completed = 1 }))
 
 let test_of_result_surface () =
   check outcome "completed with text -> visible" TO.Visible_reply
@@ -82,6 +86,11 @@ let test_autonomous_yield_boundary_contract () =
     ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
     }
   in
+  let blocking_approval : Masc.Keeper_agent_run.autonomous_yield_request =
+    { reason = Masc.Keeper_agent_run.Blocking_approval_waiting
+    ; boundary = Masc.Keeper_agent_run.Yield_immediately
+    }
+  in
   check bool "chat may yield before first provider dispatch" true
     (F.autonomous_yield_allowed_at_turn
        ~start_turn
@@ -102,8 +111,19 @@ let test_autonomous_yield_boundary_contract () =
        ~start_turn
        ~turn:(start_turn + 1)
        durable_stimulus);
+  check bool "preexisting blocking approval prevents provider turn 1" true
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:start_turn
+       blocking_approval);
+  check bool "in-flight blocking approval stops before provider turn 2" true
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:(start_turn + 1)
+       blocking_approval);
   match
     F.stop_reason_of_autonomous_yield
+      ~start_turn
       ~turn:(start_turn + 1)
       durable_stimulus
   with
@@ -113,7 +133,8 @@ let test_autonomous_yield_boundary_contract () =
   | Runtime_agent.Completed
   | Runtime_agent.TurnBudgetExhausted _
   | Runtime_agent.MutationBoundaryReached _
-  | Runtime_agent.Yielded_to_chat_waiting _ ->
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_blocking_approval _ ->
     fail "durable request mapped to the wrong stop reason"
 
 let payload fields = Some (`Assoc fields)

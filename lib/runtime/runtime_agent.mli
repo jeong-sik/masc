@@ -35,6 +35,10 @@ type stop_reason = Runtime_agent_context.stop_reason =
     }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | Yielded_to_blocking_approval of {
+      turns_used : int;
+      provider_turns_completed : int;
+    }
 (** Why this single OAS call yielded control. [Completed] is the
     model's success path; [TurnBudgetExhausted] means the per-call
     turn budget checkpoint was reached. It is not a completed
@@ -47,8 +51,12 @@ type stop_reason = Runtime_agent_context.stop_reason =
     the keeper's turn slot to a parked dashboard/connector chat request.
     [Yielded_to_durable_stimulus] fires after at least one provider turn when
     another durable event is waiting behind the event currently leased by the
-    cycle. Both yields are continuation checkpoints, not completed
-    deliverables, and the keeper resumes on the next cycle. *)
+    cycle. [Yielded_to_blocking_approval] fires on every keeper lane when a
+    Blocking HITL approval owns it; operator resolution, not another provider
+    loop, resumes the continuation. Its [provider_turns_completed] field lets
+    autonomous intake distinguish a pre-dispatch yield from a gate created by
+    the current provider/tool turn. All three yields are continuation checkpoints,
+    not completed deliverables. *)
 
 (** {1 Config} *)
 

@@ -3,54 +3,52 @@
 \* [lib/keeper/keeper_approval_queue.ml].
 \*
 \* Runtime entities modelled (see functions [submit_and_await],
-\* [submit_pending], [expire_stale]; iter 64 N-2.a removed line numbers
+\* [submit_pending_blocking], [submit_pending_observer], [expire_stale];
+\* iter 64 N-2.a removed line numbers
 \* because OCaml line drift had reached +245..+413 from the original
 \* cites — function names are stable, line numbers are not.  The drift
 \* was audited in iter 63 #14919; iter 64 N-2.c adds a structural guard
 \* at scripts/audit-tla-ml-line-refs.sh):
 \*
 \*   pending  : SMap from id to entry, holding submitted-but-unresolved
-\*              approval requests. The two submit paths are represented
-\*              by two separate optional fields on the entry, exactly one
-\*              of which is populated:
+\*              approval requests. The three submit paths are represented
+\*              by three separate optional fields on the entry, exactly one
+\*              of which is populated by a public submission path:
 \*                - [entry.resolver : ... Eio.Promise.u option]
-\*                  — the [submit_and_await] case (Some r, on_resolution = None)
-\*                - [entry.on_resolution : (approval_decision -> unit) option]
-\*                  — the [submit_pending] case (resolver = None, on_resolution = Some f)
+\*                  — the [submit_and_await] blocking case
+\*                - [entry.on_resolution_callback :
+\*                     (approval_id -> approval_decision ->
+\*                      blocking_resolution_plan) option]
+\*                  — the [submit_pending_blocking] authoritative-plan case
+\*                - [entry.on_resolution_observer :
+\*                     (approval_decision -> unit) option]
+\*                  — the [submit_pending_observer] non-authoritative case
 \*   resolver : Eio.Promise resolver tied to a fiber blocked on
 \*              [Eio.Promise.await]. Resolving wakes the fiber.
 \*
-\* Scope (which path is modelled).  keeper_approval_queue.ml has two
-\* submit entry points: [submit_and_await] (creates an [Eio.Promise],
-\* registers the entry with [~resolver:(Some resolver)], then blocks the
-\* caller on [Eio.Promise.await] — the entry has a SUSPENDED FIBER) and
-\* [submit_pending] (registers with [~resolver:None] + an [on_resolution]
-\* callback, returns the id immediately — NO suspended fiber; the
-\* decision is delivered later via the callback).  This spec models the
-\* [submit_and_await] variant — `suspended_fibers` counts those fibers.
-\* The [submit_pending] variant has no suspended fiber. Its decision must
-\* first commit a durable [Hitl_resolved] stimulus, then complete the domain
-\* callback, remove the pending id, and finally signal the keeper. Delivery
-\* failure leaves the id pending. Those durable-delivery and callback-order
-\* invariants are not projected by this count-only model; it remains scoped
-\* to the blocking promise path. [expire_stale] handles BOTH via two
-\* *syntactically* independent matches — `match entry.resolver with
-\* Some r -> Eio.Promise.resolve r (Reject ...) | None -> ()` and,
-\* separately, `match entry.on_resolution with Some f -> f (Reject ...)
-\* | None -> ()`.  The two matches are *control-flow independent* —
-\* neither references the other's field, so the choice on one side
-\* doesn't constrain the other; the four (Some/None x Some/None)
-\* combinations each have a defined branch after delivery succeeds (we do not promise clean
-\* termination, only structural independence: `Eio.Promise.resolve` and
-\* the `on_resolution` callback are unwrapped here and can still raise
-\* `Eio.Cancel.Cancelled` etc., which the surrounding runtime re-raises
-\* per its own policy).  Under the *current* runtime invariant exactly
-\* one field is populated (submit_and_await sets resolver=Some,
-\* on_resolution=None; submit_pending sets the reverse), so [resolver =
-\* None] does imply [on_resolution = Some]; the independent-match shape
-\* is defensive against a future refactor that might relax the producer
-\* invariant.  The model abstracts only the effect on the
-\* suspended-fiber population.
+\* Scope (which path is modelled). keeper_approval_queue.ml has three
+\* submit entry points. [submit_and_await] creates an [Eio.Promise], registers
+\* [resolver=Some], then blocks on [Eio.Promise.await].
+\* [submit_pending_blocking] registers an authoritative plan builder. The
+\* builder must be side-effect-free. The queue latches its typed decision,
+\* invokes the plan's idempotent durable commit, removes the pending id,
+\* publishes terminal audit, and only then runs the non-authoritative recovery
+\* hint. Commit exception/cancellation leaves the latched entry pending for a
+\* same-decision retry; a contradictory retry is rejected.
+\* [submit_pending_observer] registers only a non-authoritative observer. Its
+\* durable [Hitl_resolved] stimulus is the sole replayable decision carrier:
+\* durable commit precedes pending removal, audit publication, observer, and
+\* live signal. Observer failure is recorded but cannot restore, alter, or
+\* retry the committed decision. Domain mutations therefore use the blocking
+\* callback API until represented as a typed replayable effect.
+\*
+\* This count-only spec models only the [submit_and_await] variant;
+\* `suspended_fibers` counts those fibers. It is not formal proof of blocking
+\* callback decision latching, workspace isolation, callback/observer ordering,
+\* or durable delivery. Focused OCaml tests own those contracts. Expiry is
+\* processed per entry with the same lane-specific completion rules, so one
+\* callback failure cannot discard its id or prevent a healthy neighbour from
+\* expiring.
 \*
 \* The boundary critique flagged this as a black-box area: a tool call
 \* submits an approval request and gets suspended on
@@ -142,12 +140,14 @@ Done ==
 \* Models the regression where [expire_stale] removes the pending
 \* entry of a [submit_and_await] request but never resolves its
 \* promise — the suspended fiber stays blocked forever.  In the OCaml
-\* runtime, [expire_stale] claims each stale id. A blocking entry is removed
-\* immediately before [complete_expiration] resolves its promise; a
-\* nonblocking entry stays pending through durable delivery and callback
-\* completion. The modelled hazard is a future refactor that loses or skips
-\* the blocking resolver after removal. (NB: [entry.resolver = None] is a
-\* [submit_pending] request with no suspended fiber; its durable-delivery
+\* runtime, [expire_stale] claims each stale id. A blocking promise entry is
+\* removed immediately before [Eio.Promise.resolve] and restored if resolution
+\* raises; a blocking callback entry is removed only after its authoritative
+\* callback succeeds. A nonblocking entry commits durable delivery, is removed,
+\* and only then runs its non-authoritative observer. The modelled hazard is a
+\* future refactor that loses or skips the blocking resolver after removal.
+\* (NB: [entry.resolver = None] is a
+\* [submit_pending_observer] request with no suspended fiber; its durable-delivery
 \* ordering is explicitly out of scope, see the header.)
 ExpireStaleNoResolve ==
     /\ pending_count > 0

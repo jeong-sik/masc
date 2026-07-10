@@ -23,6 +23,247 @@ let base_path = "/tmp/masc_test_turn_admission"
 let keeper_name = "admission-keeper"
 let reset () = Keeper_turn_admission.For_testing.reset ()
 
+let make_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "agent_name", `String ("agent-" ^ name)
+        ; "trace_id", `String ("trace-" ^ name)
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> failwith ("make_meta: " ^ err)
+;;
+
+let test_direct_turn_respects_blocking_approval_lane () =
+  Printf.printf "Test 0: direct chat respects workspace-scoped Blocking approvals\n%!";
+  let other_base_path = base_path ^ "-other" in
+  let meta = make_meta keeper_name in
+  let blocked () =
+    Keeper_turn.For_testing.direct_turn_blocked_by_approval
+      ~base_path
+      meta
+  in
+  check "direct chat starts unblocked" (not (blocked ()));
+  let blocking_id =
+    Keeper_approval_queue.submit_pending_blocking
+      ~keeper_name
+      ~tool_name:"keeper_continue_after_reconcile"
+      ~input:(`Assoc [ "kind", `String "direct_turn_gate_test" ])
+      ~risk_level:Keeper_approval_queue.Critical
+      ~base_path
+      ~on_resolution:(fun ~approval_id decision ->
+        Keeper_approval_queue.blocking_resolution_plan
+          ~effect_key:("direct_turn_gate_test:" ^ approval_id)
+          ~commit:(fun () ->
+            let (_ : Agent_sdk.Hooks.approval_decision) = decision in
+            fun () -> ()))
+      ()
+  in
+  check "Blocking approval rejects direct chat in its workspace" (blocked ());
+  check
+    "Blocking approval does not leak into another workspace"
+    (not
+       (Keeper_turn.For_testing.direct_turn_blocked_by_approval
+          ~base_path:other_base_path
+          meta));
+  check
+    "Blocking approval does not block a different keeper"
+    (not
+       (Keeper_turn.For_testing.direct_turn_blocked_by_approval
+          ~base_path
+          (make_meta (keeper_name ^ "-other"))));
+  (match
+     Keeper_approval_queue.resolve
+       ~base_path
+       ~id:blocking_id
+       ~decision:(Agent_sdk.Hooks.Reject "test cleanup")
+   with
+   | Ok () -> ()
+  | Error err ->
+    check
+      ("blocking approval cleanup: "
+       ^ Keeper_approval_queue.resolve_error_to_string err)
+       false);
+  check "resolved Blocking approval releases direct chat" (not (blocked ()));
+  let persisted_gate_meta =
+    { meta with
+      paused = true
+    ; runtime =
+        { meta.runtime with
+          last_blocker =
+            Some
+              (Keeper_meta_contract.blocker_info_of_class
+                 ~detail:"approval queue restore pending"
+                 Keeper_meta_contract.Ambiguous_post_commit_failure)
+        }
+    }
+  in
+  check
+    "typed persisted continue gate blocks before queue rehydration"
+    (Keeper_turn.For_testing.direct_turn_blocked_by_approval
+       ~base_path
+       persisted_gate_meta);
+  let ordinary_paused_meta =
+    { meta with
+      paused = true
+    ; runtime =
+        { meta.runtime with
+          last_blocker =
+            Some
+              (Keeper_meta_contract.blocker_info_of_class
+                 ~detail:"ordinary recovery chat remains available"
+                 Keeper_meta_contract.No_progress_loop)
+        }
+    }
+  in
+  check
+    "ordinary paused recovery state still allows direct chat"
+    (not
+       (Keeper_turn.For_testing.direct_turn_blocked_by_approval
+          ~base_path
+          ordinary_paused_meta));
+  Keeper_approval_queue.set_approval_resolution_wake_hook
+    (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      Ok (fun () -> ()));
+  let nonblocking_id =
+    Keeper_approval_queue.submit_pending_observer
+      ~keeper_name
+      ~tool_name:"keeper_observation"
+      ~input:(`Assoc [ "kind", `String "direct_turn_observer_test" ])
+      ~risk_level:Keeper_approval_queue.Medium
+      ~base_path
+      ~on_resolution_observer:(fun _ -> ())
+      ()
+  in
+  check "Nonblocking approval keeps direct chat available" (not (blocked ()));
+  match
+    Keeper_approval_queue.resolve
+      ~base_path
+      ~id:nonblocking_id
+      ~decision:(Agent_sdk.Hooks.Reject "test cleanup")
+  with
+  | Ok () -> ()
+  | Error err ->
+    check
+      ("nonblocking approval cleanup: "
+       ^ Keeper_approval_queue.resolve_error_to_string err)
+      false
+;;
+
+let test_inflight_blocking_approval_stops_before_next_provider_turn () =
+  Printf.printf
+    "Test 0b: tool-created Blocking approval stops the in-flight OAS loop\n%!";
+  let module F = Keeper_agent_run.For_testing in
+  let gate_base_path = base_path ^ "-inflight-gate" in
+  let gate_keeper_name = keeper_name ^ "-inflight-gate" in
+  let provider_turns = ref 0 in
+  let blocking_id = ref None in
+  let rec run_provider_loop ~turn ~remaining =
+    if remaining = 0
+    then `Budget_exhausted
+    else
+      match
+        F.blocking_approval_yield_request
+          ~base_path:gate_base_path
+          ~keeper_name:gate_keeper_name
+      with
+      | Some request
+        when F.autonomous_yield_allowed_at_turn
+               ~start_turn:0
+               ~turn
+               request ->
+        `Yielded
+          (F.stop_reason_of_autonomous_yield
+             ~start_turn:0
+             ~turn
+             request)
+      | Some _ | None ->
+        incr provider_turns;
+        (* Deterministic stand-in for the first provider response invoking a
+           MASC tool whose callback publishes a non-suspending Blocking gate.
+           OAS checks the same typed request before dispatching provider turn 2. *)
+        if !provider_turns = 1
+        then
+          blocking_id :=
+            Some
+              (Keeper_approval_queue.submit_pending_blocking
+                 ~keeper_name:gate_keeper_name
+                 ~tool_name:"keeper_continue_after_partial_commit"
+                 ~input:(`Assoc [ "kind", `String "tool_created_gate" ])
+                 ~risk_level:Keeper_approval_queue.Critical
+                 ~base_path:gate_base_path
+                 ~on_resolution:(fun ~approval_id decision ->
+                   Keeper_approval_queue.blocking_resolution_plan
+                     ~effect_key:("inflight_gate_test:" ^ approval_id)
+                     ~commit:(fun () ->
+                       let (_ : Agent_sdk.Hooks.approval_decision) = decision in
+                       fun () -> ()))
+                 ());
+        run_provider_loop ~turn:(turn + 1) ~remaining:(remaining - 1)
+  in
+  let preexisting_id =
+    Keeper_approval_queue.submit_pending_blocking
+      ~keeper_name:gate_keeper_name
+      ~tool_name:"keeper_continue_after_partial_commit"
+      ~input:(`Assoc [ "kind", `String "preexisting_gate" ])
+      ~risk_level:Keeper_approval_queue.Critical
+      ~base_path:gate_base_path
+      ~on_resolution:(fun ~approval_id decision ->
+        Keeper_approval_queue.blocking_resolution_plan
+          ~effect_key:("preexisting_gate_test:" ^ approval_id)
+          ~commit:(fun () ->
+            let (_ : Agent_sdk.Hooks.approval_decision) = decision in
+            fun () -> ()))
+      ()
+  in
+  (match run_provider_loop ~turn:0 ~remaining:3 with
+   | `Yielded
+       (Runtime_agent.Yielded_to_blocking_approval
+          { turns_used = 0; provider_turns_completed = 0 }) ->
+     check "preexisting Blocking gate stopped before provider turn 1" true
+   | `Yielded _ | `Budget_exhausted ->
+     check "preexisting Blocking gate stopped before provider turn 1" false);
+  check "preexisting gate allowed zero provider turns" (!provider_turns = 0);
+  (match
+     Keeper_approval_queue.resolve
+       ~base_path:gate_base_path
+       ~id:preexisting_id
+       ~decision:(Agent_sdk.Hooks.Reject "test cleanup")
+   with
+   | Ok () -> ()
+   | Error err ->
+     check
+       ("preexisting Blocking approval cleanup: "
+        ^ Keeper_approval_queue.resolve_error_to_string err)
+       false);
+  provider_turns := 0;
+  (match run_provider_loop ~turn:0 ~remaining:3 with
+   | `Yielded
+       (Runtime_agent.Yielded_to_blocking_approval
+          { turns_used = 1; provider_turns_completed = 1 }) ->
+     check "typed Blocking boundary stopped before provider turn 2" true
+   | `Yielded _ | `Budget_exhausted ->
+     check "typed Blocking boundary stopped before provider turn 2" false);
+  check "only the gate-creating provider turn ran" (!provider_turns = 1);
+  match !blocking_id with
+  | None -> check "tool-created Blocking gate was published" false
+  | Some id ->
+    (match
+       Keeper_approval_queue.resolve
+         ~base_path:gate_base_path
+         ~id
+         ~decision:(Agent_sdk.Hooks.Reject "test cleanup")
+     with
+     | Ok () -> ()
+     | Error err ->
+       check
+         ("in-flight Blocking approval cleanup: "
+          ^ Keeper_approval_queue.resolve_error_to_string err)
+         false)
+;;
+
 let test_free_slot_admits () =
   reset ();
   Printf.printf "Test 1: free slot admits both lanes\n%!";
@@ -440,6 +681,8 @@ let test_autonomous_yields_to_queued_connector_message () =
 
 let () =
   Eio_main.run @@ fun _env ->
+  test_direct_turn_respects_blocking_approval_lane ();
+  test_inflight_blocking_approval_stops_before_next_provider_turn ();
   test_free_slot_admits ();
   test_chat_if_free_never_parks ();
   test_autonomous_skips_in_flight_chat ();

@@ -426,7 +426,9 @@ let next_human_action_or_terminal ~needs_attention ~latest_next_action
 let disposition_fields_json ~(config : Workspace.config) ~(meta : keeper_meta) :
     Yojson.Safe.t =
   let pending_approval_count =
-    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+    Keeper_approval_queue.pending_count_for_keeper
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
   in
   let runtime_blocker_fields =
     Keeper_status_bridge.runtime_blocker_fields_json config meta
@@ -742,7 +744,9 @@ let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     | [] -> None
   in
   let pending_approval_count =
-    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+    Keeper_approval_queue.pending_count_for_keeper
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
   in
   let runtime_blocker_fields =
     Keeper_status_bridge.runtime_blocker_fields_json config meta
@@ -892,7 +896,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
     else item :: acc
   in
   let live_pending_events =
-    match pending_approval_json ~keeper_name:meta.name with
+    match pending_approval_json ~base_path ~keeper_name:meta.name with
     | `List entries -> List.filter_map live_pending_approval_timeline_event entries
     | _ -> []
   in
@@ -919,7 +923,9 @@ let snapshot_json_inner ~(config : Workspace.config) ~(meta : keeper_meta) =
     | json :: _ -> Some json
     | [] -> None
   in
-  let pending_approvals = pending_approval_json ~keeper_name:meta.name in
+  let pending_approvals =
+    pending_approval_json ~base_path:config.base_path ~keeper_name:meta.name
+  in
   let pending_approval_count =
     match pending_approvals with
     | `List entries -> List.length entries

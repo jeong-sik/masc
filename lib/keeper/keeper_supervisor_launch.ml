@@ -614,11 +614,12 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_m
     meta
 ;;
 
-let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
+let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) ~gate_id =
   Keeper_supervisor_resume_reconcile_gate.resume_keeper_after_reconcile_gate
     ~supervise_keepalive
     ctx
     meta
+    ~gate_id
 ;;
 
 let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =

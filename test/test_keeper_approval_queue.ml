@@ -6,18 +6,79 @@
     3. Critical approvals transition to [Escalated] when the escalation timer
        fires, and the updated phase is reflected in-memory and in JSON. *)
 
-module AQ = Masc.Keeper_approval_queue
+module Raw_AQ = Masc.Keeper_approval_queue
+
+module AQ = struct
+  include Raw_AQ
+
+  let pending_scopes : (string, string) Hashtbl.t = Hashtbl.create 32
+
+  let base_path_for_id_opt id =
+    match Hashtbl.find_opt pending_scopes id with
+    | Some base_path -> Some base_path
+    | None ->
+      (match For_testing.pending_base_path ~id with
+       | Some base_path ->
+         Hashtbl.replace pending_scopes id base_path;
+         Some base_path
+       | None -> None)
+  ;;
+
+  let base_path_for_id id =
+    match base_path_for_id_opt id with
+    | Some base_path -> base_path
+    | None -> Alcotest.failf "pending approval %s has no workspace" id
+  ;;
+
+  let resolve ~id ~decision =
+    Raw_AQ.resolve ~base_path:(base_path_for_id id) ~id ~decision
+  ;;
+
+  let get_pending_entry ~id =
+    match base_path_for_id_opt id with
+    | Some base_path -> Raw_AQ.get_pending_entry ~base_path ~id
+    | None -> None
+  ;;
+
+  let get_pending_json ~id =
+    match base_path_for_id_opt id with
+    | Some base_path -> Raw_AQ.get_pending_json ~base_path ~id
+    | None -> None
+  ;;
+
+  let list_pending_entries = For_testing.list_pending_entries
+  let pending_count = For_testing.pending_count
+  let pending_count_for_keeper = For_testing.pending_count_for_keeper
+  let blocking_pending_count_for_keeper = For_testing.blocking_pending_count_for_keeper
+  let has_blocking_pending_for_keeper = For_testing.has_blocking_pending_for_keeper
+  let has_pending_for_keeper = For_testing.has_pending_for_keeper
+end
 module Chat_queue = Masc.Keeper_chat_queue
 module Summary_worker = Masc.Hitl_summary_worker
 
-let install_noop_resolution_delivery_hook () =
+let install_durable_resolution_delivery_hook () =
   AQ.set_approval_resolution_wake_hook
     (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-      Ok (fun () -> ()))
+      ~base_path ~keeper_name ~approval_id ~decision ~channel ->
+      let resolution = Keeper_event_queue.{ approval_id; decision; channel } in
+      let stimulus : Keeper_event_queue.stimulus =
+        { post_id = Keeper_event_queue.hitl_resolution_post_id resolution
+        ; urgency = Keeper_event_queue.Immediate
+        ; arrived_at = Unix.gettimeofday ()
+        ; payload = Keeper_event_queue.Hitl_resolved resolution
+        }
+      in
+      match
+        Masc.Keeper_registry_event_queue.enqueue_durable_result
+          ~base_path
+          keeper_name
+          stimulus
+      with
+      | Error _ as err -> err
+      | Ok () -> Ok (fun () -> ()))
 ;;
 
-let () = install_noop_resolution_delivery_hook ()
+let () = install_durable_resolution_delivery_hook ()
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_" "" in
@@ -36,6 +97,15 @@ let cleanup_dir dir =
   in
   try rm_rf dir with
   | _ -> ()
+;;
+
+let blocking_callback ?(effect_key = "test-blocking-effect") callback
+    ~approval_id decision =
+  AQ.blocking_resolution_plan
+    ~effect_key:(effect_key ^ ":" ^ approval_id)
+    ~commit:(fun () ->
+      callback decision;
+      fun () -> ())
 ;;
 
 let rec yield_until ?(attempts = 50) predicate =
@@ -145,18 +215,9 @@ let test_provider_config_for_summary_routes_hitl_summary_lane () =
 ;;
 
 let pending_id_for_keeper ~keeper_name =
-  match AQ.list_pending_json () with
-  | `List entries ->
-    List.find_map
-      (function
-        | `Assoc kvs ->
-          (match List.assoc_opt "keeper_name" kvs, List.assoc_opt "id" kvs with
-           | Some (`String name), Some (`String id) when String.equal name keeper_name ->
-             Some id
-           | _ -> None)
-        | _ -> None)
-      entries
-  | _ -> None
+  AQ.list_pending_entries ()
+  |> List.find_map (fun (entry : AQ.pending_approval) ->
+    if String.equal entry.keeper_name keeper_name then Some entry.id else None)
 ;;
 
 let phase_in_json json =
@@ -245,7 +306,7 @@ let test_resolve_with_live_resolver_does_not_fire_keeper_wake_hook () =
       Ok (fun () -> woke := Some (keeper_name, approval_id, decision)));
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        Eio.Switch.run
@@ -285,7 +346,7 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
   let base_path = temp_dir () in
   let woke = ref None in
   let completion_order = ref [] in
-  let callback_saw_pending = ref false in
+  let observer_saw_pending = ref true in
   AQ.set_approval_resolution_wake_hook
     (fun
       ~base_path:_
@@ -299,22 +360,22 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
            woke := Some (keeper_name, approval_id, decision)));
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let keeper_name = "pending-resolve-wake-test" in
        let callback_decision = ref None in
        let input = `Assoc [ "kind", `String "critical_gate" ] in
        let id =
-         AQ.submit_pending
+         AQ.submit_pending_observer
            ~keeper_name
            ~tool_name:"keeper_continue_after_reconcile"
            ~input
            ~risk_level:AQ.Critical
            ~base_path
-           ~on_resolution:(fun decision ->
-             callback_saw_pending := AQ.has_pending_for_keeper ~keeper_name;
-             completion_order := "callback" :: !completion_order;
+           ~on_resolution_observer:(fun decision ->
+             observer_saw_pending := AQ.has_pending_for_keeper ~keeper_name;
+             completion_order := "observer" :: !completion_order;
              callback_decision := Some decision)
            ()
        in
@@ -323,17 +384,17 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
         | Error err ->
           Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
        Alcotest.(check bool)
-         "on_resolution callback ran"
+         "nonblocking resolution observer ran"
          true
          (Option.is_some !callback_decision);
        Alcotest.(check (list string))
-         "domain callback completes before wake signal"
-         [ "callback"; "signal" ]
+         "observer runs before wake signal"
+         [ "observer"; "signal" ]
          (List.rev !completion_order);
        Alcotest.(check bool)
-         "pending id remains visible throughout domain callback"
-         true
-         !callback_saw_pending;
+         "pending id is gone before observer"
+         false
+         !observer_saw_pending;
        (match !woke with
         | Some (kn, aid, decision) ->
           Alcotest.(check string) "wake targets the waiting keeper" keeper_name kn;
@@ -359,17 +420,17 @@ let test_delivery_failure_keeps_nonblocking_approval_pending () =
   AQ.For_testing.clear_approval_resolution_wake_hook ();
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let id =
-         AQ.submit_pending
+         AQ.submit_pending_observer
            ~keeper_name:"delivery-failure-pending-test"
            ~tool_name:"keeper_continue_after_reconcile"
            ~input:(`Assoc [ "kind", `String "medium_gate" ])
            ~risk_level:AQ.Medium
            ~base_path
-           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ~on_resolution_observer:(fun decision -> callback_decision := Some decision)
            ()
        in
        (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
@@ -385,7 +446,7 @@ let test_delivery_failure_keeps_nonblocking_approval_pending () =
          (Option.is_some (AQ.get_pending_entry ~id));
        Alcotest.(check bool) "failed delivery does not run callback" true
          (Option.is_none !callback_decision);
-       install_noop_resolution_delivery_hook ();
+       install_durable_resolution_delivery_hook ();
        (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
         | Ok () -> ()
         | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
@@ -393,6 +454,280 @@ let test_delivery_failure_keeps_nonblocking_approval_pending () =
          (Option.is_none (AQ.get_pending_entry ~id));
        Alcotest.(check bool) "successful retry runs callback" true
          (Option.is_some !callback_decision))
+;;
+
+let test_nonblocking_observer_runs_after_durable_commit_and_removal () =
+  let base_path = temp_dir () in
+  let completion_order = ref [] in
+  let observer_saw_pending = ref true in
+  let approval_id = ref None in
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      completion_order := "durable" :: !completion_order;
+      Ok (fun () -> completion_order := "signal" :: !completion_order));
+  Fun.protect
+    ~finally:(fun () ->
+      install_durable_resolution_delivery_hook ();
+      cleanup_dir base_path)
+    (fun () ->
+       let id =
+         AQ.submit_pending_observer
+           ~keeper_name:"observer-after-delivery-test"
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "medium_gate" ])
+           ~risk_level:AQ.Medium
+           ~base_path
+           ~on_resolution_observer:(fun _decision ->
+             observer_saw_pending :=
+               (match !approval_id with
+                | Some id -> Option.is_some (AQ.get_pending_entry ~id)
+                | None -> true);
+             completion_order := "observer" :: !completion_order)
+           ()
+       in
+       approval_id := Some id;
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+       Alcotest.(check bool)
+         "observer runs after pending removal"
+         false
+         !observer_saw_pending;
+       Alcotest.(check (list string))
+         "durable commit precedes observer and live signal"
+         [ "durable"; "observer"; "signal" ]
+         (List.rev !completion_order))
+;;
+
+let test_nonblocking_observer_failure_is_non_authoritative () =
+  let base_path = temp_dir () in
+  let durable_committed = ref false in
+  let signal_fired = ref false in
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      durable_committed := true;
+      Ok (fun () -> signal_fired := true));
+  Fun.protect
+    ~finally:(fun () ->
+      install_durable_resolution_delivery_hook ();
+      cleanup_dir base_path)
+    (fun () ->
+       let id =
+         AQ.submit_pending_observer
+           ~keeper_name:"observer-failure-test"
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "medium_gate" ])
+           ~risk_level:AQ.Medium
+           ~base_path
+           ~on_resolution_observer:(fun _decision ->
+             failwith "synthetic observer failure")
+           ()
+       in
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+       Alcotest.(check bool) "durable decision committed" true !durable_committed;
+       Alcotest.(check bool)
+         "observer failure cannot restore the pending approval"
+         true
+         (Option.is_none (AQ.get_pending_entry ~id));
+       Alcotest.(check bool)
+         "observer failure cannot suppress the committed wake signal"
+         true
+         !signal_fired)
+;;
+
+let test_nonblocking_observer_cancellation_defers_until_after_signal () =
+  let base_path = temp_dir () in
+  let signal_fired = ref false in
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      Ok (fun () -> signal_fired := true));
+  Fun.protect
+    ~finally:(fun () ->
+      install_durable_resolution_delivery_hook ();
+      cleanup_dir base_path)
+    (fun () ->
+       let id =
+         AQ.submit_pending_observer
+           ~keeper_name:"observer-cancellation-test"
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "medium_gate" ])
+           ~risk_level:AQ.Medium
+           ~base_path
+           ~on_resolution_observer:(fun _decision ->
+             raise (Eio.Cancel.Cancelled (Failure "synthetic observer cancellation")))
+           ()
+       in
+       let cancellation_propagated =
+         match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+         | exception Eio.Cancel.Cancelled _ -> true
+         | Ok () | Error _ -> false
+       in
+       Alcotest.(check bool)
+         "observer cancellation propagates after commit"
+         true
+         cancellation_propagated;
+       Alcotest.(check bool)
+         "observer cancellation cannot restore the pending approval"
+         true
+         (Option.is_none (AQ.get_pending_entry ~id));
+       Alcotest.(check bool)
+         "observer cancellation cannot suppress the committed wake signal"
+         true
+         !signal_fired)
+;;
+
+let test_blocking_callback_failure_and_cancellation_keep_pending () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let submit keeper_name callback =
+         AQ.submit_pending_blocking
+           ~keeper_name
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String keeper_name ])
+           ~risk_level:AQ.Critical
+           ~base_path
+           ~on_resolution:(blocking_callback callback)
+           ()
+       in
+       let callback_should_fail = ref true in
+       let failed_id =
+         submit "blocking-callback-exception-test" (fun _ ->
+           if !callback_should_fail then failwith "synthetic callback")
+       in
+       (match AQ.resolve ~id:failed_id ~decision:Agent_sdk.Hooks.Approve with
+        | Error (AQ.Delivery_failed _) -> ()
+        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err)
+        | Ok () -> Alcotest.fail "callback exception must fail resolution");
+       Alcotest.(check bool)
+         "callback exception keeps blocking entry pending"
+         true
+         (Option.is_some (AQ.get_pending_entry ~id:failed_id));
+       callback_should_fail := false;
+       (match AQ.resolve ~id:failed_id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+       let callback_should_cancel = ref true in
+       let cancelled_id =
+         submit "blocking-callback-cancel-test" (fun _ ->
+           if !callback_should_cancel
+           then raise (Eio.Cancel.Cancelled (Failure "synthetic callback cancellation")))
+       in
+       let cancelled_propagated =
+         match AQ.resolve ~id:cancelled_id ~decision:Agent_sdk.Hooks.Approve with
+         | exception Eio.Cancel.Cancelled _ -> true
+         | Ok () | Error _ -> false
+       in
+       Alcotest.(check bool) "callback cancellation propagates" true cancelled_propagated;
+       Alcotest.(check bool)
+         "callback cancellation keeps blocking entry pending"
+         true
+         (Option.is_some (AQ.get_pending_entry ~id:cancelled_id));
+       callback_should_cancel := false;
+       match AQ.resolve ~id:cancelled_id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail (AQ.resolve_error_to_string err))
+;;
+
+let test_resolve_with_policy_rejects_wrong_workspace () =
+  let owner_base_path = temp_dir () in
+  let caller_base_path = temp_dir () in
+  let callback_called = ref false in
+  let claim_hook_called = ref false in
+  Raw_AQ.For_testing.set_resolution_claim_hook (fun _ _ -> claim_hook_called := true);
+  Fun.protect
+    ~finally:(fun () ->
+      Raw_AQ.For_testing.clear_resolution_claim_hook ();
+      cleanup_dir owner_base_path;
+      cleanup_dir caller_base_path)
+    (fun () ->
+       let id =
+         AQ.submit_pending_observer
+           ~keeper_name:"wrong-workspace-test"
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "workspace_gate" ])
+           ~risk_level:AQ.Medium
+           ~base_path:owner_base_path
+           ~on_resolution_observer:(fun _ -> callback_called := true)
+           ()
+       in
+       (match
+          AQ.resolve_with_policy
+            ~base_path:caller_base_path
+            ~id
+            ~decision:Agent_sdk.Hooks.Approve
+            ()
+        with
+        | Error (AQ.Delivery_failed { reason; _ }) ->
+          Alcotest.(check bool)
+            "mismatch reason names the caller contract"
+            true
+            (String.starts_with ~prefix:"caller workspace mismatch" reason)
+        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err)
+        | Ok _ -> Alcotest.fail "wrong workspace must not resolve an approval");
+       Alcotest.(check bool) "wrong workspace does not run callback" false !callback_called;
+       Alcotest.(check bool)
+         "wrong workspace is rejected before terminal claim"
+         false
+         !claim_hook_called;
+       Alcotest.(check bool)
+         "wrong workspace keeps owner entry pending"
+         true
+         (Option.is_some (AQ.get_pending_entry ~id));
+       match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail (AQ.resolve_error_to_string err))
+;;
+
+let test_identical_approvals_do_not_dedupe_across_workspaces () =
+  let first_base_path = temp_dir () in
+  let second_base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir first_base_path;
+      cleanup_dir second_base_path)
+    (fun () ->
+       let submit base_path =
+         AQ.submit_pending_observer
+           ~keeper_name:"cross-workspace-dedupe-test"
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "identical_gate" ])
+           ~risk_level:AQ.Medium
+           ~base_path
+           ~on_resolution_observer:(fun _ -> ())
+           ()
+       in
+       let first_id = submit first_base_path in
+       let second_id = submit second_base_path in
+       Alcotest.(check bool)
+         "identical approvals in different workspaces get distinct ids"
+         true
+         (not (String.equal first_id second_id));
+       let entry_base_path id =
+         match AQ.get_pending_entry ~id with
+         | Some entry -> entry.audit_base_path
+         | None -> Alcotest.failf "pending approval %s disappeared" id
+       in
+       Alcotest.(check string)
+         "first approval retains its workspace"
+         first_base_path
+         (entry_base_path first_id);
+       Alcotest.(check string)
+         "second approval retains its workspace"
+         second_base_path
+         (entry_base_path second_id);
+       List.iter
+         (fun id ->
+            match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+            | Ok () -> ()
+            | Error err -> Alcotest.fail (AQ.resolve_error_to_string err))
+         [ first_id; second_id ])
 ;;
 
 let test_blocking_callback_policy_owns_lane_without_resolver () =
@@ -405,19 +740,19 @@ let test_blocking_callback_policy_owns_lane_without_resolver () =
       Ok (fun () -> woke := true));
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let keeper_name = "blocking-callback-policy-test" in
        let id =
-         AQ.submit_pending
+         AQ.submit_pending_blocking
            ~keeper_name
            ~tool_name:"keeper_continue_after_reconcile"
            ~input:(`Assoc [ "kind", `String "lifecycle_gate" ])
            ~risk_level:AQ.Critical
            ~base_path
-           ~lane_policy:AQ.Blocking
-           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ~on_resolution:
+             (blocking_callback (fun decision -> callback_decision := Some decision))
            ()
        in
        Alcotest.(check bool)
@@ -467,14 +802,14 @@ let test_resolution_wake_carries_originating_continuation_channel () =
   let submit_resolve_capture ?continuation_channel ~keeper_name () =
     captured := None;
     let id =
-      AQ.submit_pending
+      AQ.submit_pending_observer
         ~keeper_name
         ~tool_name:"keeper_continue_after_reconcile"
         ~input:(`Assoc [ "kind", `String "medium_gate" ])
         ~risk_level:AQ.Medium
         ~base_path
         ?continuation_channel
-        ~on_resolution:(fun _decision -> ())
+        ~on_resolution_observer:(fun _decision -> ())
         ()
     in
     (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
@@ -486,7 +821,7 @@ let test_resolution_wake_carries_originating_continuation_channel () =
   in
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let dashboard_channel =
@@ -547,7 +882,7 @@ let test_expire_stale_submit_and_await_does_not_fire_wake_hook () =
       Ok (fun () -> woke := true));
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let keeper_name = "expire-stale-await-no-wake-test" in
@@ -597,19 +932,19 @@ let test_expire_stale_submit_pending_fires_wake_hook () =
       Ok (fun () -> woke := Some (keeper_name, approval_id, decision, channel)));
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let keeper_name = "expire-stale-pending-wake-test" in
        let id =
-         AQ.submit_pending
+         AQ.submit_pending_observer
            ~keeper_name
            ~tool_name:"keeper_continue_after_reconcile"
            ~input:(`Assoc [ "kind", `String "medium_gate" ])
            ~risk_level:AQ.Medium
            ~base_path
            ~continuation_channel
-           ~on_resolution:(fun decision -> resolved := Some decision)
+           ~on_resolution_observer:(fun decision -> resolved := Some decision)
            ()
        in
        AQ.expire_stale ~max_wait_s:0.0;
@@ -646,17 +981,17 @@ let test_expire_stale_retries_after_delivery_failure () =
   AQ.For_testing.clear_approval_resolution_wake_hook ();
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
+      install_durable_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let id =
-         AQ.submit_pending
+         AQ.submit_pending_observer
            ~keeper_name:"expire-delivery-failure-test"
            ~tool_name:"keeper_continue_after_reconcile"
            ~input:(`Assoc [ "kind", `String "medium_gate" ])
            ~risk_level:AQ.Medium
            ~base_path
-           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ~on_resolution_observer:(fun decision -> callback_decision := Some decision)
            ()
        in
        AQ.expire_stale ~max_wait_s:0.0;
@@ -664,7 +999,7 @@ let test_expire_stale_retries_after_delivery_failure () =
          (Option.is_some (AQ.get_pending_entry ~id));
        Alcotest.(check bool) "failed expiry delivery does not run callback" true
          (Option.is_none !callback_decision);
-       install_noop_resolution_delivery_hook ();
+       install_durable_resolution_delivery_hook ();
        AQ.expire_stale ~max_wait_s:0.0;
        Alcotest.(check bool) "retry removes expired entry" true
          (Option.is_none (AQ.get_pending_entry ~id));
@@ -674,6 +1009,73 @@ let test_expire_stale_retries_after_delivery_failure () =
          Alcotest.fail
            ("expected Reject, got " ^ AQ.approval_decision_to_string decision)
        | None -> Alcotest.fail "successful expiry retry did not run callback")
+;;
+
+let test_expire_stale_is_per_entry_and_preserves_callback_failures () =
+  let base_path = temp_dir () in
+  let healthy_callback = ref false in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let submit keeper_name callback =
+         AQ.submit_pending_blocking
+           ~keeper_name
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String keeper_name ])
+           ~risk_level:AQ.Medium
+           ~base_path
+           ~on_resolution:(blocking_callback callback)
+           ()
+       in
+       let callback_should_fail = ref true in
+       let failed_id =
+         submit "expire-callback-exception-test" (fun _ ->
+           if !callback_should_fail then failwith "synthetic expiry")
+       in
+       let healthy_id =
+         submit "expire-healthy-neighbor-test" (fun _ -> healthy_callback := true)
+       in
+       AQ.expire_stale ~max_wait_s:0.0;
+       Alcotest.(check bool)
+         "failed expiry callback keeps its entry"
+         true
+         (Option.is_some (AQ.get_pending_entry ~id:failed_id));
+       Alcotest.(check bool)
+         "one failed entry does not block the next expiry"
+         true
+         !healthy_callback;
+       Alcotest.(check bool)
+         "healthy neighboring entry is removed"
+         true
+         (Option.is_none (AQ.get_pending_entry ~id:healthy_id));
+       callback_should_fail := false;
+       AQ.expire_stale ~max_wait_s:0.0;
+       Alcotest.(check bool)
+         "retry removes entry after callback completes"
+         true
+         (Option.is_none (AQ.get_pending_entry ~id:failed_id));
+       let callback_should_cancel = ref true in
+       let cancelled_id =
+         submit "expire-callback-cancel-test" (fun _ ->
+           if !callback_should_cancel
+           then raise (Eio.Cancel.Cancelled (Failure "synthetic expiry cancellation")))
+       in
+       let cancelled_propagated =
+         match AQ.expire_stale ~max_wait_s:0.0 with
+         | exception Eio.Cancel.Cancelled _ -> true
+         | () -> false
+       in
+       Alcotest.(check bool) "expiry cancellation propagates" true cancelled_propagated;
+       Alcotest.(check bool)
+         "expiry cancellation keeps the claimed entry pending"
+         true
+         (Option.is_some (AQ.get_pending_entry ~id:cancelled_id));
+       callback_should_cancel := false;
+       AQ.expire_stale ~max_wait_s:0.0;
+       Alcotest.(check bool)
+         "expiry claim is released after cancellation"
+         true
+         (Option.is_none (AQ.get_pending_entry ~id:cancelled_id)))
 ;;
 
 let test_critical_entry_phase_becomes_escalated_after_timer () =
@@ -842,7 +1244,9 @@ let test_summary_survives_include_input_paths () =
          });
        let dashboard_entry =
          match
-           entry_json_for_keeper ~keeper_name (AQ.list_pending_dashboard_json ())
+           entry_json_for_keeper
+             ~keeper_name
+             (AQ.list_pending_dashboard_json ~base_path)
          with
          | Some json -> json
          | None -> Alcotest.fail "entry missing from list_pending_dashboard_json"
@@ -853,7 +1257,7 @@ let test_summary_survives_include_input_paths () =
          | None -> Alcotest.fail "pending detail JSON not found"
        in
        let list_entry =
-         match entry_json_for_keeper ~keeper_name (AQ.list_pending_json ()) with
+         match entry_json_for_keeper ~keeper_name (AQ.list_pending_json ~base_path) with
          | Some json -> json
          | None -> Alcotest.fail "entry missing from list_pending_json"
        in
@@ -897,13 +1301,13 @@ let test_summary_worker_missing_root_switch_is_explicit_failure () =
        let keeper_name = "summary-root-switch-missing-test" in
        let id =
          Eio_context.with_turn_switch turn_sw (fun () ->
-           AQ.submit_pending
+           AQ.submit_pending_observer
              ~keeper_name
              ~tool_name:"keeper_continue_after_reconcile"
              ~input:(`Assoc [ "kind", `String "medium_gate" ])
              ~risk_level:AQ.Medium
              ~base_path
-             ~on_resolution:(fun _decision -> ())
+             ~on_resolution_observer:(fun _decision -> ())
              ())
        in
        let entry =
@@ -1061,6 +1465,423 @@ let test_w3c_reply_delivery_effect_requires_success () =
           "keeper_tasks_list"))
 ;;
 
+let test_workspace_scope_isolates_queries_and_lane_gates () =
+  let base_a = temp_dir () in
+  let base_b = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir base_a;
+      cleanup_dir base_b)
+    (fun () ->
+       let keeper_name = "same-name-two-workspaces" in
+       let id_a =
+         Raw_AQ.submit_pending_blocking
+           ~keeper_name
+           ~tool_name:"workspace-a-gate"
+           ~input:(`Assoc [ "scope", `String "a" ])
+           ~risk_level:Raw_AQ.Critical
+           ~base_path:base_a
+           ~on_resolution:(blocking_callback (fun _ -> ()))
+           ()
+       in
+       let id_b =
+         Raw_AQ.submit_pending_observer
+           ~keeper_name
+           ~tool_name:"workspace-b-observer"
+           ~input:(`Assoc [ "scope", `String "b" ])
+           ~risk_level:Raw_AQ.Low
+           ~base_path:base_b
+           ~on_resolution_observer:(fun _ -> ())
+           ()
+       in
+       Alcotest.(check int) "workspace A count" 1
+         (Raw_AQ.pending_count ~base_path:base_a);
+       Alcotest.(check int) "workspace B count" 1
+         (Raw_AQ.pending_count ~base_path:base_b);
+       Alcotest.(check bool) "workspace A owns blocking lane" true
+         (Raw_AQ.has_blocking_pending_for_keeper
+            ~base_path:base_a
+            ~keeper_name);
+       Alcotest.(check bool) "workspace B ignores A blocking lane" false
+         (Raw_AQ.has_blocking_pending_for_keeper
+            ~base_path:base_b
+            ~keeper_name);
+       Alcotest.(check bool) "A entry is hidden from B detail" true
+         (Option.is_none (Raw_AQ.get_pending_json ~base_path:base_b ~id:id_a));
+       Alcotest.(check bool) "B entry is hidden from A detail" true
+         (Option.is_none (Raw_AQ.get_pending_json ~base_path:base_a ~id:id_b));
+       (match
+          Raw_AQ.resolve
+            ~base_path:base_b
+            ~id:id_a
+            ~decision:Agent_sdk.Hooks.Approve
+        with
+        | Error (Raw_AQ.Delivery_failed _) -> ()
+        | Error err ->
+          Alcotest.failf
+            "wrong-workspace resolve returned %s"
+            (Raw_AQ.resolve_error_to_string err)
+        | Ok () -> Alcotest.fail "wrong workspace resolved A approval");
+       Alcotest.(check bool) "wrong workspace preserves A entry" true
+         (Option.is_some (Raw_AQ.get_pending_entry ~base_path:base_a ~id:id_a));
+       (match
+          Raw_AQ.resolve
+            ~base_path:base_a
+            ~id:id_a
+            ~decision:Agent_sdk.Hooks.Approve
+        with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.failf "A cleanup failed: %s" (Raw_AQ.resolve_error_to_string err));
+       match
+         Raw_AQ.resolve
+           ~base_path:base_b
+           ~id:id_b
+           ~decision:(Agent_sdk.Hooks.Reject "test cleanup")
+       with
+       | Ok () -> ()
+       | Error err ->
+         Alcotest.failf "B cleanup failed: %s" (Raw_AQ.resolve_error_to_string err))
+;;
+
+let test_blocking_decision_latches_before_idempotent_commit () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let prepare_calls = ref 0 in
+       let commit_calls = ref 0 in
+       let after_remove_saw_absent = ref false in
+       let id_ref = ref "" in
+       let id =
+         Raw_AQ.submit_pending_blocking
+           ~keeper_name:"decision-latch-test"
+           ~tool_name:"decision-latch-effect"
+           ~input:(`Assoc [ "kind", `String "decision_latch" ])
+           ~risk_level:Raw_AQ.Critical
+           ~base_path
+           ~on_resolution:(fun ~approval_id decision ->
+             incr prepare_calls;
+             Raw_AQ.blocking_resolution_plan
+               ~effect_key:("decision-latch:" ^ approval_id)
+               ~commit:(fun () ->
+                 incr commit_calls;
+                 if !commit_calls = 1
+                 then failwith "synthetic partial commit failure"
+                 else (
+                   ignore decision;
+                   fun () ->
+                     after_remove_saw_absent :=
+                       Option.is_none
+                         (Raw_AQ.get_pending_entry ~base_path ~id:!id_ref))))
+           ()
+       in
+       id_ref := id;
+       (match
+          Raw_AQ.resolve ~base_path ~id ~decision:Agent_sdk.Hooks.Approve
+        with
+        | Error (Raw_AQ.Delivery_failed _) -> ()
+        | Error err ->
+          Alcotest.failf
+            "first commit returned %s"
+            (Raw_AQ.resolve_error_to_string err)
+        | Ok () -> Alcotest.fail "first synthetic commit unexpectedly succeeded");
+       Alcotest.(check int) "plan prepared once" 1 !prepare_calls;
+       Alcotest.(check int) "commit attempted once" 1 !commit_calls;
+       (match
+          Raw_AQ.resolve
+            ~base_path
+            ~id
+            ~decision:(Agent_sdk.Hooks.Reject "contradictory retry")
+        with
+        | Error (Raw_AQ.Delivery_failed _) -> ()
+        | Error err ->
+          Alcotest.failf
+            "contradictory retry returned %s"
+            (Raw_AQ.resolve_error_to_string err)
+        | Ok () -> Alcotest.fail "contradictory retry bypassed decision latch");
+       Alcotest.(check int) "contradiction does not prepare again" 1 !prepare_calls;
+       Alcotest.(check int) "contradiction does not commit" 1 !commit_calls;
+       (match
+          Raw_AQ.resolve ~base_path ~id ~decision:Agent_sdk.Hooks.Approve
+        with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.failf
+            "same-decision retry failed: %s"
+            (Raw_AQ.resolve_error_to_string err));
+       Alcotest.(check int) "same decision reuses prepared plan" 1 !prepare_calls;
+       Alcotest.(check int) "same decision retries idempotent commit" 2 !commit_calls;
+       Alcotest.(check bool) "post action observes pending removal" true
+         !after_remove_saw_absent;
+       Alcotest.(check bool) "successful retry removes entry" true
+         (Option.is_none (Raw_AQ.get_pending_entry ~base_path ~id)))
+;;
+
+let test_timeout_terminal_claim_excludes_operator_rule_commit () =
+  Eio_main.run @@ fun env ->
+  let base_path = temp_dir () in
+  let claimed_p, claimed_u = Eio.Promise.create () in
+  let release_p, release_u = Eio.Promise.create () in
+  let hook owner id =
+    match owner with
+    | Raw_AQ.Await_timeout ->
+      Eio.Promise.resolve claimed_u id;
+      Eio.Promise.await release_p
+    | Raw_AQ.Operator_resolution
+    | Raw_AQ.Await_cancellation
+    | Raw_AQ.Expiration
+    | Raw_AQ.Terminal_state_cancellation -> ()
+  in
+  Raw_AQ.For_testing.set_resolution_claim_hook hook;
+  Fun.protect
+    ~finally:(fun () ->
+      Raw_AQ.For_testing.clear_resolution_claim_hook ();
+      cleanup_dir base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let result = ref None in
+       Eio.Fiber.fork ~sw (fun () ->
+         result :=
+           Some
+             (Raw_AQ.submit_and_await
+                ~keeper_name:"timeout-claim-test"
+                ~tool_name:"timeout-claim-tool"
+                ~input:(`Assoc [ "kind", `String "timeout_claim" ])
+                ~risk_level:Raw_AQ.Low
+                ~base_path
+                ~clock:(Eio.Stdenv.clock env)
+                ~timeout_s:0.001
+                ())) ;
+       let id = Eio.Promise.await claimed_p in
+       (match
+          Raw_AQ.resolve_with_policy
+            ~base_path
+            ~id
+            ~decision:Agent_sdk.Hooks.Approve
+            ~remember_rule:true
+            ()
+        with
+        | Error (Raw_AQ.Already_resolved claimed_id)
+          when String.equal claimed_id id -> ()
+        | Error err ->
+          Alcotest.failf
+            "operator race returned %s"
+            (Raw_AQ.resolve_error_to_string err)
+        | Ok _ -> Alcotest.fail "operator bypassed timeout terminal claim");
+       Alcotest.(check int) "timeout winner has not persisted allow rule" 0
+         (List.length (Raw_AQ.list_rules ~base_path ()));
+       Eio.Promise.resolve release_u ();
+       yield_until (fun () -> Option.is_some !result);
+       (match !result with
+        | Some (Agent_sdk.Hooks.Reject _) -> ()
+        | Some Agent_sdk.Hooks.Approve ->
+          Alcotest.fail "timeout winner returned operator Approve"
+        | Some (Agent_sdk.Hooks.Edit _) ->
+          Alcotest.fail "timeout winner returned Edit"
+        | None -> Alcotest.fail "timeout result did not complete");
+       Alcotest.(check int) "timeout leaves no pending orphan" 0
+         (Raw_AQ.pending_count ~base_path);
+       Alcotest.(check int) "timeout still leaves no allow rule" 0
+         (List.length (Raw_AQ.list_rules ~base_path ()));
+       let terminal_events =
+         Raw_AQ.read_recent_audit
+           ~base_path
+           ~keeper_name:"timeout-claim-test"
+           ~n:10
+           ()
+         |> List.filter (fun json ->
+           match Json_util.assoc_member_opt "event" json with
+           | Some (`String ("approval_timeout" | "resolved" | "cancelled")) -> true
+           | Some _ | None -> false)
+       in
+       Alcotest.(check int) "exactly one terminal audit" 1
+         (List.length terminal_events))
+;;
+
+let test_timeout_retries_after_competing_operator_failure () =
+  Eio_main.run @@ fun env ->
+  let base_path = temp_dir () in
+  let operator_claimed_p, operator_claimed_u = Eio.Promise.create () in
+  let release_operator_p, release_operator_u = Eio.Promise.create () in
+  let hook owner id =
+    match owner with
+    | Raw_AQ.Operator_resolution ->
+      Eio.Promise.resolve operator_claimed_u id;
+      Eio.Promise.await release_operator_p;
+      failwith "synthetic operator failure after terminal claim"
+    | Raw_AQ.Await_timeout
+    | Raw_AQ.Await_cancellation
+    | Raw_AQ.Expiration
+    | Raw_AQ.Terminal_state_cancellation -> ()
+  in
+  Raw_AQ.For_testing.set_resolution_claim_hook hook;
+  Fun.protect
+    ~finally:(fun () ->
+      Raw_AQ.For_testing.clear_resolution_claim_hook ();
+      cleanup_dir base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let timeout_result = ref None in
+       Eio.Fiber.fork ~sw (fun () ->
+         timeout_result :=
+           Some
+             (Raw_AQ.submit_and_await
+                ~keeper_name:"timeout-retry-claim-test"
+                ~tool_name:"timeout-retry-claim-tool"
+                ~input:(`Assoc [ "kind", `String "timeout_retry_claim" ])
+                ~risk_level:Raw_AQ.Low
+                ~base_path
+                ~clock:(Eio.Stdenv.clock env)
+                ~timeout_s:0.001
+                ()));
+       yield_until (fun () -> Raw_AQ.pending_count ~base_path = 1);
+       let id =
+         match Raw_AQ.list_pending_entries ~base_path with
+         | [ entry ] -> entry.id
+         | _ -> Alcotest.fail "expected one resolver-backed approval"
+       in
+       let operator_failed = ref false in
+       Eio.Fiber.fork ~sw (fun () ->
+         match
+           Raw_AQ.resolve_with_policy
+             ~base_path
+             ~id
+             ~decision:Agent_sdk.Hooks.Approve
+             ()
+         with
+         | exception Failure _ -> operator_failed := true
+         | Ok _ | Error _ -> ());
+       let claimed_id = Eio.Promise.await operator_claimed_p in
+       Alcotest.(check string) "operator claimed expected approval" id claimed_id;
+       Eio.Time.sleep (Eio.Stdenv.clock env) 0.01;
+       Eio.Promise.resolve release_operator_u ();
+       yield_until (fun () -> !operator_failed && Option.is_some !timeout_result);
+       (match !timeout_result with
+        | Some (Agent_sdk.Hooks.Reject _) -> ()
+        | Some Agent_sdk.Hooks.Approve ->
+          Alcotest.fail "failed operator claimant leaked Approve"
+        | Some (Agent_sdk.Hooks.Edit _) ->
+          Alcotest.fail "failed operator claimant leaked Edit"
+        | None -> Alcotest.fail "timeout retry did not settle");
+       Alcotest.(check int) "timeout retry leaves no pending orphan" 0
+         (Raw_AQ.pending_count ~base_path))
+;;
+
+let test_post_removal_wake_failure_does_not_restore_committed_approval () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let id =
+         Raw_AQ.submit_pending_blocking
+           ~keeper_name:"post-removal-failure-test"
+           ~tool_name:"post-removal-failure-effect"
+           ~input:(`Assoc [ "kind", `String "post_removal_failure" ])
+           ~risk_level:Raw_AQ.Critical
+           ~base_path
+           ~on_resolution:(fun ~approval_id _decision ->
+             Raw_AQ.blocking_resolution_plan
+               ~effect_key:("post-removal-failure:" ^ approval_id)
+               ~commit:(fun () ->
+                 fun () -> failwith "synthetic best-effort wake failure"))
+           ()
+       in
+       (match
+          Raw_AQ.resolve ~base_path ~id ~decision:Agent_sdk.Hooks.Approve
+        with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.failf
+            "best-effort wake failure changed terminal result: %s"
+            (Raw_AQ.resolve_error_to_string err));
+       Alcotest.(check bool) "committed approval stays removed" true
+         (Option.is_none (Raw_AQ.get_pending_entry ~base_path ~id)))
+;;
+
+let test_terminal_cancellation_and_operator_resolution_have_one_owner () =
+  Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Raw_AQ.For_testing.reset_pending ();
+  Raw_AQ.For_testing.reset_audit_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      Raw_AQ.For_testing.reset_pending ();
+      Raw_AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
+    (fun () ->
+       let callback_commits = Atomic.make 0 in
+       let id =
+         Raw_AQ.submit_pending_blocking
+           ~keeper_name:"terminal-cancel-race"
+           ~tool_name:"keeper_continue_after_partial_commit"
+           ~input:
+             (`Assoc
+                [ "kind", `String "continue_gate_required"
+                ; "gate_id", `String "continue-race"
+                ])
+           ~risk_level:Raw_AQ.Critical
+           ~base_path
+           ~on_resolution:(fun ~approval_id decision ->
+             Raw_AQ.blocking_resolution_plan
+               ~effect_key:("terminal-cancel-race:" ^ approval_id)
+               ~commit:(fun () ->
+                 ignore (Atomic.fetch_and_add callback_commits 1);
+                 (match decision with
+                  | Agent_sdk.Hooks.Approve
+                  | Agent_sdk.Hooks.Reject _
+                  | Agent_sdk.Hooks.Edit _ -> ());
+                 fun () -> ()))
+           ()
+       in
+       let cancelled = ref None in
+       let operator_result = ref None in
+       Eio.Fiber.both
+         (fun () ->
+            Eio.Fiber.yield ();
+            cancelled :=
+              Some
+                (Raw_AQ.cancel_callback_owned_for_terminal_keeper
+                   ~base_path
+                   ~keeper_name:"terminal-cancel-race"
+                   ~reason:"superseded by Dead tombstone"))
+         (fun () ->
+            Eio.Fiber.yield ();
+            operator_result :=
+              Some
+                (Raw_AQ.resolve
+                   ~base_path
+                   ~id
+                   ~decision:Agent_sdk.Hooks.Approve));
+       let cancelled = Option.value ~default:(-1) !cancelled in
+       let operator_result =
+         Option.value
+           ~default:(Error (Raw_AQ.Not_found id))
+           !operator_result
+       in
+       let operator_committed =
+         match operator_result with
+         | Ok () -> 1
+         | Error (Raw_AQ.Not_found _ | Raw_AQ.Already_resolved _) -> 0
+         | Error err ->
+           Alcotest.failf
+             "unexpected operator race result: %s"
+             (Raw_AQ.resolve_error_to_string err)
+       in
+       Alcotest.(check int)
+         "exactly one terminal owner commits"
+         1
+         (cancelled + operator_committed);
+       Alcotest.(check int)
+         "domain callback runs only when operator owns the claim"
+         operator_committed
+         (Atomic.get callback_commits);
+       Alcotest.(check bool)
+         "terminal race leaves no pending approval"
+         true
+         (Option.is_none (Raw_AQ.get_pending_entry ~base_path ~id)))
+;;
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
@@ -1088,6 +1909,54 @@ let () =
             `Quick
             test_delivery_failure_keeps_nonblocking_approval_pending
         ; Alcotest.test_case
+            "nonblocking observer runs after durable commit and removal"
+            `Quick
+            test_nonblocking_observer_runs_after_durable_commit_and_removal
+        ; Alcotest.test_case
+            "nonblocking observer failure is non-authoritative"
+            `Quick
+            test_nonblocking_observer_failure_is_non_authoritative
+        ; Alcotest.test_case
+            "nonblocking observer cancellation signals before propagating"
+            `Quick
+            test_nonblocking_observer_cancellation_defers_until_after_signal
+        ; Alcotest.test_case
+            "blocking callback failure and cancellation keep pending"
+            `Quick
+            test_blocking_callback_failure_and_cancellation_keep_pending
+        ; Alcotest.test_case
+            "resolve_with_policy rejects a wrong workspace"
+            `Quick
+            test_resolve_with_policy_rejects_wrong_workspace
+        ; Alcotest.test_case
+            "identical approvals do not dedupe across workspaces"
+            `Quick
+            test_identical_approvals_do_not_dedupe_across_workspaces
+        ; Alcotest.test_case
+            "workspace scope isolates queries and blocking lane gates"
+            `Quick
+            test_workspace_scope_isolates_queries_and_lane_gates
+        ; Alcotest.test_case
+            "blocking decision latches before idempotent commit"
+            `Quick
+            test_blocking_decision_latches_before_idempotent_commit
+        ; Alcotest.test_case
+            "timeout terminal claim excludes operator rule commit"
+            `Quick
+            test_timeout_terminal_claim_excludes_operator_rule_commit
+        ; Alcotest.test_case
+            "timeout retries after a competing operator claim fails"
+            `Quick
+            test_timeout_retries_after_competing_operator_failure
+        ; Alcotest.test_case
+            "post-removal wake failure cannot restore committed approval"
+            `Quick
+            test_post_removal_wake_failure_does_not_restore_committed_approval
+        ; Alcotest.test_case
+            "terminal cancellation and operator resolution have one owner"
+            `Quick
+            test_terminal_cancellation_and_operator_resolution_have_one_owner
+        ; Alcotest.test_case
             "explicit blocking callback owns a lane without resolver"
             `Quick
             test_blocking_callback_policy_owns_lane_without_resolver
@@ -1103,6 +1972,10 @@ let () =
             "expire_stale retries after delivery failure"
             `Quick
             test_expire_stale_retries_after_delivery_failure
+        ; Alcotest.test_case
+            "expire_stale is per-entry and preserves callback failures"
+            `Quick
+            test_expire_stale_is_per_entry_and_preserves_callback_failures
         ; Alcotest.test_case
             "resolution wake carries originating continuation channel"
             `Quick

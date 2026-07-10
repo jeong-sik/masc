@@ -36,21 +36,16 @@ let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot
         Judge_diagnostics.lenient_fallback_metrics_json ~judge_label:"Governance" );
     ]
 
-let summary_json_of_runtime ?base_path
+let summary_json_of_runtime ~base_path
     (runtime : Dashboard_governance_judge.runtime_snapshot) =
-  let pending_approval_count = Keeper_approval_queue.pending_count () in
+  let pending_approval_count = Keeper_approval_queue.pending_count ~base_path in
   let pending_ruling, oldest_json =
-    match base_path with
-    | None -> 0, `Null
-    | Some base_path ->
-      let n =
-        Governance_cases_snapshot.pending_ruling_count ~base_path
-      in
-      let oldest =
-        Governance_cases_snapshot.oldest_pending_ruling_age_s ~base_path
-          ~now_ts:(Unix.gettimeofday ())
-      in
-      n, Option.fold ~none:`Null ~some:(fun v -> `Float v) oldest
+    let n = Governance_cases_snapshot.pending_ruling_count ~base_path in
+    let oldest =
+      Governance_cases_snapshot.oldest_pending_ruling_age_s ~base_path
+        ~now_ts:(Unix.gettimeofday ())
+    in
+    n, Option.fold ~none:`Null ~some:(fun v -> `Float v) oldest
   in
   `Assoc
     [
@@ -124,7 +119,9 @@ let hitl_status_json ~base_path =
 let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
   let runtime = Dashboard_governance_judge.runtime_status base_path in
   let judgments = Dashboard_governance_judge.fresh_judgments_json ~base_path ~limit in
-  let approval_queue = Keeper_approval_queue.list_pending_dashboard_json () in
+  let approval_queue =
+    Keeper_approval_queue.list_pending_dashboard_json ~base_path
+  in
   let recent_resolved =
     Keeper_approval_queue.list_recent_resolved_json
       ~base_path

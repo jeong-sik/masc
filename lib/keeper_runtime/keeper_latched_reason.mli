@@ -34,6 +34,12 @@ type t =
   | Stale_storm
   | Provider_timeout_loop of { consecutive_timeouts : int }
   | Operator_paused of { operator_actor : operator_actor }
+  | Continue_gate_pending of
+      { gate_id : string
+      ; origin : continue_gate_origin
+      ; committed_tools : string list
+      }
+  | Repository_registration_pending of { operation_id : string }
   | Dead_tombstone
       (** The supervisor reaped a dead keeper and left [paused = true] on
           disk as a tombstone (see
@@ -80,6 +86,11 @@ and turn_budget_detail =
 and operator_actor =
   | Grpc_directive
   | Keeper_down
+  | Hitl_rejection
+
+and continue_gate_origin =
+  | Partial_commit
+  | Reconcile_recovery
 
 (** {1 Wire format}
 
@@ -115,6 +126,7 @@ val pp : Format.formatter -> t -> unit
 
 val operator_actor_grpc_directive : operator_actor
 val operator_actor_keeper_down : operator_actor
+val operator_actor_hitl_rejection : operator_actor
 val operator_actor_to_wire : operator_actor -> string
 
 module Stable : sig

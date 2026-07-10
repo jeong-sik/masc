@@ -82,7 +82,8 @@ val consume_board_stimulus_batch
     newly-consumed board events with the [pending_board_events] already
     accumulated by the caller, deduplicating by [post_id]. A
     [Hitl_resolved] head remains queued until its exact approval id has left
-    the pending map, so domain callbacks complete before continuation intake. *)
+    the pending map, so continuation intake cannot overtake the approval
+    queue's durable commit and removal boundary. *)
 val heartbeat_event_intake
   :  ctx:'a context
   -> meta_after_triage:keeper_meta

@@ -11,7 +11,40 @@ module Keeper_types_profile = Masc.Keeper_types_profile
 module Reg = Masc.Keeper_registry
 module KT = Keeper_types
 module KR = Masc.Keeper_runtime
-module AQ = Masc.Keeper_approval_queue
+module Raw_AQ = Masc.Keeper_approval_queue
+
+module AQ = struct
+  include Raw_AQ
+
+  let pending_scopes : (string, string) Hashtbl.t = Hashtbl.create 16
+
+  let base_path_for_id_opt id =
+    match Hashtbl.find_opt pending_scopes id with
+    | Some _ as scope -> scope
+    | None ->
+      (match For_testing.pending_base_path ~id with
+       | Some base_path ->
+         Hashtbl.replace pending_scopes id base_path;
+         Some base_path
+       | None -> None)
+  ;;
+
+  let resolve ~id ~decision =
+    Raw_AQ.resolve
+      ~base_path:(Option.value ~default:"" (base_path_for_id_opt id))
+      ~id
+      ~decision
+  ;;
+
+  let get_pending_entry ~id =
+    match base_path_for_id_opt id with
+    | Some base_path -> Raw_AQ.get_pending_entry ~base_path ~id
+    | None -> None
+  ;;
+
+  let pending_count = For_testing.pending_count
+  let has_pending_for_keeper = For_testing.has_pending_for_keeper
+end
 module KSM = Keeper_state_machine
 module KLH = Masc.Keeper_lifecycle_hooks
 module FD = Keeper_fd_pressure
@@ -20,11 +53,28 @@ module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 
-let () =
+let install_durable_resolution_delivery_hook () =
   AQ.set_approval_resolution_wake_hook
     (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-      Ok (fun () -> ()))
+      ~base_path ~keeper_name ~approval_id ~decision ~channel ->
+      let resolution = Keeper_event_queue.{ approval_id; decision; channel } in
+      let stimulus : Keeper_event_queue.stimulus =
+        { post_id = Keeper_event_queue.hitl_resolution_post_id resolution
+        ; urgency = Keeper_event_queue.Immediate
+        ; arrived_at = Unix.gettimeofday ()
+        ; payload = Keeper_event_queue.Hitl_resolved resolution
+        }
+      in
+      match
+        Masc.Keeper_registry_event_queue.enqueue_durable_result
+          ~base_path
+          keeper_name
+          stimulus
+      with
+      | Error _ as err -> err
+      | Ok () -> Ok (fun () -> ()))
+
+let () = install_durable_resolution_delivery_hook ()
 
 let supervisor_agent_name = Sup.supervisor_agent_name
 
@@ -554,13 +604,13 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
         [ blocked; clear ];
       let submit keeper_name =
         let id =
-          AQ.submit_pending
+          AQ.submit_pending_observer
             ~keeper_name
             ~tool_name:"keeper_continue_after_reconcile"
             ~input:(`Assoc [])
             ~risk_level:AQ.Critical
             ~base_path:config.base_path
-            ~on_resolution:(fun _ -> ())
+            ~on_resolution_observer:(fun _ -> ())
             ()
         in
         approval_ids := id :: !approval_ids
@@ -1414,7 +1464,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       check int "approval count incremented"
         (pending_before + 1) (AQ.pending_count ());
       let approval_id =
-        match AQ.list_pending_json () with
+        match AQ.list_pending_json ~base_path:base_dir with
         | `List entries ->
             entries
             |> List.find_map (function
@@ -1429,9 +1479,80 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
         | _ -> ""
       in
       check bool "approval id present" true (approval_id <> "");
+      (match
+         AQ.resolve
+           ~id:approval_id
+           ~decision:(Agent_sdk.Hooks.Edit (`Assoc [ "unexpected", `Bool true ]))
+       with
+       | Error (AQ.Delivery_failed _) -> ()
+       | Error err -> fail (AQ.resolve_error_to_string err)
+       | Ok () -> fail "unsupported reconcile edit must retain the approval");
+      check bool
+        "unsupported reconcile edit keeps approval pending"
+        true
+        (Option.is_some (AQ.get_pending_entry ~id:approval_id));
+      ignore (Reg.register ~base_path:config.base_path meta.name meta);
+      Reg.set_failure_reason
+        ~base_path:config.base_path
+        meta.name
+        (Some (Reg.Completion_contract_violation { detail = "test latch" }));
+      let meta_path = Keeper_types_profile.keeper_meta_path config meta.name in
+      let backup_path = meta_path ^ ".approval-test-backup" in
+      Sys.rename meta_path backup_path;
+      Unix.mkdir meta_path 0o755;
+      (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
+       | Error (AQ.Delivery_failed _) -> ()
+       | Error err -> fail (AQ.resolve_error_to_string err)
+       | Ok () -> fail "failed resume persistence must retain the approval");
+      check bool
+        "failed resume persistence keeps approval pending"
+        true
+        (Option.is_some (AQ.get_pending_entry ~id:approval_id));
+      let failure_latch_preserved =
+        match Reg.get ~base_path:config.base_path meta.name with
+        | Some { Reg.last_failure_reason =
+                   Some (Reg.Completion_contract_violation _)
+               ; _
+               } -> true
+        | Some _ | None -> false
+      in
+      check bool
+        "failed resume persistence keeps the live completion-contract latch"
+        true
+        failure_latch_preserved;
+      let live_gate_still_paused, wake_still_clear =
+        match Reg.get ~base_path:config.base_path meta.name with
+        | Some entry -> entry.meta.paused, not (Atomic.get entry.fiber_wakeup)
+        | None -> false, false
+      in
+      check bool
+        "failed resume persistence keeps live metadata paused"
+        true
+        live_gate_still_paused;
+      check bool
+        "failed resume persistence does not wake the keeper"
+        true
+        wake_still_clear;
+      Unix.rmdir meta_path;
+      Sys.rename backup_path meta_path;
+      Reg.unregister ~base_path:config.base_path meta.name;
       (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
        | Ok () -> ()
-       | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+       | Error err ->
+         fail ("restart-restored approve failed: " ^ AQ.resolve_error_to_string err));
+      check bool
+        "restart-restored approve removes reconcile approval"
+        false
+        (Option.is_some (AQ.get_pending_entry ~id:approval_id));
+      let failure_latch_cleared =
+        match Reg.get ~base_path:config.base_path meta.name with
+        | Some { Reg.last_failure_reason = None; _ } -> true
+        | Some _ | None -> false
+      in
+      check bool
+        "successful durable resume clears the live completion-contract latch"
+        true
+        failure_latch_cleared;
       let resumed_meta =
         match Keeper_meta_store.read_meta config meta.name with
         | Ok (Some value) -> value
@@ -1442,7 +1563,257 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       check bool "blocker cleared after approval" true
         (Option.is_none resumed_meta.runtime.last_blocker);
       check bool "keeper registered after approval" true
-        (Reg.is_registered ~base_path:config.base_path meta.name))
+        (Reg.is_registered ~base_path:config.base_path meta.name);
+      let partial_paused_meta, partial_approval_id =
+        match
+          Masc.Keeper_turn_runtime_budget.persist_and_enqueue_partial_commit_continue_gate
+            ~config
+            ~meta:resumed_meta
+            ~failure_reason:
+              (Reg.Ambiguous_partial_commit
+                 { kind = Reg.Post_commit_failure; detail = "edit regression" })
+            ~committed_tools:[ "keeper_board_post" ]
+            ~error_detail:"edit regression"
+        with
+        | Ok value -> value
+        | Error err -> fail err
+      in
+      (match
+         AQ.resolve
+           ~id:partial_approval_id
+           ~decision:(Agent_sdk.Hooks.Edit (`Assoc [ "unexpected", `Bool true ]))
+       with
+       | Error (AQ.Delivery_failed _) -> ()
+       | Error err -> fail (AQ.resolve_error_to_string err)
+       | Ok () -> fail "unsupported partial-commit edit must retain the approval");
+      check bool
+        "unsupported partial-commit edit keeps approval pending"
+        true
+        (Option.is_some (AQ.get_pending_entry ~id:partial_approval_id));
+      (match
+         Reg.dispatch_event
+           ~base_path:config.base_path
+           partial_paused_meta.name
+           KSM.Operator_pause
+       with
+       | Ok _ -> ()
+       | Error err -> fail (KSM.transition_error_to_string err));
+      Reg.unregister ~base_path:config.base_path partial_paused_meta.name;
+      (match AQ.resolve ~id:partial_approval_id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error err ->
+         fail ("offline partial-commit approve failed: " ^ AQ.resolve_error_to_string err));
+      check bool
+        "offline partial-commit approve removes approval"
+        false
+        (Option.is_some (AQ.get_pending_entry ~id:partial_approval_id));
+      let persisted_partial_gate =
+        match Keeper_meta_store.read_meta config partial_paused_meta.name with
+        | Ok (Some value) -> value
+        | Ok None -> fail "expected persisted partial-commit gate"
+        | Error err -> fail err
+      in
+      check bool
+        "offline partial-commit approve clears durable pause"
+        false
+        persisted_partial_gate.paused)
+
+let test_rejected_continue_gates_become_terminal_operator_pauses () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _workspace =
+        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+      in
+      let paused_meta name =
+        let base = make_meta name in
+        { base with
+          paused = true
+        ; auto_resume_after_sec = Some 60.0
+        ; runtime =
+            { base.runtime with
+              last_blocker =
+                Some
+                  (Keeper_meta_contract.blocker_info_of_class
+                     ~detail:"operator decision required"
+                     Keeper_meta_contract.Ambiguous_post_commit_failure)
+            }
+        }
+      in
+      let reconcile_meta = paused_meta "reconcile-reject-terminal" in
+      let partial_meta =
+        let meta = paused_meta "partial-reject-terminal" in
+        { meta with paused = false; auto_resume_after_sec = None }
+      in
+      List.iter
+        (fun meta ->
+           match Keeper_meta_store.write_meta config meta with
+           | Ok () -> ()
+           | Error err -> fail err)
+        [ reconcile_meta; partial_meta ];
+      let _partial_paused, partial_id =
+        match
+          Masc.Keeper_turn_runtime_budget.persist_and_enqueue_partial_commit_continue_gate
+            ~config
+            ~meta:partial_meta
+            ~failure_reason:
+              (Reg.Ambiguous_partial_commit
+                 { kind = Reg.Post_commit_failure; detail = "operator rejected" })
+            ~committed_tools:[ "keeper_board_post" ]
+            ~error_detail:"operator rejected"
+        with
+        | Ok value -> value
+        | Error err -> fail err
+      in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      let reconcile_id =
+        AQ.list_pending_entries ~base_path:base_dir
+        |> List.find_map (fun (entry : AQ.pending_approval) ->
+          if String.equal entry.keeper_name reconcile_meta.name
+          then Some entry.id
+          else None)
+        |> Option.value ~default:""
+      in
+      check bool "reconcile rejection approval restored" true (reconcile_id <> "");
+      List.iter
+        (fun id ->
+           match
+             AQ.resolve
+               ~id
+               ~decision:(Agent_sdk.Hooks.Reject "remain paused")
+           with
+           | Ok () -> ()
+           | Error err -> fail (AQ.resolve_error_to_string err))
+        [ reconcile_id; partial_id ];
+      let expected_latch =
+        Keeper_latched_reason.Operator_paused
+          { operator_actor = Keeper_latched_reason.operator_actor_hitl_rejection }
+      in
+      List.iter
+        (fun name ->
+           let persisted =
+             match Keeper_meta_store.read_meta config name with
+             | Ok (Some meta) -> meta
+             | Ok None -> fail ("missing rejected keeper meta: " ^ name)
+             | Error err -> fail err
+           in
+           check bool (name ^ " remains durably paused") true persisted.paused;
+           check bool
+             (name ^ " clears the resolved reconcile blocker")
+             true
+             (Option.is_none persisted.runtime.last_blocker);
+           check bool
+             (name ^ " records typed HITL rejection")
+             true
+             (match persisted.latched_reason with
+              | Some reason -> Keeper_latched_reason.equal reason expected_latch
+              | None -> false);
+           check (option (float 0.001))
+             (name ^ " disables auto-resume")
+             None
+             persisted.auto_resume_after_sec)
+        [ reconcile_meta.name; partial_meta.name ];
+      sweep_and_recover_no_materialize ctx;
+      check int
+        "rejected terminal pauses do not re-enqueue approvals"
+        0
+        (AQ.pending_count ()))
+
+let test_stale_continue_approval_preserves_dead_and_terminal_cancels () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Raw_AQ.For_testing.reset_pending ();
+  Raw_AQ.For_testing.reset_audit_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      Raw_AQ.For_testing.reset_pending ();
+      Raw_AQ.For_testing.reset_audit_store ();
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       let meta = make_meta "continue-dead-supersedes" in
+       (match Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error err -> fail err);
+       let paused_meta, approval_id =
+         match
+           Masc.Keeper_turn_runtime_budget.persist_and_enqueue_partial_commit_continue_gate
+             ~config
+             ~meta
+             ~failure_reason:
+               (Reg.Ambiguous_partial_commit
+                  { kind = Reg.Post_commit_failure; detail = "dead supersedes" })
+             ~committed_tools:[ "keeper_board_post" ]
+             ~error_detail:"dead supersedes"
+         with
+         | Ok value -> value
+         | Error err -> fail err
+       in
+       let dead =
+         { paused_meta with
+           paused = true
+         ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+         ; auto_resume_after_sec = None
+         ; runtime = { paused_meta.runtime with last_blocker = None }
+         }
+       in
+       (match Keeper_meta_store.write_meta config dead with
+        | Ok () -> ()
+        | Error err -> fail err);
+       (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
+        | Error (AQ.Delivery_failed _) -> ()
+        | Error err -> fail (AQ.resolve_error_to_string err)
+        | Ok () -> fail "stale continue approval must not resume Dead keeper");
+       let persisted =
+         match Keeper_meta_store.read_meta config meta.name with
+         | Ok (Some value) -> value
+         | Ok None -> fail "Dead keeper metadata disappeared"
+         | Error err -> fail err
+       in
+       check bool "stale Approve preserves durable Dead pause" true persisted.paused;
+       check bool
+         "stale Approve preserves exact Dead tombstone"
+         true
+         (match persisted.latched_reason with
+          | Some Keeper_latched_reason.Dead_tombstone -> true
+          | Some _ | None -> false);
+       check bool
+         "failed stale callback remains pending until terminal cancellation"
+         true
+         (Option.is_some (AQ.get_pending_entry ~id:approval_id));
+       let cancelled =
+         Raw_AQ.cancel_callback_owned_for_terminal_keeper
+           ~base_path:base_dir
+           ~keeper_name:meta.name
+           ~reason:"superseded by durable keeper Dead tombstone"
+       in
+       check int "terminal cancellation removes exact stale callback" 1 cancelled;
+       check bool
+         "terminal cancellation leaves no stale approval"
+         true
+         (Option.is_none (AQ.get_pending_entry ~id:approval_id)))
 
 let test_sweep_reports_pending_hitl_approval () =
   Eio_main.run @@ fun env ->
@@ -1473,13 +1844,13 @@ let test_sweep_reports_pending_hitl_approval () =
        | Error err -> fail err);
       let callback_result = ref None in
       let id =
-        AQ.submit_pending
+        AQ.submit_pending_observer
           ~keeper_name:name
           ~tool_name:"keeper_continue_after_partial_commit"
           ~input:(`Assoc [ ("kind", `String "visibility_probe") ])
           ~risk_level:AQ.Critical
           ~base_path:config.base_path
-          ~on_resolution:(fun decision -> callback_result := Some decision)
+          ~on_resolution_observer:(fun decision -> callback_result := Some decision)
           ()
       in
       approval_id := Some id;
@@ -3825,6 +4196,10 @@ let () =
         test_pending_hitl_approval_keeper_names_filters_persisted_pending;
       test_case "sweep restores reconcile gate for paused keeper" `Quick
         test_sweep_restores_reconcile_gate_for_paused_keeper;
+      test_case "rejected continue gates become terminal operator pauses" `Quick
+        test_rejected_continue_gates_become_terminal_operator_pauses;
+      test_case "stale continue approval preserves Dead and terminal-cancels" `Quick
+        test_stale_continue_approval_preserves_dead_and_terminal_cancels;
       test_case "sweep warns for pending HITL approval" `Quick
         test_sweep_reports_pending_hitl_approval;
     ];

@@ -89,6 +89,12 @@ let cleanup_dead_tombstone
     Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
     if persisted_paused
     then (
+      let cancelled =
+        Keeper_approval_queue.cancel_callback_owned_for_terminal_keeper
+          ~base_path:ctx.config.base_path
+          ~keeper_name:entry.name
+          ~reason:"superseded by durable keeper Dead tombstone"
+      in
       publish_lifecycle
         ~event:
           (Keeper_lifecycle_events.Custom_event
@@ -96,7 +102,10 @@ let cleanup_dead_tombstone
         entry.name
         "paused meta persisted"
         ();
-      Log.Keeper.info "%s: dead tombstone cleaned up" entry.name)
+      Log.Keeper.info
+        "%s: dead tombstone cleaned up; cancelled_callback_approvals=%d"
+        entry.name
+        cancelled)
     else (
       publish_lifecycle
         ~event:

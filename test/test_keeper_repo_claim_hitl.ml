@@ -1,7 +1,40 @@
 module Claim = Masc.Keeper_repo_claim_hitl
-module AQ = Masc.Keeper_approval_queue
+module Raw_AQ = Masc.Keeper_approval_queue
+
+module AQ = struct
+  include Raw_AQ
+
+  let pending_scopes : (string, string) Hashtbl.t = Hashtbl.create 16
+
+  let base_path_for_id id =
+    match Hashtbl.find_opt pending_scopes id with
+    | Some base_path -> base_path
+    | None ->
+      (match For_testing.pending_base_path ~id with
+       | Some base_path ->
+         Hashtbl.replace pending_scopes id base_path;
+         base_path
+       | None -> Alcotest.failf "pending approval %s has no workspace" id)
+  ;;
+
+  let resolve ~id ~decision =
+    Raw_AQ.resolve ~base_path:(base_path_for_id id) ~id ~decision
+  ;;
+
+  let get_pending_entry ~id =
+    Raw_AQ.get_pending_entry ~base_path:(base_path_for_id id) ~id
+  ;;
+
+  let pending_count = For_testing.pending_count
+  let list_pending_entries = For_testing.list_pending_entries
+end
 
 open Repo_manager_types
+
+let reset_approval_state () =
+  AQ.For_testing.reset_pending ();
+  AQ.For_testing.reset_audit_store ()
+;;
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -112,6 +145,35 @@ let with_temp_base_path f =
   Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
 ;;
 
+let seed_keeper_meta base_path keeper_id =
+  let config = Masc.Workspace.default_config base_path in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "repo-claim-test"));
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_id
+          ; "agent_name", `String ("agent-" ^ keeper_id)
+          ; "trace_id", `String ("trace-" ^ keeper_id)
+          ])
+    with
+    | Ok meta -> meta
+    | Error err -> Alcotest.fail ("seed keeper meta: " ^ err)
+  in
+  let meta = { meta with name = keeper_id } in
+  let path = Masc.Keeper_types_profile.keeper_meta_path config keeper_id in
+  write_file path (Yojson.Safe.pretty_to_string (Masc.Keeper_meta_json.meta_to_json meta));
+  match Masc.Keeper_meta_store.read_meta config keeper_id with
+  | Ok (Some _) -> ()
+  | Ok None ->
+    Alcotest.failf
+      "seed keeper meta was not durably readable path=%s exists=%b config_base=%s"
+      path
+      (Sys.file_exists path)
+      config.base_path
+  | Error err -> Alcotest.fail ("read seeded keeper meta: " ^ err)
+;;
+
 let sample_repo ~base_path id =
   let local_path = Filename.concat base_path ("repo-" ^ id) in
   ensure_dir local_path;
@@ -131,20 +193,9 @@ let sample_repo ~base_path id =
 ;;
 
 let write_repositories base_path repos =
-  let repo_block (repo : repository) =
-    Printf.sprintf
-      "[repository.%s]\nname = \"%s\"\nurl = \"%s\"\nlocal_path = \"%s\"\n\
-       default_branch = \"%s\"\nkeepers = []\nstatus = \"Active\"\nauto_sync = false\n\
-       sync_interval = 0\n"
-      repo.id
-      repo.name
-      repo.url
-      repo.local_path
-      repo.default_branch
-  in
-  write_file
-    (Filename.concat base_path ".masc/config/repositories.toml")
-    (String.concat "\n" (List.map repo_block repos))
+  match Repo_store.save_all ~base_path repos with
+  | Ok () -> ()
+  | Error detail -> Alcotest.fail ("write repositories: " ^ detail)
 ;;
 
 let write_mapping base_path keeper_id repo_ids =
@@ -155,8 +206,8 @@ let write_mapping base_path keeper_id repo_ids =
 ;;
 
 let test_registered_repo_outside_advisory_mapping_is_allowed () =
-  AQ.For_testing.reset_audit_store ();
-  Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+  reset_approval_state ();
+  Fun.protect ~finally:reset_approval_state @@ fun () ->
   with_temp_base_path @@ fun base_path ->
   let keeper_id = "keeper-repo-advisory-scope" in
   let repo_a = sample_repo ~base_path "repo-a" in
@@ -186,8 +237,8 @@ let playground_repo_root ~base_path ~keeper_id ~repository_id =
 ;;
 
 let test_unregistered_repository_without_clone_does_not_request_hitl () =
-  AQ.For_testing.reset_audit_store ();
-  Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+  reset_approval_state ();
+  Fun.protect ~finally:reset_approval_state @@ fun () ->
   with_temp_base_path @@ fun base_path ->
   let keeper_id = "keeper-repo-unregistered" in
   let repo_a = sample_repo ~base_path "repo-a" in
@@ -236,13 +287,87 @@ let string_field key json =
       (Yojson.Safe.to_string other)
 ;;
 
+let read_keeper_meta base_path keeper_id =
+  let config = Masc.Workspace.default_config base_path in
+  match Masc.Keeper_meta_store.read_meta config keeper_id with
+  | Ok (Some meta) -> meta
+  | Ok None -> Alcotest.failf "keeper meta disappeared: %s" keeper_id
+  | Error err -> Alcotest.fail err
+;;
+
+let write_keeper_meta_direct base_path (meta : Masc.Keeper_meta_contract.keeper_meta) =
+  let config = Masc.Workspace.default_config base_path in
+  let path = Masc.Keeper_types_profile.keeper_meta_path config meta.name in
+  write_file path (Yojson.Safe.pretty_to_string (Masc.Keeper_meta_json.meta_to_json meta))
+;;
+
+let repository_operation_path base_path =
+  let dir =
+    Filename.concat
+      base_path
+      ".masc/approvals/repository-registration"
+  in
+  let files =
+    if Sys.file_exists dir
+    then
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (String.ends_with ~suffix:".json")
+    else []
+  in
+  match files with
+  | [ file ] -> Filename.concat dir file
+  | files ->
+    Alcotest.failf
+      "expected one durable repository operation, got %d"
+      (List.length files)
+;;
+
+let repository_operation_record_exists base_path =
+  let dir =
+    Filename.concat
+      base_path
+      ".masc/approvals/repository-registration"
+  in
+  Sys.file_exists dir
+  && (Sys.readdir dir
+      |> Array.exists (String.ends_with ~suffix:".json"))
+;;
+
+let repository_gate_operation_id (meta : Masc.Keeper_meta_contract.keeper_meta) =
+  match meta.latched_reason with
+  | Some (Keeper_latched_reason.Repository_registration_pending { operation_id }) ->
+    operation_id
+  | Some reason ->
+    Alcotest.failf
+      "expected repository gate, got %s"
+      (Keeper_latched_reason.to_wire reason)
+  | None -> Alcotest.fail "expected repository gate, got no latch"
+;;
+
+let request_clone_registration ~base_path ~keeper_id ~repository_id =
+  let repo_root = playground_repo_root ~base_path ~keeper_id ~repository_id in
+  init_git_repo repo_root ("https://github.com/test/" ^ repository_id ^ ".git");
+  match
+    Claim.request_repository_access
+      ~keeper_id
+      ~base_path
+      ~repository_id
+  with
+  | Claim.Access_denied_hitl_pending { approval_id; _ } -> approval_id, repo_root
+  | Claim.Access_allowed -> Alcotest.fail "expected repository registration HITL"
+  | Claim.Access_denied detail ->
+    Alcotest.fail ("expected repository registration HITL: " ^ detail)
+;;
+
 let test_unregistered_repository_id_with_clone_requests_hitl () =
   if not (git_available ()) then Alcotest.skip ()
   else (
-    AQ.For_testing.reset_audit_store ();
-    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
     with_temp_base_path @@ fun base_path ->
-    let keeper_id = "keeper-repo-direct-register" in
+    let keeper_id = "repo-direct-register" in
+    seed_keeper_meta base_path keeper_id;
     write_repositories base_path [];
     let repo_root =
       playground_repo_root ~base_path ~keeper_id ~repository_id:"not-registered"
@@ -269,7 +394,7 @@ let test_unregistered_repository_id_with_clone_requests_hitl () =
     let pending = require_one_pending ~keeper_id in
     Alcotest.(check string)
       "requested action"
-      "register_repository"
+      "verify_repository_catalog_registration"
       (string_field "requested_action" pending.input);
     Alcotest.(check string)
       "repo root"
@@ -280,10 +405,11 @@ let test_unregistered_repository_id_with_clone_requests_hitl () =
 let test_unregistered_clone_requests_hitl_and_approval_registers_repo () =
   if not (git_available ()) then Alcotest.skip ()
   else (
-    AQ.For_testing.reset_audit_store ();
-    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
     with_temp_base_path @@ fun base_path ->
-    let keeper_id = "keeper-repo-register-clone" in
+    let keeper_id = "repo-register-clone" in
+    seed_keeper_meta base_path keeper_id;
     write_repositories base_path [];
     let repo_root =
       Filename.concat
@@ -309,15 +435,83 @@ let test_unregistered_clone_requests_hitl_and_approval_registers_repo () =
     let pending = require_one_pending ~keeper_id in
     Alcotest.(check string)
       "requested action"
-      "register_repository"
+      "verify_repository_catalog_registration"
       (string_field "requested_action" pending.input);
     Alcotest.(check string)
       "policy source"
       Config_dir_resolver.repositories_toml_basename
       (string_field "policy_source" pending.input);
-    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
+    Alcotest.(check bool)
+      "repository mutation uses the authoritative blocking lane"
+      true
+      (pending.lane_policy = AQ.Blocking);
+    Alcotest.(check bool)
+      "repository mutation owns an authoritative callback"
+      true
+      (Option.is_some pending.on_resolution_callback);
+    Alcotest.(check bool)
+      "repository mutation is not a non-authoritative observer"
+      true
+      (Option.is_none pending.on_resolution_observer);
+    (match
+       AQ.resolve
+         ~id:pending.id
+         ~decision:(Agent_sdk.Hooks.Edit (`Assoc [ "unexpected", `Bool true ]))
+     with
+     | Error (AQ.Delivery_failed _) -> ()
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err)
+     | Ok () -> Alcotest.fail "unsupported edit must retain the approval");
+    Alcotest.(check bool)
+      "unsupported repository edit keeps approval pending"
+      true
+      (Option.is_some (AQ.get_pending_entry ~id:pending.id));
+    let config = Masc.Workspace.default_config base_path in
+    let persisted_gate =
+      match Masc.Keeper_meta_store.read_meta config keeper_id with
+      | Ok (Some meta) -> meta
+      | Ok None -> Alcotest.fail "repository gate keeper meta disappeared"
+      | Error err -> Alcotest.fail err
+    in
+    Alcotest.(check bool) "repository approval durably pauses keeper" true persisted_gate.paused;
+    Alcotest.(check bool)
+      "repository approval persists a typed continue gate"
+      true
+      (Masc.Keeper_supervisor_types.paused_meta_requires_reconcile_recovery
+         persisted_gate);
+    AQ.For_testing.reset_pending ();
+    (match Claim.restore_pending_registration_hitl ~config persisted_gate with
+     | Claim.Registration_restored -> ()
+     | Claim.No_registration_record -> Alcotest.fail "durable operation disappeared"
+     | Claim.Registration_superseded -> Alcotest.fail "durable operation was superseded"
+     | Claim.Registration_corrupt detail ->
+       Alcotest.fail ("durable operation became corrupt: " ^ detail));
+    let restored_pending = require_one_pending ~keeper_id in
+    Alcotest.(check bool)
+      "restored approval receives a fresh queue identity"
+      true
+      (not (String.equal pending.id restored_pending.id));
+    let operator_registered =
+      { (sample_repo ~base_path "not-registered") with
+        url = "https://github.com/test/not-registered.git"
+      ; local_path = canonical_path repo_root
+      ; keepers = [ keeper_id ]
+      }
+    in
+    write_repositories base_path [ operator_registered ];
+    (match AQ.resolve ~id:restored_pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    let resumed_meta =
+      match Masc.Keeper_meta_store.read_meta config keeper_id with
+      | Ok (Some meta) -> meta
+      | Ok None -> Alcotest.fail "approved repository keeper meta disappeared"
+      | Error err -> Alcotest.fail err
+    in
+    Alcotest.(check bool) "approved repository gate resumes keeper" false resumed_meta.paused;
+    Alcotest.(check bool)
+      "approved repository gate clears typed blocker"
+      true
+      (Option.is_none resumed_meta.runtime.last_blocker);
     match Repo_store.find ~base_path "not-registered" with
     | Error detail -> Alcotest.fail ("approved registration did not persist: " ^ detail)
     | Ok repo ->
@@ -331,10 +525,11 @@ let test_unregistered_clone_requests_hitl_and_approval_registers_repo () =
 let test_registration_approval_rechecks_clone_origin () =
   if not (git_available ()) then Alcotest.skip ()
   else (
-    AQ.For_testing.reset_audit_store ();
-    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
     with_temp_base_path @@ fun base_path ->
-    let keeper_id = "keeper-repo-register-stale-origin" in
+    let keeper_id = "repo-register-stale-origin" in
+    seed_keeper_meta base_path keeper_id;
     write_repositories base_path [];
     let repo_root =
       Filename.concat
@@ -352,20 +547,41 @@ let test_registration_approval_rechecks_clone_origin () =
     let pending = require_one_pending ~keeper_id in
     set_git_origin_url repo_root "https://github.com/test/renamed.git";
     (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
+     | Error (AQ.Delivery_failed _) -> ()
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err)
+     | Ok () -> Alcotest.fail "failed revalidation must retain the approval");
+    Alcotest.(check bool)
+      "failed revalidation keeps registration approval pending"
+      true
+      (Option.is_some (AQ.get_pending_entry ~id:pending.id));
+    (match Repo_store.find ~base_path "not-registered" with
+     | Error _ -> ()
+    | Ok _ -> Alcotest.fail "stale approved registration must not persist");
+    set_git_origin_url repo_root "https://github.com/test/not-registered.git";
+    let operator_registered =
+      { (sample_repo ~base_path "not-registered") with
+        url = "https://github.com/test/not-registered.git"
+      ; local_path = canonical_path repo_root
+      ; keepers = [ keeper_id ]
+      }
+    in
+    write_repositories base_path [ operator_registered ];
+    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
     match Repo_store.find ~base_path "not-registered" with
-    | Error _ -> ()
-    | Ok _ -> Alcotest.fail "stale approved registration must not persist")
+    | Ok _ -> ()
+    | Error detail -> Alcotest.fail ("retry did not persist registration: " ^ detail))
 ;;
 
 let test_unregistered_clone_matching_existing_remote_requests_alias () =
   if not (git_available ()) then Alcotest.skip ()
   else (
-    AQ.For_testing.reset_audit_store ();
-    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
     with_temp_base_path @@ fun base_path ->
-    let keeper_id = "keeper-repo-alias-clone" in
+    let keeper_id = "repo-alias-clone" in
+    seed_keeper_meta base_path keeper_id;
     let registered = sample_repo ~base_path "masc" in
     let registered =
       { registered with url = "https://github.com/jeong-sik/masc.git"; aliases = [] }
@@ -388,13 +604,14 @@ let test_unregistered_clone_matching_existing_remote_requests_alias () =
     let pending = require_one_pending ~keeper_id in
     Alcotest.(check string)
       "requested action"
-      "add_repository_alias"
+      "verify_repository_catalog_alias"
       (string_field "requested_action" pending.input);
     Alcotest.(check string)
       "target repository"
       "masc"
       (string_field "target_repository_id" pending.input);
     Alcotest.(check string) "alias" "masc-mcp" (string_field "alias" pending.input);
+    write_repositories base_path [ { registered with aliases = [ "masc-mcp" ] } ];
     (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
@@ -410,10 +627,11 @@ let test_unregistered_clone_matching_existing_remote_requests_alias () =
 let test_unregistered_repository_id_clone_matching_existing_remote_requests_alias () =
   if not (git_available ()) then Alcotest.skip ()
   else (
-    AQ.For_testing.reset_audit_store ();
-    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
     with_temp_base_path @@ fun base_path ->
-    let keeper_id = "keeper-repo-direct-alias" in
+    let keeper_id = "repo-direct-alias" in
+    seed_keeper_meta base_path keeper_id;
     let registered = sample_repo ~base_path "masc" in
     let registered =
       { registered with url = "https://github.com/jeong-sik/masc.git"; aliases = [] }
@@ -437,7 +655,7 @@ let test_unregistered_repository_id_clone_matching_existing_remote_requests_alia
     let pending = require_one_pending ~keeper_id in
     Alcotest.(check string)
       "requested action"
-      "add_repository_alias"
+      "verify_repository_catalog_alias"
       (string_field "requested_action" pending.input);
     Alcotest.(check string)
       "target repository"
@@ -470,10 +688,11 @@ let test_unregistered_repository_id_empty_clone_reports_verification_failure () 
 let test_nested_git_root_queues_manual_review_without_alias () =
   if not (git_available ()) then Alcotest.skip ()
   else (
-    AQ.For_testing.reset_audit_store ();
-    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
     with_temp_base_path @@ fun base_path ->
-    let keeper_id = "keeper-repo-nested-root" in
+    let keeper_id = "repo-nested-root" in
+    seed_keeper_meta base_path keeper_id;
     let registered = sample_repo ~base_path "masc" in
     let registered =
       { registered with url = "https://github.com/jeong-sik/masc.git"; aliases = [] }
@@ -496,7 +715,7 @@ let test_nested_git_root_queues_manual_review_without_alias () =
     let pending = require_one_pending ~keeper_id in
     Alcotest.(check string)
       "requested action"
-      "review_repository_catalog"
+      "verify_repository_catalog_review"
       (string_field "requested_action" pending.input);
     Alcotest.(check string)
       "expected repo root"
@@ -507,13 +726,55 @@ let test_nested_git_root_queues_manual_review_without_alias () =
       (canonical_path nested_root)
       (string_field "repo_root" pending.input);
     (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
+     | Error (AQ.Delivery_failed { reason; _ }) ->
+       Alcotest.(check bool)
+         "unresolved manual review reports missing exact catalog binding"
+         true
+         (contains_substring reason "repository catalog read failed")
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err)
+     | Ok () -> Alcotest.fail "manual review must remain pending until catalog access is allowed");
+    Alcotest.(check bool)
+      "unresolved manual review remains pending"
+      true
+      (Option.is_some (AQ.get_pending_entry ~id:pending.id));
+    let manually_registered =
+      { registered with
+        id = "masc-mcp"
+      ; name = "masc-mcp"
+      ; local_path = nested_root
+      }
+    in
+    let wrong_binding =
+      { manually_registered with url = "https://github.com/wrong/repository.git" }
+    in
+    (match Repo_store.add ~base_path wrong_binding with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail ("operator catalog update failed: " ^ detail));
+    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
+     | Error (AQ.Delivery_failed { reason; _ }) ->
+       Alcotest.(check bool)
+         "wrong catalog row is rejected by exact candidate binding"
+         true
+         (contains_substring reason "catalog binding mismatch")
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err)
+     | Ok () -> Alcotest.fail "wrong repository binding must retain manual approval");
+    Alcotest.(check bool)
+      "wrong binding keeps manual approval pending"
+      true
+      (Option.is_some (AQ.get_pending_entry ~id:pending.id));
+    write_repositories base_path [ registered; manually_registered ];
+    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    Alcotest.(check bool)
+      "manual review is removed after exact catalog access becomes allowed"
+      false
+      (Option.is_some (AQ.get_pending_entry ~id:pending.id));
     match Repo_store.find ~base_path "masc" with
     | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
     | Ok repo ->
       Alcotest.(check bool)
-        "manual review approval does not persist alias"
+        "manual review resolution does not auto-mutate the original repository"
         false
         (List.exists (String.equal "masc-mcp") repo.aliases))
 ;;
@@ -521,10 +782,11 @@ let test_nested_git_root_queues_manual_review_without_alias () =
 let test_alias_approval_rechecks_clone_origin () =
   if not (git_available ()) then Alcotest.skip ()
   else (
-    AQ.For_testing.reset_audit_store ();
-    Fun.protect ~finally:AQ.For_testing.reset_audit_store @@ fun () ->
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
     with_temp_base_path @@ fun base_path ->
-    let keeper_id = "keeper-repo-alias-stale-origin" in
+    let keeper_id = "repo-alias-stale-origin" in
+    seed_keeper_meta base_path keeper_id;
     let registered = sample_repo ~base_path "masc" in
     let registered =
       { registered with url = "https://github.com/jeong-sik/masc.git"; aliases = [] }
@@ -546,18 +808,265 @@ let test_alias_approval_rechecks_clone_origin () =
     let pending = require_one_pending ~keeper_id in
     set_git_origin_url repo_root "https://github.com/jeong-sik/not-masc.git";
     (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
+     | Error (AQ.Delivery_failed _) -> ()
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err)
+     | Ok () -> Alcotest.fail "failed alias revalidation must retain the approval");
+    Alcotest.(check bool)
+      "failed alias revalidation keeps approval pending"
+      true
+      (Option.is_some (AQ.get_pending_entry ~id:pending.id));
+    set_git_origin_url repo_root registered.url;
+    write_repositories base_path [ { registered with aliases = [ "masc-mcp" ] } ];
+    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
     match Repo_store.find ~base_path "masc" with
     | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
     | Ok repo ->
       Alcotest.(check bool)
-        "stale alias not persisted"
-        false
+        "retry persists alias after revalidation succeeds"
+        true
         (List.exists (String.equal "masc-mcp") repo.aliases))
 ;;
 
+let test_pending_record_restores_gate_after_store_before_pause_crash () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "repo-crash-gap" in
+    seed_keeper_meta base_path keeper_id;
+    write_repositories base_path [];
+    let _, _ =
+      request_clone_registration
+        ~base_path
+        ~keeper_id
+        ~repository_id:"crash-gap-repo"
+    in
+    let pending = require_one_pending ~keeper_id in
+    let operation_id = string_field "operation_id" pending.input in
+    let paused_meta = read_keeper_meta base_path keeper_id in
+    Alcotest.(check string)
+      "durable file and typed gate share exact operation identity"
+      operation_id
+      (repository_gate_operation_id paused_meta);
+    let ungated_meta =
+      { paused_meta with
+        paused = false
+      ; latched_reason = None
+      ; runtime = { paused_meta.runtime with last_blocker = None }
+      }
+    in
+    write_keeper_meta_direct base_path ungated_meta;
+    AQ.For_testing.reset_pending ();
+    let config = Masc.Workspace.default_config base_path in
+    (match Claim.restore_pending_registration_hitl ~config ungated_meta with
+     | Claim.Registration_restored -> ()
+     | Claim.No_registration_record -> Alcotest.fail "crash-gap record disappeared"
+     | Claim.Registration_superseded -> Alcotest.fail "crash-gap record was superseded"
+     | Claim.Registration_corrupt detail -> Alcotest.fail detail);
+    let restored_meta = read_keeper_meta base_path keeper_id in
+    Alcotest.(check bool) "restore reinstalls durable pause" true restored_meta.paused;
+    Alcotest.(check string)
+      "restore reuses exact operation identity"
+      operation_id
+      (repository_gate_operation_id restored_meta);
+    let restored = require_one_pending ~keeper_id in
+    Alcotest.(check string)
+      "restored queue entry reuses exact operation identity"
+      operation_id
+      (string_field "operation_id" restored.input))
+;;
+
+let test_reject_persists_terminal_pause_and_blocks_requeue () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "repo-reject-terminal" in
+    seed_keeper_meta base_path keeper_id;
+    write_repositories base_path [];
+    let _, _ =
+      request_clone_registration
+        ~base_path
+        ~keeper_id
+        ~repository_id:"rejected-repo"
+    in
+    let pending = require_one_pending ~keeper_id in
+    (match
+       AQ.resolve
+         ~id:pending.id
+         ~decision:(Agent_sdk.Hooks.Reject "operator denied exact registration")
+     with
+     | Ok () -> ()
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    let rejected_meta = read_keeper_meta base_path keeper_id in
+    let terminal_rejection =
+      rejected_meta.paused
+      &&
+      match rejected_meta.latched_reason with
+      | Some
+          (Keeper_latched_reason.Operator_paused
+            { operator_actor = Keeper_latched_reason.Hitl_rejection }) ->
+        true
+      | Some (Keeper_latched_reason.Operator_paused _)
+      | Some _ | None -> false
+    in
+    Alcotest.(check bool) "Reject persists terminal HITL pause" true terminal_rejection;
+    Alcotest.(check bool)
+      "Reject removes terminal durable operation only after commit"
+      false
+      (repository_operation_record_exists base_path);
+    (match
+       Claim.request_repository_access
+         ~keeper_id
+         ~base_path
+         ~repository_id:"rejected-repo"
+     with
+     | Claim.Access_denied detail ->
+       Alcotest.(check bool)
+         "same operation cannot requeue before explicit resume"
+         true
+         (contains_substring detail "terminally paused")
+     | Claim.Access_denied_hitl_pending _ ->
+       Alcotest.fail "rejected repository operation must not requeue"
+     | Claim.Access_allowed -> Alcotest.fail "unregistered rejected repository was allowed");
+    Alcotest.(check int) "no replacement approval queued" 0 (AQ.pending_count ()))
+;;
+
+let test_stale_approve_preserves_dead_tombstone () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "repo-dead-supersedes" in
+    seed_keeper_meta base_path keeper_id;
+    write_repositories base_path [];
+    let _, _ =
+      request_clone_registration
+        ~base_path
+        ~keeper_id
+        ~repository_id:"dead-supersedes-repo"
+    in
+    let pending = require_one_pending ~keeper_id in
+    let gated_meta = read_keeper_meta base_path keeper_id in
+    let dead_meta =
+      { gated_meta with
+        paused = true
+      ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+      ; auto_resume_after_sec = None
+      ; runtime = { gated_meta.runtime with last_blocker = None }
+      }
+    in
+    write_keeper_meta_direct base_path dead_meta;
+    (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
+     | Ok () -> ()
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    let authoritative = read_keeper_meta base_path keeper_id in
+    let dead_preserved =
+      authoritative.paused
+      &&
+      match authoritative.latched_reason with
+      | Some Keeper_latched_reason.Dead_tombstone -> true
+      | Some _ | None -> false
+    in
+    Alcotest.(check bool) "newer Dead tombstone wins stale Approve" true dead_preserved;
+    Alcotest.(check bool)
+      "stale approval terminalizes its own durable record"
+      false
+      (repository_operation_record_exists base_path);
+    Alcotest.(check int) "stale approval is removed" 0 (AQ.pending_count ()))
+;;
+
+let test_distinct_operations_are_single_flight_per_keeper () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "repo-single-flight" in
+    seed_keeper_meta base_path keeper_id;
+    write_repositories base_path [];
+    let _, _ =
+      request_clone_registration
+        ~base_path
+        ~keeper_id
+        ~repository_id:"first-repo"
+    in
+    let second_root =
+      playground_repo_root ~base_path ~keeper_id ~repository_id:"second-repo"
+    in
+    init_git_repo second_root "https://github.com/test/second-repo.git";
+    (match
+       Claim.request_repository_access
+         ~keeper_id
+         ~base_path
+         ~repository_id:"second-repo"
+     with
+     | Claim.Access_denied detail ->
+       Alcotest.(check bool)
+         "second exact operation reports the active single-flight owner"
+         true
+         (contains_substring detail "another repository operation is already pending")
+     | Claim.Access_denied_hitl_pending _ ->
+       Alcotest.fail "distinct repository operation must not dedupe to the first approval"
+     | Claim.Access_allowed -> Alcotest.fail "second unregistered repository was allowed");
+    Alcotest.(check int) "one repository approval remains" 1 (AQ.pending_count ()))
+;;
+
+let test_corrupt_record_installs_actionable_recovery_gate () =
+  if not (git_available ()) then Alcotest.skip ()
+  else (
+    reset_approval_state ();
+    Fun.protect ~finally:reset_approval_state @@ fun () ->
+    with_temp_base_path @@ fun base_path ->
+    let keeper_id = "repo-corrupt-recovery" in
+    seed_keeper_meta base_path keeper_id;
+    write_repositories base_path [];
+    let _, _ =
+      request_clone_registration
+        ~base_path
+        ~keeper_id
+        ~repository_id:"corrupt-repo"
+    in
+    let gated_meta = read_keeper_meta base_path keeper_id in
+    let durable_path = repository_operation_path base_path in
+    AQ.For_testing.reset_pending ();
+    write_file durable_path "{not-valid-json";
+    let config = Masc.Workspace.default_config base_path in
+    (match Claim.restore_pending_registration_hitl ~config gated_meta with
+     | Claim.Registration_corrupt detail ->
+       Alcotest.(check bool)
+         "corrupt outcome keeps parse evidence"
+         true
+         (String.trim detail <> "")
+     | Claim.No_registration_record -> Alcotest.fail "corrupt record disappeared"
+     | Claim.Registration_restored -> Alcotest.fail "corrupt record was treated as valid"
+     | Claim.Registration_superseded -> Alcotest.fail "corrupt record was silently dropped");
+    let recovery = require_one_pending ~keeper_id in
+    Alcotest.(check string)
+      "corrupt record exposes dedicated operator recovery"
+      "keeper_repository_registration_recovery"
+      recovery.tool_name;
+    let recovery_meta = read_keeper_meta base_path keeper_id in
+    Alcotest.(check bool) "corrupt record remains fail-closed" true recovery_meta.paused;
+    Sys.remove durable_path;
+    (match AQ.resolve ~id:recovery.id ~decision:Agent_sdk.Hooks.Approve with
+     | Ok () -> ()
+     | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    let resumed_meta = read_keeper_meta base_path keeper_id in
+    Alcotest.(check bool)
+      "operator repair and Approve clears only the corrupt recovery gate"
+      false
+      resumed_meta.paused)
+;;
+
 let () =
+  Fs_compat.clear_fs ();
+  Eio_guard.disable ();
   Alcotest.run
     "Keeper_repo_claim_hitl"
     [ ( "repo advisory access"
@@ -601,5 +1110,25 @@ let () =
             "alias approval rechecks clone origin"
             `Quick
             test_alias_approval_rechecks_clone_origin
+        ; Alcotest.test_case
+            "store-before-pause crash restores exact repository gate"
+            `Quick
+            test_pending_record_restores_gate_after_store_before_pause_crash
+        ; Alcotest.test_case
+            "Reject persists terminal pause and blocks requeue"
+            `Quick
+            test_reject_persists_terminal_pause_and_blocks_requeue
+        ; Alcotest.test_case
+            "stale Approve preserves newer Dead tombstone"
+            `Quick
+            test_stale_approve_preserves_dead_tombstone
+        ; Alcotest.test_case
+            "distinct repository operations are single-flight per keeper"
+            `Quick
+            test_distinct_operations_are_single_flight_per_keeper
+        ; Alcotest.test_case
+            "corrupt durable record exposes operator recovery gate"
+            `Quick
+            test_corrupt_record_installs_actionable_recovery_gate
         ] )
     ]

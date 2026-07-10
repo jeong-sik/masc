@@ -752,6 +752,11 @@
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 
 (test
+ (name test_keeper_registry_event_queue_race)
+ (modules test_keeper_registry_event_queue_race)
+ (libraries alcotest masc_test_deps))
+
+(test
  (name test_operator_control_snapshot_cache)
  (modules test_operator_control_snapshot_cache)
  (libraries alcotest yojson masc_test_deps eio_main))

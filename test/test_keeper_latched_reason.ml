@@ -41,6 +41,22 @@ let round_trippable =
   ; "stale storm", R.Stale_storm
   ; "provider timeout loop", R.Provider_timeout_loop { consecutive_timeouts = 2 }
   ; "operator paused", R.Operator_paused { operator_actor = R.operator_actor_grpc_directive }
+  ; ( "operator paused by HITL rejection"
+    , R.Operator_paused { operator_actor = R.operator_actor_hitl_rejection } )
+  ; ( "partial commit continue gate"
+    , R.Continue_gate_pending
+        { gate_id = "continue-gate-123"
+        ; origin = R.Partial_commit
+        ; committed_tools = [ "write_file"; "git_push" ]
+        } )
+  ; ( "reconcile recovery continue gate"
+    , R.Continue_gate_pending
+        { gate_id = "continue-gate-456"
+        ; origin = R.Reconcile_recovery
+        ; committed_tools = []
+        } )
+  ; ( "repository registration pending"
+    , R.Repository_registration_pending { operation_id = "repo-operation-123" } )
   ; "dead tombstone", R.Dead_tombstone
   ]
 ;;
@@ -63,6 +79,8 @@ let test_wire_parse_fail_closed () =
   ; "completion_contract_violation:code=galactic:summary=\"raw text\""
   ; "completion_contract_violation:code=unspecified:summary=raw_text"
   ; "operator_paused:actor=dashboard:play"
+  ; "continue_gate_pending:payload=\"not-json\""
+  ; "repository_registration_pending:operation_id=\"\""
   ]
   |> List.iter (fun wire -> expect_error wire (R.of_wire wire))
 ;;
@@ -93,7 +111,32 @@ let test_stable_json_rejects_unknown_tags () =
   expect_error
     "unknown operator actor"
     (R.Stable.of_yojson
-       (`Assoc [ "kind", `String "operator_paused"; "actor", `String "dashboard:play" ]))
+       (`Assoc [ "kind", `String "operator_paused"; "actor", `String "dashboard:play" ]));
+  expect_error
+    "empty repository operation id"
+    (R.Stable.of_yojson
+       (`Assoc
+          [ "kind", `String "repository_registration_pending"
+          ; "operation_id", `String ""
+          ]));
+  expect_error
+    "empty continue gate id"
+    (R.Stable.of_yojson
+       (`Assoc
+          [ "kind", `String "continue_gate_pending"
+          ; "gate_id", `String ""
+          ; "origin", `String "partial_commit"
+          ; "committed_tools", `List []
+          ]));
+  expect_error
+    "unknown continue gate origin"
+    (R.Stable.of_yojson
+       (`Assoc
+          [ "kind", `String "continue_gate_pending"
+          ; "gate_id", `String "gate"
+          ; "origin", `String "unknown"
+          ; "committed_tools", `List []
+          ]))
 ;;
 
 (* ── Polymorphic-variant differentiation via [equal] ────────── *)

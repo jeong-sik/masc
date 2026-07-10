@@ -88,10 +88,11 @@ let dummy_pending_approval
   ; continuation_channel = Keeper_continuation_channel.unrouted "test fixture"
   ; audit_base_path
   ; resolver = None
-  ; on_resolution = None
+  ; on_resolution_callback = None
+  ; on_resolution_observer = None
+  ; blocking_resolution_state = Q.Blocking_resolution_open
   ; context_summary = None
   ; summary_status = Q.Summary_not_requested
-  ; channel = None
   }
 ;;
 

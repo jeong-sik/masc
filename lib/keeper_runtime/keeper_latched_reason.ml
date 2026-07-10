@@ -44,6 +44,11 @@ type turn_budget_exhausted =
 type operator_actor =
   | Grpc_directive
   | Keeper_down
+  | Hitl_rejection
+
+type continue_gate_origin =
+  | Partial_commit
+  | Reconcile_recovery
 
 type t =
   | No_progress_loop of
@@ -61,6 +66,12 @@ type t =
   | Stale_storm
   | Provider_timeout_loop of { consecutive_timeouts : int }
   | Operator_paused of { operator_actor : operator_actor }
+  | Continue_gate_pending of
+      { gate_id : string
+      ; origin : continue_gate_origin
+      ; committed_tools : string list
+      }
+  | Repository_registration_pending of { operation_id : string }
   | Dead_tombstone
 
 (* -------------------------------------------------------------------- *)
@@ -141,7 +152,21 @@ let equal a b =
     (match (a1, a2) with
      | Grpc_directive, Grpc_directive -> true
      | Keeper_down, Keeper_down -> true
-     | (Grpc_directive | Keeper_down), _ -> false)
+     | Hitl_rejection, Hitl_rejection -> true
+     | (Grpc_directive | Keeper_down | Hitl_rejection), _ -> false)
+  | ( Continue_gate_pending
+        { gate_id = left_id; origin = left_origin; committed_tools = left_tools }
+    , Continue_gate_pending
+        { gate_id = right_id; origin = right_origin; committed_tools = right_tools } ) ->
+    String.equal left_id right_id
+    && List.equal String.equal left_tools right_tools
+    &&
+    (match left_origin, right_origin with
+     | Partial_commit, Partial_commit | Reconcile_recovery, Reconcile_recovery -> true
+     | (Partial_commit | Reconcile_recovery), _ -> false)
+  | ( Repository_registration_pending { operation_id = left }
+    , Repository_registration_pending { operation_id = right } ) ->
+    String.equal left right
   | Dead_tombstone, Dead_tombstone -> true
   | ( ( No_progress_loop _
       | Completion_contract_violation _
@@ -151,6 +176,8 @@ let equal a b =
       | Stale_storm
       | Provider_timeout_loop _
       | Operator_paused _
+      | Continue_gate_pending _
+      | Repository_registration_pending _
       | Dead_tombstone )
     , _ ) ->
     false
@@ -199,8 +226,18 @@ let hash = function
       ( 7
       , match operator_actor with
         | Grpc_directive -> 0
-        | Keeper_down -> 1 )
-  | Dead_tombstone -> 8
+        | Keeper_down -> 1
+        | Hitl_rejection -> 2 )
+  | Continue_gate_pending { gate_id; origin; committed_tools } ->
+    Hashtbl.hash
+      ( 8
+      , gate_id
+      , committed_tools
+      , match origin with
+        | Partial_commit -> 0
+        | Reconcile_recovery -> 1 )
+  | Repository_registration_pending { operation_id } -> Hashtbl.hash (9, operation_id)
+  | Dead_tombstone -> 10
 ;;
 
 (* -------------------------------------------------------------------- *)
@@ -246,14 +283,27 @@ let pp_runtime_exhaustion ppf = function
 
 let operator_actor_grpc_directive = Grpc_directive
 let operator_actor_keeper_down = Keeper_down
+let operator_actor_hitl_rejection = Hitl_rejection
 
 let operator_actor_to_wire = function
   | Grpc_directive -> "grpc_directive"
   | Keeper_down -> "keeper_down"
+  | Hitl_rejection -> "hitl_rejection"
+
+let continue_gate_origin_to_wire = function
+  | Partial_commit -> "partial_commit"
+  | Reconcile_recovery -> "reconcile_recovery"
+
+let continue_gate_origin_of_wire = function
+  | "partial_commit" -> Ok Partial_commit
+  | "reconcile_recovery" -> Ok Reconcile_recovery
+  | other ->
+    Error (Printf.sprintf "Keeper_latched_reason: unknown continue gate origin %S" other)
 
 let operator_actor_of_wire = function
   | "grpc_directive" -> Ok Grpc_directive
   | "keeper_down" -> Ok Keeper_down
+  | "hitl_rejection" -> Ok Hitl_rejection
   | other -> Error (Printf.sprintf "Keeper_latched_reason: unknown operator actor %S" other)
 
 (* -------------------------------------------------------------------- *)
@@ -292,6 +342,15 @@ let pp ppf = function
     Format.fprintf ppf "Provider_timeout_loop{count=%d}" consecutive_timeouts
   | Operator_paused { operator_actor } ->
     Format.fprintf ppf "Operator_paused{actor=%s}" (operator_actor_to_wire operator_actor)
+  | Continue_gate_pending { gate_id; origin; committed_tools } ->
+    Format.fprintf
+      ppf
+      "Continue_gate_pending{gate_id=%S,origin=%s,committed_tools=[%s]}"
+      gate_id
+      (continue_gate_origin_to_wire origin)
+      (String.concat "," committed_tools)
+  | Repository_registration_pending { operation_id } ->
+    Format.fprintf ppf "Repository_registration_pending{operation_id=%S}" operation_id
   | Dead_tombstone -> Format.fprintf ppf "Dead_tombstone"
 ;;
 
@@ -350,6 +409,18 @@ let to_wire = function
     Printf.sprintf "provider_timeout_loop:count=%d" consecutive_timeouts
   | Operator_paused { operator_actor } ->
     Printf.sprintf "operator_paused:actor=%s" (operator_actor_to_wire operator_actor)
+  | Continue_gate_pending { gate_id; origin; committed_tools } ->
+    let payload =
+      Yojson.Safe.to_string
+        (`Assoc
+           [ "gate_id", `String gate_id
+           ; "origin", `String (continue_gate_origin_to_wire origin)
+           ; "committed_tools", `List (List.map (fun tool -> `String tool) committed_tools)
+           ])
+    in
+    Printf.sprintf "continue_gate_pending:payload=%S" payload
+  | Repository_registration_pending { operation_id } ->
+    Printf.sprintf "repository_registration_pending:operation_id=%S" operation_id
   | Dead_tombstone -> "dead_tombstone"
 ;;
 
@@ -478,6 +549,51 @@ let of_wire wire =
        let+ operator_actor = operator_actor_of_wire actor_wire in
        Operator_paused { operator_actor }
      | None -> errorf "Keeper_latched_reason.of_wire: malformed operator pause wire %S" wire)
+  | "continue_gate_pending" :: _ ->
+    let prefix = "continue_gate_pending:payload=" in
+    let* encoded =
+      match chop_prefix ~prefix wire with
+      | Some value -> Ok value
+      | None -> errorf "Keeper_latched_reason.of_wire: malformed continue gate wire %S" wire
+    in
+    let* payload = parse_string_literal encoded in
+    let* json =
+      try Ok (Yojson.Safe.from_string payload) with
+      | Yojson.Json_error detail -> errorf "Keeper_latched_reason.of_wire: invalid continue gate payload: %s" detail
+    in
+    (match json with
+     | `Assoc
+         [ "gate_id", `String gate_id
+         ; "origin", `String origin_wire
+         ; "committed_tools", `List tools_json
+         ] ->
+       let* committed_tools =
+         let rec collect acc = function
+           | [] -> Ok (List.rev acc)
+           | `String tool :: rest -> collect (tool :: acc) rest
+           | _ :: _ -> errorf "Keeper_latched_reason.of_wire: continue gate tools must be strings"
+         in
+         collect [] tools_json
+       in
+       let* origin = continue_gate_origin_of_wire origin_wire in
+       if String.trim gate_id = ""
+       then errorf "Keeper_latched_reason.of_wire: continue gate id is empty"
+       else Ok (Continue_gate_pending { gate_id; origin; committed_tools })
+     | _ -> errorf "Keeper_latched_reason.of_wire: invalid continue gate payload shape")
+  | "repository_registration_pending" :: _ ->
+    let prefix = "repository_registration_pending:operation_id=" in
+    let* encoded =
+      match chop_prefix ~prefix wire with
+      | Some value -> Ok value
+      | None ->
+        errorf
+          "Keeper_latched_reason.of_wire: malformed repository registration wire %S"
+          wire
+    in
+    let* operation_id = parse_string_literal encoded in
+    if String.trim operation_id = ""
+    then errorf "Keeper_latched_reason.of_wire: repository operation id is empty"
+    else Ok (Repository_registration_pending { operation_id })
   | _ ->
     errorf "Keeper_latched_reason.of_wire: unknown wire form %S" wire
 ;;
@@ -605,6 +721,18 @@ module Stable = struct
         [ "kind", `String "operator_paused"
         ; "actor", `String (operator_actor_to_wire operator_actor)
         ]
+    | Continue_gate_pending { gate_id; origin; committed_tools } ->
+      `Assoc
+        [ "kind", `String "continue_gate_pending"
+        ; "gate_id", `String gate_id
+        ; "origin", `String (continue_gate_origin_to_wire origin)
+        ; "committed_tools", `List (List.map (fun tool -> `String tool) committed_tools)
+        ]
+    | Repository_registration_pending { operation_id } ->
+      `Assoc
+        [ "kind", `String "repository_registration_pending"
+        ; "operation_id", `String operation_id
+        ]
     | Dead_tombstone -> `Assoc [ "kind", `String "dead_tombstone" ]
   ;;
 
@@ -639,6 +767,29 @@ module Stable = struct
     | `Assoc [ "kind", `String "operator_paused"; "actor", `String actor ] ->
       let+ operator_actor = operator_actor_of_wire actor in
       Operator_paused { operator_actor }
+    | `Assoc
+        [ "kind", `String "continue_gate_pending"
+        ; "gate_id", `String gate_id
+        ; "origin", `String origin_wire
+        ; "committed_tools", `List tools_json
+        ]
+      when String.trim gate_id <> "" ->
+      let* committed_tools =
+        let rec collect acc = function
+          | [] -> Ok (List.rev acc)
+          | `String tool :: rest -> collect (tool :: acc) rest
+          | _ :: _ -> Error "Keeper_latched_reason: continue gate tools must be strings"
+        in
+        collect [] tools_json
+      in
+      let+ origin = continue_gate_origin_of_wire origin_wire in
+      Continue_gate_pending { gate_id; origin; committed_tools }
+    | `Assoc
+        [ "kind", `String "repository_registration_pending"
+        ; "operation_id", `String operation_id
+        ]
+      when String.trim operation_id <> "" ->
+      Ok (Repository_registration_pending { operation_id })
     | `Assoc [ "kind", `String "dead_tombstone" ] -> Ok Dead_tombstone
     | _ ->
       Error

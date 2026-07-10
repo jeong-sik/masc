@@ -25,6 +25,10 @@ type stop_reason =
     }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | Yielded_to_blocking_approval of {
+      turns_used : int;
+      provider_turns_completed : int;
+    }
 
 (** {1 Per-worker config} *)
 

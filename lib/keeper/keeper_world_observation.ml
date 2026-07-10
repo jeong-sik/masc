@@ -1350,6 +1350,7 @@ let keeper_cycle_decision
       ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
+      ~base_path
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
@@ -1395,7 +1396,9 @@ let keeper_cycle_decision
   if meta.paused
   then blocked Keeper_paused
   else if
-    Keeper_approval_queue.has_blocking_pending_for_keeper ~keeper_name:meta.name
+    Keeper_approval_queue.has_blocking_pending_for_keeper
+      ~base_path
+      ~keeper_name:meta.name
   then blocked Approval_pending
   else (
     let scheduled_autonomous_decision () =
@@ -1693,6 +1696,7 @@ let keeper_cycle_decision
         })
 ;;
 
-let should_run_keeper_cycle ~(meta : keeper_meta) (observation : world_observation) =
-  (keeper_cycle_decision ~meta observation).should_run
+let should_run_keeper_cycle ~base_path ~(meta : keeper_meta) (observation : world_observation)
+  =
+  (keeper_cycle_decision ~base_path ~meta observation).should_run
 ;;

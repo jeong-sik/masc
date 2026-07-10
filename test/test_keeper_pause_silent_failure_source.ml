@@ -357,9 +357,9 @@ let test_heartbeat_presence_uses_cas_retry_merge () =
   let src = load_source heartbeat_presence_file in
   check bool "heartbeat presence uses CAS retry writer" true
     (count_occurrences ~needle:"write_meta_with_merge" src >= 1);
-  check bool "heartbeat presence preserves disk-owned heartbeat fields" true
+  check bool "heartbeat presence preserves all disk-owned control fields" true
     (count_occurrences
-       ~needle:"Keeper_meta_merge.heartbeat_fields_from_disk"
+       ~needle:"Keeper_meta_merge.non_operator_control_fields_from_disk"
        src
      >= 1);
   check int "plain heartbeat write_meta call removed" 0

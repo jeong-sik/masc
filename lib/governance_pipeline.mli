@@ -166,7 +166,8 @@ val to_oas_approval_callback :
     With [lane_policy = Blocking] (the compatibility default), a tool that
     exceeds the governance threshold suspends via
     [Keeper_approval_queue.submit_and_await]. With [Nonblocking], the approval
-    is registered with [submit_pending], the callback returns a
+    is registered with [Keeper_approval_queue.submit_pending_observer], the
+    approval callback returns a
     typed-in-protocol rejection, and the resolution wake starts a later
     independent Keeper cycle. Production Keeper runs use [Nonblocking] so
     ordinary tool approval cannot monopolize the Keeper lane.

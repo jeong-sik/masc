@@ -142,6 +142,7 @@ let without_overrides f =
 
 let decide ~meta obs =
   WO.keeper_cycle_decision
+    ~base_path:""
     ~provider_cooldown_remaining_sec:no_provider_cooldown
     ~reactive_wake:false
     ~meta

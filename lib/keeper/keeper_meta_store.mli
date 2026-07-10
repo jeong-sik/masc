@@ -105,15 +105,26 @@ val read_meta_if_changed :
 val persist_meta :
   Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
-(** Persist [m] with a CAS bump on [meta_version]: the write is rejected
-    if the on-disk version has moved since [m] was read. There is no force
-    / bypass path — cumulative usage counters are a monotone invariant
-    (RFC-0225 §3.2, RFC-0237), so callers that lost a race must resolve the
-    conflict through {!write_meta_with_merge}, not overwrite the disk. *)
+(** Persist [m] with a CAS bump on [meta_version]. Once Eio is active, the
+    complete read/version-check/write transaction is serialized by the
+    cooperative per-path mutex plus a cross-process file lock; pre-Eio startup
+    is single-threaded and uses the same file lock. The write is rejected if
+    the on-disk version moved since [m] was read. There is no force / bypass
+    path — cumulative usage counters are a monotone invariant (RFC-0225 §3.2,
+    RFC-0237), so callers that lost a race must resolve the conflict through
+    {!write_meta_with_merge}, not overwrite the disk. *)
 val write_meta :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
+
+(** CAS-write metadata and return the exact persisted snapshot, including the
+    incremented [meta_version]. In-memory SSOT projections should consume this
+    result instead of assuming the caller record won a merge unchanged. *)
+val write_meta_returning :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (Keeper_meta_contract.keeper_meta, string) result
 
 (** [true] iff [msg] matches [version_conflict_re]. *)
 val is_version_conflict_error : string -> bool
@@ -150,3 +161,12 @@ val write_meta_with_merge :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
+
+(** As {!write_meta_with_merge}, returning the authoritative snapshot written
+    by the winning CAS attempt. *)
+val write_meta_with_merge_returning :
+  ?max_retries:int ->
+  merge:(latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta) ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (Keeper_meta_contract.keeper_meta, string) result

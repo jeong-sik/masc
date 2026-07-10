@@ -87,7 +87,7 @@ val dashboard_governance_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 
 val dashboard_governance_tool_events_http_json :
-  Httpun.Request.t -> Yojson.Safe.t
+  base_path:string -> Httpun.Request.t -> Yojson.Safe.t
 
 val dashboard_proof_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t

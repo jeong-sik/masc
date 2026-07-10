@@ -7,11 +7,28 @@ module Lib = Masc
 open Alcotest
 open Printf
 
-let () =
+let install_durable_resolution_delivery_hook () =
   Lib.Keeper_approval_queue.set_approval_resolution_wake_hook
     (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-      Ok (fun () -> ()))
+      ~base_path ~keeper_name ~approval_id ~decision ~channel ->
+      let resolution = Keeper_event_queue.{ approval_id; decision; channel } in
+      let stimulus : Keeper_event_queue.stimulus =
+        { post_id = Keeper_event_queue.hitl_resolution_post_id resolution
+        ; urgency = Keeper_event_queue.Immediate
+        ; arrived_at = Unix.gettimeofday ()
+        ; payload = Keeper_event_queue.Hitl_resolved resolution
+        }
+      in
+      match
+        Lib.Keeper_registry_event_queue.enqueue_durable_result
+          ~base_path
+          keeper_name
+          stimulus
+      with
+      | Error _ as err -> err
+      | Ok () -> Ok (fun () -> ()))
+
+let () = install_durable_resolution_delivery_hook ()
 
 let test_dir () =
   let tmp = Filename.temp_file "masc_dashboard_governance" "" in
@@ -1000,7 +1017,12 @@ let test_dashboard_exposes_keeper_approval_queue () =
         {|{"path":"/tmp/danger"}|}
         (approval |> member "input_preview" |> to_string);
       let id = approval |> member "id" |> to_string in
-      (match Lib.Keeper_approval_queue.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+      (match
+         Lib.Keeper_approval_queue.resolve
+           ~base_path:dir
+           ~id
+           ~decision:Agent_sdk.Hooks.Approve
+       with
        | Ok () -> ()
        | Error err ->
          fail ("resolve failed: " ^ Lib.Keeper_approval_queue.resolve_error_to_string err));
@@ -1080,7 +1102,7 @@ let test_approval_queue_surfaces_action_key_and_sandbox_target () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let id =
-        Lib.Keeper_approval_queue.submit_pending
+        Lib.Keeper_approval_queue.submit_pending_observer
           ~keeper_name:"governance-judge"
           ~tool_name:"tool_execute"
           ~input:
@@ -1093,13 +1115,13 @@ let test_approval_queue_surfaces_action_key_and_sandbox_target () =
           ~runtime_contract:
             (`Assoc [("backend", `String "docker"); ("sandbox_target", `String "docker")])
           ~base_path:dir
-          ~on_resolution:(fun _ -> ())
+          ~on_resolution_observer:(fun _ -> ())
           ()
       in
       Fun.protect
         ~finally:(fun () ->
           ignore
-            (Lib.Keeper_approval_queue.resolve ~id
+            (Lib.Keeper_approval_queue.resolve ~base_path:dir ~id
                ~decision:(Agent_sdk.Hooks.Reject "cleanup")))
         (fun () ->
           Eio_main.run @@ fun env ->

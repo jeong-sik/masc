@@ -31,6 +31,7 @@ let run_keeper_cycle
       ?shared_context
       ?event_bus
       ?hitl_resolution
+      ?on_stop_reason
       ()
   : (keeper_meta, Agent_sdk.Error.sdk_error) result
   =
@@ -781,17 +782,14 @@ let run_keeper_cycle
                         meta.name
                         (Some failure_reason);
                       match
-                        sync_keeper_paused_state ~config ~meta:updated_meta ~paused:true
+                        persist_and_enqueue_partial_commit_continue_gate
+                          ~config
+                          ~meta:updated_meta
+                          ~failure_reason
+                          ~committed_tools
+                          ~error_detail:e_str
                       with
-                      | Ok paused_meta ->
-                        let approval_id =
-                          enqueue_partial_commit_continue_gate
-                            ~config
-                            ~meta:paused_meta
-                            ~failure_reason
-                            ~committed_tools
-                            ~error_detail:e_str
-                        in
+                      | Ok (paused_meta, approval_id) ->
                         Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string TurnErrorAfterTools)
                           ~labels:[ "keeper", meta.name; "reason", "ambiguous_partial" ]
@@ -1013,6 +1011,7 @@ dominant source of the observed CAS race exhaustion after
                     ();
                   Error err, turn_state)
                 | Ok result ->
+                  Option.iter (fun observe -> observe result.stop_reason) on_stop_reason;
                   (match
                      require_last_execution_for_finalize
                        ~keeper_name:meta.name

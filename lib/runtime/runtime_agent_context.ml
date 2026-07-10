@@ -27,6 +27,13 @@ type stop_reason =
     (* The current autonomous cycle completed at least one OAS provider turn,
        then released its lane because another durable stimulus was queued
        behind the stimulus already leased by this cycle. *)
+  | Yielded_to_blocking_approval of
+      { turns_used : int
+      ; provider_turns_completed : int
+      }
+    (* A Blocking HITL approval owns this keeper lane. The current provider/tool
+       turn reached its boundary, then stopped before another provider dispatch
+       so only operator resolution can resume the continuation. *)
 
 type config =
   { name : string

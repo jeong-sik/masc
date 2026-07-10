@@ -137,6 +137,7 @@ let reasons_of_verdict = function
 
 let decide ?(event_queue_triggers = []) () =
   WO.keeper_cycle_decision
+    ~base_path:""
     ~provider_cooldown_remaining_sec:no_provider_cooldown
     ~event_queue_triggers
     ~meta:(make_meta "conn-keeper")

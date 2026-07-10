@@ -174,16 +174,18 @@ let stale_tool_token_placeholder = "<stale_tool_token>"
     by [Keeper_tool_resolution] (the same source of truth the scanner uses).
 
     This is a presentation-layer band-aid for stale tool names that have
-    already leaked into prompt/continuity text. The legacy
-    [Keeper_unified_prompt.sanitize_retired_tool_names] is a hardcoded
-    retired-prefix list that must be hand-edited on every tool rename and
-    silently misses renames it does not enumerate (e.g. masc_board_get ->
-    masc_board_post_get). This pass instead asks the registry: any
-    lowercase masc_/keeper_ token that resolves is kept; one that does not
-    (a removed/renamed tool, or a hallucinated name frozen in an injected
-    episode) is replaced with [stale_tool_token_placeholder] so the model
-    never sees it as a callable tool while the surrounding sentence stays
-    grammatically intact.
+    already leaked into prompt/continuity text. It is the SOLE prompt
+    sanitization pass: the legacy hardcoded
+    [Keeper_unified_prompt.sanitize_retired_tool_names] retired-prefix list
+    (which also deleted standalone words like "Grep"/"Bash" and mangled
+    prompt prose — 38-bug campaign #6) was removed. This pass asks the
+    registry: any lowercase masc_/keeper_ token that resolves is kept; one
+    that does not (a removed/renamed tool, or a hallucinated name frozen in
+    an injected episode) is replaced with [stale_tool_token_placeholder] so
+    the model never sees it as a callable tool while the surrounding
+    sentence stays grammatically intact. Plain capitalized words are never
+    touched; hallucinated calls to non-existent tools are rejected at the
+    tool-dispatch boundary with a typed error.
 
     Env-var-shaped tokens (all-uppercase, e.g. MASC_BASE_PATH) are kept —
     they are not tool invocations and stripping them would mangle legitimate

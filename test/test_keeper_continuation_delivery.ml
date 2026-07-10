@@ -38,9 +38,9 @@ let test_gate_routable_dashboard_delivers () =
   | _ -> fail "a routable Dashboard channel with real content must deliver"
 ;;
 
-let test_describe_outcome_is_stable_tag () =
-  (* G5: the counter label is describe_outcome — it must be a stable one-line
-     tag per outcome so the metric stays cardinality-bounded. *)
+let test_describe_outcome_is_human_readable () =
+  (* Logs retain connector/error detail; metrics use the separate closed label
+     function below so this detail cannot inflate metric cardinality. *)
   let delivered = D.describe_outcome (D.Delivered { kind = "dashboard" }) in
   let unrouted = D.describe_outcome D.Skipped_unrouted in
   let failed = D.describe_outcome (D.Failed { kind = "slack"; error = "boom" }) in
@@ -50,6 +50,18 @@ let test_describe_outcome_is_stable_tag () =
   check bool "tags distinct" true (delivered <> unrouted && unrouted <> failed)
 ;;
 
+let test_metric_label_excludes_failure_detail () =
+  let first =
+    D.outcome_metric_label (D.Failed { kind = "slack"; error = "timeout-1" })
+  in
+  let second =
+    D.outcome_metric_label
+      (D.Failed { kind = "discord"; error = "token-2" })
+  in
+  check string "failed metric label" "failed" first;
+  check string "failure details do not change metric label" first second
+;;
+
 let () =
   run "keeper continuation delivery gate (RFC-0320 W3c/G5)"
     [ "gate"
@@ -57,7 +69,8 @@ let () =
         ; "empty content skips", `Quick, test_gate_empty_content_skips
         ; "already-replied skips (dedup)", `Quick, test_gate_already_replied_skips
         ; "routable dashboard delivers", `Quick, test_gate_routable_dashboard_delivers
-        ; "describe_outcome is a stable tag", `Quick, test_describe_outcome_is_stable_tag
+        ; "describe_outcome is human-readable", `Quick, test_describe_outcome_is_human_readable
+        ; "metric label excludes failure detail", `Quick, test_metric_label_excludes_failure_detail
         ]
     ]
 ;;

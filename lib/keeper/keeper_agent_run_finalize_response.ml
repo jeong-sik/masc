@@ -443,7 +443,8 @@ let finalize
      in
      Otel_metric_store.inc_counter
        Keeper_metrics.(to_string ContinuationDeliveryOutcome)
-       ~labels:["outcome", Keeper_continuation_delivery.describe_outcome outcome]
+       ~labels:
+         [ "outcome", Keeper_continuation_delivery.outcome_metric_label outcome ]
        ();
      Log.Keeper.info ~keeper_name:meta.name
        "RFC-0320 W3c continuation delivery: %s"

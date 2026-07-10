@@ -59,7 +59,7 @@ const OVERVIEW_LINKS: Array<{
 }> = [
   {
     label: 'Keeper',
-    detail: 'BDI, goals, and cognition focus',
+    detail: 'Tool access and memory inspection',
     params: { section: 'cognition', view: 'keeper' },
   },
   {

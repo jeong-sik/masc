@@ -23,7 +23,7 @@ code_refs:
 - `../COMMAND-PLANE-RUNBOOK.md`
 - `../../../mcp-protocol-sdk/docs/COMPARATIVE-ANALYSIS-AND-IMPROVEMENTS.md`
 - `../../../mcp-protocol-sdk/docs/RELEASE-POLICY.md`
-- `./oas-masc-state-boundary.md`
+- `../OAS-MASC-BOUNDARY.md`
 - `./cdal-contract-kernel-and-advisory-split.md`
 - `./check-evaluation-spec.md`
 - `./proof-bundle-check-mapping.md`

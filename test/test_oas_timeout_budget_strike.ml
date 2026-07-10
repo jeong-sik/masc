@@ -606,7 +606,7 @@ let test_context_layer_budget_records_decisions () =
     over_cap.context_layer_would_fit_tokens;
   let empty =
     Keeper_run_prompt.estimate_context_layer_budget
-      ~layer_name:"continuity_summary"
+      ~layer_name:"checkpoint_context"
       ~priority:"required"
       ~cap_tokens:64
       ~text:""

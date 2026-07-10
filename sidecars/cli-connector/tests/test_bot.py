@@ -2,21 +2,7 @@
 
 from __future__ import annotations
 
-from src.bot import _response_text, _strip_state, CLIGateClient, GateResponse
-
-
-class TestStripState:
-    def test_removes_state_block(self) -> None:
-        assert _strip_state("Hi [STATE]data[/STATE] there") == "Hi  there"
-
-    def test_removes_unclosed_block(self) -> None:
-        assert _strip_state("Hi [STATE]data without end") == "Hi"
-
-    def test_preserves_plain_text(self) -> None:
-        assert _strip_state("no state here") == "no state here"
-
-    def test_handles_empty(self) -> None:
-        assert _strip_state("") == ""
+from src.bot import _response_text, CLIGateClient, GateResponse
 
 
 class TestResponseText:

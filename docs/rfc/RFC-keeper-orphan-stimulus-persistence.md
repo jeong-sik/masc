@@ -208,11 +208,6 @@ Neither side adds a type, a classifier, a cap, or a sweeper.
 - Changing bootstrap's one-shot launch semantics.
 - Reintroducing any per-turn wall-clock watchdog (RFC-0250 §4 already forbids
   this).
-- Addressing the separate orphan-active-loop gap (`keeper_post_turn.ml:480-488`
-  clears `snapshot.goal` without calling `Keeper_working_state.resolve_loop`).
-  That is a real, adjacent bug but it is on the working-state side, not the
-  event-queue side. It is left to a companion RFC so each fix has one owner and
-  one test surface.
 
 ## §5 Relationship to existing RFCs
 

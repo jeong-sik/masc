@@ -28,7 +28,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from .config import get_config
-from .formatters import fallback_text, response_blocks, strip_state_blocks
+from .formatters import fallback_text, response_blocks
 from .gate_client import GateClient, GateResponse
 
 logging.basicConfig(
@@ -258,9 +258,9 @@ class SlackGateBot:
         thinking_ts: str,
     ) -> None:
         """Process gate response and update the thinking message."""
-        rendered_text = strip_state_blocks(response_text(response))
+        rendered_text = response_text(response).strip()
         if response.ok and rendered_text:
-            reply = strip_state_blocks(response.reply)
+            reply = response.reply.strip()
             blocks = response_blocks(
                 reply,
                 keeper_name=response.keeper_name,

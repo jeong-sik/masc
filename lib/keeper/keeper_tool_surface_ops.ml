@@ -571,7 +571,6 @@ let direct_reply_visible_text body =
             let visible =
               reply
               |> Keeper_skill_routing.strip_skill_route_lines
-              |> Keeper_execution.strip_state_blocks_text
               |> String.trim
             in
             if visible = "" then None else Some visible)

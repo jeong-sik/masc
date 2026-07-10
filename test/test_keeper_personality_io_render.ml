@@ -57,10 +57,10 @@ let test_oversized_ascii_truncates_to_exact_cap () =
     (String.length r.instructions)
 
 (* --------------------------------------------------------------------- *)
-(* Behaviour parity with normalize_self_model_text                       *)
+(* Behaviour parity with normalize_prompt_text                           *)
 (* --------------------------------------------------------------------- *)
 
-let test_matches_normalize_self_model_text () =
+let test_matches_normalize_prompt_text () =
   let cap = Keeper_config.prompt_render_max_bytes in
   let inputs =
     [
@@ -73,7 +73,7 @@ let test_matches_normalize_self_model_text () =
   List.iter
     (fun raw ->
       let via_helper =
-        Keeper_config.normalize_self_model_text ~max_bytes:cap raw
+        Keeper_config.normalize_prompt_text ~max_bytes:cap raw
       in
       let p = make ~instructions:raw () in
       let r = Keeper_personality_io.to_prompt_form ~max_bytes:cap p in
@@ -101,7 +101,7 @@ let () =
         ] );
       ( "behaviour parity",
         [
-          test_case "matches normalize_self_model_text" `Quick
-            test_matches_normalize_self_model_text;
+          test_case "matches normalize_prompt_text" `Quick
+            test_matches_normalize_prompt_text;
         ] );
     ]

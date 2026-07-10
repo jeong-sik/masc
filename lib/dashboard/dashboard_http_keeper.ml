@@ -944,14 +944,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 | _ -> `Null );
               ("instructions",
                 if String.trim m.instructions = "" then `Null else `String m.instructions);
-              ("self_model", `Assoc [
-                ( "persona",
-                  match m.persona with
-                  | Some persona when String.trim persona <> "" -> `String persona
-                  | _ -> `Null );
-                ("instructions",
-                  if String.trim m.instructions = "" then `Null else `String m.instructions);
-              ]);
               ( "models"
               , `List
                   (List.map

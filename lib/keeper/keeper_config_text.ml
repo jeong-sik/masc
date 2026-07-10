@@ -58,10 +58,9 @@ let default_goal_max_chars =
      | _ -> 4096)
   | None -> 4096
 
-let default_drift_max_clauses = 6
 
 let prompt_render_max_bytes =
-  match Env_config_core.raw_value_opt "MASC_KEEPER_SELF_MODEL_MAX_BYTES" with
+  match Env_config_core.raw_value_opt "MASC_KEEPER_PROMPT_RENDER_MAX_BYTES" with
   | Some v ->
     (match int_of_string_opt (String.trim v) with
      | Some n when n > 0 -> n
@@ -93,12 +92,6 @@ let removed_keeper_sandbox_input_key_names =
     "network_mode";
   ]
 
-(* Non-public keeper input keys: accepted for external-client
-   compatibility but with no runtime effect (#7447, #9752). Empty since the
-   social_model purge (RFC-0276) removed its only member; kept as the typed
-   extension point so a future such key warns rather than errors. *)
-let non_public_keeper_input_key_names : string list = []
-
 let removed_keeper_msg_input_key_names =
   [
     "goal";
@@ -129,14 +122,6 @@ let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list 
 
 let reject_removed_keeper_input_keys ?(allow_sandbox_fields = false) ~tool_name
     (args : Yojson.Safe.t) =
-  let non_public = present_json_keys non_public_keeper_input_key_names args in
-  (match non_public with
-   | _ :: _ as fields ->
-       Log.Keeper.warn
-         "%s: ignoring non-public keeper args %s (see #7447, #9752 — \
-          accepted for external-client compatibility, no runtime effect)"
-         tool_name (String.concat ", " fields)
-   | [] -> ());
   let present = present_json_keys removed_keeper_input_key_names args in
   if present <> []
   then
@@ -194,21 +179,21 @@ let utf8_repair_string (s : string) : string =
   loop 0;
   Buffer.contents buf
 
-(* ── Self-model / goal-horizon text normalization ───────────── *)
+(* ── Prompt text normalization ──────────────────────────────── *)
 
 (* #10552: trim BOTH before and after [String_util.utf8_prefix].  The
    pre-fix sequence was [trim → prefix], but [String_util.utf8_prefix]
    can cut at a position that leaves trailing ASCII whitespace
    (e.g. nick0cave's 322-byte desires field ends with [...는 것.] —
    the prefix at max_bytes=320 backs up to byte 318, ending at the
-   space before [것]).  That makes [normalize_self_model_text]
+   space before [것]). That made the previous normalizer
    non-idempotent: applying it once produces a 318-byte string ending
    in a space; applying it AGAIN trims the space to 317 bytes.
    [personality_text_equal] then sees [normalize meta_318 = 317] and
    [normalize raw_322 = 318] — unequal — and re-sync fires every
    reconcile tick.  Trimming after prefix makes the function
    idempotent: [normalize(normalize(x)) = normalize(x)]. *)
-let normalize_self_model_text ~(max_bytes : int) (raw : string) : string =
+let normalize_prompt_text ~(max_bytes : int) (raw : string) : string =
   let s = String.trim raw in
   if s = "" then ""
   else
@@ -219,27 +204,3 @@ let normalize_goal_text ?(max_len = default_goal_max_chars) (raw : string) : str
   let s = String.trim raw in
   if s = "" then ""
   else String_util.utf8_prefix ~max_bytes:max_len s
-
-let split_semicolon_clauses (raw : string) : string list =
-  raw
-  |> String.split_on_char ';'
-  |> List.map String.trim
-  |> List.filter (fun s -> s <> "")
-
-let take_last = List_util.take_last
-
-let compact_self_model_text
-    ?(max_clauses = default_drift_max_clauses)
-    ~(max_bytes : int)
-    (raw : string) : string =
-  raw
-  |> split_semicolon_clauses
-  |> take_last max_clauses
-  |> String.concat "; "
-  |> normalize_self_model_text ~max_bytes
-
-let parse_self_model_opt args key : string option =
-  match get_string_opt args key with
-  | None -> None
-  | Some raw ->
-    Some (normalize_self_model_text ~max_bytes:prompt_render_max_bytes raw)

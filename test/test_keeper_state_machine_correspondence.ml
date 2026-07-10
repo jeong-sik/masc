@@ -74,7 +74,6 @@ let all_set b : SM.conditions =
     stop_requested = b;
     restart_budget_remaining = b;
     backoff_elapsed = b;
-    guardrail_triggered = b;
     drain_complete = b;
     context_overflow = b;
     compact_retry_exhausted = b;
@@ -264,15 +263,10 @@ let canonical_events : (string * SM.event) list =
           context_ratio = 0.5;
           message_count = 10;
           token_count = 1000;
-          auto_rules =
+          context_actions =
             {
-              reflect = false;
-              plan = false;
               compact = false;
               handoff = false;
-              guardrail_stop = false;
-              guardrail_reason = None;
-              goal_drift = 0.0;
             };
         } );
     ("CompactionStarted", SM.Compaction_started);
@@ -294,7 +288,6 @@ let canonical_events : (string * SM.event) list =
     ("FiberTerminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None });
     ("SupervisorRestartAttempt", SM.Supervisor_restart_attempt { attempt = 1 });
     ("RestartBudgetExhausted", SM.Restart_budget_exhausted);
-    ("GuardrailStop", SM.Guardrail_stop { reason = "test" });
     ("TerminalFailureDetected", SM.Terminal_failure_detected { reason = "test" });
     ( "ContextOverflowDetected",
       SM.Context_overflow_detected

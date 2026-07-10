@@ -19,8 +19,6 @@ Date: 2026-05-17
 Scope: transport boundary (server response envelope) + lib/-wide silent-failure lint
 Out of scope: persistence write failures (covered by [[RFC-0077]]), counter→Result umbrella ([[RFC-0088]]), string→variant ([[RFC-0089]]), N-of-M migration closure ([[RFC-0090]])
 
-> **Numbering note.** Originally drafted as RFC-0094; renumbered to **0098** on 2026-05-17 after ledger race-loss against parallel in-flight PRs #15716 ("compact cooldown semantics", RFC-0094), #15728 ("keeper sandbox container reuse", RFC-0097), #15722 / #15725 ("Provider-D-compat streaming wireup", RFC-0095), and the merged RFC-0097 sandbox-container spec. Following [[RFC-0078]] §monotonic-ledger and the `feedback_rfc_number_reservation_needed.md` operational rule, the number is reallocated; the topic and content are unchanged from the original draft.
-
 ## 1. Problem
 
 Two distinct silent-failure surfaces remain after [[RFC-0077]], [[RFC-0088]], [[RFC-0089]], [[RFC-0090]] address the *internal* keeper persistence and *write-side success-model attribution* gaps:
@@ -236,7 +234,6 @@ PR-3 onward introduces *new* wire codes (`-32003`, `-32004`, …). Clients that 
 
 - PR #15722 / #15725 — "[RFC-0095] Provider-D-compat streaming wire-up / diagnostic" overlaps IMPROVE-02 (Streamable HTTP default) and IMPROVE-04 (TTFT). IMPROVE-02 RFC will be drafted *after* reading these PRs to decide stack vs absorb.
 - PR #15727 — "fix(fd): docker spawn throttle bounds host FD pressure" overlaps IMPROVE-03 (FD Accountant). IMPROVE-03 RFC will likewise be drafted after reading this PR.
-- The two RFC-0094 claimants (#15716 "compact cooldown semantics", #15728 "keeper sandbox container reuse") are *orthogonal* to this RFC's scope.
 
 ## 10. References (evidence, external)
 

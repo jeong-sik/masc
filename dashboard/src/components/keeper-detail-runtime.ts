@@ -1109,24 +1109,9 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
       ],
     },
     {
-      title: 'LLM 응답 정렬',
-      rows: [
-        { label: '목표 일치도', value: fmtFixed(mw?.goal_alignment_avg) },
-        { label: '응답 일치도', value: fmtFixed(mw?.response_alignment_avg) },
-        { label: '목표 이탈도', value: fmtFixed(mw?.goal_drift_avg) },
-        { label: '반복 패턴 위험도', value: fmtFixed(mw?.repetition_risk_avg) },
-      ],
-    },
-    {
       title: '자율 행동 & 반응',
       rows: [
-        { label: '자동 성찰 비율', value: formatPct1(mw?.auto_reflect_rate) },
-        { label: '자동 계획 비율', value: formatPct1(mw?.auto_plan_rate) },
-        { label: '자동 컴팩션 비율', value: formatPct1(mw?.auto_compact_rate) },
-        { label: '자동 핸드오프 비율', value: formatPct1(mw?.auto_handoff_rate) },
-        { label: '가드레일 정지', value: fmtCount(mw?.guardrail_stop_count) },
         { label: '멘션 반응', value: fmtCount(keeper.mention_reactive_turn_count) },
-        { label: '프리뷰 유사도', value: formatPct1(mw?.proactive_preview_similarity_avg) },
       ],
     },
     {
@@ -1634,7 +1619,6 @@ export function RuntimeLensSection({
         <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
         <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
-        <${SignalRow} label="working loops" value=${context.active_open_loop_count} />
         <${SignalRow} label="memory flush" value=${formatIndependentCounters({ leftLabel: 'success', leftValue: memory.memory_flush_success_count, rightLabel: 'error', rightValue: memory.memory_flush_error_count })} />
         <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />
         <${SignalRow}

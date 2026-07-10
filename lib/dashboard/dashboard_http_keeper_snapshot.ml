@@ -140,9 +140,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
             Keeper_world_observation
             .collect_board_events_without_advancing_cursor
               ~base_path:config.base_path
-              ~continuity_summary:
-                (Keeper_world_observation.read_continuity_summary ~config
-                   ~meta:m)
               ~meta:m
           in
           Keeper_world_observation.observe
@@ -297,7 +294,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
         in
         Keeper_decision_audit.decision_pipeline_to_mermaid
           ?turn_outcome
-          ~guard_penalty_total:stats.guard_penalties_total
           ~phase
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta

@@ -349,9 +349,8 @@ let runtime_runner_execute_site = "runtime_runner.execute"
    diagnostic fields (budget_sec, source, …). [cap_blocker_detail] keeps a
    payload that begins with the prefix up to
    [blocker_detail_structured_max_chars] and truncates plain narrative text
-   to [blocker_detail_narrative_max_chars]. Idempotent. Re-homed next to the
-   prefix SSOT when the keeper social model was purged (RFC-0276 §3.3);
-   applied where the runtime builds last_blocker.detail
+   to [blocker_detail_narrative_max_chars]. Idempotent. Applied where the
+   runtime builds last_blocker.detail
    (keeper_unified_metrics_failure). *)
 let blocker_detail_narrative_max_chars = 200
 

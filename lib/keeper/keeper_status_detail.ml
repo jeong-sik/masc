@@ -797,14 +797,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              | _ -> `Null );
            ("instructions",
             if String.trim m.instructions = "" then `Null else `String m.instructions);
-           ("self_model", `Assoc [
-             ( "persona",
-               match m.persona with
-               | Some persona when String.trim persona <> "" -> `String persona
-               | _ -> `Null );
-             ("instructions",
-              if String.trim m.instructions = "" then `Null else `String m.instructions);
-           ]);
            ("paused", `Bool m.paused);
            ("keepalive_running", `Bool keepalive_running);
            ("agent", agent_status);

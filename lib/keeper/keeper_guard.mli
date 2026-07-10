@@ -15,8 +15,13 @@ val evaluate :
   Keeper_measurement.measurement_snapshot ->
   Keeper_state_machine.event list
 
+(** Derive the surviving context-capacity actions from one frozen snapshot. *)
+val context_actions :
+  Keeper_measurement.measurement_snapshot ->
+  Keeper_state_machine.context_actions
+
 (** Select the highest-priority event from the guard output.
-    Priority: Guardrail > Crash > Compact > Handoff > No_transition.
+    Priority: Crash > Compact > Handoff > No_transition.
     Returns [Heartbeat_ok] if the list is empty (no transitions needed). *)
 val prioritized_event :
   Keeper_state_machine.event list ->

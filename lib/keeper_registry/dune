@@ -12,7 +12,6 @@
   keeper_id
   keeper_runtime_manifest_types
   keeper_lifecycle_events
-  keeper_state_block_prompt
   keeper_state_machine
   keeper_state_machine_json
   keeper_state_machine_mermaid

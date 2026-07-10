@@ -128,8 +128,6 @@ type t =
   | CycleExceptions
   | SnapshotReadFailures
   | SnapshotWriteFailures
-  | StateSnapshotSkippedNoState
-  | StateSnapshotInvalidGoal
   | PromptUnknownToolTokens
   | PromptTokenStripped
   | ProgressUpdatedLineFailures
@@ -157,11 +155,7 @@ type t =
   | MemoryLlmSummaryChainExhausted
   | HitlSummaryOutcomes
   | UserVisibleReplySource
-  | ContinuitySummarySource
-  | SummarizerStateScrubs
-  | SummarizerStateBlocksRemoved
   | OasEnvKeyRejections
-  | ContinuityTsRecovered
   | MemoryWriteFailures
   | MemoryLaneUnitFailures
   | MemoryConsolidations
@@ -182,7 +176,6 @@ type t =
   | KeeperMaterializationFailures
   | ObservationQueryFailures
   | OasOnStop
-  | OasOnIdleEscalated
   | InvariantViolations
   | FsmEdgeTransitions
   | TurnFsmTransitions
@@ -206,7 +199,6 @@ type t =
   | NearExhaustionTotal
   | RestartAttempts
   | RestartOutcomes
-  | ConsecutiveIdle
   | LastProductiveTs
   | ProviderTimeoutStrike
   | StaleTerminationTotal
@@ -401,10 +393,6 @@ let to_string = function
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
   | SnapshotReadFailures -> "masc_keeper_snapshot_read_failures_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
-  | StateSnapshotSkippedNoState ->
-    "masc_keeper_state_snapshot_skipped_no_state_total"
-  | StateSnapshotInvalidGoal ->
-    "masc_keeper_state_snapshot_invalid_goal_total"
   | PromptUnknownToolTokens ->
     "masc_keeper_prompt_unknown_tool_tokens_total"
   | PromptTokenStripped ->
@@ -436,12 +424,7 @@ let to_string = function
     "masc_keeper_memory_llm_summary_chain_exhausted_total"
   | HitlSummaryOutcomes -> "masc_keeper_hitl_summary_outcomes_total"
   | UserVisibleReplySource -> "masc_keeper_user_visible_reply_source_total"
-  | ContinuitySummarySource -> "masc_keeper_continuity_summary_source_total"
-  | SummarizerStateScrubs -> "masc_keeper_summarizer_state_scrubs_total"
-  | SummarizerStateBlocksRemoved ->
-    "masc_keeper_summarizer_state_blocks_removed_total"
   | OasEnvKeyRejections -> "masc_keeper_oas_env_key_rejections_total"
-  | ContinuityTsRecovered -> "masc_keeper_continuity_ts_recovered_total"
   | MemoryWriteFailures -> "masc_keeper_memory_write_failures_total"
   | MemoryLaneUnitFailures -> "masc_keeper_memory_lane_unit_failures_total"
   | MemoryConsolidations -> "masc_keeper_memory_consolidations_total"
@@ -462,7 +445,6 @@ let to_string = function
   | KeeperMaterializationFailures -> "masc_keeper_materialization_failures_total"
   | ObservationQueryFailures -> "masc_keeper_observation_query_failures_total"
   | OasOnStop -> "masc_keeper_oas_on_stop_total"
-  | OasOnIdleEscalated -> "masc_keeper_oas_on_idle_escalated_total"
   | InvariantViolations -> "masc_keeper_invariant_violations_total"
   | FsmEdgeTransitions -> "masc_keeper_fsm_edge_transitions_total"
   | TurnFsmTransitions -> "masc_keeper_turn_fsm_transitions_total"
@@ -488,7 +470,6 @@ let to_string = function
   | NearExhaustionTotal -> "masc_keeper_near_exhaustion_total"
   | RestartAttempts -> "masc_keeper_restart_attempts_total"
   | RestartOutcomes -> "masc_keeper_restart_outcomes_total"
-  | ConsecutiveIdle -> "masc_keeper_consecutive_idle"
   | LastProductiveTs -> "masc_keeper_last_productive_ts"
   | ProviderTimeoutStrike -> "masc_keeper_provider_timeout_strike_total"
   | StaleTerminationTotal -> "masc_keeper_stale_termination_total"
@@ -594,7 +575,7 @@ let all : t list =
     ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
     PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
     TurnFailureStreakPaused;
-    CycleExceptions; SnapshotReadFailures; SnapshotWriteFailures; StateSnapshotSkippedNoState; StateSnapshotInvalidGoal; PromptUnknownToolTokens;
+    CycleExceptions; SnapshotReadFailures; SnapshotWriteFailures; PromptUnknownToolTokens;
     PromptTokenStripped;
     ProgressUpdatedLineFailures;
     SseBroadcastFailures; WorkspaceHeartbeatFailures; TurnMetricsSnapshotFailures; OasExecutionErrors;
@@ -602,17 +583,17 @@ let all : t list =
     TomlReconcileDedup; ReconcileDisabled; ToolUsageFlushFailures; TurnTimeoutCommitted;
     TurnErrorAfterTools; RuntimeSyncFailures; LocalDiscoveryFailures; ThinkingPersistFailures;
     CheckpointFailures; DecisionAuditRingOverflows; ReplySkillRouteStrips; ReplySkillRouteLinesRemoved;
-    MemoryLlmSummaryOutcomes; MemoryLlmSummaryChainExhausted; HitlSummaryOutcomes; UserVisibleReplySource; ContinuitySummarySource;
-    SummarizerStateScrubs; SummarizerStateBlocksRemoved; OasEnvKeyRejections; ContinuityTsRecovered;
+    MemoryLlmSummaryOutcomes; MemoryLlmSummaryChainExhausted; HitlSummaryOutcomes; UserVisibleReplySource;
+    OasEnvKeyRejections;
     MemoryWriteFailures; MemoryLaneUnitFailures; MemoryConsolidations; MemoryLaneSubmitted; MemoryLaneRanInline; MemoryLaneDropped;
     MemoryLanePending; MemoryLaneInFlight; MemoryLaneProviderSlotBusy; MemoryBankCompactionFailures; MemoryOsMaintenanceKeeperTimeout; WriteMetaCycleFailures; AlertPersistFailures;
     MetricsSseFailures; ChatStoreFailures; ChatTransportFailures; PersonNoteStoreFailures; KeeperMaterializationFailures; ObservationQueryFailures; OasOnStop;
-    OasOnIdleEscalated; InvariantViolations; FsmEdgeTransitions; TurnFsmTransitions;
+    InvariantViolations; FsmEdgeTransitions; TurnFsmTransitions;
     TurnPhaseDuration; LifecycleTransitions; LifecycleCallbackFailures; CompactionCallbackRecoveries;
     EventBusDrain; SupervisorCleanupFailures; SpawnSlotDenied; RegistryUpdateDropped;
     RegistryOrphanThresholdBreached; RegistryInvalidEntry; DeadTotal; AutoResumedTotal; AutoResumeBlockedTotal;
     SkipIdleWakeResumed; EventQueueOverride; StimulusConsumed; UnsupportedStimulus;
-    NearExhaustionTotal; RestartAttempts; RestartOutcomes; ConsecutiveIdle;
+    NearExhaustionTotal; RestartAttempts; RestartOutcomes;
     LastProductiveTs; ProviderTimeoutStrike; StaleTerminationTotal; StaleTerminationByClass;
     ProviderTimeoutWatchdogTermination; StaleTerminationThresholdBreached; StaleTerminationBatch; StaleBroadcastEmitFailures;
     OasRunTimeout; RuntimeSaturationSignal; RuntimeSelected; RuntimeRotation; ToolUseFailure; ToolNotAllowed;

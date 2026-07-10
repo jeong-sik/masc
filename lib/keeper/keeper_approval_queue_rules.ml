@@ -23,8 +23,11 @@
 
     Action mapping (TLA+ -> OCaml):
       Submit                 [submit_and_await] / [submit_pending]
-                             record a new pending entry and suspend
-                             the fiber on [Eio.Promise.await].
+                             record a new pending entry. [submit_and_await]
+                             suspends the caller on [Eio.Promise.await];
+                             [submit_pending] invokes its callback later and
+                             defaults to an independent Keeper cycle unless
+                             an explicit lifecycle [Blocking] policy is used.
       Resolve                operator approves/rejects via the HTTP
                              handler in [server_dashboard_http.ml],
                              which calls [resolve] on the queue and

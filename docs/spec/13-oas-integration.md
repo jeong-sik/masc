@@ -39,7 +39,7 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 
 - `/home/runner/work/masc/masc/docs/OAS-MASC-BOUNDARY.md` is the boundary contract SSOT.
 - This spec keeps the implementation map, bridge inventory, and open structural gaps.
-- `/home/runner/work/masc/masc/docs/design/oas-masc-state-boundary.md` is a historical audit / migration backlog, not the primary boundary contract.
+- `/home/runner/work/masc/masc/docs/KEEPER-STATE-OWNERSHIP.md` defines checkpoint, lane, domain-state, and receipt ownership.
 - `/home/runner/work/masc/masc/docs/design/checkpoint-truth-and-replay-rfc.md` keeps checkpoint truth hierarchy, replay semantics, and side-effect boundary language.
 - `/home/runner/work/masc/masc/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md` is evidence, not contract.
 - `/home/runner/work/masc/masc/docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md` records the OAS observability producer -> bridge -> durable store -> dashboard consumer chain.
@@ -465,7 +465,7 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | `keeper_meta` runtime split | Partial | runtime-heavy fields are grouped under `keeper_meta.runtime`, but keeper persistence still owns them |
 | keeper `working_context` wrapper | Open | keeper runtime still wraps OAS context/checkpoint state |
 | keeper checkpoint nativeization | Open | keeper path still serializes MASC-owned context |
-| message marker leakage | Open | `[STATE]`, `[GOAL]`, memory-summary markers still carry domain semantics in raw text |
+| prose/domain-state separation | Complete for Keeper replies | model-authored prose is context only; domain transitions require typed MASC tools and receipts |
 | memory projection hooks/callbacks | Removed | memory callbacks and post-turn OAS flush paths were removed |
 | team-session bridge fidelity | Open | healthcheck still calls out projection/resource-health gaps |
 
@@ -490,11 +490,10 @@ Phase ordering follows `docs/design/checkpoint-truth-and-replay-rfc.md`.
 - **B1** mutation-boundary typed fact inventory
 - **B2** side-effect class mapping against current write-gate behavior
 - **C1** `working_context` dependency inventory
-- **C2** raw marker leakage inventory (`[STATE]`, `[GOAL]`, memory-summary)
+- **C2** prose/domain-state separation audit
 - **D1** delta restore remains optimization-only
 
-Detailed implementation checklist lives in
-`docs/design/checkpoint-truth-replay-implementation-checklist.md`.
+Validation steps live in `docs/KEEPER-CONTINUITY-VALIDATION.md`.
 
 ### 12.2 Boundary Audit Snapshot
 

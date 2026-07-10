@@ -74,47 +74,4 @@ describe('refreshNamespaceTruth', () => {
     })
   }, 20000)
 
-  it('normalizes latest meta-cognition digest from project snapshot', async () => {
-    apiMocks.fetchDashboardNamespaceTruth.mockResolvedValue({
-      generated_at: '2026-03-25T08:16:21Z',
-      root: {
-        status: {
-          project: 'default',
-          version: '2.148.0',
-        },
-      },
-      meta_cognition: {
-        summary: {
-          stagnation_score: 0.72,
-          belief_count: 2,
-          contested_belief_count: 1,
-        },
-        latest_digest: {
-          post_id: 'post-meta-1',
-          title: '[meta-cognition] contested belief requires follow-up',
-          created_at: '2026-03-25T08:14:00Z',
-          updated_at: '2026-03-25T08:14:00Z',
-          hearth: 'meta-cognition',
-          digest_key: 'digest-1',
-          matches_summary: true,
-          provenance: 'board',
-        },
-      },
-    })
-
-    const namespaceTruthStore = await import('./namespace-truth-store')
-
-    await namespaceTruthStore.refreshNamespaceTruth({ force: true })
-
-    expect(namespaceTruthStore.namespaceTruth.value?.meta_cognition?.latest_digest).toEqual({
-      post_id: 'post-meta-1',
-      title: '[meta-cognition] contested belief requires follow-up',
-      created_at: '2026-03-25T08:14:00Z',
-      updated_at: '2026-03-25T08:14:00Z',
-      hearth: 'meta-cognition',
-      digest_key: 'digest-1',
-      matches_summary: true,
-      provenance: 'board',
-    })
-  }, 20000)
 })

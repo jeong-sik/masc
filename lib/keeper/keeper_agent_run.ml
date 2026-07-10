@@ -204,11 +204,9 @@ let run_turn
       ?(turn_affordances = [])
       ~(generation : int)
       ~(max_idle_turns : int)
-      (* Required, no default: the OAS loop guard kills the run at this
-         count, so the caller must pick the channel-appropriate threshold
-         (reactive/autonomous). A silent default of 3 sat below the
-         graduated idle hook's skip threshold (4), making graceful Skip
-         unreachable — user chat turns died as IdleDetected errors. *)
+      (* Required, no default: this value is forwarded to the OAS loop
+         guard, so the caller must select the channel-specific runtime
+         setting explicitly. *)
       ?(history_user_source = "direct_user")
       ?(history_assistant_source = "direct_assistant")
       ?guardrails
@@ -230,6 +228,7 @@ let run_turn
       ?trace_link
       ?continuation_channel
       ?hitl_delivery_channel
+      ?hitl_approval_grant
       ?yield_to_chat_waiting
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
@@ -745,7 +744,6 @@ let run_turn
                     ~initial_messages
                     ~hooks
                     ~context_reducer:reducer
-                   ~summarizer:Keeper_summarizer.keeper_summarizer
                    ~runtime_manifest_context
                    ~runtime_manifest_append:
                      (fun manifest ->
@@ -785,6 +783,8 @@ let run_turn
                          ~meta
                          ?clock:(Eio_context.get_clock_opt ())
                          ?continuation_channel
+                         ~lane_policy:Keeper_approval_queue.Nonblocking
+                         ?hitl_approval_grant
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       (* Mutation-boundary is native to OAS now; [exit_condition]
@@ -815,11 +815,6 @@ let run_turn
                | Error e -> Error e
                | Ok result ->
                  let post_turn_t0 = Time_compat.now () in
-                 (* Checkpoint save is deferred until after [STATE] synthesis so the
-           persisted checkpoint includes the synthesized continuity block.
-           Without this, read_continuity_summary finds no [STATE] in the
-           checkpoint messages and returns empty — causing keepers to lose
-           context across turns.  See #5431. *)
                  (* Section 4: Result processing — parse response, handle tool calls, validate contracts. *)
                 (* RFC-MASC-004: AfterTurn hooks flush incrementally during
           Agent.run. Post-run episode creation requires an explicit
@@ -893,7 +888,7 @@ let run_turn
                       | Ok response_text ->
                         Keeper_agent_run_finalize_response.finalize
                           ~config ~meta ~generation ~manifest_keeper_turn_id
-                          ~trace_id ~session ~append_manifest ~model
+                          ~session ~append_manifest ~model
                           ~acc
                           ~actual_keeper_tool_names
                           ~result ~checkpoint_persistence_error

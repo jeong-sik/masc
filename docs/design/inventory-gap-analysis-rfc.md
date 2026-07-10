@@ -22,7 +22,7 @@ code_refs:
 - `../MCP-SURFACE-AUDIT.md`
 - `./keeper-memory-resurrection-rfc.md`
 - `./contract-driven-agent-loop-rfc.md`
-- `./oas-masc-state-boundary.md`
+- `../OAS-MASC-BOUNDARY.md`
 - `../../ROADMAP.md`
 - `../../CHANGELOG.md`
 
@@ -72,7 +72,7 @@ masc는 95.2% 구현율(spec/C-implementation-status.md)을 보고하지만, 이
 ### 3.0.2 원칙
 
 1. **결정론적 동작을 비결정론적 출력에 의존시키지 않는다.**
-   - 예: memory write는 시스템이 보장해야 하는 결정론적 동작. LLM이 특정 포맷(`[STATE]`)을 출력하기를 "기대"하는 것은 비결정론적 출력에 결정론적 동작을 결합한 설계 오류.
+   - 예: memory write는 시스템 소유 post-turn 경로가 보장해야 한다. Assistant reply의 모양이나 문구는 write 여부를 결정하지 않는다.
    - 예: health check 결과는 실제 bind/listen 상태의 결정론적 반영이어야 함. stale state machine은 비결정론적 드리프트.
 
 2. **비결정론적 요소는 명시적으로 격리한다.**
@@ -89,7 +89,7 @@ masc는 95.2% 구현율(spec/C-implementation-status.md)을 보고하지만, 이
 
 | 갭 | 위반 유형 | 설명 |
 |----|----------|------|
-| C1 | **비결정론적 출력 → 결정론적 동작 의존** | `[STATE]` 포맷 파싱이 memory write의 전제조건 |
+| C1 | **비결정론적 출력 → 결정론적 동작 의존** | Assistant reply 해석이 memory write의 전제조건이 되어서는 안 됨 |
 | C2 | 결정론적 기능 부재 | config 직렬화는 결정론적이나 도구 노출이 없음 |
 | H1 | 결정론적 lifecycle 부재 | deprecation state machine 없이 수동 제거 |
 | H2 | **결정론적 스키마 ≠ 비결정론적 런타임** | 스키마가 기능 존재를 선언하나 런타임이 항상 실패 |
@@ -121,79 +121,23 @@ masc는 95.2% 구현율(spec/C-implementation-status.md)을 보고하지만, 이
 
 ### 4.1 CRITICAL
 
-#### C1: Keeper 영속 메모리 시스템 미작동
+#### C1: Keeper durable memory ownership
 
-**Issue**: #3630
-**약속**: Keeper는 "자율 에이전트 + 영속 메모리"로 문서화됨 (KEEPER-USER-MANUAL.md, QUICK-START.md)
-**현실**: 46개 keeper 디렉토리, memory.jsonl 0개
+Keeper memory has two explicit owners:
 
-**증거**:
+| Concern | Owner | Canonical evidence |
+|---|---|---|
+| Runtime transcript and continuation | OAS | checkpoint/session types |
+| Workspace memory and recall | MASC | typed facts, episodes, tool results, and turn receipts |
 
-```bash
-# 파일시스템 직접 확인 (2026-03-29)
-find .masc/keepers -name "memory.jsonl" | wc -l
-# 결과: 0
-ls .masc/keepers/ | wc -l
-# 결과: 46
-```
+The system-owned post-turn path records typed evidence independently of the
+assistant reply. An LLM may judge which facts are salient, but that judgment is
+validated before persistence and cannot mutate task, goal, HITL, connector, or
+scheduler state. Those domains advance only through their typed APIs.
 
-**근본 원인 (7중 실패)**:
-
-| # | 위치 | 상태 | 문제 |
-|---|------|------|------|
-| G1 | `keeper_memory_bank.ml:372` `append_memory_notes_from_reply` | 구현됨 | 호출자 0개 |
-| G2 | `memory_oas_bridge.ml:129` `seed_memory_bank` | 의도적 no-op | return 0, 테스트에서도 0 assert |
-| G3 | `keeper_memory_bank.ml:204` `compact_memory_bank_if_needed` | 구현됨 | 호출자 0개 |
-| G4 | `keeper_memory_policy.ml:374` `[STATE]` 블록 파서 | 구현됨 | system prompt에 포맷 주입 안 됨 |
-| G5 | keeper constitution prompt | 정의됨 | `build_keeper_system_prompt`에서 미사용 |
-| G6 | 로컬 모델 (qwen3.5) | 작동 | 강제 없이 `[STATE]` 포맷 생성 불가 |
-| G7 | `keeper_agent_run.ml:195` | 대화 히스토리 전달됨 | checkpoint 부재 + `keep_last 30` reducer 절삭 |
-
-**기존 RFC**: `docs/design/keeper-memory-resurrection-rfc.md` (G1-G7 식별, 단계별 해결 제안)
-
-**기존 RFC의 근본 문제**:
-
-기존 RFC는 G4-G6 (system prompt에 `[STATE]` 포맷 주입 → LLM이 해당 포맷 출력 → 파서가 인식 → memory write)을 해결 경로로 제안한다. 이것은 **비결정론적 출력에 결정론적 동작을 의존**시키는 휴리스틱이다.
-
-- LLM이 `[STATE]` 포맷을 출력할 확률은 모델, temperature, context length에 따라 달라진다.
-- 로컬 모델(qwen3.5-9b)은 강제 없이 이 포맷을 거의 생성하지 않는다.
-- system prompt 주입으로 확률을 높일 수 있지만, **확률이 1이 아닌 이상 결정론적 보장이 아니다.**
-- "포맷을 더 잘 따르도록 프롬프트를 개선"하는 접근은 문제를 완화하지만 해결하지 않는다.
-
-**올바른 해결 방향 (결정론적/비결정론적 분리)**:
-
-| 계층 | 성격 | 설계 |
-|------|------|------|
-| **Memory write 행위** | 결정론적 (시스템 보장) | 매 턴 종료 후 시스템 소유 post-turn 경로가 무조건 memory write를 수행. LLM 출력 포맷이나 tool call 존재 여부에 의존하지 않음 |
-| **Memory 내용 생성** | 비결정론적 (LLM 추론) | 턴의 대화 내용을 요약/추출하는 것은 LLM이 하되, 이것은 별도 요약 호출 또는 선택적 tool call |
-| **Memory 내용 부재 시** | 결정론적 fallback | LLM 요약이 실패하더라도, raw turn transcript를 그대로 memory에 저장 (degraded but guaranteed) |
-
-구체적으로 세 가지 접근이 가능하다:
-
-**A. Tool-based memory (선택적 보조 경로)**:
-- `keeper_memory_save` tool을 keeper에게 노출
-- keeper가 tool call로 명시적으로 memory write
-- tool call이 발생하면 dispatch와 write 자체는 결정론적
-- 단, tool call 발생 여부는 모델 행동이므로 이것만으로는 memory write guarantee가 되지 않음
-- 따라서 system prompt 지시는 품질 향상 수단일 뿐, 단독 해결책이 아님
-
-**B. Post-turn forced summarization (필수 guarantee path)**:
-- `keeper_agent_run.ml`에서 매 턴 종료 시, 시스템 소유 경로로 별도 LLM 호출 또는 deterministic transform을 실행
-- 생성된 요약/추출 결과를 `keeper_memory_bank.ml`의 write path로 강제 전달
-- LLM 요약 호출 자체가 실패하면 raw transcript fallback
-- 비용: 턴당 1회 추가 LLM 호출
-
-**C. Structured output constraint (constrained decoding)**:
-- LLM 출력에 structured output / JSON mode 강제
-- memory 관련 필드를 response schema에 포함
-- 이것은 모델이 지원하는 경우에만 결정론적 (llama.cpp JSON grammar, Agent-LLM-A tool_use)
-- 모든 모델에서 보장되지 않으므로 단독 사용 불가
-
-**권장**: B를 guarantee path로 두고, A를 선택적 enrichment path로 결합한다. 즉 system-owned post-turn write가 항상 실행되고, tool call은 salience/selection 품질을 높일 때만 추가한다. 두 경로 모두 LLM 출력 **포맷**에 의존하지 않는다.
-
-**기존 RFC와의 관계**: 기존 RFC의 G1-G3 (dead code 활성화)와 G7 (checkpoint)은 유효. G4-G6 (`[STATE]` 포맷 의존)은 위 접근으로 대체.
-
-**예상 노력**: 5-7일 (기존 추정 3-5일에서 증가. tool 정의 + post-turn hook + fallback + E2E 테스트)
+Verification therefore checks checkpoint restore, durable Memory OS records,
+and matching execution receipts. It never asks a model to reproduce a text
+template and never treats reply parsing as a guarantee path.
 
 ---
 

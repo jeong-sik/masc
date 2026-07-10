@@ -57,11 +57,6 @@ const DIVERGENCE_RULES: Partial<Record<keyof KeeperConditions, DivergenceFn>> = 
       ? '오퍼레이터가 pause했으나 Paused phase 미반영'
       : null,
 
-  guardrail_triggered: (v, p) =>
-    v && p !== 'Paused' && p !== 'Failing' && !isTerminated(p)
-      ? '가드레일 발동 (격리 phase 미전환)'
-      : null,
-
   turn_healthy: (v, p) =>
     !v && p !== 'Failing' && !isTerminated(p)
       ? '턴 실패 누적 — Failing phase 기대'

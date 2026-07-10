@@ -130,6 +130,7 @@ type recovery_report =
 type claim_report =
   { leases : lease list
   ; cleanup_errors : error list
+  ; blocked : error option
   }
 
 val error_to_string : error -> string
@@ -187,7 +188,9 @@ val recover_inflight :
 val claim_all :
   base_path:string -> keeper_name:string -> now:float -> (claim_report, error) result
 (** Claim the current pending batch with one validated scan and one sort. The
-    returned leases preserve the keeper's linear turn order. *)
+    returned leases preserve the keeper's linear turn order. A transition error
+    after earlier claims is returned in [blocked] alongside those leases, so no
+    inflight work loses its owner. Pre-scan failures still return [Error]. *)
 
 val finish :
   base_path:string -> terminal_receipt -> (cleanup_report, error) result

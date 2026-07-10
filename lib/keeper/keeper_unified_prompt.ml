@@ -464,107 +464,6 @@ let line_block label value =
   if value = "" then ""
   else Printf.sprintf "%s: %s\n" label value
 
-let replace_all ~needle ~replacement input =
-  let needle_len = String.length needle in
-  if needle_len = 0 || input = "" then input
-  else
-    let input_len = String.length input in
-    let buf = Buffer.create input_len in
-    let rec loop pos =
-      if pos >= input_len then ()
-      else if
-        pos + needle_len <= input_len
-        && String.sub input pos needle_len = needle
-      then (
-        Buffer.add_string buf replacement;
-        loop (pos + needle_len))
-      else (
-        Buffer.add_char buf input.[pos];
-        loop (pos + 1))
-    in
-    loop 0;
-    Buffer.contents buf
-
-let is_tool_token_char = function
-  | 'A' .. 'Z'
-  | 'a' .. 'z'
-  | '0' .. '9'
-  | '_'
-  | '-'
-  | '*' ->
-      true
-  | _ -> false
-
-let remove_tool_tokens_with_prefix ~prefix input =
-  let prefix_len = String.length prefix in
-  if prefix_len = 0 || input = "" then input
-  else
-    let input_len = String.length input in
-    let buf = Buffer.create input_len in
-    let rec skip_token pos =
-      if pos < input_len && is_tool_token_char input.[pos]
-      then skip_token (pos + 1)
-      else pos
-    in
-    let rec loop pos =
-      if pos >= input_len then ()
-      else if
-        pos + prefix_len <= input_len
-        && String.sub input pos prefix_len = prefix
-        && (pos = 0 || not (is_tool_token_char input.[pos - 1]))
-      then loop (skip_token (pos + prefix_len))
-      else (
-        Buffer.add_char buf input.[pos];
-        loop (pos + 1))
-    in
-    loop 0;
-    Buffer.contents buf
-
-let remove_standalone_tool_token ~token input =
-  let token_len = String.length token in
-  if token_len = 0 || input = "" then input
-  else
-    let input_len = String.length input in
-    let buf = Buffer.create input_len in
-    let rec loop pos =
-      if pos >= input_len then ()
-      else if
-        pos + token_len <= input_len
-        && String.sub input pos token_len = token
-        && (pos = 0 || not (is_tool_token_char input.[pos - 1]))
-        &&
-        (let after = pos + token_len in
-         after >= input_len || not (is_tool_token_char input.[after]))
-      then loop (pos + token_len)
-      else (
-        Buffer.add_char buf input.[pos];
-        loop (pos + 1))
-    in
-    loop 0;
-    Buffer.contents buf
-
-let sanitize_retired_tool_names text =
-  let retired_prefix left right = left ^ "_" ^ right in
-  let old_command_shape =
-    retired_prefix "keeper" "bash_command_shape_blocked"
-  in
-  text
-  |> replace_all ~needle:old_command_shape ~replacement:"execute_command_shape_blocked"
-  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "bash")
-  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "shell")
-  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "fs")
-  |> remove_standalone_tool_token ~token:("B" ^ "ash")
-  |> remove_standalone_tool_token ~token:("G" ^ "rep")
-  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "masc" "code")
-  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "Masc" "code")
-  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "pr")
-  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "preflight_check")
-  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "github")
-  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "github" "cli")
-  |> replace_all ~needle:"``" ~replacement:""
-  |> replace_all ~needle:", , " ~replacement:", "
-  |> replace_all ~needle:", ," ~replacement:","
-
 let state_block_instruction_text = Keeper_state_block_prompt.instruction_text
 
 (* In-binary mirror of config/prompts/keeper.turn_intent.md (minus the
@@ -1198,14 +1097,15 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   let user_message =
     "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
   in
-  (* 1차: 명시적 rename 치환(keeper_bash->execute_command 등)은 하드코딩 유지.
-     2차: registry-driven strip — rename/제거되어 더 이상 resolve되지 않는 도구
-     토큰을 Keeper_tool_resolution 기준으로 치환한다. 하드코딩 목록이 놓치는
-     stale 토큰(주입된 옛 episode의 죽은 도구명 등)을 단일 소스로 자동 정리하고,
-     문장 속에서 토큰 자리를 [<stale_tool_token>] placeholder로 남겨 의미적
-     구멍을 피한다. env 변수(대문자)는 보존. *)
-  let explicit_rename_system = sanitize_retired_tool_names system_prompt in
-  let explicit_rename_user = sanitize_retired_tool_names user_message in
+  (* Single registry-driven sanitization pass: tool tokens that no longer
+     resolve via Keeper_tool_resolution are replaced with the
+     [<stale_tool_token>] placeholder so the surrounding sentence stays
+     intact; env-var-shaped tokens (uppercase) are preserved. The legacy
+     hardcoded [sanitize_retired_tool_names] pass is deleted (38-bug
+     campaign #6): it removed standalone words like "Grep"/"Bash" and
+     retired keeper_*-prefixed tokens outright, mangling legitimate prompt
+     prose. Hallucinated calls to non-existent tools are rejected at the
+     tool-dispatch boundary with a typed error, which is the correct seam. *)
   (* P0-3: rendered prompt token integrity ratchet. Scan the prompt surfaces
      *before* the registry-driven strip so stale tokens that are about to be
      replaced still increment [PromptUnknownToolTokens] and are logged. The
@@ -1215,17 +1115,17 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   let (_ : string list) =
     Keeper_prompt_token_integrity.scan_rendered_prompt
       ~keeper_name:meta.name
-      ~system_prompt:explicit_rename_system
-      ~user_message:explicit_rename_user
+      ~system_prompt
+      ~user_message
       ~continuity_summary:continuity_for_prompt
   in
   let sanitized_system =
-    explicit_rename_system
+    system_prompt
     |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
          ~keeper_name:meta.name
   in
   let sanitized_user =
-    explicit_rename_user
+    user_message
     |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
          ~keeper_name:meta.name
   in

@@ -63,22 +63,6 @@ let trajectory_duration_ms duration_ms =
    on 2026-06-24 to remove the duplicate 9-arm match). [include
    Keeper_hooks_oas_types] above re-exports it for the call sites here. *)
 
-let idle_severity_to_label = function
-  | Agent_sdk.Hooks.Idle_severity.Nudge -> "nudge"
-  | Agent_sdk.Hooks.Idle_severity.Final_warning -> "final_warning"
-  | Agent_sdk.Hooks.Idle_severity.Skip -> "skip"
-
-let idle_decision_to_label = function
-  | Agent_sdk.Hooks.Continue -> "continue"
-  | Agent_sdk.Hooks.Skip -> "skip"
-  | Agent_sdk.Hooks.Nudge _ -> "nudge"
-  | Agent_sdk.Hooks.Override _ -> "override"
-  | Agent_sdk.Hooks.Block _ -> "block"
-  | Agent_sdk.Hooks.ApprovalRequired -> "approval_required"
-  | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
-  | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
-  | Agent_sdk.Hooks.HookFailed _ -> "hook_failed"
-
 let json_value_shape_for_log = function
   | `Assoc fields -> Printf.sprintf "object:%d" (List.length fields)
   | `List values -> Printf.sprintf "array:%d" (List.length values)
@@ -211,8 +195,6 @@ include Keeper_hooks_oas_cost_events
     closure body never read them; the docstring even admitted [ctx_snapshot]
     was "reserved, unused". State now flows through [meta_ref] (mutable) and
     the explicit callbacks (pre_tool_use_guard / on_tool_executed). *)
-
-include Keeper_hooks_oas_idle
 
 (* Passive observations are receipt evidence, not semantic watchdog progress.
    Active tool execution is tracked separately by the in-flight tool state. *)
@@ -481,14 +463,6 @@ let make_hooks
              ~keeper_name:meta.name ~trajectory_acc:(Some acc) ~turn
              response.content
          | None -> ());
-        let text = Agent_sdk.Types.text_of_content response.content in
-        let has_state_block =
-          Option.is_some (Keeper_memory_policy.find_state_block text)
-        in
-        if not has_state_block && turn > 0 then
-          Log.Keeper.debug ~keeper_name:meta.name
-            "turn=%d state_block=absent (awaiting post-run synthesis)"
-            turn;
         (try
            Sse.broadcast
              (`Assoc
@@ -500,7 +474,6 @@ let make_hooks
                  (key_model_used, `Null);
                  (key_input_tokens, `Int input_tok);
                  (key_output_tokens, `Int output_tok);
-                 (key_has_state_block, `Bool has_state_block);
                  (key_cost_usd, `Float turn_cost_usd);
                  (key_tool_calls_made, `Int !tool_call_count_ref);
                  (key_total_turns, `Int meta.runtime.usage.total_turns);
@@ -787,30 +760,6 @@ let make_hooks
             ]
           ();
         Agent_sdk.Hooks.Continue
-      | _event -> Agent_sdk.Hooks.Continue);
-
-    on_idle = Some (fun event ->
-      match event with
-      | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
-        keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names
-      | _event -> Agent_sdk.Hooks.Continue);
-
-    on_idle_escalated = Some (fun event ->
-      match event with
-      | Agent_sdk.Hooks.OnIdleEscalated
-          { severity; consecutive_idle_turns; tool_names; _ } ->
-        let decision =
-          keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names in
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string OasOnIdleEscalated)
-          ~labels:
-            [
-              (label_keeper, (!meta_ref).name);
-              (label_severity, idle_severity_to_label severity);
-              (label_decision, idle_decision_to_label decision);
-            ]
-          ();
-        decision
       | _event -> Agent_sdk.Hooks.Continue);
 
     on_error = Some (function

@@ -7,9 +7,7 @@
    \"budget_sec\":30.0,...}" mid-key and leaving operators with
    "budget_" as the trailing evidence.
 
-   The cap was re-homed from the purged social model into
-   [Keeper_meta_contract.cap_blocker_detail] (RFC-0276 §3.3) and is now
-   applied where the runtime builds [last_blocker.detail]
+   The cap is applied where the runtime builds [last_blocker.detail]
    (keeper_unified_metrics_failure).
 
    Pinned invariants:

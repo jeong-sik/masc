@@ -95,7 +95,7 @@ type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
-  | Skipped_continuity_reflection of {
+  | Skipped_cooldown of {
       hold_s : float;
       cooldown_sec : int;
     }

@@ -21,13 +21,6 @@ type threshold_params = {
   handoff_threshold : float;
   handoff_cooldown_sec : int;
   auto_handoff_enabled : bool;
-  reflect_repetition_threshold : float;
-  plan_goal_alignment_threshold : float;
-  plan_response_alignment_threshold : float;
-  guardrail_repetition_threshold : float;
-  guardrail_goal_alignment_threshold : float;
-  guardrail_response_alignment_threshold : float;
-  guardrail_context_threshold : float;
   max_consecutive_hb_failures : int;
   max_consecutive_turn_failures : int;
   model_ratio_multiplier : float;
@@ -41,18 +34,6 @@ type context_measurement = {
   message_count : int;
   token_count : int;
   max_tokens : int;
-}
-
-type similarity_measurement = {
-  repetition_risk : float;
-  goal_alignment : float;
-  response_alignment : float;
-  similarity_measurable : bool;
-  (** [false] when the turn lacked the user/assistant message pair (or goal horizon)
-      needed to compute [goal_alignment] / [response_alignment] honestly. In that
-      case the two similarity floats are marker [0.0] — distinguishable from a
-      real measurement of [0.0] only by this flag. Gates that consume similarity
-      must fail-closed when [similarity_measurable = false] (see Keeper_guard). *)
 }
 
 type timing_measurement = {
@@ -81,7 +62,6 @@ type measurement_snapshot = {
   timestamp : float;
   thresholds : threshold_params;
   context : context_measurement;
-  similarity : similarity_measurement;
   timing : timing_measurement;
   failures : failure_measurement;
 }
@@ -101,10 +81,6 @@ val capture :
   message_count:int ->
   token_count:int ->
   max_tokens:int ->
-  repetition_risk:float ->
-  goal_alignment:float ->
-  response_alignment:float ->
-  ?similarity_measurable:bool ->
   now_ts:float ->
   idle_seconds:int ->
   since_last_compaction_sec:float ->

@@ -23,6 +23,24 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_sdk.Raw_trace.t
   | Sink_degraded of Agent_sdk.Error.sdk_error
 
+(** Typed reason and boundary for an autonomous Keeper run to release its lane
+    at an OAS turn boundary. Scheduled-idle chat can yield immediately;
+    reactive chat and durable backlog yield only after the current cycle has
+    completed at least one provider turn, so a leased stimulus is never
+    acknowledged without being observed by the model. *)
+type autonomous_yield_reason =
+  | Chat_waiting
+  | Durable_stimulus_waiting
+
+type autonomous_yield_boundary =
+  | Yield_immediately
+  | Yield_after_current_turn
+
+type autonomous_yield_request = {
+  reason : autonomous_yield_reason;
+  boundary : autonomous_yield_boundary;
+}
+
 val completion_contract_result_for_progress_evidence
   :  had_owned_active_task_at_turn_start:bool
   -> actual_keeper_tool_names:string list
@@ -74,6 +92,17 @@ module For_testing : sig
     :  config:Workspace.config
     -> meta:Keeper_meta_contract.keeper_meta
     -> Agent_sdk.Raw_trace.t option
+
+  val autonomous_yield_allowed_at_turn
+    :  start_turn:int
+    -> turn:int
+    -> autonomous_yield_request
+    -> bool
+
+  val stop_reason_of_autonomous_yield
+    :  turn:int
+    -> autonomous_yield_request
+    -> Runtime_agent.stop_reason
 end
 
 val per_provider_timeout_for_turn
@@ -130,12 +159,8 @@ val run_turn
   -> ?turn_affordances:string list
   -> generation:int
   -> max_idle_turns:int
-       (* Required, no default: the OAS loop guard kills the run at this
-          count, so every caller must pick the channel-appropriate threshold
-          ([Keeper_runtime_resolved.reactive_max_idle_turns] /
-          [autonomous_max_idle_turns]). A silent default of 3 sat below the
-          graduated idle hook's skip threshold (4), making graceful Skip
-          unreachable — user chat turns died as IdleDetected errors. *)
+       (* Required, no default: forwarded to the OAS loop guard from the
+          caller's channel-specific runtime setting. *)
   -> ?history_user_source:string
   -> ?history_assistant_source:string
   -> ?guardrails:Agent_sdk.Guardrails.t
@@ -158,14 +183,13 @@ val run_turn
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_delivery_channel:Keeper_continuation_channel.t
   -> ?hitl_approval_grant:Governance_pipeline.hitl_approval_grant
-  -> ?yield_to_chat_waiting:(unit -> bool)
+  -> ?autonomous_yield_requested:(unit -> autonomous_yield_request option)
        (* Autonomous-lane hook: evaluated at each OAS agent-loop turn boundary
           (the same guard point as [max_idle_turns], before the next model
-          dispatch — never mid tool execution). When it returns [true] the run
-          stops gracefully at that boundary, releasing the turn slot so a
-          dashboard/connector chat request parked behind this turn admits via
-          direct handoff before its shorter budget expires. Only the
-          heartbeat-scheduled path passes it; a chat turn must not yield to a
-          later-queued chat. *)
+          dispatch — never mid tool execution). A typed request stops the run
+          gracefully at the boundary allowed by [autonomous_yield_reason],
+          releasing the lane for queued chat or durable stimulus work. Only the
+          heartbeat-scheduled path passes it; a chat turn never receives this
+          hook. *)
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

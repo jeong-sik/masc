@@ -150,7 +150,6 @@ export interface KeeperCheckpointSummary {
   message_count: number
   system_prompt_present: boolean
   latest_preview: string | null
-  continuity_summary: string | null
   file_stat: {
     size_bytes?: number
     mtime?: number

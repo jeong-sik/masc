@@ -94,13 +94,9 @@ let format_messages_for_prompt messages =
     |> String.concat "\n\n---\n\n"
 ;;
 
-let scrub_messages_for_librarian messages =
-  List.map Keeper_summarizer.scrub_text_blocks messages
-;;
-
 let prompt_variables (inp : input) : (string * string) list =
   [ ( "conversation_history"
-    , inp.messages |> scrub_messages_for_librarian |> format_messages_for_prompt )
+    , inp.messages |> format_messages_for_prompt )
   ]
 ;;
 

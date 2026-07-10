@@ -95,8 +95,8 @@ export const newPostSubmitting = signal(false)
 
 // ── Signals: v2 board surface chrome ───────────────────────────────
 export const selectedBoardPostId = signal<string | null>(null)
-export const boardFilterMode = signal<'all' | 'state' | 'mod'>('all')
-export const boardComposerMode = signal<'post' | 'mention' | 'state'>('post')
+export const boardFilterMode = signal<'all' | 'mod'>('all')
+export const boardComposerMode = signal<'post' | 'mention'>('post')
 export const boardComposerDraft = signal('')
 
 // ── Pagination ─────────────────────────────────────────────────────
@@ -376,59 +376,6 @@ export function postVisibilityAuditLabel(post: BoardPost): string {
 export function visibilityBadgeColor(vis: string): string {
   if (vis === 'internal') return 'bg-[var(--color-bg-hover)] text-[var(--purple)] border-[var(--color-border-strong)]'
   return 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'
-}
-
-// ── State block helpers for v2 board cards ─────────────────────────
-export interface ParsedStateBlock {
-  from: string
-  to: string
-  ctx: string
-  action: string
-}
-
-/**
- * Parse a `[STATE]...[/STATE]` block into a structured transition view.
- * Falls back to key/value lines when the canonical keys are absent.
- */
-export function parseStateBlock(text: string): ParsedStateBlock | null {
-  const start = text.indexOf('[STATE]')
-  if (start < 0) return null
-  const bodyStart = start + '[STATE]'.length
-  const end = text.indexOf('[/STATE]', bodyStart)
-  if (end < 0) return null
-  const raw = text.slice(bodyStart, end).trim()
-  if (!raw) return null
-
-  const lines = raw.split('\n').map(line => line.trim()).filter(Boolean)
-  const entries = new Map<string, string>()
-  for (const line of lines) {
-    const colon = line.indexOf(':')
-    if (colon < 0) continue
-    const key = line.slice(0, colon).trim()
-    const value = line.slice(colon + 1).trim()
-    if (key) entries.set(key.toLowerCase(), value)
-  }
-
-  const from = entries.get('from') ?? entries.get('current') ?? ''
-  const to = entries.get('to') ?? entries.get('next') ?? entries.get('goal') ?? ''
-  const ctx = entries.get('ctx') ?? entries.get('context') ?? entries.get('where') ?? ''
-  const action = entries.get('action') ?? entries.get('do') ?? entries.get('step') ?? ''
-
-  // Require at least a transition target or action to treat it as a state block.
-  if (!to && !action && !from) return null
-  return { from, to, ctx, action }
-}
-
-export function postHasStateBlock(post: BoardPost): boolean {
-  if (post.meta?.state_block) return true
-  return parseStateBlock(post.body) !== null
-}
-
-export function getPostStateBlock(post: BoardPost): ParsedStateBlock | null {
-  if (post.meta?.state_block) {
-    return parseStateBlock(`[STATE]\n${String(post.meta.state_block)}\n[/STATE]`)
-  }
-  return parseStateBlock(post.body)
 }
 
 // ── Data operations ────────────────────────────────────────────────

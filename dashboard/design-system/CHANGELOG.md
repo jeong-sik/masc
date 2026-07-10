@@ -135,7 +135,7 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `cb-shared.jsx`: `kClass()` function and its `window.*` export.
   - `cb-stress-10keepers.html` (the v1 "before" demo) — superseded by `-v2`. v2 is now the only stress-test page.
 - **18 component callsites migrated** from `<Dot kind={kClass(id)}>` → `<KeeperBadge id={id} variant="sigil"|"full">` across cb-group-a/b/c/d/h. Two patterns:
-  - `variant="sigil"` where the keeper name is rendered separately (ticker, lifeline, sidebar, swimlanes, BDI panel, kanban, rail).
+  - `variant="sigil"` where the keeper name is rendered separately (ticker, lifeline, sidebar, swimlanes, kanban, rail).
   - `variant="full"` where the badge owns both color+sigil+name (table cells, kanban foot).
 - **`primitives.html`**: dead `class="dot-k-nick"` + duplicate `class=` attribute on heartbeat anim demo cleaned.
 

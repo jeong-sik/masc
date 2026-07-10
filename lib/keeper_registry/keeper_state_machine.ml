@@ -45,8 +45,7 @@ let is_terminal = function
        3a-c   | KeeperReconcileLiveness.tla:91-93 (Dead/Restarting/Crashed)
               |   boundary/KeeperRecoveryOrchestration.tla:53-57 (recovery)
        4      | KeeperReconcileLiveness.tla:94 (Draining)
-       5      | KeeperReconcileLiveness.tla:95 (Failing — guardrail)
-       6      | KeeperReconcileLiveness.tla:96 (Paused — operator_paused;
+       5      | KeeperReconcileLiveness.tla:96 (Paused — operator_paused;
               |   compact_retry_exhausted clause is OCaml-stricter, see
               |   Note B below — refinement, not drift)
        7a     | KeeperReconcileLiveness.tla:97 (HandingOff)
@@ -134,11 +133,8 @@ let derive_phase (c : conditions) : phase =
   else if (not c.fiber_alive) && c.restart_budget_remaining
   then Crashed (* 5. In-progress stop — still draining *)
   else if c.stop_requested
-  then Draining (* 6. Guardrail -> Failing *)
-  else if c.guardrail_triggered
-  then
-    Failing
-    (* 7. Operator pause OR auto-compact retry budget exhausted.
+  then Draining
+    (* 6. Operator pause OR auto-compact retry budget exhausted.
      When [compact_retry_exhausted] is latched together with an ongoing
      [context_overflow], the keeper MUST land on [Paused] so that an
      operator has to intervene; otherwise [Overflowed → Compacting]
@@ -184,11 +180,8 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     (* Mirrors TLA+ TurnFailed: [turn_healthy' = FALSE] unconditional.
        Same payload semantics as Heartbeat_failed (audit only). *)
     { c with turn_healthy = false }
-  | Context_measured { auto_rules; _ } ->
-    { c with
-      guardrail_triggered = auto_rules.guardrail_stop
-    ; context_handoff_needed = auto_rules.handoff
-    }
+  | Context_measured { context_actions; _ } ->
+    { c with context_handoff_needed = context_actions.handoff }
   | Compaction_started -> { c with compaction_active = true }
   | Compaction_completed { before_tokens; after_tokens } ->
     (* #9988: "completed" alone does not mean the overflow was resolved.
@@ -257,7 +250,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     ; compaction_active = false
     ; handoff_active = false
     ; backoff_elapsed = false
-    ; guardrail_triggered = false
     ; drain_complete = false
     ; stop_requested = false
     ; context_overflow = false
@@ -275,7 +267,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     }
   | Zombie_timeout ->
     { c with restart_budget_remaining = false; zombie_timeout_reached = true }
-  | Guardrail_stop _ -> { c with guardrail_triggered = true }
   | Terminal_failure_detected _ -> { c with terminal_failure_latched = true }
   | Context_overflow_detected _ ->
     (* Hard overflow reported by the provider. The phase derivation
@@ -366,7 +357,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Restart_budget_exhausted
          | Credential_archived
          | Zombie_timeout
-         | Guardrail_stop _
          | Terminal_failure_detected _
          | Auto_compact_triggered
          | Operator_compact_requested
@@ -411,7 +401,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Restart_budget_exhausted
          | Credential_archived
          | Zombie_timeout
-         | Guardrail_stop _
          | Terminal_failure_detected _
          | Auto_compact_triggered
          | Operator_compact_requested
@@ -453,7 +442,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Restart_budget_exhausted
       | Credential_archived
       | Zombie_timeout
-      | Guardrail_stop _
       | Terminal_failure_detected _
       | Auto_compact_triggered
       | Operator_compact_requested
@@ -520,7 +508,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Restart_budget_exhausted
          | Credential_archived
          | Zombie_timeout
-         | Guardrail_stop _
          | Terminal_failure_detected _
          | Auto_compact_triggered
          | Operator_compact_requested

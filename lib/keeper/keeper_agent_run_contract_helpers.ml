@@ -24,7 +24,9 @@ let visible_response_text_present ~stop_reason ~response_text_present =
   match stop_reason with
   (* A yield renders only a synthetic status marker, not a deliverable — like
      a budget stop it does not count as a visible reply for the contract. *)
-  | Runtime_agent.TurnBudgetExhausted _ | Runtime_agent.Yielded_to_chat_waiting _ ->
+  | Runtime_agent.TurnBudgetExhausted _
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
     false
   | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ ->
     response_text_present
@@ -39,7 +41,8 @@ let budget_exhausted_contract_status ~stop_reason status =
      as for [Completed]/[MutationBoundaryReached]. *)
   | ( ( Runtime_agent.Completed
       | Runtime_agent.MutationBoundaryReached _
-      | Runtime_agent.Yielded_to_chat_waiting _ )
+      | Runtime_agent.Yielded_to_chat_waiting _
+      | Runtime_agent.Yielded_to_durable_stimulus _ )
     , _ )
   | Runtime_agent.TurnBudgetExhausted _, _ ->
     status

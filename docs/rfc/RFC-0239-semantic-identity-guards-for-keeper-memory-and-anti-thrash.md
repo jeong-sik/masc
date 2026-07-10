@@ -124,7 +124,7 @@ problem.
 
 `keeper_no_progress_loop_detector.ml` bumps a streak **only** when `speech_act = "stay_silent"`
 (line 48) and **resets the streak to 0 on any other speech act** (lines 66-74).
-`speech_act` is an 8-variant type (`keeper_social_model_types.ml:1-9`) in which `Stay_silent`
+`speech_act` is an eight-variant legacy type from the retired personality-state path, in which `Stay_silent`
 is distinct from `Post_board`/`Comment_board`/`Broadcast`/`Inform`.
 
 A keeper that *announces* "I'll stay quiet" by **posting it** emits `Post_board` — which

@@ -1032,6 +1032,50 @@ let () =
         [ first; second ];
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
+  (* A pending durable stimulus is the structural cooperative-yield signal for
+     an already-running autonomous OAS loop. The classifier reads the same
+     registry queue this test dequeues below; no age, count, or payload text
+     heuristic participates. *)
+  let base_path = temp_dir "keeper-event-queue-autonomous-yield" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      Keeper_chat_queue.clear ~keeper_name:"keeper-event-queue-yield-test";
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-yield-test" in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-yield-test" in
+      Masc.Keeper_registry.clear ();
+      Keeper_chat_queue.clear ~keeper_name;
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      (match
+         Masc.Keeper_unified_turn_execution.autonomous_yield_request
+           ~base_path
+           ~keeper_name
+           ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
+       with
+       | None -> ()
+       | Some _ ->
+         Alcotest.fail "empty work queues must not request an autonomous yield");
+      Masc.Keeper_registry_event_queue.enqueue
+        ~base_path
+        keeper_name
+        bootstrap_stim;
+      match
+        Masc.Keeper_unified_turn_execution.autonomous_yield_request
+          ~base_path
+          ~keeper_name
+          ~channel:Masc.Keeper_world_observation.Reactive
+      with
+      | Some
+          { Masc.Keeper_agent_run.reason =
+              Masc.Keeper_agent_run.Durable_stimulus_waiting
+          ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
+          } ->
+        ()
+      | None | Some _ ->
+        Alcotest.fail "pending durable stimulus must request a typed yield");
+
   (* --- crash recovery: consumed stimuli can be put back for replay --- *)
   let base_path = temp_dir "keeper-event-queue-requeue-front" in
   Fun.protect

@@ -46,7 +46,6 @@ export function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
   const hbStale = hbAgeMs != null && hbAgeMs > 300_000
   return keeper.paused
-    || keeper.social_model_recognized === false
     || Boolean(runtimeBlocker)
     || Boolean(blocker)
     || hbStale

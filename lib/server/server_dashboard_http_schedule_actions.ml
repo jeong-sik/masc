@@ -55,14 +55,24 @@ let decision_to_string = function
 ;;
 
 (* Absent means the narrow historical semantics (this occurrence only);
-   an unknown value is a request error, never a silent default. *)
-let grant_scope_of_json json =
-  match string_opt "scope" json with
-  | None -> Ok Schedule_domain.Grant_occurrence
-  | Some raw ->
-    (match Schedule_domain.grant_scope_of_string (String.lowercase_ascii raw) with
+   any present but invalid value — wrong type, blank, or unknown — is a
+   request error, never a silent default. *)
+let grant_scope_of_json (json : Yojson.Safe.t) =
+  let field =
+    match json with
+    | `Assoc fields -> List.assoc_opt "scope" fields
+    | _ -> None
+  in
+  match field with
+  | None | Some `Null -> Ok Schedule_domain.Grant_occurrence
+  | Some (`String raw) ->
+    (match
+       Schedule_domain.grant_scope_of_string
+         (String.lowercase_ascii (String.trim raw))
+     with
      | Ok scope -> Ok scope
      | Error _ -> Error "scope must be 'occurrence' or 'standing'")
+  | Some _ -> Error "scope must be 'occurrence' or 'standing'"
 ;;
 
 let default_rejection_reason ~operator_name =

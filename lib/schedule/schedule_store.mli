@@ -173,9 +173,12 @@ val due_execution_candidates :
 val has_current_approved_grant :
   state -> Schedule_domain.schedule_request -> bool
 (** Whether [state] contains an approved grant whose evidence matches the
-    request's current [schedule_id], payload digest, [risk_class], and [due_at].
-    Recurring requests therefore need fresh approval for each new occurrence
-    when they require a separate human grant. *)
+    request's current [schedule_id], payload digest, and [risk_class]. An
+    occurrence-scoped grant additionally requires the evidence [due_at] to
+    equal the request's current [due_at], so recurring requests need fresh
+    approval for each occurrence; a standing-scoped grant skips the [due_at]
+    comparison and keeps covering occurrences until the payload digest or
+    risk class changes. *)
 
 val prune_completed :
   Workspace_utils.config ->

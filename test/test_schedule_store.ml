@@ -616,11 +616,27 @@ let test_standing_grant_covers_recurrences_until_payload_changes () =
     (has_current_approved_grant state due);
   check int "second occurrence dispatches without a fresh grant" 1
     (List.length (due_execution_candidates state));
-  (* Change the action: digest moves, standing grant must stop matching. *)
+  (match start_due_candidate config ~now:261.0 ~schedule_id:req.schedule_id with
+   | Ok running -> check_status "running second occurrence" Running running.status
+   | Error err -> fail (store_error_to_string err));
+  (match complete_running config ~now:262.0 ~schedule_id:req.schedule_id () with
+   | Ok stored -> check_status "rescheduled again" Scheduled stored.status
+   | Error err -> fail (store_error_to_string err));
+  (* Change the action while Scheduled (update_request rejects Due/Running):
+     the digest moves, so the standing grant must stop matching and the next
+     occurrence must re-block on approval. *)
+  let scheduled =
+    match get_schedule config ~schedule_id:req.schedule_id with
+    | Some scheduled -> scheduled
+    | None -> fail "rescheduled request missing"
+  in
   (match
-     update_request config ~schedule_id:req.schedule_id ~due_at:due.due_at
+     update_request config ~schedule_id:req.schedule_id ~due_at:scheduled.due_at
        ~expires_at:None ~payload:(updated_payload ())
    with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match refresh_due config ~now:scheduled.due_at with
    | Ok _ -> ()
    | Error err -> fail (store_error_to_string err));
   let state = read_state config in
@@ -630,7 +646,9 @@ let test_standing_grant_covers_recurrences_until_payload_changes () =
     | None -> fail "updated request missing"
   in
   check bool "standing grant dies with the payload digest" false
-    (has_current_approved_grant state updated)
+    (has_current_approved_grant state updated);
+  check int "changed payload re-blocks the next occurrence" 0
+    (List.length (due_execution_candidates state))
 ;;
 
 let test_load_corrupt_when_both_unparseable () =

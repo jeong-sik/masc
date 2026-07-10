@@ -304,84 +304,12 @@ let dispatch_route ~router ~request ~path ~upgrade reqd =
           ]
       in
       Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `POST, "/api/v1/board/reactions" ->
-      Http.Request.read_body_async reqd (fun body ->
-        try
-          let args = Yojson.Safe.from_string body in
-          let target_type_raw =
-            Option.value ~default:""
-              (Safe_ops.json_string_opt "target_type" args)
-          in
-          let target_id =
-            Option.value ~default:"" (Safe_ops.json_string_opt "target_id" args)
-          in
-          let user_id =
-            Option.value ~default:"" (Safe_ops.json_string_opt "user_id" args)
-          in
-          let emoji =
-            Option.value ~default:"" (Safe_ops.json_string_opt "emoji" args)
-          in
-          match Board.reaction_target_type_of_string_opt target_type_raw with
-          | None ->
-              Http.Response.json ~status:`Bad_request
-                {|{"error":"target_type must be post or comment"}|} reqd
-          | Some target_type ->
-              (match
-                 Board_dispatch.toggle_reaction ~target_type ~target_id
-                   ~user_id ~emoji
-               with
-               | Ok result ->
-                   Http.Response.json
-                     (Yojson.Safe.to_string
-                        (Board.reaction_toggle_result_to_yojson result))
-                     reqd
-               | Error e ->
-                   Http.Response.json ~status:`Bad_request
-                     (Yojson.Safe.to_string
-                        (`Assoc
-                           [
-                             ("error", `String (Tool_board.board_error_to_string e));
-                           ]))
-                     reqd)
-        with
-        | Yojson.Json_error msg ->
-            Http.Response.json ~status:`Bad_request
-              (Yojson.Safe.to_string
-                 (`Assoc [ ("error", `String ("invalid JSON: " ^ msg)) ]))
-              reqd)
-  | `GET, "/api/v1/board/reactions" ->
-      let target_type_raw =
-        Option.value ~default:"" (query_param request "target_type")
-      in
-      let target_id =
-        Option.value ~default:"" (query_param request "target_id")
-      in
-      let user_id = query_param request "user_id" in
-      (match Board.reaction_target_type_of_string_opt target_type_raw with
-       | None ->
-           Http.Response.json ~status:`Bad_request
-             {|{"error":"target_type must be post or comment"}|} reqd
-       | Some target_type ->
-           (match
-              Board_dispatch.list_reactions ~target_type ~target_id ?user_id ()
-            with
-            | Ok summary ->
-                let json =
-                  `Assoc
-                    [
-                      ( "reactions",
-                        `List (List.map Board.reaction_summary_to_yojson summary) );
-                    ]
-                in
-                Http.Response.json (Yojson.Safe.to_string json) reqd
-            | Error e ->
-                Http.Response.json ~status:`Bad_request
-                  (Yojson.Safe.to_string
-                     (`Assoc
-                        [
-                          ("error", `String (Tool_board.board_error_to_string e));
-                        ]))
-                  reqd))
+  (* Board reactions are owned by the typed route table. Keep this delegation
+     before the legacy board-detail prefix below, which would otherwise treat
+     [reactions] as a post id and bypass bearer-bound actor resolution. *)
+  | (`GET | `POST), "/api/v1/board/reactions"
+  | `GET, "/api/v1/board/reactions/catalog" ->
+      Http.Router.dispatch router ~upgrade request reqd
   | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
       let post_id = String.sub p 14 (String.length p - 14) in
       let format = Option.value ~default:"nested" (query_param request "format") in

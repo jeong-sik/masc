@@ -21,6 +21,24 @@ open Alcotest
 
 module Http = Masc.Http_server_eio
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
+let with_reaction_auth_base f =
+  let base_path = Filename.temp_dir "board-reaction-auth-" "" in
+  Auth.save_auth_config
+    base_path
+    { Masc_domain.default_auth_config with enabled = true; require_token = true };
+  f base_path
+
+let reaction_auth_request ?token () =
+  let headers =
+    match token with
+    | None -> Httpun.Headers.of_list []
+    | Some token ->
+      Httpun.Headers.of_list [ "authorization", "Bearer " ^ token ]
+  in
+  Httpun.Request.create ~headers `GET "/api/v1/board/reactions"
+
 (* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts.
    Kept in sync with that file — see module doc. *)
 let dashboard_board_tool_routes =
@@ -117,6 +135,49 @@ let test_board_reaction_catalog_uses_board_ssot () =
     check (list string) "catalog" Board.board_reaction_emojis actual
   | _ -> fail "reaction catalog must be a JSON object"
 
+let test_board_reaction_optional_auth_is_anonymous_only_without_header () =
+  with_reaction_auth_base (fun base_path ->
+    match
+      Server_auth.authorize_optional_token_bound_permission_request
+        ~base_path
+        ~permission:Masc_domain.CanReadState
+        (reaction_auth_request ())
+    with
+    | Ok None -> ()
+    | Ok (Some actor) ->
+      failf "headerless request unexpectedly resolved actor %s" actor
+    | Error error -> fail (Masc_domain.masc_error_to_string error))
+
+let test_board_reaction_optional_auth_rejects_invalid_header () =
+  with_reaction_auth_base (fun base_path ->
+    match
+      Server_auth.authorize_optional_token_bound_permission_request
+        ~base_path
+        ~permission:Masc_domain.CanReadState
+        (reaction_auth_request ~token:"invalid-board-reaction-token" ())
+    with
+    | Error error ->
+      check bool "invalid credential is unauthorized" true
+        (Server_auth.http_status_of_auth_error error = `Unauthorized)
+    | Ok None -> fail "invalid Authorization header fell back to anonymous"
+    | Ok (Some actor) -> failf "invalid credential resolved actor %s" actor)
+
+let test_dashboard_dev_token_can_vote_as_credential_owner () =
+  with_reaction_auth_base (fun base_path ->
+    match
+      Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token base_path
+    with
+    | Error message -> fail message
+    | Ok token ->
+      match
+        Server_auth.authorize_token_bound_permission_request
+          ~base_path
+          ~permission:Masc_domain.CanVote
+          (reaction_auth_request ~token ())
+      with
+      | Ok actor -> check string "dashboard credential owner" "dashboard" actor
+      | Error error -> fail (Masc_domain.masc_error_to_string error))
+
 let () =
   run
     "board_rest_routes"
@@ -137,5 +198,17 @@ let () =
             "reaction catalog uses Board SSOT"
             `Quick
             test_board_reaction_catalog_uses_board_ssot
+        ; test_case
+            "optional reaction auth is anonymous only without header"
+            `Quick
+            test_board_reaction_optional_auth_is_anonymous_only_without_header
+        ; test_case
+            "optional reaction auth rejects invalid header"
+            `Quick
+            test_board_reaction_optional_auth_rejects_invalid_header
+        ; test_case
+            "dashboard dev-token can vote as credential owner"
+            `Quick
+            test_dashboard_dev_token_can_vote_as_credential_owner
         ] )
     ]

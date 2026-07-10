@@ -313,6 +313,7 @@ type task_status =
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
+  | OperatorBlocked of { assignee: string; blocked_at: string; reason: string option }
 [@@deriving show]
 
 (** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
@@ -369,14 +370,14 @@ let task_assignee_of_status = function
     Exhaustive match — adding a constructor forces an update here. *)
 let task_status_is_terminal = function
   | Done _ | Cancelled _ -> true
-  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | OperatorBlocked _ -> false
 
 (** Completed state: [Done]. Distinct from [task_status_is_terminal] which
     also includes [Cancelled]. Use this when only successful completion
     matters (e.g. convergence ratios, reputation counting). *)
 let task_status_is_done = function
   | Done _ -> true
-  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ -> false
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ | OperatorBlocked _ -> false
 
 (** Issue #8354 + 2026-05-27 follow-up: schema enums for [task_status]
     used to be hand-rolled in [tool_shard.ml] and [mcp_server.ml],

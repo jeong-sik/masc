@@ -55,9 +55,15 @@ runs:
       if: runner.os == 'Linux' && inputs.dune-cache == 'true'
       shell: bash
       run: |
+        # hardlink, NOT copy: copy mode duplicates every artifact into
+        # ~/.cache/dune, roughly doubling disk while the cache populates.
+        # The first cache-cold Build and Test after #23996 died at link time
+        # with "/usr/bin/ld: final link failed: No space left on device"
+        # (run 29091172837). ~/.cache/dune and the workspace share one
+        # filesystem on GitHub runners, so hardlinks add no meaningful space.
         {
           echo "DUNE_CACHE=enabled"
-          echo "DUNE_CACHE_STORAGE_MODE=copy"
+          echo "DUNE_CACHE_STORAGE_MODE=hardlink"
         } >> "$GITHUB_ENV"
 
     - name: Bootstrap local opam switch (Linux)

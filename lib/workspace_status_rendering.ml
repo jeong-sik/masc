@@ -53,7 +53,7 @@ let task_assignee = function
   | Masc_domain.InProgress { assignee; _ }
   | Masc_domain.AwaitingVerification { assignee; _ }
   | Masc_domain.Done { assignee; _ } -> assignee
-  | Masc_domain.Cancelled { cancelled_by; _ } -> cancelled_by
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ | Masc_domain.OperatorBlocked _ -> "-"
   | Masc_domain.Todo -> "unclaimed"
 
 let active_task_assignee = function

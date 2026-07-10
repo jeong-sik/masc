@@ -122,6 +122,7 @@ let tool_call
   { tool_name
   ; provider = "test"
   ; outcome = "ok"
+  ; execution_outcome = Tool_result.Ok
   ; typed_outcome
   ; latency_ms = 0.0
   ; task_id = None

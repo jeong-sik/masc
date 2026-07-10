@@ -269,12 +269,36 @@ function rosterPresenceDisplay(
   if (state.kind === 'running') {
     const runState = composite?.run_state
     if (runState?.kind === 'in_turn') {
-      const wakeLabel = runState.wake_kind === 'woken' ? '반응형' : '자율'
+      const wakeLabel = runState.wake_kind === 'woken'
+        ? '반응형'
+        : runState.wake_kind === 'proactive_tick'
+          ? '자율'
+          : runState.wake_kind != null
+            ? `기원 ${runState.wake_kind}`
+            : '기원 확인 필요'
       return { status: 'busy', detail: `${state.turnPhase} live · ${wakeLabel}` }
     }
     if (runState?.kind === 'waiting') {
-      const depth = runState.queue_depth ?? 0
-      return { status: 'idle', detail: depth > 0 ? `대기 중 · 큐 ${depth}` : '대기 중' }
+      const depth = runState.queue_depth
+      const detail = depth == null
+        ? '대기 중 · 큐 확인 필요'
+        : depth > 0
+          ? `대기 중 · 큐 ${depth}`
+          : '대기 중'
+      return { status: 'idle', detail }
+    }
+    if (runState?.kind === 'suspended') {
+      const phase = runState.phase?.trim()
+      return {
+        status: agent.status ?? keeper.status ?? null,
+        detail: phase ? `중단 · ${phase}` : '중단 · 단계 확인 필요',
+      }
+    }
+    if (runState != null) {
+      return {
+        status: agent.status ?? keeper.status ?? null,
+        detail: `런타임 상태 ${runState.kind}`,
+      }
     }
     if (runState == null) {
       if (composite?.is_live === true) {

@@ -1219,7 +1219,7 @@ describe('AgentRoster live-only cards', () => {
   // #16 (38-bug campaign PR-5): a keeper actively executing a *reactively
   // woken* turn must render distinctly from one on its own proactive
   // cadence — the whole point of exposing typed `run_state`.
-  it('surfaces the reactive wake cause from run_state for an in-turn keeper', async () => {
+  it('surfaces known and future wake causes without a silent default', async () => {
     agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
     keepers.value = [
       {
@@ -1267,6 +1267,34 @@ describe('AgentRoster live-only cards', () => {
     expect(presence.dataset.presenceRawStatus).toBe('busy')
     expect(presence.textContent).toContain('executing live')
     expect(presence.textContent).toContain('반응형')
+
+    fleetCompositeSnapshot.value = {
+      ...fleetCompositeSnapshot.value,
+      snapshots: [
+        makeCompositeSnapshot({
+          keeper: 'sangsu',
+          is_live: true,
+          turn_phase: 'executing',
+          live_turn: {
+            turn_id: 687,
+            started_at: 1_781_184_900,
+            last_progress_at: 1_781_184_901,
+            last_progress_kind: 'sse_thinking_delta',
+          },
+          run_state: {
+            kind: 'in_turn',
+            wake_kind: 'future_scheduler_kind',
+            stimulus_kinds: [],
+            started_at: 1_781_184_900,
+            active_tool_count: 0,
+          },
+        }),
+      ],
+    }
+    await flushUi()
+
+    expect(presence.textContent).toContain('기원 future_scheduler_kind')
+    expect(presence.textContent).not.toContain('자율')
   })
 
   it('surfaces the queue depth from run_state for a waiting keeper', async () => {

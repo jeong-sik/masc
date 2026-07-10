@@ -128,10 +128,6 @@ async function loadChat() {
     ...(await importOriginal<typeof import('../governance-signals')>()),
     governanceData: mockGovernanceData,
   }))
-  vi.doMock('../../api/dashboard-governance', async (importOriginal) => ({
-    ...(await importOriginal<typeof import('../../api/dashboard-governance')>()),
-    resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
-  }))
   return import('./keeper-workspace-chat')
 }
 
@@ -161,7 +157,6 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../keeper-detail-state')
     vi.doUnmock('../../router')
     vi.doUnmock('../governance-signals')
-    vi.doUnmock('../../api/dashboard-governance')
   })
 
   it('shows a pending-approval cue linking to the approvals queue when the keeper awaits a decision', async () => {
@@ -180,10 +175,13 @@ describe('KeeperWorkspaceChat', () => {
     expect(cue?.textContent).toContain('승인 대기')
     expect(cue?.textContent).toContain('fs_write')
 
-    // Three actions render (승인 / 거부 / 결재 큐 →); the queue link navigates.
-    const queueLink = Array.from(cue?.querySelectorAll('button') ?? [])
-      .find(button => button.textContent?.includes('결재 큐'))
-    expect(queueLink).not.toBeUndefined()
+    // Chat remains read-only: the approvals surface is the single act-point
+    // that includes risk and input evidence before approve/reject.
+    const actions = Array.from(cue?.querySelectorAll('button') ?? [])
+    expect(actions).toHaveLength(1)
+    expect(cue?.textContent).not.toContain('거부')
+    const queueLink = actions[0]
+    expect(queueLink?.textContent).toContain('결재 큐')
     await act(async () => {
       queueLink?.click()
     })

@@ -490,7 +490,11 @@ let create_entry
       ?disposition
       ?disposition_reason
       ?(continuation_channel =
-         Keeper_continuation_channel.unrouted "legacy: continuation channel not provided")
+         (* Missing connector fails closed as [Unrouted]; the reason string is
+            pinned by test_keeper_approval_queue "missing connector fails
+            closed" (#23716). #23845 reworded it in passing (main red #23901,
+            family B). *)
+         Keeper_continuation_channel.unrouted "no originating connector")
       ~audit_base_path
       ~resolver
       ~on_resolution
@@ -924,12 +928,20 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
            (Printexc.to_string exn))
        (fun () -> f decision)
    | None -> ());
-  wake_keeper_on_approval_resolution
-    ~base_path
-    ~keeper_name:entry.keeper_name
-    ~approval_id:entry.id
-    ~decision:(hitl_resolution_decision_of_approval_decision decision)
-    ~channel:entry.channel;
+  (* Blocking approvals (live resolver) resume through the promise above;
+     firing the wake too would double-stimulate the keeper. Only non-blocking
+     approvals (no suspended fiber) need the [Hitl_resolved] wake. #23681
+     collaterally dropped this guard while rewiring channel provenance
+     (main red #23901, family B). *)
+  (match entry.resolver with
+   | Some _ -> ()
+   | None ->
+     wake_keeper_on_approval_resolution
+       ~base_path
+       ~keeper_name:entry.keeper_name
+       ~approval_id:entry.id
+       ~decision:(hitl_resolution_decision_of_approval_decision decision)
+       ~channel:entry.channel);
   try
     Sse.broadcast
       (`Assoc
@@ -1515,16 +1527,20 @@ let expire_stale ~max_wait_s =
          ?disposition_reason:entry.disposition_reason
          ~decision:(Approval_expired reason)
          ();
-       (* Expiry clears the [Approval_pending] skip just like a resolution, so
-          the keeper needs the same wake or it stays stalled until an unrelated
-          stimulus. The keeper's suspended tool call (if any) receives
-          [Reject reason]. *)
-       wake_keeper_on_approval_resolution
-         ~base_path:entry.audit_base_path
-         ~keeper_name:entry.keeper_name
-         ~approval_id:id
-         ~decision:Keeper_event_queue.Hitl_rejected
-         ~channel:entry.channel;
+       (* Expiry clears the [Approval_pending] skip just like a resolution.
+          Blocking entries resume via the resolver promise below; only
+          non-blocking entries (no suspended fiber) need the wake, or the
+          keeper stays stalled until an unrelated stimulus. #23681 dropped
+          this resolver guard (main red #23901, family B). *)
+       (match entry.resolver with
+        | Some _ -> ()
+        | None ->
+          wake_keeper_on_approval_resolution
+            ~base_path:entry.audit_base_path
+            ~keeper_name:entry.keeper_name
+            ~approval_id:id
+            ~decision:Keeper_event_queue.Hitl_rejected
+            ~channel:entry.channel);
        (match entry.resolver with
         | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
         | None -> ());

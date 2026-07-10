@@ -128,6 +128,7 @@ let recover_atomic_orphan ~path ~recovered_dir =
         fsync_path (Stdlib.Filename.dirname path);
         Ok Deleted_zero_length)
       else (
+        fsync_path path;
         let recovered_stat = Unix.lstat recovered_dir in
         if recovered_stat.Unix.st_kind <> Unix.S_DIR
         then

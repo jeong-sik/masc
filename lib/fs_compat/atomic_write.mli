@@ -50,8 +50,8 @@ val recover_atomic_orphan
   -> recovered_dir:string
   -> (atomic_orphan_recovery, string) result
 (** Reconcile one recognized atomic-write orphan. Zero-length files are
-    deleted; non-empty files are moved without overwrite into the existing real
-    [recovered_dir] for forensic review. *)
+    deleted; non-empty files are fsynced and moved without overwrite into the
+    existing real [recovered_dir] for forensic review. *)
 
 (** #10130: boot-time sweep for [.atomic_*.tmp] orphans.
 

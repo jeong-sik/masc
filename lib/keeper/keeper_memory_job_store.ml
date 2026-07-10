@@ -325,27 +325,37 @@ let sync_directory path =
   | Error detail -> Error (Io_error { operation = Sync; path; detail })
 ;;
 
+let not_real_directory_error path =
+  Io_error
+    { operation = Inspect
+    ; path
+    ; detail = "memory job store path is not a real directory"
+    }
+;;
+
+let require_existing_real_directory path =
+  let* stat = protect_io Inspect path (fun () -> Unix.lstat path) in
+  if stat.Unix.st_kind = Unix.S_DIR
+  then Ok ()
+  else Error (not_real_directory_error path)
+;;
+
 let ensure_real_directory ~owned path =
   let* before = inspect_path path in
-  let* () =
+  let* created =
     match before with
-    | Some _ -> Ok ()
+    | Some _ -> Ok false
     | None ->
-      protect_io Ensure_directory path (fun () ->
-        Fs_compat.mkdir_p_durable_unix path)
+      let mode = if owned then private_directory_mode else 0o755 in
+      let* () =
+        protect_io Ensure_directory path (fun () ->
+          try Unix.mkdir path mode with
+          | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+      in
+      Ok true
   in
-  let* stat = protect_io Inspect path (fun () -> Unix.lstat path) in
-  let* () =
-    if stat.Unix.st_kind = Unix.S_DIR
-    then Ok ()
-    else
-      Error
-        (Io_error
-           { operation = Inspect
-           ; path
-           ; detail = "memory job store path is not a real directory"
-           })
-  in
+  let* () = require_existing_real_directory path in
+  let* () = if created then sync_directory (Filename.dirname path) else Ok () in
   if not owned
   then Ok ()
   else
@@ -356,10 +366,60 @@ let ensure_real_directory ~owned path =
     sync_directory path
 ;;
 
+let managed_root_directories ~base_path =
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  [ masc_dir; Common.keepers_runtime_dir_of_base ~base_path ]
+;;
+
+let keeper_ancestor_directories ~base_path ~keeper_name =
+  let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
+  [ Filename.concat keepers_root keeper_name
+  ; keeper_jobs_dir ~base_path ~keeper_name
+  ]
+;;
+
+let validate_real_directory_chain paths =
+  let rec loop = function
+    | [] -> Ok true
+    | path :: rest ->
+      let* stat = inspect_path path in
+      (match stat with
+       | None -> Ok false
+       | Some stat when stat.Unix.st_kind = Unix.S_DIR -> loop rest
+       | Some _ -> Error (not_real_directory_error path))
+  in
+  loop paths
+;;
+
+let require_real_directory_chain paths =
+  let rec loop = function
+    | [] -> Ok ()
+    | path :: rest ->
+      let* () = require_existing_real_directory path in
+      loop rest
+  in
+  loop paths
+;;
+
+let validate_managed_root_if_present ~base_path =
+  validate_real_directory_chain
+    (base_path :: managed_root_directories ~base_path)
+;;
+
+let validate_keeper_ancestors_if_present ~base_path ~keeper_name =
+  validate_real_directory_chain
+    (base_path
+     :: (managed_root_directories ~base_path
+         @ keeper_ancestor_directories ~base_path ~keeper_name))
+;;
+
 let ensure_store_dirs ~base_path ~keeper_name =
   let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
   let keeper_dir = Filename.concat keepers_root keeper_name in
-  let parent_dirs = [ keepers_root; keeper_dir ] in
+  let* () = require_existing_real_directory base_path in
+  let parent_dirs =
+    managed_root_directories ~base_path @ [ keeper_dir ]
+  in
   let owned_dirs =
     [ keeper_jobs_dir ~base_path ~keeper_name
     ; pending_dir ~base_path ~keeper_name
@@ -376,7 +436,9 @@ let ensure_store_dirs ~base_path ~keeper_name =
       loop ~owned rest
   in
   let* () = loop ~owned:false parent_dirs in
-  loop ~owned:true owned_dirs
+  let* () = loop ~owned:true owned_dirs in
+  require_real_directory_chain
+    (base_path :: (parent_dirs @ owned_dirs))
 ;;
 
 let valid_job_id id =
@@ -1328,6 +1390,7 @@ let activate ~base_path (job : job) =
 ;;
 
 let abort_awaiting ~base_path (job : job) =
+  let* () = ensure_store_dirs ~base_path ~keeper_name:job.keeper_name in
   let path = awaiting_path ~base_path job in
   let* exists = file_exists path in
   if not exists
@@ -1443,6 +1506,7 @@ let claim_all ~base_path ~keeper_name ~now =
   else if (not (Float.is_finite now)) || now < 0.0
   then Error (Invalid_claim_time now)
   else
+    let* () = ensure_store_dirs ~base_path ~keeper_name in
     let dir = pending_dir ~base_path ~keeper_name in
     let* paths = list_json_paths dir in
     let* envelopes =
@@ -1624,31 +1688,37 @@ let backlog_count ~base_path ~keeper_name =
   if not (keeper_name_is_valid keeper_name)
   then Error (Invalid_keeper_name keeper_name)
   else
-    let* awaiting = list_json_paths (awaiting_dir ~base_path ~keeper_name) in
-    let* pending = list_json_paths (pending_dir ~base_path ~keeper_name) in
-    let* inflight = list_json_paths (inflight_dir ~base_path ~keeper_name) in
-    let* awaiting_envelopes =
-      load_envelopes
-        ~expected_keeper_name:keeper_name
-        ~expected_state:Expect_awaiting
-        awaiting
+    let* ancestors_exist =
+      validate_keeper_ancestors_if_present ~base_path ~keeper_name
     in
-    let* pending_envelopes =
-      load_envelopes
-        ~expected_keeper_name:keeper_name
-        ~expected_state:Expect_pending
-        pending
-    in
-    let* inflight_envelopes =
-      load_envelopes
-        ~expected_keeper_name:keeper_name
-        ~expected_state:Expect_inflight
-        inflight
-    in
-    Ok
-      (List.length awaiting_envelopes
-       + List.length pending_envelopes
-       + List.length inflight_envelopes)
+    if not ancestors_exist
+    then Ok 0
+    else
+      let* awaiting = list_json_paths (awaiting_dir ~base_path ~keeper_name) in
+      let* pending = list_json_paths (pending_dir ~base_path ~keeper_name) in
+      let* inflight = list_json_paths (inflight_dir ~base_path ~keeper_name) in
+      let* awaiting_envelopes =
+        load_envelopes
+          ~expected_keeper_name:keeper_name
+          ~expected_state:Expect_awaiting
+          awaiting
+      in
+      let* pending_envelopes =
+        load_envelopes
+          ~expected_keeper_name:keeper_name
+          ~expected_state:Expect_pending
+          pending
+      in
+      let* inflight_envelopes =
+        load_envelopes
+          ~expected_keeper_name:keeper_name
+          ~expected_state:Expect_inflight
+          inflight
+      in
+      Ok
+        (List.length awaiting_envelopes
+         + List.length pending_envelopes
+         + List.length inflight_envelopes)
 ;;
 
 let directory_exists path =
@@ -1673,7 +1743,7 @@ let directory_exists path =
 
 let discover_keeper_names ~base_path =
   let root = Common.keepers_runtime_dir_of_base ~base_path in
-  let* root_exists = directory_exists root in
+  let* root_exists = validate_managed_root_if_present ~base_path in
   if not root_exists
   then Ok ([], [])
   else

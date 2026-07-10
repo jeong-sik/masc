@@ -54,7 +54,7 @@ function shouldRefreshDevToken(): boolean {
   const actor = currentDashboardActor()
   if (isRemoteAccess() || actor !== 'dashboard') return false
   // Loopback dashboard sessions should self-heal if they are still holding
-  // a borrowed non-dashboard token (for example an old MCP-client paste/URL token).
+  // a borrowed non-dashboard token (for example an old MCP-client paste).
   return meta == null || meta.actor == null || meta.actor !== actor
 }
 
@@ -62,7 +62,7 @@ function shouldRefreshDevToken(): boolean {
     subsequent `/mcp` requests include `Authorization: Bearer ...`. The server
     only exposes `/api/v1/dashboard/dev-token` when bound to loopback with
     strict-auth overrides disabled; in every other case this quietly no-ops
-    and existing flows (URL `?token=...`, manual paste) continue to work. */
+    and manually supplied credentials remain untouched. */
 export async function ensureDevToken(): Promise<void> {
   if (!shouldRefreshDevToken()) return
   if (devTokenBootstrapPromise) return devTokenBootstrapPromise

@@ -16,6 +16,11 @@ type cleanup_zombie_result =
   | No_zombies
   | Cleaned of { count : int; names : string list; released_tasks : int; skipped : int }
 
+type heartbeat_result =
+  | Heartbeat_updated of { agent_name : string }
+  | Heartbeat_agent_not_found of { agent_name : string }
+  | Heartbeat_invalid_agent_file of { agent_name : string; detail : string }
+
 (* Callback refs and types are now in Workspace_hooks. *)
 
 (* Board artifact cleanup is wired via Workspace_hooks callbacks at startup. *)
@@ -23,7 +28,7 @@ type cleanup_zombie_result =
 
 (* heartbeat_in_workspace removed — workspaces are flattened (#4638). Use heartbeat. *)
 
-let heartbeat config ~agent_name =
+let heartbeat_r config ~agent_name =
   ensure_initialized config;
   let actual_name = resolve_agent_name config agent_name in
   let filename = safe_filename actual_name ^ ".json" in
@@ -34,13 +39,13 @@ let heartbeat config ~agent_name =
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
           write_json config agent_file (agent_to_yojson updated);
-          Printf.sprintf "%s heartbeat updated" actual_name
+          Heartbeat_updated { agent_name = actual_name }
       | Error e ->
           Log.Workspace.debug "heartbeat: invalid agent JSON for %s: %s" actual_name e;
-          Printf.sprintf "Invalid agent file for %s" actual_name
+          Heartbeat_invalid_agent_file { agent_name = actual_name; detail = e }
     )
   end else
-    Printf.sprintf "Agent %s not found" agent_name
+    Heartbeat_agent_not_found { agent_name }
 
 (** Cleanup zombie agents - removes stale agents.
     [keeper_threshold_sec] and [agent_threshold_sec] control the inactivity

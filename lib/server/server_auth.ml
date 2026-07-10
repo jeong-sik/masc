@@ -79,39 +79,89 @@ let auth_token_from_request request =
       trim_opt
         (Httpun.Headers.get request.Httpun.Request.headers "x-masc-internal-token")
 
-let websocket_query_token_from_request request =
-  let path = Http_server_eio.Request.path request in
-  if request.Httpun.Request.meth = `GET
-     && (String.equal path "/ws" || String.equal path "/api/v1/ide/lsp")
-  then
-    trim_opt (query_param request "token")
-  else None
+let websocket_bearer_subprotocol_prefix = "masc.bearer.hex."
 
-let websocket_auth_token_from_request request =
-  match auth_token_from_request request with
-  | Some _ as token -> token
-  | None -> websocket_query_token_from_request request
+type websocket_credential =
+  | Websocket_credential_missing
+  | Websocket_header_bearer of string
+  | Websocket_subprotocol_bearer of string
 
-let observer_sse_query_token_from_request request =
-  let path = Http_server_eio.Request.path request in
-  let observer_stream_requested =
-    match query_param request "sse_kind" with
-    | Some raw ->
-        String.equal "observer" (String.lowercase_ascii (String.trim raw))
-    | None -> false
-  in
-  match request.Httpun.Request.meth with
-  | `GET
-    when (observer_stream_requested && String.equal path "/mcp")
-         || String.equal path "/events/presence"
-         || String.equal path "/api/v1/ide/cursors/stream" ->
-      trim_opt (query_param request "token")
+type websocket_credential_error =
+  | Malformed_authorization_bearer
+  | Malformed_subprotocol_bearer
+  | Ambiguous_subprotocol_bearer
+  | Conflicting_credential_channels
+
+let websocket_credential_error_to_string = function
+  | Malformed_authorization_bearer ->
+    "Malformed Authorization bearer on WebSocket upgrade."
+  | Malformed_subprotocol_bearer ->
+    "Malformed credential subprotocol on WebSocket upgrade."
+  | Ambiguous_subprotocol_bearer ->
+    "Multiple credential subprotocols on WebSocket upgrade."
+  | Conflicting_credential_channels ->
+    "WebSocket upgrade supplied credentials through multiple channels."
+
+let hex_nibble = function
+  | '0' .. '9' as c -> Some (Char.code c - Char.code '0')
+  | 'a' .. 'f' as c -> Some (10 + Char.code c - Char.code 'a')
+  | 'A' .. 'F' as c -> Some (10 + Char.code c - Char.code 'A')
   | _ -> None
 
-let observer_sse_auth_token_from_request request =
-  match auth_token_from_request request with
-  | Some _ as token -> token
-  | None -> observer_sse_query_token_from_request request
+let decode_hex value =
+  let length = String.length value in
+  if length = 0 || length mod 2 <> 0
+  then None
+  else
+    let bytes = Bytes.create (length / 2) in
+    let rec loop source_index =
+      if source_index = length
+      then Some (Bytes.unsafe_to_string bytes)
+      else
+        match hex_nibble value.[source_index], hex_nibble value.[source_index + 1] with
+        | Some high, Some low ->
+          Bytes.set bytes (source_index / 2) (Char.chr ((high lsl 4) lor low));
+          loop (source_index + 2)
+        | None, _ | _, None -> None
+    in
+    loop 0
+
+let websocket_subprotocol_token_from_request request =
+  let bearer_members =
+    Httpun.Headers.get request.Httpun.Request.headers "sec-websocket-protocol"
+    |> Option.value ~default:""
+    |> String.split_on_char ','
+    |> List.map String.trim
+    |> List.filter (String.starts_with ~prefix:websocket_bearer_subprotocol_prefix)
+  in
+  match bearer_members with
+  | [] -> Ok None
+  | [ protocol ] ->
+    let prefix_length = String.length websocket_bearer_subprotocol_prefix in
+    let encoded =
+      String.sub protocol prefix_length (String.length protocol - prefix_length)
+    in
+    (match decode_hex encoded |> Option.bind String_util.trim_nonempty with
+     | Some token -> Ok (Some token)
+     | None -> Error Malformed_subprotocol_bearer)
+  | _ -> Error Ambiguous_subprotocol_bearer
+
+let websocket_credential_from_request request =
+  let header_bearer =
+    match Httpun.Headers.get request.Httpun.Request.headers "authorization" with
+    | None -> Ok None
+    | Some value ->
+      (match bearer_token_from_header value |> Option.bind String_util.trim_nonempty with
+       | Some token -> Ok (Some token)
+       | None -> Error Malformed_authorization_bearer)
+  in
+  let* header_bearer = header_bearer in
+  let* subprotocol_bearer = websocket_subprotocol_token_from_request request in
+  match header_bearer, subprotocol_bearer with
+  | Some _, Some _ -> Error Conflicting_credential_channels
+  | Some token, None -> Ok (Websocket_header_bearer token)
+  | None, Some token -> Ok (Websocket_subprotocol_bearer token)
+  | None, None -> Ok Websocket_credential_missing
 
 let agent_from_request request =
   let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
@@ -173,99 +223,6 @@ let resolve_agent_name_for_auth_raw ~base_path request ~token :
       match agent_from_request request with
       | Some raw when String.trim raw <> "" -> Ok (Some (String.trim raw))
       | _ -> Ok None)
-
-(** Verify Bearer token for MCP endpoints *)
-let verify_mcp_auth ~base_path request =
-  let auth_config = Auth.load_auth_config base_path in
-  let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
-  if not auth_config.Masc_domain.enabled then
-    Ok None  (* Auth disabled - allow all *)
-  else
-    match auth_token_from_request request with
-    | None when not auth_config.require_token ->
-        Ok None  (* Token not required *)
-    | None ->
-        Error
-          "Authentication required. Use 'Authorization: Bearer <token>' header."
-    | Some token -> (
-        let* agent_name =
-          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
-          |> Result.map_error Masc_domain.masc_error_to_string
-        in
-        match agent_name with
-        | None ->
-            (* Fail-closed: dead branch today (resolver:154-157 returns
-               [Ok (Some _)] or [Error] for [Some token]) but kept
-               explicit so a future [Anonymous] case cannot silently
-               rewrite to "dashboard". Spec:
-               [specs/auth/AuthIdentityFSM.tla] invariant
-               [NoSilentRewrite] (I2). *)
-            Error
-              "Authentication required. Bearer token did not resolve to \
-               any agent."
-        | Some agent_name ->
-            Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission:Masc_domain.CanReadState
-            |> Result.map_error Masc_domain.masc_error_to_string
-            |> Result.map (fun () -> None))
-
-let verify_mcp_observer_stream_auth ~base_path request =
-  let auth_config = Auth.load_auth_config base_path in
-  let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
-  if not auth_config.Masc_domain.enabled then
-    Ok None
-  else
-    match observer_sse_auth_token_from_request request with
-    | None when not auth_config.require_token ->
-        Ok None
-    | None ->
-        Error
-          "Authentication required. Use 'Authorization: Bearer <token>' header \
-           or 'token' query param for the observer/presence/cursor SSE stream."
-    | Some token -> (
-        let* agent_name =
-          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
-          |> Result.map_error Masc_domain.masc_error_to_string
-        in
-        match agent_name with
-        | None ->
-            (* Fail-closed: see verify_mcp_auth above. *)
-            Error
-              "Authentication required. Bearer token did not resolve to \
-               any agent."
-        | Some agent_name ->
-            Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission:Masc_domain.CanReadState
-            |> Result.map_error Masc_domain.masc_error_to_string
-            |> Result.map (fun () -> None))
-
-let verify_operator_mcp_auth ~base_path request =
-  let auth_config = Auth.load_auth_config base_path in
-  if not auth_config.Masc_domain.enabled then
-    Error
-      "/mcp/operator requires workspace auth enabled with require_token=true."
-  else if not auth_config.require_token then
-    Error "/mcp/operator requires bearer token auth (require_token=true)."
-  else
-    match auth_token_from_request request with
-    | None ->
-        Error "Authentication required. Use 'Authorization: Bearer <token>' header."
-    | Some token -> (
-        let* agent_name =
-          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
-          |> Result.map_error Masc_domain.masc_error_to_string
-        in
-        match agent_name with
-        | None ->
-            (* Fail-closed: see verify_mcp_auth above. *)
-            Error
-              "Authentication required. Bearer token did not resolve to \
-               any agent."
-        | Some agent_name ->
-            Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission:Masc_domain.CanAdmin
-            |> Result.map_error Masc_domain.masc_error_to_string
-            |> Result.map (fun () -> None))
 
 let request_actor_hint request =
   match agent_from_request request with
@@ -575,6 +532,18 @@ let ensure_same_origin_browser_request request :
                  action = "cross-origin HTTP mutation" })))
 
 let authorize_websocket_request ~base_path ~permission request =
+  let* credential =
+    websocket_credential_from_request request
+    |> Result.map_error (fun error ->
+         Masc_domain.Auth
+           (Masc_domain.Auth_error.InvalidToken
+              (websocket_credential_error_to_string error)))
+  in
+  let* () =
+    match credential with
+    | Websocket_subprotocol_bearer _ -> ensure_same_origin_browser_request request
+    | Websocket_credential_missing | Websocket_header_bearer _ -> Ok ()
+  in
   let claimed_agent =
     match internal_keeper_agent_from_request request with
     | Some _ as agent -> agent
@@ -582,7 +551,11 @@ let authorize_websocket_request ~base_path ~permission request =
   in
   Server_transport_admission.admit
     ~base_path
-    ~token:(websocket_auth_token_from_request request)
+    ~token:
+      (match credential with
+       | Websocket_credential_missing -> None
+       | Websocket_header_bearer token | Websocket_subprotocol_bearer token ->
+         Some token)
     ~claimed_agent
     ~requirement:(Server_transport_admission.Permission permission)
 
@@ -869,55 +842,32 @@ let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) r
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
 
 let authorize_tool_request ~base_path ~tool_name request :
-    (unit, Masc_domain.masc_error) result =
-  let auth_cfg = Auth.load_auth_config base_path in
-  let token = auth_token_from_request request in
-  let* () =
-    if Option.is_some token then Ok ()
-    else ensure_same_origin_browser_request request
-  in
-  let* auth_cfg =
-    ensure_strict_http_token_auth
-      ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
-    |> Result.map_error (fun msg ->
-          Masc_domain.Auth
-            (Masc_domain.Auth_error.Unauthorized
-               { reason = Generic; message = msg }))
-  in
-  let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
-  (* NDT-OK: pre-existing dashboard fallback for non-token dashboard tool requests.
-     Token-bound requests without a resolved agent fail closed in the guard below. *)
-  let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-  if
-    auth_cfg.enabled && auth_cfg.require_token && token <> None
-    && agent_name_opt = None
-  then
-    Error
-      (Masc_domain.Auth
-         (Masc_domain.Auth_error.Unauthorized
-            { reason = Missing_token
-            ; message =
-                "Agent name required (X-Gate-Agent / X-MASC-Agent or \
-                 token-bound credential)"
-            }))
-  else
-    Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name
+    (Server_transport_admission.admission, Masc_domain.masc_error) result =
+  let claimed_agent = agent_from_request request in
+  Server_transport_admission.admit
+    ~base_path
+    ~token:(auth_token_from_request request)
+    ~claimed_agent
+    ~requirement:(Server_transport_admission.Tool tool_name)
 
-let authorize_token_bound_permission_request ~base_path ~permission request :
-    (string, Masc_domain.masc_error) result =
+let authorize_token_bound_admission_request ~base_path ~permission request =
   let claimed_agent =
     match internal_keeper_agent_from_request request with
     | Some _ as agent -> agent
     | None -> agent_from_request request
   in
-  let+ identity =
-    Server_transport_admission.authorize
-      ~base_path
-      ~token:(auth_token_from_request request)
-      ~claimed_agent
-      ~requirement:(Server_transport_admission.Permission permission)
+  Server_transport_admission.admit
+    ~base_path
+    ~token:(auth_token_from_request request)
+    ~claimed_agent
+    ~requirement:(Server_transport_admission.Permission permission)
+
+let authorize_token_bound_permission_request ~base_path ~permission request :
+    (string, Masc_domain.masc_error) result =
+  let+ admission =
+    authorize_token_bound_admission_request ~base_path ~permission request
   in
-  identity.agent_name
+  admission.identity.agent_name
 
 let is_dashboard_bootstrap_path path =
   String.starts_with ~prefix:"/api/v1/dashboard/" path
@@ -937,27 +887,6 @@ let rec with_public_read handler request reqd =
     match !server_state with
     | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
     | Some state -> handler state request reqd
-
-and with_observer_sse_read_auth handler request reqd =
-  let strict = http_auth_strict_enabled () in
-  let path = Http_server_eio.Request.path request in
-  if strict && not (is_public_read_path path) then
-    match !server_state with
-    | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
-    | Some state ->
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      (match verify_mcp_observer_stream_auth ~base_path request with
-       | Ok _ ->
-         (match check_agent_rate_limit request reqd with
-          | Ok () -> handler state request reqd
-          | Error () -> ())
-       | Error msg ->
-         Http_server_eio.Response.json
-           ~status:`Unauthorized
-           (Yojson.Safe.to_string (`Assoc [ "error", `String msg ]))
-           reqd)
-  else
-    with_public_read handler request reqd
 
 and with_read_auth handler request reqd =
   match !server_state with
@@ -989,9 +918,9 @@ and with_tool_auth ~tool_name handler request reqd =
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_tool_request ~base_path ~tool_name request with
-      | Ok () ->
+      | Ok admission ->
           (match check_agent_rate_limit request reqd with
-          | Ok () -> handler state request reqd
+          | Ok () -> handler state admission.identity.agent_name request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
 
@@ -1004,5 +933,17 @@ and with_token_permission_auth ~permission handler request reqd =
       | Ok agent_name ->
           (match check_agent_rate_limit request reqd with
           | Ok () -> handler state agent_name request reqd
+          | Error () -> ())
+      | Error err -> respond_auth_error request reqd err)
+
+and with_transport_admission_auth ~permission handler request reqd =
+  match !server_state with
+  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state ->
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      (match authorize_token_bound_admission_request ~base_path ~permission request with
+      | Ok admission ->
+          (match check_agent_rate_limit request reqd with
+          | Ok () -> handler state admission request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)

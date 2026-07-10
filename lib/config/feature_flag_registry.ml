@@ -36,12 +36,12 @@ type flag = {
 let all_flags : flag list = [
   (* ── Transport ────────────────────────────────────────────── *)
   { env_name = "MASC_GRPC_ENABLED";
-    description = "gRPC transport server";
-    default = true; category = "transport";
-    lifecycle = Active; since = "2.0.0" };
+    description = "Experimental gRPC transport server";
+    default = false; category = "transport";
+    lifecycle = Experimental; since = "2.0.0" };
 
   { env_name = "MASC_WS_ENABLED";
-    description = "WebSocket transport server";
+    description = "Same-origin HTTP/1.1 WebSocket upgrade at /ws";
     default = true; category = "transport";
     lifecycle = Active; since = "2.0.0" };
 

@@ -4,7 +4,7 @@
     [refresh_work_as_heartbeat] is the keepalive cycle's
     "implicit heartbeat" path: when the keeper just finished a
     productive turn (`work_as_hb () = true`) and the proactive warmup
-    has elapsed, we count any successful Workspace.heartbeat against any
+    has elapsed, we count any successful Workspace.heartbeat_r against any
     session-bound workspace as evidence that the keeper is alive — and reset the
     consecutive-failure counter accordingly.
 
@@ -36,9 +36,23 @@ let refresh_work_as_heartbeat
   then (
     let hb_ok =
       try
-        (* fire-and-forget: heartbeat persistence is enough; loop records only success/failure. *)
-        ignore (Workspace.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name);
-        true
+        match
+          Workspace.heartbeat_r
+            ctx.config
+            ~agent_name:meta_after_proactive.agent_name
+        with
+        | Workspace.Heartbeat_updated _ -> true
+        | Workspace.Heartbeat_agent_not_found { agent_name } ->
+          Log.Keeper.warn
+            "heartbeat owner %s disappeared after proactive work"
+            agent_name;
+          false
+        | Workspace.Heartbeat_invalid_agent_file { agent_name; detail } ->
+          Log.Keeper.warn
+            "heartbeat state for %s is invalid after proactive work: %s"
+            agent_name
+            detail;
+          false
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

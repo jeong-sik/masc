@@ -865,7 +865,7 @@ let run_heartbeat_loop
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
-     Updated ONLY on Workspace.heartbeat success after turn. *)
+     Updated ONLY on Workspace.heartbeat_r success after turn. *)
   let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
   let _max_silence () =
@@ -1148,7 +1148,7 @@ let run_heartbeat_loop
             (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
           raise Keeper_registry.Keeper_fiber_crash);
         (* Phase 1: work-as-heartbeat — renew point (b).
-                 After turn, call Workspace.heartbeat to prove workspace I/O health.
+                 After turn, call Workspace.heartbeat_r to prove workspace I/O health.
                  On success: refresh freshness lease + reset consecutive_failures.
                  On failure: leave timestamp unchanged → presence sync resumes next cycle.
                  T6 audit: a crashed cycle proves nothing about health — do not

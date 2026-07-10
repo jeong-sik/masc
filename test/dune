@@ -2265,8 +2265,6 @@
 
 (include stanzas/test_hitl_summary_worker.inc)
 
-(include stanzas/test_ws_standalone_lifecycle.inc)
-
 (test
  (name test_dashboard_yjs)
  (modules test_dashboard_yjs)

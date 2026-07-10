@@ -330,13 +330,18 @@ Notes:
 
 ## 8. Open the Dashboard as Admin
 
-Pass the token once via query string. The dashboard moves it into `sessionStorage` and removes it from the URL.
+Open the dashboard without putting the bearer in the URL:
 
 ```text
-http://127.0.0.1:8935/dashboard?agent=agent-code-tool-matrix&token=<raw-token>
+http://127.0.0.1:8935/dashboard?agent=agent-code-tool-matrix
 ```
 
-For a dev-token bootstrap, use `agent=dashboard-dev` instead.
+Paste the raw bearer into the dashboard auth control. The dashboard keeps that
+manual token in `sessionStorage` and sends it in the `Authorization` header;
+it does not put the credential in URL history, request logs, or referrers.
+
+For a dev-token bootstrap, use `agent=dashboard-dev` instead. The bootstrap
+credential is still transported in the `Authorization` header.
 
 You can verify the session with:
 

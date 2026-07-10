@@ -766,7 +766,7 @@
             </tr>
             <tr>
               <td>Auth identity is spread across several layers.</td>
-              <td>Token owner, request hints, dashboard actor fallback, <code>_agent_name</code> injection, and SSE query-token auth span server auth, MCP transport, and execute dispatcher.</td>
+              <td>Token owner, request hints, dashboard actor fallback, <code>_agent_name</code> injection, and SSE header authentication span server auth, MCP transport, and execute dispatcher.</td>
               <td>Introduce a small request identity state-machine record consumed by transport, auth, and dispatcher.</td>
               <td><span class="heat high">High</span></td>
             </tr>
@@ -1169,9 +1169,9 @@
                 <code>dashboard/src/app.ts:162-184</code>
               </li>
               <li>
-                <strong>SSE carries observer token in query string</strong>
-                <span>EventSource lacks custom headers, so sessionStorage token is moved into <code>/mcp?...&amp;sse_kind=observer</code>.</span>
-                <code>dashboard/src/sse.ts:196-209</code>
+                <strong>SSE carries observer credentials in an Authorization header</strong>
+                <span>Authenticated streams use fetch + ReadableStream so the sessionStorage token never enters the URL.</span>
+                <code>dashboard/src/sse.ts, dashboard/src/transports/sse-transport.ts</code>
               </li>
               <li>
                 <strong>WebSocket discovers URL, connects, then sends dashboard hello</strong>

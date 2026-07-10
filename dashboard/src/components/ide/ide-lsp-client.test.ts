@@ -30,7 +30,7 @@ class MockWebSocket {
   onclose: ((event: CloseEvent) => void) | null = null
   failSend = false
 
-  constructor(readonly url: string) {
+  constructor(readonly url: string, readonly protocols?: string | string[]) {
     mockSockets.push(this)
   }
 
@@ -154,9 +154,11 @@ describe('LspConnection', () => {
     const conn = new LspConnection(() => {}, () => {})
     conn.connect()
 
-    expect(mockSockets[0]?.url).toBe(
-      'ws://localhost:3000/api/v1/ide/lsp?token=lsp-token',
-    )
+    expect(mockSockets[0]?.url).toBe('ws://localhost:3000/api/v1/ide/lsp')
+    expect(mockSockets[0]?.protocols).toEqual([
+      'masc.ide.v1',
+      'masc.bearer.hex.6c73702d746f6b656e',
+    ])
     conn.dispose()
   })
 
@@ -170,9 +172,11 @@ describe('LspConnection', () => {
 
     expect(first.readyState).toBe(MockWebSocket.CLOSED)
     expect(mockSockets).toHaveLength(2)
-    expect(mockSockets[1]?.url).toBe(
-      'ws://localhost:3000/api/v1/ide/lsp?token=fresh-lsp-token',
-    )
+    expect(mockSockets[1]?.url).toBe('ws://localhost:3000/api/v1/ide/lsp')
+    expect(mockSockets[1]?.protocols).toEqual([
+      'masc.ide.v1',
+      'masc.bearer.hex.66726573682d6c73702d746f6b656e',
+    ])
     conn.dispose()
   })
 

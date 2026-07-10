@@ -26,11 +26,6 @@ type deps = {
   is_ready : unit -> bool;
   get_runtime_result : unit -> (runtime, string) result;
   get_base_path : unit -> string;
-  verify_mcp_auth : base_path:string -> Httpun.Request.t -> (unit, string) result;
-  verify_mcp_observer_stream_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
-  verify_operator_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
 }
 
 val mcp_protocol_versions : string list
@@ -50,6 +45,78 @@ val remember_protocol_version_if_initialize_succeeded :
   response_json:Yojson.Safe.t ->
   unit
 
+val validate_mcp_session_owner_for_request :
+  session_id:string ->
+  requester:Server_transport_admission.identity ->
+  (unit, string) result
+
+val bind_mcp_session_owner_if_initialize_succeeded :
+  string ->
+  requester:Server_transport_admission.identity ->
+  request_body:string ->
+  response_json:Yojson.Safe.t ->
+  (unit, string) result
+
+val authorize_mcp_session_delete :
+  session_id:string ->
+  requester:Server_transport_admission.identity ->
+  (unit, string) result
+
+val mcp_session_owner :
+  string -> Server_transport_admission.identity option
+
+val authorize_mcp_profile_admission :
+  base_path:string ->
+  profile:tool_profile ->
+  Httpun.Request.t ->
+  (Server_transport_admission.admission, Masc_domain.masc_error) result
+(** Strict per-credential admission shared by the H1 and H2 MCP session
+    surfaces. [Full] and [Managed_agent] require [CanReadState];
+    [Operator_remote] requires [CanAdmin]. *)
+
+type mcp_sse_owner_lease
+(** An opaque, connection-scoped ownership claim for an SSE wire session id.
+    Lease identity is immutable; a reconnect by the same credential replaces
+    the prior lease without allowing its stale disconnect callback to release
+    the replacement.  Initialized Agent streams still derive authority from
+    the persistent transport-session owner, not from this lease. *)
+
+val validate_mcp_sse_session_owner_for_request :
+  session_id:string ->
+  sse_kind:Sse.session_kind ->
+  requester:Server_transport_admission.identity ->
+  (unit, string) result
+(** [validate_mcp_sse_session_owner_for_request] requires Agent streams to use
+    an initialized, credential-owned MCP session.  Observer and Presence
+    streams may use a fresh wire id, but an existing ephemeral lease must have
+    the same credential owner.  Known ownerless sessions fail closed. *)
+
+val claim_mcp_sse_session_owner_for_request :
+  session_id:string ->
+  sse_kind:Sse.session_kind ->
+  requester:Server_transport_admission.identity ->
+  (mcp_sse_owner_lease, string) result
+(** Atomically claims the SSE wire id after validation.  Initialized sessions
+    remain governed by the transport-session owner SSOT; their supplemental
+    connection lease only preserves that owner boundary if the inactive
+    protocol state is reaped while the stream is being connected or remains
+    open. *)
+
+val activate_mcp_sse_owner_lease :
+  mcp_sse_owner_lease -> (unit, string) result
+(** Promotes a connection claim after [Sse.register] succeeds.  Until this
+    transition, another same-owner reconnect is rejected explicitly, so two
+    concurrent setup paths cannot stop or overwrite one another. *)
+
+val release_mcp_sse_owner_lease : mcp_sse_owner_lease -> unit
+(** Releases [lease] only when it is still current.  A failed reconnect setup
+    restores the prior active lease until the old connection is stopped;
+    therefore a stale disconnect callback cannot release a newer reconnect,
+    and a pre-stop setup failure cannot orphan the existing connection owner.
+    Releasing the current owner of a non-transport stream also removes its
+    credential-bound backing session before a different owner may claim the
+    wire id. *)
+
 val remember_mcp_profile :
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   string ->
@@ -57,7 +124,8 @@ val remember_mcp_profile :
   unit
 val forget_mcp_session : string -> unit
 val profile_label : tool_profile -> string
-val reap_stale_sessions : is_active_session:(string -> bool) -> int
+val reap_stale_sessions :
+  base_path:string -> is_active_session:(string -> bool) -> int
 val validate_mcp_session_profile :
   profile:tool_profile -> string -> (unit, string) result
 val validate_mcp_session_delete_profile :
@@ -87,6 +155,7 @@ val ensure_sse_backing_session_for_known_transport_session :
   transport_session_id:string -> sse_session_id:string -> unit
 
 val body_tools_call_name : string -> string option
+val body_jsonrpc_id : string -> Yojson.Safe.t option
 val protocol_version_from_body : string -> string option
 val get_session_id_query : string -> string option
 val get_header_any_case : Httpun.Headers.t -> string -> string option

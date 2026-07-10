@@ -3,7 +3,7 @@
 // Tracks: PR-0.2.G (sibling of PR-0.2.B WS histogram #12015, PR-0.2.F
 // perf-baseline.yml). IMPLEMENTATION-QUEUE Q-P1-7 (Track C C-5).
 //
-// Targets the dashboard WebSocket endpoint at port 8937. Default scenario
+// Targets the dashboard same-origin WebSocket upgrade. Default scenario
 // holds 100 sustained virtual users for 30 seconds. CI runs a 5-VU 5-second
 // smoke variant; real 100-VU measurement runs on a dedicated production
 // runner per docs/design/perf-baseline-protocol.md scope.
@@ -14,7 +14,8 @@
 //   - msg-received rate > 99%
 //
 // Configurable via env:
-//   MASC_DASHBOARD_WS_URL  (default ws://127.0.0.1:8937/dashboard/ws)
+//   MASC_DASHBOARD_WS_URL  (default ws://127.0.0.1:8935/ws)
+//   MASC_DASHBOARD_BEARER  (optional non-browser Authorization bearer)
 //   K6_VUS                 (default 100)
 //   K6_DURATION            (default 30s)
 //   K6_HOLD_MS             (default 20000 — connection hold per VU)
@@ -26,7 +27,8 @@ import { Trend } from 'k6/metrics'
 const syncLatency = new Trend('sync_latency_ms')
 
 const targetUrl =
-  __ENV.MASC_DASHBOARD_WS_URL || 'ws://127.0.0.1:8937/dashboard/ws'
+  __ENV.MASC_DASHBOARD_WS_URL || 'ws://127.0.0.1:8935/ws'
+const authToken = __ENV.MASC_DASHBOARD_BEARER || ''
 const vus = parseInt(__ENV.K6_VUS || '100', 10)
 const duration = __ENV.K6_DURATION || '30s'
 const holdMs = parseInt(__ENV.K6_HOLD_MS || '20000', 10)
@@ -54,13 +56,23 @@ export const options = {
 
 export default function () {
   const sentAt = new Map() // request-id -> ts (ms)
+  const headers = { 'Sec-WebSocket-Protocol': 'masc.dashboard.v1' }
+  if (authToken) headers.Authorization = `Bearer ${authToken}`
 
-  const res = ws.connect(targetUrl, {}, function (socket) {
+  const res = ws.connect(targetUrl, { headers }, function (socket) {
     socket.on('open', function () {
       const helloId = `hello-${__VU}-${Date.now()}`
       sentAt.set(helloId, Date.now())
       socket.send(
-        JSON.stringify({ type: 'hello', client: 'k6-load-vu', id: helloId })
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: helloId,
+          method: 'dashboard/hello',
+          params: {
+            protocol: 'dashboard-ws.v1',
+            features: ['snapshot', 'delta', 'mode_snapshot'],
+          },
+        })
       )
     })
 

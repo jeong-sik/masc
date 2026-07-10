@@ -65,8 +65,7 @@ let print_summary () =
     Env_config_keeper.WorkAsHeartbeat.max_silence_sec;
   Log.Env.info "SmartHeartbeat: enabled=%b"
     Env_config_keeper.SmartHeartbeat.enabled;
-  Log.Env.info "KeeperGrpc: max_reconnect=%d backoff=%.1fs"
-    Env_config_keeper.KeeperGrpc.max_reconnect_attempts
+  Log.Env.info "KeeperGrpc: reconnect=continuous backoff=%.1fs"
     Env_config_keeper.KeeperGrpc.reconnect_backoff_sec;
   Log.Env.info "KeeperProactive: max_attempts=%d timing_ring=%d"
     Env_config_keeper.KeeperProactive.max_attempts

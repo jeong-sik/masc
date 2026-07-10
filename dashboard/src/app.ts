@@ -20,6 +20,7 @@ import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './name
 import { cancelPendingSSERefreshes, registerGovernanceRefresh, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
+import { startDashboardTransportFallback } from './dashboard-transport-fallback'
 import { ensureDevToken } from './api/dev-token'
 import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard-logs'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
@@ -150,6 +151,7 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false
+    let stopTransportFallback: (() => void) | null = null
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -178,6 +180,7 @@ export function App() {
             console.warn('[app] dashboard config fetch failed', err instanceof Error ? err.message : err)
           })
 
+        stopTransportFallback = startDashboardTransportFallback()
         void connectDashboardWS(route.value)
       })
 
@@ -219,6 +222,8 @@ export function App() {
 
     return () => {
       cancelled = true
+      stopTransportFallback?.()
+      stopTransportFallback = null
       disconnectDashboardWS()
       unsubSSE()
       stopPeriodicRefresh()

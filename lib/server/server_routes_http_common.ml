@@ -128,16 +128,26 @@ let parse_host_port host_header default_host default_port =
           (host, port)
         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> (default_host, default_port))
 
-(** Allowed origins for DNS rebinding protection.
-    SSOT: [Masc_network_defaults.allowed_origins]. *)
+(** Compatibility projection of the documented static origin list. Runtime
+    admission does not compare strings against this list; it uses the parsed
+    host/port policy in [Server_auth.public_read_cors_origin_opt]. *)
 let allowed_origins = Masc_network_defaults.allowed_origins
 
-(** Validate Origin header for DNS rebinding protection *)
+(** Shared MCP transport path boundary.  H1 and H2 must run the same Origin
+    and protocol admission for this exact surface. *)
+let is_mcp_like_path path =
+  String.equal path "/mcp"
+  || String.equal path "/mcp/managed"
+  || String.equal path "/mcp/operator"
+  || String.equal path "/sse"
+
+(** Validate Origin without prefix heuristics.  Missing Origin is valid for
+    non-browser MCP clients; browser requests reuse the exact host/port and
+    configured loopback-dev policy already owned by [Server_auth]. *)
 let validate_origin (request : Httpun.Request.t) =
   match Httpun.Headers.get request.headers "origin" with
   | None -> true
-  | Some origin ->
-      List.exists (fun prefix -> String.starts_with ~prefix origin) allowed_origins
+  | Some _ -> Option.is_some (public_read_cors_origin_opt request)
 
 (** Check if client accepts SSE *)
 let accepts_sse (request : Httpun.Request.t) =
@@ -205,15 +215,6 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
         match current_server_state_opt () with
         | Some state -> (Mcp_server.workspace_config state).base_path
         | None -> Server_mcp_transport_http.default_base_path ());
-    verify_mcp_auth =
-      (fun ~base_path request ->
-        Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
-    verify_mcp_observer_stream_auth =
-      (fun ~base_path request ->
-        Result.map (fun _ -> ()) (verify_mcp_observer_stream_auth ~base_path request));
-    verify_operator_mcp_auth =
-      (fun ~base_path request ->
-        Result.map (fun _ -> ()) (verify_operator_mcp_auth ~base_path request));
   }
 
 let mcp_transport_json_headers session_id protocol_version origin =

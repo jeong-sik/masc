@@ -1,21 +1,23 @@
 ---
 title: OCaml ↔ TypeScript shared contract — SSE + gRPC-web
 rfc: 0004
-status: Active
+status: Retired
 created: 2026-04-17
 implementation_prs: []
 ---
 
 # RFC-0004: OCaml ↔ TypeScript shared contract — SSE + gRPC-web
 
-**Status**: Active (frontmatter SSOT; Phase A0.1 completed 2026-05-17)
+**Status**: Retired. The unused `proto/masc.proto` contract and proposed
+gRPC-web dashboard path were removed. `proto/masc_workspace.proto` is the sole
+gRPC contract; the dashboard uses its authenticated HTTP/WebSocket surfaces.
 **Date**: 2026-04-17
 **Scope**: masc OCaml server ↔ dashboard TypeScript contract boundary; SSE event stream, gRPC surface
 **One sentence**: masc 의 두 contract 표면(SSE, gRPC) 중 SSE 에는 atd 기반 OCaml→JSON Schema→Zod AST 파이프라인으로 SSOT 를 도입하고, gRPC 는 dashboard 소비 경로(Connect-RPC 또는 gRPC-web)를 여는 thin slice 로 시작한다.
 
 ## Related Documents
 
-- `../../proto/masc.proto` — gRPC 표면 기존 SSOT
+- `../../proto/masc_workspace.proto` — current gRPC SSOT
 - `../../scripts/gen-grpc-descriptors.sh` — drift 검증 선례
 - PR #7955 — Zod SSE parse boundary (런타임 validation 진입)
 - PR #7952 — `Lockfree_atomic` helper module (이 RFC 와 독립, 참고용)

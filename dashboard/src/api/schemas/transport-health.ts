@@ -128,8 +128,9 @@ const WebsocketSchema = object({
   enabled: fallback(boolean(), false),
   configured: fallback(boolean(), false),
   listening: fallback(boolean(), false),
+  listen_status: fallback(string(), 'unknown'),
   mode: fallback(string(), 'unknown'),
-  port: fallback(number(), 0),
+  endpoint: fallback(string(), '/ws'),
   sessions: fallback(number(), 0),
   relay_source: fallback(string(), 'unknown'),
   delivery: fallback(WebsocketDeliverySchema, {

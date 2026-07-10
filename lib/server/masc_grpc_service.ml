@@ -87,31 +87,6 @@ let decode_tool_arguments_or_raise arguments_json =
       (Printf.sprintf "ToolCall arguments_json is malformed JSON: %s" message)
 ;;
 
-(** Read a file to string. Returns [""] on non-cancellation errors.
-    Propagates [Eio.Cancel.Cancelled] so cooperative cancellation is preserved. *)
-let read_file_safe path =
-  try Fs_compat.load_file path with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Transport.warn "read_file_safe failed for %s: %s" path (Printexc.to_string exn);
-    ""
-;;
-
-(** Safe filename: replace non-alphanumeric chars with underscores. *)
-let safe_filename name =
-  String.map
-    (fun c ->
-       if
-         (c >= 'a' && c <= 'z')
-         || (c >= 'A' && c <= 'Z')
-         || (c >= '0' && c <= '9')
-         || c = '-'
-         || c = '_'
-       then c
-       else '_')
-    name
-;;
-
 let task_assignee_of_status status =
   match Masc_domain.task_assignee_of_status status with
   | Some a -> a
@@ -125,6 +100,18 @@ let task_info_of_task (task : Masc_domain.task) : T.task_info =
   ; assigned_to = task_assignee_of_status task.task_status
   ; priority = task.priority
   }
+;;
+
+let persisted_timestamp_ms ~agent_name ~field value =
+  match Masc_domain.parse_iso8601_opt value with
+  | Some seconds -> Int64.of_float (seconds *. 1000.0)
+  | None ->
+    Log.Transport.warn
+      "gRPC GetStatus: agent %s has invalid persisted %s timestamp: %S"
+      agent_name
+      field
+      value;
+    0L
 ;;
 
 (** {1 Unary Handlers} *)
@@ -168,46 +155,45 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
 ;;
 
 (** GetStatus handler: return current workspace state. *)
-let handle_get_status (workspace_config : Workspace_utils_backend_setup.config) (_bytes : string)
+let handle_get_status (workspace_config : Workspace_utils_backend_setup.config) (bytes : string)
   : string
   =
-  let masc_dir = Common.masc_dir_from_base_path ~base_path:workspace_config.base_path in
-  let agents_dir = Filename.concat masc_dir "agents" in
+  let req =
+    decode_request_or_raise ~rpc:"GetStatus" T.StatusRequest.of_bytes_result bytes
+  in
+  let _identity =
+    authorize_or_raise
+      ~workspace_config
+      ~auth_token:req.auth_token
+      ~claimed_agent:None
+      ~requirement:(Server_transport_admission.Permission Masc_domain.CanReadState)
+  in
   let agents =
-    if Sys.file_exists agents_dir && Sys.is_directory agents_dir
-    then
-      Sys.readdir agents_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.filter_map (fun f ->
-        let path = Filename.concat agents_dir f in
-        try
-          let json = Yojson.Safe.from_string (read_file_safe path) in
-          match Masc_domain.agent_of_yojson json with
-          | Ok agent ->
-            let status_str =
-              Masc_domain.agent_status_to_string agent.Masc_domain.status
-            in
-            Some
-              ({ T.name = agent.name
-               ; status = status_str
-               ; capabilities = agent.capabilities
-               ; last_heartbeat_ms = now_ms ()
-               ; session_bound_at_ms = now_ms ()
-               ; current_task_id = Option.value ~default:"" agent.current_task
-               }
-               : T.agent_info)
-          | _ -> None
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Transport.debug "gRPC status: agent parse skip: %s" (Printexc.to_string exn);
-          None)
-    else []
+    Workspace.get_all_agents workspace_config
+    |> List.map (fun (agent : Masc_domain.agent) ->
+      ({ T.name = agent.name
+       ; status = Masc_domain.agent_status_to_string agent.status
+       ; capabilities = agent.capabilities
+       ; last_seen_ms =
+           persisted_timestamp_ms
+             ~agent_name:agent.name
+             ~field:"last_seen"
+             agent.last_seen
+       ; session_bound_at_ms =
+           persisted_timestamp_ms
+             ~agent_name:agent.name
+             ~field:"session_bound_at"
+             agent.session_bound_at
+       ; current_task_id = Option.value ~default:"" agent.current_task
+       }
+       : T.agent_info))
   in
   let tasks = Workspace.get_tasks_safe workspace_config |> List.map task_info_of_task in
+  let message_count =
+    Workspace.get_all_messages_raw workspace_config ~since_seq:0 |> List.length
+  in
   T.StatusResponse.(
-    to_bytes { agents; tasks; message_count = 0; workspace_path = workspace_config.base_path })
+    to_bytes { agents; tasks; message_count; workspace_path = workspace_config.base_path })
 ;;
 
 (** ToolCall handler: dispatch an MCP tool call via gRPC. *)
@@ -251,56 +237,6 @@ let handle_tool_call
   T.ToolCallResponse.to_bytes result
 ;;
 
-(** LspCall handler — forwards JSON-RPC LSP requests to the language server.
-
-    The [lsp_dispatcher] closure encapsulates the Eio capabilities (switch,
-    process manager, clock) and per-server LSP process cache. It mirrors
-    the WebSocket endpoint's [ensure_lsp_process + send_request] flow but
-    uses a server-scoped (not connection-scoped) process cache, since gRPC
-    calls are stateless unary RPCs.
-
-    Success semantics: [error_message = ""] means the JSON-RPC response in
-    [jsonrpc_response_json] is valid; otherwise the request was rejected
-    before reaching the LSP process. *)
-let handle_lsp_call
-      (workspace_config : Workspace_utils_backend_setup.config)
-      (lsp_dispatcher :
-         language_id:string
-         -> jsonrpc_request_json:string
-         -> workspace_root:string option
-         -> (string, string) result)
-      (bytes : string)
-  : string
-  =
-  let req =
-    decode_request_or_raise ~rpc:"LspCall" T.LspRequest.of_bytes_result bytes
-  in
-  let _identity =
-    (* Unlike the dashboard WebSocket proxy, this raw gRPC bridge does not own
-       the proxy's read-only LSP method catalog. Keep it admin-only so a
-       worker credential cannot forward executeCommand/applyEdit-class calls. *)
-    authorize_or_raise
-      ~workspace_config
-      ~auth_token:req.auth_token
-      ~claimed_agent:None
-      ~requirement:(Server_transport_admission.Permission Masc_domain.CanAdmin)
-  in
-  let result =
-    lsp_dispatcher
-      ~language_id:req.language_id
-      ~jsonrpc_request_json:req.jsonrpc_request_json
-      ~workspace_root:req.workspace_root
-  in
-  let resp =
-    match result with
-    | Ok jsonrpc_response_json ->
-      T.LspResponse.{ jsonrpc_response_json; error_message = "" }
-    | Error msg ->
-      T.LspResponse.{ jsonrpc_response_json = ""; error_message = msg }
-  in
-  T.LspResponse.to_bytes resp
-;;
-
 (** {1 Streaming Handlers} *)
 
 (** Active heartbeat stream count (atomic for signal safety). *)
@@ -308,57 +244,6 @@ let active_heartbeat_streams = Atomic.make 0
 
 (** Active subscribe stream count (atomic for signal safety). *)
 let active_subscribe_streams = Atomic.make 0
-
-(** Compute directives for a keeper based on current workspace state.
-    Returns a list of string directives to include in HeartbeatAck.
-    Reads agent paused state and unclaimed tasks from the filesystem. *)
-let compute_directives
-      ~(workspace_config : Workspace_utils_backend_setup.config)
-      ~(agent_name : string)
-  : string list
-  =
-  let masc_dir = Common.masc_dir_from_base_path ~base_path:workspace_config.base_path in
-  let directives = ref [] in
-  (* 1. Pause directive: check if agent is marked paused *)
-  let agent_file =
-    Filename.concat
-      (Filename.concat masc_dir "agents")
-      (safe_filename agent_name ^ ".json")
-  in
-  if Sys.file_exists agent_file
-  then (
-    try
-      let json = Yojson.Safe.from_string (read_file_safe agent_file) in
-      match Json_util.assoc_member_opt "paused" json with
-      | Some (`Bool true) -> directives := "pause" :: !directives
-      | Some (`Bool false)
-      | Some `Null | Some (`Int _) | Some (`Intlit _) | Some (`Float _) | Some (`String _) | Some (`Assoc _) | Some (`List _) | None -> ()
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Transport.warn
-        "compute_directives: failed to parse agent file %s: %s"
-        agent_file
-        (Printexc.to_string exn));
-  (* 2. Task assignment: find first unclaimed task for idle agent *)
-  if Workspace.root_is_initialized workspace_config
-  then (
-    let unclaimed =
-      Workspace.get_tasks_safe workspace_config
-      |> List.filter_map (fun (task : Masc_domain.task) ->
-        match task.task_status with
-        | Masc_domain.Todo -> Some task.id
-        | Masc_domain.Claimed _
-        | Masc_domain.InProgress _
-        | Masc_domain.AwaitingVerification _
-        | Masc_domain.Done _
-        | Masc_domain.Cancelled _ -> None)
-    in
-    match unclaimed with
-    | task_id :: _ -> directives := ("claim:" ^ task_id) :: !directives
-    | [] -> ());
-  List.rev !directives
-;;
 
 (** Heartbeat bidi handler: receive pings, respond with acks. *)
 let handle_heartbeat
@@ -389,9 +274,9 @@ let handle_heartbeat
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with
       | bytes ->
-        (match T.HeartbeatPing.of_bytes_result bytes with
-         | Error msg -> Log.Transport.warn "gRPC Heartbeat decode failed: %s" msg
-         | Ok ping ->
+        let ping =
+          decode_request_or_raise ~rpc:"Heartbeat" T.HeartbeatPing.of_bytes_result bytes
+        in
            let identity =
              authorize_or_raise
                ~workspace_config
@@ -402,69 +287,42 @@ let handle_heartbeat
            let agent_name = identity.agent_name in
            (try
               let t0 = Unix.gettimeofday () in
-              (* Update agent last_seen *)
-              (try
-                 let agent_file =
-                   Filename.concat
-                     (Filename.concat
-                        (Common.masc_dir_from_base_path ~base_path:workspace_config.base_path)
-                        "agents")
-                     (safe_filename agent_name ^ ".json")
-                 in
-                 if Sys.file_exists agent_file
-                 then (
-                   let json = Yojson.Safe.from_string (read_file_safe agent_file) in
-                   match Masc_domain.agent_of_yojson json with
-                   | Ok agent ->
-                     let now = Unix.gettimeofday () in
-                     let iso_now = Masc_domain.iso8601_of_unix_seconds now in
-                     let updated = { agent with Masc_domain.last_seen = iso_now } in
-                     let content =
-                       Yojson.Safe.to_string (Masc_domain.agent_to_yojson updated)
-                     in
-                     let tmp_path = agent_file ^ ".tmp" in
-                     Fs_compat.save_file tmp_path content;
-                     Unix.rename tmp_path agent_file
-                   | Error e ->
-                     Log.Transport.warn
-                       "gRPC heartbeat: invalid agent JSON for %s: %s"
-                       agent_name
-                       e)
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn ->
-                 Log.Transport.error
-                   "gRPC heartbeat update failed: %s"
-                   (Printexc.to_string exn));
-              (* Count active agents and pending tasks *)
-              let masc_dir =
-                Common.masc_dir_from_base_path ~base_path:workspace_config.base_path
-              in
-              let agents_dir = Filename.concat masc_dir "agents" in
+              (match Workspace.heartbeat_r workspace_config ~agent_name with
+               | Workspace.Heartbeat_updated _ -> ()
+               | Workspace.Heartbeat_agent_not_found { agent_name } ->
+                 Grpc_core.Status.raise_error
+                   Grpc_core.Status.Not_found
+                   (Printf.sprintf
+                      "Heartbeat credential owner %s has no bound workspace agent."
+                      agent_name)
+               | Workspace.Heartbeat_invalid_agent_file { agent_name; detail } ->
+                 Grpc_core.Status.raise_error
+                   Grpc_core.Status.Data_loss
+                   (Printf.sprintf
+                      "Heartbeat agent state for %s is invalid: %s"
+                      agent_name
+                      detail));
               let agent_count =
-                if Sys.file_exists agents_dir
-                then Array.length (Sys.readdir agents_dir)
-                else 0
+                Workspace.get_active_agents workspace_config |> List.length
               in
-              let tasks_dir = Filename.concat masc_dir "tasks" in
               let pending_count =
-                if Sys.file_exists tasks_dir
-                then
-                  Sys.readdir tasks_dir
-                  |> Array.to_list
-                  |> List.filter (fun f -> Filename.check_suffix f ".json")
-                  |> List.length
-                else 0
-              in
-              let directives =
-                compute_directives ~workspace_config ~agent_name
+                Workspace.get_tasks_safe workspace_config
+                |> List.fold_left
+                     (fun count (task : Masc_domain.task) ->
+                       match task.task_status with
+                       | Masc_domain.Todo
+                       | Masc_domain.Claimed _
+                       | Masc_domain.InProgress _
+                       | Masc_domain.AwaitingVerification _ ->
+                         count + 1
+                       | Masc_domain.Done _ | Masc_domain.Cancelled _ -> count)
+                     0
               in
               let ack =
                 T.HeartbeatAck.
                   { timestamp_ms = now_ms ()
                   ; active_agent_count = agent_count
                   ; pending_task_count = pending_count
-                  ; directives
                   }
               in
               let ack_bytes = T.HeartbeatAck.to_bytes ack in
@@ -478,7 +336,8 @@ let handle_heartbeat
             | exn ->
               Log.Transport.error
                 "gRPC heartbeat iteration crashed: %s"
-                (Printexc.to_string exn)));
+                (Printexc.to_string exn);
+              raise exn);
         loop ()
       | exception End_of_file -> cleanup ()
     in
@@ -658,8 +517,7 @@ let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (
     @param workspace_config The MASC workspace configuration.
     @param tool_dispatcher Function that dispatches tool calls:
       [tool_name -> arguments_json -> (result_json, error_message) result].
-    @param lsp_dispatcher Function that forwards LSP JSON-RPC requests:
-      [language_id -> jsonrpc_request_json -> workspace_root -> (response_json, error) result]. *)
+    The dashboard IDE owns the sole LSP transport at [/api/v1/ide/lsp]. *)
 let create_service
       ~(workspace_config : Workspace_utils_backend_setup.config)
       ~(tool_dispatcher :
@@ -668,18 +526,12 @@ let create_service
           -> tool_name:string
           -> arguments:Yojson.Safe.t
           -> (string, string) result)
-      ~(lsp_dispatcher :
-          language_id:string
-          -> jsonrpc_request_json:string
-          -> workspace_root:string option
-          -> (string, string) result)
   : Grpc_eio.Service.t
   =
   Grpc_eio.Service.create service_name
   |> Grpc_eio.Service.add_unary "Broadcast" (handle_broadcast workspace_config)
   |> Grpc_eio.Service.add_unary "GetStatus" (handle_get_status workspace_config)
   |> Grpc_eio.Service.add_unary "ToolCall" (handle_tool_call workspace_config tool_dispatcher)
-  |> Grpc_eio.Service.add_unary "LspCall" (handle_lsp_call workspace_config lsp_dispatcher)
   |> Grpc_eio.Service.add_server_streaming "Subscribe" (handle_subscribe workspace_config)
   |> Grpc_eio.Service.add_bidi_streaming "Heartbeat" (handle_heartbeat workspace_config)
 ;;

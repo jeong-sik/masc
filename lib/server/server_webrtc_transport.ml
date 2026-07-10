@@ -122,6 +122,15 @@ type peer_conn = {
 (** Signaling exchange registry. *)
 let pending_offers : (string, pending_offer) Hashtbl.t = Hashtbl.create 8
 let active_peers : (string, peer_conn) Hashtbl.t = Hashtbl.create 8
+let pending_offer_admissions :
+    (string, Server_transport_admission.admission) Hashtbl.t =
+  Hashtbl.create 8
+;;
+
+let peer_admissions :
+    (string, Server_transport_admission.admission) Hashtbl.t =
+  Hashtbl.create 8
+;;
 
 (** Live WebRTC connections keyed by peer_id. *)
 let peer_webrtc_map : (string, Webrtc.Webrtc_eio.t) Hashtbl.t = Hashtbl.create 8
@@ -133,21 +142,17 @@ let registry_mutex = Eio.Mutex.create ()
 
 let with_registry f = Eio_guard.with_mutex registry_mutex f
 
-(** Generate a unique offer/peer ID. *)
-let next_id =
-  let counter = Atomic.make 0 in
-  fun prefix ->
-    let n = Atomic.fetch_and_add counter 1 in
-    Printf.sprintf "%s-%d-%d" prefix
-      (int_of_float (Unix.gettimeofday () *. 1000.0)) n
+(** Generate an unguessable offer/peer ID. *)
+let next_id prefix = Random_id.prefixed ~prefix:(prefix ^ "-") ~bytes:16
 
 (** {1 Message Handler} *)
 
 (** Callback invoked when a DataChannel message arrives.
     Signature: peer_id -> message_body -> unit.
     Set by [set_message_handler] from the server bootstrap. *)
-let message_handler : (string -> string -> unit) ref =
-  ref (fun _peer_id _body ->
+let message_handler :
+    (Server_transport_admission.admission -> string -> string -> unit) ref =
+  ref (fun _admission _peer_id _body ->
     Log.Server.warn "WebRTC message received but no handler registered")
 
 (** Register the MCP dispatch handler for incoming DataChannel messages. *)
@@ -217,8 +222,9 @@ let add_remote_ice_candidate webrtc candidate_str =
 
 (** Create a signaling offer.
     Returns the offer_id for the answerer to reference. *)
-let create_offer ~from_agent ~ice_candidates ~dtls_fingerprint =
+let create_offer ~admission ~ice_candidates ~dtls_fingerprint =
   let offer_id = next_id "offer" in
+  let from_agent = admission.Server_transport_admission.identity.agent_name in
   let offer = {
     offer_id;
     from_agent;
@@ -227,7 +233,8 @@ let create_offer ~from_agent ~ice_candidates ~dtls_fingerprint =
     created_at = Unix.gettimeofday ();
   } in
   with_registry (fun () ->
-    Hashtbl.replace pending_offers offer_id offer);
+    Hashtbl.replace pending_offers offer_id offer;
+    Hashtbl.replace pending_offer_admissions offer_id admission);
   Log.Server.info "WebRTC offer %s from %s (%d ICE candidates)"
     offer_id from_agent (List.length ice_candidates);
   offer_id
@@ -241,13 +248,30 @@ let get_offer offer_id =
     Creates a Webrtc.Webrtc_eio.t server-side peer and stores it in peer_webrtc_map.
     The offer's ICE candidates and credentials are fed into the WebRTC peer.
     Returns a peer_conn for both sides. *)
-let accept_offer ~offer_id ~answerer_agent =
+let accept_offer ~offer_id ~admission =
   with_registry (fun () ->
-    match Hashtbl.find_opt pending_offers offer_id with
-    | None -> Error "Offer not found or expired"
-    | Some offer ->
+    match
+      Hashtbl.find_opt pending_offers offer_id,
+      Hashtbl.find_opt pending_offer_admissions offer_id
+    with
+    | None, None -> Error "Offer not found or expired"
+    | None, Some _ ->
+      Hashtbl.remove pending_offer_admissions offer_id;
+      Log.Server.error
+        "WebRTC offer %s had bearer admission without signaling payload"
+        offer_id;
+      Error "Offer state is inconsistent"
+    | Some _, None ->
       Hashtbl.remove pending_offers offer_id;
+      Log.Server.error
+        "WebRTC offer %s had signaling payload without bearer admission"
+        offer_id;
+      Error "Offer state is inconsistent"
+    | Some offer, Some offer_admission ->
+      Hashtbl.remove pending_offers offer_id;
+      Hashtbl.remove pending_offer_admissions offer_id;
       let peer_id = next_id "peer" in
+      let answerer_agent = admission.Server_transport_admission.identity.agent_name in
       let conn = {
         peer_id;
         remote_agent = offer.from_agent;
@@ -256,6 +280,11 @@ let accept_offer ~offer_id ~answerer_agent =
         last_activity = Unix.gettimeofday ();
       } in
       Hashtbl.replace active_peers peer_id conn;
+      (* [remote_agent] is the offer owner, so inbound DataChannel messages
+         must execute under that same immutable admission. The answerer's
+         credential authorizes accepting the offer but must never be projected
+         onto traffic sent by the remote offer owner. *)
+      Hashtbl.replace peer_admissions peer_id offer_admission;
       (* Create server-side WebRTC peer *)
       let ice_config = configured_ice_config ~role:Webrtc.Ice.Controlled in
       let webrtc = Webrtc.Webrtc_eio.create ~ice_config ~role:Webrtc.Webrtc_eio.Server () in
@@ -279,6 +308,7 @@ let mark_connected peer_id =
 let remove_peer peer_id =
   with_registry (fun () ->
     Hashtbl.remove active_peers peer_id;
+    Hashtbl.remove peer_admissions peer_id;
     (match Hashtbl.find_opt peer_webrtc_map peer_id with
      | Some webrtc ->
        Webrtc.Webrtc_eio.close webrtc;
@@ -319,11 +349,21 @@ let start_webrtc_connection ~sw ~env peer_id =
       (* Wire message handler on the datachannel *)
       dc.Webrtc.Webrtc_eio.on_message <- Some (fun data ->
         let msg = Bytes.to_string data in
-        with_registry (fun () ->
+        let admission =
+          with_registry (fun () ->
           match Hashtbl.find_opt active_peers peer_id with
-          | Some conn -> conn.last_activity <- Unix.gettimeofday ()
-          | None -> ());
-        !message_handler peer_id msg);
+          | Some conn ->
+            conn.last_activity <- Unix.gettimeofday ();
+            Hashtbl.find_opt peer_admissions peer_id
+          | None -> None)
+        in
+        match admission with
+        | Some admission -> !message_handler admission peer_id msg
+        | None ->
+          Log.Server.error
+            "WebRTC peer %s received data without retained bearer admission"
+            peer_id;
+          remove_peer peer_id);
       dc.Webrtc.Webrtc_eio.on_close <- Some (fun () ->
         Log.Server.info "WebRTC peer %s datachannel closed" peer_id;
         remove_peer peer_id));
@@ -363,18 +403,16 @@ let send_to_peer peer_id msg =
 (** {1 HTTP Signaling Handlers} *)
 
 (** Handle POST /webrtc/offer — create a new offer. *)
-let handle_offer_request body =
+let handle_offer_request ~admission body =
   try
     let json = Yojson.Safe.from_string body in
-    let from_agent =
-      (match Json_util.assoc_member_opt "agent_name" json with Some (`String s) -> s | _ -> "") in
     let ice_candidates =
       (match Json_util.assoc_member_opt "ice_candidates" json with Some (`List l) -> l | _ -> [])
       |> List.map Yojson.Safe.to_string in
     let dtls_fingerprint =
       Json_util.get_string json "dtls_fingerprint"
       |> Option.value ~default:"" in
-    let offer_id = create_offer ~from_agent ~ice_candidates ~dtls_fingerprint in
+    let offer_id = create_offer ~admission ~ice_candidates ~dtls_fingerprint in
     Ok (Printf.sprintf {|{"offer_id":"%s","status":"pending"}|} offer_id)
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Invalid offer: %s" (Printexc.to_string exn))
@@ -382,13 +420,11 @@ let handle_offer_request body =
 (** Handle POST /webrtc/answer — accept an existing offer.
     Also returns server-side ICE credentials for the client to complete
     the signaling handshake. *)
-let handle_answer_request body =
+let handle_answer_request ~admission body =
   try
     let json = Yojson.Safe.from_string body in
     let offer_id =
       (match Json_util.assoc_member_opt "offer_id" json with Some (`String s) -> s | _ -> "") in
-    let answerer =
-      (match Json_util.assoc_member_opt "agent_name" json with Some (`String s) -> s | _ -> "") in
     (* Also accept optional answerer ICE candidates *)
     let answer_ice =
       match Json_util.assoc_member_opt "ice_candidates" json with
@@ -396,7 +432,7 @@ let handle_answer_request body =
       | Some candidates -> (match candidates with `List l -> l | _ -> []) |> List.map Yojson.Safe.to_string
     in
     ignore answer_ice;
-    match accept_offer ~offer_id ~answerer_agent:answerer with
+    match accept_offer ~offer_id ~admission with
     | Ok conn ->
       (* Retrieve server-side ICE credentials to return in the answer *)
       let ice_ufrag, ice_pwd =
@@ -428,6 +464,12 @@ let active_peer_count () =
   with_registry (fun () ->
     Hashtbl.length active_peers)
 
+let admitted_remote_agent peer_id =
+  with_registry (fun () ->
+    Hashtbl.find_opt peer_admissions peer_id
+    |> Option.map (fun admission ->
+         admission.Server_transport_admission.identity.agent_name))
+
 (** Number of live WebRTC connections (subset of active_peers that have
     a Webrtc.Webrtc_eio.t running). *)
 let live_webrtc_count () =
@@ -449,7 +491,9 @@ let cleanup_expired_offers ?(max_age_s = 60.0) () =
       ) pending_offers [])
   in
   List.iter (fun id ->
-    with_registry (fun () -> Hashtbl.remove pending_offers id)
+    with_registry (fun () ->
+      Hashtbl.remove pending_offers id;
+      Hashtbl.remove pending_offer_admissions id)
   ) expired;
   List.length expired
 
@@ -476,4 +520,3 @@ let () =
     ~live_count:live_webrtc_count
     ~channels_count:connected_channel_count
     ~ice_servers_urls:configured_ice_server_urls
-

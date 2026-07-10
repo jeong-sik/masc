@@ -24,19 +24,23 @@ val handle_ag_ui_events :
        when none present — {!Mcp_session.get_or_generate}).
     2. Resolve protocol version from the per-session table.
     3. Read [last-event-id] header (replay anchor).
-    4. Run {!check_sse_connect_guard} — on rate-limit reject with
+    4. Require strict token-bound [CanReadState] admission, validate/claim the
+       shared credential owner lease, and bind the backing session to that
+       owner before any prior connection can be stopped.
+    5. Run {!check_sse_connect_guard} — on rate-limit reject with
        {!respond_sse_rate_limited} (HTTP 429) and stop.
-    5. {!stop_sse_session_preserve_guard} on the session id (drops a
+    6. {!stop_sse_session_preserve_guard} on the session id (drops a
        previous SSE stream for the same session without re-arming the
        guard).
-    6. Register as an {!Sse.Observer} with {!Sse.register} — receives a
+    7. Register as an {!Sse.Observer} with {!Sse.register} — receives a
        per-client event stream and a possibly-evicted prior session id.
        Evicted session is fully stopped.
-    7. Send a synthetic AG-UI [Run_started] prime event so the client
+    8. Publish the HTTP connection, then activate its ownership lease.
+    9. Send a synthetic AG-UI [Run_started] prime event so the client
        can observe the connection has settled.
-    8. If [last-event-id] was present, replay missed observer events via
+    10. If [last-event-id] was present, replay missed observer events via
        {!Sse.get_events_after_for_kind}.
-    9. Spawn two fibers under the runtime switch:
+    11. Spawn two fibers under the runtime switch:
        - drain: pulls from per-session stream, writes raw to client,
          self-terminates on send failure.
        - ping: sleeps 30s, writes ": ping\\n\\n" comment frame to
@@ -54,12 +58,10 @@ val handle_ag_ui_events :
 
     {1 Boot-time fast path}
 
-    When [deps.get_runtime_result ()] returns [Error] (runtime not
-    yet bootstrapped), the handler skips fiber spawn and logs at
-    {!Log.Server.debug}.  The HTTP response is already in flight at
-    this point — clients see a stream that emits the prime event
-    and any replay events but no live updates.  The client SDK is
-    expected to retry on stream end.
+    When [deps.get_runtime_result ()] returns [Error] after registration, the
+    handler logs an explicit error and closes the stream.  This releases the
+    owner lease and backing session rather than leaving a registered stream
+    with no live pumps.
 
     {1 Ping interval}
 

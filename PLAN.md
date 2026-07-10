@@ -20,15 +20,16 @@
 - #14557 - fix(keeper,dashboard,server): stop swallowing warnings/errors (Phase 6)
 - #14564 - feat(keeper): wire goal/task/board with keeper tool results (Phase 5)
 - #14565 - feat(ide): add memory tier panel to IDE right-side (Phase 5)
-- #14573 - feat(grpc,lsp): add LspCall RPC to gRPC service (Phase 1)
 - #14574 - refactor(keeper): RFC-0064 two-surface tool alias — drop 3-tier classification (Phase 4)
 
 ## Remaining Work
 
 ### Phase 1: Dashboard/Transports
-- [x] Implement multi-transport abstraction (SSE, HTTP streamable, WebSocket, gRPC)
+- [x] Implement multi-transport abstraction (SSE, HTTP streamable, WebSocket,
+      experimental opt-in gRPC)
 - [x] Remove hardcoded EventSource from dashboard/src/sse.ts
-- [ ] Wire gRPC consumer for LSP results (in-flight: PR #14573)
+- [x] Retire the unconsumed gRPC `LspCall`; authenticated `/api/v1/ide/lsp`
+      WebSocket is the IDE LSP transport SSOT
 - [ ] Add Go WebSocket server support (no Go code in repo; deferred)
 
 ### Phase 2: Keeper Invariants

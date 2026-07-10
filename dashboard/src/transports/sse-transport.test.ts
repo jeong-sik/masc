@@ -42,6 +42,26 @@ function installMock(): void {
   vi.stubGlobal('EventSource', MockEventSource)
 }
 
+function controlledEventStream(): {
+  readonly response: Response
+  readonly controller: ReadableStreamDefaultController<Uint8Array>
+} {
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+  const stream = new ReadableStream<Uint8Array>({
+    start(nextController) {
+      controller = nextController
+    },
+  })
+  if (controller === undefined) throw new Error('stream controller was not initialized')
+  return {
+    response: new Response(stream, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }),
+    controller,
+  }
+}
+
 describe('createSseTransport', () => {
   beforeEach(() => {
     installMock()
@@ -87,6 +107,160 @@ describe('createSseTransport', () => {
       { type: 'message', data: { kind: 'ping' } },
       { type: 'message', data: 'plain heartbeat' },
     ])
+  })
+
+  it('uses an Authorization header and ReadableStream without a query bearer', async () => {
+    vi.useRealTimers()
+    const streamState: {
+      controller?: ReadableStreamDefaultController<Uint8Array>
+    } = {}
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamState.controller = controller
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const events: Array<{ type: string; data?: unknown }> = []
+    const transport = createSseTransport('/mcp?session_id=dash_test', {
+      headers: { Authorization: 'Bearer secret-token' },
+      retryJitterMs: 0,
+    })
+    transport.subscribe((event) => {
+      events.push({
+        type: event.type,
+        ...(event.type === 'message' ? { data: event.data } : {}),
+      })
+    })
+
+    transport.connect()
+
+    await vi.waitFor(() => expect(events).toContainEqual({ type: 'open' }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/mcp?session_id=dash_test',
+      expect.objectContaining({
+        cache: 'no-store',
+        headers: expect.objectContaining({
+          Accept: 'text/event-stream',
+          Authorization: 'Bearer secret-token',
+        }),
+      }),
+    )
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('secret-token')
+
+    const controller = streamState.controller
+    if (controller === undefined) throw new Error('stream controller was not initialized')
+    controller.enqueue(
+      new TextEncoder().encode('id: evt-42\ndata: {"kind":"authenticated"}\n\n'),
+    )
+    await vi.waitFor(() => {
+      expect(events).toContainEqual({
+        type: 'message',
+        data: { kind: 'authenticated' },
+      })
+    })
+
+    transport.disconnect()
+    expect(transport.isConnected()).toBe(false)
+  })
+
+  it('applies an id-only server prime and retry value to the next request', async () => {
+    const first = controlledEventStream()
+    const second = controlledEventStream()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(first.response)
+      .mockResolvedValueOnce(second.response)
+    vi.stubGlobal('fetch', fetchMock)
+    const transport = createSseTransport('/mcp?session_id=dash_test', {
+      headers: { Authorization: 'Bearer secret-token' },
+      retryBaseMs: 100,
+      retryJitterMs: 0,
+    })
+
+    transport.connect()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    first.controller.enqueue(
+      new TextEncoder().encode(
+        'retry: 3000\nid: evt-42\n\nretry: invalid\nid: bad\0id\n\n',
+      ),
+    )
+    first.controller.close()
+    await vi.advanceTimersByTimeAsync(0)
+
+    await vi.advanceTimersByTimeAsync(2_999)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer secret-token',
+          'Last-Event-ID': 'evt-42',
+        }),
+      }),
+    )
+
+    transport.disconnect()
+  })
+
+  it('parses CRLF, lone CR, lone LF, and chunk-split multi-line data', async () => {
+    vi.useRealTimers()
+    const controlled = controlledEventStream()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(controlled.response))
+    const messages: unknown[] = []
+    const transport = createSseTransport('/mcp', {
+      headers: { Authorization: 'Bearer secret-token' },
+      retryJitterMs: 0,
+    })
+    transport.subscribe((event) => {
+      if (event.type === 'message') messages.push(event.data)
+    })
+
+    transport.connect()
+    controlled.controller.enqueue(new TextEncoder().encode('\uFEFF: comment\r\nid: evt-'))
+    controlled.controller.enqueue(new TextEncoder().encode('7\r'))
+    controlled.controller.enqueue(
+      new TextEncoder().encode('\ndata:  leading\rdata: second\r\r'),
+    )
+    controlled.controller.enqueue(
+      new TextEncoder().encode('data: {"answer":\ndata: 42}\n\n'),
+    )
+
+    await vi.waitFor(() => {
+      expect(messages).toEqual([
+        ' leading\nsecond',
+        { answer: 42 },
+      ])
+    })
+    transport.disconnect()
+  })
+
+  it('discards an unterminated event when the fetch stream reaches EOF', async () => {
+    vi.useRealTimers()
+    const controlled = controlledEventStream()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(controlled.response))
+    const eventTypes: string[] = []
+    const transport = createSseTransport('/mcp', {
+      headers: { Authorization: 'Bearer secret-token' },
+      retryBaseMs: 60_000,
+      retryJitterMs: 0,
+    })
+    transport.subscribe((event) => eventTypes.push(event.type))
+
+    transport.connect()
+    controlled.controller.enqueue(new TextEncoder().encode('data: incomplete'))
+    controlled.controller.close()
+
+    await vi.waitFor(() => expect(eventTypes).toContain('error'))
+    expect(eventTypes).not.toContain('message')
+    transport.disconnect()
   })
 
   it('reconnects with exponential backoff capped by retryMaxMs', () => {

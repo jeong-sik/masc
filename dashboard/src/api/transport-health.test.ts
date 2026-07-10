@@ -157,8 +157,9 @@ describe('decodeTransportHealthData', () => {
         enabled: true,
         configured: true,
         listening: false,
-        mode: 'relay',
-        port: 8080,
+        listen_status: 'initializing',
+        mode: 'same_origin',
+        endpoint: '/ws',
         sessions: 2,
         relay_source: 'sse',
       },
@@ -216,7 +217,9 @@ describe('decodeTransportHealthData', () => {
     expect(result!.sse.hot_sessions[0]!.kind).toBe('observer')
     expect(result!.grpc.enabled).toBe(true)
     expect(result!.grpc.port).toBe(50051)
-    expect(result!.websocket.mode).toBe('relay')
+    expect(result!.websocket.mode).toBe('same_origin')
+    expect(result!.websocket.endpoint).toBe('/ws')
+    expect(result!.websocket.listen_status).toBe('initializing')
     expect(result!.webrtc.ice_server_count).toBe(2)
     expect(result!.streamable_http.supports_post).toBe(true)
     expect(result!.streamable_http.presence_stream).toBe('/events/presence')

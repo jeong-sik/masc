@@ -36,9 +36,6 @@
       direct [respond_with_string] calls in the critical POST/GET/DELETE
       handlers (especially the OAS-executing forked fiber at [Eio.Fiber.fork
       ~sw:(runtime.sw)]).
-   5. [lib/server/server_ws_standalone.ml]: [Ws.Wsd.send_pong] wrapped so the
-      "cannot write to closed writer" race is explicit.
-
    This test asserts the presence of these defensive patterns in the source so
    a future refactor that silently removes them fails CI before it can re-arm
    the FATAL restart loop. *)
@@ -326,26 +323,5 @@ let () =
           cancel endpoint. Client transport disconnect must not cancel the \
           accepted keeper_msg request."
          keeper_cancel_count);
-
-  (* ---- lib/server/server_ws_standalone.ml -------------------------------- *)
-  let ws_src =
-    resolve_path
-      [ Filename.concat project_root "lib/server/server_ws_standalone.ml"
-      ; "lib/server/server_ws_standalone.ml"
-      ; "../lib/server/server_ws_standalone.ml"
-      ]
-    |> read_file
-  in
-
-  (* Anchor W1: websocket write races are still guarded by the shared
-     late-response classifier. *)
-  assert_contains
-    ~label:"W1a: websocket write failure classifier still present"
-    ws_src
-    "Late_response.classify_write_failure exn";
-  assert_contains
-    ~label:"W1b: websocket late-write debug branch"
-    ws_src
-    "WS standalone handler closed before write completed";
 
   print_endline "test_reqd_invalid_state_swallow: OK"

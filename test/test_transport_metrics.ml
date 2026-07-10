@@ -213,25 +213,22 @@ let test_ws_dashboard_hello_latency () =
     1.0
     (error_count_after -. error_count_before)
 
-let test_ws_enabled_blank_env_matches_runtime () =
+let test_ws_enabled_blank_env_defaults_enabled () =
   with_env "MASC_WS_ENABLED" (Some "") (fun () ->
     check bool "transport metrics treats blank as enabled" true
-      (TM.ws_enabled ());
-    check bool "runtime server treats blank as enabled" true
-      (Server_ws_standalone.is_enabled ()))
+      (TM.ws_enabled ()))
 
-let test_ws_enabled_normalized_env_matches_runtime () =
+let test_ws_enabled_normalizes_false_env () =
   with_env "MASC_WS_ENABLED" (Some " FALSE ") (fun () ->
     check bool "transport metrics normalizes false env" false
-      (TM.ws_enabled ());
-    check bool "runtime server normalizes false env" false
-      (Server_ws_standalone.is_enabled ()))
+      (TM.ws_enabled ()))
 
-let test_ws_runtime_listening_cache () =
-  TM.set_ws_runtime_listening true;
-  check bool "ws listening uses runtime cache" true (TM.ws_listening ());
-  TM.set_ws_runtime_listening false;
-  check bool "ws listening resets" false (TM.ws_listening ())
+let test_ws_upgrade_state_readiness () =
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    TM.set_ws_upgrade_state TM.Ready;
+    check bool "ws listening uses typed runtime state" true (TM.ws_listening ());
+    TM.set_ws_upgrade_state TM.Initializing;
+    check bool "ws listening resets" false (TM.ws_listening ()))
 
 let test_http_listener_state_json () =
   let accepts_before =
@@ -524,39 +521,34 @@ let test_grpc_listen_status_lifecycle () =
     (Atomic.get TM.grpc_listen_status);
   check bool "grpc listening returns false" false (TM.grpc_listening ())
 
-let test_ws_listen_status_lifecycle () =
-  check string "ws status after init" "not_started"
-    (Atomic.get TM.ws_listen_status);
-  TM.set_ws_listen_status "listening";
-  TM.set_ws_runtime_listening true;
-  check string "ws status after listening" "listening"
-    (Atomic.get TM.ws_listen_status);
-  check bool "ws listening returns true" true (TM.ws_listening ());
-  TM.set_ws_listen_status "stopped";
-  TM.set_ws_runtime_listening false;
-  check string "ws status after stopped" "stopped"
-    (Atomic.get TM.ws_listen_status);
-  check bool "ws listening returns false" false (TM.ws_listening ())
+let test_ws_upgrade_state_lifecycle () =
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    TM.set_ws_upgrade_state TM.Initializing;
+    check string "ws status initializing" "initializing"
+      (TM.ws_upgrade_state_to_string (TM.get_ws_upgrade_state ()));
+    TM.set_ws_upgrade_state TM.Ready;
+    check string "ws status ready" "ready"
+      (TM.ws_upgrade_state_to_string (TM.get_ws_upgrade_state ()));
+    check bool "ws listening returns true" true (TM.ws_listening ());
+    TM.set_ws_upgrade_state TM.Stopped;
+    check string "ws status stopped" "stopped"
+      (TM.ws_upgrade_state_to_string (TM.get_ws_upgrade_state ()));
+    check bool "ws listening returns false" false (TM.ws_listening ()))
 
 let test_listen_status_bind_failed () =
   TM.set_grpc_listen_status "bind_failed";
   TM.set_grpc_runtime_listening false;
-  TM.set_ws_listen_status "bind_failed";
-  TM.set_ws_runtime_listening false;
   check bool "grpc not listening on bind_failed" false (TM.grpc_listening ());
-  check bool "ws not listening on bind_failed" false (TM.ws_listening ());
   check string "grpc status is bind_failed" "bind_failed"
-    (Atomic.get TM.grpc_listen_status);
-  check string "ws status is bind_failed" "bind_failed"
-    (Atomic.get TM.ws_listen_status)
+    (Atomic.get TM.grpc_listen_status)
 
 let test_listen_status_disabled () =
   TM.set_grpc_listen_status "disabled";
-  TM.set_ws_listen_status "disabled";
+  TM.set_ws_upgrade_state TM.Disabled;
   check string "grpc status disabled" "disabled"
     (Atomic.get TM.grpc_listen_status);
   check string "ws status disabled" "disabled"
-    (Atomic.get TM.ws_listen_status)
+    (TM.ws_upgrade_state_to_string (TM.get_ws_upgrade_state ()))
 
 (* ============================================================
    Test Runner
@@ -588,11 +580,11 @@ let () =
       test_case "observe dashboard hello latency" `Quick
         test_ws_dashboard_hello_latency;
       test_case "blank env stays enabled" `Quick
-        test_ws_enabled_blank_env_matches_runtime;
+        test_ws_enabled_blank_env_defaults_enabled;
       test_case "normalized env matches runtime" `Quick
-        test_ws_enabled_normalized_env_matches_runtime;
+        test_ws_enabled_normalizes_false_env;
       test_case "runtime listening cache" `Quick
-        test_ws_runtime_listening_cache;
+        test_ws_upgrade_state_readiness;
     ]);
     ("http_listener", [
       test_case "primary listener state json" `Quick
@@ -609,7 +601,7 @@ let () =
       test_case "grpc listen_status lifecycle" `Quick
         test_grpc_listen_status_lifecycle;
       test_case "ws listen_status lifecycle" `Quick
-        test_ws_listen_status_lifecycle;
+        test_ws_upgrade_state_lifecycle;
       test_case "listen_status bind_failed" `Quick
         test_listen_status_bind_failed;
       test_case "listen_status disabled" `Quick

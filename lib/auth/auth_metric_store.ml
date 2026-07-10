@@ -1,4 +1,5 @@
 let metric_auth_strict_unknown_tool_denials = "masc_auth_strict_unknown_tool_denials_total"
+let metric_auth_tool_permission_undeclared_denials = "masc_auth_tool_permission_undeclared_denials_total"
 let metric_auth_credential_index_cache_hits = "masc_auth_credential_index_cache_hits_total"
 let metric_auth_credential_index_cache_misses = "masc_auth_credential_index_cache_misses_total"
 let metric_auth_credential_ambiguous_lookup = "masc_auth_credential_ambiguous_lookup_total"

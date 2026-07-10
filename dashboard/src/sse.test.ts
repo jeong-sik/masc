@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildDashboardSseUrl,
+  connectSSE,
   connected,
   disconnectSSE,
   flushPendingSseEvents,
@@ -53,14 +54,14 @@ describe('buildDashboardSseUrl', () => {
     clearStoredToken()
   })
 
-  it('includes token from sessionStorage and agent from query params', () => {
+  it('keeps the stored bearer out of the URL while preserving agent scope', () => {
     setStoredToken('secret')
     expect(
       buildDashboardSseUrl('dash_test', '?agent=keeper-a'),
-    ).toBe('/mcp?agent=keeper-a&token=secret&session_id=dash_test&sse_kind=observer')
+    ).toBe('/mcp?agent=keeper-a&session_id=dash_test&sse_kind=observer')
   })
 
-  it('omits blank raw stored tokens through the shared auth reader', () => {
+  it('never projects blank raw stored tokens into the URL', () => {
     sessionStorage.setItem('masc_bearer_token', '   ')
 
     expect(buildDashboardSseUrl('dash_test', '?agent=keeper-a')).toBe(
@@ -92,6 +93,65 @@ describe('normalizeSSEDispatchType', () => {
 
   it('strips legacy masc slash prefix for core events', () => {
     expect(normalizeSSEDispatchType('masc/keeper_turn_complete')).toBe('keeper_turn_complete')
+  })
+})
+
+describe('dashboard SSE credential lifecycle', () => {
+  beforeEach(() => {
+    disconnectSSE()
+    clearStoredToken()
+    MockEventSource.reset()
+    vi.stubGlobal('EventSource', MockEventSource)
+    sessionStorage.removeItem('masc_dashboard_sse_session_id')
+  })
+
+  afterEach(() => {
+    disconnectSSE()
+    clearStoredToken()
+    vi.unstubAllGlobals()
+  })
+
+  it('aborts stale fetch streams on token rotation and token clear', async () => {
+    const fetchSignals: AbortSignal[] = []
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.signal instanceof AbortSignal) fetchSignals.push(init.signal)
+      return Promise.resolve(
+        new Response(new ReadableStream<Uint8Array>(), {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    setStoredToken('token-a')
+
+    connectSSE()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer token-a' }),
+      }),
+    )
+
+    setStoredToken('token-b')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(fetchSignals[0]?.aborted).toBe(true)
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer token-b' }),
+      }),
+    )
+
+    clearStoredToken()
+    await vi.waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    expect(fetchSignals[1]?.aborted).toBe(true)
+
+    disconnectSSE()
+    expect(MockEventSource.instances[0]?.close).toHaveBeenCalledTimes(1)
+    setStoredToken('token-c')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(MockEventSource.instances).toHaveLength(1)
   })
 })
 

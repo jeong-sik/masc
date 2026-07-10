@@ -1,6 +1,6 @@
 // Dashboard WS cutover flag.
 //
-// The dashboard historically opened both an /sse EventSource and a /ws
+// The dashboard historically opened both an observer SSE stream and a /ws
 // WebSocket in parallel.  The server fans every broadcast to both
 // channels, so every event reaches the client twice — once through the
 // direct SSE stream and once through the WS session's
@@ -8,9 +8,9 @@
 // event twice: deltas land in the store via [applyDelta], raw pushes
 // via the [routeServerPushEvent] call inside [handleRawPush].
 //
-// This flag controls the WS-only mode.
-// As of recent updates, WS-only mode is the default (true) to reduce
-// overhead and redundancy. You can opt-out by setting it to false.
+// This flag controls the steady state. WS-only is the default; a concrete WS
+// failure temporarily starts authenticated streaming-fetch SSE. Setting the
+// flag false deliberately keeps WS and SSE open in parallel.
 //
 // Precedence (first match wins):
 //   1. window.__MASC_DASHBOARD_WS_ONLY__ === false  (runtime injection)

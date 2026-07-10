@@ -7,6 +7,14 @@ module Wrtc = Server_webrtc_transport
 module Transport = Masc.Transport
 module Agent_transport = Masc_grpc_transport
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
+let admission agent_name : Server_transport_admission.admission =
+  { identity = { agent_name; role = Masc_domain.Worker }
+  ; auth_token = "token-" ^ agent_name
+  }
+;;
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   (match value with
@@ -24,7 +32,7 @@ let with_env name value f =
 let test_create_offer () =
   Eio_main.run (fun _env ->
     let offer_id = Wrtc.create_offer
-      ~from_agent:"claude"
+      ~admission:(admission "claude")
       ~ice_candidates:["candidate:1"]
       ~dtls_fingerprint:"sha256:abc" in
     Alcotest.(check bool) "offer_id not empty"
@@ -37,7 +45,7 @@ let test_create_offer () =
 let test_get_offer () =
   Eio_main.run (fun _env ->
     let offer_id = Wrtc.create_offer
-      ~from_agent:"gemini"
+      ~admission:(admission "gemini")
       ~ice_candidates:["c1"; "c2"]
       ~dtls_fingerprint:"sha256:xyz" in
     let offer = Wrtc.get_offer offer_id in
@@ -50,13 +58,15 @@ let test_get_offer () =
 let test_accept_offer () =
   Eio_main.run (fun _env ->
     let offer_id = Wrtc.create_offer
-      ~from_agent:"alice"
+      ~admission:(admission "alice")
       ~ice_candidates:["c1"]
       ~dtls_fingerprint:"fp" in
-    let result = Wrtc.accept_offer ~offer_id ~answerer_agent:"bob" in
+    let result = Wrtc.accept_offer ~offer_id ~admission:(admission "bob") in
     Alcotest.(check bool) "accept ok" true (Result.is_ok result);
     let conn = Result.get_ok result in
     Alcotest.(check string) "remote_agent" "alice" conn.remote_agent;
+    Alcotest.(check (option string)) "datachannel admission stays offer-bound"
+      (Some "alice") (Wrtc.admitted_remote_agent conn.peer_id);
     Alcotest.(check string) "channel" "masc-events" conn.channel_label;
     Alcotest.(check bool) "active peers > 0"
       true (Wrtc.active_peer_count () > 0);
@@ -64,16 +74,18 @@ let test_accept_offer () =
 
 let test_accept_nonexistent () =
   Eio_main.run (fun _env ->
-    let result = Wrtc.accept_offer ~offer_id:"fake-id" ~answerer_agent:"x" in
+    let result =
+      Wrtc.accept_offer ~offer_id:"fake-id" ~admission:(admission "x")
+    in
     Alcotest.(check bool) "accept fails" true (Result.is_error result))
 
 let test_double_accept () =
   Eio_main.run (fun _env ->
     let offer_id = Wrtc.create_offer
-      ~from_agent:"a" ~ice_candidates:[] ~dtls_fingerprint:"" in
-    let r1 = Wrtc.accept_offer ~offer_id ~answerer_agent:"b" in
+      ~admission:(admission "a") ~ice_candidates:[] ~dtls_fingerprint:"" in
+    let r1 = Wrtc.accept_offer ~offer_id ~admission:(admission "b") in
     Alcotest.(check bool) "first accept ok" true (Result.is_ok r1);
-    let r2 = Wrtc.accept_offer ~offer_id ~answerer_agent:"c" in
+    let r2 = Wrtc.accept_offer ~offer_id ~admission:(admission "c") in
     Alcotest.(check bool) "second accept fails" true (Result.is_error r2);
     let conn = Result.get_ok r1 in
     Wrtc.remove_peer conn.peer_id)
@@ -82,17 +94,25 @@ let test_double_accept () =
 
 let test_handle_offer_request () =
   Eio_main.run (fun _env ->
-    let body = {|{"agent_name":"claude","ice_candidates":["c1"],"dtls_fingerprint":"fp"}|} in
-    let result = Wrtc.handle_offer_request body in
+    let body =
+      {|{"agent_name":"forged-agent","ice_candidates":["c1"],"dtls_fingerprint":"fp"}|}
+    in
+    let result = Wrtc.handle_offer_request ~admission:(admission "claude") body in
     Alcotest.(check bool) "ok" true (Result.is_ok result);
-    let json = Result.get_ok result in
-    Alcotest.(check bool) "has offer_id"
-      true (String.length json > 0);
+    let json = Yojson.Safe.from_string (Result.get_ok result) in
+    let offer_id = Yojson.Safe.Util.(json |> member "offer_id" |> to_string) in
+    let offer = Option.get (Wrtc.get_offer offer_id) in
+    Alcotest.(check string)
+      "browser agent_name cannot override bearer owner"
+      "claude"
+      offer.from_agent;
     ignore (Wrtc.cleanup_expired_offers ~max_age_s:0.0 ()))
 
 let test_handle_invalid_offer () =
   Eio_main.run (fun _env ->
-    let result = Wrtc.handle_offer_request "not json" in
+    let result =
+      Wrtc.handle_offer_request ~admission:(admission "claude") "not json"
+    in
     Alcotest.(check bool) "error" true (Result.is_error result))
 
 (* ====== Cleanup ====== *)
@@ -100,7 +120,7 @@ let test_handle_invalid_offer () =
 let test_cleanup_expired () =
   Eio_main.run (fun _env ->
     let _id = Wrtc.create_offer
-      ~from_agent:"old" ~ice_candidates:[] ~dtls_fingerprint:"" in
+      ~admission:(admission "old") ~ice_candidates:[] ~dtls_fingerprint:"" in
     let cleaned = Wrtc.cleanup_expired_offers ~max_age_s:0.0 () in
     Alcotest.(check bool) "cleaned >= 1" true (cleaned >= 1))
 
@@ -108,10 +128,12 @@ let test_cleanup_stale_peers () =
   Eio_main.run (fun _env ->
     let make_peer from_agent answerer_agent =
       let offer_id =
-        Wrtc.create_offer ~from_agent ~ice_candidates:["c1"]
+        Wrtc.create_offer ~admission:(admission from_agent) ~ice_candidates:["c1"]
           ~dtls_fingerprint:"fp"
       in
-      let result = Wrtc.accept_offer ~offer_id ~answerer_agent in
+      let result =
+        Wrtc.accept_offer ~offer_id ~admission:(admission answerer_agent)
+      in
       Alcotest.(check bool) "accept ok" true (Result.is_ok result);
       Result.get_ok result
     in
@@ -147,12 +169,14 @@ let test_agent_transport_webrtc () =
 let test_message_handler_invoked () =
   Eio_main.run (fun _env ->
     let received = ref None in
-    Wrtc.set_message_handler (fun peer_id msg ->
+    Wrtc.set_message_handler (fun _admission peer_id msg ->
       received := Some (peer_id, msg));
     (* Create and accept an offer to get a peer *)
     let offer_id = Wrtc.create_offer
-      ~from_agent:"sender" ~ice_candidates:["c1"] ~dtls_fingerprint:"fp1" in
-    let result = Wrtc.accept_offer ~offer_id ~answerer_agent:"receiver" in
+      ~admission:(admission "sender") ~ice_candidates:["c1"] ~dtls_fingerprint:"fp1" in
+    let result =
+      Wrtc.accept_offer ~offer_id ~admission:(admission "receiver")
+    in
     Alcotest.(check bool) "accept ok" true (Result.is_ok result);
     let _conn = Result.get_ok result in
     (* The handler should be set *)
@@ -169,8 +193,8 @@ let test_send_to_nonexistent_peer () =
 let test_mark_connected_updates_peer () =
   Eio_main.run (fun _env ->
     let offer_id = Wrtc.create_offer
-      ~from_agent:"a" ~ice_candidates:["c1"] ~dtls_fingerprint:"fp" in
-    let result = Wrtc.accept_offer ~offer_id ~answerer_agent:"b" in
+      ~admission:(admission "a") ~ice_candidates:["c1"] ~dtls_fingerprint:"fp" in
+    let result = Wrtc.accept_offer ~offer_id ~admission:(admission "b") in
     Alcotest.(check bool) "accept ok" true (Result.is_ok result);
     let conn = Result.get_ok result in
     Alcotest.(check bool) "not connected initially"
@@ -184,17 +208,19 @@ let test_mark_connected_updates_peer () =
 let test_handle_answer_request_valid () =
   Eio_main.run (fun _env ->
     let offer_id = Wrtc.create_offer
-      ~from_agent:"alice" ~ice_candidates:["c1"] ~dtls_fingerprint:"fp" in
+      ~admission:(admission "alice") ~ice_candidates:["c1"] ~dtls_fingerprint:"fp" in
     let body = Printf.sprintf
       {|{"offer_id":"%s","agent_name":"bob","ice_candidates":["c2"],"dtls_fingerprint":"fp2"}|}
       offer_id in
-    let result = Wrtc.handle_answer_request body in
+    let result = Wrtc.handle_answer_request ~admission:(admission "bob") body in
     Alcotest.(check bool) "answer ok" true (Result.is_ok result);
     ignore (Wrtc.cleanup_expired_offers ~max_age_s:0.0 ()))
 
 let test_handle_answer_request_invalid () =
   Eio_main.run (fun _env ->
-    let result = Wrtc.handle_answer_request "bad json" in
+    let result =
+      Wrtc.handle_answer_request ~admission:(admission "bob") "bad json"
+    in
     Alcotest.(check bool) "bad json fails" true (Result.is_error result))
 
 let test_configured_ice_servers_from_csv_env () =

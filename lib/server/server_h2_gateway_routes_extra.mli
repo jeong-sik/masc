@@ -7,6 +7,7 @@
     otherwise. *)
 
 val dispatch :
+  with_public_read:((unit -> unit) -> unit) ->
   h2_reqd:H2.Reqd.t ->
   httpun_request:Httpun.Request.t ->
   cors:(string * string) list ->
@@ -15,8 +16,13 @@ val dispatch :
   [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
   | `CONNECT | `TRACE | `Other of string ] ->
   bool
-(** [dispatch ~h2_reqd ~httpun_request ~cors ~path ~config method_]
+(** [dispatch ~with_public_read ~h2_reqd ~httpun_request ~cors ~path ~config
+    method_]
     handles the following routes:
+
+    [with_public_read] is the parent gateway's H2 adapter for the H1
+    {!Server_auth.with_public_read} contract. Every board, karma, and voice
+    data read is executed through it; static assets remain public.
 
     {2 Voice config}
     - [GET /api/v1/voice/config] — JSON dump from

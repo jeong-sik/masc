@@ -86,6 +86,45 @@ let test_mandatory_tools_are_registered () =
     mandatory
 ;;
 
+let test_auth_callable_tools_declare_permission () =
+  init ();
+  let auth_catalog_names =
+    List.map fst Tool_catalog.explicit_metadata
+    @ Tool_catalog.public_mcp_tools
+    @ Tool_catalog_surfaces.system_internal_hidden
+    @ Tool_spec.all_registered_names ()
+    |> sorted_set
+  in
+  let coverage = Tool_catalog.permission_coverage ~names:auth_catalog_names in
+  Alcotest.(check (list string))
+    "auth catalog names are registered"
+    []
+    coverage.unregistered;
+  Alcotest.(check (list string))
+    "auth catalog names declare permissions"
+    []
+    coverage.permission_undeclared;
+  let tag_only_names =
+    Tool_dispatch.all_registered_names ()
+    |> List.filter (fun name -> not (List.mem name auth_catalog_names))
+    |> sorted_set
+  in
+  List.iter
+    (fun name ->
+       match Auth.required_permission_for_tool name with
+       | Error Auth.Tool_unregistered -> ()
+       | Error Auth.Tool_permission_undeclared ->
+         Alcotest.failf
+           "tag-only tool %s leaked into catalog without a permission"
+           name
+       | Ok permission ->
+         Alcotest.failf
+           "tag-only tool %s unexpectedly received %s"
+           name
+           (Masc_domain.permission_to_string permission))
+    tag_only_names
+;;
+
 let test_workspace_schemas_route_to_state () =
   init ();
   Tool_schemas_workspace.schemas
@@ -217,6 +256,8 @@ let () =
     ; ( "mandatory_tools"
       , [ test_case "mandatory tools are registered" `Quick
             test_mandatory_tools_are_registered
+        ; test_case "auth-callable tools declare permissions" `Quick
+            test_auth_callable_tools_declare_permission
         ] )
     ; ( "workspace_tools"
       , [ test_case "workspace schemas route to Mod_state" `Quick

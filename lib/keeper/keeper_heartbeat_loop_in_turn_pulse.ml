@@ -1,7 +1,7 @@
 (** In-turn liveness pulse helpers for the keeper heartbeat loop,
     extracted from keeper_heartbeat_loop.ml.
 
-    Drives a side-fiber that emits Workspace.heartbeat + SSE broadcasts at
+    Drives a side-fiber that emits Workspace.heartbeat_r + SSE broadcasts at
     a bounded interval while a keeper turn is executing, so operators
     see continued presence and the registry can detect stuck turns. *)
 
@@ -68,8 +68,25 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
   match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
   | Some entry when Option.is_some entry.current_turn_observation ->
     (try
-       let _heartbeat = Workspace.heartbeat ctx.config ~agent_name:meta.agent_name in
-       ()
+       match Workspace.heartbeat_r ctx.config ~agent_name:meta.agent_name with
+       | Workspace.Heartbeat_updated _ -> ()
+       | Workspace.Heartbeat_agent_not_found { agent_name } ->
+         Log.Keeper.warn
+           "in-turn heartbeat owner %s disappeared"
+           agent_name;
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string HeartbeatFailures)
+           ~labels:[ "keeper", meta.name; "phase", "in_turn_heartbeat_missing" ]
+           ()
+       | Workspace.Heartbeat_invalid_agent_file { agent_name; detail } ->
+         Log.Keeper.warn
+           "in-turn heartbeat state for %s is invalid: %s"
+           agent_name
+           detail;
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string HeartbeatFailures)
+           ~labels:[ "keeper", meta.name; "phase", "in_turn_heartbeat_invalid" ]
+           ()
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

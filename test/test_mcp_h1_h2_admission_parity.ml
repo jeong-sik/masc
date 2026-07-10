@@ -30,13 +30,88 @@ let contains ~needle haystack =
 let assert_contains label ~needle source =
   check bool label true (contains ~needle source)
 
+let assert_not_contains label ~needle source =
+  check bool label false (contains ~needle source)
+
 let assert_order label ~before ~after source =
   let before_idx = Str.search_forward (Str.regexp_string before) source 0 in
   let after_idx = Str.search_forward (Str.regexp_string after) source 0 in
   check bool label true (before_idx < after_idx)
 
+let assert_near_after label ~anchor ~needle ~within source =
+  let anchor_idx = Str.search_forward (Str.regexp_string anchor) source 0 in
+  let needle_idx =
+    Str.search_forward (Str.regexp_string needle)
+      source (anchor_idx + String.length anchor)
+  in
+  check bool label true (needle_idx - anchor_idx <= within)
+
+let source_between ~start_anchor ~end_anchor source =
+  let start_idx =
+    Str.search_forward (Str.regexp_string start_anchor) source 0
+  in
+  let end_idx =
+    Str.search_forward (Str.regexp_string end_anchor)
+      source (start_idx + String.length start_anchor)
+  in
+  String.sub source start_idx (end_idx - start_idx)
+
 let request ?(headers = []) ?(meth = `POST) target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) meth target
+
+let test_origin_admission_is_exact_across_h1_h2 () =
+  let h1_same_origin =
+    request
+      ~headers:
+        [ "host", "127.0.0.1:8935"
+        ; "origin", "http://127.0.0.1:8935"
+        ]
+      "/mcp"
+  in
+  let h1_prefix_attack =
+    request
+      ~headers:
+        [ "host", "127.0.0.1:8935"
+        ; "origin", "http://127.0.0.1.evil.test:8935"
+        ]
+      "/mcp"
+  in
+  check bool "H1 exact same-origin admitted" true
+    (Server_routes_http.validate_origin h1_same_origin);
+  check bool "H1 origin-prefix attacker rejected" false
+    (Server_routes_http.validate_origin h1_prefix_attack);
+  check bool "non-browser request without Origin admitted" true
+    (Server_routes_http.validate_origin (request "/mcp"));
+  check (option string) "invalid Origin is never reflected" None
+    (Server_auth.public_read_cors_headers h1_prefix_attack
+     |> List.assoc_opt "access-control-allow-origin");
+  let h2_headers =
+    H2.Headers.of_list
+      [ ":authority", "127.0.0.1:8935"
+      ; "origin", "http://127.0.0.1:8935"
+      ]
+    |> Server_h2_gateway_helpers.httpun_headers_of_h2
+  in
+  check (option string) "H2 authority projects to shared Host contract"
+    (Some "127.0.0.1:8935")
+    (Httpun.Headers.get h2_headers "host");
+  let h2_same_origin = Httpun.Request.create ~headers:h2_headers `POST "/mcp" in
+  check bool "H2 projected same-origin admitted" true
+    (Server_routes_http.validate_origin h2_same_origin);
+  let h2_prefix_attack =
+    H2.Headers.of_list
+      [ ":authority", "127.0.0.1:8935"
+      ; "origin", "http://127.0.0.1.evil.test:8935"
+      ]
+    |> Server_h2_gateway_helpers.httpun_headers_of_h2
+    |> fun headers -> Httpun.Request.create ~headers `POST "/mcp"
+  in
+  check bool "H2 projected origin-prefix attacker rejected" false
+    (Server_routes_http.validate_origin h2_prefix_attack);
+  check bool "legacy root alias is outside MCP origin gate" false
+    (Server_routes_http.is_mcp_like_path "/");
+  check bool "canonical MCP path is inside origin gate" true
+    (Server_routes_http.is_mcp_like_path "/mcp")
 
 let body method_ =
   Printf.sprintf {|{"jsonrpc":"2.0","id":1,"method":"%s","params":{}}|} method_
@@ -79,6 +154,18 @@ let assert_result_ok label = function
 let assert_result_error label = function
   | Ok () -> failf "%s expected Error, got Ok" label
   | Error msg -> check bool (label ^ " message is not empty") true (String.length msg > 0)
+
+let require_sse_owner_lease label = function
+  | Ok lease -> lease
+  | Error msg -> failf "%s expected a lease, got Error %S" label msg
+
+let assert_sse_owner_claim_error label = function
+  | Ok _ -> failf "%s expected Error, got Ok" label
+  | Error msg ->
+      check bool (label ^ " message is not empty") true (String.length msg > 0)
+
+let admission_identity agent_name role : Server_transport_admission.identity =
+  { agent_name; role }
 
 let assert_accept_mode label expected actual =
   let same =
@@ -272,6 +359,226 @@ let test_shared_protocol_and_delete_matrix () =
   check (option string) "DELETE without session has no admission id" None
     (Transport.get_session_id_any (request ~meth:`DELETE "/mcp"))
 
+let test_session_owner_is_immutable_and_delete_is_owner_or_admin () =
+  let session_id = "h1-h2-parity-owned-session" in
+  let owner = admission_identity "owner-agent" Masc_domain.Worker in
+  let other = admission_identity "other-agent" Masc_domain.Worker in
+  let admin = admission_identity "admin-agent" Masc_domain.Admin in
+  let initialize_response =
+    Mcp_transport_protocol.make_response ~id:(`Int 1) (`Assoc [])
+  in
+  Fun.protect
+    ~finally:(fun () -> Transport.forget_mcp_session session_id)
+    (fun () ->
+      assert_result_ok "fresh session accepts its first credential owner"
+        (Transport.validate_mcp_session_owner_for_request ~session_id
+           ~requester:owner);
+      assert_result_ok "successful initialize binds credential owner"
+        (Transport.bind_mcp_session_owner_if_initialize_succeeded session_id
+           ~requester:owner ~request_body:initialize_body
+           ~response_json:initialize_response);
+      Transport.remember_protocol_version session_id "2025-11-25";
+      assert_result_ok "bound owner may reuse session"
+        (Transport.validate_mcp_session_owner_for_request ~session_id
+           ~requester:owner);
+      assert_result_error "different credential cannot reuse session"
+        (Transport.validate_mcp_session_owner_for_request ~session_id
+           ~requester:other);
+      assert_result_error "owner binding cannot be overwritten"
+        (Transport.bind_mcp_session_owner_if_initialize_succeeded session_id
+           ~requester:other ~request_body:initialize_body
+           ~response_json:initialize_response);
+      check (option string) "immutable owner remains original"
+        (Some owner.agent_name)
+        (Transport.mcp_session_owner session_id
+         |> Option.map (fun identity -> identity.agent_name));
+      assert_result_ok "owner may delete session"
+        (Transport.authorize_mcp_session_delete ~session_id ~requester:owner);
+      assert_result_error "different worker may not delete session"
+        (Transport.authorize_mcp_session_delete ~session_id ~requester:other);
+      assert_result_ok "explicit Admin may delete another owner's session"
+        (Transport.authorize_mcp_session_delete ~session_id ~requester:admin))
+
+let test_ownerless_known_session_requires_admin_delete () =
+  let session_id = "h1-h2-parity-ownerless-session" in
+  let worker = admission_identity "worker-agent" Masc_domain.Worker in
+  let admin = admission_identity "admin-agent" Masc_domain.Admin in
+  Fun.protect
+    ~finally:(fun () -> Transport.forget_mcp_session session_id)
+    (fun () ->
+      Transport.remember_protocol_version session_id "2025-11-25";
+      assert_result_error "known ownerless session fails closed on reuse"
+        (Transport.validate_mcp_session_owner_for_request ~session_id
+           ~requester:worker);
+      assert_result_error "known ownerless session cannot open Observer SSE"
+        (Transport.validate_mcp_sse_session_owner_for_request ~session_id
+           ~sse_kind:Sse.Observer ~requester:worker);
+      assert_result_error "worker cannot delete ownerless legacy session"
+        (Transport.authorize_mcp_session_delete ~session_id ~requester:worker);
+      assert_result_ok "Admin can clean up ownerless legacy session"
+        (Transport.authorize_mcp_session_delete ~session_id ~requester:admin))
+
+let test_sse_owner_lease_is_credential_bound_and_stale_safe () =
+  let session_id = "h1-h2-parity-ephemeral-sse-session" in
+  let owner = admission_identity "observer-owner" Masc_domain.Worker in
+  let other = admission_identity "observer-other" Masc_domain.Worker in
+  let initialize_response =
+    Mcp_transport_protocol.make_response ~id:(`Int 1) (`Assoc [])
+  in
+  assert_result_error "Agent stream cannot mint an uninitialized session"
+    (Transport.validate_mcp_sse_session_owner_for_request ~session_id
+       ~sse_kind:Sse.Agent_stream ~requester:owner);
+  let first =
+    Transport.claim_mcp_sse_session_owner_for_request ~session_id
+      ~sse_kind:Sse.Observer ~requester:owner
+    |> require_sse_owner_lease "fresh Observer claim"
+  in
+  ignore (Mcp_store.remove session_id);
+  ignore
+    (Mcp_store.get_or_create ~id:session_id ~agent_name:owner.agent_name ());
+  assert_sse_owner_claim_error
+    "same credential cannot overlap an in-progress connection setup"
+    (Transport.claim_mcp_sse_session_owner_for_request ~session_id
+       ~sse_kind:Sse.Observer ~requester:owner);
+  assert_result_ok "registered Observer activates its owner lease"
+    (Transport.activate_mcp_sse_owner_lease first);
+  assert_result_ok "same credential may validate Observer reconnect"
+    (Transport.validate_mcp_sse_session_owner_for_request ~session_id
+       ~sse_kind:Sse.Observer ~requester:owner);
+  assert_result_error "different credential cannot reuse Observer wire id"
+    (Transport.validate_mcp_sse_session_owner_for_request ~session_id
+       ~sse_kind:Sse.Observer ~requester:other);
+  assert_result_error "POST owner gate also sees the ephemeral SSE owner"
+    (Transport.validate_mcp_session_owner_for_request ~session_id
+       ~requester:other);
+  assert_result_error "successful initialize cannot race a different SSE owner"
+    (Transport.bind_mcp_session_owner_if_initialize_succeeded session_id
+       ~requester:other ~request_body:initialize_body
+       ~response_json:initialize_response);
+  check bool "rejected initialize leaves transport owner unbound" true
+    (Option.is_none (Transport.mcp_session_owner session_id));
+  let abandoned_reconnect =
+    Transport.claim_mcp_sse_session_owner_for_request ~session_id
+      ~sse_kind:Sse.Observer ~requester:owner
+    |> require_sse_owner_lease "same-owner reconnect setup"
+  in
+  Transport.release_mcp_sse_owner_lease abandoned_reconnect;
+  assert_result_error "failed reconnect restores the active owner lease"
+    (Transport.validate_mcp_sse_session_owner_for_request ~session_id
+       ~sse_kind:Sse.Observer ~requester:other);
+  let replacement =
+    Transport.claim_mcp_sse_session_owner_for_request ~session_id
+      ~sse_kind:Sse.Observer ~requester:owner
+    |> require_sse_owner_lease "same-owner Observer reconnect"
+  in
+  assert_result_ok "replacement Observer activates its owner lease"
+    (Transport.activate_mcp_sse_owner_lease replacement);
+  Transport.release_mcp_sse_owner_lease first;
+  assert_result_error "stale disconnect cannot release replacement lease"
+    (Transport.validate_mcp_sse_session_owner_for_request ~session_id
+       ~sse_kind:Sse.Observer ~requester:other);
+  Transport.release_mcp_sse_owner_lease replacement;
+  check bool "current lease release removes fresh owner-bound backing" true
+    (Option.is_none (Mcp_store.peek session_id));
+  let next_owner =
+    Transport.claim_mcp_sse_session_owner_for_request ~session_id
+      ~sse_kind:Sse.Presence ~requester:other
+    |> require_sse_owner_lease "released id accepts a new Presence owner"
+  in
+  assert_result_ok "new Presence owner activates its lease"
+    (Transport.activate_mcp_sse_owner_lease next_owner);
+  Transport.release_mcp_sse_owner_lease next_owner
+
+let test_old_disconnect_during_reconnect_does_not_restore_orphan_owner () =
+  let session_id = "h1-h2-parity-sse-disconnect-race" in
+  let owner = admission_identity "disconnect-owner" Masc_domain.Worker in
+  let other = admission_identity "disconnect-other" Masc_domain.Worker in
+  ignore (Mcp_store.remove session_id);
+  let active =
+    Transport.claim_mcp_sse_session_owner_for_request ~session_id
+      ~sse_kind:Sse.Observer ~requester:owner
+    |> require_sse_owner_lease "initial race-test claim"
+  in
+  ignore
+    (Mcp_store.get_or_create ~id:session_id ~agent_name:owner.agent_name ());
+  assert_result_ok "initial race-test lease activates"
+    (Transport.activate_mcp_sse_owner_lease active);
+  let reconnect =
+    Transport.claim_mcp_sse_session_owner_for_request ~session_id
+      ~sse_kind:Sse.Observer ~requester:owner
+    |> require_sse_owner_lease "race-test reconnect claim"
+  in
+  Transport.release_mcp_sse_owner_lease active;
+  Transport.release_mcp_sse_owner_lease reconnect;
+  check bool "failed reconnect after old disconnect removes backing" true
+    (Option.is_none (Mcp_store.peek session_id));
+  let other_lease =
+    Transport.claim_mcp_sse_session_owner_for_request ~session_id
+      ~sse_kind:Sse.Presence ~requester:other
+    |> require_sse_owner_lease "race cleanup permits a new owner"
+  in
+  Transport.release_mcp_sse_owner_lease other_lease
+
+let test_initialized_sse_uses_transport_owner_with_connection_lease () =
+  let session_id = "h1-h2-parity-initialized-sse-session" in
+  let owner = admission_identity "initialized-owner" Masc_domain.Worker in
+  let other = admission_identity "initialized-other" Masc_domain.Worker in
+  let initialize_response =
+    Mcp_transport_protocol.make_response ~id:(`Int 1) (`Assoc [])
+  in
+  Fun.protect
+    ~finally:(fun () -> Transport.forget_mcp_session session_id)
+    (fun () ->
+      assert_result_ok "successful initialize binds SSE transport owner"
+        (Transport.bind_mcp_session_owner_if_initialize_succeeded session_id
+           ~requester:owner ~request_body:initialize_body
+           ~response_json:initialize_response);
+      Transport.remember_protocol_version session_id "2025-11-25";
+      assert_result_ok "initialized owner may open Agent stream"
+        (Transport.validate_mcp_sse_session_owner_for_request ~session_id
+           ~sse_kind:Sse.Agent_stream ~requester:owner);
+      assert_result_error "different owner cannot open initialized Agent stream"
+        (Transport.validate_mcp_sse_session_owner_for_request ~session_id
+           ~sse_kind:Sse.Agent_stream ~requester:other);
+      let lease =
+        Transport.claim_mcp_sse_session_owner_for_request ~session_id
+          ~sse_kind:Sse.Agent_stream ~requester:owner
+        |> require_sse_owner_lease "initialized Agent stream connection claim"
+      in
+      assert_result_ok "initialized Agent stream activates connection lease"
+        (Transport.activate_mcp_sse_owner_lease lease);
+      Transport.release_mcp_sse_owner_lease lease)
+
+let test_delete_invalidates_in_flight_agent_stream_claim () =
+  let session_id = "h1-h2-parity-delete-vs-agent-get" in
+  let owner = admission_identity "delete-race-owner" Masc_domain.Worker in
+  let initialize_response =
+    Mcp_transport_protocol.make_response ~id:(`Int 1) (`Assoc [])
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Transport.forget_mcp_session session_id;
+      ignore (Mcp_store.remove session_id))
+    (fun () ->
+      assert_result_ok "delete-race initialize binds owner"
+        (Transport.bind_mcp_session_owner_if_initialize_succeeded session_id
+           ~requester:owner ~request_body:initialize_body
+           ~response_json:initialize_response);
+      Transport.remember_protocol_version session_id "2025-11-25";
+      let lease =
+        Transport.claim_mcp_sse_session_owner_for_request ~session_id
+          ~sse_kind:Sse.Agent_stream ~requester:owner
+        |> require_sse_owner_lease "in-flight Agent GET claim"
+      in
+      Transport.forget_mcp_session session_id;
+      ignore
+        (Mcp_store.get_or_create ~id:session_id ~agent_name:owner.agent_name ());
+      assert_result_error "deleted Agent GET claim cannot activate"
+        (Transport.activate_mcp_sse_owner_lease lease);
+      Transport.release_mcp_sse_owner_lease lease;
+      check bool "invalidated GET removes backing created after DELETE" true
+        (Option.is_none (Mcp_store.peek session_id)))
+
 let test_sse_backing_session_bridge_requires_known_transport_session () =
   let transport_session_id = "h1-h2-parity-sse-transport-session" in
   let sse_session_id = "presence:" ^ transport_session_id in
@@ -370,6 +677,7 @@ let test_failed_initialize_does_not_start_session_duration_metric () =
     Otel_genai.Mcp_metric_name.server_session_duration ^ "_count"
   in
   let before_count = metric_value count_metric [] in
+  let owner = admission_identity "failed-initialize-owner" Masc_domain.Worker in
   Fun.protect
     ~finally:(fun () -> Transport.forget_mcp_session session_id)
     (fun () ->
@@ -378,8 +686,13 @@ let test_failed_initialize_does_not_start_session_duration_metric () =
         session_id
         ~request_body
         ~response_json;
+      assert_result_ok "failed initialize does not attempt owner binding"
+        (Transport.bind_mcp_session_owner_if_initialize_succeeded session_id
+           ~requester:owner ~request_body ~response_json);
       check bool "failed initialize leaves session unknown" false
         (Transport.is_known_session session_id);
+      check bool "failed initialize leaves owner unbound" true
+        (Option.is_none (Transport.mcp_session_owner session_id));
       Transport.forget_mcp_session session_id);
   let after_count = metric_value count_metric [] in
   check (float 0.0001)
@@ -400,6 +713,12 @@ let test_h1_h2_post_route_wiring_parity () =
       ("forwards internal keeper runtime", "is_verified_internal_keeper_request");
       ( "records initialize protocol only after success",
         "remember_protocol_version_if_initialize_succeeded" );
+      ( "requires strict credential admission",
+        "authorize_mcp_profile_admission" );
+      ( "checks immutable session owner",
+        "validate_mcp_session_owner_for_request" );
+      ( "binds owner after successful initialize",
+        "bind_mcp_session_owner_if_initialize_succeeded" );
     ];
   assert_order "H1 refreshes MCP profile after auth gate"
     ~before:"match auth_result with"
@@ -412,7 +731,10 @@ let test_h1_h2_post_route_wiring_parity () =
   assert_contains "H1 unknown supplied session returns not found"
     ~needle:"Httpun.Response.create ~headers `Not_found" h1;
   assert_contains "H2 unknown supplied session returns not found"
-    ~needle:"~status:`Not_found" h2
+    ~needle:"~status:`Not_found" h2;
+  assert_not_contains "H2 does not expose legacy POST / MCP alias"
+    ~needle:{|`POST, "/"|}
+    h2
 
 let test_h1_h2_delete_route_wiring_parity () =
   let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
@@ -432,11 +754,221 @@ let test_h1_h2_delete_route_wiring_parity () =
       assert_contains ("H1 DELETE " ^ label) ~needle h1;
       assert_contains ("H2 DELETE " ^ label) ~needle h2)
     [
-      ("verifies MCP auth", "verify_mcp_auth ~base_path");
+      ("requires strict credential admission", "authorize_mcp_profile_admission");
       ("checks session profile", "validate_mcp_session_delete_profile");
+      ("checks owner or Admin", "authorize_mcp_session_delete");
       ("checks protocol continuity", "validate_protocol_version_continuity");
       ("forgets session after termination", "forget_mcp_session session_id");
-    ]
+    ];
+  assert_contains "H1 invalidates session before stopping DELETE connection"
+    ~needle:"forget_mcp_session session_id;\n               stop_sse_session session_id"
+    h1;
+  assert_contains "H2 invalidates session before stopping DELETE connection"
+    ~needle:
+      "Server_mcp_transport_http.forget_mcp_session\n                               session_id;\n                             stop_sse_session session_id"
+    h2
+
+let test_mcp_sse_get_owner_wiring_and_fail_closed_route_surface () =
+  let h1 = source_file "lib/server/server_mcp_transport_http.ml" in
+  let related_sse =
+    source_file "lib/server/server_mcp_transport_http_agui.ml"
+  in
+  let h1_routes = source_file "lib/server/server_routes_http_routes_frontend.ml" in
+  let h2 = source_file "lib/server/server_h2_gateway.ml" in
+  let get_handler =
+    source_between ~start_anchor:"let handle_get_mcp"
+      ~end_anchor:"let handle_get_operator_mcp" h1
+  in
+  List.iter
+    (fun (label, needle) -> assert_contains label ~needle get_handler)
+    [
+      ( "GET requires strict profile admission",
+        "authorize_mcp_profile_admission" );
+      ( "GET validates stream-specific session ownership",
+        "validate_mcp_sse_session_owner_for_request" );
+      ( "GET claims fresh Observer or Presence ownership",
+        "claim_mcp_sse_session_owner_for_request" );
+      ( "GET binds the backing session to the credential owner",
+        "ensure_sse_backing_session_for_owner" );
+      ( "GET activates ownership only after SSE registration",
+        "activate_mcp_sse_owner_lease" );
+      ( "GET clears the prior disconnect hook",
+        "Sse.clear_disconnect_hook session_id" );
+      ( "GET closes only after admission and ownership",
+        "stop_sse_session_preserve_guard session_id" );
+    ];
+  assert_order "GET authenticates before owner validation"
+    ~before:"authorize_mcp_profile_admission"
+    ~after:"validate_mcp_sse_session_owner_for_request" get_handler;
+  assert_order "GET validates owner before claiming the wire id"
+    ~before:"validate_mcp_sse_session_owner_for_request"
+    ~after:"claim_mcp_sse_session_owner_for_request" get_handler;
+  assert_order "GET claims owner before stopping an existing connection"
+    ~before:"claim_mcp_sse_session_owner_for_request"
+    ~after:"stop_sse_session_preserve_guard session_id" get_handler;
+  assert_order "GET clears stale hook before stopping existing connection"
+    ~before:"Sse.clear_disconnect_hook session_id"
+    ~after:"stop_sse_session_preserve_guard session_id" get_handler;
+  assert_order "GET publishes HTTP connection before activating its owner lease"
+    ~before:"register_sse_conn ~session_id ~info"
+    ~after:"activate_mcp_sse_owner_lease" get_handler;
+  List.iter
+    (fun (label, needle) -> assert_contains label ~needle related_sse)
+    [
+      ( "AG-UI/Presence require strict bearer admission",
+        "authorize_token_bound_admission_request" );
+      ( "AG-UI/Presence validate owner before guard/stop",
+        "validate_mcp_sse_session_owner_for_request" );
+      ( "AG-UI/Presence claim shared SSE owner lease",
+        "claim_mcp_sse_session_owner_for_request" );
+      ( "AG-UI/Presence bind credential owner to backing",
+        "ensure_backing_session_for_owner" );
+      ( "AG-UI/Presence clear stale hook before reconnect stop",
+        "Sse.clear_disconnect_hook session_id" );
+      ( "AG-UI/Presence publish before owner activation",
+        "register_sse_conn ~session_id ~info" );
+      ( "Presence validates raw transport owner before namespace claim",
+        "~related_transport_session_id:raw_session_id" );
+    ];
+  assert_order "related SSE authenticates before owner validation"
+    ~before:"authorize_token_bound_admission_request"
+    ~after:"validate_mcp_sse_session_owner_for_request" related_sse;
+  assert_order "related SSE owner claim precedes reconnect stop"
+    ~before:"claim_mcp_sse_session_owner_for_request"
+    ~after:"stop_sse_session_preserve_guard session_id" related_sse;
+  assert_order "related SSE publishes before owner activation"
+    ~before:"register_sse_conn ~session_id ~info"
+    ~after:"Sse_owner.activate lease" related_sse;
+  assert_not_contains "related SSE no longer uses unit legacy auth"
+    ~needle:"verify_mcp_observer_stream_auth" related_sse;
+  assert_contains "H1 exposes the single implemented SSE GET ingress"
+    ~needle:{|Http.Router.get "/mcp"|} h1_routes;
+  assert_not_contains "H1 managed GET remains fail closed"
+    ~needle:{|Http.Router.get "/mcp/managed"|} h1_routes;
+  assert_not_contains "H1 legacy /sse GET remains fail closed"
+    ~needle:{|Http.Router.get "/sse"|} h1_routes;
+  assert_contains "H1 AG-UI SSE route uses the owned handler"
+    ~needle:{|Http.Router.get "/ag-ui/events" handle_ag_ui_events|}
+    h1_routes;
+  assert_contains "H1 Presence SSE route uses the owned handler"
+    ~needle:{|Http.Router.get "/events/presence" handle_presence_events|}
+    h1_routes;
+  assert_not_contains "H2 /mcp GET remains fail closed"
+    ~needle:{|`GET, "/mcp"|} h2;
+  assert_not_contains "H2 managed GET remains fail closed"
+    ~needle:{|`GET, "/mcp/managed"|} h2;
+  assert_not_contains "H2 legacy /sse GET remains fail closed"
+    ~needle:{|`GET, "/sse"|} h2;
+  assert_not_contains "H2 AG-UI SSE remains fail closed"
+    ~needle:{|`GET, "/ag-ui/events"|} h2;
+  assert_not_contains "H2 Presence SSE remains fail closed"
+    ~needle:{|`GET, "/events/presence"|} h2
+
+let test_h2_read_auth_and_origin_wiring_parity () =
+  let h1_frontend =
+    source_file "lib/server/server_routes_http_routes_frontend.ml"
+  in
+  let h1_dashboard =
+    source_file "lib/server/server_routes_http_routes_dashboard.ml"
+  in
+  let h1_activity =
+    source_file "lib/server/server_routes_http_routes_activity.ml"
+  in
+  let h1_ide = source_file "lib/server/server_ide_http.ml" in
+  let h2 = source_file "lib/server/server_h2_gateway.ml" in
+  let h2_extra =
+    source_file "lib/server/server_h2_gateway_routes_extra.ml"
+  in
+  let h2_helpers =
+    source_file "lib/server/server_h2_gateway_helpers.ml"
+  in
+  let common = source_file "lib/server/server_routes_http_common.ml" in
+  let h1_runtime = source_file "lib/server/server_routes_http_runtime.ml" in
+  let h1_main = source_file "bin/main_eio.ml" in
+  assert_contains "H1 GraphQL SSOT uses strict read admission"
+    ~needle:
+      "with_read_auth (fun _state req reqd -> handle_graphql req reqd)"
+    h1_frontend;
+  List.iter
+    (fun (path, source) ->
+      assert_contains ("H1 public-read SSOT for " ^ path)
+        ~needle:(Printf.sprintf "Http.Router.get %S" path) source;
+      assert_near_after ("H1 public-read wrapper guards " ^ path)
+        ~anchor:(Printf.sprintf "Http.Router.get %S" path)
+        ~needle:"with_public_read" ~within:160 source)
+    [ "/api/v1/dashboard/branches", h1_dashboard
+    ; "/api/v1/dashboard/nudges", h1_dashboard
+    ; "/api/v1/dashboard/workspace", h1_dashboard
+    ; "/api/v1/status", h1_ide
+    ; "/api/v1/voice/config", h1_frontend
+    ; "/api/v1/board", h1_activity
+    ; "/api/v1/karma", h1_activity
+    ];
+  List.iter
+    (fun path ->
+      assert_contains ("H2 public-read admission for " ^ path)
+        ~needle:
+          (Printf.sprintf "`GET, %S ->\n          with_h2_public_read" path)
+        h2)
+    [ "/api/v1/dashboard/branches"
+    ; "/api/v1/dashboard/nudges"
+    ; "/api/v1/dashboard/workspace"
+    ; "/api/v1/status"
+    ; "/api/v1/openapi.json"
+    ];
+  assert_contains "H2 strict read admission for GET /graphql"
+    ~needle:"`GET, \"/graphql\" ->\n          with_h2_read_auth" h2;
+  assert_contains "H2 strict read admission for POST /graphql"
+    ~needle:"`POST, \"/graphql\" ->\n          with_h2_read_auth" h2;
+  assert_contains "H2 agent-card read uses public-read admission"
+    ~needle:
+      {|`GET, ("/.well-known/agent.json" | "/.well-known/agent-card.json") ->
+          with_h2_public_read|}
+    h2;
+  List.iter
+    (fun path ->
+      assert_contains ("H2 extra public-read admission for " ^ path)
+        ~needle:
+          (Printf.sprintf "| `GET, %S ->\n      handle_public_read" path)
+        h2_extra)
+    [ "/api/v1/voice/config"
+    ; "/api/v1/board"
+    ; "/api/v1/board/curation"
+    ; "/api/v1/board/hearths"
+    ; "/api/v1/board/flairs"
+    ; "/api/v1/board/sub-boards"
+    ; "/api/v1/board/karma/ledger"
+    ; "/api/v1/karma"
+    ];
+  assert_contains "H2 board detail read uses public-read admission"
+    ~needle:{|&& String.length p > 14 ->
+      handle_public_read|}
+    h2_extra;
+  assert_contains "H2 extra dispatcher receives parent public-read adapter"
+    ~needle:"Server_h2_gateway_routes_extra.dispatch\n               ~with_public_read:"
+    h2;
+  assert_contains "H2 projects :authority into the shared Host contract"
+    ~needle:"let httpun_headers = httpun_headers_of_h2 h2_headers" h2;
+  assert_contains "H2 authority projection is owned by one helper"
+    ~needle:"H2.Headers.get headers \":authority\"" h2_helpers;
+  assert_contains "H2 CORS reflection reuses H1 safe headers"
+    ~needle:"let cors = public_read_cors_headers httpun_request" h2;
+  assert_contains "H2 MCP Origin gate reuses the shared predicate"
+    ~needle:
+      "if is_mcp_like_path path && not (validate_origin httpun_request)"
+    h2;
+  assert_contains "H1 aliases the shared MCP path predicate"
+    ~needle:"let is_mcp_like_path = Server_routes_http.is_mcp_like_path"
+    h1_main;
+  assert_contains "shared Origin admission uses parsed H1 CORS policy"
+    ~needle:"| Some _ -> Option.is_some (public_read_cors_origin_opt request)"
+    common;
+  assert_not_contains "shared Origin admission has no prefix heuristic"
+    ~needle:"String.starts_with ~prefix origin" common;
+  assert_contains "H1 preflight uses safe CORS reflection"
+    ~needle:"public_read_cors_headers request" h1_runtime;
+  assert_not_contains "H2 preflight does not reflect raw Origin"
+    ~needle:"cors_preflight_headers origin" h2
 
 (* /ws upgrade admission — a bearer credential with CanReadState is the
    boundary. Same-origin never substitutes for authentication, and Origin
@@ -464,13 +996,22 @@ let worker_token base_path =
   | Ok (token, _credential) -> token
   | Error err -> fail (Masc_domain.masc_error_to_string err)
 
+let hex_encode value =
+  let buffer = Buffer.create (String.length value * 2) in
+  String.iter (fun byte -> Buffer.add_string buffer (Printf.sprintf "%02x" (Char.code byte))) value;
+  Buffer.contents buffer
+
 let ws_upgrade_request ?token headers =
-  let target =
+  let headers =
     match token with
-    | None -> "/ws"
-    | Some token -> "/ws?token=" ^ Uri.pct_encode token
+    | None -> headers
+    | Some token ->
+      ( "sec-websocket-protocol"
+      , "masc.dashboard.v1, " ^ Server_auth.websocket_bearer_subprotocol_prefix
+        ^ hex_encode token )
+      :: headers
   in
-  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/ws"
 
 let ws_gate ?token ~base_path headers =
   Server_routes_http_routes_frontend.websocket_upgrade_authorized
@@ -485,6 +1026,31 @@ let test_ws_upgrade_denied_without_token () =
       [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
   with
   | Ok _ -> fail "expected deny: same-origin request has no bearer token"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf
+      "expected Auth error, got %s"
+      (Masc_domain.masc_error_to_string other)
+
+let test_ws_upgrade_rejects_legacy_query_bearer () =
+  with_ws_auth_dir @@ fun base_path ->
+  let token = worker_token base_path in
+  let request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [ ("host", "127.0.0.1:8935")
+           ; ("origin", "http://127.0.0.1:8935")
+           ])
+      `GET
+      ("/ws?token=" ^ Uri.pct_encode token)
+  in
+  match
+    Server_routes_http_routes_frontend.websocket_upgrade_authorized
+      ~base_path
+      request
+  with
+  | Ok _ -> fail "legacy query bearer must not authenticate a WebSocket"
   | Error (Masc_domain.Auth _) -> ()
   | Error other ->
     failf
@@ -506,7 +1072,7 @@ let test_ws_upgrade_allows_token_bound_same_origin () =
       "expected token-bound same-origin upgrade to pass, got %s"
       (Masc_domain.masc_error_to_string err)
 
-let test_ws_upgrade_allows_token_bound_cross_origin () =
+let test_ws_upgrade_rejects_browser_subprotocol_cross_origin () =
   with_ws_auth_dir @@ fun base_path ->
   let token = worker_token base_path in
   match
@@ -515,11 +1081,10 @@ let test_ws_upgrade_allows_token_bound_cross_origin () =
       ~base_path
       [ ("host", "127.0.0.1:8935"); ("origin", "http://evil.example:8935") ]
   with
-  | Ok admission -> check string "retained bearer" token admission.auth_token
-  | Error err ->
-    failf
-      "expected token-bound cross-origin upgrade to pass, got %s"
-      (Masc_domain.masc_error_to_string err)
+  | Ok _ -> fail "browser subprotocol credential must be origin-bound"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf "expected Auth error, got %s" (Masc_domain.masc_error_to_string other)
 
 let test_ws_upgrade_allows_bearer_header_for_non_browser_client () =
   with_ws_auth_dir @@ fun base_path ->
@@ -542,6 +1107,72 @@ let test_ws_upgrade_allows_bearer_header_for_non_browser_client () =
     failf
       "expected bearer-authenticated non-browser upgrade to pass, got %s"
       (Masc_domain.masc_error_to_string err)
+
+let test_ws_upgrade_rejects_ambiguous_subprotocol_credentials () =
+  with_ws_auth_dir @@ fun base_path ->
+  let token = worker_token base_path in
+  let request =
+    ws_upgrade_request
+      [ ( "sec-websocket-protocol"
+        , "masc.dashboard.v1, masc.bearer.hex.zz, "
+          ^ Server_auth.websocket_bearer_subprotocol_prefix
+          ^ hex_encode token )
+      ; ("host", "127.0.0.1:8935")
+      ; ("origin", "http://127.0.0.1:8935")
+      ]
+  in
+  match
+    Server_routes_http_routes_frontend.websocket_upgrade_authorized
+      ~base_path
+      request
+  with
+  | Ok _ -> fail "multiple credential subprotocols must fail closed"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf "expected Auth error, got %s" (Masc_domain.masc_error_to_string other)
+
+let test_ws_upgrade_rejects_conflicting_credential_channels () =
+  with_ws_auth_dir @@ fun base_path ->
+  let token = worker_token base_path in
+  let request =
+    ws_upgrade_request
+      ~token
+      [ ("host", "127.0.0.1:8935")
+      ; ("origin", "http://127.0.0.1:8935")
+      ; ("authorization", "Bearer " ^ token)
+      ]
+  in
+  match
+    Server_routes_http_routes_frontend.websocket_upgrade_authorized
+      ~base_path
+      request
+  with
+  | Ok _ -> fail "multiple credential channels must fail closed"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf "expected Auth error, got %s" (Masc_domain.masc_error_to_string other)
+
+let test_ws_upgrade_rejects_process_wide_internal_token () =
+  with_ws_auth_dir @@ fun base_path ->
+  let internal_token = Auth.ensure_internal_keeper_token base_path in
+  let request =
+    ws_upgrade_request
+      [ ("host", "127.0.0.1:8935")
+      ; ("authorization", "Bearer " ^ internal_token)
+      ; ("x-masc-keeper-name", "sangsu")
+      ]
+  in
+  match
+    Server_routes_http_routes_frontend.websocket_upgrade_authorized
+      ~base_path
+      request
+  with
+  | Ok _ -> fail "process-wide internal token must not impersonate a keeper"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf
+      "expected Auth error, got %s"
+      (Masc_domain.masc_error_to_string other)
 
 let test_ide_lsp_websocket_denies_tokenless_same_origin () =
   with_ws_auth_dir @@ fun base_path ->
@@ -575,13 +1206,16 @@ let test_ide_lsp_websocket_allows_token_bound_same_origin () =
   let request =
     Httpun.Request.create
       ~headers:
-        (Httpun.Headers.of_list
+      (Httpun.Headers.of_list
            [
              ("host", "127.0.0.1:8935");
              ("origin", "http://127.0.0.1:8935");
+             ( "sec-websocket-protocol"
+             , "masc.ide.v1, " ^ Server_auth.websocket_bearer_subprotocol_prefix
+               ^ hex_encode token );
            ])
       `GET
-      ("/api/v1/ide/lsp?token=" ^ Uri.pct_encode token)
+      "/api/v1/ide/lsp"
   in
   match
     Server_auth.authorize_websocket_request
@@ -613,6 +1247,52 @@ let test_ws_dispatch_carries_admitted_bearer () =
     (Some (Some "admitted-token", "ws-auth-session", body))
     !observed
 
+let webrtc_admission_request ?token () =
+  let headers =
+    match token with
+    | None -> [ "origin", "http://127.0.0.1:8935" ]
+    | Some token ->
+      [ "origin", "http://127.0.0.1:8935"
+      ; "authorization", "Bearer " ^ token
+      ]
+  in
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list headers)
+    `POST
+    "/webrtc/offer"
+
+let test_webrtc_signaling_denies_tokenless_same_origin () =
+  with_ws_auth_dir @@ fun base_path ->
+  match
+    Server_auth.authorize_token_bound_admission_request
+      ~base_path
+      ~permission:Masc_domain.CanBroadcast
+      (webrtc_admission_request ())
+  with
+  | Ok _ -> fail "same-origin WebRTC signaling must not replace bearer admission"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf
+      "expected Auth error, got %s"
+      (Masc_domain.masc_error_to_string other)
+
+let test_webrtc_signaling_retains_bearer_owner () =
+  with_ws_auth_dir @@ fun base_path ->
+  let token = worker_token base_path in
+  match
+    Server_auth.authorize_token_bound_admission_request
+      ~base_path
+      ~permission:Masc_domain.CanBroadcast
+      (webrtc_admission_request ~token ())
+  with
+  | Ok admission ->
+    check string "credential owner" "ws-test-agent" admission.identity.agent_name;
+    check string "retained bearer" token admission.auth_token
+  | Error err ->
+    failf
+      "expected bearer-authenticated WebRTC signaling, got %s"
+      (Masc_domain.masc_error_to_string err)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -622,12 +1302,26 @@ let () =
         [
           test_case "request context records pre-body state" `Quick
             test_request_context_make_records_session_source;
+          test_case "Origin admission is exact across H1/H2" `Quick
+            test_origin_admission_is_exact_across_h1_h2;
           test_case "request context decides POST body admission" `Quick
             test_request_context_decides_post_body;
           test_case "POST shared predicate matrix" `Quick
             test_shared_post_admission_matrix;
           test_case "protocol and DELETE predicate matrix" `Quick
             test_shared_protocol_and_delete_matrix;
+          test_case "session owner is immutable; delete is owner or Admin" `Quick
+            test_session_owner_is_immutable_and_delete_is_owner_or_admin;
+          test_case "ownerless known session requires Admin delete" `Quick
+            test_ownerless_known_session_requires_admin_delete;
+          test_case "ephemeral SSE owner lease is credential-bound and stale-safe"
+            `Quick test_sse_owner_lease_is_credential_bound_and_stale_safe;
+          test_case "old disconnect during reconnect cannot orphan owner" `Quick
+            test_old_disconnect_during_reconnect_does_not_restore_orphan_owner;
+          test_case "initialized SSE reuses immutable transport owner" `Quick
+            test_initialized_sse_uses_transport_owner_with_connection_lease;
+          test_case "DELETE invalidates in-flight Agent GET claim" `Quick
+            test_delete_invalidates_in_flight_agent_stream_claim;
           test_case "SSE backing session bridge requires known transport session"
             `Quick
             test_sse_backing_session_bridge_requires_known_transport_session;
@@ -644,22 +1338,41 @@ let () =
             test_h1_h2_post_route_wiring_parity;
           test_case "H1/H2 DELETE route uses the same admission gates" `Quick
             test_h1_h2_delete_route_wiring_parity;
+          test_case "MCP SSE GET ownership and route surface fail closed" `Quick
+            test_mcp_sse_get_owner_wiring_and_fail_closed_route_surface;
+          test_case "H2 read auth and Origin wiring match H1" `Quick
+            test_h2_read_auth_and_origin_wiring_parity;
         ] );
       ( "ws-upgrade-admission",
         [
           test_case "denies same-origin upgrade without token" `Quick
             test_ws_upgrade_denied_without_token;
+          test_case "rejects legacy query bearer" `Quick
+            test_ws_upgrade_rejects_legacy_query_bearer;
           test_case "allows token-bound same-origin upgrade" `Quick
             test_ws_upgrade_allows_token_bound_same_origin;
-          test_case "allows token-bound cross-origin upgrade" `Quick
-            test_ws_upgrade_allows_token_bound_cross_origin;
+          test_case "rejects cross-origin browser subprotocol credential" `Quick
+            test_ws_upgrade_rejects_browser_subprotocol_cross_origin;
           test_case "allows bearer header for non-browser clients" `Quick
             test_ws_upgrade_allows_bearer_header_for_non_browser_client;
+          test_case "rejects ambiguous subprotocol credentials" `Quick
+            test_ws_upgrade_rejects_ambiguous_subprotocol_credentials;
+          test_case "rejects conflicting credential channels" `Quick
+            test_ws_upgrade_rejects_conflicting_credential_channels;
+          test_case "rejects process-wide internal token impersonation" `Quick
+            test_ws_upgrade_rejects_process_wide_internal_token;
           test_case "carries admitted bearer into MCP dispatcher" `Quick
             test_ws_dispatch_carries_admitted_bearer;
           test_case "IDE LSP denies tokenless same-origin upgrade" `Quick
             test_ide_lsp_websocket_denies_tokenless_same_origin;
           test_case "IDE LSP allows token-bound same-origin upgrade" `Quick
             test_ide_lsp_websocket_allows_token_bound_same_origin;
+        ] );
+      ( "webrtc-admission",
+        [
+          test_case "denies tokenless same-origin signaling" `Quick
+            test_webrtc_signaling_denies_tokenless_same_origin;
+          test_case "retains signaling bearer owner" `Quick
+            test_webrtc_signaling_retains_bearer_owner;
         ] );
     ]

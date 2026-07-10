@@ -673,25 +673,24 @@ let state_to_json st =
     [assertion_kind_to_string] / [assertion_kind_of_string_lenient]
     aren't updated. Same shape as #8546 / #8601 / #8592. *)
 let handle_heartbeat ~tool_name ~start_time ctx _args =
-  let message = Workspace.heartbeat ctx.config ~agent_name:ctx.agent_name in
-  (* Workspace.heartbeat returns "..." on failure (agent not found, invalid file) *)
-  let success =
-    not
-      (String.length message >= 3
-       && Char.code message.[0] = 0xe2
-       && Char.code message.[1] = 0x9a
-       && Char.code message.[2] = 0xa0)
-  in
-  if success
-  then Tool_result.ok ~tool_name ~start_time message
-  else
-    (* RFC-0189: heartbeat failure stems from agent-state issues
-       ("agent not found", "invalid file") that the caller can
-       resolve (bind the session, refresh credentials).
-       [Workflow_rejection]. *)
+  match Workspace.heartbeat_r ctx.config ~agent_name:ctx.agent_name with
+  | Workspace.Heartbeat_updated { agent_name } ->
+    Tool_result.ok
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "%s heartbeat updated" agent_name)
+  | Workspace.Heartbeat_agent_not_found { agent_name } ->
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name ~start_time message
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "Agent %s not found" agent_name)
+  | Workspace.Heartbeat_invalid_agent_file { agent_name; detail } ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name
+      ~start_time
+      (Printf.sprintf "Invalid agent file for %s: %s" agent_name detail)
 ;;
 
 type dispatch_handler =

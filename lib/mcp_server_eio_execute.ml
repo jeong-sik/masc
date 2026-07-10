@@ -231,8 +231,19 @@ let execute_tool_eio
             if (not skip_heartbeat) && workspace_init_cached
             then (
               try
-                let (_ : string) = Workspace.heartbeat config ~agent_name in
-                ()
+                match Workspace.heartbeat_r config ~agent_name with
+                | Workspace.Heartbeat_updated _ -> ()
+                | Workspace.Heartbeat_agent_not_found { agent_name } ->
+                  Log.Misc.warn
+                    "heartbeat owner %s disappeared while dispatching %s"
+                    agent_name
+                    name
+                | Workspace.Heartbeat_invalid_agent_file { agent_name; detail } ->
+                  Log.Misc.warn
+                    "heartbeat state for %s is invalid while dispatching %s: %s"
+                    agent_name
+                    name
+                    detail
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn ->

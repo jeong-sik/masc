@@ -129,26 +129,42 @@ PY
 }
 
 probe_ws_handshake() {
-  local host="$1"
-  local port="$2"
-  python3 - "$host" "$port" <<'PY'
+  local ws_url="$1"
+  local auth_token="${2:-}"
+  WS_PROBE_AUTH_TOKEN="$auth_token" python3 - "$ws_url" <<'PY'
 import base64
 import os
 import socket
+import ssl
 import sys
+from urllib.parse import urlsplit
 
-host = sys.argv[1]
-port = int(sys.argv[2])
+parsed = urlsplit(sys.argv[1])
+if parsed.scheme not in {"ws", "wss"} or not parsed.hostname:
+    sys.exit(1)
+host = parsed.hostname
+port = parsed.port or (443 if parsed.scheme == "wss" else 80)
+path = parsed.path or "/"
+if parsed.query:
+    path += "?" + parsed.query
+auth_token = os.environ.get("WS_PROBE_AUTH_TOKEN", "")
+authorization = f"Authorization: Bearer {auth_token}\r\n" if auth_token else ""
+origin_scheme = "https" if parsed.scheme == "wss" else "http"
+sock = None
 try:
     sock = socket.create_connection((host, port), timeout=3)
+    if parsed.scheme == "wss":
+        sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
     key = base64.b64encode(os.urandom(16)).decode("ascii")
     request = (
-        f"GET / HTTP/1.1\r\n"
-        f"Host: {host}:{port}\r\n"
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {parsed.netloc}\r\n"
+        f"Origin: {origin_scheme}://{parsed.netloc}\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         f"Sec-WebSocket-Key: {key}\r\n"
-        "Sec-WebSocket-Version: 13\r\n\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        f"{authorization}\r\n"
     )
     sock.sendall(request.encode("ascii"))
     response = b""
@@ -159,10 +175,11 @@ try:
             break
         response += chunk
 finally:
-    try:
-        sock.close()
-    except Exception:
-        pass
+    if sock is not None:
+        try:
+            sock.close()
+        except Exception:
+            pass
 
 status = response.split(b"\r\n", 1)[0]
 if b"101" not in status:
@@ -339,8 +356,9 @@ compare_truth "grpc" "$dashboard_grpc" "$tool_grpc" "$actual_grpc" \
   "tcp=127.0.0.1:${grpc_port}"
 
 ws_discovery="$(curl -fsS --max-time 5 "${MASC_HTTP_BASE_URL}/ws" 2>/dev/null || printf '{}')"
-ws_port="$(jq -r '.ws_port // empty' <<<"$ws_discovery" 2>/dev/null || true)"
-if [[ "$ws_port" =~ ^[0-9]+$ ]] && probe_ws_handshake "127.0.0.1" "$ws_port"; then
+ws_url="$(jq -r '.ws_url // empty' <<<"$ws_discovery" 2>/dev/null || true)"
+ws_auth_token="$(transport_auth_token)"
+if [[ "$ws_url" =~ ^wss?:// ]] && probe_ws_handshake "$ws_url" "$ws_auth_token"; then
   actual_ws="true"
 else
   actual_ws="false"
@@ -351,7 +369,7 @@ fi
 dashboard_ws="$(json_bool "$transport_health_json" '.websocket as $ws | if ($ws | has("reachable")) then $ws.reachable else $ws.listening end')"
 tool_ws="$(json_bool "$transport_status_json" '.websocket as $ws | if ($ws | has("reachable")) then $ws.reachable else $ws.listening end')"
 compare_truth "websocket" "$dashboard_ws" "$tool_ws" "$actual_ws" \
-  "port=${ws_port:-missing}"
+  "url=${ws_url:-missing}"
 
 dashboard_h2="$(json_bool "$transport_health_json" '.http2.multiplex_ready')"
 tool_h2="$(

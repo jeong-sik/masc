@@ -94,27 +94,6 @@ let json_ensure_meta_string_field name value = function
   | _non_object ->
       Error "json_ensure_meta_string_field: expected JSON object"
 
-let board_tool_agent_name_from_request request =
-  let hdr name =
-    Option.bind
-      (Httpun.Headers.get request.Httpun.Request.headers name)
-      (fun value ->
-        let trimmed = String.trim value in
-        if String.equal trimmed "" then None else Some trimmed)
-  in
-  match hdr "x-gate-agent" with
-  | Some value -> value
-  | None -> (
-      match hdr "x-masc-agent" with
-      | Some value -> value
-      | None ->
-          (* NDT-OK: same-origin dashboard tool calls may omit agent headers;
-             the sibling board REST bridges already use this dashboard actor fallback. *)
-          "dashboard")
-
-let board_tool_owner_from_request request =
-  board_tool_agent_name_from_request request |> board_actor_author_for_write
-
 let sub_board_owner_matches ~owner (sb : Board.sub_board) =
   String.equal (Board.Agent_id.to_string sb.Board.owner) owner
 
@@ -350,10 +329,9 @@ let board_context_inference_submission_json ~post_id ~target_source tool_data =
       Ok (`Assoc fields)
   | _ -> Error "masc_keeper_msg returned a malformed queue submission"
 
-let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
+let dispatch_board_context_inference ~state ~sw ~clock ~agent_name ~target_keeper
     ~target_source ~(post : Board.post) ~comments =
   let config = Mcp_server.workspace_config state in
-  let agent_name = board_tool_agent_name_from_request request in
   let keeper_ctx : _ Keeper_tool_surface.context =
     {
       config;
@@ -392,7 +370,7 @@ let respond_board_context_inference_error request reqd ~status ~message =
   respond_json_value_with_cors ~status request reqd
     (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
 
-let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body =
+let handle_board_context_inference_request ~state ~sw ~clock ~agent_name reqd body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error msg ->
       respond_board_context_inference_error request reqd ~status:`Bad_request
@@ -423,7 +401,7 @@ let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body 
                     ~message
               | Ok (target_keeper, target_source) -> (
                   match
-                    dispatch_board_context_inference ~state ~sw ~clock ~request
+                    dispatch_board_context_inference ~state ~sw ~clock ~agent_name
                       ~target_keeper ~target_source ~post ~comments
                   with
                   | Ok json ->
@@ -671,15 +649,16 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg"
-         (fun state _req reqd ->
+         (fun state actor _req reqd ->
          Http.Request.read_body_async reqd
-           (handle_board_context_inference_request ~state ~sw ~clock ~request
+           (handle_board_context_inference_request ~state ~sw ~clock
+              ~agent_name:actor
               reqd))
          request reqd)
 
   |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_sub_board_create"
-         (fun _state _req reqd ->
+         (fun _state actor _req reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -693,7 +672,7 @@ let add_routes ~sw ~clock router =
                Safe_ops.json_string_opt "description" args |> Option.value ~default:""
              in
              let members = Safe_ops.json_string_list "members" args in
-             let owner = board_tool_owner_from_request request in
+             let owner = board_actor_author_for_write actor in
              let access =
                match Safe_ops.json_string_opt "access" args with
                | Some s -> Board.sub_board_access_of_string_opt s
@@ -731,7 +710,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_sub_board_delete"
-         (fun _state _req reqd ->
+         (fun _state actor _req reqd ->
          let path = Http.Request.path request in
          (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
           | None ->
@@ -739,7 +718,7 @@ let add_routes ~sw ~clock router =
                 (`Assoc [("error", `String "sub_board_id is required")])
                 reqd
          | Some sub_board_id ->
-              let owner = board_tool_owner_from_request request in
+              let owner = board_actor_author_for_write actor in
               (match Board_dispatch.get_sub_board ~sub_board_id with
                | Error e ->
                    Http.Response.json_value ~status:`Not_found
@@ -762,7 +741,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.prefix_put "/api/v1/board/sub-boards/" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_sub_board_update"
-         (fun _state _req reqd ->
+         (fun _state actor _req reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -782,7 +761,7 @@ let add_routes ~sw ~clock router =
                     (`Assoc [("error", `String "sub_board_id is required")])
                     reqd
               | Some sub_board_id ->
-                  let owner = board_tool_owner_from_request request in
+                  let owner = board_actor_author_for_write actor in
                   (match Board_dispatch.get_sub_board ~sub_board_id with
                    | Error e ->
                        Http.Response.json_value ~status:`Not_found
@@ -805,6 +784,83 @@ let add_routes ~sw ~clock router =
                (`Assoc [("error", `String ("invalid JSON: " ^ msg))])
                reqd))
          request reqd)
+
+  |> Http.Router.get "/api/v1/board/reactions" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let target_type_raw =
+           Server_utils.query_param request "target_type"
+           |> Option.value ~default:""
+         in
+         let target_id =
+           Server_utils.query_param request "target_id"
+           |> Option.value ~default:""
+         in
+         let user_id = Server_utils.query_param request "user_id" in
+         match Board.reaction_target_type_of_string_opt target_type_raw with
+         | None ->
+           Http.Response.json_value ~status:`Bad_request
+             (`Assoc [ "error", `String "target_type must be post or comment" ])
+             reqd
+         | Some target_type ->
+           (match Board_dispatch.list_reactions ~target_type ~target_id ?user_id () with
+            | Ok summary ->
+              Http.Response.json_value
+                (`Assoc
+                   [ ( "reactions"
+                     , `List (List.map Board.reaction_summary_to_yojson summary) ) ])
+                reqd
+            | Error error ->
+              Http.Response.json_value ~status:`Bad_request
+                (`Assoc
+                   [ "error", `String (Board_tool.board_error_to_string error) ])
+                reqd)
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/board/reactions" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_board_reaction"
+         (fun _state actor _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             match Yojson.Safe.from_string body with
+             | exception Yojson.Json_error message ->
+               Http.Response.json_value ~status:`Bad_request
+                 (`Assoc [ "error", `String ("invalid JSON: " ^ message) ])
+                 reqd
+             | args ->
+               let target_type_raw =
+                 Safe_ops.json_string_opt "target_type" args
+                 |> Option.value ~default:""
+               in
+               let target_id =
+                 Safe_ops.json_string_opt "target_id" args
+                 |> Option.value ~default:""
+               in
+               let emoji =
+                 Safe_ops.json_string_opt "emoji" args
+                 |> Option.value ~default:""
+               in
+               let user_id = board_actor_author_for_write actor in
+               match Board.reaction_target_type_of_string_opt target_type_raw with
+               | None ->
+                 Http.Response.json_value ~status:`Bad_request
+                   (`Assoc
+                      [ "error", `String "target_type must be post or comment" ])
+                   reqd
+               | Some target_type ->
+                 (match
+                    Board_dispatch.toggle_reaction
+                      ~target_type ~target_id ~user_id ~emoji
+                  with
+                  | Ok result ->
+                    Http.Response.json_value
+                      (Board.reaction_toggle_result_to_yojson result)
+                      reqd
+                  | Error error ->
+                    Http.Response.json_value ~status:`Bad_request
+                      (`Assoc
+                         [ ( "error"
+                           , `String (Board_tool.board_error_to_string error) ) ])
+                      reqd))
+         ) request reqd)
 
   |> Http.Router.prefix_get "/api/v1/board/" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -841,13 +897,11 @@ let add_routes ~sw ~clock router =
               respond_json_with_cors ~status request reqd body)
        ) request reqd)
 
-  (* Board write APIs — used by dashboard + Bevy Viewer.
-     Uses with_tool_auth to allow same-origin or allowlisted local dev browser
-     requests without a bearer token. *)
+  (* Board write APIs — used by dashboard + Bevy Viewer. Every route binds
+     actor fields to the credential owner returned by [with_tool_auth]. *)
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_vote"
-         (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -877,8 +931,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.post "/api/v1/tools/masc_board_post" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_post"
-         (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -917,8 +970,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_comment"
-         (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -950,8 +1002,7 @@ let add_routes ~sw ~clock router =
      agent header so the client cannot forge the voting identity. *)
   |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_comment_vote"
-         (fun _state _req reqd ->
-         let agent_name = board_tool_agent_name_from_request request in
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1065,7 +1116,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.post "/api/v1/prompts" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_prompt_override"
-         (fun state _req reqd ->
+         (fun state _actor _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -1128,7 +1179,7 @@ let add_routes ~sw ~clock router =
   (* Governance Runtime Params: set / clear *)
   |> Http.Router.post "/api/v1/governance/params/set" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_set_param"
-         (fun state _req reqd ->
+         (fun state _actor _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -1200,7 +1251,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.post "/api/v1/governance/params/clear" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_set_param"
-         (fun state _req reqd ->
+         (fun state _actor _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in

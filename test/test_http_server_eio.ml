@@ -205,26 +205,27 @@ let with_env name value_opt f =
        f ())
 ;;
 
-let with_ws_same_origin_ready ready f =
-  Masc.Transport_metrics.set_ws_same_origin_runtime_ready ready;
+let with_ws_upgrade_state state f =
+  let previous = Masc.Transport_metrics.get_ws_upgrade_state () in
+  Masc.Transport_metrics.set_ws_upgrade_state state;
   Fun.protect
     ~finally:(fun () ->
-      Masc.Transport_metrics.set_ws_same_origin_runtime_ready false)
+      Masc.Transport_metrics.set_ws_upgrade_state previous)
     f
 ;;
 
 let test_frontend_websocket_upgrade_waits_for_dispatcher () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
-    with_ws_same_origin_ready false (fun () ->
+    with_ws_upgrade_state Masc.Transport_metrics.Initializing (fun () ->
       Alcotest.(check (option string))
         "dispatcher-not-ready upgrades are rejected"
-        (Some "WebSocket transport not ready")
+        (Some "WebSocket transport initializing")
         (Server_routes_http_routes_frontend.websocket_upgrade_unavailable_reason ())))
 ;;
 
 let test_frontend_websocket_upgrade_allows_ready_dispatcher () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
-    with_ws_same_origin_ready true (fun () ->
+    with_ws_upgrade_state Masc.Transport_metrics.Ready (fun () ->
       Alcotest.(check (option string))
         "ready dispatcher admits upgrades"
         None

@@ -240,6 +240,35 @@ let test_ws_upgrade_accept_rejects_wrong_version () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected a non-13 Sec-WebSocket-Version to be rejected"
 
+let test_ws_subprotocol_selects_application_not_bearer () =
+  let request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [ ( "sec-websocket-protocol"
+             , "masc.bearer.hex.736563726574, masc.dashboard.v1" )
+           ])
+      `GET
+      "/ws"
+  in
+  Alcotest.(check (option string))
+    "application protocol selected"
+    (Some "masc.dashboard.v1")
+    (Ws.selected_websocket_application_subprotocol request)
+
+let test_ws_subprotocol_never_echoes_bearer () =
+  let request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [ "sec-websocket-protocol", "masc.bearer.hex.736563726574" ])
+      `GET
+      "/ws"
+  in
+  Alcotest.(check (option string))
+    "bearer protocol not selected"
+    None
+    (Ws.selected_websocket_application_subprotocol request)
 (* ====== Dashboard route-scoped slices ====== *)
 
 let test_dashboard_route_scoped_slices_are_valid () =
@@ -649,21 +678,17 @@ let with_env_var name value f =
     | None -> Unix.putenv name "")
     f
 
-let test_backpressure_gate_unauthenticated_ignored () =
-  (* Unauthenticated sessions never report bufferedAmount, so the gate
-     must never apply to them.  Set an aggressive threshold and verify
-     the flag still returns false. *)
+let test_backpressure_gate_protocol_pending_ignored () =
+  (* Upgrade-authenticated sessions do not participate in dashboard
+     backpressure until dashboard/hello confirms protocol readiness. *)
   with_env_var "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES" "1" (fun () ->
-    (* Stub session: we can't construct a real Wsd.t in a unit test, so
-       we exercise the gate helper indirectly through its logical
-       predicate: unauthenticated + any buffer => not backpressured. *)
-    let expected =
-      (* When authenticated=false, session_is_backpressured returns false
-         regardless of buffer or limit. *)
-      false
+    let session =
+      Ws.new_session ~id:"hello-pending-backpressure" ~wsd:(Obj.magic ())
+        ~authenticated_agent:"test-agent"
     in
-    Alcotest.(check bool) "unauthenticated session cannot be backpressured"
-      false expected)
+    Atomic.set session.dashboard_last_buffered_amount max_int;
+    Alcotest.(check bool) "protocol-pending session cannot be backpressured"
+      false (Ws.session_is_backpressured session))
 
 let test_backpressure_gate_zero_disables () =
   (* MASC_WS_CLIENT_BUFFER_LIMIT_BYTES=0 means gate disabled. Even if a
@@ -737,8 +762,11 @@ let test_backpressure_gate_stale_ack_throttles_delivery () =
   let before = read_counter name in
   Ws.__test_reset_env_caches ();
   with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0.001" (fun () ->
-    let session = Ws.new_session ~id:"stale-ack" ~wsd:(Obj.magic ()) in
-    Atomic.set session.dashboard_auth (Ws.Authenticated { agent = None });
+    let session =
+      Ws.new_session ~id:"stale-ack" ~wsd:(Obj.magic ())
+        ~authenticated_agent:"test-agent"
+    in
+    Atomic.set session.dashboard_protocol Ws.Hello_confirmed;
     Atomic.set session.dashboard_last_delta_seq 1;
     Atomic.set session.dashboard_last_delta_at (Unix.gettimeofday () -. 10.0);
     Alcotest.(check bool) "stale ack skips send without closing session"
@@ -763,7 +791,10 @@ let test_inbound_size_env_defaults () =
 (* ====== Inbound dispatch admission ====== *)
 
 let with_registered_test_session sid f =
-  let session = Ws.new_session ~id:sid ~wsd:(Obj.magic ()) in
+  let session =
+    Ws.new_session ~id:sid ~wsd:(Obj.magic ())
+      ~authenticated_agent:"test-agent"
+  in
   Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions sid session);
   Fun.protect
     ~finally:(fun () ->
@@ -1045,34 +1076,35 @@ let test_slice_fanout_flag_reads_env () =
         Alcotest.(check bool) "env=false → disabled"
           false (Ws.slice_index_enabled ())))
 
-(* ====== Dashboard auth state (RFC-0204 §8.4, Phase 1) ====== *)
+(* ====== Dashboard protocol state (RFC-0204 §8.4, Phase 1) ====== *)
 
-let test_dashboard_auth_unauthenticated () =
-  Alcotest.(check bool) "Unauthenticated is not authenticated"
-    false (Ws.dashboard_auth_is_authenticated Ws.Unauthenticated);
-  Alcotest.(check (option string)) "Unauthenticated carries no agent"
-    None (Ws.dashboard_auth_agent Ws.Unauthenticated)
-
-let test_dashboard_auth_authenticated_with_agent () =
-  let st = Ws.Authenticated { agent = Some "garnet" } in
-  Alcotest.(check bool) "Authenticated counts as authenticated"
-    true (Ws.dashboard_auth_is_authenticated st);
-  Alcotest.(check (option string)) "agent name is carried through"
-    (Some "garnet") (Ws.dashboard_auth_agent st)
-
-let test_dashboard_auth_authenticated_tokenless () =
-  (* An auth config that permits tokenless dashboard reads resolves to an
-     authenticated state with no agent name. *)
-  let st = Ws.Authenticated { agent = None } in
-  Alcotest.(check bool) "tokenless still counts as authenticated"
-    true (Ws.dashboard_auth_is_authenticated st);
-  Alcotest.(check (option string)) "tokenless carries no agent"
-    None (Ws.dashboard_auth_agent st)
+let test_dashboard_hello_confirms_protocol_without_reauth () =
+  with_registered_test_session "hello-transition" (fun session ->
+    Alcotest.(check string) "upgrade identity is immutable"
+      "test-agent" session.authenticated_agent;
+    Alcotest.(check bool) "new session waits for hello"
+      false (Ws.dashboard_hello_is_confirmed session);
+    (match
+       Ws.dashboard_subscribe ~session_id:session.id ~slices:[ "shell" ] ()
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "subscribe must not precede dashboard/hello");
+    (match Ws.dashboard_hello ~session_id:session.id () with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail error);
+    Alcotest.(check bool) "hello confirms protocol"
+      true (Ws.dashboard_hello_is_confirmed session);
+    (match Ws.dashboard_hello ~session_id:session.id () with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail error))
 
 (* ====== Cross-fiber scalar state (Atomic.t) ====== *)
 
 let test_new_session_initializes_pong_state () =
-  let session = Ws.new_session ~id:"pong-state-init" ~wsd:(Obj.magic ()) in
+  let session =
+    Ws.new_session ~id:"pong-state-init" ~wsd:(Obj.magic ())
+      ~authenticated_agent:"test-agent"
+  in
   Alcotest.(check bool) "closed starts false" false (Atomic.get session.closed);
   Alcotest.(check bool) "last_pong_at is in the recent past"
     true
@@ -1089,7 +1121,10 @@ let test_new_session_initializes_pong_state () =
     0 (Atomic.get session.inbound_dispatches)
 
 let test_record_pong_refreshes_last_pong_at () =
-  let session = Ws.new_session ~id:"pong-refresh" ~wsd:(Obj.magic ()) in
+  let session =
+    Ws.new_session ~id:"pong-refresh" ~wsd:(Obj.magic ())
+      ~authenticated_agent:"test-agent"
+  in
   let before = Atomic.get session.last_pong_at in
   Unix.sleepf 0.005;
   Ws.record_pong session;
@@ -1171,7 +1206,10 @@ let test_dashboard_seq_no_lost_updates_across_domains () =
      meaningless.  Skip rather than assert a vacuous green. *)
   if Domain.recommended_domain_count () < 2 then ()
   else
-  let session = Ws.new_session ~id:"seq-xdomain" ~wsd:(Obj.magic ()) in
+  let session =
+    Ws.new_session ~id:"seq-xdomain" ~wsd:(Obj.magic ())
+      ~authenticated_agent:"test-agent"
+  in
   let iters = 1_000_000 in
   (* Two-way start barrier: each domain announces arrival and spins until both
      are present, so the increment loops run in true overlap.  Without it the
@@ -1222,6 +1260,10 @@ let () =
         test_ws_upgrade_accept_rejects_short_key;
       Alcotest.test_case "wrong Sec-WebSocket-Version rejected" `Quick
         test_ws_upgrade_accept_rejects_wrong_version;
+      Alcotest.test_case "application subprotocol selected" `Quick
+        test_ws_subprotocol_selects_application_not_bearer;
+      Alcotest.test_case "bearer subprotocol never echoed" `Quick
+        test_ws_subprotocol_never_echoes_bearer;
     ]);
     ("dashboard", [
       Alcotest.test_case "route scoped slices are valid" `Quick
@@ -1273,7 +1315,7 @@ let () =
     ]);
     ("backpressure_gate", [
       Alcotest.test_case "unauthenticated sessions never trigger the gate" `Quick
-        test_backpressure_gate_unauthenticated_ignored;
+        test_backpressure_gate_protocol_pending_ignored;
       Alcotest.test_case "zero limit disables the gate" `Quick
         test_backpressure_gate_zero_disables;
       Alcotest.test_case "default limit is 1 MiB" `Quick
@@ -1341,13 +1383,9 @@ let () =
       Alcotest.test_case "flag reads env var" `Quick
         test_slice_fanout_flag_reads_env;
     ]);
-    ("dashboard_auth_state", [
-      Alcotest.test_case "Unauthenticated has no auth and no agent" `Quick
-        test_dashboard_auth_unauthenticated;
-      Alcotest.test_case "Authenticated carries the agent name" `Quick
-        test_dashboard_auth_authenticated_with_agent;
-      Alcotest.test_case "tokenless Authenticated has no agent" `Quick
-        test_dashboard_auth_authenticated_tokenless;
+    ("dashboard_protocol_state", [
+      Alcotest.test_case "hello confirms protocol without reauth" `Quick
+        test_dashboard_hello_confirms_protocol_without_reauth;
     ]);
     ("pong_state", [
       Alcotest.test_case "new session initializes pong atomics" `Quick

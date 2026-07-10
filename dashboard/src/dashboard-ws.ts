@@ -3,9 +3,8 @@ import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
 import {
-  dashboardBearerToken,
   subscribeStoredTokenChanges,
-  websocketUrlWithDashboardBearer,
+  websocketProtocolsWithDashboardBearer,
 } from './api/core'
 import { parseWebSocketSseFrames } from './dashboard-ws-parse'
 import {
@@ -51,9 +50,6 @@ interface DashboardWsDiscovery {
   listen_status?: string | null
   ws_url?: string | null
   unavailable_reason?: string | null
-  same_origin_upgrade_enabled?: boolean
-  same_origin_upgrade_path?: string | null
-  same_origin_ws_url?: string | null
 }
 
 interface DashboardWsDiscoveryResult {
@@ -63,7 +59,7 @@ interface DashboardWsDiscoveryResult {
   reason?: string
 }
 
-const DASHBOARD_WS_DISCOVERY_CACHE_KEY = 'masc.dashboard.ws.discovery.v1'
+const DASHBOARD_WS_DISCOVERY_CACHE_KEY = 'masc.dashboard.ws.discovery.v2'
 const DASHBOARD_WS_PARSE_TIMEOUT_MS = 5_000
 
 let socket: WebSocket | null = null
@@ -108,48 +104,9 @@ function sameOriginWebSocketUrl(wsUrl: string): boolean {
   }
 }
 
-function currentOriginWebSocketUrl(pathOrUrl: string): string | null {
-  if (typeof window === 'undefined' || typeof window.location === 'undefined') return null
-  if (window.location.protocol !== 'https:' && window.location.protocol !== 'http:') return null
-  try {
-    const parsed = new URL(pathOrUrl, window.location.href)
-    parsed.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    parsed.host = window.location.host
-    return parsed.toString()
-  } catch {
-    return null
-  }
-}
-
-function sameOriginUpgradePath(data: DashboardWsDiscovery): string | null {
-  const upgradePath = nonBlankString(data.same_origin_upgrade_path)
-  if (upgradePath) return upgradePath
-  const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
-  if (!sameOriginWsUrl) return null
-  try {
-    const baseUrl = typeof window !== 'undefined' && typeof window.location !== 'undefined'
-      ? window.location.href
-      : 'http://localhost/'
-    const parsed = new URL(sameOriginWsUrl, baseUrl)
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`
-  } catch {
-    return null
-  }
-}
-
 function preferredDiscoveredWsUrl(data: DashboardWsDiscovery): string | null {
-  if (data.same_origin_upgrade_enabled === true) {
-    const upgradePath = sameOriginUpgradePath(data)
-    if (upgradePath) {
-      const wsUrl = currentOriginWebSocketUrl(upgradePath)
-      if (wsUrl) return wsUrl
-    }
-  }
   const wsUrl = nonBlankString(data.ws_url)
-  if (wsUrl) return wsUrl
-  const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
-  if (sameOriginWsUrl && sameOriginWebSocketUrl(sameOriginWsUrl)) return sameOriginWsUrl
-  return null
+  return wsUrl && sameOriginWebSocketUrl(wsUrl) ? wsUrl : null
 }
 
 function readCachedWsUrl(): string | null {
@@ -232,16 +189,9 @@ function discoveryUnavailableReason(data: DashboardWsDiscovery): string {
     const listenStatus = nonBlankString(data.listen_status)
     return listenStatus ? `not listening (${listenStatus})` : 'not listening'
   }
-  if (!nonBlankString(data.ws_url)) {
-    const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
-    if (sameOriginWsUrl && data.same_origin_upgrade_enabled !== true) {
-      return 'standalone websocket URL unavailable; same-origin upgrade disabled'
-    }
-    if (data.same_origin_upgrade_enabled === true) {
-      return 'same-origin websocket URL unavailable'
-    }
-    return 'websocket URL unavailable'
-  }
+  const wsUrl = nonBlankString(data.ws_url)
+  if (!wsUrl) return 'same-origin websocket URL unavailable'
+  if (!sameOriginWebSocketUrl(wsUrl)) return 'cross-origin websocket URL rejected'
   return 'unavailable'
 }
 
@@ -816,9 +766,9 @@ subscribeStoredTokenChanges(() => {
   reconnectAfterAuthTokenChange()
 })
 
-export async function subscribeDashboardRoute(routeState: DashboardRouteState): Promise<void> {
-  const desired = rememberRouteState(routeState)
-  if (!dashboardWsReady.value) return
+async function subscribeRememberedDashboardRoute(
+  desired: DashboardRouteState,
+): Promise<void> {
   const slices = dashboardSlicesForRoute(desired)
   const key = `${routeKey(desired)}|${slices.join(',')}`
   if (key === lastSubscribeKey) return
@@ -834,6 +784,12 @@ export async function subscribeDashboardRoute(routeState: DashboardRouteState): 
     if (lastSubscribeKey === key) lastSubscribeKey = ''
     throw err
   }
+}
+
+export async function subscribeDashboardRoute(routeState: DashboardRouteState): Promise<void> {
+  const desired = rememberRouteState(routeState)
+  if (!dashboardWsReady.value) return
+  await subscribeRememberedDashboardRoute(desired)
 }
 
 export async function connectDashboardWS(routeState?: DashboardRouteState): Promise<void> {
@@ -877,7 +833,10 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   helloFailed = false
   let ws: WebSocket
   try {
-    ws = new WebSocket(websocketUrlWithDashboardBearer(wsUrl))
+    ws = new WebSocket(
+      wsUrl,
+      websocketProtocolsWithDashboardBearer(wsUrl, 'masc.dashboard.v1'),
+    )
   } catch (err) {
     // A constructor failure proves this URL is unusable for the current
     // browser. Keep it out of the cache and let reconnect rediscover.
@@ -893,27 +852,30 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     if (socket !== ws) return
     dashboardWsConnected.value = true
     reconnectAttempts = 0
-    const token = dashboardBearerToken()
     void sendRpc('dashboard/hello', {
       protocol: 'dashboard-ws.v1',
-      token: token ?? undefined,
       features: ['snapshot', 'delta', 'mode_snapshot'],
     })
       .then(() => {
         if (socket !== ws) return
         if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
         resetDiscoveryCacheFailures()
-        batch(() => {
-          dashboardWsReady.value = true
-          dashboardWsLastError.value = null
-        })
         if (desiredRouteState) {
-          void subscribeDashboardRoute(desiredRouteState)
+          void subscribeRememberedDashboardRoute(desiredRouteState)
             .then(() => {
-              if (socket === ws) startHeartbeat(ws)
+              if (socket !== ws) return
+              batch(() => {
+                dashboardWsReady.value = true
+                dashboardWsLastError.value = null
+              })
+              startHeartbeat(ws)
             })
             .catch(err => reconnectAfterCurrentSocketFailure(ws, err))
         } else {
+          batch(() => {
+            dashboardWsReady.value = true
+            dashboardWsLastError.value = null
+          })
           startHeartbeat(ws)
         }
       })
@@ -949,13 +911,11 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   ws.onclose = (event) => {
     if (socket !== ws) return
     const closeError = new Error(formatCloseEventError(event))
-    // Clean close (wasClean=true) is server-initiated (shutdown/redeploy/idle),
-    // not a degraded-WS error. Leaving lastError set on a clean close would trip
-    // the SSE fallback (dashboard-transport-fallback.ts) for every clean close ->
-    // reconnect window, producing the "dashboard keeps falling back to SSE"
-    // symptom. Abnormal closes (wasClean=false: network drop, code 1006/1011)
-    // keep lastError set so the fallback still engages. reconnect runs either
-    // way; pending RPCs are rejected either way (socket is gone).
+    // A clean server close is not an error, so keep its diagnostic empty.
+    // [dashboard-transport-fallback] separately observes the ready -> reconnecting
+    // transition and covers that event gap with SSE; abnormal closes retain the
+    // concrete WS error as the operator-facing fallback reason. Reconnect runs
+    // either way and pending RPCs are rejected because the socket is gone.
     const clean = event.wasClean === true
     // Fatal closes indicate a persistent condition (policy violation, server
     // error, or abnormal close after hello was explicitly rejected). Stop

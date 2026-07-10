@@ -513,7 +513,7 @@ let string_list_member key fields =
 ;;
 
 let dashboard_hello_handler =
-  ref (fun ~base_path:_ ~session_id:_ ?token:_ () -> Error "Dashboard WS not integrated")
+  ref (fun ~session_id:_ () -> Error "Dashboard WS not integrated")
 
 let dashboard_subscribe_handler =
   ref (fun ~session_id:_ ?route:_ ~slices:_ () -> Error "Dashboard WS not integrated")
@@ -547,13 +547,16 @@ let handle_dashboard_hello_eio state id ?mcp_session_id params =
   match mcp_session_id, params with
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/hello requires a WebSocket session"
   | Some session_id, Some (`Assoc fields) ->
-    let token = optional_string_member "token" fields in
-    !dashboard_hello_handler
-      ~base_path:(Mcp_server.workspace_config state).base_path
-      ~session_id
-      ?token
-      ()
-    |> dashboard_response_or_error id
+    ignore state;
+    if List.mem_assoc "token" fields
+    then
+      make_error_typed
+        ~id
+        Mcp_error_code.Invalid_params
+        "dashboard/hello token is retired; authenticate the WebSocket upgrade"
+    else
+      !dashboard_hello_handler ~session_id ()
+      |> dashboard_response_or_error id
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;

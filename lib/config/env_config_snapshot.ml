@@ -77,15 +77,18 @@ let storage_entries =
 let transport_entries =
   [
     entry ~default:"8936" "MASC_GRPC_PORT" "gRPC server port";
-    entry ~default:"true" "MASC_GRPC_ENABLED" "Enable gRPC transport";
+    entry ~default:"30.0" "MASC_GRPC_UNARY_TIMEOUT_SEC"
+      "Deadline for finite unary gRPC calls; streaming RPCs have no inherited deadline";
+    entry ~default:"false" "MASC_GRPC_ENABLED"
+      "Enable the experimental gRPC transport";
     entry ~default:"(derived)" "MASC_GRPC_TARGET" "gRPC client target address";
     entry ~default:"48" "MASC_GRPC_STREAM_MAX_BUFFER"
       "Per-subscriber outbound buffer drop threshold.  When the stream has \
        this many unsent events queued, new events are dropped and \
        masc_grpc_events_dropped_total advances.  Stream capacity is 64, \
        default leaves headroom.";
-    entry ~default:"8937" "MASC_WS_PORT" "WebSocket server port";
-    entry ~default:"true" "MASC_WS_ENABLED" "Enable WebSocket transport";
+    entry ~default:"true" "MASC_WS_ENABLED"
+      "Enable same-origin /ws upgrades on the HTTP listener";
     entry ~default:"1048576" "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES"
       "Skip WS dashboard deltas for authenticated sessions whose last reported \
        WebSocket.bufferedAmount exceeds this many bytes. 0 disables the gate.";
@@ -453,8 +456,6 @@ let keeper_runtime_entries =
 
 let keeper_grpc_entries =
   [
-    entry ~default:"5" "MASC_KEEPER_GRPC_MAX_RECONNECT"
-      "Max gRPC reconnect attempts (clamped 1-20)";
     entry ~default:"5.0" "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"
       "Backoff delay between gRPC reconnect attempts (clamped 1-60 seconds)";
   ]

@@ -607,7 +607,7 @@ let keepalive_interval_sec_ =
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
 module WorkAsHeartbeat = struct
-  (** Master switch. When true, successful Workspace.heartbeat after a
+  (** Master switch. When true, successful Workspace.heartbeat_r after a
       unified turn counts as presence proof, allowing the next cycle to skip
       the full ensure_keeper_workspace_presence call. *)
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
@@ -923,12 +923,6 @@ end
 (** {1 gRPC Heartbeat Reconnect} *)
 
 module KeeperGrpc = struct
-  (** Maximum gRPC reconnect attempts before stopping the heartbeat fiber.
-      Default: 5. Range: [1, 20]. *)
-  let max_reconnect_attempts =
-    max 1 (min 20 (get_int ~default:5 "MASC_KEEPER_GRPC_MAX_RECONNECT"))
-  ;;
-
   (** Backoff delay between gRPC reconnect attempts in seconds.
       Default: 5.0. Range: [1.0, 60.0]. *)
   let reconnect_backoff_sec =

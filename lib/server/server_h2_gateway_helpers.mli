@@ -1,5 +1,10 @@
 (** H2 gateway response helpers. *)
 
+val httpun_headers_of_h2 : H2.Headers.t -> Httpun.Headers.t
+(** Projects HTTP/2 request headers into the Httpun adapter contract. The
+    required [:authority] pseudo-header is the SSOT for the synthesized [Host]
+    header, so shared H1 Origin/auth helpers evaluate the real H2 authority. *)
+
 val h2_respond_body :
   ?status:H2.Status.t ->
   ?extra_headers:(string * string) list ->

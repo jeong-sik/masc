@@ -134,10 +134,11 @@ module Transport : sig
   val agent_transport_to_string : agent_transport -> string
 
   val grpc_port : int
+  val grpc_unary_timeout_sec : unit -> float
   val grpc_enabled : unit -> bool
   val grpc_target_opt : unit -> string option
-  val ws_port : int
   val ws_enabled : unit -> bool
+  (** Whether same-origin [/ws] upgrades are enabled on the HTTP listener. *)
   val webrtc_enabled : unit -> bool
   val use_h2 : unit -> h2_mode
   val agent_transport_opt : unit -> agent_transport option

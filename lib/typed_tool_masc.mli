@@ -22,6 +22,7 @@ val create :
   parse:(Yojson.Safe.t -> ('input, string) result) ->
   handler:('input -> ('output, string) result) ->
   encode:('output -> Yojson.Safe.t) ->
+  required_permission:Masc_domain.permission ->
   ?is_read_only:bool ->
   ?is_destructive:bool ->
   ?is_idempotent:bool ->

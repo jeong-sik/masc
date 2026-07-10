@@ -1,6 +1,6 @@
 ---
-status: draft
-last_verified: 2026-04-25
+status: superseded
+last_verified: 2026-07-10
 code_refs:
   - lib/server/server_mcp_transport_ws.ml
   - lib/sse.ml
@@ -13,7 +13,9 @@ code_refs:
 
 # WS Migration Performance Series
 
-> Status: Draft
+> Status: Superseded by the WS-primary/authenticated-SSE fallback lifecycle in
+> `docs/sse-ws-cutover.md`. The analysis below is retained as historical
+> performance context and is not a current transport topology description.
 > Date: 2026-04-25
 > PRs: #10089, #10096, #10098, #10102, #10104, #10106, #10107,
 > #10112, #10114, #10117, #10119 (RFC), #10120 (chore)

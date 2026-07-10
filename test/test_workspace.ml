@@ -698,17 +698,21 @@ let test_event_log_on_claim_done () =
 (* Heartbeat & Zombie Detection Tests                           *)
 (* ============================================================ *)
 
-let contains_heartbeat result =
-  has_legacy_result_prefix "\xF0\x9F\x92\x93" result
-  || str_contains (String.lowercase_ascii result) "heartbeat updated"
-
 let test_heartbeat_updates_lastseen () =
   with_test_env (fun config ->
     let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[] () in
 
     (* Send heartbeat *)
-    let result = Workspace.heartbeat config ~agent_name:"gemini" in
-    Alcotest.(check bool) "heartbeat success" true (contains_heartbeat result)
+    match Workspace.heartbeat_r config ~agent_name:"gemini" with
+    | Workspace.Heartbeat_updated { agent_name } ->
+      Alcotest.(check bool)
+        "resolved agent is gemini-prefixed"
+        true
+        (String.starts_with ~prefix:"gemini" agent_name)
+    | Workspace.Heartbeat_agent_not_found _ ->
+      Alcotest.fail "bound agent was reported missing"
+    | Workspace.Heartbeat_invalid_agent_file { detail; _ } ->
+      Alcotest.failf "bound agent state was invalid: %s" detail
   )
 
 let test_is_agent_session_bound_after_default_join () =
@@ -932,8 +936,13 @@ let test_release_stale_claims_skips_stale_verification () =
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
     (* Heartbeat for non-bound agent *)
-    let result = Workspace.heartbeat config ~agent_name:"nonexistent" in
-    Alcotest.(check bool) "heartbeat for nonexistent" true (contains_warning result)
+    match Workspace.heartbeat_r config ~agent_name:"nonexistent" with
+    | Workspace.Heartbeat_agent_not_found { agent_name } ->
+      Alcotest.(check string) "missing agent identity" "nonexistent" agent_name
+    | Workspace.Heartbeat_updated _ ->
+      Alcotest.fail "nonexistent agent heartbeat unexpectedly succeeded"
+    | Workspace.Heartbeat_invalid_agent_file _ ->
+      Alcotest.fail "nonexistent agent should not have an invalid file"
   )
 
 (* test_get_agents_status removed (2026-06-09): get_agents_status deleted with

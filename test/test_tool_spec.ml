@@ -45,6 +45,8 @@ let () =
             check bool "reason default" true (Option.is_none spec.reason);
             check bool "effect_domain default" true
               (Option.is_none spec.effect_domain);
+            check bool "required_permission default" true
+              (Option.is_none spec.required_permission);
             check bool "requires_actor_binding default" true
               (Option.is_none spec.requires_actor_binding);
             check bool "title default" true (Option.is_none spec.title));
@@ -61,6 +63,7 @@ let () =
                 ~visibility:Tool_catalog.Hidden
                 ~effect_domain:Tool_catalog.Masc_workspace
                 ~requires_actor_binding:true
+                ~required_permission:Masc_domain.CanAdmin
                 ~reason:"hidden for test"
                 ~title:"Test Tool"
                 ()
@@ -71,6 +74,8 @@ let () =
               (spec.effect_domain = Some Tool_catalog.Masc_workspace);
             check bool "requires_actor_binding" true
               (spec.requires_actor_binding = Some true);
+            check bool "required_permission" true
+              (spec.required_permission = Some Masc_domain.CanAdmin);
             check bool "reason present" true (Option.is_some spec.reason);
             check bool "title present" true (Option.is_some spec.title));
         ] );
@@ -84,6 +89,7 @@ let () =
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
+                ~required_permission:Masc_domain.CanBroadcast
                 ()
             in
             Tool_spec.register spec;
@@ -100,6 +106,7 @@ let () =
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
+                ~required_permission:Masc_domain.CanBroadcast
                 ()
             in
             Tool_spec.register spec;
@@ -114,6 +121,7 @@ let () =
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
                 ~is_read_only:true
+                ~required_permission:Masc_domain.CanReadState
                 ()
             in
             Tool_spec.register spec;
@@ -127,6 +135,7 @@ let () =
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
+                ~required_permission:Masc_domain.CanBroadcast
                 ()
             in
             Tool_spec.register spec;
@@ -141,6 +150,7 @@ let () =
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
                 ~requires_actor_binding:true
+                ~required_permission:Masc_domain.CanBroadcast
                 ()
             in
             Tool_spec.register spec;
@@ -158,6 +168,7 @@ let () =
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
                 ~mcp_context_required:true
+                ~required_permission:Masc_domain.CanBroadcast
                 ()
             in
             Tool_spec.register spec;
@@ -177,6 +188,7 @@ let () =
                 ~is_destructive:true
                 ~effect_domain:Tool_catalog.Host_repo_write
                 ~requires_actor_binding:true
+                ~required_permission:Masc_domain.CanAdmin
                 ~visibility:Tool_catalog.Hidden
                 ~reason:"test hidden"
                 ()
@@ -188,6 +200,8 @@ let () =
               (meta.effect_domain = Some Tool_catalog.Host_repo_write);
             check bool "requires_actor_binding" true
               (meta.requires_actor_binding = Some true);
+            check (option string) "required_permission" (Some "CanAdmin")
+              (Option.map Masc_domain.permission_to_string meta.required_permission);
             check bool "hidden" true (meta.visibility = Tool_catalog.Hidden);
             check bool "reason" true (meta.reason = Some "test hidden"));
           test_case "register preserves catalog actor binding by default" `Quick (fun () ->
@@ -196,7 +210,8 @@ let () =
             Tool_catalog.register_metadata name
               { existing with
                 requires_actor_binding = Some true;
-                effect_domain = Some Tool_catalog.Masc_workspace };
+                effect_domain = Some Tool_catalog.Masc_workspace;
+                required_permission = Some Masc_domain.CanAdmin };
             let spec =
               Tool_spec.create
                 ~name
@@ -209,7 +224,48 @@ let () =
             Tool_spec.register spec;
             let meta = Tool_catalog.metadata name in
             check bool "requires_actor_binding preserved" true
-              (meta.requires_actor_binding = Some true));
+              (meta.requires_actor_binding = Some true);
+            check (option string) "required_permission preserved" (Some "CanAdmin")
+              (Option.map Masc_domain.permission_to_string meta.required_permission));
+          test_case "register rejects undeclared permission before mutation" `Quick (fun () ->
+            let name = "__test_spec_missing_permission" in
+            check_raises "required_permission missing"
+              (Invalid_argument
+                 ("Tool_spec.register: required_permission must be declared for " ^ name))
+              (fun () ->
+                Tool_spec.register
+                  (Tool_spec.create
+                     ~name
+                     ~description:"missing permission"
+                     ~module_tag:Tool_dispatch.Mod_misc
+                     ~input_schema:empty_schema
+                     ~handler_binding:Tag_dispatch
+                     ~is_read_only:true
+                     ()));
+            check bool "tag registry unchanged" true
+              (Option.is_none (Tool_dispatch.lookup_tag name)));
+          test_case "register rejects conflicting permission before mutation" `Quick (fun () ->
+            let name = "__test_spec_conflicting_permission" in
+            Tool_catalog.register_metadata name
+              { Tool_catalog.default_metadata with
+                required_permission = Some Masc_domain.CanAdmin };
+            check_raises "required_permission conflict"
+              (Invalid_argument
+                 (Printf.sprintf
+                    "Tool_spec.register: conflicting required_permission for %s (CanAdmin vs CanBroadcast)"
+                    name))
+              (fun () ->
+                Tool_spec.register
+                  (Tool_spec.create
+                     ~name
+                     ~description:"conflicting permission"
+                     ~module_tag:Tool_dispatch.Mod_misc
+                     ~input_schema:empty_schema
+                     ~handler_binding:Tag_dispatch
+                     ~required_permission:Masc_domain.CanBroadcast
+                     ()));
+            check bool "tag registry unchanged" true
+              (Option.is_none (Tool_dispatch.lookup_tag name)));
           test_case "empty name rejected" `Quick (fun () ->
             check_raises "invalid_arg"
               (Invalid_argument "Tool_spec.register: name must not be empty")
@@ -235,6 +291,7 @@ let () =
                     ~module_tag:Tool_dispatch.Mod_misc
                     ~input_schema:empty_schema
                     ~handler_binding:Tag_dispatch
+                    ~required_permission:Masc_domain.CanBroadcast
                     ())
                 [ "__test_spec_bulk_a"; "__test_spec_bulk_b"; "__test_spec_bulk_c" ]
             in
@@ -255,6 +312,7 @@ let () =
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
+                ~required_permission:Masc_domain.CanBroadcast
                 ()
             in
             let schema = Tool_spec.to_tool_schema spec in
@@ -275,6 +333,7 @@ let () =
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
+                ~required_permission:Masc_domain.CanBroadcast
                 ()
             in
             Tool_spec.register spec;
@@ -290,6 +349,7 @@ let () =
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (tool_ok "ok")))
+                ~required_permission:Masc_domain.CanBroadcast
                 ()
             in
             Tool_spec.register spec;

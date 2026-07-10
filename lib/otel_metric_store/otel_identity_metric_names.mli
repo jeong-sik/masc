@@ -5,6 +5,7 @@
 
 val metric_auth_bearer_token_mismatch : string
 val metric_auth_strict_unknown_tool_denials : string
+val metric_auth_tool_permission_undeclared_denials : string
 val metric_auth_credential_token_duplicate : string
 val metric_auth_credential_token_rotated : string
 val metric_auth_credential_ambiguous_lookup : string

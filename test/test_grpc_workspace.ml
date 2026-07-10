@@ -95,7 +95,7 @@ let test_status_agents_response_roundtrip () =
           [ { T.name = "claude-swift-fox"
             ; status = "active"
             ; capabilities = [ "code" ]
-            ; last_heartbeat_ms = 1700000000000L
+            ; last_seen_ms = 1700000000000L
             ; session_bound_at_ms = 1700000000000L
             ; current_task_id = "task-1"
             }
@@ -164,15 +164,13 @@ let test_heartbeat_ack_roundtrip () =
       { timestamp_ms = 1700000000001L
       ; active_agent_count = 5
       ; pending_task_count = 3
-      ; directives = [ "rebalance" ]
       }
   in
   let bytes = T.HeartbeatAck.to_bytes ack in
   let decoded = T.HeartbeatAck.of_bytes bytes in
   Alcotest.(check int64) "timestamp_ms" 1700000000001L decoded.timestamp_ms;
   Alcotest.(check int) "active_agent_count" 5 decoded.active_agent_count;
-  Alcotest.(check int) "pending_task_count" 3 decoded.pending_task_count;
-  Alcotest.(check (list string)) "directives" [ "rebalance" ] decoded.directives
+  Alcotest.(check int) "pending_task_count" 3 decoded.pending_task_count
 ;;
 
 let test_subscribe_request_roundtrip () =
@@ -254,7 +252,7 @@ let test_status_response_roundtrip () =
           [ { T.name = "a1"
             ; status = "active"
             ; capabilities = []
-            ; last_heartbeat_ms = 0L
+            ; last_seen_ms = 0L
             ; session_bound_at_ms = 0L
             ; current_task_id = ""
             }
@@ -332,14 +330,39 @@ let test_grpc_stream_max_buffer_env_override () =
          (Masc_grpc_service.stream_max_buffer ()))
 ;;
 
-let test_grpc_default_on_enablement () =
-  (* With no MASC_GRPC_ENABLED env var, gRPC stays enabled. *)
+let test_grpc_unary_timeout_is_finite_and_configurable () =
+  let was_set = Sys.getenv_opt "MASC_GRPC_UNARY_TIMEOUT_SEC" in
+  Fun.protect
+    ~finally:(fun () ->
+      match was_set with
+      | Some value -> Unix.putenv "MASC_GRPC_UNARY_TIMEOUT_SEC" value
+      | None -> Unix.putenv "MASC_GRPC_UNARY_TIMEOUT_SEC" "")
+    (fun () ->
+      Unix.putenv "MASC_GRPC_UNARY_TIMEOUT_SEC" "";
+      Alcotest.(check (float 0.001))
+        "default unary deadline"
+        30.0
+        (Env_config.Transport.grpc_unary_timeout_sec ());
+      Unix.putenv "MASC_GRPC_UNARY_TIMEOUT_SEC" "17.5";
+      Alcotest.(check (float 0.001))
+        "configured unary deadline"
+        17.5
+        (Env_config.Transport.grpc_unary_timeout_sec ());
+      Unix.putenv "MASC_GRPC_UNARY_TIMEOUT_SEC" "0";
+      Alcotest.(check (float 0.001))
+        "zero cannot disable unary deadline"
+        30.0
+        (Env_config.Transport.grpc_unary_timeout_sec ()))
+;;
+
+let test_grpc_opt_in_enablement () =
+  (* With no valid MASC_GRPC_ENABLED value, experimental gRPC stays off. *)
   let was_set = Sys.getenv_opt "MASC_GRPC_ENABLED" in
   (match was_set with
    | Some _ -> Unix.putenv "MASC_GRPC_ENABLED" ""
    | None -> ());
   let result = Masc_grpc_server.is_enabled () in
-  Alcotest.(check bool) "enabled by default" true result;
+  Alcotest.(check bool) "disabled by default" false result;
   (* Verify explicit enable still works. *)
   Unix.putenv "MASC_GRPC_ENABLED" "1";
   let enabled = Masc_grpc_server.is_enabled () in
@@ -366,10 +389,12 @@ let test_grpc_server_registers_health_service () =
              ~workspace_config
              ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
                Ok "{}")
-             ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-               Error "test stub")
          in
          let services = Grpc_eio.Server.list_services server in
+         Alcotest.(check bool)
+           "server adds no implicit overall stream deadline"
+           true
+           (Option.is_none (Grpc_eio.Server.config server).default_timeout);
          Alcotest.(check bool)
            "workspace service registered"
            true
@@ -388,32 +413,6 @@ let test_grpc_server_registers_health_service () =
          (List.mem "grpc.health.v1.Health" services))
 ;;
 
-let test_lsp_jsonrpc_request_parse_missing_method () =
-  match
-    Masc_grpc_server.For_testing.parse_lsp_jsonrpc_request
-      {|{"jsonrpc":"2.0","params":null}|}
-  with
-  | Ok _ -> Alcotest.fail "missing method should be rejected"
-  | Error msg ->
-    Alcotest.(check string)
-      "explicit missing method error"
-      "JSON-RPC request missing method field"
-      msg
-;;
-
-let test_lsp_jsonrpc_request_parse_method_not_string () =
-  match
-    Masc_grpc_server.For_testing.parse_lsp_jsonrpc_request
-      {|{"jsonrpc":"2.0","method":17,"params":null}|}
-  with
-  | Ok _ -> Alcotest.fail "non-string method should be rejected"
-  | Error msg ->
-    Alcotest.(check string)
-      "explicit method type error"
-      "JSON-RPC request method field must be a string"
-      msg
-;;
-
 let test_get_status_projects_backlog_tasks () =
   Eio_main.run
   @@ fun env ->
@@ -428,24 +427,48 @@ let test_get_status_projects_backlog_tasks () =
          ~priority:1
          ~description:"Use backlog SSOT for gRPC status");
     ignore (Masc.Workspace.claim_next workspace_config ~agent_name:"alpha");
+    let token = create_worker_token dir "status-reader" in
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
           Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "GetStatus" with
     | Some { handler = `Unary handler; _ } ->
-      let resp = T.StatusResponse.of_bytes (handler "") in
+      let request = T.StatusRequest.to_bytes { auth_token = token } in
+      let resp = T.StatusResponse.of_bytes (handler request) in
       Alcotest.(check int) "tasks count" 1 (List.length resp.tasks);
       let task = List.hd resp.tasks in
       Alcotest.(check string) "task id" "task-001" task.T.id;
       Alcotest.(check string) "task title" "Fix stale projection" task.T.title;
       Alcotest.(check string) "task status" "claimed" task.T.status;
       Alcotest.(check string) "task assignee" "alpha" task.T.assigned_to;
-      Alcotest.(check int) "task priority" 1 task.T.priority
+      Alcotest.(check int) "task priority" 1 task.T.priority;
+      Alcotest.(check int)
+        "message count comes from workspace SSOT"
+        (List.length (Masc.Workspace.get_all_messages_raw workspace_config ~since_seq:0))
+        resp.message_count;
+      let persisted_agent =
+        Masc.Workspace.get_all_agents workspace_config
+        |> List.find (fun (agent : Masc_domain.agent) -> String.equal agent.name "alpha")
+      in
+      let projected_agent =
+        List.find (fun (agent : T.agent_info) -> String.equal agent.name "alpha") resp.agents
+      in
+      let persisted_ms value =
+        Masc_domain.parse_iso8601_opt value
+        |> Option.map (fun seconds -> Int64.of_float (seconds *. 1000.0))
+        |> Option.value ~default:0L
+      in
+      Alcotest.(check int64)
+        "last_seen comes from persisted agent state"
+        (persisted_ms persisted_agent.last_seen)
+        projected_agent.last_seen_ms;
+      Alcotest.(check int64)
+        "session binding comes from persisted agent state"
+        (persisted_ms persisted_agent.session_bound_at)
+        projected_agent.session_bound_at_ms
     | _ -> Alcotest.fail "GetStatus unary handler missing")
 ;;
 
@@ -516,34 +539,6 @@ let test_tool_call_request_invalid_bytes_result () =
       (String_util.contains_substring msg"ToolCallRequest")
 ;;
 
-let test_lsp_request_invalid_bytes_result () =
-  match T.LspRequest.of_bytes_result malformed_protobuf with
-  | Ok _ -> Alcotest.fail "expected decode failure"
-  | Error msg ->
-    Alcotest.(check bool)
-      "error keeps 'protobuf decode error:' prefix"
-      true
-      (String.starts_with ~prefix:"protobuf decode error:" msg);
-    Alcotest.(check bool)
-      "error names the failing protobuf type (LspRequest)"
-      true
-      (String_util.contains_substring msg"LspRequest")
-;;
-
-let test_lsp_response_invalid_bytes_result () =
-  match T.LspResponse.of_bytes_result malformed_protobuf with
-  | Ok _ -> Alcotest.fail "expected decode failure"
-  | Error msg ->
-    Alcotest.(check bool)
-      "error keeps 'protobuf decode error:' prefix"
-      true
-      (String.starts_with ~prefix:"protobuf decode error:" msg);
-    Alcotest.(check bool)
-      "error names the failing protobuf type (LspResponse)"
-      true
-      (String_util.contains_substring msg"LspResponse")
-;;
-
 let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
   Eio_main.run
   @@ fun env ->
@@ -555,8 +550,6 @@ let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
         ~workspace_config
         ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
           Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "ToolCall" with
     | Some { handler = `Unary handler; _ } ->
@@ -580,8 +573,6 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
         ~workspace_config
         ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
           Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Subscribe" with
     | Some { handler = `ServerStreaming handler; _ } ->
@@ -597,20 +588,17 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
     | _ -> Alcotest.fail "Subscribe server-streaming handler missing")
 ;;
 
-let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
+let test_heartbeat_handler_invalid_bytes_closes_without_ack () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_temp_dir "masc-grpc-invalid-heartbeat" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
-    let token = create_worker_token dir "test-agent" in
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
           Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Heartbeat" with
     | Some { handler = `Bidi handler; _ } ->
@@ -620,26 +608,17 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
       let request_stream = Grpc_eio.Stream.create 16 in
       let response_stream = handler ~sw request_stream in
       Grpc_eio.Stream.add request_stream malformed_protobuf;
-      Grpc_eio.Stream.add
-        request_stream
-        (T.HeartbeatPing.to_bytes
-           { agent_name = "test-agent"
-           ; session_id = "sess-1"
-           ; timestamp_ms = 1700000000000L
-           ; current_task_id = ""
-           ; auth_token = token
-           });
-      let ack_bytes =
-        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
-          Grpc_eio.Stream.take response_stream)
-      in
-      let ack = T.HeartbeatAck.of_bytes ack_bytes in
-      Alcotest.(check int) "active agents" 0 ack.active_agent_count;
+      (match
+         Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+           Grpc_eio.Stream.take response_stream)
+       with
+       | _ -> Alcotest.fail "malformed Heartbeat produced an ack"
+       | exception End_of_file -> ());
       let logs =
         Log.Ring.recent ~limit:20 ~module_filter:"Transport" ~since_seq:baseline ()
       in
       Alcotest.(check bool)
-        "decode failure logged as warn"
+        "decode failure is observed"
         true
         (List.exists
            (fun (entry : Log.Ring.entry) ->
@@ -647,11 +626,14 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
               && String.starts_with ~prefix:"gRPC Heartbeat decode failed:" entry.message)
            logs);
       Alcotest.(check bool)
-        "decode failure not logged as crash"
-        false
+        "terminal stream failure is observed"
+        true
         (List.exists
            (fun (entry : Log.Ring.entry) ->
-              String.starts_with ~prefix:"gRPC heartbeat iteration crashed:" entry.message)
+              String.starts_with
+                ~prefix:
+                  "gRPC heartbeat fiber died outside iteration: Grpc_error(INVALID_ARGUMENT:"
+                entry.message)
            logs);
       Grpc_eio.Stream.close request_stream
     | _ -> Alcotest.fail "Heartbeat bidi handler missing")
@@ -664,15 +646,11 @@ let test_protected_methods_enforce_bearer_admission () =
   with_temp_dir "masc-grpc-tokenless" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
     let tool_dispatches = ref 0 in
-    let lsp_dispatches = ref 0 in
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
           incr tool_dispatches;
-          Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          incr lsp_dispatches;
           Ok "{}")
     in
     let unary_reject method_name expected label request =
@@ -681,6 +659,11 @@ let test_protected_methods_enforce_bearer_admission () =
         expect_grpc_status label expected (fun () -> handler request)
       | _ -> Alcotest.failf "%s unary handler missing" method_name
     in
+    unary_reject
+      "GetStatus"
+      Grpc_core.Status.Unauthenticated
+      "GetStatus tokenless"
+      (T.StatusRequest.to_bytes { auth_token = "" });
     unary_reject
       "Broadcast"
       Grpc_core.Status.Unauthenticated
@@ -702,27 +685,7 @@ let test_protected_methods_enforce_bearer_admission () =
          ; arguments_json = "{}"
          ; auth_token = ""
          });
-    unary_reject
-      "LspCall"
-      Grpc_core.Status.Unauthenticated
-      "LspCall tokenless"
-      (T.LspRequest.to_bytes
-         { language_id = "ocaml"
-         ; jsonrpc_request_json = {|{"jsonrpc":"2.0","id":1,"method":"shutdown"}|}
-         ; workspace_root = None
-         ; auth_token = ""
-         });
     let worker_token = create_worker_token dir "test-agent" in
-    unary_reject
-      "LspCall"
-      Grpc_core.Status.Permission_denied
-      "LspCall worker role"
-      (T.LspRequest.to_bytes
-         { language_id = "ocaml"
-         ; jsonrpc_request_json = {|{"jsonrpc":"2.0","id":1,"method":"shutdown"}|}
-         ; workspace_root = None
-         ; auth_token = worker_token
-         });
     unary_reject
       "ToolCall"
       Grpc_core.Status.Unauthenticated
@@ -735,7 +698,6 @@ let test_protected_methods_enforce_bearer_admission () =
          ; auth_token = worker_token
          });
     Alcotest.(check int) "rejected tool requests are not dispatched" 0 !tool_dispatches;
-    Alcotest.(check int) "rejected LSP requests are not dispatched" 0 !lsp_dispatches;
     (match Grpc_eio.Service.get_method service "Subscribe" with
      | Some { handler = `ServerStreaming handler; _ } ->
        expect_grpc_status
@@ -793,8 +755,6 @@ let test_tool_call_malformed_arguments_raise_invalid_argument () =
         ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
           dispatched := true;
           Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Ok "{}")
     in
     match Grpc_eio.Service.get_method service "ToolCall" with
     | Some { handler = `Unary handler; _ } ->
@@ -851,14 +811,6 @@ let () =
             "ToolCallRequest invalid bytes result"
             `Quick
             test_tool_call_request_invalid_bytes_result
-        ; Alcotest.test_case
-            "LspRequest invalid bytes result"
-            `Quick
-            test_lsp_request_invalid_bytes_result
-        ; Alcotest.test_case
-            "LspResponse invalid bytes result"
-            `Quick
-            test_lsp_response_invalid_bytes_result
         ] )
     ; ( "service"
       , [ Alcotest.test_case "service_name" `Quick test_service_name
@@ -875,9 +827,9 @@ let () =
             `Quick
             test_subscribe_handler_invalid_bytes_raise_grpc_status
         ; Alcotest.test_case
-            "heartbeat invalid bytes warn and continue"
+            "heartbeat invalid bytes close without ack"
             `Quick
-            test_heartbeat_handler_invalid_bytes_warns_and_continues
+            test_heartbeat_handler_invalid_bytes_closes_without_ack
         ; Alcotest.test_case
             "protected methods enforce bearer admission"
             `Quick
@@ -890,9 +842,9 @@ let () =
     ; ( "server_config"
       , [ Alcotest.test_case "default_port" `Quick test_grpc_default_port
         ; Alcotest.test_case
-            "default_on_enablement"
+            "opt_in_enablement"
             `Quick
-            test_grpc_default_on_enablement
+            test_grpc_opt_in_enablement
         ; Alcotest.test_case
             "stream_max_buffer default"
             `Quick
@@ -902,17 +854,13 @@ let () =
             `Quick
             test_grpc_stream_max_buffer_env_override
         ; Alcotest.test_case
+            "unary timeout is finite and configurable"
+            `Quick
+            test_grpc_unary_timeout_is_finite_and_configurable
+        ; Alcotest.test_case
             "registers_health_service"
             `Quick
             test_grpc_server_registers_health_service
-        ; Alcotest.test_case
-            "lsp_jsonrpc_missing_method"
-            `Quick
-            test_lsp_jsonrpc_request_parse_missing_method
-        ; Alcotest.test_case
-            "lsp_jsonrpc_method_not_string"
-            `Quick
-            test_lsp_jsonrpc_request_parse_method_not_string
         ] )
     ]
 ;;

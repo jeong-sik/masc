@@ -495,11 +495,15 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "maintenance_cleanup")
     (fun () ->
     let last_prune = ref (Unix.gettimeofday ()) in
+    let base_path = (Mcp_server.workspace_config state).base_path in
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
        clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
-    (try Server_mcp_transport_http_session.load_sessions_from_file ()
-     with exn ->
+    (try
+       Server_mcp_transport_http_session.load_sessions_from_file ~base_path ()
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
        Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
@@ -528,7 +532,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          in
          let sessions_reaped =
            Server_mcp_transport_http_session.reap_stale_sessions
-             ~is_active_session:is_active
+             ~base_path ~is_active_session:is_active
          in
          if sse_guards_reaped + http_guards_reaped + sessions_reaped > 0
          then

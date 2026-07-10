@@ -20,6 +20,14 @@ module Http = Http_server_eio
 
 include Server_routes_http_sidecar_paths
 
+let status_read_tool_name = "sidecar_status_read"
+let schema_read_tool_name = "sidecar_schema_read"
+let logs_read_tool_name = "sidecar_logs_read"
+let config_read_tool_name = "sidecar_config_read"
+let config_write_tool_name = "sidecar_config_write"
+let process_start_tool_name = "sidecar_process_start"
+let process_stop_tool_name = "sidecar_process_stop"
+
 type sidecar_start_plan =
   { argv : string list
   ; env : string array
@@ -1001,34 +1009,36 @@ let handle_start state request reqd =
 let add_routes ~sw:_ ~clock:_ router =
   router
   |> Http.Router.get "/api/v1/sidecar/status" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd -> handle_status state request reqd)
+    with_tool_auth
+      ~tool_name:status_read_tool_name
+      (fun state _actor _req reqd -> handle_status state request reqd)
       request
       reqd)
   |> Http.Router.get "/api/v1/sidecar/logs" (fun request reqd ->
     with_tool_auth
-      ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_logs state request reqd)
+      ~tool_name:logs_read_tool_name
+      (fun state _actor _req reqd -> handle_logs state request reqd)
       request
       reqd)
-  (* Schema is field-shape metadata, not values, so it's safe under
-     public_read — the dashboard form needs it during cold-start
-     onboarding (before any auth tokens are configured). *)
+  (* Schema is field-shape metadata, not values. It remains a worker-readable
+     capability, but still crosses the same explicit auth boundary as every
+     other sidecar route. *)
   |> Http.Router.get "/api/v1/sidecar/schema" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd -> handle_schema state request reqd)
+    with_tool_auth
+      ~tool_name:schema_read_tool_name
+      (fun state _actor _req reqd -> handle_schema state request reqd)
       request
       reqd)
   |> Http.Router.post "/api/v1/sidecar/start" (fun request reqd ->
     with_tool_auth
-      ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_start state request reqd)
+      ~tool_name:process_start_tool_name
+      (fun state _actor _req reqd -> handle_start state request reqd)
       request
       reqd)
   |> Http.Router.post "/api/v1/sidecar/stop" (fun request reqd ->
     with_tool_auth
-      ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_stop state request reqd)
+      ~tool_name:process_stop_tool_name
+      (fun state _actor _req reqd -> handle_stop state request reqd)
       request
       reqd)
   (* Writes user-supplied values (potentially containing tokens) to disk,
@@ -1036,16 +1046,16 @@ let add_routes ~sw:_ ~clock:_ router =
      inside the handler — the auth gate just keeps unauth'd writers out. *)
   |> Http.Router.post "/api/v1/sidecar/config" (fun request reqd ->
     with_tool_auth
-      ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_put_config state request reqd)
+      ~tool_name:config_write_tool_name
+      (fun state _actor _req reqd -> handle_put_config state request reqd)
       request
       reqd)
   (* Read current runtime TOML so the dashboard form prefills with what's
      actually on disk. Tokens may surface in the response, so [tool_auth]. *)
   |> Http.Router.get "/api/v1/sidecar/config" (fun request reqd ->
     with_tool_auth
-      ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_get_config state request reqd)
+      ~tool_name:config_read_tool_name
+      (fun state _actor _req reqd -> handle_get_config state request reqd)
       request
       reqd)
 ;;

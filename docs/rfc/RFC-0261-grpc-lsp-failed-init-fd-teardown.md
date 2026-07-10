@@ -1,8 +1,12 @@
 # RFC-0261 — gRPC LSP failed-initialize FD/process teardown
 
-- Status: Draft
+- Status: Retired
 - Date: 2026-06-19
 - Related: issue #21546 (fd-leak audit), RFC-0137 (FD pressure host-external triggers), `keeper_fd_pressure.ml` (FD admission gate)
+
+The unconsumed gRPC `LspCall` surface was removed. The authenticated
+`/api/v1/ide/lsp` WebSocket route is the IDE LSP transport SSOT, so none of the
+implementation described below remains live code.
 
 ## Problem
 
@@ -32,7 +36,7 @@ only by call frequency.
 
 ### Why it matters under fleet load
 
-`MASC_GRPC_ENABLED` defaults to `true` (`env_config_snapshot.ml:83`), so the path is live by
+At the time of this retired RFC, `MASC_GRPC_ENABLED` defaulted to `true`, so the path was live by
 default. The trigger requires an LSP server binary on `PATH` whose `initialize` does not complete
 within 10s (e.g. `ocamllsp` on a large repo, easier to hit under 16-keeper CPU/IO contention) or
 errors. A keeper or IDE proxy issuing repeated `LspCall` for a flaky language server re-spawns on

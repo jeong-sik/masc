@@ -6,6 +6,7 @@ import {
   getKeeperColor,
   normalizeKeeperCursorSnapshot,
 } from './keeper-cursor-overlay'
+import { clearStoredToken, setStoredToken } from '../../api/core'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -108,12 +109,71 @@ describe('getKeeperColor', () => {
     expect(instances[0]?.close).toHaveBeenCalled()
   })
 
-  it('builds cursor stream URLs with repository and token scope', () => {
+  it('keeps the stored bearer out of cursor stream URLs', () => {
     window.sessionStorage.setItem('masc_bearer_token', 'token-1')
 
     expect(buildKeeperCursorStreamUrl('', ' masc ')).toBe(
-      '/api/v1/ide/cursors/stream?repo_id=masc&token=token-1',
+      '/api/v1/ide/cursors/stream?repo_id=masc',
     )
+  })
+
+  it('replaces an open cursor stream when the bearer rotates or clears', async () => {
+    vi.useRealTimers()
+    const fetchSignals: AbortSignal[] = []
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.signal instanceof AbortSignal) fetchSignals.push(init.signal)
+      return Promise.resolve(
+        new Response(new ReadableStream<Uint8Array>(), {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const eventSources: Array<{ readonly url: string; close: ReturnType<typeof vi.fn> }> = []
+    class MockEventSource {
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      readonly url: string
+      close = vi.fn()
+
+      constructor(url: string) {
+        this.url = url
+        eventSources.push(this)
+      }
+    }
+    vi.stubGlobal('EventSource', MockEventSource)
+    setStoredToken('token-a')
+
+    const cleanup = connectKeeperCursorStream('', () => {})
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer token-a' }),
+      }),
+    )
+
+    setStoredToken('token-b')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(fetchSignals[0]?.aborted).toBe(true)
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer token-b' }),
+      }),
+    )
+
+    clearStoredToken()
+    await vi.waitFor(() => expect(eventSources).toHaveLength(1))
+    expect(fetchSignals[1]?.aborted).toBe(true)
+    expect(eventSources[0]?.url).toBe('/api/v1/ide/cursors/stream')
+
+    cleanup()
+    expect(eventSources[0]?.close).toHaveBeenCalledTimes(1)
+    setStoredToken('token-c')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(eventSources).toHaveLength(1)
   })
 
   it('builds cursor stream URLs with canonical URL scope', () => {

@@ -70,6 +70,7 @@ type metadata = {
   idempotent : bool option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
+  required_permission : Masc_domain.permission option;
 }
 
 (* ================================================================ *)
@@ -91,6 +92,7 @@ let default_metadata =
     idempotent = None;
     effect_domain = None;
     requires_actor_binding = None;
+    required_permission = None;
   }
 
 (* Runtime-readable like MASC_FULL_SURFACE so tests and local admin flows can
@@ -118,6 +120,7 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     idempotent = None;
     effect_domain = None;
     requires_actor_binding = None;
+    required_permission = None;
   }
 
 let with_semantic_flags ?readonly ?mcp_context_required
@@ -157,19 +160,55 @@ let masc_workspace_tool =
 let actor_bound_masc_workspace_tool =
   with_semantic_flags ~requires_actor_binding:true masc_workspace_tool
 
-let read_state_tool = readonly_tool
-let broadcast_tool = masc_workspace_tool
-let actor_broadcast_tool = actor_bound_masc_workspace_tool
-let add_task_tool = masc_workspace_tool
-let claim_task_tool = actor_bound_masc_workspace_tool
-let complete_task_tool = actor_bound_masc_workspace_tool
-let reset_tool = destructive_tool
+let with_required_permission permission meta =
+  { meta with required_permission = Some permission }
+
+let read_state_tool =
+  with_required_permission Masc_domain.CanReadState readonly_tool
+
+let broadcast_tool =
+  with_required_permission Masc_domain.CanBroadcast masc_workspace_tool
+
+let actor_broadcast_tool =
+  with_required_permission Masc_domain.CanBroadcast actor_bound_masc_workspace_tool
+
+let add_task_tool =
+  with_required_permission Masc_domain.CanAddTask masc_workspace_tool
+
+let claim_task_tool =
+  with_required_permission Masc_domain.CanClaimTask actor_bound_masc_workspace_tool
+
+let complete_task_tool =
+  with_required_permission Masc_domain.CanCompleteTask actor_bound_masc_workspace_tool
+
+let vote_tool =
+  with_required_permission Masc_domain.CanVote actor_bound_masc_workspace_tool
+
+let admin_tool =
+  with_required_permission Masc_domain.CanAdmin default_metadata
+
+let destructive_admin_tool =
+  with_semantic_flags ~destructive:true admin_tool
+
+let destructive_actor_broadcast_tool =
+  with_semantic_flags ~destructive:true actor_broadcast_tool
+
+let reset_tool =
+  with_required_permission Masc_domain.CanReset destructive_tool
 
 let hidden_runtime_tool reason meta =
   {
     meta with
     visibility = Hidden;
     allow_direct_call_when_hidden = true;
+    reason = Some reason;
+  }
+
+let hidden_http_route_tool reason meta =
+  {
+    meta with
+    visibility = Hidden;
+    allow_direct_call_when_hidden = false;
     reason = Some reason;
   }
 
@@ -197,8 +236,9 @@ let force_true_if_member name names current =
 let explicit_metadata : (string * metadata) list =
   [
     ( "masc_operator_judgment_write",
-      hidden_active
-        "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and automation." );
+      with_required_permission Masc_domain.CanAdmin
+        (hidden_active
+           "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and automation.") );
     (* Physically removed: masc_interrupt, masc_approve, masc_reject,
        masc_pending_interrupts, masc_branch (masc-checkpoint CLI removed,
        #4709/#4734), operator_judgment_latest, hat_wear, hat_status,
@@ -226,11 +266,13 @@ let explicit_metadata : (string * metadata) list =
        masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
-        (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
+        (with_required_permission Masc_domain.CanAdmin
+           (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.")) );
     ( "masc_set_param",
       with_semantic_flags ~destructive:true
-        (hidden_active
-           "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface.") );
+        (with_required_permission Masc_domain.CanAdmin
+           (hidden_active
+              "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface.")) );
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
     ("masc_reset", reset_tool);
     ("masc_start", broadcast_tool);
@@ -243,17 +285,31 @@ let explicit_metadata : (string * metadata) list =
     ("masc_goal_upsert", broadcast_tool);
     ("masc_goal_transition", broadcast_tool);
     ("masc_goal_verify", broadcast_tool);
+    ("masc_goal_hygiene_review", destructive_admin_tool);
     ("masc_plan_init", broadcast_tool);
     ("masc_plan_update", broadcast_tool);
     ("masc_keeper_list", read_state_tool);
     ("masc_keeper_status", read_state_tool);
     ("masc_keeper_waiting_inventory", read_state_tool);
-    ("masc_keeper_up", broadcast_tool);
+    ("masc_keeper_sandbox_status", read_state_tool);
+    ("masc_keeper_create_from_persona", actor_broadcast_tool);
+    ("masc_keeper_persona_audit", read_state_tool);
+    ("masc_keeper_msg", actor_broadcast_tool);
+    ("masc_keeper_msg_result", read_state_tool);
+    ("masc_keeper_msg_cancel", actor_broadcast_tool);
+    ("masc_keeper_msg_queue", read_state_tool);
+    ("masc_keeper_adversarial_review", read_state_tool);
+    ("masc_keeper_reset", actor_broadcast_tool);
+    ("masc_keeper_compact", actor_broadcast_tool);
+    ("masc_keeper_clear", destructive_admin_tool);
+    ( "masc_keeper_up",
+      with_required_permission Masc_domain.CanAdmin broadcast_tool );
     ( "masc_keeper_down",
       with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace
-        default_metadata );
+        (with_required_permission Masc_domain.CanAdmin broadcast_tool) );
     ("masc_plan_get_task", read_state_tool);
     ("masc_plan_clear_task", actor_broadcast_tool);
+    ("masc_task_set_goal", complete_task_tool);
     ("masc_note_add", broadcast_tool);
     ("masc_deliver", broadcast_tool);
     ("masc_config", read_state_tool);
@@ -265,7 +321,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_get_metrics", read_state_tool);
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
-    ("masc_operator_confirm", actor_broadcast_tool);
+    ("masc_operator_confirm", admin_tool);
     ("masc_surface_audit", read_state_tool);
     ("masc_persona_list", read_state_tool);
     ("masc_persona_create", broadcast_tool);
@@ -273,6 +329,19 @@ let explicit_metadata : (string * metadata) list =
     ("masc_runtime_verify", read_state_tool);
     ("masc_runtime_ollama_probe", read_state_tool);
     ("masc_cleanup_zombies", broadcast_tool);
+    ("masc_gc", destructive_admin_tool);
+    ("masc_session", actor_broadcast_tool);
+    ("masc_library_add", broadcast_tool);
+    ("masc_library_list", read_state_tool);
+    ("masc_library_promote", broadcast_tool);
+    ("masc_library_read", read_state_tool);
+    ("masc_library_search", read_state_tool);
+    ("masc_schedule_create", actor_broadcast_tool);
+    ("masc_schedule_list", read_state_tool);
+    ("masc_schedule_get", read_state_tool);
+    ("masc_schedule_cancel", actor_broadcast_tool);
+    ("masc_schedule_approve", destructive_admin_tool);
+    ("masc_schedule_reject", destructive_admin_tool);
     ("masc_board_hearths", read_state_tool);
     ("masc_board_search", read_state_tool);
     ("masc_board_profile", read_state_tool);
@@ -280,18 +349,29 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_list", read_state_tool);
     ("masc_board_sub_board_get", read_state_tool);
     ("masc_board_post", broadcast_tool);
+    ("masc_board_post_update", actor_broadcast_tool);
     ("masc_board_comment", broadcast_tool);
-    ("masc_board_vote", broadcast_tool);
-    ("masc_board_comment_vote", broadcast_tool);
-    ("masc_board_reaction", broadcast_tool);
+    ("masc_board_vote", vote_tool);
+    ("masc_board_comment_vote", vote_tool);
+    ("masc_board_reaction", vote_tool);
     ("masc_board_sub_board_create", broadcast_tool);
     ("masc_board_sub_board_update", broadcast_tool);
-    ("masc_board_sub_board_delete", broadcast_tool);
-    ("masc_board_cleanup", destructive_tool);
-    ("masc_board_delete", destructive_tool);
+    ("masc_board_sub_board_delete", destructive_actor_broadcast_tool);
+    ("masc_board_cleanup", destructive_admin_tool);
+    ("masc_board_delete", destructive_actor_broadcast_tool);
     ("masc_tool_stats", read_state_tool);
-    ("masc_pause", broadcast_tool);
-    ("masc_resume", broadcast_tool);
+    ( "masc_pause",
+      with_required_permission Masc_domain.CanAdmin broadcast_tool );
+    ( "masc_resume",
+      with_required_permission Masc_domain.CanAdmin broadcast_tool );
+    ( "masc_prompt_override",
+      with_required_permission Masc_domain.CanAdmin
+        (hidden_active
+           "Internal HTTP prompt-override mutation route; hidden from the public tool surface.") );
+    ( "masc_fusion",
+      with_required_permission Masc_domain.CanAdmin
+        (hidden_active
+           "Internal fusion execution route; callable but hidden from the public MCP schema surface.") );
     ("masc_run_get", broadcast_tool);
     ("masc_run_list", read_state_tool);
     ("masc_run_init", broadcast_tool);
@@ -319,7 +399,15 @@ let explicit_metadata : (string * metadata) list =
     ( "tool_execute",
       hidden_runtime_tool
         "Typed command-execution runtime tool; callable but hidden from the public MCP schema surface."
-        destructive_tool );
+        (with_required_permission Masc_domain.CanBroadcast destructive_tool) );
+    ( "tool_edit_file",
+      hidden_runtime_tool
+        "Structured file-edit runtime tool; callable but hidden from the public MCP schema surface."
+        (with_required_permission Masc_domain.CanBroadcast destructive_tool) );
+    ( "tool_write_file",
+      hidden_runtime_tool
+        "Structured file-write runtime tool; callable but hidden from the public MCP schema surface."
+        (with_required_permission Masc_domain.CanBroadcast destructive_tool) );
     ( "tool_read_file",
       hidden_runtime_tool
         "Structured file-read runtime tool; callable but hidden from the public MCP schema surface."
@@ -328,12 +416,39 @@ let explicit_metadata : (string * metadata) list =
       hidden_runtime_tool
         "Structured code-search runtime tool; callable but hidden from the public MCP schema surface."
         read_state_tool );
-    ( "sidecar",
-      {
-        destructive_tool with
-        visibility = Hidden;
-        effect_domain = Some Masc_workspace;
-      } );
+    ( "sidecar_status_read",
+      hidden_http_route_tool
+        "Read-only sidecar status HTTP route."
+        read_state_tool );
+    ( "sidecar_schema_read",
+      hidden_http_route_tool
+        "Read-only sidecar configuration-schema HTTP route."
+        read_state_tool );
+    ( "sidecar_logs_read",
+      hidden_http_route_tool
+        "Sensitive sidecar log-read HTTP route; operator access only."
+        (with_semantic_flags ~readonly:true ~idempotent:true
+           ~effect_domain:Read_only admin_tool) );
+    ( "sidecar_config_read",
+      hidden_http_route_tool
+        "Sensitive sidecar configuration-read HTTP route; values may contain secrets."
+        (with_semantic_flags ~readonly:true ~idempotent:true
+           ~effect_domain:Read_only admin_tool) );
+    ( "sidecar_config_write",
+      hidden_http_route_tool
+        "Sidecar configuration-write HTTP route; operator access only."
+        (with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace
+           admin_tool) );
+    ( "sidecar_process_start",
+      hidden_http_route_tool
+        "Sidecar process-start HTTP route; operator access only."
+        (with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace
+           admin_tool) );
+    ( "sidecar_process_stop",
+      hidden_http_route_tool
+        "Sidecar process-stop HTTP route; operator access only."
+        (with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace
+           admin_tool) );
   ]
 
 (* ================================================================ *)
@@ -348,6 +463,29 @@ let register_metadata name (meta : metadata) =
 
 let registered_metadata name =
   Hashtbl.find_opt metadata_table name
+
+type permission_coverage =
+  { unregistered : string list
+  ; permission_undeclared : string list
+  }
+
+let permission_coverage ~names =
+  let names = List.sort_uniq String.compare names in
+  let unregistered, permission_undeclared =
+    List.fold_left
+      (fun (unregistered, permission_undeclared) name ->
+         match registered_metadata name with
+         | None -> name :: unregistered, permission_undeclared
+         | Some { required_permission = None; _ } ->
+           unregistered, name :: permission_undeclared
+         | Some { required_permission = Some _; _ } ->
+           unregistered, permission_undeclared)
+      ([], [])
+      names
+  in
+  { unregistered = List.rev unregistered
+  ; permission_undeclared = List.rev permission_undeclared
+  }
 
 (* ================================================================ *)
 (* Public MCP surface — delegates to Tool_catalog_surfaces (SSOT)   *)
@@ -554,7 +692,11 @@ let metadata_to_fields name =
     | Some value -> ("requiresActorBinding", `Bool value) :: with_mcp_context_required
     | None -> with_mcp_context_required
   in
-  with_actor_binding
+  (match meta.required_permission with
+  | Some permission ->
+    ("requiredPermission", `String (Masc_domain.permission_to_string permission))
+    :: with_actor_binding
+  | None -> with_actor_binding)
 
 let public_contract_fields name =
   let meta = metadata name in
@@ -581,9 +723,16 @@ let public_contract_fields name =
     | Some value -> ("mcpContextRequired", `Bool value) :: with_actor_binding
     | None -> with_actor_binding
   in
+  let with_required_permission =
+    match meta.required_permission with
+    | Some permission ->
+      ("requiredPermission", `String (Masc_domain.permission_to_string permission))
+      :: with_mcp_context_required
+    | None -> with_mcp_context_required
+  in
   match meta.canonical_name with
-  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_mcp_context_required
-  | None -> with_mcp_context_required
+  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_required_permission
+  | None -> with_required_permission
 
 let allow_direct_call name =
   let meta = metadata name in

@@ -81,7 +81,7 @@ let add_routes router =
        ) request reqd)
   |> Http.Router.post "/api/v1/verification/resolve" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_operator_confirm"
-         (fun state req reqd ->
+         (fun state _actor req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              try
                let args = Yojson.Safe.from_string body_str in

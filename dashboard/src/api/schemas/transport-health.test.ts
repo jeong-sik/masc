@@ -171,8 +171,9 @@ describe('parseTransportHealthData', () => {
         enabled: true,
         configured: true,
         listening: true,
-        mode: 'relay',
-        port: 8080,
+        listen_status: 'ready',
+        mode: 'same_origin',
+        endpoint: '/ws',
         sessions: 15,
         relay_source: 'sse',
         delivery: {
@@ -238,7 +239,9 @@ describe('parseTransportHealthData', () => {
     expect(result.sse.broadcast_avg_seconds).toBe(0.5)
     expect(result.grpc.port).toBe(50051)
     expect(result.grpc.events_delivered).toBe(1000)
-    expect(result.websocket.mode).toBe('relay')
+    expect(result.websocket.mode).toBe('same_origin')
+    expect(result.websocket.endpoint).toBe('/ws')
+    expect(result.websocket.listen_status).toBe('ready')
     expect(result.websocket.delivery.client_acks).toBe(95)
     expect(result.webrtc.active_peers).toBe(4)
     expect(result.streamable_http.default_transport).toBe('streamable_http')

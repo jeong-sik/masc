@@ -48,7 +48,7 @@ type agent_info =
   { name : string
   ; status : string
   ; capabilities : string list
-  ; last_heartbeat_ms : int64
+  ; last_seen_ms : int64
   ; session_bound_at_ms : int64
   ; current_task_id : string
   }
@@ -66,7 +66,7 @@ let agent_info_to_proto (a : agent_info) : P.AgentInfo.t =
   { name = a.name
   ; status = a.status
   ; capabilities = a.capabilities
-  ; last_heartbeat_ms = a.last_heartbeat_ms
+  ; last_seen_ms = a.last_seen_ms
   ; session_bound_at_ms = a.session_bound_at_ms
   ; current_task_id = a.current_task_id
   }
@@ -76,7 +76,7 @@ let agent_info_of_proto (p : P.AgentInfo.t) : agent_info =
   { name = p.name
   ; status = p.status
   ; capabilities = p.capabilities
-  ; last_heartbeat_ms = p.last_heartbeat_ms
+  ; last_seen_ms = p.last_seen_ms
   ; session_bound_at_ms = p.session_bound_at_ms
   ; current_task_id = p.current_task_id
   }
@@ -149,7 +149,6 @@ module HeartbeatAck = struct
     { timestamp_ms : int64
     ; active_agent_count : int
     ; pending_task_count : int
-    ; directives : string list
     }
 
   let of_bytes bytes =
@@ -157,7 +156,6 @@ module HeartbeatAck = struct
     { timestamp_ms = p.timestamp_ms
     ; active_agent_count = p.active_agent_count
     ; pending_task_count = p.pending_task_count
-    ; directives = p.directives
     }
   ;;
 
@@ -167,7 +165,6 @@ module HeartbeatAck = struct
       { timestamp_ms = t.timestamp_ms
       ; active_agent_count = t.active_agent_count
       ; pending_task_count = t.pending_task_count
-      ; directives = t.directives
       }
   ;;
 end
@@ -377,6 +374,26 @@ end
 
 (** {1 Status} *)
 
+module StatusRequest = struct
+  type t = { auth_token : string }
+
+  let of_bytes_result bytes =
+    match decode_result ~type_name:"StatusRequest" P.StatusRequest.from_proto bytes with
+    | Ok auth_token -> Ok ({ auth_token } : t)
+    | Error _ as err -> err
+  ;;
+
+  let of_bytes bytes =
+    match of_bytes_result bytes with
+    | Ok request -> request
+    | Error msg -> invalid_arg msg
+  ;;
+
+  let to_bytes (t : t) =
+    encode P.StatusRequest.to_proto t.auth_token
+  ;;
+end
+
 module StatusResponse = struct
   type t =
     { agents : agent_info list
@@ -402,78 +419,5 @@ module StatusResponse = struct
       ; message_count = t.message_count
       ; workspace_path = t.workspace_path
       }
-  ;;
-end
-
-(** {1 LSP Proxy} *)
-
-module LspRequest = struct
-  type t =
-    { language_id : string
-    ; jsonrpc_request_json : string
-    ; workspace_root : string option
-    ; auth_token : string
-    }
-
-  let of_bytes_result bytes =
-    match decode_result ~type_name:"LspRequest" P.LspRequest.from_proto bytes with
-    | Ok p ->
-      Ok
-        ({ language_id = p.language_id
-         ; jsonrpc_request_json = p.jsonrpc_request_json
-         ; workspace_root =
-             (match p.workspace_root with
-              | "" -> None
-              | s -> Some s)
-         ; auth_token = p.auth_token
-         }
-         : t)
-    | Error _ as err -> err
-  ;;
-
-  let of_bytes bytes =
-    match of_bytes_result bytes with
-    | Ok req -> req
-    | Error msg -> invalid_arg msg
-  ;;
-
-  let to_bytes (t : t) =
-    encode
-      P.LspRequest.to_proto
-      { language_id = t.language_id
-      ; jsonrpc_request_json = t.jsonrpc_request_json
-      ; workspace_root = Option.value ~default:"" t.workspace_root
-      ; auth_token = t.auth_token
-      }
-  ;;
-end
-
-module LspResponse = struct
-  type t =
-    { jsonrpc_response_json : string
-    ; error_message : string
-    }
-
-  let of_bytes_result bytes =
-    match decode_result ~type_name:"LspResponse" P.LspResponse.from_proto bytes with
-    | Ok p ->
-      Ok
-        ({ jsonrpc_response_json = p.jsonrpc_response_json
-         ; error_message = p.error_message
-         }
-         : t)
-    | Error _ as err -> err
-  ;;
-
-  let of_bytes bytes =
-    match of_bytes_result bytes with
-    | Ok resp -> resp
-    | Error msg -> invalid_arg msg
-  ;;
-
-  let to_bytes (t : t) =
-    encode
-      P.LspResponse.to_proto
-      { jsonrpc_response_json = t.jsonrpc_response_json; error_message = t.error_message }
   ;;
 end

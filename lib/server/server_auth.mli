@@ -65,20 +65,32 @@ val bearer_token_from_header : string -> string option
 val auth_token_from_request : Httpun.Request.t -> string option
 (** Token from [Authorization: Bearer …] on the request. *)
 
-val websocket_query_token_from_request : Httpun.Request.t -> string option
-(** Browser WebSocket bearer token from the [token] query parameter.  Query
-    credentials are accepted only for GET [/ws] and GET [/api/v1/ide/lsp],
-    whose browser clients cannot set an [Authorization] header. *)
+val websocket_bearer_subprotocol_prefix : string
 
-val websocket_auth_token_from_request : Httpun.Request.t -> string option
-(** Header bearer token, falling back to {!websocket_query_token_from_request}. *)
+type websocket_credential =
+  | Websocket_credential_missing
+  | Websocket_header_bearer of string
+  | Websocket_subprotocol_bearer of string
 
-val observer_sse_query_token_from_request : Httpun.Request.t -> string option
-(** Observer/presence/cursor SSE allows the token via query string for browser
-    EventSource. *)
+type websocket_credential_error =
+  | Malformed_authorization_bearer
+  | Malformed_subprotocol_bearer
+  | Ambiguous_subprotocol_bearer
+  | Conflicting_credential_channels
 
-val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
-(** Combined header-or-query lookup for the SSE observer endpoint. *)
+val websocket_credential_error_to_string : websocket_credential_error -> string
+
+val websocket_subprotocol_token_from_request :
+  Httpun.Request.t -> (string option, websocket_credential_error) result
+(** Browser WebSocket bearer decoded from the dedicated hex-encoded
+    [Sec-WebSocket-Protocol] member. Exactly one bearer member is accepted;
+    malformed or ambiguous protocol headers return an explicit error. *)
+
+val websocket_credential_from_request :
+  Httpun.Request.t -> (websocket_credential, websocket_credential_error) result
+(** Parse exactly one credential channel for a WebSocket upgrade. A valid
+    Authorization bearer and a subprotocol bearer cannot coexist, and the
+    process-wide internal-token header is not a WebSocket credential. *)
 
 val agent_from_request : Httpun.Request.t -> string option
 (** Caller-declared agent name from the request (header / query). *)
@@ -93,20 +105,6 @@ val resolve_agent_name_for_auth_raw :
   token:string option -> (string option, Masc_domain.masc_error) result
 (** Resolve the agent name to use for permission checks given the
     request and bearer [token].  [Ok None] means "no agent context". *)
-
-(** {1 MCP / observer / operator verification} *)
-
-val verify_mcp_auth :
-  base_path:string -> Httpun.Request.t -> ('a option, string) result
-(** Bearer token check for the [/mcp] endpoint. *)
-
-val verify_mcp_observer_stream_auth :
-  base_path:string -> Httpun.Request.t -> ('a option, string) result
-(** Variant for the observer SSE stream (allows query token). *)
-
-val verify_operator_mcp_auth :
-  base_path:string -> Httpun.Request.t -> ('a option, string) result
-(** Variant for [/mcp/operator] (admin-tier). *)
 
 (** {1 Dashboard actor identification} *)
 
@@ -199,9 +197,10 @@ val authorize_websocket_request :
   Httpun.Request.t ->
   (Server_transport_admission.admission, Masc_domain.masc_error) result
 (** Require token-bound role admission for a WebSocket upgrade. Same-origin
-    never substitutes for a bearer credential, while a
-    valid explicit bearer is not rejected merely because a non-browser or
-    proxied client supplies a different Origin.  The returned immutable
+    never substitutes for a bearer credential. Browser subprotocol credentials
+    additionally require a same-origin (or explicitly allowlisted dev-origin)
+    request; a non-browser Authorization bearer remains independent of Origin.
+    The returned immutable
     admission context must be carried into protected requests on the upgraded
     connection. *)
 
@@ -327,8 +326,11 @@ val authorize_read_request :
 
 val authorize_tool_request :
   base_path:string ->
-  tool_name:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
-(** Check that the request is allowed to call [tool_name]. *)
+  tool_name:string ->
+  Httpun.Request.t ->
+  (Server_transport_admission.admission, Masc_domain.masc_error) result
+(** Strict token-bound admission for [tool_name]. The process-wide internal
+    token and same-origin status are insufficient. *)
 
 val authorize_token_bound_permission_request :
   base_path:string ->
@@ -351,13 +353,6 @@ val with_public_read :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Public-read combinator (no auth, looser CORS). *)
 
-val with_observer_sse_read_auth :
-  (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Read combinator for browser EventSource endpoints that must accept
-    [token] in the query string when strict HTTP auth is active. *)
-
 val with_read_auth :
   (Mcp_server.server_state ->
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
@@ -374,9 +369,10 @@ val with_permission_auth :
 val with_tool_auth :
   tool_name:string ->
   (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Tool-call auth combinator. *)
+(** Strict tool-call auth combinator. Threads the credential owner into the
+    handler for actor binding and audit attribution. *)
 
 val with_token_permission_auth :
   permission:Masc_domain.permission ->
@@ -385,3 +381,21 @@ val with_token_permission_auth :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Like [with_permission_auth] but requires strict token-bound admission and
     threads the admitted credential owner into the handler for auditing. *)
+
+val authorize_token_bound_admission_request :
+  base_path:string ->
+  permission:Masc_domain.permission ->
+  Httpun.Request.t ->
+  (Server_transport_admission.admission, Masc_domain.masc_error) result
+(** Strict bearer admission for long-lived transports. The returned immutable
+    context contains both the token-bound identity and the credential that must
+    accompany subsequent messages on the admitted connection. *)
+
+val with_transport_admission_auth :
+  permission:Masc_domain.permission ->
+  (Mcp_server.server_state ->
+   Server_transport_admission.admission ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** HTTP/1.1 combinator for a transport handshake that must retain the complete
+    strict bearer admission after the request returns. *)

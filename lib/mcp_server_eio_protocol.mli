@@ -200,7 +200,7 @@ val run_stdio :
     exits cleanly. *)
 
 val register_dashboard_ws_handlers :
-  hello:(base_path:string -> session_id:string -> ?token:string -> unit -> (Yojson.Safe.t, string) result) ->
+  hello:(session_id:string -> unit -> (Yojson.Safe.t, string) result) ->
   subscribe:(session_id:string -> ?route:string -> slices:string list -> unit -> (Yojson.Safe.t, string) result) ->
   unsubscribe:(session_id:string -> ?slices:string list -> unit -> (Yojson.Safe.t, string) result) ->
   ping:(session_id:string -> unit -> (Yojson.Safe.t, string) result) ->
@@ -213,4 +213,3 @@ val register_dashboard_ack :
    unit ->
    (Yojson.Safe.t, string) result) ->
   unit
-

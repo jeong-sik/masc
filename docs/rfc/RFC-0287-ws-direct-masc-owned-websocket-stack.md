@@ -1,9 +1,9 @@
 ---
 rfc: "0287"
 title: "ws-direct — a single masc-owned WebSocket stack for server and client"
-status: Draft
+status: Implemented
 created: 2026-06-23
-updated: 2026-06-23
+updated: 2026-07-10
 author: vincent
 supersedes: []
 superseded_by: null
@@ -13,7 +13,10 @@ implementation_prs: []
 
 # RFC-0287: ws-direct — a single masc-owned WebSocket stack
 
-Status: Draft
+Status: Implemented for the same-origin server upgrade and outbound client
+stack. The standalone-listener sections below are historical: that listener,
+`:8937`, and `MASC_WS_PORT` were later retired in favor of one HTTP-listener
+`/ws` boundary. Current topology is in `docs/spec/09-server-transport.md`.
 Author: jeong-sik (vincent), with Claude Opus 4.8
 Date: 2026-06-23
 Scope: the WebSocket library under the transport surface — the server upgrade

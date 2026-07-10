@@ -297,7 +297,7 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
       write_text_file (agent_path config "keeper-sangsu-agent")
         (Yojson.Safe.to_string legacy_agent_json);
 
-      ignore (Workspace.heartbeat config ~agent_name:"keeper-sangsu-agent");
+      ignore (Workspace.heartbeat_r config ~agent_name:"keeper-sangsu-agent");
 
       let repaired_json =
         match Safe_ops.read_file_safe (agent_path config "keeper-sangsu-agent") with

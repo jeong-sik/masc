@@ -36,6 +36,7 @@ type metadata = {
   idempotent : bool option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
+  required_permission : Masc_domain.permission option;
 }
 
 (** {1 Configuration} *)
@@ -94,6 +95,16 @@ val register_metadata : string -> metadata -> unit
 val registered_metadata : string -> metadata option
 (** Explicit or [Tool_spec]-registered metadata, without surface-derived
     fallback metadata. *)
+
+type permission_coverage =
+  { unregistered : string list
+  ; permission_undeclared : string list
+  }
+
+val permission_coverage : names:string list -> permission_coverage
+(** Partition a candidate authorization surface into names with no registered
+    metadata and names whose metadata omits [required_permission]. Lists are
+    sorted and deduplicated; both states are fail-closed. *)
 
 val explicit_metadata : (string * metadata) list
 (** Explicitly configured tool metadata entries (for test verification). *)

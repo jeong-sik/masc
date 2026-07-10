@@ -26,7 +26,7 @@ import {
 import { DEFAULT_LANGUAGE_ID } from './ide-language'
 import {
   subscribeStoredTokenChanges,
-  websocketUrlWithDashboardBearer,
+  websocketProtocolsWithDashboardBearer,
 } from '../../api/core'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -413,10 +413,11 @@ export class LspConnection {
     this.started = true
     this.clearReconnectTimer()
     const origin = typeof window !== 'undefined' ? window.location.origin : DEFAULT_MASC_ORIGIN
-    const wsUrl = websocketUrlWithDashboardBearer(
-      origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp',
+    const wsUrl = origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp'
+    const ws = new WebSocket(
+      wsUrl,
+      websocketProtocolsWithDashboardBearer(wsUrl, 'masc.ide.v1'),
     )
-    const ws = new WebSocket(wsUrl)
     this.ws = ws
 
     ws.onopen = () => {

@@ -45,6 +45,7 @@ type t = {
   title : string option;
   effect_domain : Tool_catalog.effect_domain option;
   requires_actor_binding : bool option;
+  required_permission : Masc_domain.permission option;
 }
 
 (* ================================================================ *)
@@ -70,13 +71,14 @@ let create
     ?title
     ?effect_domain
     ?requires_actor_binding
+    ?required_permission
     () =
   { name; description; module_tag; input_schema; handler_binding;
     is_read_only; mcp_context_required; is_destructive; is_idempotent;
     visibility; implementation_status;
     canonical_name; replacement; reason;
     allow_direct_call_when_hidden; title; effect_domain;
-    requires_actor_binding }
+    requires_actor_binding; required_permission }
 
 (* ================================================================ *)
 (* Conversion                                                       *)
@@ -101,12 +103,7 @@ let expects_handler : (string, unit) Hashtbl.t = Hashtbl.create 256
 let register (spec : t) =
   if String.equal spec.name "" then
     invalid_arg "Tool_spec.register: name must not be empty";
-  (* Track for handler coverage verification *)
-  Hashtbl.replace registered_names spec.name ();
-  (* 1. Tag + schema registry *)
-  Tool_dispatch.register_module_tag
-    ~schemas:[ to_tool_schema spec ] ~tag:spec.module_tag;
-  (* 2. Catalog metadata — enforce Hidden for system-internal tools *)
+  (* Resolve and validate policy before mutating any registry. *)
   let is_system_internal =
     Tool_catalog_surfaces.is_system_internal_hidden spec.name
   in
@@ -126,6 +123,33 @@ let register (spec : t) =
         Option.bind existing (fun (meta : Tool_catalog.metadata) ->
           meta.requires_actor_binding)
   in
+  let required_permission =
+    let existing_permission =
+      Option.bind existing (fun (meta : Tool_catalog.metadata) ->
+        meta.required_permission)
+    in
+    match spec.required_permission, existing_permission with
+    | Some declared, Some existing when declared <> existing ->
+      invalid_arg
+        (Printf.sprintf
+           "Tool_spec.register: conflicting required_permission for %s (%s vs %s)"
+           spec.name
+           (Masc_domain.permission_to_string existing)
+           (Masc_domain.permission_to_string declared))
+    | Some permission, None | None, Some permission | Some permission, Some _ ->
+      Some permission
+    | None, None ->
+      invalid_arg
+        (Printf.sprintf
+           "Tool_spec.register: required_permission must be declared for %s"
+           spec.name)
+  in
+  (* Track for handler coverage verification. *)
+  Hashtbl.replace registered_names spec.name ();
+  (* 1. Tag + schema registry *)
+  Tool_dispatch.register_module_tag
+    ~schemas:[ to_tool_schema spec ] ~tag:spec.module_tag;
+  (* 2. Catalog metadata — enforce Hidden for system-internal tools *)
   Tool_catalog.register_metadata spec.name
     { Tool_catalog.visibility = effective_visibility;
       lifecycle = Tool_catalog.Active;
@@ -139,7 +163,8 @@ let register (spec : t) =
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;
       effect_domain = spec.effect_domain;
-      requires_actor_binding };
+      requires_actor_binding;
+      required_permission };
   (* 3. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
   (match spec.handler_binding with
    | Direct h | Shared h ->

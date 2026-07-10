@@ -11,14 +11,19 @@
       startup; this module does not depend on the board layer
       directly. *)
 
-(** Update the agent's [last_seen] timestamp on disk.
+type heartbeat_result =
+  | Heartbeat_updated of { agent_name : string }
+  | Heartbeat_agent_not_found of { agent_name : string }
+  | Heartbeat_invalid_agent_file of { agent_name : string; detail : string }
+
+(** Update the agent's [last_seen] timestamp on disk with a closed, typed
+    outcome.
 
     [agent_name] is resolved through {!Workspace_utils.resolve_agent_name}
-    so canonical/alias forms both work.  Returns a human-readable
-    status string (heartbeat updated / agent missing / file invalid).
-    The agent file is mutated under [with_file_lock]. *)
-val heartbeat :
-  Workspace_utils_backend_setup.config -> agent_name:string -> string
+    so canonical/alias forms both work. The agent file is mutated under
+    [with_file_lock]. *)
+val heartbeat_r :
+  Workspace_utils_backend_setup.config -> agent_name:string -> heartbeat_result
 
 type cleanup_zombie_result =
   | No_agents_dir

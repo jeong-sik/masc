@@ -16,6 +16,14 @@ let protocol_version_by_session : string SMap.t Atomic.t = Atomic.make SMap.empt
 
 let mcp_profile_by_session : Server_mcp_transport_http_types.tool_profile SMap.t Atomic.t = Atomic.make SMap.empty
 
+(** Immutable credential owner for each initialized transport session.  The
+    bearer token itself is deliberately not retained; the admission identity is
+    sufficient for ownership checks and does not turn the persistence file into
+    a credential store. *)
+let mcp_owner_by_session :
+    Server_transport_admission.identity SMap.t Atomic.t =
+  Atomic.make SMap.empty
+
 let session_started_at : float SMap.t Atomic.t = Atomic.make SMap.empty
 
 let session_transport_context :
@@ -134,6 +142,66 @@ let remember_protocol_version_if_initialize_succeeded
 let is_known_session session_id =
   SMap.mem session_id (Atomic.get protocol_version_by_session)
 
+let mcp_session_owner session_id =
+  SMap.find_opt session_id (Atomic.get mcp_owner_by_session)
+
+let same_owner
+      (left : Server_transport_admission.identity)
+      (right : Server_transport_admission.identity)
+  =
+  String.equal left.agent_name right.agent_name
+
+let owner_mismatch_message ~session_id =
+  Printf.sprintf
+    "Session %s is not owned by the authenticated credential."
+    session_id
+
+let rec remember_mcp_session_owner session_id requester =
+  let owners = Atomic.get mcp_owner_by_session in
+  match SMap.find_opt session_id owners with
+  | Some owner when same_owner owner requester -> Ok ()
+  | Some _ -> Error (owner_mismatch_message ~session_id)
+  | None ->
+      let updated = SMap.add session_id requester owners in
+      if Atomic.compare_and_set mcp_owner_by_session owners updated
+      then Ok ()
+      else remember_mcp_session_owner session_id requester
+
+let validate_mcp_session_owner_for_request ~session_id ~requester =
+  match mcp_session_owner session_id with
+  | Some owner when same_owner owner requester -> Ok ()
+  | Some _ -> Error (owner_mismatch_message ~session_id)
+  | None when is_known_session session_id ->
+      Error
+        (Printf.sprintf
+           "Session %s has no credential owner metadata; initialize a new session."
+           session_id)
+  | None -> Ok ()
+
+let bind_mcp_session_owner_if_initialize_succeeded session_id ~requester
+      ~request_body ~response_json =
+  if jsonrpc_response_succeeded response_json
+  then
+    match Mcp_transport_protocol.protocol_version_from_body request_body with
+    | Some version when is_valid_protocol_version version ->
+        remember_mcp_session_owner session_id requester
+    | Some _ | None -> Ok ()
+  else Ok ()
+
+let authorize_mcp_session_delete ~session_id ~requester =
+  match mcp_session_owner session_id with
+  | Some owner when same_owner owner requester -> Ok ()
+  | Some _ when requester.Server_transport_admission.role = Masc_domain.Admin ->
+      Ok ()
+  | Some _ -> Error (owner_mismatch_message ~session_id)
+  | None when requester.Server_transport_admission.role = Masc_domain.Admin ->
+      Ok ()
+  | None ->
+      Error
+        (Printf.sprintf
+           "Session %s has no credential owner metadata; only Admin may delete it."
+           session_id)
+
 let ensure_sse_backing_session_for_known_transport_session
     ~transport_session_id ~sse_session_id =
   if is_known_session transport_session_id then
@@ -151,6 +219,7 @@ let forget_mcp_session session_id =
   record_mcp_server_session_duration session_id;
   atomic_update protocol_version_by_session (fun map -> SMap.remove session_id map);
   atomic_update mcp_profile_by_session (fun map -> SMap.remove session_id map);
+  atomic_update mcp_owner_by_session (fun map -> SMap.remove session_id map);
   atomic_update session_last_active_sse (fun map -> SMap.remove session_id map);
   atomic_update session_started_at (fun map -> SMap.remove session_id map);
   atomic_update session_transport_context (fun map -> SMap.remove session_id map)
@@ -168,16 +237,15 @@ let profile_of_string = function
   | "operator_remote" -> Some Server_mcp_transport_http_types.Operator_remote
   | _ -> None
 
-let sessions_file_path () =
-  let base = default_base_path () in
+let sessions_file_path ~base_path =
   Filename.concat
-    (Config_dir_resolver.masc_root ~base_path:base)
+    (Config_dir_resolver.masc_root ~base_path)
     "mcp_transport_sessions.json"
 
 (** Serialize current session state to JSON and write to disk atomically.
     Uses write-then-rename to avoid partial writes on crash. *)
-let save_sessions_to_file () =
-  let path = sessions_file_path () in
+let save_sessions_to_file ~base_path () =
+  let path = sessions_file_path ~base_path in
   let dir = Filename.dirname path in
   (* [begin]/[end] close the [then] branch so the trailing [;] sequences into
      the rest of the function. Without them, OCaml absorbs [; let versions =
@@ -185,10 +253,12 @@ let save_sessions_to_file () =
      ran only when [mkdir] raised — i.e. never on the happy path (dir already
      present or mkdir succeeds), silently persisting nothing. *)
   if not (Stdlib.Sys.file_exists dir) then begin
-    try Unix.mkdir dir 0o755 with Unix.Unix_error _ -> ()
+    try Unix.mkdir dir 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
   end;
   let versions = Atomic.get protocol_version_by_session in
   let profiles = Atomic.get mcp_profile_by_session in
+  let owners = Atomic.get mcp_owner_by_session in
   let timestamps = Atomic.get session_last_active_sse in
   let started_at = Atomic.get session_started_at in
   let transports = Atomic.get session_transport_context in
@@ -231,6 +301,18 @@ let save_sessions_to_file () =
                     "network_transport"
                     transport.Otel_dispatch_hook.network_transport
           in
+          let owner_fields =
+            match SMap.find_opt sid owners with
+            | None -> []
+            | Some owner ->
+                [ ( "owner_agent_name"
+                  , `String owner.Server_transport_admission.agent_name )
+                ; ( "owner_role"
+                  , `String
+                      (Masc_domain.agent_role_to_string
+                         owner.Server_transport_admission.role) )
+                ]
+          in
           Some
             ( sid
             , `Assoc
@@ -239,7 +321,7 @@ let save_sessions_to_file () =
                  ; "last_active_sse", `Float ts
                  ; "started_at", `Float started
                  ]
-                 @ transport_fields) )
+                 @ owner_fields @ transport_fields) )
     ) all_ids
   in
   let json = `Assoc [ "sessions", `Assoc json_entries ] in
@@ -268,18 +350,17 @@ let save_sessions_to_file () =
   Unix.rename tmp_path path
 
 (** Load session state from disk. Restores protocol versions, profiles,
-    and last-active timestamps so the grace period applies correctly
+    immutable credential owners, and last-active timestamps so the grace period applies correctly
     after a server restart.
 
-    Errors (missing file, corrupt JSON) are silently ignored — the
-    server starts with a clean slate, which is safe but means clients
-    must re-handshake. *)
-let load_sessions_from_file () =
-  let path = sessions_file_path () in
+    A missing file is a clean initial state. Malformed or unreadable state
+    raises to the bootstrap boundary, which reports the failure explicitly
+    before clients re-handshake. *)
+let load_sessions_from_file ~base_path () =
+  let path = sessions_file_path ~base_path in
   if not (Stdlib.Sys.file_exists path) then ()
   else begin
-    try
-      let float_field = function
+    let float_field = function
         | Some (`Float value) -> Some value
         | Some (`Int value) -> Some (float_of_int value)
         | _ -> None
@@ -307,7 +388,7 @@ let load_sessions_from_file () =
             }
       in
       let json = Yojson.Basic.from_file path in
-      (match json with
+    (match json with
        | `Assoc [("sessions", `Assoc entries)] ->
            List.iter (fun (sid, entry) ->
              match entry with
@@ -345,6 +426,34 @@ let load_sessions_from_file () =
                           (fun map -> SMap.add sid t map);
                         atomic_update session_started_at
                           (fun map -> SMap.add sid started_at map);
+                        (match
+                           string_field "owner_agent_name" fields,
+                           string_field "owner_role" fields
+                         with
+                         | Some agent_name, Some role_string ->
+                             (match Masc_domain.agent_role_of_string role_string with
+                              | Ok role ->
+                                  let owner : Server_transport_admission.identity =
+                                    { agent_name; role }
+                                  in
+                                  (match remember_mcp_session_owner sid owner with
+                                   | Ok () -> ()
+                                   | Error msg ->
+                                       Log.Auth.warn
+                                         "MCP session %s immutable owner metadata rejected: %s"
+                                         sid msg)
+                              | Error msg ->
+                                  Log.Auth.warn
+                                    "MCP session %s owner metadata rejected: %s"
+                                    sid msg)
+                         | None, None ->
+                             Log.Auth.warn
+                               "MCP session %s restored without owner metadata; only Admin may delete it"
+                               sid
+                         | Some _, None | None, Some _ ->
+                             Log.Auth.warn
+                               "MCP session %s has incomplete owner metadata; owner left unbound"
+                               sid);
                         (match transport_context fields with
                          | Some transport ->
                              atomic_update session_transport_context
@@ -354,10 +463,7 @@ let load_sessions_from_file () =
                   | _ -> ())
              | _ -> ()
            ) entries
-       | _ -> ())
-    with
-    | Stdlib.Sys_error _ -> ()
-    | Yojson.Json_error _ -> ()
+     | _ -> ())
   end
 
 (** Reap session entries whose session_id has no active SSE connection
@@ -369,7 +475,7 @@ let load_sessions_from_file () =
     reconnect without triggering "Unknown Mcp-Session-Id" errors.
 
     Call periodically from the cleanup loop. Returns number of reaped entries. *)
-let reap_stale_sessions ~is_active_session =
+let reap_stale_sessions ~base_path ~is_active_session =
   let now = Unix.gettimeofday () in
   let stale, kept_by_grace =
     SMap.fold (fun sid _ (stale_acc, grace_acc) ->
@@ -398,6 +504,9 @@ let reap_stale_sessions ~is_active_session =
     atomic_update mcp_profile_by_session (fun map ->
       List.fold_left (fun m sid -> SMap.remove sid m) map stale
     );
+    atomic_update mcp_owner_by_session (fun map ->
+      List.fold_left (fun m sid -> SMap.remove sid m) map stale
+    );
     atomic_update session_last_active_sse (fun map ->
       List.fold_left (fun m sid -> SMap.remove sid m) map stale
     );
@@ -412,9 +521,10 @@ let reap_stale_sessions ~is_active_session =
     Log.Server.info "session grace: %d sessions kept (inactive but within %.0fs grace)"
       kept_by_grace grace_period_seconds;
   (* Persist session state after each reap cycle so file stays current. *)
-  (try save_sessions_to_file ()
-   with Stdlib.Sys_error msg ->
-     Log.Server.warn "session persist failed: %s" msg);
+  (try save_sessions_to_file ~base_path () with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Log.Server.warn "session persist failed: %s" (Printexc.to_string exn));
   List.length stale
 
 let profile_label = function

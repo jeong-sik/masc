@@ -515,7 +515,7 @@ let add_routes ~sw ~clock router =
            end) request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->
        let force = Server_utils.bool_query_param request "force" ~default:false in
-       let handle _state req reqd =
+       let handle _state _actor req reqd =
          let json = dashboard_runtime_probe_http_json ~force () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
@@ -830,12 +830,9 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~status ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/logs/tool-host-failures" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_broadcast" (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_broadcast" (fun state actor req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           let fallback_agent =
-             dashboard_actor_for_request
-               ~base_path:(Mcp_server.workspace_config state).base_path request
-           in
+           let fallback_agent = Some actor in
            let report_result =
              try
                let json = Yojson.Safe.from_string body_str in
@@ -1156,7 +1153,7 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/governance/approvals/resolve" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _actor _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -1206,7 +1203,7 @@ let add_routes ~sw ~clock router =
          )
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/governance/approvals/rules/delete" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _actor _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -1250,7 +1247,7 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd (operator_error_json message)
        ) request reqd)
   |> Http.Router.post "/api/v1/operator/action" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_action" (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_operator_action" (fun state _actor req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -1264,7 +1261,7 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
   |> Http.Router.post "/api/v1/operator/confirm" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _actor req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -1639,7 +1636,7 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_msg" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_msg" (fun state _actor _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match parse_keeper_chat_stream_request body_str with
            | Ok payload ->
@@ -1652,13 +1649,13 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.prefix_get "/api/v1/keepers/chat/requests/" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg_result"
-         (fun state _req reqd ->
+         (fun state _actor _req reqd ->
            handle_keeper_chat_request_result state request reqd)
          request reqd)
 
   |> Http.Router.prefix_post "/api/v1/keepers/chat/requests/" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg_cancel"
-         (fun state _req reqd ->
+         (fun state _actor _req reqd ->
            handle_keeper_chat_request_cancel state request reqd)
          request reqd)
 
@@ -1674,15 +1671,13 @@ let add_routes ~sw ~clock router =
            Keeper_api.handle_keeper_get_subroutes state req request reqd
          ) request reqd)
 
-  (* Keeper config or tools update.  This prefix_post catches ALL POST
-     /api/v1/keepers/* requests.  We check the suffix BEFORE auth so that
-     /tools gets with_tool_auth (localhost-friendly) while /config keeps
-     with_token_permission_auth (admin token required). *)
+  (* Keeper config or tools update. This prefix catches every POST
+     /api/v1/keepers/* request; every mutation is token-bound. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
        match Keeper_api.classify_keeper_post_route (Http.Request.path request) with
        | Keeper_api.Keeper_post_tools ->
            with_tool_auth ~tool_name:"masc_keeper_up"
-             (fun state req reqd ->
+             (fun state _actor req reqd ->
                Keeper_api.handle_keeper_tools_post state req reqd
              ) request reqd
        | Keeper_api.Keeper_post_config ->
@@ -1743,7 +1738,7 @@ let add_routes ~sw ~clock router =
              ) request reqd
        | Keeper_api.Keeper_post_catchup_judge ->
            with_tool_auth ~tool_name:"masc_fusion"
-             (fun state req reqd ->
+             (fun state _actor req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_catchup_judge_post state req reqd body_str
                )

@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-07-10
 code_refs:
   - lib/config/env_config.mli
   - lib/config/
@@ -60,7 +60,7 @@ should be treated as restart-required.
 | Scope | Examples | Why |
 | --- | --- | --- |
 | Runtime root and config roots | `MASC_BASE_PATH`, `MASC_CONFIG_DIR`, `MASC_PERSONAS_DIR`, `HOME` | `Config_dir_resolver` caches the resolved root for the life of the process |
-| Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_WS_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED`, `MASC_WEBRTC_ENABLED` | listeners and advertised base URLs are fixed during server startup |
+| Server bind and transport topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_GRPC_ENABLED`, `MASC_GRPC_UNARY_TIMEOUT_SEC`, `MASC_WS_ENABLED`, `MASC_WEBRTC_ENABLED` | HTTP and same-origin `/ws` share one listener; gRPC streams have no inherited overall deadline while finite unary calls use their dedicated deadline; listener and route gates are fixed during server startup |
 | Backend/bootstrap wiring | `MASC_STARTUP_WATCHDOG_SEC` | boot-time watchdog setup; storage is filesystem-only by construction |
 | Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded once and injected into the process env during boot |
 | Startup-loaded policy | tool policy related env plus `tool_policy.toml`-driven behavior | tool groups are loaded once at startup |

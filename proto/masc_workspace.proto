@@ -30,11 +30,6 @@ service MascWorkspace {
   // Get current project status.
   rpc GetStatus(StatusRequest) returns (StatusResponse);
 
-  // LSP proxy call: forwards a JSON-RPC LSP request to the language server
-  // and returns the JSON-RPC response.  Used by the IDE dashboard to
-  // obtain hover, codeLens, inlayHint, and diagnostic results over the
-  // gRPC-web transport instead of a separate WebSocket.
-  rpc LspCall(LspRequest) returns (LspResponse);
 }
 
 // ===== Heartbeat =====
@@ -53,8 +48,6 @@ message HeartbeatAck {
   int64 timestamp_ms = 1;
   int32 active_agent_count = 2;
   int32 pending_task_count = 3;
-  // Directives from server (e.g., "rebalance", "pause").
-  repeated string directives = 4;
 }
 
 // ===== Event Subscription =====
@@ -118,7 +111,8 @@ message BroadcastResponse {
 // ===== Status =====
 
 message StatusRequest {
-  // Empty for now; can add filters later.
+  // Bearer credential. The token owner is the caller identity.
+  string auth_token = 1;
 }
 
 message StatusResponse {
@@ -134,7 +128,9 @@ message AgentInfo {
   string name = 1;
   string status = 2;
   repeated string capabilities = 3;
-  int64 last_heartbeat_ms = 4;
+  // Persisted agent last_seen timestamp. Zero means the stored timestamp is invalid.
+  int64 last_seen_ms = 4;
+  // Persisted session binding timestamp. Zero means the stored timestamp is invalid.
   int64 session_bound_at_ms = 5;
   string current_task_id = 6;
 }
@@ -145,29 +141,4 @@ message TaskInfo {
   string status = 3;
   string assigned_to = 4;
   int32 priority = 5;
-}
-
-// ===== LSP Proxy =====
-
-message LspRequest {
-  // Language ID, e.g. "ocaml", "typescript", "go".
-  string language_id = 1;
-  // JSON-RPC 2.0 request object serialized as a string.
-  string jsonrpc_request_json = 2;
-  // Optional: workspace root URI for the LSP server.
-  string workspace_root = 3;
-  // Bearer credential; token ownership supplies the caller identity.
-  string auth_token = 4;
-}
-
-message LspResponse {
-  // JSON-RPC 2.0 response object serialized as a string. Only valid when
-  // error_message is empty.
-  string jsonrpc_response_json = 1;
-  // Empty string means the request reached the LSP server and the JSON-RPC
-  // response is in jsonrpc_response_json (which may itself carry a JSON-RPC
-  // level error per the JSON-RPC spec). Non-empty means the gRPC service
-  // rejected the request before it reached the LSP process (transport-level
-  // failure, no language server, dispatcher not wired, etc.).
-  string error_message = 2;
 }

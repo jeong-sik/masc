@@ -114,8 +114,7 @@ start_mode_server() {
   local mode="$1"
   local port="$2"
   local grpc_port="$3"
-  local ws_port="$4"
-  local log_file="$5"
+  local log_file="$4"
 
   local grpc_enabled="0"
   local ws_enabled="1"
@@ -138,7 +137,6 @@ start_mode_server() {
     export MASC_GRPC_ENABLED="$grpc_enabled"
     export MASC_GRPC_PORT="$grpc_port"
     export MASC_WS_ENABLED="$ws_enabled"
-    export MASC_WS_PORT="$ws_port"
     export MASC_WEBRTC_ENABLED="$webrtc_enabled"
     exec "$SERVER_EXE" --host=127.0.0.1 --port "$port" --base-path "$BASE_PATH"
   ) >"$log_file" 2>&1 &
@@ -256,7 +254,7 @@ check_tool_time() {
 
 run_mode() {
   local mode="$1"
-  local port grpc_port ws_port server_log server_pid
+  local port grpc_port server_log server_pid
   local base_url mcp_url health_json health_file
   local session_line session_id protocol_version
   local status_first_time status_second_time keeper_first_time keeper_second_time keeper_status_time transport_time
@@ -273,13 +271,12 @@ run_mode() {
   if [[ "$(normalize_bool "$START_SERVER")" = "1" ]]; then
     port="$(pick_port)"
     grpc_port="$(pick_port)"
-    ws_port="$(pick_port)"
     server_log="$RUN_DIR/${mode}.server.log"
     base_url="http://127.0.0.1:${port}"
     mcp_url="${base_url}/mcp"
 
     log "mode=${mode} starting server on port=${port}"
-    server_pid="$(start_mode_server "$mode" "$port" "$grpc_port" "$ws_port" "$server_log")"
+    server_pid="$(start_mode_server "$mode" "$port" "$grpc_port" "$server_log")"
 
     if ! harness_wait_for_health "$port" "$SERVER_WAIT_SEC"; then
       log "mode=${mode} health wait failed"

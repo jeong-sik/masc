@@ -41,7 +41,7 @@ val authorize :
     non-empty bearer token, binds an optional caller-declared agent to the
     token owner, and checks the required role/tool capability.
 
-    The process-wide internal keeper token is accepted as [Worker] only when
-    [claimed_agent] is present.  A stored credential cannot impersonate a
-    different [claimed_agent].  This identity-only projection is for adapters
-    that do not need to retain the admitted credential. *)
+    A process-wide service token is deliberately insufficient: every admitted
+    connection must present a stored credential whose owner matches any
+    [claimed_agent].  This identity-only projection is for adapters that do
+    not need to retain the admitted credential. *)

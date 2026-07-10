@@ -14,31 +14,8 @@ let health_service_name = "grpc.health.v1.Health"
 (** Read the configured gRPC port from environment or use default. *)
 let configured_port () = Env_config.Transport.grpc_port
 
-(** Check whether gRPC is enabled (default: enabled, opt-out via env). *)
+(** Check whether the experimental gRPC transport is explicitly enabled. *)
 let is_enabled () = Env_config.Transport.grpc_enabled ()
-
-let parse_lsp_jsonrpc_request jsonrpc_request_json =
-  try
-    match Yojson.Safe.from_string jsonrpc_request_json with
-    | `Assoc fields ->
-      (match List.assoc_opt "method" fields with
-       | Some (`String method_) ->
-         let params =
-           match List.assoc_opt "params" fields with
-           | Some value -> value
-           | None -> `Null
-         in
-         Ok (method_, params)
-       | Some _ -> Error "JSON-RPC request method field must be a string"
-       | None -> Error "JSON-RPC request missing method field")
-    | _ -> Error "JSON-RPC request must be a JSON object"
-  with
-  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON-RPC parse error: %s" msg)
-;;
-
-module For_testing = struct
-  let parse_lsp_jsonrpc_request = parse_lsp_jsonrpc_request
-end
 
 module Reflection_bridge = struct
   let reflection_v1_service_name = "grpc.reflection.v1.ServerReflection"
@@ -79,40 +56,37 @@ module Reflection_bridge = struct
 
   let grpc_masc_descriptor_b64 =
     String.concat ""
-      [ "ChRtYXNjX3dvcmtzcGFjZS5wcm90bxIRbWFzYy53b3Jrc3BhY2UudjEimAEKDUhlYXJ0YmVhdFBpbmcSHQoKYWdlbnRfbmFtZRgB"
+      [ "ChRtYXNjX3dvcmtzcGFjZS5wcm90bxIRbWFzYy53b3Jrc3BhY2UudjEitwEKDUhlYXJ0YmVhdFBpbmcSHQoKYWdlbnRfbmFtZRgB"
       ; "IAEoCVIJYWdlbnROYW1lEh0KCnNlc3Npb25faWQYAiABKAlSCXNlc3Npb25JZBIhCgx0aW1lc3RhbXBfbXMYAyABKANSC3RpbWVz"
-      ; "dGFtcE1zEiYKD2N1cnJlbnRfdGFza19pZBgEIAEoCVINY3VycmVudFRhc2tJZCKtAQoMSGVhcnRiZWF0QWNrEiEKDHRpbWVzdGFt"
-      ; "cF9tcxgBIAEoA1ILdGltZXN0YW1wTXMSLAoSYWN0aXZlX2FnZW50X2NvdW50GAIgASgFUhBhY3RpdmVBZ2VudENvdW50EiwKEnBl"
-      ; "bmRpbmdfdGFza19jb3VudBgDIAEoBVIQcGVuZGluZ1Rhc2tDb3VudBIeCgpkaXJlY3RpdmVzGAQgAygJUgpkaXJlY3RpdmVzIo4B"
-      ; "ChBTdWJzY3JpYmVSZXF1ZXN0Eh0KCmFnZW50X25hbWUYASABKAlSCWFnZW50TmFtZRIdCgpzZXNzaW9uX2lkGAIgASgJUglzZXNz"
-      ; "aW9uSWQSHwoLZXZlbnRfdHlwZXMYAyADKAlSCmV2ZW50VHlwZXMSGwoJc2luY2Vfc2VxGAQgASgDUghzaW5jZVNlcSKhAQoFRXZl"
-      ; "bnQSEAoDc2VxGAEgASgDUgNzZXESHQoKZXZlbnRfdHlwZRgCIAEoCVIJZXZlbnRUeXBlEiEKDHNvdXJjZV9hZ2VudBgDIAEoCVIL"
-      ; "c291cmNlQWdlbnQSIQoMdGltZXN0YW1wX21zGAQgASgDUgt0aW1lc3RhbXBNcxIhCgxwYXlsb2FkX2pzb24YBSABKAlSC3BheWxv"
-      ; "YWRKc29uIpMBCg9Ub29sQ2FsbFJlcXVlc3QSHQoKYWdlbnRfbmFtZRgBIAEoCVIJYWdlbnROYW1lEh0KCnNlc3Npb25faWQYAiAB"
-      ; "KAlSCXNlc3Npb25JZBIbCgl0b29sX25hbWUYAyABKAlSCHRvb2xOYW1lEiUKDmFyZ3VtZW50c19qc29uGAQgASgJUg1hcmd1bWVu"
-      ; "dHNKc29uIpEBChBUb29sQ2FsbFJlc3BvbnNlEhgKB3N1Y2Nlc3MYASABKAhSB3N1Y2Nlc3MSHwoLcmVzdWx0X2pzb24YAiABKAlS"
-      ; "CnJlc3VsdEpzb24SIwoNZXJyb3JfbWVzc2FnZRgDIAEoCVIMZXJyb3JNZXNzYWdlEh0KCmVycm9yX2NvZGUYBCABKAVSCWVycm9y"
-      ; "Q29kZSJnChBCcm9hZGNhc3RSZXF1ZXN0Eh0KCmFnZW50X25hbWUYASABKAlSCWFnZW50TmFtZRIYCgdtZXNzYWdlGAIgASgJUgdt"
-      ; "ZXNzYWdlEhoKCG1lbnRpb25zGAMgAygJUghtZW50aW9ucyI/ChFCcm9hZGNhc3RSZXNwb25zZRIYCgdzdWNjZXNzGAEgASgIUgdz"
-      ; "dWNjZXNzEhAKA3NlcRgCIAEoA1IDc2VxIg8KDVN0YXR1c1JlcXVlc3QixQEKDlN0YXR1c1Jlc3BvbnNlEjQKBmFnZW50cxgBIAMo"
-      ; "CzIcLm1hc2Mud29ya3NwYWNlLnYxLkFnZW50SW5mb1IGYWdlbnRzEjEKBXRhc2tzGAIgAygLMhsubWFzYy53b3Jrc3BhY2UudjEu"
-      ; "VGFza0luZm9SBXRhc2tzEiMKDW1lc3NhZ2VfY291bnQYAyABKAVSDG1lc3NhZ2VDb3VudBIlCg53b3Jrc3BhY2VfcGF0aBgEIAEo"
-      ; "CVINd29ya3NwYWNlUGF0aCLeAQoJQWdlbnRJbmZvEhIKBG5hbWUYASABKAlSBG5hbWUSFgoGc3RhdHVzGAIgASgJUgZzdGF0dXMS"
-      ; "IgoMY2FwYWJpbGl0aWVzGAMgAygJUgxjYXBhYmlsaXRpZXMSKgoRbGFzdF9oZWFydGJlYXRfbXMYBCABKANSD2xhc3RIZWFydGJl"
-      ; "YXRNcxItChNzZXNzaW9uX2JvdW5kX2F0X21zGAUgASgDUhBzZXNzaW9uQm91bmRBdE1zEiYKD2N1cnJlbnRfdGFza19pZBgGIAEo"
-      ; "CVINY3VycmVudFRhc2tJZCKFAQoIVGFza0luZm8SDgoCaWQYASABKAlSAmlkEhQKBXRpdGxlGAIgASgJUgV0aXRsZRIWCgZzdGF0"
-      ; "dXMYAyABKAlSBnN0YXR1cxIfCgthc3NpZ25lZF90bxgEIAEoCVIKYXNzaWduZWRUbxIaCghwcmlvcml0eRgFIAEoBVIIcHJpb3Jp"
-      ; "dHkihgEKCkxzcFJlcXVlc3QSHwoLbGFuZ3VhZ2VfaWQYASABKAlSCmxhbmd1YWdlSWQSMAoUanNvbnJwY19yZXF1ZXN0X2pzb24Y"
-      ; "AiABKAlSEmpzb25ycGNSZXF1ZXN0SnNvbhIlCg53b3Jrc3BhY2Vfcm9vdBgDIAEoCVINd29ya3NwYWNlUm9vdCJmCgtMc3BSZXNw"
-      ; "b25zZRIyChVqc29ucnBjX3Jlc3BvbnNlX2pzb24YASABKAlSE2pzb25ycGNSZXNwb25zZUpzb24SIwoNZXJyb3JfbWVzc2FnZRgC"
-      ; "IAEoCVIMZXJyb3JNZXNzYWdlMvoDCg1NYXNjV29ya3NwYWNlElIKCUhlYXJ0YmVhdBIgLm1hc2Mud29ya3NwYWNlLnYxLkhlYXJ0"
-      ; "YmVhdFBpbmcaHy5tYXNjLndvcmtzcGFjZS52MS5IZWFydGJlYXRBY2soATABEkwKCVN1YnNjcmliZRIjLm1hc2Mud29ya3NwYWNl"
-      ; "LnYxLlN1YnNjcmliZVJlcXVlc3QaGC5tYXNjLndvcmtzcGFjZS52MS5FdmVudDABElMKCFRvb2xDYWxsEiIubWFzYy53b3Jrc3Bh"
-      ; "Y2UudjEuVG9vbENhbGxSZXF1ZXN0GiMubWFzYy53b3Jrc3BhY2UudjEuVG9vbENhbGxSZXNwb25zZRJWCglCcm9hZGNhc3QSIy5t"
-      ; "YXNjLndvcmtzcGFjZS52MS5Ccm9hZGNhc3RSZXF1ZXN0GiQubWFzYy53b3Jrc3BhY2UudjEuQnJvYWRjYXN0UmVzcG9uc2USUAoJ"
-      ; "R2V0U3RhdHVzEiAubWFzYy53b3Jrc3BhY2UudjEuU3RhdHVzUmVxdWVzdBohLm1hc2Mud29ya3NwYWNlLnYxLlN0YXR1c1Jlc3Bv"
-      ; "bnNlEkgKB0xzcENhbGwSHS5tYXNjLndvcmtzcGFjZS52MS5Mc3BSZXF1ZXN0Gh4ubWFzYy53b3Jrc3BhY2UudjEuTHNwUmVzcG9u"
-      ; "c2ViBnByb3RvMw=="
+      ; "dGFtcE1zEiYKD2N1cnJlbnRfdGFza19pZBgEIAEoCVINY3VycmVudFRhc2tJZBIdCgphdXRoX3Rva2VuGAUgASgJUglhdXRoVG9r"
+      ; "ZW4ijQEKDEhlYXJ0YmVhdEFjaxIhCgx0aW1lc3RhbXBfbXMYASABKANSC3RpbWVzdGFtcE1zEiwKEmFjdGl2ZV9hZ2VudF9jb3Vu"
+      ; "dBgCIAEoBVIQYWN0aXZlQWdlbnRDb3VudBIsChJwZW5kaW5nX3Rhc2tfY291bnQYAyABKAVSEHBlbmRpbmdUYXNrQ291bnQirQEK"
+      ; "EFN1YnNjcmliZVJlcXVlc3QSHQoKYWdlbnRfbmFtZRgBIAEoCVIJYWdlbnROYW1lEh0KCnNlc3Npb25faWQYAiABKAlSCXNlc3Np"
+      ; "b25JZBIfCgtldmVudF90eXBlcxgDIAMoCVIKZXZlbnRUeXBlcxIbCglzaW5jZV9zZXEYBCABKANSCHNpbmNlU2VxEh0KCmF1dGhf"
+      ; "dG9rZW4YBSABKAlSCWF1dGhUb2tlbiKhAQoFRXZlbnQSEAoDc2VxGAEgASgDUgNzZXESHQoKZXZlbnRfdHlwZRgCIAEoCVIJZXZl"
+      ; "bnRUeXBlEiEKDHNvdXJjZV9hZ2VudBgDIAEoCVILc291cmNlQWdlbnQSIQoMdGltZXN0YW1wX21zGAQgASgDUgt0aW1lc3RhbXBN"
+      ; "cxIhCgxwYXlsb2FkX2pzb24YBSABKAlSC3BheWxvYWRKc29uIrIBCg9Ub29sQ2FsbFJlcXVlc3QSHQoKYWdlbnRfbmFtZRgBIAEo"
+      ; "CVIJYWdlbnROYW1lEh0KCnNlc3Npb25faWQYAiABKAlSCXNlc3Npb25JZBIbCgl0b29sX25hbWUYAyABKAlSCHRvb2xOYW1lEiUK"
+      ; "DmFyZ3VtZW50c19qc29uGAQgASgJUg1hcmd1bWVudHNKc29uEh0KCmF1dGhfdG9rZW4YBSABKAlSCWF1dGhUb2tlbiKRAQoQVG9v"
+      ; "bENhbGxSZXNwb25zZRIYCgdzdWNjZXNzGAEgASgIUgdzdWNjZXNzEh8KC3Jlc3VsdF9qc29uGAIgASgJUgpyZXN1bHRKc29uEiMK"
+      ; "DWVycm9yX21lc3NhZ2UYAyABKAlSDGVycm9yTWVzc2FnZRIdCgplcnJvcl9jb2RlGAQgASgFUgllcnJvckNvZGUihgEKEEJyb2Fk"
+      ; "Y2FzdFJlcXVlc3QSHQoKYWdlbnRfbmFtZRgBIAEoCVIJYWdlbnROYW1lEhgKB21lc3NhZ2UYAiABKAlSB21lc3NhZ2USGgoIbWVu"
+      ; "dGlvbnMYAyADKAlSCG1lbnRpb25zEh0KCmF1dGhfdG9rZW4YBCABKAlSCWF1dGhUb2tlbiI/ChFCcm9hZGNhc3RSZXNwb25zZRIY"
+      ; "CgdzdWNjZXNzGAEgASgIUgdzdWNjZXNzEhAKA3NlcRgCIAEoA1IDc2VxIi4KDVN0YXR1c1JlcXVlc3QSHQoKYXV0aF90b2tlbhgB"
+      ; "IAEoCVIJYXV0aFRva2VuIsUBCg5TdGF0dXNSZXNwb25zZRI0CgZhZ2VudHMYASADKAsyHC5tYXNjLndvcmtzcGFjZS52MS5BZ2Vu"
+      ; "dEluZm9SBmFnZW50cxIxCgV0YXNrcxgCIAMoCzIbLm1hc2Mud29ya3NwYWNlLnYxLlRhc2tJbmZvUgV0YXNrcxIjCg1tZXNzYWdl"
+      ; "X2NvdW50GAMgASgFUgxtZXNzYWdlQ291bnQSJQoOd29ya3NwYWNlX3BhdGgYBCABKAlSDXdvcmtzcGFjZVBhdGgi1AEKCUFnZW50"
+      ; "SW5mbxISCgRuYW1lGAEgASgJUgRuYW1lEhYKBnN0YXR1cxgCIAEoCVIGc3RhdHVzEiIKDGNhcGFiaWxpdGllcxgDIAMoCVIMY2Fw"
+      ; "YWJpbGl0aWVzEiAKDGxhc3Rfc2Vlbl9tcxgEIAEoA1IKbGFzdFNlZW5NcxItChNzZXNzaW9uX2JvdW5kX2F0X21zGAUgASgDUhBz"
+      ; "ZXNzaW9uQm91bmRBdE1zEiYKD2N1cnJlbnRfdGFza19pZBgGIAEoCVINY3VycmVudFRhc2tJZCKFAQoIVGFza0luZm8SDgoCaWQY"
+      ; "ASABKAlSAmlkEhQKBXRpdGxlGAIgASgJUgV0aXRsZRIWCgZzdGF0dXMYAyABKAlSBnN0YXR1cxIfCgthc3NpZ25lZF90bxgEIAEo"
+      ; "CVIKYXNzaWduZWRUbxIaCghwcmlvcml0eRgFIAEoBVIIcHJpb3JpdHkysAMKDU1hc2NXb3Jrc3BhY2USUgoJSGVhcnRiZWF0EiAu"
+      ; "bWFzYy53b3Jrc3BhY2UudjEuSGVhcnRiZWF0UGluZxofLm1hc2Mud29ya3NwYWNlLnYxLkhlYXJ0YmVhdEFjaygBMAESTAoJU3Vi"
+      ; "c2NyaWJlEiMubWFzYy53b3Jrc3BhY2UudjEuU3Vic2NyaWJlUmVxdWVzdBoYLm1hc2Mud29ya3NwYWNlLnYxLkV2ZW50MAESUwoI"
+      ; "VG9vbENhbGwSIi5tYXNjLndvcmtzcGFjZS52MS5Ub29sQ2FsbFJlcXVlc3QaIy5tYXNjLndvcmtzcGFjZS52MS5Ub29sQ2FsbFJl"
+      ; "c3BvbnNlElYKCUJyb2FkY2FzdBIjLm1hc2Mud29ya3NwYWNlLnYxLkJyb2FkY2FzdFJlcXVlc3QaJC5tYXNjLndvcmtzcGFjZS52"
+      ; "MS5Ccm9hZGNhc3RSZXNwb25zZRJQCglHZXRTdGF0dXMSIC5tYXNjLndvcmtzcGFjZS52MS5TdGF0dXNSZXF1ZXN0GiEubWFzYy53"
+      ; "b3Jrc3BhY2UudjEuU3RhdHVzUmVzcG9uc2ViBnByb3RvMw=="
       ]
   ;;
 
@@ -424,15 +398,10 @@ let create_server
           -> tool_name:string
           -> arguments:Yojson.Safe.t
           -> (string, string) result)
-      ~(lsp_dispatcher :
-          language_id:string
-          -> jsonrpc_request_json:string
-          -> workspace_root:string option
-          -> (string, string) result)
   : Grpc_eio.Server.t
   =
   let service =
-    Masc_grpc_service.create_service ~workspace_config ~tool_dispatcher ~lsp_dispatcher
+    Masc_grpc_service.create_service ~workspace_config ~tool_dispatcher
   in
   let health = Grpc_eio.Health.create ~default_status:Grpc_eio.Health.Serving () in
   Grpc_eio.Health.register_service health ~service:Masc_grpc_service.service_name;
@@ -448,7 +417,11 @@ let create_server
   let server =
     Grpc_eio.Server.create
       ~config:
-        { Grpc_eio.Server.default_config with port; host = Env_config_core.masc_host () }
+        { Grpc_eio.Server.default_config with
+          port
+        ; host = Env_config_core.masc_host ()
+        ; default_timeout = None
+        }
       ()
   in
   let server_ref = ref server in
@@ -498,118 +471,13 @@ let start
   then (
     Transport_metrics.set_grpc_runtime_listening false;
     Transport_metrics.set_grpc_listen_status "disabled";
-    Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)")
+    Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=1 to opt in)")
   else (
     let port = configured_port () in
-    (* Extract Eio capabilities for LSP proxy wiring. *)
-    let proc_mgr = Eio.Stdenv.process_mgr env in
-    let clock = Eio.Stdenv.clock env in
-    let base_path = workspace_config.Workspace_utils_backend_setup.base_path in
-    (* Build the LSP dispatcher closure. Uses a dedicated switch scoped to
-       the gRPC server lifetime so LSP child processes are cleaned up when
-       the server shuts down. The process cache and router are server-scoped
-       (shared across all gRPC calls) since gRPC calls are stateless unary RPCs,
-       unlike the WebSocket endpoint which uses per-connection state. *)
-    let lsp_sw = sw in
-    let lsp_processes : (string, Lsp_process_manager.lsp_process) Hashtbl.t =
-      Hashtbl.create 8
-    in
-    let lsp_router = Lsp_message_router.create () in
-    let lsp_spawn_mutex = Eio.Mutex.create () in
-    let lsp_dispatcher
-          ~language_id
-          ~jsonrpc_request_json
-          ~workspace_root
-      : (string, string) result
-      =
-      let lang_id = language_id in
-      let ws_root = Option.value workspace_root ~default:base_path in
-      (* Ensure the LSP process for this language is running. *)
-      let ensure_proc () =
-        Eio.Mutex.use_rw ~protect:true lsp_spawn_mutex (fun () ->
-          match Hashtbl.find_opt lsp_processes lang_id with
-          | Some proc -> Ok proc
-          | None ->
-            (match Lsp_process_manager.spawn ~sw:lsp_sw ~lang_id ~workspace_root:ws_root proc_mgr with
-             | Error spawn_err ->
-               Error (Format.asprintf "LSP spawn failed for %s: %a" lang_id Lsp_process_manager.pp_spawn_error spawn_err)
-             | Ok proc ->
-               let _reader =
-                 Lsp_message_router.start_response_reader
-                   ~sw:lsp_sw lsp_router proc
-                   ~on_exit:None
-                   ~on_notification:(fun ~client_id:_ ~method_:_ _params -> ())
-               in
-               (* Send initialize request with timeout. *)
-               let init_params =
-                 `Assoc
-                   [ "processId", `Int (Unix.getpid ())
-                   ; "rootUri", `String ("file://" ^ ws_root)
-                   ; "capabilities", `Assoc []
-                   ]
-               in
-               (try
-                  let init_result =
-                    Eio.Time.with_timeout_exn clock 10.0 (fun () ->
-                      let promise =
-                        Lsp_message_router.send_request
-                          lsp_router proc
-                          ~method_:"initialize"
-                          ~params:init_params
-                          ~client_id:0
-                      in
-                      Eio.Promise.await promise)
-                  in
-                  (match init_result with
-                   | Ok _ ->
-                     Lsp_message_router.send_notification
-                       lsp_router proc
-                       ~method_:"initialized"
-                       ~params:(`Assoc []);
-                     Hashtbl.replace lsp_processes lang_id proc;
-                     Ok proc
-                   | Error msg ->
-                     (* Init failed: the proc + its 3 pipe FDs + reader fibers
-                        are bound to [lsp_sw] (server lifetime) and were NOT
-                        cached, so without teardown they leak until shutdown and
-                        the next LspCall re-spawns (RFC-0261 / #21546). *)
-                     Lsp_process_manager.shutdown proc;
-                     Error (Printf.sprintf "LSP initialize failed for %s: %s" lang_id msg))
-                with
-                | Eio.Time.Timeout ->
-                  Lsp_process_manager.shutdown proc;
-                  Error (Printf.sprintf "LSP initialize timeout for %s (10s)" lang_id)
-                | exn ->
-                  Lsp_process_manager.shutdown proc;
-                  Error (Printf.sprintf "LSP initialize error for %s: %s" lang_id (Printexc.to_string exn)))))
-      in
-      match ensure_proc () with
-      | Error _ as e -> e
-      | Ok proc ->
-        (match parse_lsp_jsonrpc_request jsonrpc_request_json with
-         | Error _ as error -> error
-         | Ok (method_, params) ->
-           try
-             let promise =
-               Lsp_message_router.send_request
-                 lsp_router proc
-                 ~method_
-                 ~params
-                 ~client_id:0
-             in
-             (match Eio.Promise.await promise with
-              | Ok result ->
-                Ok (Yojson.Safe.to_string result)
-              | Error msg ->
-                Error (Printf.sprintf "LSP request failed: %s" msg))
-           with
-           | exn ->
-             Error (Printf.sprintf "LSP dispatch error: %s" (Printexc.to_string exn)))
-    in
     Eio.Fiber.fork ~sw (fun () ->
       try
         let server =
-          create_server ~port ~workspace_config ~tool_dispatcher ~lsp_dispatcher
+          create_server ~port ~workspace_config ~tool_dispatcher
         in
         Log.Server.info
           "gRPC workspace server starting on port %d (health + reflection enabled)"
@@ -617,7 +485,7 @@ let start
         Log.Server.info "  service: %s" Masc_grpc_service.service_name;
         Log.Server.info "  health: %s/Check" health_service_name;
         Log.Server.info
-          "  methods: Broadcast, GetStatus, ToolCall, LspCall, Subscribe, Heartbeat";
+          "  methods: Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
         Transport_metrics.set_grpc_runtime_listening true;
         Transport_metrics.set_grpc_listen_status "listening";
         (* Safe: finally is Atomic.set — no I/O, no exception risk *)

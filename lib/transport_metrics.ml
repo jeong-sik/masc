@@ -382,22 +382,34 @@ let http_listener_json ?now () =
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false
-let ws_runtime_listening : bool Atomic.t = Atomic.make false
-let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
+
+type ws_upgrade_state =
+  | Initializing
+  | Ready
+  | Disabled
+  | H2_only_unsupported
+  | Stopped
+
+let ws_upgrade_state : ws_upgrade_state Atomic.t = Atomic.make Initializing
+
+let ws_upgrade_state_to_string = function
+  | Initializing -> "initializing"
+  | Ready -> "ready"
+  | Disabled -> "disabled"
+  | H2_only_unsupported -> "h2_only_unsupported"
+  | Stopped -> "stopped"
+;;
 
 (** Explanatory status for why a transport is or is not listening.
     Valid values: ["not_started"], ["disabled"], ["listening"],
     ["bind_failed"], ["stopped"]. *)
 let grpc_listen_status : string Atomic.t = Atomic.make "not_started"
 
-let ws_listen_status : string Atomic.t = Atomic.make "not_started"
 let set_grpc_runtime_listening listening = Atomic.set grpc_runtime_listening listening
-let set_ws_runtime_listening listening = Atomic.set ws_runtime_listening listening
-let set_ws_same_origin_runtime_ready ready =
-  Atomic.set ws_same_origin_runtime_ready ready
+let set_ws_upgrade_state state = Atomic.set ws_upgrade_state state
+let get_ws_upgrade_state () = Atomic.get ws_upgrade_state
 
 let set_grpc_listen_status status = Atomic.set grpc_listen_status status
-let set_ws_listen_status status = Atomic.set ws_listen_status status
 let grpc_enabled () = Env_config.Transport.grpc_enabled ()
 let grpc_port () = Env_config.Transport.grpc_port
 let grpc_listening () = grpc_enabled () && Atomic.get grpc_runtime_listening
@@ -466,10 +478,10 @@ let queue_pressure ~sse_queue_max ~relay_queue_depth ~relay_retry_total ~relay_d
 ;;
 
 let ws_enabled () = Env_config.Transport.ws_enabled ()
-let ws_port () = Env_config.Transport.ws_port
-let ws_listening () = ws_enabled () && Atomic.get ws_runtime_listening
 let ws_same_origin_ready () =
-  ws_enabled () && Atomic.get ws_same_origin_runtime_ready
+  ws_enabled () && Atomic.get ws_upgrade_state = Ready
+
+let ws_listening = ws_same_origin_ready
 
 (* [tcp_port_reachable] is intentionally [false], matching the canonical
    decision in [Transport_read_model.tcp_port_reachable]. A stdlib
@@ -599,8 +611,8 @@ let transport_health_json ~config =
   let grpc_live = grpc_listening () in
   let grpc_reachable = grpc_live || tcp_port_reachable (grpc_port ()) in
   let ws_configured = ws_enabled () in
-  let ws_live = ws_listening () in
-  let ws_reachable = ws_live || tcp_port_reachable (ws_port ()) in
+  let ws_live = ws_same_origin_ready () in
+  let ws_reachable = ws_live in
   let streamable_auth_policy_present =
     Env_config.Transport.http_auth_strict_env_enabled ()
   in
@@ -688,9 +700,9 @@ let transport_health_json ~config =
           ; "configured", `Bool ws_configured
           ; "listening", `Bool ws_live
           ; "reachable", `Bool ws_reachable
-          ; "listen_status", `String (Atomic.get ws_listen_status)
-          ; "mode", `String "standalone"
-          ; "port", `Int (ws_port ())
+          ; "listen_status", `String (ws_upgrade_state_to_string (get_ws_upgrade_state ()))
+          ; "mode", `String "same_origin"
+          ; "endpoint", `String "/ws"
           ; "sessions", `Int ws_sessions
           ; "relay_source", `String "sse_external_subscriber"
           ; (* Diagnostic counters for the WS delivery path.  The metric names

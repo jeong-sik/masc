@@ -166,7 +166,6 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
   printf 'MASC_KEEPER_BOOTSTRAP_ENABLED=%%s\n' "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}"
   printf 'MASC_GRPC_PORT=%%s\n' "${MASC_GRPC_PORT:-}"
-  printf 'MASC_WS_PORT=%%s\n' "${MASC_WS_PORT:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
   printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
   printf 'MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=%%s\n' "${MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM:-}"
@@ -409,7 +408,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code_default stdout_default stderr_default;
       let captured_default = read_file capture_default in
-      check bool "ws enabled by default" true
+      check bool "same-origin /ws enabled by default" true
         (contains_substring captured_default "MASC_WS_ENABLED=1");
       check bool "webrtc enabled by default" true
         (contains_substring captured_default "MASC_WEBRTC_ENABLED=1");
@@ -438,7 +437,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
       check bool "config dir override preserved" true
         (contains_substring captured_override
            ("MASC_CONFIG_DIR=" ^ Filename.concat dir "custom-config"));
-      check bool "ws override preserved" true
+      check bool "same-origin /ws override preserved" true
         (contains_substring captured_override "MASC_WS_ENABLED=0");
       check bool "webrtc override preserved" true
         (contains_substring captured_override "MASC_WEBRTC_ENABLED=0"))
@@ -794,7 +793,7 @@ let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
       check bool "parent env repo-local config ignore is logged" true
         (contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR"))
 
-let test_explicit_http_port_derives_sidecar_ports () =
+let test_explicit_http_port_derives_grpc_port () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
@@ -814,9 +813,7 @@ let test_explicit_http_port_derives_sidecar_ports () =
           stderr;
       let captured = read_file capture in
       check bool "grpc port derived from explicit http port" true
-        (contains_substring captured "MASC_GRPC_PORT=9952");
-      check bool "ws port derived from explicit http port" true
-        (contains_substring captured "MASC_WS_PORT=9953"))
+        (contains_substring captured "MASC_GRPC_PORT=9952"))
 
 let test_grpc_direct_banner_is_preserved_in_stderr () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -1233,8 +1230,8 @@ let () =
             "explicit base path ignores repo-local config from parent env"
             `Quick
             test_explicit_base_path_ignores_repo_local_config_from_parent_env;
-          test_case "explicit http port derives sidecar ports" `Quick
-            test_explicit_http_port_derives_sidecar_ports;
+          test_case "explicit http port derives grpc port" `Quick
+            test_explicit_http_port_derives_grpc_port;
           test_case "grpc-direct banner is preserved in stderr" `Quick
             test_grpc_direct_banner_is_preserved_in_stderr;
           test_case "stale Dune artifacts are cleaned and retried" `Quick

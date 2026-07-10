@@ -84,9 +84,14 @@ let is_websocket_upgrade_request request =
 let websocket_upgrade_unavailable_reason () =
   if not (Transport_metrics.ws_enabled ())
   then Some "WebSocket transport disabled"
-  else if not (Transport_metrics.ws_same_origin_ready ())
-  then Some "WebSocket transport not ready"
-  else None
+  else
+    match Transport_metrics.get_ws_upgrade_state () with
+    | Transport_metrics.Ready -> None
+    | Transport_metrics.Initializing -> Some "WebSocket transport initializing"
+    | Transport_metrics.Disabled -> Some "WebSocket transport disabled"
+    | Transport_metrics.H2_only_unsupported ->
+      Some "WebSocket upgrade unavailable in H2-only mode"
+    | Transport_metrics.Stopped -> Some "WebSocket transport stopped"
 
 let websocket_upgrade_authorized ~base_path request =
   authorize_websocket_request
@@ -113,6 +118,7 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
                Server_mcp_transport_ws.upgrade_connection
                  ?sw
                  ?clock
+                 ~authenticated_agent:admission.identity.agent_name
                  ~on_message:
                    (Server_mcp_transport_ws.dispatch_inbound_message
                       ~auth_token:admission.auth_token)
@@ -126,15 +132,15 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
     websocket_discovery_handler request reqd
 
 let webrtc_signaling_handler signaling_fn request reqd =
-  with_permission_auth ~permission:Masc_domain.CanBroadcast
-    (fun _state _req reqd ->
+  with_transport_admission_auth ~permission:Masc_domain.CanBroadcast
+    (fun _state admission _req reqd ->
       if not (Server_webrtc_transport.is_enabled ()) then
         Http.Response.json_value ~status:`Not_found
           (`Assoc [ ("error", `String "webrtc transport disabled") ])
           reqd
       else
         Http.Request.read_body_async reqd (fun body_str ->
-          match signaling_fn body_str with
+          match signaling_fn ~admission body_str with
           | Ok body ->
               Http.Response.json body reqd
           | Error msg ->
@@ -285,16 +291,12 @@ let add_routes ?sw ?clock ~port ~host router =
   |> Http.Router.get "/graphiql/react-dom.production.min.js"
        (serve_graphiql_asset "react-dom.production.min.js")
   |> Http.Router.get "/mcp" (fun request reqd ->
-       (* Observer/presence SSE streams authenticate via the `token` query
-          param — an EventSource cannot set an Authorization header. Parse
-          sse_kind and let handle_get_mcp route it: Observer/Presence go to
-          verify_mcp_observer_stream_auth (accepts header OR `token` query),
-          the default (Agent_stream) still requires a bearer header via
-          verify_mcp_auth. Do NOT wrap in with_read_auth — that gate is
-          header-only and 401s ("Token required") the query-token SSE
-          handshake before the sse_kind-aware auth runs, which is why the
-          dashboard observer stream failed and the client fell back/looped.
-          Mirrors POST /mcp, which already self-auths via handle_post_mcp. *)
+       (* Parse [sse_kind] and let [handle_get_mcp] apply the shared strict MCP
+          admission plus stream-specific session ownership gate. Authenticated
+          browser streams use fetch with a ReadableStream because EventSource
+          cannot set request headers. Do not wrap this route in
+          [with_read_auth]; [handle_get_mcp] owns both the authentication result
+          and the MCP-shaped error response, matching POST /mcp. *)
        let sse_kind =
          match Server_utils.query_param request "sse_kind" with
          | Some raw
@@ -308,7 +310,6 @@ let add_routes ?sw ?clock ~port ~host router =
          | _ -> None
        in
        handle_get_mcp ?sse_kind request reqd)
-  |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
   |> Http.Router.post "/mcp/managed"
        (handle_post_mcp ~profile:Server_mcp_transport_http.Managed_agent)

@@ -8,6 +8,7 @@ module Auth = Masc.Auth
 module Tool_spec = Tool_spec
 module Tool_dispatch = Tool_dispatch
 module Types = Masc_domain
+module Sidecar_routes = Server_routes_http_routes_sidecar
 
 (* Setup a temp directory for testing *)
 let setup_test_workspace () =
@@ -133,10 +134,18 @@ let strict_unknown_tool_denial_count ~agent_name ~tool_class =
     ~labels:[ ("agent_name", agent_name); ("tool_class", tool_class) ]
     ()
 
+let undeclared_tool_permission_denial_count ~agent_name ~tool_name =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_auth_tool_permission_undeclared_denials
+    ~labels:[ ("agent_name", agent_name); ("tool_name", tool_name) ]
+    ()
+
 let keeper_strict_auth_regression_tools =
   [
     "tool_search_files";
     "tool_execute";
+    "tool_edit_file";
+    "tool_write_file";
     "keeper_task_claim";
     "tool_read_file";
     "keeper_board_search";
@@ -673,7 +682,7 @@ let test_ensure_keeper_credential_uses_per_keeper_token () =
           check bool "keeper credential is worker" true (cred.role = Masc_domain.Worker);
           check bool "keeper bearer is not the shared internal token" false
             (Auth.verify_internal_keeper_token dir ~token:raw_token);
-          check bool "internal keeper token hash persisted" true
+          check bool "per-keeper provisioning does not mint shared service token" false
             (Sys.file_exists (Auth.internal_keeper_token_hash_file dir));
           check bool "persisted raw token file created" true
             (Sys.file_exists raw_token_path);
@@ -923,7 +932,7 @@ let test_resolve_role_workspace_secret_grants_admin () =
   | Ok role -> fail (Printf.sprintf "expected Admin, got %s" (Masc_domain.show_agent_role role))
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
-let test_authorize_unknown_masc_tool_strict_worker_allowed () =
+let test_authorize_unknown_masc_tool_strict_denied () =
   let dir = setup_test_workspace () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
   let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
@@ -936,8 +945,9 @@ let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   in
   cleanup_test_workspace dir;
   match result with
-  | Ok () -> ()
-  | Error e -> fail (Masc_domain.masc_error_to_string e)
+  | Ok () -> fail "unknown masc_* tool should not bypass catalog authorization"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
 let test_authorize_unknown_non_masc_tool_strict_denied () =
   let dir = setup_test_workspace () in
@@ -963,30 +973,6 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
         (strict_unknown_tool_denial_count
            ~agent_name:"worker_agent" ~tool_class:"external")
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
-
-let test_authorize_unknown_masc_prefix_strict_worker_allowed () =
-  let prefixes_with_unlisted_tool = [ "masc_unlisted_tool" ] in
-  let dir = setup_test_workspace () in
-  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
-  let result =
-    match create_result with
-    | Ok (raw_token, _) ->
-        List.fold_left
-          (fun acc tool_name ->
-             match acc with
-             | Error _ as e -> e
-             | Ok () ->
-                 Auth.authorize_tool dir ~agent_name:"worker_agent"
-                   ~token:(Some raw_token) ~tool_name)
-          (Ok ())
-          prefixes_with_unlisted_tool
-    | Error e -> Error e
-  in
-  cleanup_test_workspace dir;
-  match result with
-  | Ok () -> ()
-  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_authorize_retired_dotted_tool_prefixes_strict_denied () =
   let retired_unlisted_tools =
@@ -1061,14 +1047,228 @@ let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
   | Ok () -> ()
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
-let test_authorize_tool_v2_unknown_internal_worker_allowed () =
+let test_authorize_tool_v2_unknown_internal_denied () =
   let result =
     Auth.authorize_tool_for_role ~agent_name:"worker_agent"
       ~role:Masc_domain.Worker ~tool_name:"masc_unlisted_tool"
   in
   match result with
+  | Ok () -> fail "unknown masc_* tool should not bypass catalog authorization"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_required_permission_is_catalog_ssot () =
+  let check_permission tool_name expected =
+    match Auth.required_permission_for_tool tool_name with
+    | Ok actual ->
+      check string tool_name
+        (Masc_domain.permission_to_string expected)
+        (Masc_domain.permission_to_string actual)
+    | Error _ -> fail ("catalogued tool missing permission: " ^ tool_name)
+  in
+  let check_unregistered tool_name =
+    match Auth.required_permission_for_tool tool_name with
+    | Error Auth.Tool_unregistered -> ()
+    | Error Auth.Tool_permission_undeclared ->
+      fail (tool_name ^ " must not remain registered without a permission")
+    | Ok permission ->
+      fail
+        (Printf.sprintf
+           "%s unexpectedly received %s"
+           tool_name
+           (Masc_domain.permission_to_string permission))
+  in
+  check_permission "masc_status" Masc_domain.CanReadState;
+  check_permission "masc_add_task" Masc_domain.CanAddTask;
+  check_permission "masc_transition" Masc_domain.CanCompleteTask;
+  check_permission "masc_board_reaction" Masc_domain.CanVote;
+  check_permission "masc_reset" Masc_domain.CanReset;
+  check_permission "masc_operator_action" Masc_domain.CanAdmin;
+  List.iter
+    (fun tool_name -> check_permission tool_name Masc_domain.CanAdmin)
+    [ "masc_keeper_up"
+    ; "masc_keeper_down"
+    ; "masc_pause"
+    ; "masc_resume"
+    ; "masc_prompt_override"
+    ; "masc_fusion"
+    ];
+  List.iter
+    (fun tool_name -> check_permission tool_name Masc_domain.CanReadState)
+    [ Sidecar_routes.status_read_tool_name
+    ; Sidecar_routes.schema_read_tool_name
+    ];
+  List.iter
+    (fun tool_name -> check_permission tool_name Masc_domain.CanAdmin)
+    [ Sidecar_routes.logs_read_tool_name
+    ; Sidecar_routes.config_read_tool_name
+    ; Sidecar_routes.config_write_tool_name
+    ; Sidecar_routes.process_start_tool_name
+    ; Sidecar_routes.process_stop_tool_name
+    ];
+  check_permission "tool_execute" Masc_domain.CanBroadcast;
+  check_unregistered "sidecar";
+  check_unregistered "masc_totally_unlisted"
+
+let test_registered_tool_without_permission_is_observably_denied () =
+  let agent_name = "worker_missing_policy" in
+  let tool_name = "__test_registered_without_permission" in
+  Tool_catalog.register_metadata tool_name Tool_catalog.default_metadata;
+  let before =
+    undeclared_tool_permission_denial_count ~agent_name ~tool_name
+  in
+  let result =
+    Auth.authorize_tool_for_role ~agent_name ~role:Masc_domain.Worker ~tool_name
+  in
+  match result with
+  | Ok () -> fail "registered tool with undeclared permission must fail closed"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) ->
+    check (float 0.0001) "undeclared permission counter increments"
+      (before +. 1.0)
+      (undeclared_tool_permission_denial_count ~agent_name ~tool_name)
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_worker_cannot_invoke_reset_but_admin_can () =
+  (match
+     Auth.authorize_tool_for_role ~agent_name:"worker"
+       ~role:Masc_domain.Worker ~tool_name:"masc_reset"
+   with
+   | Ok () -> fail "worker must not receive CanReset"
+   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e)));
+  match
+    Auth.authorize_tool_for_role ~agent_name:"admin"
+      ~role:Masc_domain.Admin ~tool_name:"masc_reset"
+  with
   | Ok () -> ()
   | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_operator_mutation_tools_require_admin () =
+  let tool_names =
+    [ "masc_keeper_up"
+    ; "masc_keeper_down"
+    ; "masc_pause"
+    ; "masc_resume"
+    ; "masc_prompt_override"
+    ; "masc_fusion"
+    ]
+  in
+  List.iter
+    (fun tool_name ->
+       (match
+          Auth.authorize_tool_for_role ~agent_name:"worker"
+            ~role:Masc_domain.Worker ~tool_name
+        with
+        | Ok () -> fail (tool_name ^ " must reject worker credentials")
+        | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+        | Error e ->
+          fail
+            (Printf.sprintf
+               "%s returned the wrong worker error: %s"
+               tool_name
+               (Masc_domain.masc_error_to_string e)));
+       match
+         Auth.authorize_tool_for_role ~agent_name:"admin"
+           ~role:Masc_domain.Admin ~tool_name
+       with
+       | Ok () -> ()
+       | Error e ->
+         fail
+           (Printf.sprintf
+              "%s rejected admin credentials: %s"
+              tool_name
+              (Masc_domain.masc_error_to_string e)))
+    tool_names
+
+let test_sidecar_route_permissions_are_split () =
+  let read_tools =
+    [ Sidecar_routes.status_read_tool_name
+    ; Sidecar_routes.schema_read_tool_name
+    ]
+  in
+  let admin_tools =
+    [ Sidecar_routes.logs_read_tool_name
+    ; Sidecar_routes.config_read_tool_name
+    ; Sidecar_routes.config_write_tool_name
+    ; Sidecar_routes.process_start_tool_name
+    ; Sidecar_routes.process_stop_tool_name
+    ]
+  in
+  List.iter
+    (fun tool_name ->
+       check bool (tool_name ^ " remains HTTP-only") false
+         (Tool_catalog.allow_direct_call tool_name))
+    (read_tools @ admin_tools);
+  List.iter
+    (fun tool_name ->
+       match
+         Auth.authorize_tool_for_role ~agent_name:"worker"
+           ~role:Masc_domain.Worker ~tool_name
+       with
+       | Ok () -> ()
+       | Error e ->
+         fail
+           (Printf.sprintf
+              "%s should permit Worker reads: %s"
+              tool_name
+              (Masc_domain.masc_error_to_string e)))
+    read_tools;
+  List.iter
+    (fun tool_name ->
+       (match
+          Auth.authorize_tool_for_role ~agent_name:"worker"
+            ~role:Masc_domain.Worker ~tool_name
+        with
+        | Ok () -> fail (tool_name ^ " must reject Worker credentials")
+        | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+        | Error e ->
+          fail
+            (Printf.sprintf
+               "%s returned the wrong Worker error: %s"
+               tool_name
+               (Masc_domain.masc_error_to_string e)));
+       match
+         Auth.authorize_tool_for_role ~agent_name:"admin"
+           ~role:Masc_domain.Admin ~tool_name
+       with
+       | Ok () -> ()
+       | Error e ->
+         fail
+           (Printf.sprintf
+              "%s rejected Admin credentials: %s"
+              tool_name
+              (Masc_domain.masc_error_to_string e)))
+    admin_tools;
+  match Auth.required_permission_for_tool "sidecar" with
+  | Error Auth.Tool_unregistered -> ()
+  | Error Auth.Tool_permission_undeclared ->
+    fail "retired sidecar alias must be removed, not left without a permission"
+  | Ok permission ->
+    fail
+      ("retired sidecar alias still grants "
+       ^ Masc_domain.permission_to_string permission)
+
+let test_owner_deletes_remain_worker_actions_but_cleanup_is_admin () =
+  List.iter
+    (fun tool_name ->
+       match
+         Auth.authorize_tool_for_role ~agent_name:"owner"
+           ~role:Masc_domain.Worker ~tool_name
+       with
+       | Ok () -> ()
+       | Error e ->
+         fail
+           (Printf.sprintf "%s should remain owner-authorized: %s"
+              tool_name
+              (Masc_domain.masc_error_to_string e)))
+    [ "masc_board_delete"; "masc_board_sub_board_delete" ];
+  match
+    Auth.authorize_tool_for_role ~agent_name:"worker"
+      ~role:Masc_domain.Worker ~tool_name:"masc_board_cleanup"
+  with
+  | Ok () -> fail "bulk board cleanup must require admin permission"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
 let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   let result =
@@ -1192,20 +1392,30 @@ let () =
         `Quick test_resolve_role_rejects_agent_name_impersonation_without_token;
       test_case "resolve_role workspace secret grants admin"
         `Quick test_resolve_role_workspace_secret_grants_admin;
-      test_case "strict unknown masc tool allows worker"
-        `Quick test_authorize_unknown_masc_tool_strict_worker_allowed;
+      test_case "strict unknown masc tool denied"
+        `Quick test_authorize_unknown_masc_tool_strict_denied;
       test_case "strict unknown non-masc tool denied"
         `Quick test_authorize_unknown_non_masc_tool_strict_denied;
-      test_case "strict unknown masc prefix allows worker"
-        `Quick test_authorize_unknown_masc_prefix_strict_worker_allowed;
       test_case "strict retired dotted tool prefixes denied"
         `Quick test_authorize_retired_dotted_tool_prefixes_strict_denied;
       test_case "strict known keeper tool allows worker"
         `Quick test_authorize_known_keeper_tool_strict_worker_allowed;
       test_case "strict v2 known keeper tool allows worker"
         `Quick test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed;
-      test_case "strict v2 unknown internal tool allows worker"
-        `Quick test_authorize_tool_v2_unknown_internal_worker_allowed;
+      test_case "strict v2 unknown internal tool denied"
+        `Quick test_authorize_tool_v2_unknown_internal_denied;
+      test_case "tool permission is catalog SSOT"
+        `Quick test_required_permission_is_catalog_ssot;
+      test_case "registered tool without permission is observably denied"
+        `Quick test_registered_tool_without_permission_is_observably_denied;
+      test_case "worker reset denied and admin reset allowed"
+        `Quick test_worker_cannot_invoke_reset_but_admin_can;
+      test_case "operator mutation tools require admin"
+        `Quick test_operator_mutation_tools_require_admin;
+      test_case "sidecar route permissions are split"
+        `Quick test_sidecar_route_permissions_are_split;
+      test_case "owner deletes stay worker actions and cleanup is admin"
+        `Quick test_owner_deletes_remain_worker_actions_but_cleanup_is_admin;
       test_case "strict v2 fake keeper prefix denied"
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
       test_case "tool auth strict env cannot disable fail-closed"

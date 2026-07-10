@@ -68,4 +68,5 @@ let tool = Typed_tool_masc.create
   ~parse:parse_broadcast
   ~handler:handle_broadcast
   ~encode:encode_broadcast
+  ~required_permission:Masc_domain.CanBroadcast
   ()

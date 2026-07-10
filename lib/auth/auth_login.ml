@@ -93,10 +93,9 @@ let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
             persist_raw_token ~base_path ~agent_name bearer_token
           in
           let agent_param = url_encode agent_name in
-          let token_param = url_encode bearer_token in
           let dashboard_url =
-            Printf.sprintf "http://%s:%d/dashboard?agent=%s&token=%s"
-              host port agent_param token_param
+            Printf.sprintf "http://%s:%d/dashboard?agent=%s"
+              host port agent_param
           in
           let mcp_url = Printf.sprintf "http://%s:%d/mcp" host port in
           Ok

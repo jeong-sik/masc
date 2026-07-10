@@ -502,20 +502,20 @@ let handle_gate_connector_unbind _state request reqd =
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/gate/message" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun state _actor _req reqd ->
          handle_gate_message ~sw ~clock state request reqd
        ) request reqd)
 
   |> Http.Router.prefix_get "/api/v1/gate/message/requests/" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg_result"
-         (fun state _req reqd ->
+         (fun state _actor _req reqd ->
            Server_routes_http_keeper_stream.handle_keeper_chat_request_result
              state request reqd)
          request reqd)
 
   |> Http.Router.prefix_post "/api/v1/gate/message/requests/" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg_cancel"
-         (fun state _req reqd ->
+         (fun state _actor _req reqd ->
            Server_routes_http_keeper_stream.handle_keeper_chat_request_cancel
              state request reqd)
          request reqd)
@@ -546,22 +546,22 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/keepers" (fun request reqd ->
-        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+        with_tool_auth ~tool_name:"channel_gate" (fun state _actor _req reqd ->
          handle_gate_keepers ~sw ~clock state request reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/keeper-status" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun state _actor _req reqd ->
          handle_gate_keeper_status_by_name ~sw ~clock state request reqd
        ) request reqd)
 
   (* Generic connector routes — dispatch by ?name=<connector> *)
   |> Http.Router.post "/api/v1/gate/connector/bind" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun state _actor _req reqd ->
          handle_gate_connector_bind ~sw ~clock state request reqd
        ) request reqd)
 
   |> Http.Router.post "/api/v1/gate/connector/unbind" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun _state _req reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun _state _actor _req reqd ->
          handle_gate_connector_unbind _state request reqd
        ) request reqd)

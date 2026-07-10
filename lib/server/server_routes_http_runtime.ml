@@ -1396,9 +1396,8 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
 
 (** CORS preflight handler *)
 let options_handler request reqd =
-  let origin = get_origin request in
   let headers = Httpun.Headers.of_list (
-    ("content-length", "0") :: cors_preflight_headers origin
+    ("content-length", "0") :: public_read_cors_headers request
   ) in
   let response = Httpun.Response.create ~headers `No_content in
   Httpun.Reqd.respond_with_string reqd response ""

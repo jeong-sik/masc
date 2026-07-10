@@ -249,7 +249,19 @@ module Transport = struct
   (** gRPC server port. Default: 8936. *)
   let grpc_port = get_port ~default:8936 "MASC_GRPC_PORT"
 
-  (** Whether gRPC transport is enabled. Default: true.
+  let grpc_unary_timeout_default_sec = 30.0
+
+  (** Deadline for finite unary gRPC calls. Streaming calls intentionally do
+      not inherit this deadline. *)
+  let grpc_unary_timeout_sec () =
+    let value =
+      get_float_nonneg
+        ~default:grpc_unary_timeout_default_sec
+        "MASC_GRPC_UNARY_TIMEOUT_SEC"
+    in
+    if value > 0.0 then value else grpc_unary_timeout_default_sec
+
+  (** Whether the experimental gRPC transport is enabled. Default: false.
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let grpc_enabled () = Feature_flag_registry.get_bool "MASC_GRPC_ENABLED"
 
@@ -257,11 +269,9 @@ module Transport = struct
   let grpc_target_opt () =
     Sys.getenv_opt "MASC_GRPC_TARGET" |> trim_opt
 
-  (** WebSocket server port. Default: 8937. *)
-  let ws_port = get_port ~default:8937 "MASC_WS_PORT"
-
-  (** Whether WebSocket transport is enabled. Default: true.
-      Accessor-shaped reader; listener lifecycle is still decided at boot. *)
+  (** Whether same-origin [/ws] upgrades are enabled on the HTTP listener.
+      Default: true. Accessor-shaped reader; route admission is still decided
+      at boot. *)
   let ws_enabled () = Feature_flag_registry.get_bool "MASC_WS_ENABLED"
 
   (** Whether WebRTC transport is enabled. Default: true.

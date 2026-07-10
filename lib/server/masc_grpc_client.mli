@@ -8,7 +8,9 @@
     - [subscribe] is server-streaming (returns an event stream).
     - [heartbeat_stream] is bidirectional streaming.
 
-    Connection is established lazily on first call. Set
+    Streaming RPCs do not inherit grpc-direct's finite connection default;
+    unary RPCs use [MASC_GRPC_UNARY_TIMEOUT_SEC]. Connection is established
+    lazily on first call. Set
     [MASC_GRPC_TARGET] to override the default target
     (http://127.0.0.1:MASC_GRPC_PORT). *)
 
@@ -32,8 +34,9 @@ val create :
 (** Create a client from environment variables.
 
     Reads [MASC_GRPC_TARGET] or falls back to
-    [http://127.0.0.1:{MASC_GRPC_PORT|8936}], and uses the internal keeper
-    credential when [MASC_INTERNAL_MCP_TOKEN] is available. *)
+    [http://127.0.0.1:{MASC_GRPC_PORT|8936}]. The connection carries no
+    process-wide bearer; keeper streams put the owning keeper credential in
+    each typed request. *)
 val create_from_env :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->

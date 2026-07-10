@@ -13,7 +13,7 @@ type agent_info =
   { name : string
   ; status : string
   ; capabilities : string list
-  ; last_heartbeat_ms : int64
+  ; last_seen_ms : int64
   ; session_bound_at_ms : int64
   ; current_task_id : string
   }
@@ -47,7 +47,6 @@ module HeartbeatAck : sig
     { timestamp_ms : int64
     ; active_agent_count : int
     ; pending_task_count : int
-    ; directives : string list
     }
 
   val of_bytes : string -> t
@@ -142,6 +141,14 @@ end
 
 (** {1 Status} *)
 
+module StatusRequest : sig
+  type t = { auth_token : string }
+
+  val of_bytes_result : string -> (t, string) result
+  val of_bytes : string -> t
+  val to_bytes : t -> string
+end
+
 module StatusResponse : sig
   type t =
     { agents : agent_info list
@@ -150,32 +157,6 @@ module StatusResponse : sig
     ; workspace_path : string
     }
 
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end
-
-(** {1 LSP Proxy} *)
-
-module LspRequest : sig
-  type t =
-    { language_id : string
-    ; jsonrpc_request_json : string
-    ; workspace_root : string option
-    ; auth_token : string
-    }
-
-  val of_bytes_result : string -> (t, string) result
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end
-
-module LspResponse : sig
-  type t =
-    { jsonrpc_response_json : string
-    ; error_message : string
-    }
-
-  val of_bytes_result : string -> (t, string) result
   val of_bytes : string -> t
   val to_bytes : t -> string
 end

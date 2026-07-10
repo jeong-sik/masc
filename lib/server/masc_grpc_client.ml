@@ -20,7 +20,9 @@ let normalize_token token =
   | Some _ | None -> None
 
 let create ?auth_token ~sw ~env target =
-  let config = Grpc_eio.Client.default_config ~target in
+  let config =
+    { (Grpc_eio.Client.default_config ~target) with timeout = None }
+  in
   let client = Grpc_eio.Client.connect ~config ~sw ~env target in
   { client; auth_token = normalize_token auth_token }
 
@@ -32,8 +34,7 @@ let create_from_env ~sw ~env =
       let port = Masc_grpc_server.configured_port () in
       Printf.sprintf "http://%s:%d" Masc_network_defaults.masc_http_default_host port
   in
-  let auth_token = Sys.getenv_opt Auth.internal_keeper_token_env_key in
-  create ?auth_token ~sw ~env target
+  create ~sw ~env target
 
 let close t =
   Grpc_eio.Client.close t.client
@@ -46,6 +47,7 @@ let wire_auth_token t = Option.value ~default:"" t.auth_token
 let call_unary_safe t ~sw ~env ~method_ ~request ~decode =
   match
     Grpc_eio.Client.call_unary ~sw ~env t.client
+      ~deadline:(Env_config.Transport.grpc_unary_timeout_sec ())
       ~service ~method_ ~request
   with
   | Ok bytes -> (
@@ -60,8 +62,9 @@ let call_unary_safe t ~sw ~env ~method_ ~request ~decode =
 (** {1 Unary RPCs} *)
 
 let get_status t ~sw ~env =
-  (* StatusRequest is an empty protobuf message: 0 bytes on the wire. *)
-  let request = "" in
+  let request =
+    T.StatusRequest.to_bytes { auth_token = wire_auth_token t }
+  in
   call_unary_safe t ~sw ~env ~method_:"GetStatus" ~request
     ~decode:T.StatusResponse.of_bytes
 
@@ -230,11 +233,6 @@ let heartbeat_stream t ~sw ~env =
       ~service ~method_:"Heartbeat" ~requests:raw_requests
   in
   let send (ping : T.HeartbeatPing.t) =
-    let ping =
-      match t.auth_token with
-      | Some auth_token -> { ping with auth_token }
-      | None -> ping
-    in
     Grpc_eio.Stream.add request_stream (T.HeartbeatPing.to_bytes ping)
   in
   let recv () =

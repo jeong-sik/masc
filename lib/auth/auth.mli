@@ -292,6 +292,17 @@ val check_permission :
 
 val is_tool_auth_strict_enabled : unit -> bool
 
+type tool_permission_error =
+  | Tool_unregistered
+  | Tool_permission_undeclared
+
+val required_permission_for_tool :
+  string -> (permission, tool_permission_error) result
+(** Resolve the permission declared by registered ToolCatalog metadata.
+    Surface membership and internal-looking string prefixes never grant
+    admission. Missing registration and missing policy remain distinct,
+    fail-closed states. *)
+
 val authorize_tool :
   string -> agent_name:string -> token:string option ->
   tool_name:string -> (unit, masc_error) result

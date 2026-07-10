@@ -99,7 +99,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     transport: 'WebSocket',
     endpoint: () => '/ws',
     description: '양방향 소켓. operator UI 제어용.',
-    live: (data) => `${data.websocket.listening ? 'live' : 'down'} · ${data.websocket.sessions} sessions · port ${data.websocket.port}`,
+    live: (data) => `${data.websocket.listening ? 'live' : 'down'} · ${data.websocket.sessions} sessions · ${data.websocket.endpoint}`,
   },
   {
     id: 'p2p-fastlane',
@@ -505,7 +505,13 @@ export function TransportHealthPanel() {
               </div>
             <//>
 
-            <${SectionCard} label="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
+            <${SectionCard}
+              label="WebSocket"
+              status=${wsStatus}
+              eyebrow=${data.websocket.configured
+                ? `${data.websocket.endpoint} ${data.websocket.listen_status}`
+                : '비활성'}
+            >
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="리스너" value=${data.websocket.listening ? 'live' : 'down'} />
                 <${MetricRow} label="세션" value=${data.websocket.sessions} />

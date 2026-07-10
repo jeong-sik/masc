@@ -612,7 +612,7 @@ let test_post_annotations_rejects_missing_scope () =
       (error_code_of_response response))
 ;;
 
-let test_cursor_stream_accepts_query_token_under_strict_auth () =
+let test_cursor_stream_rejects_query_token_under_strict_auth () =
   with_env "MASC_HTTP_BASE_URL" (Some "https://masc.example.test") (fun () ->
     with_ide_server (fun ~base_path ~state:_ ~router ->
       let token = create_worker_token base_path "alice" in
@@ -623,7 +623,29 @@ let test_cursor_stream_accepts_query_token_under_strict_auth () =
       in
       let request = http_request ~meth:`GET ~path () in
       let response = dispatch router request in
-      check_status "GET cursor stream with query token succeeds" 200 response))
+      check_status "GET cursor stream with query token is unauthorized" 401 response))
+;;
+
+let test_cursor_stream_requires_stored_credential () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request
+        ~meth:`GET
+        ~path:(scoped_ide_path "/api/v1/ide/cursors/stream")
+        ()
+    in
+    let response = dispatch router request in
+    check_status "GET cursor stream without credential is unauthorized" 401 response)
+;;
+
+let test_cursor_stream_accepts_header_token_under_strict_auth () =
+  with_env "MASC_HTTP_BASE_URL" (Some "https://masc.example.test") (fun () ->
+    with_ide_server (fun ~base_path ~state:_ ~router ->
+      let token = create_worker_token base_path "alice" in
+      let path = scoped_ide_path "/api/v1/ide/cursors/stream" in
+      let request = http_request ~meth:`GET ~path ~token:(Some token) () in
+      let response = dispatch router request in
+      check_status "GET cursor stream with Authorization header succeeds" 200 response))
 ;;
 
 let test_memory_response_declares_annotation_source_contract () =
@@ -946,9 +968,17 @@ let () =
             `Quick
             test_post_annotations_rejects_missing_scope
         ; test_case
-            "GET cursor stream accepts query token under strict auth"
+            "GET cursor stream rejects query token under strict auth"
             `Quick
-            test_cursor_stream_accepts_query_token_under_strict_auth
+            test_cursor_stream_rejects_query_token_under_strict_auth
+        ; test_case
+            "GET cursor stream requires stored credential"
+            `Quick
+            test_cursor_stream_requires_stored_credential
+        ; test_case
+            "GET cursor stream accepts header token under strict auth"
+            `Quick
+            test_cursor_stream_accepts_header_token_under_strict_auth
         ; test_case
             "GET memory declares annotation source contract"
             `Quick

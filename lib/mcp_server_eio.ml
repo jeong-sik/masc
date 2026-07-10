@@ -94,6 +94,20 @@ let () =
      Safe to call multiple times; existing registrations are preserved. *)
   Unified_tool_registry.register_all ();
   Unified_tool_registry.enforce_visible_tag_coverage ();
+  let auth_surface_names =
+    List.map fst Tool_catalog.explicit_metadata
+    @ Tool_catalog.public_mcp_tools
+    @ Tool_catalog_surfaces.system_internal_hidden
+    @ Tool_spec.all_registered_names ()
+  in
+  let coverage = Tool_catalog.permission_coverage ~names:auth_surface_names in
+  if coverage.unregistered <> [] || coverage.permission_undeclared <> []
+  then
+    failwith
+      (Printf.sprintf
+         "Tool authorization catalog incomplete: unregistered=[%s] permission_undeclared=[%s]"
+         (String.concat "," coverage.unregistered)
+         (String.concat "," coverage.permission_undeclared));
   mark_tag_registry_initialized ();
   (* Inject masc_* schemas into keeper bridge for surface/policy filtering.
      Uses Config.raw_all_tool_schemas, including domain-adapter schemas not

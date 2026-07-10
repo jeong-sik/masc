@@ -1,16 +1,17 @@
 ---
-status: rfc
-last_verified: 2026-04-25
+status: superseded
+last_verified: 2026-07-10
 code_refs:
   - lib/sse.ml
   - lib/server/server_mcp_transport_ws.ml
-  - lib/server/server_ws_standalone.ml
   - lib/server/masc_grpc_service.ml
 ---
 
 # WS Slice-Indexed Fan-Out (RFC)
 
-> Status: RFC — proposal only, no code
+> Status: Superseded — the standalone listener was retired; reassess fan-out
+> indexing against the current authenticated same-origin `/ws` path before
+> reviving this proposal.
 > Date: 2026-04-25
 > Depends on: `ws-migration-perf-series.md` (#10110)
 > Successor to: deferred decision in the migration perf series

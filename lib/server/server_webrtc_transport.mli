@@ -94,11 +94,12 @@ val configured_ice_server_urls : unit -> string list
 (** {1 Signaling exchange} *)
 
 val create_offer :
-  from_agent:string ->
+  admission:Server_transport_admission.admission ->
   ice_candidates:string list ->
   dtls_fingerprint:string ->
   string
-(** Registers a new offer and returns its synthetic
+(** Registers a new offer under the token-bound admission and returns its
+    unguessable
     [offer_id].  [ice_candidates] / [dtls_fingerprint]
     are stored verbatim for the answerer to consume. *)
 
@@ -109,7 +110,7 @@ val get_offer : string -> pending_offer option
 
 val accept_offer :
   offer_id:string ->
-  answerer_agent:string ->
+  admission:Server_transport_admission.admission ->
   (peer_conn, string) result
 (** Completes the signaling exchange: drops the offer
     from the pending registry, materializes the
@@ -118,13 +119,19 @@ val accept_offer :
     table.  [Error msg] when the offer is unknown or
     already accepted. *)
 
-val handle_offer_request : string -> (string, string) result
+val handle_offer_request :
+  admission:Server_transport_admission.admission ->
+  string ->
+  (string, string) result
 (** HTTP handler for [POST /webrtc/offer] — parses the
     JSON body and returns a JSON response with the
     [offer_id] / [status:pending] envelope, or
     [Error msg] on malformed input. *)
 
-val handle_answer_request : string -> (string, string) result
+val handle_answer_request :
+  admission:Server_transport_admission.admission ->
+  string ->
+  (string, string) result
 (** HTTP handler for [POST /webrtc/answer] — accepts an
     existing offer and returns the server's ICE
     credentials so the client can complete the handshake. *)
@@ -161,6 +168,9 @@ val send_to_peer : string -> string -> (int, string) result
 
 val pending_offer_count : unit -> int
 val active_peer_count : unit -> int
+val admitted_remote_agent : string -> string option
+(** Credential owner retained for inbound DataChannel authorization. This must
+    match {!peer_conn.remote_agent}, never the answerer's signaling identity. *)
 val live_webrtc_count : unit -> int
 val connected_channel_count : unit -> int
 
@@ -182,7 +192,7 @@ val cleanup_stale_peers : ?max_idle_s:float -> unit -> int
 (** {1 Callback registration} *)
 
 val set_message_handler :
-  (string -> string -> unit) -> unit
+  (Server_transport_admission.admission -> string -> string -> unit) -> unit
 (** Installs the callback invoked on every inbound
     DataChannel message — [(peer_id, payload)].  Set
     once at server bootstrap. *)

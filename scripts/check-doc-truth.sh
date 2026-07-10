@@ -134,7 +134,7 @@ require_contains docs/spec/01-system-overview.md 'Retired team-session / command
 
 require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
 require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
-require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 1'
+require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 0'
 require_not_contains docs/spec/09-server-transport.md '| `server_command_plane_http.ml` |'
 require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed'
 require_not_contains docs/spec/09-server-transport.md '| Workspace | `/api/v1/workspace/*`'

@@ -755,7 +755,15 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   let initial_backend_mode = "filesystem" in
-  Transport_metrics.set_ws_same_origin_runtime_ready false;
+  Transport_metrics.set_ws_upgrade_state
+    (if not (Transport_metrics.ws_enabled ())
+     then Transport_metrics.Disabled
+     else
+       match http_mode with
+       | `H2_only -> Transport_metrics.H2_only_unsupported
+       | `H1_only | `Auto -> Transport_metrics.Initializing);
+  Eio.Switch.on_release sw (fun () ->
+    Transport_metrics.set_ws_upgrade_state Transport_metrics.Stopped);
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
 
@@ -1073,7 +1081,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (* Start auxiliary transports before optional warmups and keeper loops.
          Otherwise HTTP can report ready while gRPC/WS startup is still stuck
          behind heavier startup work. *)
-      (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
+      (* Experimental gRPC workspace transport (explicit opt-in). *)
       let tool_dispatcher ~identity ~auth_token ~tool_name ~arguments =
         let arguments =
           Server_mcp_actor_injection.canonicalize_tool_arguments
@@ -1242,21 +1250,26 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       Server_mcp_transport_ws.set_inbound_message_handler
         dispatch_ws_inbound_message;
-      Transport_metrics.set_ws_same_origin_runtime_ready true;
-      (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
-      Server_ws_standalone.start ~sw ~env
-        ~on_message:(fun session_id body ->
-          Server_mcp_transport_ws.dispatch_inbound_message session_id body);
+      Transport_metrics.set_ws_upgrade_state
+        (if not (Transport_metrics.ws_enabled ())
+         then Transport_metrics.Disabled
+         else
+           match http_mode with
+           | `H2_only -> Transport_metrics.H2_only_unsupported
+           | `H1_only | `Auto -> Transport_metrics.Ready);
       (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
       if Server_webrtc_transport.is_enabled () then (
         Log.Server.info "WebRTC DataChannel transport enabled";
         Server_webrtc_transport.set_message_handler
-          (fun peer_id body_str ->
+          (fun admission peer_id body_str ->
             Eio.Fiber.fork ~sw (fun () ->
               try
                 let response_json =
                   Mcp_eio.handle_request ~clock ~sw
-                    ~mcp_session_id:peer_id state body_str
+                    ~mcp_session_id:peer_id
+                    ~auth_token:admission.Server_transport_admission.auth_token
+                    state
+                    body_str
                 in
                 let response_str = Yojson.Safe.to_string response_json in
                 if response_str <> "null" then begin
@@ -1292,10 +1305,15 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Transport_bridge.register_provider (module struct
         let name = "ws"
         let protocol = Transport.Ws
-        let is_enabled () = Server_ws_standalone.is_enabled ()
+        let is_enabled () = Transport_metrics.ws_same_origin_ready ()
         let session_count () = Server_mcp_transport_ws.session_count ()
         let status_json () = `Assoc [
-          "port", `Int (Server_ws_standalone.configured_port ());
+          "mode", `String "same_origin";
+          "endpoint", `String "/ws";
+          "port", `Int config.port;
+          "upgrade_state", `String
+            (Transport_metrics.ws_upgrade_state_to_string
+               (Transport_metrics.get_ws_upgrade_state ()));
           "sessions", `Int (Server_mcp_transport_ws.session_count ());
         ]
         let reap_stale () = 0  (* WS sessions self-clean on disconnect *)

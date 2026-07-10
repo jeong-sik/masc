@@ -1,7 +1,7 @@
 (** MASC gRPC Server.
 
     Runs the gRPC workspace service on a configurable port.
-    Enabled by default; disable with MASC_GRPC_ENABLED=0. *)
+    Experimental and disabled by default; enable with MASC_GRPC_ENABLED=1. *)
 
 (** Default gRPC port (8936). *)
 val default_port : int
@@ -12,13 +12,8 @@ val health_service_name : string
 (** Read the configured gRPC port from MASC_GRPC_PORT env or use default. *)
 val configured_port : unit -> int
 
-(** Whether gRPC transport is enabled (default-on, opt-out via env). *)
+(** Whether gRPC transport is explicitly enabled (default: false). *)
 val is_enabled : unit -> bool
-
-module For_testing : sig
-  val parse_lsp_jsonrpc_request :
-    string -> ((string * Yojson.Safe.t), string) result
-end
 
 (** Build a gRPC server preloaded with reflection, health, and workspace
     services. Exposed for tests and local transport wiring checks. *)
@@ -29,10 +24,6 @@ val create_server :
                    auth_token:string ->
                    tool_name:string ->
                    arguments:Yojson.Safe.t ->
-                   (string, string) result) ->
-  lsp_dispatcher:(language_id:string ->
-                   jsonrpc_request_json:string ->
-                   workspace_root:string option ->
                    (string, string) result) ->
   Grpc_eio.Server.t
 

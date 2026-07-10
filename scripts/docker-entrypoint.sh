@@ -52,8 +52,10 @@ fi
 # loopback bind — a deliberate boundary so an admin token never auto-exposes on
 # a public bind. Consequences:
 #   - Bridge (default): the dashboard shell serves, but its live data needs an
-#     admin token (open /dashboard?token=<token>). For the zero-auth dashboard,
-#     use the native quickstart (./quickstart.sh), which binds loopback.
+#     admin token. Open /dashboard and paste the token into the dashboard auth
+#     control; authenticated requests send it only in the Authorization header.
+#     For the zero-auth dashboard, use the native quickstart (./quickstart.sh),
+#     which binds loopback.
 #   - Linux host networking: `--network host` + MASC_BIND_HOST=127.0.0.1 makes the
 #     container loopback the host loopback, enabling the zero-auth dashboard.
 #     Docker Desktop (macOS/Windows) does not route host networking to the host

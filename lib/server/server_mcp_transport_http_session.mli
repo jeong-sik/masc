@@ -23,8 +23,8 @@ val is_valid_protocol_version : string -> bool
 
 (** {1 Per-session state}
 
-    Two atomic [SMap.t] registries keyed by session id store
-    per-session protocol version and tool profile.  All
+    Atomic [SMap.t] registries keyed by session id store
+    per-session protocol version, tool profile, and owner identity.  All
     accessors below are thread-safe via internal CAS loops. *)
 
 val remember_protocol_version :
@@ -45,6 +45,38 @@ val remember_protocol_version_if_initialize_succeeded :
     ~request_body ~response_json] records initialize protocol/session
     activity only when [response_json] is a successful JSON-RPC response.
     Rejected initialize requests must not start session-duration state. *)
+
+val validate_mcp_session_owner_for_request :
+  session_id:string ->
+  requester:Server_transport_admission.identity ->
+  (unit, string) result
+(** [validate_mcp_session_owner_for_request ~session_id ~requester] admits a
+    fresh, not-yet-initialized session or a known session owned by [requester].
+    A known legacy session without owner metadata and a session owned by a
+    different credential both fail closed. *)
+
+val bind_mcp_session_owner_if_initialize_succeeded :
+  string ->
+  requester:Server_transport_admission.identity ->
+  request_body:string ->
+  response_json:Yojson.Safe.t ->
+  (unit, string) result
+(** Atomically binds the credential owner to [session_id] only when the request
+    is a successful [initialize]. Repeating the bind for the same owner is
+    idempotent; a competing owner is rejected without overwriting the original
+    immutable binding. *)
+
+val authorize_mcp_session_delete :
+  session_id:string ->
+  requester:Server_transport_admission.identity ->
+  (unit, string) result
+(** Allows DELETE only to the bound credential owner or an explicit [Admin]
+    identity. Ownerless legacy sessions therefore require Admin cleanup. *)
+
+val mcp_session_owner :
+  string -> Server_transport_admission.identity option
+(** Returns the immutable credential owner currently bound to [session_id].
+    Exposed for focused persistence and authorization tests. *)
 
 val is_known_session : string -> bool
 (** RFC-0100 PR-3 — Q3 default. [true] iff the server has previously
@@ -70,8 +102,8 @@ val remember_mcp_profile :
     ids do not start session-duration state. *)
 
 val forget_mcp_session : string -> unit
-(** Removes both the protocol-version and tool-profile entries
-    for [session_id]. *)
+(** Removes protocol-version, tool-profile, credential-owner, and telemetry
+    entries for [session_id]. *)
 
 (** {1 Grace period}
 
@@ -85,32 +117,34 @@ val grace_period_seconds : float
 
 (** {1 File persistence}
 
-    Session state (protocol version, profile, last-active timestamp)
+    Session state (protocol version, profile, credential owner, last-active timestamp)
     is persisted to [\<base_path\>/.masc/mcp_transport_sessions.json].
     On restart, [load_sessions_from_file] restores the state so the
     grace period applies to recently-active sessions. *)
 
-val sessions_file_path : unit -> string
-(** Returns the path to the persistence file.  Exposed for testing. *)
+val sessions_file_path : base_path:string -> string
+(** Returns the persistence path under the explicitly selected workspace
+    [base_path]. Exposed for testing. *)
 
-val save_sessions_to_file : unit -> unit
+val save_sessions_to_file : base_path:string -> unit -> unit
 (** Serialize current session state and write atomically to disk.
     Called automatically by [reap_stale_sessions] after each cleanup.
-    Safe to call at any time — uses write-then-rename. *)
+    Safe to call at any time — uses write-then-rename. The caller must pass the
+    live server workspace base path; persistence never derives it from cwd. *)
 
-val load_sessions_from_file : unit -> unit
+val load_sessions_from_file : base_path:string -> unit -> unit
 (** Load session state from disk into the in-memory registries.
     Call once during server startup, before the MCP handler accepts
-    requests.  Errors (missing file, corrupt JSON) are silently
-    ignored — the server starts clean. *)
+    requests. A missing file is an empty initial state; malformed or unreadable
+    state raises so the bootstrap boundary can report the failure explicitly. *)
 
 val profile_label : Server_mcp_transport_http_types.tool_profile -> string
 (** Stable label for the MCP HTTP surface a session belongs to.
     Used in profile-mismatch errors and termination logs. *)
 
 val reap_stale_sessions :
-  is_active_session:(string -> bool) -> int
-(** [reap_stale_sessions ~is_active_session] removes session
+  base_path:string -> is_active_session:(string -> bool) -> int
+(** [reap_stale_sessions ~base_path ~is_active_session] removes session
     entries whose [session_id] returns [false] from
     [is_active_session].  Returns the number of reaped entries.
 

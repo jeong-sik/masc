@@ -1,8 +1,8 @@
 (** gRPC heartbeat adapter between the keeper domain and the server
-    transport. Runs the gRPC bidi stream, dispatches incoming
-    [HeartbeatAck] directives into the keeper FSM, and exposes a
-    setter so the server bootstrap can install the gRPC client once
-    the transport is up. *)
+    transport. Runs the credential-bound bidi liveness stream and exposes a
+    setter so the server bootstrap can install the gRPC client once the
+    transport is up. Control-plane directives intentionally do not travel on
+    this telemetry channel. *)
 
 val set_grpc_client
   : ?env:Eio_unix.Stdenv.base

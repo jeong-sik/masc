@@ -20,7 +20,7 @@ import { scheduleSessionTraceReload } from './components/session-trace/session-t
 import { recordSseCompaction } from './components/keeper-workspace/compaction-snapshots'
 import { appendAuditEntry } from './live-store'
 import { isCrashedPhase } from './lib/keeper-predicates'
-import { dashboardBearerToken } from './api/core'
+import { authHeaders, subscribeStoredTokenChanges } from './api/core'
 import { parseSSEMessage } from './schemas/sse'
 import {
   parseOasPayload,
@@ -233,6 +233,8 @@ function parseOasPayloadOrWarn(
 
 let transport: Transport | null = null
 let unsubscribe: (() => void) | null = null
+let unsubscribeTokenChanges: (() => void) | null = null
+let activeAuthorization: string | null = null
 let wasDisconnected = false
 let pauseOasRuntimeIngress = false
 let queuedOasEvents: SSEEvent[] = []
@@ -255,12 +257,7 @@ export function buildDashboardSseUrl(sessionId: string, locationSearch = window.
   const urlParams = new URLSearchParams(locationSearch)
   const sseParams = new URLSearchParams()
   const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
-  // Token from sessionStorage (moved from URL on init) — EventSource does not
-  // support custom headers, so query param is the only option.  The token is
-  // no longer visible in the browser address bar or shareable links.
-  const token = dashboardBearerToken()
   if (agent) sseParams.set('agent', agent)
-  if (token) sseParams.set('token', token)
   sseParams.set('session_id', sessionId)
   sseParams.set('sse_kind', 'observer')
   return `/mcp?${sseParams.toString()}`
@@ -339,14 +336,27 @@ export function flushPendingSseEvents(): void {
   flushPending()
 }
 
-export function connectSSE(): void {
-  disconnectSSE()
+function closeSseTransport(): void {
+  unsubscribe?.()
+  unsubscribe = null
+  transport?.disconnect()
+  transport = null
+  connected.value = false
+}
 
+function openSseTransport(): void {
+  closeSseTransport()
+  wasDisconnected = false
+  pauseOasRuntimeIngress = false
+  queuedOasEvents = []
   const sseUrl = buildDashboardSseUrl(getOrCreateSessionId())
+  const headers = authHeaders({ includeActor: false })
+  activeAuthorization = headers.Authorization ?? null
   console.debug('[SSE] connecting', sseUrl)
   transport = createSseTransport(sseUrl, {
     retryBaseMs: RECONNECT_BASE_MS,
     retryMaxMs: RECONNECT_MAX_MS,
+    headers,
   })
 
   unsubscribe = transport.subscribe((event) => {
@@ -387,6 +397,18 @@ export function connectSSE(): void {
   })
 
   transport.connect()
+}
+
+export function connectSSE(): void {
+  if (unsubscribeTokenChanges === null) {
+    unsubscribeTokenChanges = subscribeStoredTokenChanges(() => {
+      if (transport === null) return
+      const nextAuthorization = authHeaders({ includeActor: false }).Authorization ?? null
+      if (nextAuthorization === activeAuthorization) return
+      openSseTransport()
+    })
+  }
+  openSseTransport()
 }
 
 function handleEvent(event: SSEEvent): void {
@@ -1179,13 +1201,13 @@ function handleEvent(event: SSEEvent): void {
 }
 
 export function disconnectSSE(): void {
-  unsubscribe?.()
-  unsubscribe = null
-  transport?.disconnect()
-  transport = null
+  unsubscribeTokenChanges?.()
+  unsubscribeTokenChanges = null
+  activeAuthorization = null
+  closeSseTransport()
+  wasDisconnected = false
   pauseOasRuntimeIngress = false
   queuedOasEvents = []
-  connected.value = false
 }
 
 // Re-export as readable signal for components

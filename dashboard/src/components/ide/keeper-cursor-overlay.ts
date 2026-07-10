@@ -5,7 +5,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { dashboardBearerToken } from '../../api/core'
+import { authHeaders, subscribeStoredTokenChanges } from '../../api/core'
 import { appendIdeScopeParams, type IdeScope, type IdeScopeOptions } from '../../api/ide'
 import { createSseTransport } from '../../transports/sse-transport'
 
@@ -429,51 +429,89 @@ export function connectKeeperCursorStream(
   options: KeeperCursorStreamOptions = {},
 ): () => void {
   let failedCount = 0
-  options.onStatus?.({ status: 'connecting', failedCount })
-  if (typeof EventSource === 'undefined') {
-    failedCount = 1
-    options.onStatus?.({
-      status: 'degraded',
-      failedCount,
-      lastErrorMs: Date.now(),
-      error: 'EventSource unavailable',
-    })
-    return () => {
-      options.onStatus?.({ status: 'closed', failedCount })
-    }
+  let disposed = false
+  let activeAuthorization: string | null = null
+  let transport: ReturnType<typeof createSseTransport> | null = null
+  let unsubscribeTransport: (() => void) | null = null
+
+  const stopTransport = () => {
+    const currentTransport = transport
+    const currentUnsubscribe = unsubscribeTransport
+    transport = null
+    unsubscribeTransport = null
+    currentUnsubscribe?.()
+    currentTransport?.disconnect()
   }
 
-  const transport = createSseTransport(buildKeeperCursorStreamUrl(baseUrl, options))
-  const unsubscribe = transport.subscribe((event) => {
-    if (event.type === 'open') {
-      failedCount = 0
-      options.onStatus?.({ status: 'live', failedCount, lastOpenMs: Date.now() })
-      return
-    }
-    if (event.type === 'message') {
-      onUpdate(normalizeKeeperCursorSnapshot(event.data))
-      return
-    }
-    if (event.type === 'error') {
+  const startTransport = () => {
+    if (disposed) return
+    const headers = authHeaders({ includeActor: false })
+    activeAuthorization = headers.Authorization ?? null
+    const authenticatedFetch = typeof headers.Authorization === 'string'
+    options.onStatus?.({ status: 'connecting', failedCount })
+    if (
+      (authenticatedFetch && typeof fetch === 'undefined')
+      || (!authenticatedFetch && typeof EventSource === 'undefined')
+    ) {
       failedCount += 1
       options.onStatus?.({
         status: 'degraded',
         failedCount,
         lastErrorMs: Date.now(),
-        error: event.error.message,
+        error: authenticatedFetch ? 'Authenticated fetch unavailable' : 'EventSource unavailable',
       })
-      console.error('Keeper cursor stream error:', event.error)
       return
     }
-    if (event.type === 'close') {
-      options.onStatus?.({ status: 'closed', failedCount })
-    }
+    const nextTransport = createSseTransport(
+      buildKeeperCursorStreamUrl(baseUrl, options),
+      { headers },
+    )
+    transport = nextTransport
+    unsubscribeTransport = nextTransport.subscribe((event) => {
+      if (disposed || transport !== nextTransport) return
+      if (event.type === 'open') {
+        failedCount = 0
+        options.onStatus?.({ status: 'live', failedCount, lastOpenMs: Date.now() })
+        return
+      }
+      if (event.type === 'message') {
+        onUpdate(normalizeKeeperCursorSnapshot(event.data))
+        return
+      }
+      if (event.type === 'error') {
+        failedCount += 1
+        options.onStatus?.({
+          status: 'degraded',
+          failedCount,
+          lastErrorMs: Date.now(),
+          error: event.error.message,
+        })
+        console.error('Keeper cursor stream error:', event.error)
+        return
+      }
+      if (event.type === 'close') {
+        options.onStatus?.({ status: 'closed', failedCount })
+      }
+    })
+    nextTransport.connect()
+  }
+
+  const unsubscribeTokenChanges = subscribeStoredTokenChanges(() => {
+    if (disposed) return
+    const nextAuthorization = authHeaders({ includeActor: false }).Authorization ?? null
+    if (nextAuthorization === activeAuthorization) return
+    stopTransport()
+    startTransport()
   })
-  transport.connect()
+
+  startTransport()
 
   return () => {
-    transport.disconnect()
-    unsubscribe()
+    if (disposed) return
+    disposed = true
+    unsubscribeTokenChanges()
+    stopTransport()
+    options.onStatus?.({ status: 'closed', failedCount })
   }
 }
 
@@ -484,13 +522,11 @@ export function buildKeeperCursorStreamUrl(
   const base = baseUrl.trim().replace(/\/+$/, '')
   const endpoint = `${base}/api/v1/ide/cursors/stream`
   const params = new URLSearchParams()
-  const token = dashboardBearerToken()
   if (typeof scopeOptions === 'string' || scopeOptions === null) {
     appendIdeScopeParams(params, { repoId: scopeOptions })
   } else {
     appendIdeScopeParams(params, scopeOptions)
   }
-  if (token) params.set('token', token)
   const query = params.toString()
   return query ? `${endpoint}?${query}` : endpoint
 }

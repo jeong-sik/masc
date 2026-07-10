@@ -744,7 +744,6 @@ let get_bindings ~host ~port : binding list =
             options =
               [ ("mode", "same_origin_upgrade")
               ; ("discovery_path", "/ws")
-              ; ("standalone_port", string_of_int Env_config.Transport.ws_port)
               ];
           };
         ]

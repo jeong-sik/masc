@@ -282,7 +282,6 @@ end
 (** {1 gRPC heartbeat reconnect} *)
 
 module KeeperGrpc : sig
-  val max_reconnect_attempts : int
   val reconnect_backoff_sec : float
 end
 

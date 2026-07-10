@@ -1,9 +1,9 @@
 ---
 rfc: "0281"
 title: "WebSocket transport SSOT — separate upgrade-attachment from session-protocol, drive the connection"
-status: Draft
+status: Superseded
 created: 2026-06-22
-updated: 2026-06-22
+updated: 2026-07-10
 author: vincent
 supersedes: []
 superseded_by: null
@@ -13,7 +13,10 @@ implementation_prs: []
 
 # RFC-0281: WebSocket transport SSOT
 
-Status: Draft
+Status: Superseded. The connection-driving diagnosis led to the current
+same-origin `/ws` path, but the standalone `:8937` listener and `MASC_WS_PORT`
+topology described below were subsequently removed. Current runtime truth is
+owned by `docs/spec/09-server-transport.md`.
 Author: jeong-sik (vincent), with Claude Opus 4.8
 Date: 2026-06-22
 Scope: WebSocket transport surface — the HTTP-upgrade path (`GET /ws`, `GET /api/v1/ide/lsp`) and the standalone listener (`MASC_WS_PORT`, default 8937). Establishes a single connection-driving SSOT and a single MCP session-protocol SSOT.

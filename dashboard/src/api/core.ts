@@ -15,8 +15,9 @@ import {
 } from '../lib/dashboard-session-actor'
 
 // --- Auth ---
-// Token is read from ?token= on first load, moved to sessionStorage,
-// then stripped from the URL to avoid exposure in history/logs.
+// Bearer credentials are never accepted from the URL. Strip a rejected legacy
+// token parameter from the current history entry so it cannot propagate through
+// later navigation or referrers; authentication remains header-only.
 
 function getQueryParams(): URLSearchParams {
   return new URLSearchParams(window.location.search)
@@ -25,9 +26,9 @@ function getQueryParams(): URLSearchParams {
 const TOKEN_STORAGE_KEY = 'masc_bearer_token'
 const TOKEN_META_STORAGE_KEY = 'masc_bearer_token_meta'
 
-type StoredTokenSource = 'dev' | 'manual' | 'url'
+type StoredTokenSource = 'dev' | 'manual'
 
-const STORED_TOKEN_SOURCES = ['dev', 'manual', 'url'] as const
+const STORED_TOKEN_SOURCES = ['dev', 'manual'] as const
 
 const DEFAULT_STORED_TOKEN_SOURCE: StoredTokenSource = 'manual'
 
@@ -90,19 +91,16 @@ function storedTokenMetaEquals(
     && (left.scope ?? null) === (right.scope ?? null)
 }
 
-function initTokenFromUrl(): void {
+function stripRejectedTokenQueryParam(): void {
   const params = new URLSearchParams(window.location.search)
-  const urlToken = params.get('token')
-  if (urlToken) {
-    setStoredToken(urlToken, { source: 'url' })
-    params.delete('token')
-    const cleaned = params.toString()
-    const newUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '') + window.location.hash
-    history.replaceState(null, '', newUrl)
-  }
+  if (!params.has('token')) return
+  params.delete('token')
+  const cleaned = params.toString()
+  const newUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '') + window.location.hash
+  history.replaceState(null, '', newUrl)
 }
 
-initTokenFromUrl()
+stripRejectedTokenQueryParam()
 
 export function getStoredToken(): string | null {
   try {
@@ -117,21 +115,26 @@ export function dashboardBearerToken(): string | null {
   return getStoredToken()
 }
 
-/** Attach the dashboard bearer to a WebSocket URL.
- *
- * Browser WebSocket constructors cannot set an Authorization header. The
- * server accepts this query credential only on its two WebSocket routes; the
- * URL is never written to browser history. */
-export function websocketUrlWithDashboardBearer(rawUrl: string): string {
+/** Build the WebSocket subprotocol list without putting the bearer in a URL.
+ * The token is hex-encoded into a dedicated protocol member and is emitted
+ * only for the current origin; the server echoes only the application
+ * protocol, never the credential member. */
+export function websocketProtocolsWithDashboardBearer(
+  rawUrl: string,
+  applicationProtocol: string,
+): string[] {
   const token = dashboardBearerToken()
-  if (!token) return rawUrl
-  if (typeof window === 'undefined') return rawUrl
+  if (!token) return [applicationProtocol]
+  if (typeof window === 'undefined') return [applicationProtocol]
   const base = window.location.href
   const url = new URL(rawUrl, base)
   const websocketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  if (url.protocol !== websocketProtocol || url.host !== window.location.host) return rawUrl
-  url.searchParams.set('token', token)
-  return url.toString()
+  if (url.protocol !== websocketProtocol || url.host !== window.location.host) {
+    return [applicationProtocol]
+  }
+  const bytes = new TextEncoder().encode(token)
+  const tokenHex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return [applicationProtocol, `masc.bearer.hex.${tokenHex}`]
 }
 
 export function getStoredTokenMeta(): StoredTokenMeta | null {

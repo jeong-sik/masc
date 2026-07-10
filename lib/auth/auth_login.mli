@@ -9,7 +9,8 @@
        no-expiry variant when [~token_lifetime] is [`Long_lived]).
     4. Persists the raw token to a per-agent file under
        [<base_path>/.masc/auth/<agent_name>.token].
-    5. Renders dashboard / MCP URLs using URL-encoded query params.
+    5. Renders a dashboard URL carrying only the non-secret agent hint and an
+       MCP endpoint URL carrying no credentials.
     6. Returns a {!t} record carrying every field needed by the
        three render functions ({!to_yojson}, {!render_shell},
        {!render_text}).
@@ -70,8 +71,9 @@ type t = {
     Field invariants:
     - [bearer_token] is the freshly-minted raw token; it is also
       written to [raw_token_file] (operator-readable, mode 0600).
-    - [dashboard_url] always carries [agent] + [token] query params,
-      both URL-encoded.
+    - [dashboard_url] carries only the URL-encoded [agent] hint. The bearer
+      token is never embedded in a URL; browser callers supply it through the
+      dashboard auth control, which sends it in the Authorization header.
     - [mcp_token_env_var] is exactly the value the caller passed to
       {!mint} via [~token_env_var]. The server does not interpret
       or validate this string — it is rendered verbatim into the

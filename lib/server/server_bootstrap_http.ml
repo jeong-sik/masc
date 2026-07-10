@@ -63,11 +63,17 @@ let print_startup_banner
     Printf.printf
       "   gRPC :%d → Workspace + grpc.health.v1.Health + reflection\n%!"
       (Masc_grpc_server.configured_port ());
-  if Server_ws_standalone.is_enabled ()
+  if Transport_metrics.ws_enabled ()
   then
-    Printf.printf
-      "   GET  /ws → WebSocket upgrade or discovery (standalone fallback ws://127.0.0.1:%d/)\n%!"
-      (Server_ws_standalone.configured_port ());
+    (match Env_config.Transport.use_h2 () with
+     | Env_config.Transport.H2_only ->
+       Printf.printf
+         "   GET  /ws → discovery only (WebSocket upgrade unavailable in H2-only mode)\n%!"
+     | Env_config.Transport.H1_only
+     | Env_config.Transport.Auto
+     | Env_config.Transport.Unknown_h2_mode _ ->
+       Printf.printf
+         "   GET  /ws → authenticated same-origin WebSocket upgrade or discovery\n%!");
   if Server_webrtc_transport.is_enabled ()
   then Printf.printf "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"
 ;;

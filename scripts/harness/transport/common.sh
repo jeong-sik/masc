@@ -10,22 +10,18 @@ source "${ROOT_DIR}/scripts/harness/lib/server_bootstrap.sh"
 
 MASC_HTTP_PORT="${MASC_HTTP_PORT:-$(harness_pick_free_port)}"
 MASC_GRPC_PORT="${MASC_GRPC_PORT:-$(harness_pick_free_port)}"
-MASC_WS_PORT="${MASC_WS_PORT:-$(harness_pick_free_port)}"
 # Issue #8423: `MASC_HTTP_BASE_URL` is the documented name the OCaml
 # server reads (server_bootstrap_http.ml, env_config_core.ml). Transport
 # harness scripts use that same name directly so the probed endpoint matches
 # the configured server endpoint.
 MASC_HTTP_BASE_URL="${MASC_HTTP_BASE_URL:-http://127.0.0.1:${MASC_HTTP_PORT}}"
 MASC_GRPC_ADDR="127.0.0.1:${MASC_GRPC_PORT}"
-MASC_WS_URL="ws://127.0.0.1:${MASC_WS_PORT}"
 
 export ROOT_DIR
 export MASC_HTTP_PORT
 export MASC_GRPC_PORT
-export MASC_WS_PORT
 export MASC_HTTP_BASE_URL
 export MASC_GRPC_ADDR
-export MASC_WS_URL
 
 PASS=0
 FAIL=0
@@ -94,7 +90,6 @@ ensure_server() {
   export MASC_GRPC_ENABLED="${MASC_GRPC_ENABLED:-1}"
   export MASC_GRPC_PORT
   export MASC_WS_ENABLED="${MASC_WS_ENABLED:-1}"
-  export MASC_WS_PORT
   export MASC_WEBRTC_ENABLED="${MASC_WEBRTC_ENABLED:-1}"
   export MASC_HOST="${MASC_HOST:-127.0.0.1}"
   export MASC_HTTP_PORT

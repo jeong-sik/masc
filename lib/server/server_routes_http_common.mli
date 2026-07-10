@@ -129,7 +129,18 @@ val state_net_opt :
 (** {1 Origin / Accept negotiation} *)
 
 val allowed_origins : string list
+(** Compatibility projection of {!Masc_network_defaults.allowed_origins}; not
+    an authorization predicate. *)
+
+val is_mcp_like_path : string -> bool
+(** Shared MCP HTTP surface predicate used by both H1 and H2 before Origin and
+    protocol admission. *)
+
 val validate_origin : Httpun.Request.t -> bool
+(** Accepts requests without [Origin] (non-browser clients) and otherwise
+    delegates exact host/port admission to {!Server_auth.public_read_cors_origin_opt}.
+    Prefix matching is deliberately forbidden. *)
+
 val accepts_sse : Httpun.Request.t -> bool
 val accepts_streamable_mcp : Httpun.Request.t -> bool
 val request_force_json_response : Httpun.Request.t -> bool

@@ -9,6 +9,12 @@
 module T = Masc_grpc_types
 module Wrtc = Server_webrtc_transport
 
+let admission agent_name : Server_transport_admission.admission =
+  { identity = { agent_name; role = Masc_domain.Worker }
+  ; auth_token = "token-" ^ agent_name
+  }
+;;
+
 (* ============================================================
    1. gRPC Subscribe ← SSE Broadcast Integration
    ============================================================ *)
@@ -166,7 +172,9 @@ let test_webrtc_full_signaling_flow () =
     let offer_body =
       {|{"agent_name":"agent-a","ice_candidates":["candidate:1 udp 2130706431 192.168.1.1 54321 typ host"],"dtls_fingerprint":"sha-256:AA:BB:CC"}|}
     in
-    let offer_result = Wrtc.handle_offer_request offer_body in
+    let offer_result =
+      Wrtc.handle_offer_request ~admission:(admission "agent-a") offer_body
+    in
     Alcotest.(check bool) "offer ok" true (Result.is_ok offer_result);
     let offer_json = Yojson.Safe.from_string (Result.get_ok offer_result) in
     let offer_id = Yojson.Safe.Util.(member "offer_id" offer_json |> to_string) in
@@ -182,7 +190,9 @@ let test_webrtc_full_signaling_flow () =
     (* Agent B accepts the offer *)
     let answer_body = Printf.sprintf
       {|{"offer_id":"%s","agent_name":"agent-b"}|} offer_id in
-    let answer_result = Wrtc.handle_answer_request answer_body in
+    let answer_result =
+      Wrtc.handle_answer_request ~admission:(admission "agent-b") answer_body
+    in
     Alcotest.(check bool) "answer ok" true (Result.is_ok answer_result);
     let answer_json = Yojson.Safe.from_string (Result.get_ok answer_result) in
     let peer_id = Yojson.Safe.Util.(member "peer_id" answer_json |> to_string) in

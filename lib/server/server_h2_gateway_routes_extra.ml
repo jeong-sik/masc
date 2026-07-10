@@ -6,19 +6,24 @@ open Server_h2_gateway_helpers
 
 (* Dispatch board, governance, voice, karma, and static asset routes.
    Returns [true] if the route was handled, [false] otherwise. *)
-let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
+let dispatch ~with_public_read ~h2_reqd ~httpun_request ~cors ~path ~config
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
+  let handle_public_read respond =
+    with_public_read respond;
+    true
+  in
   match httpun_meth, path with
   | `GET, "/api/v1/voice/config" ->
-      let status, json = voice_config_payload () in
-      let status =
-        match status with `OK -> `OK | `Error -> `Internal_server_error
-      in
-      h2_respond_json_value h2_reqd json ~status ~extra_headers:cors;
-      true
+      handle_public_read (fun () ->
+        let status, json = voice_config_payload () in
+        let status =
+          match status with `OK -> `OK | `Error -> `Internal_server_error
+        in
+        h2_respond_json_value h2_reqd json ~status ~extra_headers:cors)
 
   | `GET, "/api/v1/board" ->
+      handle_public_read (fun () ->
       let hearth = query_param httpun_request "hearth" in
       let sort_by = board_sort_order_of_request httpun_request in
       let exclude_system = bool_query_param httpun_request "exclude_system" ~default:false in
@@ -74,36 +79,36 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
         ("offset", `Int offset);
         ("sort_by", `String (board_sort_label sort_by));
       ] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
   | `GET, "/api/v1/board/curation" ->
+      handle_public_read (fun () ->
       let json =
         match Board_dispatch.latest_curation_snapshot () with
         | None -> `Assoc [("snapshot", `Null)]
         | Some snap ->
             `Assoc [("snapshot", Board_curation.snapshot_to_yojson snap)]
       in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
   | `GET, "/api/v1/board/hearths" ->
+      handle_public_read (fun () ->
       let hearths = Board_dispatch.list_hearths () in
       let json = `Assoc [
         ("hearths", `List (List.map (fun (name, count) ->
           `Assoc [("name", `String name); ("count", `Int count)]
         ) hearths));
       ] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
   | `GET, "/api/v1/board/flairs" ->
+      handle_public_read (fun () ->
       let flairs = List.map Board.flair_to_yojson Board.available_flairs in
       let json = `Assoc [("flairs", `List flairs)] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
   | `GET, "/api/v1/board/sub-boards" ->
+      handle_public_read (fun () ->
       let sub_boards = Board_dispatch.list_sub_boards () in
       let json =
         `Assoc
@@ -112,10 +117,10 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
               `List (List.map Board.sub_board_to_yojson sub_boards) );
           ]
       in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
   | `GET, "/api/v1/board/karma/ledger" ->
+      handle_public_read (fun () ->
       (* Karma ledger contract endpoint — attributed karma events.
          Query params:
            agent  — filter to a single recipient (case-sensitive)
@@ -145,12 +150,12 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
                    totals) );
           ]
       in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
   | `GET, p
     when String.starts_with ~prefix:"/api/v1/board/" p
          && String.length p > 14 ->
+      handle_public_read (fun () ->
       let post_id = String.sub p 14 (String.length p - 14) in
       let format = Option.value ~default:"nested" (query_param httpun_request "format") in
       let voter = board_voter_query httpun_request in
@@ -162,10 +167,10 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
           ~config
           ~response_format:format ~post_id
       in
-      h2_respond_json h2_reqd body ~status ~extra_headers:cors;
-      true
+      h2_respond_json h2_reqd body ~status ~extra_headers:cors)
 
   | `GET, "/api/v1/karma" ->
+      handle_public_read (fun () ->
       let karma_list = Board_dispatch.get_all_karma () in
       let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
       let json = `Assoc [
@@ -173,8 +178,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
           `Assoc [("agent", `String agent); ("karma", `Int k)]
         ) sorted));
       ] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
   | `GET, "/static/css/middleware.css" ->
       (match read_file (playground_asset_path "static/css/middleware.css") with

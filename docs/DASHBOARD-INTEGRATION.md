@@ -27,7 +27,9 @@ code_refs:
   - `Authorization: Bearer <token>`
   - `X-MASC-Agent: <agent_name>`
 - SSE
-  - `/mcp?agent=<agent_name>&token=<token>&session_id=<session_id>&sse_kind=observer`
+  - `/mcp?agent=<agent_name>&session_id=<session_id>&sse_kind=observer`
+  - authenticated browser streams use `fetch` + `ReadableStream` with
+    `Authorization: Bearer <token>`; bearer query parameters are not accepted
 
 ## Canonical v1 Surfaces
 

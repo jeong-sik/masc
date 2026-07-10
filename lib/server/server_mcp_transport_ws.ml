@@ -41,16 +41,13 @@ let set_inbound_message_handler handler =
 let dispatch_inbound_message ?auth_token session_id body =
   Atomic.get inbound_message_handler ~auth_token session_id body
 
-(** Dashboard authentication state for a WebSocket session.  Set once by
-    [dashboard_hello] and then read on the SSE forward hot path and the
-    dashboard RPC auth gates.  Held in an [Atomic.t] on the session
-    ([dashboard_auth]) so the single write and the many reads stay tear-free
-    if dashboard serving moves off the main Eio domain (RFC-0204 §8.4,
-    Phase 1).  [Authenticated] carries the resolved agent name, or [None]
-    when the auth config permits tokenless dashboard reads. *)
-type dashboard_auth_state =
-  | Unauthenticated
-  | Authenticated of { agent : string option }
+(** Dashboard application-protocol state.  Transport authentication happens
+    once during the HTTP upgrade and its credential owner is stored separately
+    in the immutable [authenticated_agent] field.  [dashboard/hello] confirms
+    protocol readiness without accepting a second credential. *)
+type dashboard_protocol_state =
+  | Hello_pending
+  | Hello_confirmed
 
 (* RFC-0287: inbound frame reassembly + UTF-8 validation now live in the
    ws-direct Connection layer, which delivers complete messages via the
@@ -75,7 +72,8 @@ type ws_session = {
       the single liveness signal — there is no separate tick counter that a
       responsive client could accumulate against (#21509). *)
   last_pong_at: float Atomic.t;
-  dashboard_auth: dashboard_auth_state Atomic.t;
+  authenticated_agent: string;
+  dashboard_protocol: dashboard_protocol_state Atomic.t;
   dashboard_route: string option Atomic.t;
   (** Slices this session subscribes to, held as an immutable list inside an
       [Atomic.t].  Subscribe / unsubscribe (under [sessions_mutex]) publish a
@@ -113,18 +111,15 @@ type ws_session = {
   inbound_dispatches: int Atomic.t;
 }
 
-(** [true] when the dashboard handshake has completed for this state. *)
-let dashboard_auth_is_authenticated = function
-  | Unauthenticated -> false
-  | Authenticated _ -> true
+(** [true] once [dashboard/hello] has confirmed application-protocol
+    readiness.  Transport authentication is already complete before a session
+    can exist. *)
+let dashboard_protocol_is_confirmed = function
+  | Hello_pending -> false
+  | Hello_confirmed -> true
 
-(** Resolved agent name for an authenticated state, [None] otherwise. *)
-let dashboard_auth_agent = function
-  | Unauthenticated -> None
-  | Authenticated { agent } -> agent
-
-(** Reads a session's current dashboard auth state (wait-free). *)
-let dashboard_auth session = Atomic.get session.dashboard_auth
+let dashboard_hello_is_confirmed session =
+  dashboard_protocol_is_confirmed (Atomic.get session.dashboard_protocol)
 
 (** Registry of active WebSocket sessions. *)
 let sessions : (string, ws_session) Hashtbl.t = Hashtbl.create 16
@@ -229,17 +224,13 @@ let update_ws_session_count_metric () =
   Transport_metrics.set_ws_sessions
     (with_sessions_rw (fun () -> Hashtbl.length sessions))
 
-(** Generate a unique session ID. *)
-let next_id =
-  let counter = Atomic.make 0 in
-  fun () ->
-    let n = Atomic.fetch_and_add counter 1 in
-    Printf.sprintf "ws-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) n
+(** Generate an unguessable session ID. *)
+let next_id () = Random_id.prefixed ~prefix:"ws-" ~bytes:16
 
 let log_ws_delivery_dropped ~context session_id =
   Log.Transport.warn "WS %s not delivered for session=%s" context session_id
 
-let new_session ~id ~wsd =
+let new_session ~id ~wsd ~authenticated_agent =
   (* NDT-OK: session creation stamps wall-clock liveness/ACK metadata only;
      message ordering and protocol output still come from explicit sequence IDs. *)
   let now = Unix.gettimeofday () in
@@ -249,7 +240,8 @@ let new_session ~id ~wsd =
     closed = Atomic.make false;
     write_mutex = Eio.Mutex.create ();
     last_pong_at = Atomic.make now;
-    dashboard_auth = Atomic.make Unauthenticated;
+    authenticated_agent;
+    dashboard_protocol = Atomic.make Hello_pending;
     dashboard_route = Atomic.make None;
     dashboard_slices = Atomic.make [];
     dashboard_seq = Atomic.make 0;
@@ -432,13 +424,13 @@ let dashboard_session_result session =
     |> List.sort compare
     |> List.map (fun slice -> `String slice)
   in
-  let auth = dashboard_auth session in
   `Assoc
     [
       ("protocol", `String "dashboard-ws.v1");
       ("session_id", `String session.id);
-      ("authenticated", `Bool (dashboard_auth_is_authenticated auth));
-      ( "agent", Json_util.string_opt_to_json (dashboard_auth_agent auth) );
+      ("authenticated", `Bool true);
+      ("hello_confirmed", `Bool (dashboard_hello_is_confirmed session));
+      ("agent", `String session.authenticated_agent);
       ( "route", Json_util.string_opt_to_json (Atomic.get session.dashboard_route) );
       ("slices", `List slices);
       ("seq", `Int (Atomic.get session.dashboard_seq));
@@ -453,7 +445,7 @@ let dashboard_snapshot_provider : (string -> Yojson.Safe.t option) ref =
 let set_dashboard_snapshot_provider provider =
   dashboard_snapshot_provider := provider
 
-let dashboard_auth_success_payload session =
+let dashboard_hello_success_payload session =
   `Assoc
     [
       ("protocol", `String "dashboard-ws.v1");
@@ -467,44 +459,14 @@ let dashboard_auth_success_payload session =
           ] );
     ]
 
-let verify_dashboard_token ~base_path token =
-  let auth_cfg = Auth.load_auth_config base_path in
-  if not auth_cfg.Masc_domain.enabled then
-    Ok None
-  else
-    match token with
-    | None when not auth_cfg.require_token ->
-        (match Auth.check_permission base_path ~agent_name:"dashboard"
-                 ~token:None ~permission:Masc_domain.CanReadState with
-         | Ok () -> Ok None
-         | Error err -> Error (Masc_domain.masc_error_to_string err))
-    | None ->
-        Error "dashboard/hello requires a bearer token"
-    | Some raw_token -> (
-        match Auth.find_credential_by_token base_path ~token:raw_token with
-        | Error err -> Error (Masc_domain.masc_error_to_string err)
-        | Ok cred -> (
-            match
-              Auth.check_permission base_path ~agent_name:cred.Masc_domain.agent_name
-                ~token:(Some raw_token) ~permission:Masc_domain.CanReadState
-            with
-            | Ok () -> Ok (Some cred.Masc_domain.agent_name)
-            | Error err -> Error (Masc_domain.masc_error_to_string err)))
-
-let dashboard_hello ~base_path ~session_id ?token () =
+let dashboard_hello ~session_id () =
   let start_time = Unix.gettimeofday () in
   let result =
     match find_session session_id with
     | None -> Error "WebSocket session not found"
-    | Some session -> (
-        match verify_dashboard_token ~base_path token with
-        | Error msg -> Error msg
-        | Ok agent ->
-            (* Single writer per session: dashboard_hello is the only site
-               that sets the auth state, so Atomic.set (not compare_and_set)
-               is sufficient.  Revisit if a second writer is introduced. *)
-            Atomic.set session.dashboard_auth (Authenticated { agent });
-            Ok (dashboard_auth_success_payload session))
+    | Some session ->
+      Atomic.set session.dashboard_protocol Hello_confirmed;
+      Ok (dashboard_hello_success_payload session)
   in
   Transport_metrics.observe_ws_dashboard_hello_latency
     ~success:(match result with Ok _ -> true | Error _ -> false)
@@ -532,7 +494,7 @@ let dashboard_subscribe ~session_id ?route ~slices () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
   | Some session ->
-      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
+      if not (dashboard_hello_is_confirmed session) then
         Error "dashboard/subscribe requires dashboard/hello first"
       else begin
         let invalid =
@@ -562,7 +524,7 @@ let dashboard_unsubscribe ~session_id ?slices () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
   | Some session ->
-      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
+      if not (dashboard_hello_is_confirmed session) then
         Error "dashboard/unsubscribe requires dashboard/hello first"
       else begin
         with_sessions_rw (fun () ->
@@ -585,7 +547,7 @@ let dashboard_ping ~session_id () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
   | Some session ->
-      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
+      if not (dashboard_hello_is_confirmed session) then
         Error "dashboard/ping requires dashboard/hello first"
       else
         Ok
@@ -600,7 +562,7 @@ let dashboard_ack ~session_id ~seq ?buffered_amount () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
   | Some session ->
-      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
+      if not (dashboard_hello_is_confirmed session) then
         Error "dashboard/ack requires dashboard/hello first"
       else begin
         Atomic.set session.dashboard_last_ack_at (Time_compat.now ());
@@ -886,7 +848,7 @@ let dashboard_ack_is_stale
     dashboard has stopped sending ACKs for too long.  Only authenticated
     dashboard sessions participate; anonymous sessions always pass. *)
 let session_is_backpressured session =
-  if not (dashboard_auth_is_authenticated (dashboard_auth session)) then false
+  if not (dashboard_hello_is_confirmed session) then false
   else
     let limit = client_buffer_limit_bytes () in
     let buffered_limit_exceeded =
@@ -946,7 +908,7 @@ let send_dashboard_or_raw_sse session sse_event =
     Transport_metrics.inc_ws_throttled_delivery ();
     true
   end
-  else if dashboard_auth_is_authenticated (dashboard_auth session) then begin
+  else if dashboard_hello_is_confirmed session then begin
     (* Parse once and reuse for both the delta-build branch and the
        slice-mismatch decision.  parse_sse_dashboard_event hits a
        single-slot Atomic cache after the broadcast's first call, but
@@ -995,8 +957,8 @@ let send_dashboard_or_raw_sse session sse_event =
           send_text_shared_checked ~context:"sse-forward" session sse_event
   end
   else begin
-    (* Unauthenticated session: drop SSE events until dashboard/hello
-       completes.  Forwarding before hello floods the client with SSE
+    (* Upgrade-authenticated but protocol-pending session: drop SSE events
+       until dashboard/hello completes.  Forwarding before hello floods the client with SSE
        frames that can bury the JSON-RPC hello response, causing the
        browser RPC timeout to fire and triggering a reconnect loop. *)
     true
@@ -1068,7 +1030,7 @@ let cleanup_session session_id =
   | None -> ()
   | Some session ->
     close_detached_session_wsd ~context:"close" session;
-    (* #10875: see server_ws_standalone — per-session lifecycle is DEBUG
+    (* #10875: per-session lifecycle is DEBUG
        to avoid logging amplification during WS storm (#10701). *)
     Log.Server.debug "WebSocket session %s closed" session_id
 
@@ -1175,20 +1137,12 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
    handler to refresh the liveness timestamp. *)
 
 (** Build the MCP-over-WebSocket session handler for a freshly upgraded
-    [wsd].  Single source of truth for the MCP WebSocket session
-    protocol — session registration, SSE broadcast subscription,
-    liveness heartbeat, and frame opcode handling — shared by the
-    same-origin HTTP-upgrade path
-    ([Server_routes_http_routes_frontend]) and the standalone listener
-    ([Server_ws_standalone]).  The two paths differ only in how the
-    socket is attached (Gluten upgrade vs. raw listener), not in the
-    session protocol.  RFC-0281 S3.2.
+    [wsd].  Single source of truth for the same-origin MCP WebSocket session
+    protocol — session registration, SSE broadcast subscription, liveness
+    heartbeat, and message handling.  RFC-0281 S3.2.
 
     [on_connection_close] and [on_eof] are observability hooks invoked
-    before {!cleanup_session}.  The defaults close the close-frame
-    payload and ignore the eof error; the standalone path injects its
-    close-code diagnostic + eof summary.  Cleanup runs regardless of
-    the hook. *)
+    before {!cleanup_session}.  Cleanup runs regardless of the hook. *)
 let mcp_websocket_handler
     ?sw
     ?clock
@@ -1196,10 +1150,11 @@ let mcp_websocket_handler
     ?(on_eof = fun ~session_id:_ -> ())
     ~on_message
     ~origin_label
+    ~authenticated_agent
     (wsd : Ws_wsd.t)
   : Ws_endpoint.handlers =
   let session_id = next_id () in
-  let session = new_session ~id:session_id ~wsd in
+  let session = new_session ~id:session_id ~wsd ~authenticated_agent in
   with_sessions_rw (fun () -> Hashtbl.replace sessions session_id session);
   Transport_metrics.set_ws_sessions
     (with_sessions_rw (fun () -> Hashtbl.length sessions));
@@ -1269,6 +1224,17 @@ let ws_upgrade_accept (request : Httpun.Request.t) : (string, string) result =
     Ok (sec_websocket_accept key)
   | _ -> Error "websocket upgrade request did not pass RFC 6455 §4.2.1 scrutiny"
 
+let websocket_application_subprotocols = [ "masc.dashboard.v1"; "masc.ide.v1" ]
+
+let selected_websocket_application_subprotocol request =
+  Httpun.Headers.get request.Httpun.Request.headers "sec-websocket-protocol"
+  |> Option.bind (fun raw ->
+       raw
+       |> String.split_on_char ','
+       |> List.map String.trim
+       |> List.find_opt (fun protocol ->
+            List.mem protocol websocket_application_subprotocols))
+
 let respond_and_drive_upgrade
     ~(upgrade : Gluten.impl -> unit)
     ~(reqd : Httpun.Reqd.t)
@@ -1280,13 +1246,17 @@ let respond_and_drive_upgrade
   match ws_upgrade_accept request with
   | Error _ as e -> e
   | Ok accept ->
-    let headers =
-      Httpun.Headers.of_list
-        [ "Upgrade", "websocket"
-        ; "Connection", "Upgrade"
-        ; "Sec-WebSocket-Accept", accept
-        ]
+    let response_headers =
+      [ "Upgrade", "websocket"
+      ; "Connection", "Upgrade"
+      ; "Sec-WebSocket-Accept", accept
+      ]
+      @
+      match selected_websocket_application_subprotocol request with
+      | Some protocol -> [ "Sec-WebSocket-Protocol", protocol ]
+      | None -> []
     in
+    let headers = Httpun.Headers.of_list response_headers in
     (* Sends the 101 on the reqd, then the callback attaches the post-101
        socket: a ws-direct Endpoint (Server role) packaged as a Gluten.impl,
        drop-in for the former Httpun_ws.Server_connection. RFC-0287 §4.1. *)
@@ -1309,6 +1279,7 @@ let upgrade_connection
     ?sw
     ?clock
     ?(on_message = fun _session_id _text -> ())
+    ~authenticated_agent
     ~(upgrade : Gluten.impl -> unit)
     (reqd : Httpun.Reqd.t)
   : (unit, string) result =
@@ -1316,7 +1287,8 @@ let upgrade_connection
     ~max_message:(max_inbound_message_bytes ())
     ~max_frame:(max_inbound_frame_bytes ())
     ~handler:
-      (mcp_websocket_handler ?sw ?clock ~on_message ~origin_label:"same-origin /ws")
+      (mcp_websocket_handler ?sw ?clock ~on_message
+         ~origin_label:"same-origin /ws" ~authenticated_agent)
 
 (** Outcome of {!send_to_session_result}.  [Sent] is the happy path;
     [Session_gone] is the expected case where the session has already
@@ -1385,7 +1357,7 @@ let () = Shutdown_hooks.register_ws_cleanup (fun () -> close_all (), session_cou
 
 let () =
   Mcp_server_eio_protocol.register_dashboard_ws_handlers
-    ~hello:(fun ~base_path ~session_id ?token () -> dashboard_hello ~base_path ~session_id ?token ())
+    ~hello:(fun ~session_id () -> dashboard_hello ~session_id ())
     ~subscribe:(fun ~session_id ?route ~slices () -> dashboard_subscribe ~session_id ?route ~slices ())
     ~unsubscribe:(fun ~session_id ?slices () -> dashboard_unsubscribe ~session_id ?slices ())
     ~ping:(fun ~session_id () -> dashboard_ping ~session_id ());

@@ -201,6 +201,52 @@ let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
   let actor = Server_auth.dashboard_actor_for_request ~base_path request in
   Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
 
+let authorize_mcp_profile_admission ~base_path ~profile request =
+  let permission =
+    match profile with
+    | Full | Managed_agent -> Masc_domain.CanReadState
+    | Operator_remote -> Masc_domain.CanAdmin
+  in
+  Server_auth.authorize_token_bound_admission_request
+    ~base_path ~permission request
+
+module Mcp_sse_owner = Server_mcp_transport_http_sse_owner
+
+type mcp_sse_owner_lease = Mcp_sse_owner.lease
+
+let validate_mcp_session_owner_for_request =
+  Mcp_sse_owner.validate_mcp_session_owner_for_request
+
+let bind_mcp_session_owner_if_initialize_succeeded =
+  Mcp_sse_owner.bind_mcp_session_owner_if_initialize_succeeded
+
+let validate_mcp_sse_session_owner_for_request =
+  Mcp_sse_owner.validate_mcp_sse_session_owner_for_request
+
+let claim_mcp_sse_session_owner_for_request =
+  Mcp_sse_owner.claim_mcp_sse_session_owner_for_request
+
+let activate_mcp_sse_owner_lease = Mcp_sse_owner.activate
+let discard_previous_mcp_sse_owner_lease = Mcp_sse_owner.discard_previous
+let release_mcp_sse_owner_lease = Mcp_sse_owner.release
+let ensure_sse_backing_session_for_owner =
+  Mcp_sse_owner.ensure_backing_session_for_owner
+let forget_mcp_session = Mcp_sse_owner.forget_mcp_session
+let respond_mcp_session_owner_forbidden ~deps request reqd ~session_id
+      ~protocol_version msg =
+  let body =
+    error_body ~id:`Null ~code:Mcp_error_code.Auth_error msg
+    |> Yojson.Safe.to_string
+  in
+  let headers =
+    Httpun.Headers.of_list
+      (("content-length", string_of_int (String.length body))
+       :: json_headers ~deps session_id protocol_version (deps.get_origin request))
+  in
+  safe_respond_with_string reqd
+    (Httpun.Response.create ~headers `Forbidden)
+    body
+
 let handle_post_mcp ~deps ?(profile = Full) request reqd =
   (* Readiness gate: reject before session/auth if server state is not ready *)
   if not (deps.is_ready ()) then
@@ -224,15 +270,29 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
   let protocol_version = context.protocol_version in
   let origin = context.origin in
   let base_path = context.base_path in
-  let auth_result =
-    match profile with
-    | Full | Managed_agent ->
-        deps.verify_mcp_auth ~base_path request
-    | Operator_remote ->
-        deps.verify_operator_mcp_auth ~base_path request
-  in
+  let auth_result = authorize_mcp_profile_admission ~base_path ~profile request in
   let open Result.Syntax in
   ignore (
+    let* admission =
+      match auth_result with
+      | Ok admission -> Ok admission
+      | Error err ->
+          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd
+            ~session_id ~protocol_version
+            (Masc_domain.masc_error_to_string err);
+          Error ()
+    in
+    let* () =
+      match
+        validate_mcp_session_owner_for_request ~session_id
+          ~requester:admission.identity
+      with
+      | Ok () -> Ok ()
+      | Error msg ->
+          respond_mcp_session_owner_forbidden ~deps request reqd ~session_id
+            ~protocol_version msg;
+          Error ()
+    in
     let* () =
       match validate_mcp_session_profile ~profile session_id with
       | Ok () -> Ok ()
@@ -263,14 +323,6 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
           in
           let response = Httpun.Response.create ~headers `Bad_request in
           safe_respond_with_string reqd response body;
-          Error ()
-    in
-    let* () =
-      match auth_result with
-      | Ok () -> Ok ()
-      | Error msg ->
-          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
-            ~protocol_version msg;
           Error ()
     in
     let otel_transport_context =
@@ -413,6 +465,25 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                   ~otel_transport_context
                                   ~internal_keeper_runtime body_with_agent
                               in
+                              let response_json =
+                                match
+                                  bind_mcp_session_owner_if_initialize_succeeded
+                                    session_id
+                                    ~requester:admission.identity
+                                    ~request_body:body_str
+                                    ~response_json
+                                with
+                                | Ok () -> response_json
+                                | Error msg ->
+                                    Log.Auth.warn
+                                      "MCP initialize owner bind rejected for session %s: %s"
+                                      session_id msg;
+                                    Mcp_transport_protocol.make_error
+                                      ~id:(Option.value ~default:`Null response_id)
+                                      (Mcp_error_code.to_wire_code
+                                         Mcp_error_code.Auth_error)
+                                      msg
+                              in
                               remember_protocol_version_if_initialize_succeeded
                                 ~otel_transport_context
                                 session_id
@@ -549,206 +620,282 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
-  let origin = deps.get_origin request in
-  let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
-  let protocol_version = get_protocol_version_for_session ~session_id request in
-  let base_path = deps.get_base_path () in
-  let auth_result =
-    match profile with
-    | Full | Managed_agent ->
-        (match sse_kind with
-         | Sse.Observer | Sse.Presence ->
-             deps.verify_mcp_observer_stream_auth ~base_path request
-         | Sse.Agent_stream ->
-             deps.verify_mcp_auth ~base_path request)
-    | Operator_remote ->
-        deps.verify_operator_mcp_auth ~base_path request
-  in
-  let last_event_id = get_last_event_id request in
-  match validate_mcp_session_profile ~profile session_id with
-  | Error msg ->
-      let headers =
-        Httpun.Headers.of_list
-          (("content-length", string_of_int (String.length msg))
-          :: json_headers ~deps session_id protocol_version origin)
-      in
-      let response = Httpun.Response.create ~headers `Conflict in
-      safe_respond_with_string reqd response msg
-  | Ok () -> (
-      match validate_protocol_version_continuity ~session_id request with
-      | Error msg ->
-          let body =
-            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
-          in
-          let headers =
-            Httpun.Headers.of_list
-              (("content-length", string_of_int (String.length body))
-              :: json_headers ~deps session_id protocol_version origin)
-          in
-          let response = Httpun.Response.create ~headers `Bad_request in
-          safe_respond_with_string reqd response body
-      | Ok () ->
-      (match auth_result with
-      | Error msg ->
-          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
-            ~protocol_version msg
-      | Ok () ->
-      let otel_transport_context =
-        Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
-      in
-      remember_mcp_profile ~otel_transport_context session_id profile;
-      let token =
-        match sse_kind with
-        | Sse.Observer | Sse.Presence ->
-            Server_auth.observer_sse_auth_token_from_request request
-        | Sse.Agent_stream ->
-            Server_auth.auth_token_from_request request
-      in
-      let auth = { Sse.config = base_path; token } in
-      (match check_sse_connect_guard session_id with
-      | Error (reason, retry_after_s) ->
-          respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
-            ~reason ~retry_after_s reqd
-      | Ok () ->
-          stop_sse_session session_id;
-          if Option.is_some last_event_id then
-            Transport_metrics.inc_sse_reconnect ();
-          ensure_sse_backing_session_for_known_transport_session
-            ~transport_session_id:session_id ~sse_session_id:session_id;
-          (match
-             Sse.register ~kind:sse_kind ~auth session_id
-               ~last_event_id:(Option.value ~default:0 last_event_id)
-               ~on_disconnect:(fun () -> stop_sse_session session_id)
+    let origin = deps.get_origin request in
+    let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
+    let protocol_version =
+      get_protocol_version_for_session ~session_id request
+    in
+    let base_path = deps.get_base_path () in
+    let auth_result =
+      authorize_mcp_profile_admission ~base_path ~profile request
+    in
+    let last_event_id = get_last_event_id request in
+    let open Result.Syntax in
+    ignore
+      (let* admission =
+         match auth_result with
+         | Ok admission -> Ok admission
+         | Error err ->
+             respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request
+               reqd ~session_id ~protocol_version
+               (Masc_domain.masc_error_to_string err);
+             Error ()
+       in
+       let* () =
+         match
+           validate_mcp_sse_session_owner_for_request ~session_id ~sse_kind
+             ~requester:admission.identity
+         with
+         | Ok () -> Ok ()
+         | Error msg ->
+             respond_mcp_session_owner_forbidden ~deps request reqd
+               ~session_id ~protocol_version msg;
+             Error ()
+       in
+       let* () =
+         match validate_mcp_session_profile ~profile session_id with
+         | Ok () -> Ok ()
+         | Error msg ->
+             let headers =
+               Httpun.Headers.of_list
+                 (("content-length", string_of_int (String.length msg))
+                 :: json_headers ~deps session_id protocol_version origin)
+             in
+             let response = Httpun.Response.create ~headers `Conflict in
+             safe_respond_with_string reqd response msg;
+             Error ()
+       in
+       let* () =
+         match validate_protocol_version_continuity ~session_id request with
+         | Ok () -> Ok ()
+         | Error msg ->
+             let body =
+               Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
+             in
+             let headers =
+               Httpun.Headers.of_list
+                 (("content-length", string_of_int (String.length body))
+                 :: json_headers ~deps session_id protocol_version origin)
+             in
+             let response = Httpun.Response.create ~headers `Bad_request in
+             safe_respond_with_string reqd response body;
+             Error ()
+       in
+       let otel_transport_context =
+         Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+       in
+       if is_known_session session_id then
+         remember_mcp_profile ~otel_transport_context session_id profile;
+       let* () =
+         match check_sse_connect_guard session_id with
+         | Ok () -> Ok ()
+         | Error (reason, retry_after_s) ->
+             respond_sse_rate_limited ~deps ~origin ~session_id
+               ~protocol_version ~reason ~retry_after_s reqd;
+             Error ()
+       in
+       let* owner_lease =
+         match
+           claim_mcp_sse_session_owner_for_request ~session_id ~sse_kind
+             ~requester:admission.identity
+         with
+         | Ok lease -> Ok lease
+         | Error msg ->
+             respond_mcp_session_owner_forbidden ~deps request reqd
+               ~session_id ~protocol_version msg;
+             Error ()
+       in
+       let release_owner_lease () =
+         release_mcp_sse_owner_lease owner_lease
+       in
+       let registered_client_id = ref None in
+       let cleanup_failed_setup () =
+         match !registered_client_id with
+         | Some client_id ->
+             Sse.unregister_if_current session_id client_id
+         | None -> release_owner_lease ()
+       in
+       try
+         let* () =
+           match
+             ensure_sse_backing_session_for_owner ~session_id
+               ~requester:admission.identity
            with
-           | Error reg_err ->
-               let msg = Sse.registration_error_to_string reg_err in
-               Log.Server.warn "%s" msg;
-               respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
-           | Ok (client_id, event_stream, evicted) ->
-              let headers =
-                Httpun.Headers.of_list
-                  (sse_stream_headers ~deps session_id protocol_version origin)
-              in
-              let response = Httpun.Response.create ~headers `OK in
-              let writer = Httpun.Reqd.respond_with_streaming reqd response in
-              let mutex = Eio.Mutex.create () in
-              let info_ref : sse_conn_info option ref = ref None in
-          (match evicted with
-          | Some evicted_sid ->
-              (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
-                 close frame + Evict/Close event pair. *)
-              stop_sse_session_evict evicted_sid
-                ~reason:Session_lifecycle_event.Cap_exceeded
-          | None -> ());
-          let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
-          info_ref := Some info;
-          register_sse_conn ~session_id ~info;
-          if not (send_raw info (sse_prime_event ())) then
-            Log.Server.debug "SSE prime send failed for session %s" info.session_id;
-          (match last_event_id with
-          | Some last_id ->
-              let missed = Sse.get_events_after_for_kind sse_kind last_id in
-              List.iter (fun ev ->
-                if not (send_raw info ev) then
-                  Log.Server.debug "SSE replay send failed for session %s"
-                    info.session_id
-              ) missed
-          | None -> ());
-          (match deps.get_runtime_result () with
-          | Ok runtime ->
-              let sw = runtime.sw in
-              let clock = runtime.clock in
-              run_sse_pumps ~sw ~stop_promise:info.stop_promise
-                ~drain:(fun () ->
-                  let rec drain () =
-                    let event = Eio.Stream.take event_stream in
-                    (try
-                      if not (Atomic.get info.closed || (Atomic.get info.stop)) then
-                        if not (send_raw info event) then
-                          Log.Server.debug "SSE drain send failed for session %s"
+           | Ok () -> Ok ()
+           | Error msg ->
+               release_owner_lease ();
+               respond_mcp_session_owner_forbidden ~deps request reqd
+                 ~session_id ~protocol_version msg;
+               Error ()
+         in
+         (* Ownership is established before either operation.  Clearing the old
+            hook prevents an intentional same-owner reconnect from running the
+            prior connection's cleanup against the replacement.  Preserve the
+            successful connect guard while closing the old writer so concurrent
+            reconnects cannot bypass the guard through [stop_sse_session]. *)
+         Sse.clear_disconnect_hook session_id;
+         stop_sse_session_preserve_guard session_id;
+         discard_previous_mcp_sse_owner_lease owner_lease;
+         if Option.is_some last_event_id then
+           Transport_metrics.inc_sse_reconnect ();
+         let auth =
+           { Sse.config = base_path; token = Some admission.auth_token }
+         in
+         match
+           Sse.register ~kind:sse_kind ~auth session_id
+             ~last_event_id:(Option.value ~default:0 last_event_id)
+             ~on_disconnect:(fun () ->
+               release_owner_lease ();
+               stop_sse_session_preserve_guard session_id)
+         with
+         | Error reg_err ->
+             release_owner_lease ();
+             let msg = Sse.registration_error_to_string reg_err in
+             Log.Server.warn "%s" msg;
+             respond_sse_register_error ~deps ~origin ~protocol_version reqd msg;
+             Error ()
+         | Ok (client_id, event_stream, evicted) ->
+           registered_client_id := Some client_id;
+           let headers =
+             Httpun.Headers.of_list
+               (sse_stream_headers ~deps session_id protocol_version origin)
+           in
+           let response = Httpun.Response.create ~headers `OK in
+           let writer = Httpun.Reqd.respond_with_streaming reqd response in
+           let mutex = Eio.Mutex.create () in
+           (match evicted with
+           | Some evicted_sid ->
+               (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
+                  close frame + Evict/Close event pair. *)
+               stop_sse_session_evict evicted_sid
+                 ~reason:Session_lifecycle_event.Cap_exceeded
+           | None -> ());
+           let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
+           register_sse_conn ~session_id ~info;
+           let* () =
+             match activate_mcp_sse_owner_lease owner_lease with
+             | Ok () -> Ok ()
+             | Error msg ->
+                 cleanup_failed_setup ();
+                 Log.Server.warn
+                   "SSE owner activation failed after connection publication for %s: %s"
+                   session_id msg;
+                 Error ()
+           in
+           if not (send_raw info (sse_prime_event ())) then
+             Log.Server.debug "SSE prime send failed for session %s"
+               info.session_id;
+           (match last_event_id with
+           | Some last_id ->
+               let missed = Sse.get_events_after_for_kind sse_kind last_id in
+               List.iter
+                 (fun ev ->
+                   if not (send_raw info ev) then
+                     Log.Server.debug
+                       "SSE replay send failed for session %s"
+                       info.session_id)
+                 missed
+           | None -> ());
+           (match deps.get_runtime_result () with
+           | Ok runtime ->
+               let sw = runtime.sw in
+               let clock = runtime.clock in
+               run_sse_pumps ~sw ~stop_promise:info.stop_promise
+                 ~drain:(fun () ->
+                   let rec drain () =
+                     let event = Eio.Stream.take event_stream in
+                     (try
+                        if
+                          not
+                            (Atomic.get info.closed || Atomic.get info.stop)
+                        then if not (send_raw info event) then
+                          Log.Server.debug
+                            "SSE drain send failed for session %s"
                             info.session_id
-                    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                      Log.Server.error "drain write error: %s"
-                        (Printexc.to_string exn);
-                      stop_sse_session info.session_id);
-                    if not (Atomic.get info.stop) then drain ()
-                  in
-                  try drain ()
-                  with Eio.Cancel.Cancelled _ as e -> raise e
+                      with
+                     | Eio.Cancel.Cancelled _ as e -> raise e
                      | exn ->
+                         Log.Server.error "drain write error: %s"
+                           (Printexc.to_string exn);
+                         stop_sse_session_preserve_guard info.session_id);
+                     if not (Atomic.get info.stop) then drain ()
+                   in
+                   try drain () with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
                        Log.Server.error "drain loop error: %s"
                          (Printexc.to_string exn))
-                ~ping:(fun () ->
-                  let is_cancelled exn =
-                    match exn with
-                    | Eio.Cancel.Cancelled _ -> true
-                    | _ -> false
-                  in
-                  let rec loop () =
-                    if not (Atomic.get info.stop) then (
-                      (try Eio.Time.sleep clock sse_ping_interval_s
-                       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                         if is_cancelled exn then raise exn;
-                         Log.Server.error "ping sleep error: %s"
-                           (Printexc.to_string exn));
-                      (try
-                         if Atomic.get info.closed then
-                           stop_sse_session info.session_id
-                         else if not (Atomic.get info.stop) then
-                           if not (send_raw info ": ping\n\n") then
-                             Log.Server.debug "SSE ping send failed for session %s"
-                               info.session_id
-                       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                         if is_cancelled exn then raise exn;
-                         Log.Server.error "ping send error: %s"
-                           (Printexc.to_string exn);
-                         stop_sse_session info.session_id);
-                      loop ())
-                  in
-                   try loop () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                     if is_cancelled exn then ()
-                     else
-                       Log.Server.error "ping loop error: %s"
-                         (Printexc.to_string exn))
-          | Error msg ->
-              Log.Server.debug "SSE runtime unavailable for session %s: %s"
-                session_id msg);
-          let client_count = Sse.client_count () in
-          if client_count > Sse.max_clients / 2 then
-            Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients))))
+                 ~ping:(fun () ->
+                   let is_cancelled = function
+                     | Eio.Cancel.Cancelled _ -> true
+                     | _ -> false
+                   in
+                   let rec loop () =
+                     if not (Atomic.get info.stop) then (
+                       (try Eio.Time.sleep clock sse_ping_interval_s with
+                       | Eio.Cancel.Cancelled _ as e -> raise e
+                       | exn ->
+                           if is_cancelled exn then raise exn;
+                           Log.Server.error "ping sleep error: %s"
+                             (Printexc.to_string exn));
+                       (try
+                          if Atomic.get info.closed then
+                            stop_sse_session_preserve_guard info.session_id
+                          else if not (Atomic.get info.stop) then
+                            if not (send_raw info ": ping\n\n") then
+                              Log.Server.debug
+                                "SSE ping send failed for session %s"
+                                info.session_id
+                        with
+                       | Eio.Cancel.Cancelled _ as e -> raise e
+                       | exn ->
+                           if is_cancelled exn then raise exn;
+                           Log.Server.error "ping send error: %s"
+                             (Printexc.to_string exn);
+                           stop_sse_session_preserve_guard info.session_id);
+                       loop ())
+                   in
+                   try loop () with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                       if not (is_cancelled exn) then
+                         Log.Server.error "ping loop error: %s"
+                           (Printexc.to_string exn))
+           | Error msg ->
+               Log.Server.error
+                 "SSE runtime unavailable after registration for session %s: %s"
+                 session_id msg;
+               stop_sse_session_preserve_guard session_id);
+           let client_count = Sse.client_count () in
+           if client_count > Sse.max_clients / 2 then
+             Log.Server.info "SSE connected: %s (active: %d/%d)" session_id
+               client_count Sse.max_clients;
+           Ok ()
+       with
+       | Eio.Cancel.Cancelled _ as e ->
+           cleanup_failed_setup ();
+           raise e
+       | exn ->
+           cleanup_failed_setup ();
+           raise exn)
 
 
 let handle_get_operator_mcp ~deps request reqd =
-  let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
-  let protocol_version = get_protocol_version_for_session ~session_id request in
-  let base_path = deps.get_base_path () in
-  match deps.verify_operator_mcp_auth ~base_path request with
-  | Error msg ->
-      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id ~protocol_version
-        msg
-  | Ok () ->
-      handle_get_mcp ~deps ~profile:Operator_remote request reqd
+  handle_get_mcp ~deps ~profile:Operator_remote request reqd
 
 let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
   let base_path = deps.get_base_path () in
-  let auth_result =
-    match profile with
-    | Full | Managed_agent ->
-        deps.verify_mcp_auth ~base_path request
-    | Operator_remote ->
-        deps.verify_operator_mcp_auth ~base_path request
-  in
+  let auth_result = authorize_mcp_profile_admission ~base_path ~profile request in
   match auth_result with
-  | Error msg ->
+  | Error err ->
       let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
       let protocol_version = get_protocol_version_for_session ~session_id request in
       respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id ~protocol_version
-        msg
-  | Ok () -> (
+        (Masc_domain.masc_error_to_string err)
+  | Ok admission -> (
       match get_session_id_any request with
       | Some session_id -> (
           match validate_mcp_session_delete_profile ~profile session_id with
@@ -760,6 +907,17 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
               let response = Httpun.Response.create ~headers `Conflict in
               safe_respond_with_string reqd response msg
           | Ok () -> (
+              let protocol_version =
+                get_protocol_version_for_session ~session_id request
+              in
+              match
+                authorize_mcp_session_delete ~session_id
+                  ~requester:admission.identity
+              with
+              | Error msg ->
+                  respond_mcp_session_owner_forbidden ~deps request reqd
+                    ~session_id ~protocol_version msg
+              | Ok () -> (
               match validate_protocol_version_continuity ~session_id request with
               | Error msg ->
                   let body =
@@ -781,8 +939,10 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
               | Ok () ->
                let protocol_version = get_protocol_version request in
                let sse_active_before_stop = is_active_sse_session session_id in
+               forget_mcp_session session_id;
                stop_sse_session session_id;
                Sse.unregister session_id;
+               ignore (Session.McpSessionStore.remove session_id);
                let resource_cleanup =
                  match request_runtime_result deps with
                  | Ok runtime ->
@@ -794,7 +954,6 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                        session_id msg;
                      "skipped_runtime_unavailable"
                in
-               forget_mcp_session session_id;
                Log.Mcp_transport.info "Session terminated: %s reason=client_delete profile=%s \
                   protocol_version=%s sse_active_before_stop=%b \
                   resource_cleanup=%s"
@@ -805,7 +964,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   (("content-length", "0") :: mcp_headers session_id protocol_version)
               in
               let response = Httpun.Response.create ~headers `No_content in
-              safe_respond_with_string reqd response ""))
+              safe_respond_with_string reqd response "")))
       | None ->
           let body = "Mcp-Session-Id required" in
           let headers =

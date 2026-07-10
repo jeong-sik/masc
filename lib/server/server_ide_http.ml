@@ -1167,8 +1167,9 @@ let add_routes router =
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/cursors/stream" (fun request reqd ->
-    Server_auth.with_observer_sse_read_auth
-      (fun state _req inner_reqd ->
+    Server_auth.with_token_permission_auth
+      ~permission:Masc_domain.CanReadState
+      (fun state _agent_name _req inner_reqd ->
          let uri = Uri.of_string request.target in
          match parse_pagination_query ~max_limit:200 uri with
          | Error msg ->

@@ -42,31 +42,21 @@ let require_strict_auth_config base_path =
 ;;
 
 let identity_of_token ~base_path ~token ~claimed_agent =
-  if Auth.verify_internal_keeper_token base_path ~token
-  then
+  let* credential = Auth.find_credential_by_token base_path ~token in
+  let* () =
     match normalized_nonempty claimed_agent with
-    | Some agent_name -> Ok { agent_name; role = Masc_domain.Worker }
-    | None ->
+    | None -> Ok ()
+    | Some claimed when String.equal claimed credential.Masc_domain.agent_name -> Ok ()
+    | Some _ ->
       Error
         (unauthorized
            Masc_domain.Auth_error.Actor_mismatch
-           "Internal keeper bearer admission requires an agent identity.")
-  else
-    let* credential = Auth.find_credential_by_token base_path ~token in
-    let* () =
-      match normalized_nonempty claimed_agent with
-      | None -> Ok ()
-      | Some claimed when String.equal claimed credential.Masc_domain.agent_name -> Ok ()
-      | Some _ ->
-        Error
-          (unauthorized
-             Masc_domain.Auth_error.Actor_mismatch
-             "Bearer credential owner does not match the claimed agent.")
-    in
-    Ok
-      { agent_name = credential.Masc_domain.agent_name
-      ; role = credential.role
-      }
+           "Bearer credential owner does not match the claimed agent.")
+  in
+  Ok
+    { agent_name = credential.Masc_domain.agent_name
+    ; role = credential.role
+    }
 ;;
 
 let check_requirement identity = function

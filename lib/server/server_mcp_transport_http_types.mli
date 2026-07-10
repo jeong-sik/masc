@@ -26,9 +26,4 @@ type deps = {
   is_ready : unit -> bool;
   get_runtime_result : unit -> (runtime, string) result;
   get_base_path : unit -> string;
-  verify_mcp_auth : base_path:string -> Httpun.Request.t -> (unit, string) result;
-  verify_mcp_observer_stream_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
-  verify_operator_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, string) result;
 }

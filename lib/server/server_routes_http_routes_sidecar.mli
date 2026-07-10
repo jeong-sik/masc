@@ -10,6 +10,19 @@
 module Http = Http_server_eio
 (** Local alias for the Eio HTTP server module. *)
 
+(** {1 Route authorization capabilities} *)
+
+val status_read_tool_name : string
+val schema_read_tool_name : string
+val logs_read_tool_name : string
+val config_read_tool_name : string
+val config_write_tool_name : string
+val process_start_tool_name : string
+val process_stop_tool_name : string
+(** Tool-catalog capability names used by the corresponding HTTP routes.
+    Each route has one explicit authorization identity; the retired aggregate
+    [sidecar] alias is not used. *)
+
 (** {1 Sidecar id validation} *)
 
 val known_ids : string list

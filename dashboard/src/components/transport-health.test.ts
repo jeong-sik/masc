@@ -77,8 +77,9 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       enabled: true,
       configured: true,
       listening: true,
-      mode: 'standalone',
-      port: 8936,
+      listen_status: 'ready',
+      mode: 'same_origin',
+      endpoint: '/ws',
       sessions: 0,
       relay_source: 'sse_external_subscriber',
       delivery: {
@@ -713,8 +714,9 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
       enabled: true,
       configured: true,
       listening: true,
-      mode: 'standalone',
-      port: 8936,
+      listen_status: 'ready',
+      mode: 'same_origin',
+      endpoint: '/ws',
       sessions: 0,
       relay_source: 'sse_external_subscriber',
       delivery: {

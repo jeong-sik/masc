@@ -4,11 +4,8 @@
     need full-duplex.
 
     External surface:
-    - {b session record} ({!ws_session}) — concrete because
-      [server_ws_standalone] passes session values to
-      {!read_inbound_message_frame} /
-      {!send_dashboard_or_raw_sse} and reaches the live
-      {!sessions} table directly.
+    - {b session record} ({!ws_session}) — concrete for focused transport
+      lifecycle and fan-out regression tests.
     - {b inbound size decisions}
       ({!inbound_size_rejection}, {!inbound_size_decision}).
     - {b SSE parse record} ({!parsed_sse_event}) — exposed
@@ -52,8 +49,7 @@
     [detach_session_for_close] / [close_detached_session_wsd] /
     [update_ws_session_count_metric],
     [dashboard_snapshot_provider] cell,
-    [dashboard_auth_success_payload],
-    [verify_dashboard_token], [dashboard_snapshot],
+    [dashboard_hello_success_payload], [dashboard_snapshot],
     [parse_cache] / [sse_data_prefix] /
     [extract_sse_data_*],
     [dashboard_delta_payload_text_cache] /
@@ -80,13 +76,12 @@
 
 (** {1 Session record} *)
 
-type dashboard_auth_state =
-  | Unauthenticated
-  | Authenticated of { agent : string option }
-(** Dashboard handshake state for a session.  Set once by [dashboard_hello],
-    read on the SSE forward hot path and the dashboard RPC auth gates.  Held
-    in an [Atomic.t] field so the single write and many reads are tear-free if
-    dashboard serving moves off the main Eio domain (RFC-0204 §8.4, Phase 1). *)
+type dashboard_protocol_state =
+  | Hello_pending
+  | Hello_confirmed
+(** Application-protocol readiness after immutable HTTP-upgrade admission.
+    [dashboard/hello] performs no authentication; it only advances this typed
+    state so data cannot race ahead of the hello response. *)
 
 (* RFC-0287: inbound reassembly + UTF-8 validation moved into the ws-direct
    Connection layer, which delivers complete messages to the Endpoint
@@ -100,7 +95,8 @@ type ws_session = {
   closed : bool Atomic.t;
   write_mutex : Eio.Mutex.t;
   last_pong_at : float Atomic.t;
-  dashboard_auth : dashboard_auth_state Atomic.t;
+  authenticated_agent : string;
+  dashboard_protocol : dashboard_protocol_state Atomic.t;
   dashboard_route : string option Atomic.t;
   dashboard_slices : string list Atomic.t;
   dashboard_seq : int Atomic.t;
@@ -111,11 +107,8 @@ type ws_session = {
   dashboard_last_delta_at : float Atomic.t;
   inbound_dispatches : int Atomic.t;
 }
-(** Per-WS session state.  Concrete record because
-    [server_ws_standalone] threads the value through
-    {!read_inbound_message_frame} +
-    {!send_dashboard_or_raw_sse} and reaches the
-    {!sessions} table directly.  The dashboard handshake /
+(** Per-WS session state.  Concrete for focused transport lifecycle and
+    fan-out regression tests.  The dashboard handshake /
     ack state machine is tracked in the [dashboard_*] fields;
     see the [#10648] / dashboard-ws.v1 protocol notes in the
     .ml for the field semantics.
@@ -132,11 +125,11 @@ type ws_session = {
     serving moves to its own domain (RFC-0204 Phase 3).  All writes
     to [wsd] are serialized through [write_mutex]. *)
 
-val dashboard_auth_is_authenticated : dashboard_auth_state -> bool
-(** [true] once [dashboard_hello] has authenticated the session. *)
+val dashboard_protocol_is_confirmed : dashboard_protocol_state -> bool
+(** [true] once [dashboard/hello] confirms protocol readiness. *)
 
-val dashboard_auth_agent : dashboard_auth_state -> string option
-(** Resolved agent name for an [Authenticated] state, [None] otherwise. *)
+val dashboard_hello_is_confirmed : ws_session -> bool
+(** Wait-free read of the session's protocol-readiness state. *)
 
 (** {1 SSE parse record} *)
 
@@ -176,8 +169,7 @@ val sessions : (string, ws_session) Hashtbl.t
 (** Live session table keyed by session id.  Reads /
     writes must be guarded by {!with_sessions_rw} (or
     held under the same Eio mutex via the slice-index
-    helpers).  Reached directly by
-    [server_ws_standalone] when wiring upgrade handlers. *)
+    helpers). *)
 
 val with_sessions_rw : (unit -> 'a) -> 'a
 (** Runs [f] under the sessions mutex in read/write
@@ -190,12 +182,15 @@ val session_count : unit -> int
     transport probe. *)
 
 val next_id : unit -> string
-(** Generates a fresh session id.  Internal counter is
-    monotonically increasing for the process lifetime. *)
+(** Generates a cryptographically random, process-independent session id. *)
 
-val new_session : id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
+val new_session :
+  id:string ->
+  wsd:Ws_direct_core.Endpoint.Wsd.t ->
+  authenticated_agent:string ->
+  ws_session
 (** Builds a fresh {!ws_session} with [closed = false]
-    and the dashboard handshake state cleared.  Caller
+    and immutable upgrade identity recorded.  Caller
     inserts the result into {!sessions} under
     {!with_sessions_rw}. *)
 
@@ -258,13 +253,11 @@ val set_inbound_message_handler :
   (auth_token:string option -> string -> string -> unit) -> unit
 (** Installs the MCP JSON-RPC dispatcher invoked for inbound WebSocket
     text messages.  Bootstrap sets this once it has a live server state.
-    [auth_token] is the immutable credential admitted by the HTTP upgrade;
-    standalone connections pass [None] until their distinct handshake contract
-    supplies an authenticated request context. *)
+    [auth_token] is the immutable credential admitted by the HTTP upgrade. *)
 
 val dispatch_inbound_message : ?auth_token:string -> string -> string -> unit
 (** Dispatches an inbound WebSocket message through the currently installed
-    handler.  Used by both standalone WS and same-origin [/ws] upgrade paths.
+    handler.  Used by the same-origin [/ws] upgrade path.
     The optional credential is captured per connection and rechecked by the MCP
     request handler; an authenticated upgrade is never itself authorization for
     later tool calls. *)
@@ -276,12 +269,12 @@ val mcp_websocket_handler :
   ?on_eof:(session_id:string -> unit) ->
   on_message:(string -> string -> unit) ->
   origin_label:string ->
+  authenticated_agent:string ->
   Ws_direct_core.Endpoint.Wsd.t ->
   Ws_direct_core.Endpoint.handlers
-(** Single source of truth for the MCP-over-WebSocket session protocol:
+(** Single source of truth for the same-origin MCP-over-WebSocket session protocol:
     session registration, SSE subscription, liveness heartbeat, and message
-    handling.  Shared by the same-origin upgrade path and the standalone
-    listener — they differ only in socket attachment, not the session protocol.
+    handling.
     ws-direct delivers complete (reassembled, UTF-8-validated, size-capped)
     messages to [on_message] and auto-replies to pings, so this builds an
     Endpoint handler rather than a frame-opcode switch.  [on_close_log] /
@@ -297,6 +290,11 @@ val ws_upgrade_accept : Httpun.Request.t -> (string, string) result
     [Upgrade: websocket], [Connection] listing [upgrade], [Sec-WebSocket-Version:
     13], and a [Sec-WebSocket-Key] that base64-decodes to exactly 16 bytes.
     Returns the accept token on success.  Exposed for unit tests. *)
+
+val selected_websocket_application_subprotocol :
+  Httpun.Request.t -> string option
+(** Selects only a known application protocol for the 101 response. The
+    credential-bearing subprotocol is never echoed. *)
 
 val respond_and_drive_upgrade :
   upgrade:(Gluten.impl -> unit) ->
@@ -315,6 +313,7 @@ val upgrade_connection :
   ?sw:Eio.Switch.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?on_message:(string -> string -> unit) ->
+  authenticated_agent:string ->
   upgrade:(Gluten.impl -> unit) ->
   Httpun.Reqd.t ->
   (unit, string) result
@@ -358,15 +357,12 @@ val set_dashboard_snapshot_provider :
     Called once at server bootstrap. *)
 
 val dashboard_hello :
-  base_path:string ->
   session_id:string ->
-  ?token:string ->
   unit ->
   (Yojson.Safe.t, string) result
-(** Authenticates the dashboard session.  [Ok payload]
-    on success carries the protocol version + per-slice
-    snapshot; [Error msg] otherwise (unknown session,
-    bad token, etc). *)
+(** Confirms the immutable credential-bound upgrade admission and returns the
+    dashboard protocol payload. No second bearer is accepted in the message
+    body. *)
 
 val dashboard_subscribe :
   session_id:string ->
@@ -443,6 +439,10 @@ val dashboard_ack_is_stale :
 (** Pure stale-ACK predicate used by the dashboard backpressure gate.  Only
     unacknowledged dashboard/delta seqs can become stale; subscribe snapshots
     are excluded because the browser does not ACK them. *)
+
+val session_is_backpressured : ws_session -> bool
+(** [true] when a hello-confirmed dashboard session exceeds the buffered-byte
+    or stale-ACK gate. Protocol-pending sessions never enter the gate. *)
 
 val max_inbound_frame_bytes : unit -> int
 (** Maximum single inbound WebSocket frame payload size.  [0] disables the

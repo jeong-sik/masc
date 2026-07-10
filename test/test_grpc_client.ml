@@ -7,6 +7,12 @@ module T = Masc_grpc_types
 
 (* ====== Client-side type round-trip tests ====== *)
 
+let test_status_request_roundtrip () =
+  let request = T.StatusRequest.{ auth_token = "status-token" } in
+  let decoded = T.StatusRequest.of_bytes (T.StatusRequest.to_bytes request) in
+  Alcotest.(check string) "auth token" request.auth_token decoded.auth_token
+;;
+
 let test_status_agents_response_roundtrip () =
   let resp =
     T.StatusResponse.
@@ -14,7 +20,7 @@ let test_status_agents_response_roundtrip () =
           [ { T.name = "codex"
             ; status = "active"
             ; capabilities = [ "code" ]
-            ; last_heartbeat_ms = 1000L
+            ; last_seen_ms = 1000L
             ; session_bound_at_ms = 500L
             ; current_task_id = "T-001"
             }
@@ -65,14 +71,12 @@ let test_heartbeat_ack_roundtrip () =
     timestamp_ms = 1700000001000L;
     active_agent_count = 5;
     pending_task_count = 3;
-    directives = ["compact"; "reflect"];
   } in
   let bytes = T.HeartbeatAck.to_bytes ack in
   let decoded = T.HeartbeatAck.of_bytes bytes in
   Alcotest.(check int64) "timestamp_ms" ack.timestamp_ms decoded.timestamp_ms;
   Alcotest.(check int) "agent_count" 5 decoded.active_agent_count;
-  Alcotest.(check int) "task_count" 3 decoded.pending_task_count;
-  Alcotest.(check (list string)) "directives" ["compact"; "reflect"] decoded.directives
+  Alcotest.(check int) "task_count" 3 decoded.pending_task_count
 
 let test_tool_call_response_roundtrip () =
   let resp = T.ToolCallResponse.{
@@ -141,7 +145,7 @@ let test_status_response_roundtrip () =
     agents = [{
       T.name = "claude"; status = "active";
       capabilities = ["code"; "review"];
-      last_heartbeat_ms = 1000L; session_bound_at_ms = 500L;
+      last_seen_ms = 1000L; session_bound_at_ms = 500L;
       current_task_id = "";
     }];
     tasks = [{
@@ -197,34 +201,12 @@ let test_subscribe_request_serde () =
   Alcotest.(check (list string)) "types" req.event_types decoded.event_types;
   Alcotest.(check int64) "seq" req.since_seq decoded.since_seq
 
-let test_heartbeat_ack_directive_types () =
-  let ack = T.HeartbeatAck.{
-    timestamp_ms = 1700000002000L;
-    active_agent_count = 2;
-    pending_task_count = 1;
-    directives = ["pause"; "claim:T-42"; "wakeup"; "resume"];
-  } in
-  let bytes = T.HeartbeatAck.to_bytes ack in
-  let decoded = T.HeartbeatAck.of_bytes bytes in
-  Alcotest.(check (list string)) "P3 directives roundtrip"
-    ["pause"; "claim:T-42"; "wakeup"; "resume"] decoded.directives
-
-let test_heartbeat_ack_empty_directives () =
-  let ack = T.HeartbeatAck.{
-    timestamp_ms = 1700000003000L;
-    active_agent_count = 0;
-    pending_task_count = 0;
-    directives = [];
-  } in
-  let bytes = T.HeartbeatAck.to_bytes ack in
-  let decoded = T.HeartbeatAck.of_bytes bytes in
-  Alcotest.(check (list string)) "empty directives" [] decoded.directives
-
 (* ====== Test runner ====== *)
 
 let () =
   Alcotest.run "MASC gRPC Client" [
     "client-types", [
+      Alcotest.test_case "status request roundtrip" `Quick test_status_request_roundtrip;
       Alcotest.test_case "status agents response roundtrip" `Quick test_status_agents_response_roundtrip;
       Alcotest.test_case "tool call error response roundtrip" `Quick test_tool_call_error_response_roundtrip;
       Alcotest.test_case "heartbeat ping roundtrip" `Quick test_heartbeat_ping_roundtrip;
@@ -236,10 +218,6 @@ let () =
       Alcotest.test_case "event roundtrip" `Quick test_event_roundtrip;
       Alcotest.test_case "status response roundtrip" `Quick test_status_response_roundtrip;
       Alcotest.test_case "subscribe request serde" `Quick test_subscribe_request_serde;
-    ];
-    "directives", [
-      Alcotest.test_case "P3 directive types roundtrip" `Quick test_heartbeat_ack_directive_types;
-      Alcotest.test_case "empty directives roundtrip" `Quick test_heartbeat_ack_empty_directives;
     ];
     "transport", [
       Alcotest.test_case "default is local" `Quick test_transport_from_env_default;

@@ -36,15 +36,11 @@ module Graphql_api = Masc.Graphql_api
 module Types = Masc_domain
 module Tempo = Masc.Tempo
 module Auth = Masc.Auth
-module Board = Masc.Board
-module Board_curation = Masc.Board_curation
 module Board_dispatch = Masc.Board_dispatch
 module Task = Masc.Task
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Masc.Progress
 module Sse = Masc.Sse
-module Safe_ops = Safe_ops
-module Tool_board = Board_tool
 module Transport_metrics = Masc.Transport_metrics
 module Server_mcp_transport_http = Server_mcp_transport_http
 
@@ -179,11 +175,7 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
 (** Path predicate: requests that go through the MCP transport surface
     (HTTP-based sessions, SSE, JSON-RPC messages) and therefore must pass
     origin and protocol-version checks. *)
-let is_mcp_like_path path =
-  String.equal path "/mcp"
-  || String.equal path "/mcp/managed"
-  || String.equal path "/mcp/operator"
-  || String.equal path "/sse"
+let is_mcp_like_path = Server_routes_http.is_mcp_like_path
 
 (** Returns true if the request failed origin or protocol-version
     validation and the corresponding error response was sent on [reqd].
@@ -227,20 +219,6 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
 let dispatch_route ~router ~request ~path ~upgrade reqd =
   match request.Httpun.Request.meth, path with
   | `OPTIONS, _ -> options_handler request reqd
-  | `POST, "/webrtc/offer" when Server_webrtc_transport.is_enabled () ->
-    Http.Request.read_body_async reqd (fun body ->
-      match Server_webrtc_transport.handle_offer_request body with
-      | Ok json -> Http.Response.json json reqd
-      | Error msg ->
-        Http.Response.json ~status:`Bad_request
-          (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-  | `POST, "/webrtc/answer" when Server_webrtc_transport.is_enabled () ->
-    Http.Request.read_body_async reqd (fun body ->
-      match Server_webrtc_transport.handle_answer_request body with
-      | Ok json -> Http.Response.json json reqd
-      | Error msg ->
-        Http.Response.json ~status:`Bad_request
-          (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
   | `DELETE, "/mcp" -> handle_delete_mcp request reqd
   | `DELETE, "/mcp/managed" ->
       handle_delete_mcp
@@ -248,152 +226,6 @@ let dispatch_route ~router ~request ~path ~upgrade reqd =
   | `DELETE, "/mcp/operator" ->
       handle_delete_mcp
         ~profile:Server_mcp_transport_http.Operator_remote request reqd
-  | `GET, "/api/v1/board/flairs" ->
-      let flairs = List.map Board.flair_to_yojson Board.available_flairs in
-      let json = `Assoc [("flairs", `List flairs)] in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/hearths" ->
-      let hearths = Board_dispatch.list_hearths () in
-      let json = `Assoc [
-        ("hearths", `List (List.map (fun (name, count) ->
-          `Assoc [("name", `String name); ("count", `Int count)]
-        ) hearths));
-      ] in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/curation" ->
-      let json =
-        match Board_dispatch.latest_curation_snapshot () with
-        | None -> `Assoc [ ("snapshot", `Null) ]
-        | Some snap ->
-            `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
-      in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/sub-boards" ->
-      let sub_boards = Board_dispatch.list_sub_boards () in
-      let json =
-        `Assoc
-          [
-            ( "sub_boards",
-              `List (List.map Board.sub_board_to_yojson sub_boards) );
-          ]
-      in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/karma/ledger" ->
-      let agent = query_param request "agent" in
-      let limit =
-        int_query_param request "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000
-      in
-      let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
-      let totals =
-        Board_dispatch.get_all_karma ()
-        |> List.sort (fun (_, a) (_, b) -> compare b a)
-      in
-      let json =
-        `Assoc
-          [
-            ("events", `List (List.map Board.karma_event_to_yojson events));
-            ("count", `Int (List.length events));
-            ("scoring_rule", `String "up=+1,down=0");
-            ( "totals",
-              `List
-                (List.map
-                   (fun (agent_name, k) ->
-                     `Assoc
-                       [ ("agent", `String agent_name); ("karma", `Int k) ])
-                   totals) );
-          ]
-      in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `POST, "/api/v1/board/reactions" ->
-      Http.Request.read_body_async reqd (fun body ->
-        try
-          let args = Yojson.Safe.from_string body in
-          let target_type_raw =
-            Option.value ~default:""
-              (Safe_ops.json_string_opt "target_type" args)
-          in
-          let target_id =
-            Option.value ~default:"" (Safe_ops.json_string_opt "target_id" args)
-          in
-          let user_id =
-            Option.value ~default:"" (Safe_ops.json_string_opt "user_id" args)
-          in
-          let emoji =
-            Option.value ~default:"" (Safe_ops.json_string_opt "emoji" args)
-          in
-          match Board.reaction_target_type_of_string_opt target_type_raw with
-          | None ->
-              Http.Response.json ~status:`Bad_request
-                {|{"error":"target_type must be post or comment"}|} reqd
-          | Some target_type ->
-              (match
-                 Board_dispatch.toggle_reaction ~target_type ~target_id
-                   ~user_id ~emoji
-               with
-               | Ok result ->
-                   Http.Response.json
-                     (Yojson.Safe.to_string
-                        (Board.reaction_toggle_result_to_yojson result))
-                     reqd
-               | Error e ->
-                   Http.Response.json ~status:`Bad_request
-                     (Yojson.Safe.to_string
-                        (`Assoc
-                           [
-                             ("error", `String (Tool_board.board_error_to_string e));
-                           ]))
-                     reqd)
-        with
-        | Yojson.Json_error msg ->
-            Http.Response.json ~status:`Bad_request
-              (Yojson.Safe.to_string
-                 (`Assoc [ ("error", `String ("invalid JSON: " ^ msg)) ]))
-              reqd)
-  | `GET, "/api/v1/board/reactions" ->
-      let target_type_raw =
-        Option.value ~default:"" (query_param request "target_type")
-      in
-      let target_id =
-        Option.value ~default:"" (query_param request "target_id")
-      in
-      let user_id = query_param request "user_id" in
-      (match Board.reaction_target_type_of_string_opt target_type_raw with
-       | None ->
-           Http.Response.json ~status:`Bad_request
-             {|{"error":"target_type must be post or comment"}|} reqd
-       | Some target_type ->
-           (match
-              Board_dispatch.list_reactions ~target_type ~target_id ?user_id ()
-            with
-            | Ok summary ->
-                let json =
-                  `Assoc
-                    [
-                      ( "reactions",
-                        `List (List.map Board.reaction_summary_to_yojson summary) );
-                    ]
-                in
-                Http.Response.json (Yojson.Safe.to_string json) reqd
-            | Error e ->
-                Http.Response.json ~status:`Bad_request
-                  (Yojson.Safe.to_string
-                     (`Assoc
-                        [
-                          ("error", `String (Tool_board.board_error_to_string e));
-                        ]))
-                  reqd))
-  | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
-      let post_id = String.sub p 14 (String.length p - 14) in
-      let format = Option.value ~default:"nested" (query_param request "format") in
-      let voter = board_voter_query request in
-      let config =
-        Option.map (fun state -> (Mcp_server.workspace_config state)) !server_state
-      in
-      let (status, body) =
-        board_post_detail_json ~include_moderation:false ~blind_votes:false
-          ~config ~voter ~response_format:format ~post_id
-      in
-      Http.Response.json ~status body reqd
   | _ -> Http.Router.dispatch router ~upgrade request reqd
 
 let log_late_response_failure ~context msg =

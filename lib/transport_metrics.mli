@@ -8,13 +8,13 @@
     - [masc_ws_*] for WebSocket transport
     - [masc_agent_heartbeat_*] for agent liveness
 
-    Internal: ~22 helpers stay private — \[sse_hot_sessions]
+    Internal helpers stay private — \[sse_hot_sessions]
     (Atomic.t state cell mutated by {!set_sse_queue_snapshot}),
-    \[grpc_runtime_listening] / \[ws_runtime_listening] (bool
-    Atomic.t cells mutated by the [set_*_runtime_listening]
-    functions), [set_sse_queue_depth] (per-session gauge,
+    \[grpc_runtime_listening] (a bool Atomic.t cell) and
+    \[ws_upgrade_state] (a typed Atomic.t cell), [set_sse_queue_depth]
+    (per-session gauge,
     high-cardinality so kept internal), [grpc_enabled] /
-    [grpc_port] / [ws_port] (env-derived), [set_agent_heartbeat_age]
+    [grpc_port] (env-derived), [set_agent_heartbeat_age]
     / [inc_agent_stale] (per-agent labels, internal-only), the
     JSON helpers (\[assoc_field], [int_field], [int_field_opt],
     [int_option_json], [workspace_id_from_config], [cluster_summary_json]),
@@ -263,31 +263,30 @@ val inc_ws_delta_payload_serialization : unit -> unit
     Drift would break dashboard tooltips. *)
 val grpc_listen_status : string Atomic.t
 
-(** WebSocket variant of {!grpc_listen_status}. *)
-val ws_listen_status : string Atomic.t
+type ws_upgrade_state =
+  | Initializing
+  | Ready
+  | Disabled
+  | H2_only_unsupported
+  | Stopped
+(** Typed lifecycle of the authenticated same-origin [/ws] upgrade endpoint.
+    [H2_only_unsupported] is explicit because RFC 8441 extended CONNECT is
+    not implemented; it must never be advertised as ready. *)
 
 (** [set_grpc_runtime_listening listening] flips the gRPC
     listen-state Atomic.  Combined with
     {!Env_config.Transport.grpc_enabled} via {!grpc_listening}. *)
 val set_grpc_runtime_listening : bool -> unit
 
-(** WebSocket variant of {!set_grpc_runtime_listening}. *)
-val set_ws_runtime_listening : bool -> unit
-
-(** [set_ws_same_origin_runtime_ready ready] flips the same-origin [/ws]
-    upgrade readiness Atomic.  This is separate from the HTTP listener being
-    open: early bootstrap can accept HTTP requests before the WebSocket MCP
-    dispatcher is installed. *)
-val set_ws_same_origin_runtime_ready : bool -> unit
+val set_ws_upgrade_state : ws_upgrade_state -> unit
+val get_ws_upgrade_state : unit -> ws_upgrade_state
+val ws_upgrade_state_to_string : ws_upgrade_state -> string
 
 (** [set_grpc_listen_status s] writes [s] into
     {!grpc_listen_status}.  Caller is responsible for using a
     pinned status literal — drift to free-form strings would
     break dashboard parsing. *)
 val set_grpc_listen_status : string -> unit
-
-(** WebSocket variant of {!set_grpc_listen_status}. *)
-val set_ws_listen_status : string -> unit
 
 (** [grpc_listening ()] is
     [grpc_enabled () && Atomic.get grpc_runtime_listening] —
@@ -299,13 +298,12 @@ val grpc_listening : unit -> bool
     Read every call — env mutation between calls takes effect. *)
 val ws_enabled : unit -> bool
 
-(** [ws_listening ()] is
-    [ws_enabled () && Atomic.get ws_runtime_listening] —
-    AND of env-config and runtime state. *)
+(** [ws_listening ()] is true only for the authenticated same-origin endpoint
+    in [Ready]. *)
 val ws_listening : unit -> bool
 
-(** [ws_same_origin_ready ()] is [ws_enabled ()] AND the runtime readiness bit
-    set after the inbound WebSocket dispatcher is installed. *)
+(** [ws_same_origin_ready ()] is [ws_enabled ()] AND the typed runtime state
+    [Ready]. *)
 val ws_same_origin_ready : unit -> bool
 
 (** {1 Agent health gauges (test-visible)} *)

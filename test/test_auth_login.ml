@@ -55,6 +55,11 @@ let test_login_with_expiry_uses_caller_env_var () =
         (Masc_domain.agent_role_to_string report.role);
       check string "client env passthrough" "MASC_TOKEN"
         report.mcp_token_env_var;
+      check string "dashboard URL carries only the agent hint"
+        "http://127.0.0.1:8935/dashboard?agent=test-agent"
+        report.dashboard_url;
+      check bool "dashboard URL excludes bearer token" false
+        (contains_substring ~needle:report.bearer_token report.dashboard_url);
       check bool "raw token file exists" true
         (Sys.file_exists report.raw_token_file);
       (match
@@ -115,6 +120,11 @@ let test_login_long_lived_passes_env_var_through () =
       check string "agent" "long-lived-daemon" report.agent_name;
       check string "client env passthrough" "CUSTOM_MCP_TOKEN"
         report.mcp_token_env_var;
+      check string "long-lived dashboard URL carries no bearer"
+        "http://127.0.0.1:8935/dashboard?agent=long-lived-daemon"
+        report.dashboard_url;
+      check bool "long-lived dashboard URL excludes bearer token" false
+        (contains_substring ~needle:report.bearer_token report.dashboard_url);
       (match
          Auth.find_credential_by_token base_path
            ~token:report.bearer_token

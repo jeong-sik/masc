@@ -9,6 +9,11 @@ let metric_auth_strict_unknown_tool_denials =
   Otel_metric_store_core.declare_counter "masc_auth_strict_unknown_tool_denials_total"
 ;;
 
+let metric_auth_tool_permission_undeclared_denials =
+  Otel_metric_store_core.declare_counter
+    "masc_auth_tool_permission_undeclared_denials_total"
+;;
+
 let metric_auth_credential_token_duplicate =
   Otel_metric_store_core.declare_counter "masc_auth_credential_token_duplicate_total"
 ;;

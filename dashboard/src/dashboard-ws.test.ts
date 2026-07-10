@@ -57,7 +57,7 @@ class MockWebSocket {
   onerror: ((event: Event) => void) | null = null
   onclose: ((event: CloseEvent) => void) | null = null
 
-  constructor(readonly url: string) {
+  constructor(readonly url: string, readonly protocols?: string | string[]) {
     mockSockets.push(this)
   }
 
@@ -174,6 +174,12 @@ function wsDiscoveryResponse(
 
 function parseRpc(socket: MockWebSocket, index: number): JsonRpcRequest {
   return JSON.parse(socket.sent[index] ?? '{}') as JsonRpcRequest
+}
+
+function bearerProtocol(token: string): string {
+  const bytes = new TextEncoder().encode(token)
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `masc.bearer.hex.${hex}`
 }
 
 async function flushPromises(): Promise<void> {
@@ -330,21 +336,25 @@ describe('parseWebSocketSseFrames', () => {
 })
 
 describe('dashboard websocket route subscriptions', () => {
-  it('sends hello token from the shared dashboard auth reader', async () => {
+  it('carries the bearer in a subprotocol and never in the URL or hello body', async () => {
     installWebSocketMocks()
     setStoredToken('  ws-token  ')
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     const socket = mockSockets[0]!
-    expect(socket.url).toBe('ws://localhost:3000/ws?token=ws-token')
+    expect(socket.url).toBe('ws://localhost:3000/ws')
+    expect(socket.protocols).toEqual([
+      'masc.dashboard.v1',
+      bearerProtocol('ws-token'),
+    ])
     socket.open()
 
     const hello = parseRpc(socket, 0)
     expect(hello.method).toBe('dashboard/hello')
-    expect(hello.params.token).toBe('ws-token')
+    expect(hello.params).not.toHaveProperty('token')
   })
 
-  it('does not place the bearer in a cross-origin discovery URL', async () => {
+  it('rejects a cross-origin discovery URL instead of sending a bearer', async () => {
     installWebSocketMocks()
     setStoredToken('ws-token')
     vi.mocked(fetch).mockResolvedValueOnce(
@@ -353,7 +363,8 @@ describe('dashboard websocket route subscriptions', () => {
 
     await connectDashboardWS({ tab: 'overview', params: {} })
 
-    expect(mockSockets[0]?.url).toBe('ws://remote.example/ws')
+    expect(mockSockets).toHaveLength(0)
+    expect(dashboardWsLastError.value).toContain('cross-origin websocket URL rejected')
   })
 
   it('omits blank raw stored tokens from websocket hello', async () => {
@@ -362,6 +373,7 @@ describe('dashboard websocket route subscriptions', () => {
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     const socket = mockSockets[0]!
+    expect(socket.protocols).toEqual(['masc.dashboard.v1'])
     socket.open()
 
     const hello = parseRpc(socket, 0)
@@ -476,7 +488,7 @@ describe('dashboard websocket route subscriptions', () => {
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
     expect(dashboardWsLastError.value).toBe(
-      'dashboard websocket unavailable: websocket URL unavailable',
+      'dashboard websocket unavailable: same-origin websocket URL unavailable',
     )
 
     await vi.advanceTimersByTimeAsync(60_000)
@@ -486,14 +498,10 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
-  it('prefers the current page origin when same-origin upgrade is advertised', async () => {
+  it('accepts the current-origin ws_url advertised by discovery', async () => {
     mockSockets.length = 0
     vi.stubGlobal('WebSocket', MockWebSocket)
-    vi.stubGlobal('fetch', vi.fn(async () => wsDiscoveryResponse('ws://127.0.0.1:5173/ws', {
-      same_origin_upgrade_enabled: true,
-      same_origin_upgrade_path: '/ws',
-      same_origin_ws_url: 'ws://127.0.0.1:5173/ws',
-    })))
+    vi.stubGlobal('fetch', vi.fn(async () => wsDiscoveryResponse('ws://localhost:3000/ws')))
 
     await connectDashboardWS({ tab: 'overview', params: {} })
 
@@ -501,32 +509,14 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets[0]!.url).toBe('ws://localhost:3000/ws')
   })
 
-  it('derives the current-origin upgrade URL from same_origin_ws_url when the path is omitted', async () => {
+  it('rejects legacy standalone discovery URLs', async () => {
     mockSockets.length = 0
     vi.stubGlobal('WebSocket', MockWebSocket)
-    vi.stubGlobal('fetch', vi.fn(async () => wsDiscoveryResponse('ws://127.0.0.1:5173/ws', {
-      same_origin_upgrade_enabled: true,
-      same_origin_ws_url: 'ws://127.0.0.1:5173/ws?transport=dashboard',
-    })))
+    vi.stubGlobal('fetch', vi.fn(async () => wsDiscoveryResponse('ws://127.0.0.1:9999/')))
 
     await connectDashboardWS({ tab: 'overview', params: {} })
 
-    expect(mockSockets).toHaveLength(1)
-    expect(mockSockets[0]!.url).toBe('ws://localhost:3000/ws?transport=dashboard')
-  })
-
-  it('falls back to the advertised websocket URL when same-origin upgrade is disabled', async () => {
-    mockSockets.length = 0
-    vi.stubGlobal('WebSocket', MockWebSocket)
-    vi.stubGlobal('fetch', vi.fn(async () => wsDiscoveryResponse('ws://127.0.0.1:8937/', {
-      same_origin_upgrade_enabled: false,
-      same_origin_ws_url: 'ws://localhost:3000/ws',
-    })))
-
-    await connectDashboardWS({ tab: 'overview', params: {} })
-
-    expect(mockSockets).toHaveLength(1)
-    expect(mockSockets[0]!.url).toBe('ws://127.0.0.1:8937/')
+    expect(mockSockets).toHaveLength(0)
   })
 
   it('retries discovery when the server withholds ws_url for this host', async () => {
@@ -538,7 +528,7 @@ describe('dashboard websocket route subscriptions', () => {
         enabled: true,
         listening: true,
         ws_url: null,
-        unavailable_reason: 'standalone_ws_loopback_only',
+        unavailable_reason: 'h2_only_unsupported',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -549,7 +539,7 @@ describe('dashboard websocket route subscriptions', () => {
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
     expect(dashboardWsLastError.value).toBe(
-      'dashboard websocket unavailable: standalone_ws_loopback_only',
+      'dashboard websocket unavailable: h2_only_unsupported',
     )
 
     await vi.advanceTimersByTimeAsync(60_000)
@@ -590,7 +580,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('clears lastError on a clean close so the SSE fallback does not engage', async () => {
+  it('clears the error diagnostic on a clean reconnectable close', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()
     await connectDashboardWS({ tab: 'overview', params: {} })
@@ -598,14 +588,15 @@ describe('dashboard websocket route subscriptions', () => {
     socket.open()
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
     const subscribe = parseRpc(socket, 1)
     socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
-    // Server-initiated clean close (wasClean=true) is not a degraded-WS error:
-    // lastError stays null so the SSE fallback (dashboard-transport-fallback.ts)
-    // does not fire. reconnect still runs.
+    // Server-initiated clean close (wasClean=true) is not a degraded-WS error.
+    // The transport fallback coordinator observes the ready transition itself,
+    // while this module keeps only the error diagnostic contract.
     socket.close({ code: 1001, reason: 'server restart', wasClean: true })
     expect(dashboardWsLastError.value).toBe(null)
     expect(dashboardWsReady.value).toBe(false)
@@ -619,6 +610,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.open()
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
     const subscribe = parseRpc(socket, 1)
     socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
     await flushPromises()
@@ -632,8 +624,8 @@ describe('dashboard websocket route subscriptions', () => {
   it('drops cached websocket discovery from a different origin', async () => {
     installWebSocketMocks()
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>
-    sessionStorage.setItem('masc.dashboard.ws.discovery.v1', JSON.stringify({
-      ws_url: 'ws://127.0.0.1:8937/',
+    sessionStorage.setItem('masc.dashboard.ws.discovery.v2', JSON.stringify({
+      ws_url: 'ws://127.0.0.1:9999/',
     }))
 
     await connectDashboardWS({ tab: 'overview', params: {} })
@@ -675,6 +667,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.open()
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
     const subscribe = parseRpc(socket, 1)
     socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
     await flushPromises()
@@ -698,6 +691,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.open()
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
     const subscribe = parseRpc(socket, 1)
     socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
     await flushPromises()
@@ -722,6 +716,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.open()
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
     const subscribe = parseRpc(socket, 1)
     socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
     await flushPromises()
@@ -745,6 +740,7 @@ describe('dashboard websocket route subscriptions', () => {
     socket.open()
     const hello = parseRpc(socket, 0)
     socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
     const subscribe = parseRpc(socket, 1)
     socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
     await flushPromises()
@@ -780,7 +776,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
-  it('reconnects with a fresh token after hello auth rejection', async () => {
+  it('waits for a credential change after hello protocol rejection', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()
     setStoredToken('stale-token', { source: 'dev', actor: 'dashboard' })
@@ -789,7 +785,11 @@ describe('dashboard websocket route subscriptions', () => {
     const socket = mockSockets[0]!
     socket.open()
     const hello = parseRpc(socket, 0)
-    expect(hello.params.token).toBe('stale-token')
+    expect(socket.protocols).toEqual([
+      'masc.dashboard.v1',
+      bearerProtocol('stale-token'),
+    ])
+    expect(hello.params).not.toHaveProperty('token')
 
     socket.receive({ jsonrpc: '2.0', id: hello.id, error: { message: 'auth rejected' } })
     await flushPromises()
@@ -809,7 +809,11 @@ describe('dashboard websocket route subscriptions', () => {
     retry.open()
     const retryHello = parseRpc(retry, 0)
     expect(retryHello.method).toBe('dashboard/hello')
-    expect(retryHello.params.token).toBe('fresh-token')
+    expect(retry.protocols).toEqual([
+      'masc.dashboard.v1',
+      bearerProtocol('fresh-token'),
+    ])
+    expect(retryHello.params).not.toHaveProperty('token')
   })
 
   it('keeps reconnecting after a token change cancels an in-flight hello', async () => {
@@ -821,7 +825,11 @@ describe('dashboard websocket route subscriptions', () => {
     const staleSocket = mockSockets[0]!
     staleSocket.open()
     const staleHello = parseRpc(staleSocket, 0)
-    expect(staleHello.params.token).toBe('stale-token')
+    expect(staleSocket.protocols).toEqual([
+      'masc.dashboard.v1',
+      bearerProtocol('stale-token'),
+    ])
+    expect(staleHello.params).not.toHaveProperty('token')
 
     setStoredToken('fresh-token', { source: 'manual' })
     await flushPromises()
@@ -834,7 +842,11 @@ describe('dashboard websocket route subscriptions', () => {
     freshSocket.open()
     const freshHello = parseRpc(freshSocket, 0)
     expect(freshHello.method).toBe('dashboard/hello')
-    expect(freshHello.params.token).toBe('fresh-token')
+    expect(freshSocket.protocols).toEqual([
+      'masc.dashboard.v1',
+      bearerProtocol('fresh-token'),
+    ])
+    expect(freshHello.params).not.toHaveProperty('token')
     freshSocket.receive({ jsonrpc: '2.0', id: freshHello.id, result: {} })
     await flushPromises()
     const subscribe = parseRpc(freshSocket, 1)
@@ -873,6 +885,7 @@ describe('dashboard websocket route subscriptions', () => {
     retry.open()
     const retryHello = parseRpc(retry, 0)
     expect(retryHello.method).toBe('dashboard/hello')
+    expect(retry.protocols).toEqual(['masc.dashboard.v1'])
     expect(retryHello.params).not.toHaveProperty('token')
   })
 
@@ -946,7 +959,7 @@ describe('dashboard websocket route subscriptions', () => {
 
     const subscribe = parseRpc(firstSocket, 1)
     expect(subscribe.method).toBe('dashboard/subscribe')
-    expect(dashboardWsReady.value).toBe(true)
+    expect(dashboardWsReady.value).toBe(false)
 
     await vi.advanceTimersByTimeAsync(DASHBOARD_WS_RPC_TIMEOUT_MS)
     await flushPromises()

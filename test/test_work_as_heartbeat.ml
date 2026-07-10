@@ -84,15 +84,6 @@ let test_turn_timeout_default () =
 
 (* ── KeeperGrpc config defaults ────────────────────────── *)
 
-let test_grpc_max_reconnect_default () =
-  check int "default grpc max reconnect 5" 5
-    Cfg.KeeperGrpc.max_reconnect_attempts
-
-let test_grpc_max_reconnect_range () =
-  let v = Cfg.KeeperGrpc.max_reconnect_attempts in
-  check bool "reconnect >= 1" true (v >= 1);
-  check bool "reconnect <= 20" true (v <= 20)
-
 let test_grpc_backoff_default () =
   check (float 0.1) "default grpc backoff 5.0s" 5.0
     Cfg.KeeperGrpc.reconnect_backoff_sec
@@ -243,8 +234,6 @@ let () =
       test_case "turn timeout default is 600" `Quick test_turn_timeout_default;
     ];
     "grpc_config", [
-      test_case "max_reconnect default" `Quick test_grpc_max_reconnect_default;
-      test_case "max_reconnect range" `Quick test_grpc_max_reconnect_range;
       test_case "backoff default" `Quick test_grpc_backoff_default;
       test_case "backoff range" `Quick test_grpc_backoff_range;
     ];

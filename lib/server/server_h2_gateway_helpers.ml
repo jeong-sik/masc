@@ -1,3 +1,15 @@
+let httpun_headers_of_h2 headers =
+  let fields = H2.Headers.to_list headers in
+  match H2.Headers.get headers ":authority" with
+  | None -> Httpun.Headers.of_list fields
+  | Some authority ->
+      let fields =
+        List.filter
+          (fun (name, _) -> not (String.equal name "host"))
+          fields
+      in
+      Httpun.Headers.of_list (("host", authority) :: fields)
+
 let maybe_compress ?(compress = true) h2_reqd body =
   let req = H2.Reqd.request h2_reqd in
   Http_response_payload.compress_body

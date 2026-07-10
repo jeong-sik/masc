@@ -133,8 +133,8 @@ let safe_respond_with_string reqd response body =
       match Late_response.classify_write_failure exn with
       | Some msg ->
           (* Recognised late-response race (httpun "invalid state" / closed
-             writer).  Aligned with [Server_ws_standalone] heartbeat /
-             send_pong / handler sites which already log this at debug —
+             writer).  Aligned with WebSocket heartbeat / handler sites which
+             already log this at debug —
              closes the #13082 review N-of-M leftover: the SSOT classifier
              was unified but this site kept emitting WARN, drowning the
              [None] branch's genuinely-unexpected signal in routine

@@ -61,7 +61,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0022 | Runtime Attempt Liveness Contract | Draft | 03d5feaf25 2026-07-08 | - |
 | 0024 | Ollama Runtime Integration + KV Cache Optimization | Draft | 03d5feaf25 2026-07-08 | - |
 | 0025 | Tiered Small-Model Runtime (4B → 9B → 70B+) | Draft | 03d5feaf25 2026-07-08 | - |
-| 0027 | Retired tension and meta-cognition draft | Superseded | a7eb9e6845 2026-07-10 | - |
+| 0027 | Retired tension and meta-cognition draft | Superseded | 102863d7e2 2026-07-10 | - |
 | 0029 | Dashboard Fiber-Batched Aggregation | Active | 03d5feaf25 2026-07-08 | - |
 | 0032 | Environment Knob Unification | Draft | 03d5feaf25 2026-07-08 | - |
 | 0034 | d — release_stale_claims agent-side sync | Draft | 03d5feaf25 2026-07-08 | - |
@@ -113,7 +113,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0090 | Write-side success-model attribution — finish N-of-M migration | Implemented | 03d5feaf25 2026-07-08 | - |
 | 0091 | Execute tool: cmd string → typed Argv schema (lexer/validator 박멸) | Implemented | 03d5feaf25 2026-07-08 | - |
 | 0093 | Board persistence — path unification (snapshot vs append) | Implemented | 03d5feaf25 2026-07-08 | - |
-| 0094 | Compact cooldown semantics split decision record | Superseded | a7eb9e6845 2026-07-10 | - |
+| 0094 | Compact cooldown semantics split decision record | Superseded | 102863d7e2 2026-07-10 | - |
 | 0095 | Provider-D-compat provider streaming wire-up | Implemented | 03d5feaf25 2026-07-08 | - |
 | 0096 | Keeper Turn Contract — multi-turn reasoning + runtime SPOF root-fix | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0097 | Keeper sandbox container reuse (long-running sandbox per keeper) | Active | 03d5feaf25 2026-07-08 | - |
@@ -242,7 +242,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0239 | Semantic-identity guards for keeper memory and anti-thrash | Draft | a7eb9e6845 2026-07-10 | - |
 | 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0241 | external-attention store lifecycle: read-side bound, retention, and typed tai... | Draft | 03d5feaf25 2026-07-08 | - |
-| 0242 | Retired continuity prose-filter draft | Superseded | a7eb9e6845 2026-07-10 | - |
+| 0242 | Retired continuity prose-filter draft | Superseded | 102863d7e2 2026-07-10 | - |
 | 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | 03d5feaf25 2026-07-08 | - |
 | 0244 | Memory OS recall: turn-seeded deterministic lexical retrieval, with provenanc... | Draft | 03d5feaf25 2026-07-08 | - |
 | 0245 | Exempt goalless tasks from the per-goal WIP claim cap | Withdrawn | 03d5feaf25 2026-07-08 | - |
@@ -275,26 +275,26 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0272 | Memory OS — Episode Log Retention (bounded append for events.jsonl / episodes) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0273 | Dashboard-driven keeper config & runtime persistence | Draft | a7eb9e6845 2026-07-10 | - |
 | 0274 | Workspace base_path SSOT — retire env runtime read, thread Workspace.config | Draft | 03d5feaf25 2026-07-08 | - |
-| 0275 | Retired cognitive-triple removal record | Implemented | a7eb9e6845 2026-07-10 | - |
-| 0276 | Remove Keeper social-model self-report protocol | Implemented | a7eb9e6845 2026-07-10 | - |
+| 0275 | Retired cognitive-triple removal record | Implemented | 102863d7e2 2026-07-10 | - |
+| 0276 | Remove Keeper social-model self-report protocol | Implemented | 102863d7e2 2026-07-10 | - |
 | 0277 | Fusion: 이종 패널 그룹(heterogeneous panel groups) + 발동 예산 제거 | Draft | 03d5feaf25 2026-07-08 | - |
 | 0278 | Fusion: 같은 model을 다른 prompt로 (same-model panels via panel labels) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0279 | Typed completion-contract reason — structured backend emit replacing colon-co... | Draft | 03d5feaf25 2026-07-08 | - |
 | 0280 | Fusion: validated preset type (Parse, don't validate) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0281 | WebSocket transport SSOT — separate upgrade-attachment from session-protocol,... | Draft | 03d5feaf25 2026-07-08 | - |
-| 0282 | Reduce Keeper persona to ordinary instructions | Implemented | a7eb9e6845 2026-07-10 | - |
+| 0282 | Reduce Keeper persona to ordinary instructions | Implemented | 102863d7e2 2026-07-10 | - |
 | 0283 | Fusion: judge-of-judges 위상 (flat/staged reducer) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0284 | Keeper Guidance Visibility-Leg Drift Guard | Draft | 4a48172c29 2026-07-10 | - |
 | 0285 | Memory OS — Self-Observation Claim Volatility (closing RFC-0259's internal-st... | Draft | a7eb9e6845 2026-07-10 | - |
 | 0286 | exec/keeper 스택: redirect & turn-termination 경계 소유권 | Draft | 03d5feaf25 2026-07-08 | - |
 | 0287 | ws-direct — a single masc-owned WebSocket stack for server and client | Draft | 03d5feaf25 2026-07-08 | - |
-| 0288 | Remove per-Keeper goal-horizon fields | Implemented | a7eb9e6845 2026-07-10 | - |
+| 0288 | Remove per-Keeper goal-horizon fields | Implemented | 102863d7e2 2026-07-10 | - |
 | 0289 | Extract progress-classification into its own library for a single substantive... | Draft | 03d5feaf25 2026-07-08 | - |
 | 0290 | Generic keeper background-work tool (spawn → wake-on-completion) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0291 | Closed SSE event-type sum + typed broadcast — RFC-0004 Phase A0 Wave 2 increment | Draft | 03d5feaf25 2026-07-08 | - |
 | 0292 | Complete lib/auth de-duplication — remove drifted Masc.Auth* test copies | Draft | 03d5feaf25 2026-07-08 | - |
 | 0293 | Keeper execution-endpoint backend (host / ephemeral-docker / persistent-docke... | Draft | 03d5feaf25 2026-07-08 | - |
-| 0294 | Remove workspace Goal horizon | Implemented | a7eb9e6845 2026-07-10 | - |
+| 0294 | Remove workspace Goal horizon | Implemented | 102863d7e2 2026-07-10 | - |
 | 0295 | Fleet RuntimeBand 5th value — transient (busy tone dead-branch recovery) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0296 | CI skip-gate main-push safety-net: always run Build and Test on non-PR events | Draft | 03d5feaf25 2026-07-08 | - |
 | 0297 | Keeper lifecycle gate consistency & observability | Draft | a7eb9e6845 2026-07-10 | - |
@@ -315,7 +315,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0312 | Keeper repo mappings are advisory default scope, not access caps | Accepted | 03d5feaf25 2026-07-08 | - |
 | 0313 | Keeper Existence Invariance (failure modulates pacing and routing, never exis... | Draft | 03d5feaf25 2026-07-08 | - |
 | 0314 | Keeper Recurring Producer (register the autonomous-repeat tasks the runtime a... | Draft | 03d5feaf25 2026-07-08 | - |
-| 0315 | Typed wake-turn context and self-directed work lane | Active | a7eb9e6845 2026-07-10 | - |
+| 0315 | Typed wake-turn context and self-directed work lane | Active | 102863d7e2 2026-07-10 | - |
 | 0316 | Merge gating convergence: enforce_admins=true + live Branch Protection Watchdog | Draft | 03d5feaf25 2026-07-08 | - |
 | 0317 | In-process Slack connector (Socket Mode) | In progress (PR-1/PR-2 landed; PR-3 implemented; PR-4 sidecar removal pending) | d72c574d8f 2026-07-09 | - |
 | 0318 | Operator-overlay LLM approval resolver for non-critical keeper HITL | Draft | 03d5feaf25 2026-07-08 | - |
@@ -331,7 +331,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0328 | Keeper perseveration: grounding-gated memory promotion, active residue purge,... | Draft | a7eb9e6845 2026-07-10 | - |
 | 0329 | Excise the payload-blind Execute governance gate: typed Shell-IR risk with fa... | Draft | 626afed7b7 2026-07-10 | - |
 | 0331 | Typed tool effect class (retire the `read_only_patterns` string classifier) | Draft | 7662c42bb3 2026-07-09 | - |
-| 0332 | Rejected heuristic memory write dedup draft | Rejected | a7eb9e6845 2026-07-10 | - |
+| 0332 | Rejected heuristic memory write dedup draft | Rejected | 102863d7e2 2026-07-10 | - |
 | 0333 | Deterministic cost↔success frontier join for the eval harness | Draft | ae027bed8f 2026-07-09 | - |
 | 0334 | Board wake as mailbox delivery: enqueue-always, cap only the wake, one digest... | Draft | 2b0141503c 2026-07-10 | - |
 | 0335 | TOML as the Single Settings Source | Draft | e5e4c44f2b 2026-07-09 | - |
@@ -342,6 +342,8 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 03d5feaf25 2026-07-08 | - |
 | runt | Per-runtime note field & dashboard surfacing | Draft | 03d5feaf25 2026-07-08 | - |
 | type | # Typed egress-resource capability — durable-remote creation beyond gh subcom... | Draft | 03d5feaf25 2026-07-08 | - |
+
+
 
 
 

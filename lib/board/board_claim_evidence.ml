@@ -236,82 +236,19 @@ let load_records path =
 ;;
 
 (* --- Phase 1: target-post high-risk detection --- *)
+(* claim_kind type and helpers imported from Board_claim_gate (SSOT). *)
 
-(** Typed claim kinds — single source of truth. *)
-type claim_kind =
-  | Artifact_exists
-  | Artifact_missing
-  | Artifact_created
-  | Artifact_endorsed
-  | Verification_endorsement
-  | Task_completion
-  | Pr_state
-  | Retraction_ack
-  | Opinion_or_routing
-;;
-
-let claim_kind_is_high_risk = function
-  | Opinion_or_routing -> false
-  | _ -> true
-;;
-
-let claim_kind_of_string raw =
-  let normal = raw |> String.trim |> String.lowercase_ascii
-    |> String.map (function '-' | ' ' -> '_' | ch -> ch)
-  in
-  match normal with
-  | "artifact_exists" -> Some Artifact_exists
-  | "artifact_missing" -> Some Artifact_missing
-  | "artifact_created" -> Some Artifact_created
-  | "artifact_endorsed" -> Some Artifact_endorsed
-  | "verification_endorsement" -> Some Verification_endorsement
-  | "task_completion" -> Some Task_completion
-  | "pr_state" -> Some Pr_state
-  | "retraction_ack" -> Some Retraction_ack
-  | "opinion_or_routing" | "opinion" | "routing" -> Some Opinion_or_routing
-  | _ -> None
-;;
-
-(** [post_has_high_risk_evidence post_id] scans the sidecar ledger for
-    any record targeting [post_id] that carries typed claims beyond
-    [opinion_or_routing].  Used by the board claim gate (Phase 1) to
-    force source_post_snapshot requirements on replies to high-risk
-    posts even when the replying keeper omits explicit claim args.
-
-    Unknown/unrecognised claim strings are treated as high-risk
-    (fail-closed): if the sidecar contains a claim we cannot parse,
-    we assume it is high-risk rather than silently ignoring it. *)
+(** [post_has_high_risk_evidence post_id] uses the projection_lookup
+    index to check whether any record targeting [post_id] carries typed
+    claims beyond [opinion_or_routing].  Used by the board claim gate
+    (Phase 1) to force source_post_snapshot requirements on replies to
+    high-risk posts even when the replying keeper omits explicit claim
+    args. *)
 let post_has_high_risk_evidence post_id =
-  let records = load_records (sidecar_path ()) in
-  List.exists
-    (fun json ->
-      let matches_target =
-        match string_opt "target_post_id" json with
-        | Some pid -> String.equal pid post_id
-        | None -> false
-      in
-      if not matches_target
-      then false
-      else
-        let claims =
-          match assoc_opt "claims" json with
-          | Some (`List items) ->
-            List.filter_map
-              (function `String s -> Some s | _ -> None)
-              items
-          | _ -> []
-        in
-        (* Any claim beyond opinion_or_routing makes the post high-risk.
-           Unknown/unrecognised claim strings are treated as high-risk
-           (fail-closed): if the sidecar contains a claim we cannot parse,
-           we assume it is high-risk rather than silently ignoring it. *)
-        List.exists
-          (fun c ->
-            match claim_kind_of_string c with
-            | Some k -> claim_kind_is_high_risk k
-            | None -> true)
-          claims)
-    records
+  let lookup = projection_lookup () in
+  match lookup post_id with
+  | Some _proj -> true
+  | None -> false
 ;;
 
 let projection_lookup () =

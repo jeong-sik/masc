@@ -483,6 +483,23 @@ let test_wrong_state_and_coordinate_are_rejected () =
 ;;
 
 let test_symlinked_store_boundaries_are_rejected () =
+  with_temp_dir "memory-job-masc-parent-symlink" (fun base_path ->
+    with_temp_dir "memory-job-external-masc" (fun external_masc ->
+      let job = make_job 1 in
+      Unix.symlink
+        external_masc
+        (Masc.Common.masc_dir_from_base_path ~base_path);
+      (match Store.stage_awaiting_turn_commit ~base_path job with
+       | Error (Store.Io_error { operation = Store.Inspect; _ }) -> ()
+       | Error error ->
+         Alcotest.failf
+           "wrong intermediate-parent error: %s"
+           (Store.error_to_string error)
+       | Ok _ -> Alcotest.fail "symlinked .masc parent was accepted");
+      Alcotest.(check int)
+        "intermediate target untouched"
+        0
+        (Array.length (Sys.readdir external_masc))));
   with_temp_dir "memory-job-root-symlink" (fun base_path ->
     let job = make_job 1 in
     let jobs_root =
@@ -631,7 +648,7 @@ let test_discovery_isolates_malformed_keeper () =
 let test_typed_boundaries_reject_invalid_values () =
   List.iter
     (fun keeper_name ->
-       match
+       (match
          Store.make_job
            ~keeper_name
            ~trace_id:"trace-k1"
@@ -648,7 +665,23 @@ let test_typed_boundaries_reject_invalid_values () =
            keeper_name
            (Store.error_to_string error)
        | Ok _ ->
-         Alcotest.failf "reserved keeper path segment %S was accepted" keeper_name)
+         Alcotest.failf "reserved keeper path segment %S was accepted" keeper_name);
+       (match
+          Store.operation_stage_path_for_keepers_dir
+            ~keepers_dir:"/unused"
+            ~keeper_name
+            ~operation_id:(String.make 64 'a')
+        with
+        | Error (Store.Invalid_keeper_name _) -> ()
+        | Error error ->
+          Alcotest.failf
+            "wrong operation-stage keeper error for %S: %s"
+            keeper_name
+            (Store.error_to_string error)
+        | Ok _ ->
+          Alcotest.failf
+            "operation stage accepted reserved keeper segment %S"
+            keeper_name))
     [ "."; ".." ];
   (match
      Store.make_job

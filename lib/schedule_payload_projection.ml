@@ -5,6 +5,10 @@ type known_kind =
   | Board_post
   | Keeper_wake
 
+type risk_policy =
+  | Requires_side_effecting
+  | Intrinsic_non_side_effecting of Schedule_domain.risk_class
+
 type support_status =
   | Supported
   | Unsupported
@@ -86,13 +90,32 @@ let classify_kind = function
   | _ -> None
 ;;
 
+let risk_policy_of_kind = function
+  | Board_post -> Requires_side_effecting
+  | Keeper_wake -> Intrinsic_non_side_effecting Schedule_domain.Reminder_only
+;;
+
 (* The intrinsic risk of a payload kind, when the kind itself determines it
    rather than the caller. [Keeper_wake] is always [Reminder_only] (an internal
    self-wake, never a human-grant action); [Board_post] is caller-specified
    (it may write to the board and require approval), so it returns [None]. *)
-let intrinsic_risk_class_of_kind = function
-  | Keeper_wake -> Some Schedule_domain.Reminder_only
-  | Board_post -> None
+let intrinsic_risk_class_of_kind kind =
+  match risk_policy_of_kind kind with
+  | Requires_side_effecting -> None
+  | Intrinsic_non_side_effecting risk_class -> Some risk_class
+;;
+
+let risk_class_satisfies_policy kind risk_class =
+  match risk_policy_of_kind kind with
+  | Requires_side_effecting -> Schedule_domain.is_side_effecting risk_class
+  | Intrinsic_non_side_effecting _ ->
+    not (Schedule_domain.is_side_effecting risk_class)
+;;
+
+let side_effecting_risk_required kind =
+  match risk_policy_of_kind kind with
+  | Requires_side_effecting -> true
+  | Intrinsic_non_side_effecting _ -> false
 ;;
 
 let assoc_string key fields =
@@ -193,7 +216,7 @@ let validate_board_post_common ~content_error view =
 
 let validate_board_post_for_creation ~risk_class view =
   let* () = board_schema_version_error ~creation:true view.schema_version in
-  if not (Schedule_domain.is_side_effecting risk_class)
+  if not (risk_class_satisfies_policy Board_post risk_class)
   then
     Error
       (board_post_kind
@@ -208,7 +231,11 @@ let validate_board_post_for_creation ~risk_class view =
 
 let validate_board_post_for_dispatch (request : Schedule_domain.schedule_request) view =
   let* () = board_schema_version_error ~creation:false view.schema_version in
-  if not (Schedule_domain.is_side_effecting request.Schedule_domain.risk_class)
+  if
+    not
+      (risk_class_satisfies_policy
+         Board_post
+         request.Schedule_domain.risk_class)
   then Error (board_post_kind ^ " requires a side-effecting risk_class")
   else
     validate_board_post_common
@@ -252,7 +279,7 @@ let validate_keeper_wake_body body =
    (it writes to the shared board and legitimately requires approval). *)
 let validate_keeper_wake_for_creation ~risk_class view =
   let* () = keeper_wake_schema_version_error ~creation:true view.schema_version in
-  if Schedule_domain.is_side_effecting risk_class
+  if not (risk_class_satisfies_policy Keeper_wake risk_class)
   then
     Error
       (keeper_wake_kind
@@ -440,7 +467,7 @@ let known_kind_contract_to_yojson kind =
       [ "kind", `String (known_kind_to_string kind)
       ; "schema_versions", `List [ `Int 1 ]
       ; "dispatch_tool", `String (dispatch_tool_name kind)
-      ; "side_effecting_risk_required", `Bool true
+      ; "side_effecting_risk_required", `Bool (side_effecting_risk_required kind)
       ; "creation_contract", `String "per_kind_validator_required"
       ; "dispatch_contract", `String "consumer_supported"
       ]

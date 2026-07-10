@@ -83,6 +83,7 @@
   test_auth_credential_index_cache
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
+  test_dashboard_dev_token_auth
   test_mcp_error_code
   test_error_body_wire_shape
   test_session_lifecycle_event

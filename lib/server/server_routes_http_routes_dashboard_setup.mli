@@ -28,9 +28,6 @@ val oas_telemetry_provider_param : Httpun.Request.t -> string option
     n=0 preserved. Exposed for the freeze-guard test. *)
 val resolve_telemetry_n : has_time_window:bool -> n_param:string option -> int
 
-val dashboard_dev_token_path : string -> string
-val ensure_dashboard_dev_token : string -> (string, string) result
-
 val handle_broadcast :
   Mcp_server.server_state -> string -> Httpun.Reqd.t -> string -> unit
 val handle_dashboard_link_previews :

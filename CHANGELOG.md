@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- Dashboard dev-token issuance now rejects missing, malformed, and non-loopback request Hosts before credential I/O; rotates legacy Admin bearers to Worker through a resumable fail-closed journal; and requires catalog-destructive tools such as operator actions to carry Admin credentials.
 - Prompt overrides now persist in a schema-versioned envelope bound to the SHA256 revision of each prompt body and template-variable contract. Legacy or malformed files and contract-drifted entries fail closed with observable fallback, writes use atomic replacement, and dashboard set/clear mutations commit to memory only after persistence succeeds.
 
 ## [0.20.1] - 2026-07-10

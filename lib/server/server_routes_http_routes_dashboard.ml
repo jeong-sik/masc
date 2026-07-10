@@ -380,6 +380,7 @@ let respond_runtime_config_reload state agent_name ~operation request reqd =
       ~request reqd msg
 
 let add_routes ~sw ~clock router =
+  let dashboard_dev_token_mutex = Eio.Mutex.create () in
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
@@ -490,11 +491,9 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->
        with_public_read handle_dashboard_workspace request reqd)
-  (* Dev-only shared bearer for the dashboard UI. Served exclusively when the
-     server binds to loopback and strict-auth env overrides are disabled, so
-     that a LAN deployment never hands out a token over the wire. The token is
-     canonicalized to the [dashboard] actor and persisted at
-     [.masc/auth/dashboard.token]. *)
+  (* Dev-only Worker bearer for the dashboard UI. Bind-host admission is one
+     layer; the request Host is independently parsed and admitted before any
+     credential/token I/O to close DNS-rebinding access. *)
   |> Http.Router.get "/api/v1/dashboard/dev-token" (fun request reqd ->
        if (not (http_auth_bind_is_loopback ()))
           || http_auth_strict_enabled () then
@@ -503,15 +502,39 @@ let add_routes ~sw ~clock router =
        else
          with_public_read (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
-           let raw_result = ensure_dashboard_dev_token base_path in
+           let raw_result =
+             Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token_for_request
+               ~mutex:dashboard_dev_token_mutex
+               ~request:req
+               ~base_path
+           in
            begin
              match raw_result with
              | Ok raw ->
                Http.Response.json_value ~request:req
                  (`Assoc [ ("token", `String raw) ]) reqd
-             | Error msg ->
-               Http.Response.json_value ~status:`Internal_server_error
-                 ~request:req (`Assoc [ ("error", `String msg) ]) reqd
+             | Error err ->
+               let status =
+                 match err with
+                 | Server_routes_http_dashboard_dev_token.Request_host_rejected _ ->
+                     `Forbidden
+                 | _ -> `Internal_server_error
+               in
+               let code =
+                 Server_routes_http_dashboard_dev_token.error_code err
+               in
+               let message =
+                 Server_routes_http_dashboard_dev_token.error_to_string err
+               in
+               Log.Auth.error
+                 "dashboard dev-token denied code=%s detail=%s"
+                 code message;
+               Http.Response.json_value ~status ~request:req
+                 (`Assoc
+                    [ ("error", `String message)
+                    ; ("error_code", `String code)
+                    ])
+                 reqd
            end) request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->
        let force = Server_utils.bool_query_param request "force" ~default:false in

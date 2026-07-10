@@ -160,6 +160,23 @@ val host_port_scheme_of_origin :
   string -> (string * int option * string option) option
 (** Parse an [Origin] header value into [(host, port, scheme)]. *)
 
+type request_host_rejection =
+  | Missing_request_host
+  | Malformed_request_host
+  | Non_loopback_request_host of string
+
+type admitted_request_host = {
+  host : string;
+  port : int option;
+}
+
+val admit_loopback_request_host :
+  Httpun.Request.t -> (admitted_request_host, request_host_rejection) result
+(** Parse the request [Host] authority and admit exact loopback hosts only.
+    Missing/malformed authorities and non-loopback hosts remain distinct typed
+    rejections.  This is the DNS-rebinding admission gate for endpoints that
+    expose local credentials. *)
+
 val host_port_of_request : Httpun.Request.t -> (string * int option) option
 (** Host/port from the request's [Host] header. *)
 

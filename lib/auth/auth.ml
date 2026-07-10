@@ -283,7 +283,12 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
   if is_known_or_internal_tool_name tool_name
   then
-    if has_permission role CanBroadcast
+    let permission =
+      match (Tool_catalog.metadata tool_name).destructive with
+      | Some true -> CanAdmin
+      | Some false | None -> CanBroadcast
+    in
+    if has_permission role permission
     then Ok ()
     else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
   else (
@@ -295,11 +300,10 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
 ;;
 
 (** Role-based tool authorization.
-    Resolves the caller role and enforces generic internal-tool access.
-    Invalid/expired tokens are rejected (not silently downgraded).
-
-    Known or [masc_*] tools require at least Worker; unknown external tools are
-    forbidden. *)
+    Resolves the caller role and enforces catalog-owned destructive metadata:
+    destructive tools require [CanAdmin], while other known/internal tools
+    require [CanBroadcast]. Invalid/expired tokens are rejected rather than
+    silently downgraded. *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e
@@ -367,5 +371,4 @@ let is_auth_enabled config : bool =
   let cfg = load_auth_config config in
   cfg.enabled
 ;;
-
 

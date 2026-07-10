@@ -37,13 +37,6 @@ let oas_telemetry_limit_param req =
 
 let oas_telemetry_provider_param req = trimmed_query_param req "provider"
 
-(* Dashboard dev-token cluster extracted to
-   [Server_routes_http_dashboard_dev_token] (godfile decomp). *)
-
-let dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.dashboard_dev_token_path
-let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token
-
-
 (** Broadcast handler: parse JSON body, extract "message" string field, and
     relay via Workspace.broadcast.  Error responses are encoded through Yojson so
     exception messages cannot break JSON framing via embedded quotes. *)

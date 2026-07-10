@@ -442,20 +442,55 @@ let host_port_scheme_of_origin origin =
       origin (Printexc.to_string exn);
     None
 
+type request_host_rejection =
+  | Missing_request_host
+  | Malformed_request_host
+  | Non_loopback_request_host of string
+
+type admitted_request_host = {
+  host : string;
+  port : int option;
+}
+
+let parse_request_host_header raw =
+  let authority = String.trim raw in
+  if String.equal authority "" then
+    None
+  else
+    try
+      let uri = Uri.of_string ("http://" ^ authority) in
+      match
+        Uri.scheme uri,
+        Uri.userinfo uri,
+        Uri.host uri,
+        Uri.path uri,
+        Uri.query uri,
+        Uri.fragment uri
+      with
+      | Some "http", None, Some host, "", [], None ->
+          let host = String.lowercase_ascii (String.trim host) in
+          if String.equal host "" then None else Some { host; port = Uri.port uri }
+      | _ -> None
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> None
+
+let admit_loopback_request_host request =
+  match Httpun.Headers.get request.Httpun.Request.headers "host" with
+  | None -> Error Missing_request_host
+  | Some raw ->
+      (match parse_request_host_header raw with
+       | None -> Error Malformed_request_host
+       | Some ({ host; _ } as admitted) when is_loopback_host host -> Ok admitted
+       | Some { host; _ } -> Error (Non_loopback_request_host host))
+
 let host_port_of_request request =
   match Httpun.Headers.get request.Httpun.Request.headers "host" with
   | None -> None
-  | Some host_header -> (
-      try
-        let uri = Uri.of_string ("http://" ^ host_header) in
-        match Uri.host uri with
-        | None -> None
-        | Some host ->
-            Some (String.trim host |> String.lowercase_ascii, Uri.port uri)
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Log.Auth.debug "host_port_of_request: parse failed for %S: %s"
-          host_header (Printexc.to_string exn);
-        None)
+  | Some host_header ->
+      Option.map
+        (fun { host; port } -> host, port)
+        (parse_request_host_header host_header)
 
 (* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
    can be toggled without restarting the server process. *)
@@ -810,11 +845,22 @@ let resolve_agent_name_for_auth ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =
   resolve_agent_name_for_auth_raw ~base_path request ~token
 
+let require_resolved_authorization_actor = function
+  | Some agent_name -> Ok agent_name
+  | None ->
+      Error
+        (Masc_domain.Auth
+           (Masc_domain.Auth_error.Unauthorized
+              { reason = Missing_token
+              ; message =
+                  "Authenticated agent identity required (bearer credential or explicit actor in optional-token mode)."
+              }))
+
 let authorize_permission_request ~base_path ~permission request :
     (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
-  let* auth_cfg =
+  let* _auth_cfg =
     ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg
     |> Result.map_error (fun msg ->
           Masc_domain.Auth
@@ -822,23 +868,8 @@ let authorize_permission_request ~base_path ~permission request :
                { reason = Generic; message = msg }))
   in
   let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
-  (* NDT-OK: pre-existing dashboard fallback for non-token dashboard reads.
-     Token-bound requests without a resolved agent fail closed in the guard below. *)
-  let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-  if
-    auth_cfg.enabled && auth_cfg.require_token && token <> None
-    && agent_name_opt = None
-  then
-    Error
-      (Masc_domain.Auth
-         (Masc_domain.Auth_error.Unauthorized
-            { reason = Missing_token
-            ; message =
-                "Agent name required (X-Gate-Agent / X-MASC-Agent or \
-                 token-bound credential)"
-            }))
-  else
-    Auth.check_permission base_path ~agent_name ~token ~permission
+  let* agent_name = require_resolved_authorization_actor agent_name_opt in
+  Auth.check_permission base_path ~agent_name ~token ~permission
 
 let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
@@ -851,7 +882,7 @@ let authorize_tool_request ~base_path ~tool_name request :
     if Option.is_some token then Ok ()
     else ensure_same_origin_browser_request request
   in
-  let* auth_cfg =
+  let* _auth_cfg =
     ensure_strict_http_token_auth
       ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
     |> Result.map_error (fun msg ->
@@ -860,23 +891,8 @@ let authorize_tool_request ~base_path ~tool_name request :
                { reason = Generic; message = msg }))
   in
   let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
-  (* NDT-OK: pre-existing dashboard fallback for non-token dashboard tool requests.
-     Token-bound requests without a resolved agent fail closed in the guard below. *)
-  let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-  if
-    auth_cfg.enabled && auth_cfg.require_token && token <> None
-    && agent_name_opt = None
-  then
-    Error
-      (Masc_domain.Auth
-         (Masc_domain.Auth_error.Unauthorized
-            { reason = Missing_token
-            ; message =
-                "Agent name required (X-Gate-Agent / X-MASC-Agent or \
-                 token-bound credential)"
-            }))
-  else
-    Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name
+  let* agent_name = require_resolved_authorization_actor agent_name_opt in
+  Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name
 
 let authorize_token_bound_permission_request ~base_path ~permission request :
     (string, Masc_domain.masc_error) result =

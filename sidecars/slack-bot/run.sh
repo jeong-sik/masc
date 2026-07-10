@@ -32,18 +32,42 @@ LOG_DIR="$BASE_PATH/.masc/logs"
 LOG_FILE="$LOG_DIR/slack-sidecar-$(date +%Y%m%d).log"
 STATUS_FILE="$BASE_PATH/.gate/runtime/slack/status.json"
 
+ensure_venv() {
+  # Bootstrap a local .venv from requirements.txt on first run so the bot (and
+  # the backend schema fetch) work on a host with only python3 + pip (no uv).
+  #
+  # Success-sentinel (.deps-ok) + flock: a failed or partial pip install leaves
+  # the sentinel absent, so the next call retries (self-healing instead of a
+  # poisoned venv that fails forever on the cached `test -x`). Concurrent
+  # callers serialize on .venv/.bootstrap.lock so none runs schema_dump against
+  # a half-built env. Stderr is piped through (no `-q`) so failures stay visible.
+  if [[ -f .venv/.deps-ok ]]; then
+    return
+  fi
+  mkdir -p .venv
+  flock .venv/.bootstrap.lock bash -c '
+    if [[ ! -f .venv/.deps-ok ]]; then
+      python3 -m venv .venv &&
+        .venv/bin/pip install -r requirements.txt 2>&1 &&
+        touch .venv/.deps-ok
+    fi
+  '
+}
+
 cmd="${1:-start}"
 case "$cmd" in
   start)
     cd "$(script_dir)"
-    if [[ ! -f .env ]]; then
-      echo "ERROR: .env missing. Copy .env.example and fill SLACK_BOT_TOKEN + SLACK_APP_TOKEN." >&2
+    CONFIG_TOML="$BASE_PATH/.gate/runtime/slack/config.toml"
+    if [[ ! -f .env && ! -f "$CONFIG_TOML" ]]; then
+      echo "ERROR: Slack config missing. Save tokens in the dashboard, or copy .env.example and fill SLACK_BOT_TOKEN + SLACK_APP_TOKEN." >&2
       exit 1
     fi
+    ensure_venv
     mkdir -p "$LOG_DIR"
     printf 'Starting Slack sidecar\n  MASC_BASE_PATH=%s\n  log file:      %s\n' \
       "$BASE_PATH" "$LOG_FILE" >&2
-    python -m src 2>&1 | tee -a "$LOG_FILE"
+    .venv/bin/python -m src 2>&1 | tee -a "$LOG_FILE"
     ;;
   tail)
     if [[ ! -f "$LOG_FILE" ]]; then
@@ -68,7 +92,8 @@ case "$cmd" in
   diagnostics)
     cd "$(script_dir)"
     shift || true
-    python -m src diagnostics "$@"
+ensure_venv
+    .venv/bin/python -m src diagnostics "$@"
     ;;
   stop)
     # Match by absolute script_dir path so we never hit another sidecar.

@@ -1,5 +1,4 @@
-(** Ratchet: [Task.Anti_rationalization.review] never approves an empty
-    evaluator response.
+(** Empty evaluator response handling: fail-open by liveness (#10474).
 
     The runtime log on 2026-06-28 showed repeated
     "evaluator returned empty text (approving by liveness)" entries. That
@@ -10,10 +9,14 @@
 
     2026-07-09 (24h tool-error audit): the reject stays deterministic, but
     empty output is now [Evaluator_empty] instead of [Format_reject] and the
-    reason names the evaluator-side failure — the old
-    "review format unrecognized" wording sent keepers into a revise-notes
-    retry loop for a failure their notes did not cause. The must-not-approve
-    invariant is unchanged and re-pinned below. *)
+    reason names the evaluator-side failure.
+
+    2026-07-10 (#10474 topology deadlock fix): Empty_review_output is an
+    evaluator-side failure — the keeper's notes were never reviewed. The old
+    hard-reject sent keepers into an unbounded revise-notes retry loop
+    (305 hits/24h) that could never succeed. Now fails-open by liveness
+    when no excuse advisory is active, rejects only when there is an
+    active safety-net pattern. *)
 
 module AR = Masc.Task.Anti_rationalization
 
@@ -77,7 +80,7 @@ let test_whitespace_only_verdict_also_empty () =
   | Ok _ ->
       Alcotest.fail "parse_verdict of whitespace should return Error"
 
-let test_review_rejects_empty_evaluator_output () =
+let test_review_approves_empty_by_liveness () =
   with_reviewer
     (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
       Ok (None, ""))
@@ -92,16 +95,10 @@ let test_review_rejects_empty_evaluator_output () =
         (Some "empty review output")
         result.AR.fallback_reason;
       match result.AR.verdict with
-      | AR.Reject reason ->
-        Alcotest.(check bool)
-          "reject reason attributes the failure to the evaluator, not the notes"
-          true
-          (contains_substring reason "evaluator-side failure"
-           && contains_substring reason "not reviewed"
-           && not (contains_substring reason "review format unrecognized"))
-      | AR.Approve ->
+      | AR.Approve -> ()
+      | AR.Reject _ ->
         Alcotest.fail
-          "empty evaluator output must not approve by liveness")
+          "empty evaluator output without advisory should approve by liveness (#10474)")
 
 let test_review_accepts_strict_json_evaluator_response () =
   with_reviewer
@@ -175,9 +172,9 @@ let () =
       ( "review policy",
         [
           Alcotest.test_case
-            "empty evaluator output rejects"
+            "empty evaluator output approves by liveness"
             `Quick
-            test_review_rejects_empty_evaluator_output;
+            test_review_approves_empty_by_liveness;
           Alcotest.test_case
             "strict JSON evaluator response passes"
             `Quick

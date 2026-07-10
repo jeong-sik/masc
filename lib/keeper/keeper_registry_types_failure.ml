@@ -105,6 +105,7 @@ type failure_reason =
   | Exception of string
   | Turn_overflow_pause
   | Turn_livelock_pause
+  | Operator_interrupt
 
 let ambiguous_partial_commit_kind_to_string =
   Keeper_registry_types_kill_class.ambiguous_partial_commit_kind_to_string
@@ -151,6 +152,7 @@ let failure_reason_to_string = function
   | Exception s -> Printf.sprintf "exception(%s)" s
   | Turn_overflow_pause -> "turn_overflow_pause"
   | Turn_livelock_pause -> "turn_livelock_pause"
+  | Operator_interrupt -> "operator_interrupt"
 ;;
 
 (** #10584: cohort key for grouping failures by variant, ignoring
@@ -184,6 +186,7 @@ let failure_reason_cohort_key = function
   | Some (Exception _) -> "exception"
   | Some Turn_overflow_pause -> "turn_overflow_pause"
   | Some Turn_livelock_pause -> "turn_livelock_pause"
+  | Some Operator_interrupt -> "operator_interrupt"
   | None -> "unknown"
 ;;
 
@@ -198,7 +201,8 @@ let stale_kill_failure_reason ~prior ~kill_class =
       | Turn_overflow_pause
       | Turn_livelock_pause
       | Heartbeat_consecutive_failures _
-      | Exception _ ) -> prior
+      | Exception _
+      | Operator_interrupt ) -> prior
   | Some
       ( Stale_termination_storm _
       | Stale_fleet_batch _

@@ -151,9 +151,10 @@ val set_failure_reason : base_path:string -> string -> failure_reason option -> 
 val set_last_correlation_id : base_path:string -> string -> string -> unit
 
 (** Mark the beginning of a keeper turn. Installs a fresh
-    [current_turn_observation] with [turn_id = usage.total_turns + 1].
+    [current_turn_observation] with [turn_id = usage.total_turns + 1] and
+    [wake] frozen for the turn's lifetime (#16, 38-bug campaign PR-5).
     Must be paired with [mark_turn_finished] (or [mark_turn_failed]). *)
-val mark_turn_started : base_path:string -> string -> unit
+val mark_turn_started : base_path:string -> wake:wake_reason -> string -> unit
 
 (** Refresh the live turn's progress timestamp without changing its FSM
     projection.  No-op when no turn is active.  [event_kind] must be a
@@ -257,6 +258,23 @@ val mark_turn_gate_rejected_by_name : string -> unit
     safe to call in finally blocks even if [mark_turn_started] was not
     called. *)
 val mark_turn_finished : base_path:string -> string -> unit
+
+(** Store or clear the live [Eio.Switch.t] for the current turn.
+    The switch is used by [interrupt_current_turn] to cancel an
+    in-flight turn from the dashboard or operator tooling. *)
+val set_turn_switch :
+  base_path:string -> string -> Eio.Switch.t option -> unit
+
+(** Reset [current_turn_switch] to [None]. Idempotent no-op if the
+    keeper is not registered. *)
+val clear_turn_switch : base_path:string -> string -> unit
+
+(** Cancel the keeper's in-flight turn by failing its [Eio.Switch.t].
+    Returns [`Cancelled turn_id] when a live switch was held and
+    cancelled, or [`No_turn_in_flight] when there is no active turn or
+    no registered switch. *)
+val interrupt_current_turn :
+  base_path:string -> string -> [ `Cancelled of int | `No_turn_in_flight ]
 
 (** Record the verdict reasons from a [keeper_cycle_decision] that
     chose to skip the next turn.  Stamps [last_skip_observation] with

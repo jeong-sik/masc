@@ -244,9 +244,17 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
       ~base_url:"http://example.invalid"
       ()
   in
-  let configured = Vt.provider_for_vision { base with max_tokens = Some 4096 } in
+  let configured =
+    Vt.provider_for_vision
+      ~runtime_id:"test.unconfigured"
+      { base with max_tokens = Some 4096 }
+  in
   assert (configured.max_tokens = Some 4096);
-  let fallback = Vt.provider_for_vision { base with max_tokens = None } in
+  let fallback =
+    Vt.provider_for_vision
+      ~runtime_id:"test.unconfigured"
+      { base with max_tokens = None }
+  in
   assert (fallback.max_tokens = Some Vt.vision_default_max_tokens);
   let expected_schema = Structured_schema.vision_analyze_output_schema in
   (match configured.response_format with
@@ -602,6 +610,7 @@ endpoint = "https://p3.example/v1"
 [models.vision-c]
 api-name = "vision-c"
 max-context = 4096
+temperature = 1.0
 
 [models.vision-c.capabilities]
 supports-image-input = true
@@ -610,6 +619,19 @@ supports-structured-output = true
 
 [p3.vision-c]
 |}
+
+let test_provider_for_vision_uses_runtime_temperature () =
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    match Vt.first_vision_runtime_id () with
+    | Error msg -> failwith ("expected configured vision runtime: " ^ msg)
+    | Ok runtime_id ->
+      (match Runtime.get_runtime_by_id runtime_id with
+       | None -> failwith "selected vision runtime should resolve"
+       | Some runtime ->
+         let configured =
+           Vt.provider_for_vision ~runtime_id runtime.Runtime.provider_config
+         in
+         assert (configured.temperature = Some 1.0)))
 
 let schema_unsupported_vision_runtime_toml =
   {|
@@ -1113,9 +1135,10 @@ let () =
   test_schema_unsupported_vision_runtime_is_skipped_before_provider_call ();
   (* These tests drive the synthetic ollama vision runtimes past the
      schema-capability gate to the provider sub-call, so they need an installed
-     model catalog that advertises supports_structured_output (see
+  model catalog that advertises supports_structured_output (see
      [with_vision_model_catalog]). *)
   with_vision_model_catalog (fun () ->
+    test_provider_for_vision_uses_runtime_temperature ();
     test_invalid_structured_vision_response_is_runtime_failure ();
     test_run_vision_invalid_structured_response_is_typed ();
     test_retryable_provider_error_tries_next_runtime ();

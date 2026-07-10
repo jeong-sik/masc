@@ -25,13 +25,21 @@ type outcome =
       ; after : int
       }
 
+module For_testing : sig
+  val provider_for_consolidation
+    :  runtime_id:string
+    -> Llm_provider.Provider_config.t
+    -> Llm_provider.Provider_config.t
+end
+
 (** Read [keeper_id]'s facts, ask the model for a consolidation plan, apply it,
     and (unless [dry_run]) rewrite the store atomically only if the fact snapshot
     still matches the model's input. Below a minimum fact count it skips the LLM
     call. Returns the outcome without raising for the expected failure modes so a
     caller fiber stays alive. If [timeout_sec] is configured but no [clock] is
     available, the provider call is refused as [Transport_failed _] rather than
-    running without a deadline. *)
+    running without a deadline. [runtime_id] remains paired with [provider_cfg]
+    so model-level temperature declarations survive request tuning. *)
 val consolidate_keeper
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -39,6 +47,7 @@ val consolidate_keeper
   -> ?dry_run:bool
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> runtime_id:string
   -> provider_cfg:Llm_provider.Provider_config.t
   -> now:float
   -> keeper_id:string

@@ -356,10 +356,9 @@ let parse_keeper_task_done_evidence_refs args =
            then Error "evidence_refs must contain at least one non-empty string."
            else Ok refs
          | `String ref_ :: rest ->
-           let ref_ = String.trim ref_ in
-           if ref_ = ""
+           if Task.Completion_review.blank_evidence_ref ref_
            then Error "evidence_refs must contain only non-empty strings."
-           else collect (ref_ :: acc) rest
+           else collect (String.trim ref_ :: acc) rest
          | _ :: _ -> Error "evidence_refs must be an array of non-empty strings."
        in
        collect [] refs

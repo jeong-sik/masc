@@ -159,11 +159,13 @@ val run_named :
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 (** Run a single [Agent.run] call with MASC-driven runtime model fallback.
     MASC drives the runtime FSM directly: resolves runtime providers,
-    tries each with OAS, and uses [Runtime_fsm.decide] on failure.
+    resolves each candidate's model temperature before trying it with OAS, and
+    uses [Runtime_fsm.decide] on failure.
     The runtime loop runs inside a capacity-managed queue permit. *)
 
 type attempt_inference_policy =
-  { attempt_enable_thinking : bool option
+  { attempt_temperature : float
+  ; attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
   ; attempt_max_tokens : int
   }
@@ -243,6 +245,7 @@ module For_testing : sig
   val attempt_inference_policy :
     ?max_tokens_for_runtime:(runtime_id:string -> int) ->
     runtime_id:string ->
+    fallback_temperature:float ->
     fallback_enable_thinking:bool option ->
     fallback_max_tokens:int ->
     unit ->

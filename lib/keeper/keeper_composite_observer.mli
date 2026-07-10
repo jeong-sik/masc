@@ -182,6 +182,9 @@ type live_turn = {
       (** Tools issued but not yet completed on the live turn, mirrored
           from [turn_observation.active_tool_count]. [0] outside any tool
           call. *)
+  wake : Keeper_registry.wake_reason;
+      (** What triggered this turn, mirrored from [turn_observation.wake]
+          (#16, 38-bug campaign PR-5). *)
 }
 
 (** Most recent deliberate skip verdict, mirrored from
@@ -211,6 +214,44 @@ type board_cursor = {
   bc_ts : float;
   bc_post_id : string option;
 }
+
+(** Total run-state classification (#16, 38-bug campaign PR-5). Previously
+    the dashboard collapsed "actively executing a turn", "idle waiting for
+    proactive cadence", and "reactively woken (and by what stimulus)" into
+    a single "진행 중 / 실행 중" label. Precedence: [phase <> Running]
+    always yields [Suspended] (the phase itself explains why the keeper is
+    not runnable); otherwise a live turn yields [In_turn]; otherwise
+    [Waiting]. *)
+type run_state =
+  | In_turn of {
+      rs_wake : Keeper_registry.wake_reason;
+      rs_started_at : float;
+      rs_active_tool_count : int;
+    }
+  | Waiting of {
+      rs_queue_depth : int;
+          (** [Keeper_event_queue.length] of the entry's event queue at
+              observation time — stimuli already enqueued but not yet
+              drained by a turn. *)
+      rs_last_skip : last_skip option;
+    }
+  | Suspended of Keeper_state_machine.phase
+
+val run_state_of_entry :
+  Keeper_registry.registry_entry -> last_skip:last_skip option -> run_state
+(** Pure derivation, exposed so other server surfaces (Bonsai
+    keepers/summary row, [masc_keeper_list] detailed rows) can classify a
+    registry entry directly instead of re-deriving a full {!snapshot}. *)
+
+val run_state_to_json : run_state -> Yojson.Safe.t
+(** [{"kind": "in_turn" | "waiting" | "suspended"; ...}]. See [.ml] for the
+    exact per-kind shape. *)
+
+val wake_reason_kind_and_stimuli : Keeper_registry.wake_reason -> string * string list
+(** [("proactive_tick", [])] or [("woken", <stimulus kind labels>)].
+    Exposed so non-JSON consumers (Bonsai [keepers/summary] row, which has
+    its own typed wire record) can project a {!run_state}'s wake without
+    round-tripping through {!run_state_to_json}. *)
 
 type fsm_guard_violation_bucket = {
   action : string;
@@ -261,6 +302,12 @@ type snapshot = {
       (** Current live turn timing. [Some _] iff [is_live = true]. This is
           the causality boundary used by dashboard enrichers before treating
           the latest terminal receipt as a current blocker. *)
+  run_state : run_state;
+      (** Total classification of what the keeper is doing right now
+          (#16, 38-bug campaign PR-5): actively executing a turn (and why
+          it woke), idle waiting for the proactive cadence, or suspended by
+          a non-[Running] phase. Never [In_turn] without [live_turn = Some
+          _], and vice versa. *)
   last_outcome : last_outcome option;
       (** Most recent completed turn, surfaced separately from live
           state so operators can see "what just finished" without

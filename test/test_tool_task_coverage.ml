@@ -833,6 +833,62 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
   | _ -> failwith "expected exactly one task"
 )
 
+(* RFC-0337 decision 4: blank evidence_refs entries were silently dropped by
+   [non_empty_trimmed_strings] (["", " "] collapsed to [] with no signal to
+   the caller). The boundary now rejects blank entries loudly, mirroring the
+   keeper_task_done parser; absent field and explicit [] stay accepted. *)
+let () = test "handle_transition_rejects_blank_evidence_ref_entries" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Blank evidence entries task") ])
+  in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "release");
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "handing off with junk evidence entries");
+                ("evidence_refs", `List [ `String ""; `String "  " ]);
+              ] );
+        ])
+  in
+  assert (not (Tool_result.is_success result));
+  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  assert (str_contains (Tool_result.message result) "must contain only non-empty strings")
+)
+
+let () = test "handle_transition_accepts_explicit_empty_evidence_refs" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Explicit empty evidence task") ])
+  in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "release");
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "blocked, no evidence to hand off yet");
+                ("evidence_refs", `List []);
+              ] );
+        ])
+  in
+  (* Explicit [] is "no evidence", not data loss — must not trip the
+     blank-entry boundary reject. *)
+  if not (Tool_result.is_success result) then failwith (Tool_result.message result)
+)
+
 let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
   (* Field evidence 2026-04-17/18: keepers attempted transitions on
      tasks they had not claimed. The FSM rejects [Start] on [Todo]

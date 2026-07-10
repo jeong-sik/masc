@@ -60,6 +60,13 @@ let is_placeholder_evidence_ref value =
   let value = value |> String.trim |> String.lowercase_ascii in
   value = "" || List.mem value placeholder_evidence_refs
 
+(* RFC-0337 decision 4: shared element-level predicate for evidence-ref
+   boundary checks. The masc_transition handoff boundary rejects entries
+   this predicate flags instead of silently dropping them; the
+   keeper_task_done parser (keeper_tool_task_runtime.ml) enforces the same
+   semantics locally on raw JSON for keeper-vocabulary error messages. *)
+let blank_evidence_ref value = String.equal (String.trim value) ""
+
 let non_empty_trimmed_strings values =
   values
   |> List.filter_map (fun value ->

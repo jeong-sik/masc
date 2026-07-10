@@ -138,6 +138,26 @@ let parse_handoff_context ~(agent_name : string)
                  work entry; treat the empty context as absent rather
                  than failing the call. *)
               Ok None
+          else if
+            (* RFC-0337 decision 4: a provided evidence ref that trims to ""
+               was previously dropped in silence by
+               [non_empty_trimmed_strings], collapsing ["", " "] to [] and
+               letting the caller believe evidence was recorded. Reject
+               blank entries loudly instead, mirroring the
+               keeper_task_done boundary parser
+               ([parse_keeper_task_done_evidence_refs]). Absent field and
+               explicit [] stay accepted: neither loses caller data. *)
+            List.exists Tool_task_completion_review.blank_evidence_ref
+              handoff_context.evidence_refs
+          then
+            Error
+              (Printf.sprintf
+                 "handoff_context.evidence_refs must contain only non-empty \
+                  strings for action=%s; drop the blank entries or omit the \
+                  field. Example: {\"summary\": \"tests green\", \
+                  \"evidence_refs\": [\"%s\"]}."
+                 (Masc_domain.task_action_to_string action)
+                 handoff_example_evidence_ref)
           else
             Ok
               (Some

@@ -94,8 +94,8 @@ let messages_for_summary ~trace_id ~texts =
   let system =
     "You summarize keeper progress notes into one durable memory-bank entry. \
      Preserve concrete code paths, commands, decisions, blockers, and next \
-     steps. Do not invent facts. Do not include [STATE] blocks or markdown \
-     fences. Output only a JSON object with a non-empty string field named \
+     steps. Do not invent facts. Do not include markdown fences. Output only \
+     a JSON object with a non-empty string field named \
      summary."
   in
   let user =

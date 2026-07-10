@@ -38,7 +38,7 @@ let tla_phase = function
 let emit_record oc json =
   let c = Yojson.Safe.Util.member "conditions_after" json in
   Printf.fprintf oc
-    "  [launch_pending |-> %s, fiber_alive |-> %s, heartbeat_healthy |-> %s, turn_healthy |-> %s, context_within_budget |-> %s, context_handoff_needed |-> %s, compaction_active |-> %s, handoff_active |-> %s, operator_paused |-> %s, stop_requested |-> %s, restart_budget_remaining |-> %s, backoff_elapsed |-> %s, guardrail_triggered |-> %s, drain_complete |-> %s, context_overflow |-> %s, compact_retry_exhausted |-> %s, restart_count |-> %d, recorded_phase |-> %S]"
+    "  [launch_pending |-> %s, fiber_alive |-> %s, heartbeat_healthy |-> %s, turn_healthy |-> %s, context_within_budget |-> %s, context_handoff_needed |-> %s, compaction_active |-> %s, handoff_active |-> %s, operator_paused |-> %s, stop_requested |-> %s, restart_budget_remaining |-> %s, backoff_elapsed |-> %s, drain_complete |-> %s, context_overflow |-> %s, compact_retry_exhausted |-> %s, restart_count |-> %d, recorded_phase |-> %S]"
     (bool_to_tla (get_bool c "launch_pending"))
     (bool_to_tla (get_bool c "fiber_alive"))
     (bool_to_tla (get_bool c "heartbeat_healthy"))
@@ -51,7 +51,6 @@ let emit_record oc json =
     (bool_to_tla (get_bool c "stop_requested"))
     (bool_to_tla (get_bool c "restart_budget_remaining"))
     (bool_to_tla (get_bool c "backoff_elapsed"))
-    (bool_to_tla (get_bool c "guardrail_triggered"))
     (bool_to_tla (get_bool c "drain_complete"))
     (bool_to_tla (get_bool c "context_overflow"))
     (bool_to_tla (get_bool c "compact_retry_exhausted"))

@@ -20,11 +20,10 @@
    This block is the reverse-direction citation so code search for
    "KeeperMemoryLifecycle" lands in this module too â completing the
    sibling pair with keeper_memory_policy.ml which carries the
-   horizon-tier and producer anchor (memory_horizon_of_kind_opt).
+   horizon-tier and producer anchor (memory_horizon_of_kind).
 
    Sibling division of labor:
-     keeper_memory_policy.ml   tier vocabulary, producer,
-                               classification.
+     keeper_memory_policy.ml   tier vocabulary and classification.
      keeper_memory_bank.ml     persistence, compaction,
                                summarization, provenance enforcement.
 
@@ -37,9 +36,7 @@
      - handoff clears stale short-term notes.  The generation-handoff
        path here explicitly clears short_mem that has not been
        promoted to mid_mem.
-     - each tier stays within its configured bound.
-       select_memory_candidates (this file) walks rows under the
-       tier-specific cap from Keeper_memory_policy.kind_caps. *)
+     - each tier stays within its configured bound. *)
 
 (* Selection pipeline, dedup, consensus detection, and lock
    infrastructure extracted to [Keeper_memory_bank_selection]
@@ -59,6 +56,7 @@ open Keeper_types_profile
 type memory_row_source =
   | Progress_consolidation
   | Cross_trace_recurrence
+  | Explicit_memory_write
   | Tool_result
   | Voice_output
   | Other of string
@@ -66,6 +64,7 @@ type memory_row_source =
 let memory_row_source_of_string = function
   | "progress_consolidation" -> Progress_consolidation
   | "cross_trace_recurrence" -> Cross_trace_recurrence
+  | "explicit_memory_write" -> Explicit_memory_write
   | "tool_result" -> Tool_result
   | "voice_output" -> Voice_output
   | other -> Other other
@@ -73,13 +72,14 @@ let memory_row_source_of_string = function
 let memory_row_source_to_string = function
   | Progress_consolidation -> "progress_consolidation"
   | Cross_trace_recurrence -> "cross_trace_recurrence"
+  | Explicit_memory_write -> "explicit_memory_write"
   | Tool_result -> "tool_result"
   | Voice_output -> "voice_output"
   | Other other -> other
 
 type keeper_memory_row_raw = {
   json: Yojson.Safe.t;
-  kind: string;
+  kind: memory_kind;
   horizon: string;
   source: memory_row_source;
   generation: int;
@@ -91,11 +91,6 @@ type keeper_memory_row_raw = {
 type memory_consolidation_summarizer =
   trace_id:string -> texts:string list -> string option
 
-let memory_horizon_of_kind_exn kind =
-  match memory_horizon_of_kind_opt kind with
-  | Some horizon -> horizon
-  | None -> invalid_arg ("unknown memory kind: " ^ kind)
-
 let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
   try
     let j = Yojson.Safe.from_string line in
@@ -103,9 +98,9 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
     if schema_version <> keeper_memory_schema_version then
       None
     else
-    let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
+    let kind_wire = Safe_ops.json_string ~default:"" "kind" j in
+    let kind = memory_kind_of_wire kind_wire in
     let horizon = memory_horizon_of_json_opt j in
-    let expected_horizon = memory_horizon_of_kind_opt kind in
     let source_raw = Safe_ops.json_string ~default:"" "source" j |> String.trim in
     let trace_id = Safe_ops.json_string ~default:"" "trace_id" j |> String.trim in
     let generation = Safe_ops.json_int ~default:0 "generation" j in
@@ -115,10 +110,9 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
       if raw < 1 then 1 else if raw > 100 then 100 else raw
     in
     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-    match expected_horizon, horizon with
-    | Some expected_horizon, Some horizon
-      when String.equal expected_horizon horizon
-           && kind <> ""
+    match kind, horizon with
+    | Some kind, Some horizon
+      when String.equal (memory_horizon_of_kind kind) horizon
            && source_raw <> ""
            && trace_id <> ""
            && text <> ""
@@ -190,7 +184,6 @@ let deterministic_progress_consolidation_summary ~count texts =
 
 let sanitize_consolidation_summary text =
   text
-  |> Keeper_text_processing.strip_state_blocks_text
   |> String.trim
   |> String_util.utf8_safe ~max_bytes:(max_memory_text_length ()) ~suffix:"..."
   |> String_util.to_string
@@ -253,7 +246,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
     Hashtbl.create 32
   in
   List.iter (fun (row : keeper_memory_row_raw) ->
-    if row.kind = "progress" then begin
+    if row.kind = Progress then begin
       let tid = row_trace_id row in
       if tid <> "" then
         let existing =
@@ -281,8 +274,8 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
       let summary_json = `Assoc [
         ("ts", `String (now_iso ()));
         ("ts_unix", `Float now);
-        ("kind", `String "long_term");
-        ("horizon", `String long_term_horizon);
+        ("kind", `String (memory_kind_to_wire Long_term));
+        ("horizon", `String (memory_horizon_of_kind Long_term));
         ("source", `String (memory_row_source_to_string Progress_consolidation));
         ("schema_version", `Int keeper_memory_schema_version);
         ("priority", `Int consolidation_progress_priority);
@@ -293,8 +286,8 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
       ] in
       consolidated := {
         json = summary_json;
-        kind = "long_term";
-        horizon = long_term_horizon;
+        kind = Long_term;
+        horizon = memory_horizon_of_kind Long_term;
         source = Progress_consolidation;
         generation;
         text = summary_text;
@@ -307,7 +300,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
   (* 2. Promote recurring texts across multiple trace_ids *)
   let text_traces : (string, string list) Hashtbl.t = Hashtbl.create 256 in
   List.iter (fun (row : keeper_memory_row_raw) ->
-    if row.kind <> "long_term" then begin
+    if row.kind <> Long_term then begin
       let norm = normalize_memory_text_key row.text in
       let tid = row_trace_id row in
       if norm <> "" && tid <> "" then begin
@@ -334,8 +327,8 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
         let lt_json = `Assoc [
           ("ts", `String (now_iso ()));
           ("ts_unix", `Float now);
-          ("kind", `String "long_term");
-          ("horizon", `String long_term_horizon);
+          ("kind", `String (memory_kind_to_wire Long_term));
+          ("horizon", `String (memory_horizon_of_kind Long_term));
           ("source", `String (memory_row_source_to_string Cross_trace_recurrence));
           ("schema_version", `Int keeper_memory_schema_version);
           ("priority", `Int consolidation_recurrence_priority);
@@ -352,8 +345,8 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
         ] in
         consolidated := {
           json = lt_json;
-          kind = "long_term";
-          horizon = long_term_horizon;
+          kind = Long_term;
+          horizon = memory_horizon_of_kind Long_term;
           source = Cross_trace_recurrence;
           generation = row.generation;
           text = row.text;
@@ -385,8 +378,8 @@ let memory_compaction_trigger_bytes ~(target_notes : int) : int =
   max 60000 (min 20000000 raw)
 
 let memory_kind_caps_for_compaction
-    ~(target_notes : int) : (string, int) Hashtbl.t =
-  let tbl : (string, int) Hashtbl.t = Hashtbl.create 16 in
+    ~(target_notes : int) : (memory_kind, int) Hashtbl.t =
+  let tbl : (memory_kind, int) Hashtbl.t = Hashtbl.create 16 in
   let base_total = max 1 (total_cap ()) in
   let scale = max 6 (target_notes / base_total) in
   List.iter
@@ -397,25 +390,23 @@ let memory_kind_caps_for_compaction
   tbl
 
 let memory_row_key (row : keeper_memory_row_raw) : string =
-  String.lowercase_ascii (String.trim row.kind)
-  ^ ":"
-  ^ normalize_memory_text_key row.text
+  memory_kind_to_wire row.kind ^ ":" ^ normalize_memory_text_key row.text
 
 let compaction_priority
     ~(current_generation : int)
     (row : keeper_memory_row_raw) : int =
   let horizon_bonus =
-    match row.horizon with
-    | h when h = long_term_horizon -> 12
-    | h when h = short_term_horizon ->
+    match row.kind with
+    | Long_term -> 12
+    | Progress | Open_question ->
         if row.generation >= current_generation then 4 else -18
-    | _ -> 0
+    | Goal | Decision -> 0
   in
   let source_bonus =
     match row.source with
     | Cross_trace_recurrence -> 4
     | Progress_consolidation -> 2
-    | Tool_result | Voice_output | Other _ -> 0
+    | Explicit_memory_write | Tool_result | Voice_output | Other _ -> 0
   in
   max 1 (min 120 (row.priority + horizon_bonus + source_bonus))
 
@@ -452,7 +443,7 @@ let consolidation_metric_source source =
   match source with
   | (Progress_consolidation | Cross_trace_recurrence) as s ->
     memory_row_source_to_string s
-  | Tool_result | Voice_output | Other _ -> "other"
+  | Explicit_memory_write | Tool_result | Voice_output | Other _ -> "other"
 
 let memory_row_identity (row : keeper_memory_row_raw) =
   Yojson.Safe.to_string row.json
@@ -641,9 +632,9 @@ let compact_memory_bank_if_needed
           }
         else
           let kind_caps = memory_kind_caps_for_compaction ~target_notes in
-          let kind_used : (string, int) Hashtbl.t = Hashtbl.create 16 in
+          let kind_used : (memory_kind, int) Hashtbl.t = Hashtbl.create 16 in
           let selected_keys : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
-          let kind_dropped_keys : (string, string) Hashtbl.t = Hashtbl.create 256 in
+          let kind_dropped_keys : (string, memory_kind) Hashtbl.t = Hashtbl.create 256 in
           let selected_rev = ref [] in
           let selected_count = ref 0 in
           let fallback_kind_cap = max 8 (target_notes / 8) in
@@ -705,8 +696,9 @@ let compact_memory_bank_if_needed
             Hashtbl.to_seq kind_dropped_keys
             |> Seq.fold_left
                  (fun acc (_, kind) ->
-                   let cur = Option.value ~default:0 (List.assoc_opt kind acc) in
-                   (kind, cur + 1) :: List.remove_assoc kind acc)
+                   let kind_wire = memory_kind_to_wire kind in
+                   let cur = Option.value ~default:0 (List.assoc_opt kind_wire acc) in
+                   (kind_wire, cur + 1) :: List.remove_assoc kind_wire acc)
                  []
             |> List.sort (fun (a, _) (b, _) -> String.compare a b)
           in
@@ -776,102 +768,53 @@ let compact_memory_bank_if_needed
                 error = None;
               }
 
-let append_memory_notes_from_reply
+type explicit_memory_write_error =
+  | Explicit_memory_kind_not_writable of memory_kind
+  | Rejected_explicit_memory_text
+  | Explicit_memory_write_failed of string
+
+let append_explicit_memory_note
     (config : Workspace.config)
     (meta : keeper_meta)
-    ?snapshot
-    ?state_snapshot_source
     ~(turn : int)
-    ~(reply : string)
-    () : (int * string list) =
-  (* [source] is the per-note provenance written to the memory-bank JSONL — a
-     separate vocabulary from the turn-cascade [state_snapshot_source]. The
-     turn-cascade source (when present) is rendered to its wire string and carries
-     its typed synthetic-ness. The meta-goal fallback is also constructed rather
-     than model-authored, so it is marked synthetic before candidate selection.
-     RFC-0242 §3.2: the candidate gate receives the [is_synthetic] bit, not a
-     string to re-classify. *)
-  let (snapshot, source, is_synthetic) =
-    match snapshot with
-    | Some s ->
-      (match state_snapshot_source with
-       | Some src ->
-         ( s,
-           Keeper_memory_policy.state_snapshot_source_to_string src,
-           Keeper_memory_policy.state_snapshot_source_is_synthetic src )
-       | None -> (s, "message_metadata", false))
-    | None ->
-      (match parse_state_snapshot_from_reply reply with
-    | Some s -> (s, "reply_state_block", false)
-    | None ->
-        (* Deterministic fallback: use keeper meta fields as a continuity
-           snapshot only. Because this snapshot is constructed rather than
-           model-authored, the candidate gate suppresses durable writes and
-           reports the suppression explicitly. *)
-        ( {
-            Keeper_memory_policy.priority = None;
-            Keeper_memory_policy.goal =
-              (if meta.goal <> "" then Some meta.goal else None);
-            progress = None;
-            done_summary = None;
-            next_summary = None;
-            next_items = [];
-            decisions = [];
-            open_questions = [];
-            constraints = [];
-          },
-          "meta_goal_fallback", true ))
-  in
-  let selection =
-    memory_candidates_from_snapshot_gated ~is_synthetic snapshot
-  in
-  let notes = selection.selected in
-  if selection.suppressed_synthetic_candidates > 0 then
-    Log.Keeper.info
-      ~keeper_name:meta.name
-      "memory_candidates suppressed source=%s synthetic_candidates=%d"
-      source
-      selection.suppressed_synthetic_candidates;
-  if selection.dropped_by_total_cap > 0 || selection.dropped_by_kind <> [] then
-    Log.Keeper.warn
-      ~keeper_name:meta.name
-      "memory_candidates dropped total_cap=%d kind=%s"
-      selection.dropped_by_total_cap
-      (String.concat ","
-         (List.map (fun (k, c) -> Printf.sprintf "%s:%d" k c) selection.dropped_by_kind));
-  if notes = [] then
-    (0, [])
+    ~(kind : memory_kind)
+    ~(text : string)
+    : (unit, explicit_memory_write_error) result
+  =
+  let text = String.trim text in
+  if not (memory_kind_is_writable kind)
+  then Error (Explicit_memory_kind_not_writable kind)
+  else if not (is_meaningful_memory_text text)
+  then Error Rejected_explicit_memory_text
   else
+    let kind_wire = memory_kind_to_wire kind in
+    let horizon = memory_horizon_of_kind kind in
     let now_ts = Time_compat.now () in
     let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
-    let kinds_acc = ref [] in
-    let seen_kinds : (string, unit) Hashtbl.t = Hashtbl.create 8 in
-    with_memory_bank_lock path (fun () ->
-      List.iter
-        (fun (kind, text, priority) ->
-           let horizon = memory_horizon_of_kind_exn kind in
-           if not (Hashtbl.mem seen_kinds kind) then begin
-             Hashtbl.add seen_kinds kind ();
-             kinds_acc := kind :: !kinds_acc
-           end;
-           Keeper_types_support.append_jsonl_line path
-             (`Assoc
-               [
-                 ("ts", `String (now_iso ()));
-                 ("ts_unix", `Float now_ts);
-                 ("name", `String meta.name);
-                 ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-                 ("generation", `Int meta.runtime.generation);
-                 ("turn", `Int turn);
-                 ("kind", `String kind);
-                 ("horizon", `String horizon);
-                 ("source", `String source);
-                 ("schema_version", `Int keeper_memory_schema_version);
-                 ("priority", `Int priority);
-                 ("text", `String text);
-               ]))
-        notes);
-    (List.length notes, List.rev !kinds_acc)
+    (try
+       with_memory_bank_lock path (fun () ->
+         Keeper_types_support.append_jsonl_line
+           path
+           (`Assoc
+             [ "ts", `String (now_iso ())
+             ; "ts_unix", `Float now_ts
+             ; "name", `String meta.name
+             ; ( "trace_id"
+               , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
+             ; "generation", `Int meta.runtime.generation
+             ; "turn", `Int turn
+             ; "kind", `String kind_wire
+             ; "horizon", `String horizon
+             ; ( "source"
+               , `String (memory_row_source_to_string Explicit_memory_write) )
+             ; "schema_version", `Int keeper_memory_schema_version
+             ; "priority", `Int (tuned_priority_for_candidate ~kind ~text)
+             ; "text", `String text
+             ]));
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Explicit_memory_write_failed (Printexc.to_string exn)))
 
 let strip_tool_result_reserved_keys (result : Yojson.Safe.t) : Yojson.Safe.t =
   match result with
@@ -942,12 +885,12 @@ let append_memory_notes_from_tool_results
                      `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
                  ; ("generation", `Int meta.runtime.generation)
                  ; ("turn", `Int turn)
-                 ; ("kind", `String "long_term")
-                 ; ("horizon", `String long_term_horizon)
+                 ; ("kind", `String (memory_kind_to_wire Long_term))
+                 ; ("horizon", `String (memory_horizon_of_kind Long_term))
                  ; ("source", `String (memory_row_source_to_string Tool_result))
                  ; ("schema_version", `Int keeper_memory_schema_version)
                  ; ( "priority",
-                     `Int (tuned_priority_for_candidate ~kind:"long_term" ~text) )
+                     `Int (tuned_priority_for_candidate ~kind:Long_term ~text) )
                  ; ("text", `String text)
                  ; ("artifact_id", `String artifact_id)
                  ; ("artifact_kind", `String kind)
@@ -973,7 +916,7 @@ let append_voice_output
   if text = "" || not (is_meaningful_memory_text text)
   then Ok 0
   else (
-    let kind = "progress" in
+    let kind = Progress in
     let now_ts = Time_compat.now () in
     let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
     let optional_provider =
@@ -988,8 +931,8 @@ let append_voice_output
       ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ; "generation", `Int meta.runtime.generation
       ; "turn", `Int turn
-      ; "kind", `String kind
-      ; "horizon", `String short_term_horizon
+      ; "kind", `String (memory_kind_to_wire kind)
+      ; "horizon", `String (memory_horizon_of_kind kind)
       ; "source", `String (memory_row_source_to_string Voice_output)
       ; "schema_version", `Int keeper_memory_schema_version
       ; "priority", `Int (tuned_priority_for_candidate ~kind ~text)
@@ -1015,7 +958,7 @@ let summarize_memory_bank_lines
   let parsed =
     raw_rows
     |> List.map (fun (row : keeper_memory_row_raw) ->
-         { kind = row.kind
+         { kind = memory_kind_to_wire row.kind
          ; text = row.text
          ; priority = row.priority
          ; ts_unix = row.ts_unix
@@ -1071,9 +1014,14 @@ let summarize_memory_bank_lines
     |> List.filter (fun (row : keeper_memory_row_raw) ->
          match row.source with
          | Voice_output -> false
-         | Progress_consolidation | Cross_trace_recurrence | Tool_result | Other _ -> true)
+         | ( Progress_consolidation
+           | Cross_trace_recurrence
+           | Explicit_memory_write
+           | Tool_result
+           | Other _ ) ->
+           true)
     |> List.map (fun (row : keeper_memory_row_raw) ->
-         { kind = row.kind
+         { kind = memory_kind_to_wire row.kind
          ; text = row.text
          ; priority = row.priority
          ; ts_unix = row.ts_unix

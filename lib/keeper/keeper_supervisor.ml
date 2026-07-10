@@ -219,10 +219,28 @@ let release_dead_keeper_owned_tasks (ctx : _ context) (entry : Keeper_registry.r
           err)
 ;;
 
-let pending_hitl_approval_keeper_names config =
+let pending_hitl_approval_counts config =
+  let pending_entries = Keeper_approval_queue.list_pending_entries () in
   keeper_names config
-  |> List.filter (fun name ->
-       Keeper_approval_queue.has_pending_for_keeper ~keeper_name:name)
+  |> List.filter_map (fun name ->
+       let blocking_count, nonblocking_count =
+         List.fold_left
+           (fun (blocking_count, nonblocking_count) (entry : Keeper_approval_queue.pending_approval) ->
+              if String.equal entry.keeper_name name
+              then
+                (match entry.lane_policy with
+                 | Keeper_approval_queue.Blocking -> blocking_count + 1, nonblocking_count
+                 | Keeper_approval_queue.Nonblocking -> blocking_count, nonblocking_count + 1)
+              else blocking_count, nonblocking_count)
+           (0, 0)
+           pending_entries
+       in
+       if blocking_count = 0 && nonblocking_count = 0
+       then None
+       else Some (name, blocking_count, nonblocking_count))
+
+let pending_hitl_approval_keeper_names config =
+  pending_hitl_approval_counts config |> List.map (fun (name, _, _) -> name)
 ;;
 
 let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _ context)
@@ -233,23 +251,25 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
   in
   let dead_ttl_sec = Runtime_params.get Governance_registry.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
-  (* HITL visibility: a keeper blocked on a pending approval surfaces to the
-     operator only as a silent chat stall — [keeper_cycle_decision] returns
-     [blocked Approval_pending] and the keeper emits no further
-     chat/observation until the operator resolves the approval (or
-     [approval_janitor] expires it at the 30m mark). Name the keeper and
-     pending approval count on every sweep so the terminal log and downstream
-     consumers can see *why* the chat is awaiting a response. *)
-  pending_hitl_approval_keeper_names ctx.config
-  |> List.iter (fun name ->
-       let pending_count =
-         Keeper_approval_queue.pending_count_for_keeper ~keeper_name:name
-       in
-       Log.Keeper.warn
-         "keeper:%s blocked on %d pending HITL approval(s); chat awaits operator \
-          decision"
-         name
-         pending_count);
+  (* HITL visibility: distinguish a typed blocking continuation from an
+     independent-cycle callback. Only the former prevents a Keeper cycle; the
+     latter must remain observable without falsely reporting a chat stall. *)
+  pending_hitl_approval_counts ctx.config
+  |> List.iter (fun (name, blocking_count, nonblocking_count) ->
+       if blocking_count > 0
+       then
+         Log.Keeper.warn
+           "keeper:%s blocked on %d blocking HITL approval(s); %d nonblocking \
+            approval(s) also pending; chat awaits operator decision"
+           name
+           blocking_count
+           nonblocking_count
+       else
+         Log.Keeper.info
+           "keeper:%s has %d nonblocking HITL approval(s); chat lane remains \
+            available"
+           name
+           nonblocking_count);
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)
@@ -827,7 +847,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
     (match read_meta ctx.config name with
      | Ok (Some meta)
        when paused_meta_requires_reconcile_recovery meta
-            && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
+            && not
+                 (Keeper_approval_queue.has_blocking_pending_for_keeper
+                    ~keeper_name:meta.name)
        -> restore_reconcile_continue_gate ctx meta
      | Ok (Some _)
      | Ok None
@@ -845,7 +867,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       | Ok (Some meta)
         when is_stale_paused_meta ~now ~paused_ttl_sec meta
              && (not (paused_meta_requires_reconcile_recovery meta))
-             && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
+             && not
+                  (Keeper_approval_queue.has_blocking_pending_for_keeper
+                     ~keeper_name:meta.name)
         ->
         let path = Keeper_types_profile.keeper_meta_path ctx.config name in
         (try
@@ -921,7 +945,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       match read_meta ctx.config name with
       | Ok (Some meta)
         when Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta
-             && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
+             && not
+                  (Keeper_approval_queue.has_blocking_pending_for_keeper
+                     ~keeper_name:meta.name)
         ->
         (match
            ( Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta

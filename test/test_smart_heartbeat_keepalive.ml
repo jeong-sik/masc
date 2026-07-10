@@ -480,7 +480,7 @@ let test_board_goal_keyword_overlap_is_not_wake_reason () =
   in
   check (option string) "goal keyword overlap no longer wakes" None
     (Option.map KWOBS.wake_reason_label
-       (KWOBS.wake_reason ~continuity_summary:"" ~meta ~signal))
+       (KWOBS.wake_reason ~meta ~signal))
 
 let test_after_wake_idle_woken_continues () =
   let next = Unix.gettimeofday () +. 60.0 in

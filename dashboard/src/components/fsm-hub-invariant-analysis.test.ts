@@ -140,7 +140,7 @@ describe('deriveOperationalInsight', () => {
     expect(insight.headline).toContain('runtime exhaustion')
   })
 
-  it('reports warn when gate_rejected', () => {
+  it('reports warn from the typed gate_rejected stage', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
         decision: { stage: 'gate_rejected' },
@@ -150,6 +150,7 @@ describe('deriveOperationalInsight', () => {
     )
     expect(insight.tone).toBe('warn')
     expect(insight.headline).toContain('Guardrail')
+    expect(insight.evidence).toEqual(['KDP gate_rejected', 'KTC idle'])
   })
 
   it('reports warn when a lane is stalled', () => {

@@ -233,7 +233,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 | **Memory system** | `12-memory-systems.md` + `Masc.Memory.t` facade | MASC-owned memory bank / institution / procedural 계약 |
 | **TRPG subsystem** | 7개 docs, 미통합 | 분리 패키지 후 자체 spec |
 | **Transport protocol detail** | TRANSPORT-VERIFICATION-CHECKLIST (401 lines) | 09-server-transport.md에 부분 포함, WebRTC/WS 미상세 |
-| **OAS integration contract** | OAS-MASC-BOUNDARY.md (55 lines), oas-masc-state-boundary (278 lines) | OAS delegation 범위 상세화 |
+| **OAS integration contract** | OAS-MASC-BOUNDARY.md, KEEPER-STATE-OWNERSHIP.md | OAS delegation과 MASC domain-state 소유권 |
 | **Operational runbook** | COMMAND-PLANE-RUNBOOK, BENCHMARK-RUNBOOK | 운영 절차 통합 spec |
 | **Config reference** | 없음 (env var 50+ 산재) | 환경변수/설정 SSOT |
 | **Error catalog** | 없음 | MCP error code + 복구 절차 |

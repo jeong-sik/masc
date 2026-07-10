@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -21,8 +20,6 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger("cli-connector")
-
-_RE_STATE_BLOCK = re.compile(r"\[STATE\].*?(?:\[/STATE\]|$)", re.DOTALL)
 
 # Add shared module to path
 _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
@@ -45,12 +42,8 @@ class CLIGateClient(GateClientBase):
         )
 
 
-def _strip_state(text: str) -> str:
-    return _RE_STATE_BLOCK.sub("", text).strip()
-
-
 def _response_text(response: GateResponse) -> str:
-    return _strip_state(response_text(response))
+    return response_text(response).strip()
 
 
 async def _interactive_loop(client: CLIGateClient, keeper: str) -> None:

@@ -406,7 +406,7 @@ sweep_and_recover
   |-- [4] !fiber_alive AND restart_budget AND backoff_elapsed > Restarting
   |-- [4] !fiber_alive AND restart_budget --------------------> Crashed
   |-- [5] stop_requested -------------------------------------> Draining
-  |-- [6] guardrail_triggered --------------------------------> Failing
+  |-- [6] heartbeat_unhealthy OR turn_unhealthy --------------> Failing
   |-- [7] operator_paused OR
   |       (context_overflow AND compact_retry_exhausted) -----> Paused
   |-- [8] handoff_active -------------------------------------> HandingOff

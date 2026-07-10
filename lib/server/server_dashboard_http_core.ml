@@ -294,8 +294,7 @@ let dashboard_general_agent_count_light =
 
 let provider_capacity_json = Server_dashboard_http_core_entities.provider_capacity_json
 
-(* #10544: light mode is meant to skip the heavy belief/tension evaluation
-   and the full board scan, so it should also have a smaller wall-clock
+(* #10544: light mode skips the full board scan, so it should also have a smaller wall-clock
    budget. Pre-fix both modes shared the 16s timeout (post-#9766 8→16
    bump for the full path), which masked any "light isn't really light"
    regression — the operator cannot tell from log noise alone whether
@@ -314,24 +313,17 @@ let dashboard_shell_timeout_for ~light =
   if light then dashboard_shell_light_timeout_s else dashboard_shell_timeout_s
 ;;
 
-(* Meta_cognition.summary_json does a full board_posts.jsonl scan +
-   belief/tension/desire rule evaluation. On a workspace with 450+ posts this
-   regularly exceeds 8s, which was the previous shell timeout and caused
-   repeat "cache compute timeout: shell:..." + "cache bg-revalidate failed"
-   noise in the log. Give it its own cache with a longer TTL, and on a cold
-   miss warm it in the background so the shell path never blocks on the
-   initial full JSONL scan. *)
-(* Meta-cognition summary cache + dashboard shell cache key helpers extracted to
-   [Server_dashboard_http_core_meta_cognition] (godfile decomp). *)
-module Mc_cache = Server_dashboard_http_core_meta_cognition.Mc_cache
+let dashboard_shell_cache_prefix (config : Workspace.config) =
+  Printf.sprintf "shell:workspace=%s:" config.base_path
+;;
 
-let meta_cognition_summary_ttl = Server_dashboard_http_core_meta_cognition.meta_cognition_summary_ttl
-let dashboard_shell_cache_prefix = Server_dashboard_http_core_meta_cognition.dashboard_shell_cache_prefix
-let dashboard_shell_cache_key = Server_dashboard_http_core_meta_cognition.dashboard_shell_cache_key
-let meta_cognition_summary_key = Server_dashboard_http_core_meta_cognition.meta_cognition_summary_key
-let clear_meta_cognition_warm_flag = Server_dashboard_http_core_meta_cognition.clear_meta_cognition_warm_flag
-let schedule_meta_cognition_summary_warm = Server_dashboard_http_core_meta_cognition.schedule_meta_cognition_summary_warm
-let meta_cognition_summary_cached = Server_dashboard_http_core_meta_cognition.meta_cognition_summary_cached
+let dashboard_shell_cache_key ?(light = false) (config : Workspace.config) =
+  Printf.sprintf
+    "%sworkspace=%s:mode=%s"
+    (dashboard_shell_cache_prefix config)
+    config.workspace_path
+    (if light then "light" else "full")
+;;
 
 let dashboard_shell_paths_json = Server_dashboard_http_core_shell_bootstrap.dashboard_shell_paths_json
 let dashboard_shell_bootstrap_json = Server_dashboard_http_core_shell_bootstrap.dashboard_shell_bootstrap_json
@@ -418,7 +410,6 @@ let shell_projection_label_to_phase : string -> Server_timing.phase = function
   | "tasks" -> Projection_tasks
   | "keepers" -> Projection_keepers
   | "configured_keepers" -> Projection_configured_keepers
-  | "meta_cognition" -> Projection_meta_cognition
   | "config_resolution" -> Projection_config_resolution
   | "runtime_resolution" -> Projection_runtime_resolution
   | other -> Custom other
@@ -494,7 +485,6 @@ let dashboard_shell_payload_json
     let configured_keepers, configured_keepers_ms =
       measure_ms "configured_keepers" (fun () -> configured_keeper_count config)
     in
-    let meta_cognition_r = ref (`Null, 0) in
     let config_resolution_r = ref (`Null, 0) in
     let runtime_resolution_r = ref (`Null, 0) in
     let active_keepers, keepers_ms =
@@ -511,12 +501,8 @@ let dashboard_shell_payload_json
         , 0 ))
       else measure_ms "keepers" (fun () -> running_keeper_count config)
     in
-    if light
+    if not light
     then
-      meta_cognition_r
-      := measure_json_projection "meta_cognition" (fun () ->
-           meta_cognition_summary_cached config)
-    else
       (* Isolate each parallel section: in [Eio.Fiber.all] a single fiber's
          exception cancels its siblings and fails the whole payload. Route each
          through [Cancel_safe.observe] (RFC-0106 SSOT) so an unexpected section
@@ -526,16 +512,6 @@ let dashboard_shell_payload_json
          by [Cancel_safe.observe] so fiber-tree unwind is preserved. *)
       Eio.Fiber.all
         [ (fun () ->
-            Cancel_safe.observe
-              ~on_exn:(fun exn ->
-                Log.Dashboard.error
-                  "dashboard meta_cognition section failed: %s"
-                  (Printexc.to_string exn))
-              (fun () ->
-                meta_cognition_r
-                := measure_json_projection "meta_cognition" (fun () ->
-                     meta_cognition_summary_cached config)))
-        ; (fun () ->
             Cancel_safe.observe
               ~on_exn:(fun exn ->
                 Log.Dashboard.error
@@ -556,7 +532,6 @@ let dashboard_shell_payload_json
                 := measure_json_projection "runtime_resolution" (fun () ->
                      Server_dashboard_http_runtime_info.runtime_resolution_json config)))
         ];
-    let meta_cognition_json, meta_cognition_ms = !meta_cognition_r in
     let config_resolution_json, config_resolution_ms = !config_resolution_r in
     let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
     shell_projection_trace_finish trace Shell_trace_finished;
@@ -575,7 +550,6 @@ let dashboard_shell_payload_json
       ; "persisted_keepers", `Int persisted_keepers
       ; "configured_keepers", `Int configured_keepers
       ; "providers", provider_capacity_json ()
-      ; "meta_cognition", meta_cognition_json
       ; "config_resolution", config_resolution_json
       ; "runtime_resolution", runtime_resolution_json
       ]
@@ -595,7 +569,6 @@ let dashboard_shell_payload_json
             ; "keepers_ms", `Int keepers_ms
             ; "persisted_keepers_ms", `Int persisted_keepers_ms
             ; "configured_keepers_ms", `Int configured_keepers_ms
-            ; "meta_cognition_ms", `Int meta_cognition_ms
             ; "config_resolution_ms", `Int config_resolution_ms
             ; "runtime_resolution_ms", `Int runtime_resolution_ms
             ; "light", `Bool light
@@ -762,10 +735,9 @@ let dashboard_shell_http_json
     (* Shell endpoint is read-only; use config directly without isolation
        since state is not available in this context.
 
-       The payload compute runs status / agents / tasks / keepers /
-       meta_cognition projections (the latter scans board_posts.jsonl and
-       evaluates belief/tension/desire rules — frequently 8s+ on a hot
-       workspace).  Under cache miss this used to run inline on the calling
+       The payload compute runs status / agents / tasks / keepers and
+       configuration/runtime-resolution projections. Under cache miss this
+       used to run inline on the calling
        fiber's Eio main domain, blocking every other HTTP fiber for the
        duration — the same Eio cooperative scheduling violation that
        PRs #18991 / #18993 / #18994 / #19007 / #19015 / #19023 / #19024 /

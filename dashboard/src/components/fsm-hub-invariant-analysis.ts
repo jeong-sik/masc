@@ -159,7 +159,6 @@ export function deriveOperationalInsight(
       evidence: [
         `KDP ${snapshot.decision.stage}`,
         `KTC ${snapshot.turn_phase}`,
-        snapshot.measurement.auto_rules?.guardrail_reason ?? 'no guardrail reason',
       ],
     }
   }

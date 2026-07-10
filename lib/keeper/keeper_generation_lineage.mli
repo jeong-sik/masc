@@ -4,13 +4,6 @@
     exposes a [surface_json] view consumed by the dashboard
     generation-lineage panel. *)
 
-(** Drift_guard verdict + similarity projected to JSON. *)
-type continuity_judgment =
-  { json : Yojson.Safe.t
-  ; verdict : string
-  ; similarity : float option
-  }
-
 (** SSOT list of identity fields tracked across generations.
     Each pair is [(field_name, getter)]. *)
 val identity_fields :
@@ -43,11 +36,6 @@ val inheritance_delta_json :
   parent:Keeper_meta_contract.keeper_meta ->
   child:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t
-
-(** Run Drift_guard against [original] vs [received] and project
-    the verdict + similarity to [continuity_judgment]. *)
-val continuity_judgment :
-  original:string -> received:string -> continuity_judgment
 
 (** Build the per-rollover manifest JSON document
     ([keeper_generation_lineage_v1] schema). *)

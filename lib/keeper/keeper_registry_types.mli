@@ -410,7 +410,7 @@ type livelock_attempt_state = {
 
 type turn_measurement = {
   tm_captured_at : float;
-  tm_auto_rules : Keeper_state_machine.auto_rule_summary;
+  tm_context_actions : Keeper_state_machine.context_actions;
 }
 
 type done_resolution = [ `Stopped | `Crashed of string ]
@@ -457,8 +457,8 @@ type registry_entry = {
   waiting_for_inference : bool Atomic.t;
       (** Ephemeral flag: true when keeper is blocked in admission queue.
           Does not affect state machine phase derivation. *)
-  last_auto_rules :
-    (float * Keeper_state_machine.auto_rule_summary) option;
+  last_context_actions :
+    (float * Keeper_state_machine.context_actions) option;
       (** Snapshot of the most recent [Context_measured] auto-rule summary.
           Stored as [(wall_clock, summary)] so the composite observer
           (RFC-0003 §6) can surface the last measurement without reading

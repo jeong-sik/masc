@@ -346,7 +346,7 @@ export type KeeperConfigUpdatePayload = {
   compaction_ratio_gate?: number
   compaction_message_gate?: number
   compaction_token_gate?: number
-  continuity_compaction_cooldown_sec?: number
+  compaction_cooldown_sec?: number
   // Handoff
   auto_handoff?: boolean
   handoff_threshold?: number

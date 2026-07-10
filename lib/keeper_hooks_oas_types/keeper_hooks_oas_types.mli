@@ -22,8 +22,6 @@ val label_status : string
 val label_site : string
 val label_reason : string
 val label_outcome : string
-val label_severity : string
-val label_decision : string
 val label_stop_reason : string
 val label_keeper_name : string
 val label_channel : string
@@ -58,7 +56,6 @@ val key_source : string
 val key_type : string
 val key_turn : string
 val key_model_used : string
-val key_has_state_block : string
 val key_tool_calls_made : string
 val key_total_turns : string
 val key_scope : string

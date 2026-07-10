@@ -16,7 +16,7 @@
       payload returned by the shell surface before any keeper data
       is available. Pins `project="initializing"`, zero counts for
       agents/tasks/keepers/total_runtimes, empty providers map, and
-      null meta_cognition/config_resolution/runtime_resolution. The
+      null config_resolution/runtime_resolution. The
       caller wraps via [with_projection_diagnostics] tagged
       `surface="shell"` with `cache_state="initializing"` and
       `bootstrap_source="shell_prewarm"`. *)
@@ -49,7 +49,6 @@ let dashboard_shell_bootstrap_json (config : Workspace.config) : Yojson.Safe.t =
           ] )
     ; "configured_keepers", `Int 0
     ; "providers", `Assoc []
-    ; "meta_cognition", `Null
     ; "config_resolution", `Null
     ; "runtime_resolution", `Null
     ]

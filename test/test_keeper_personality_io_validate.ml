@@ -18,7 +18,7 @@ let coerce p = Keeper_personality_io.coerce p
    the actual nick0cave instructions length on disk (Layer 1 fix
    evidence, 2026-04-26). Sized at [prompt_render_max_bytes + 37] so it
    exceeds whatever cap the runtime resolves (default 4096, override via
-   MASC_KEEPER_SELF_MODEL_MAX_BYTES). Using String.make so the byte count
+   MASC_KEEPER_PROMPT_RENDER_MAX_BYTES). Using String.make so the byte count
    is verifiable and not dependent on OCaml string-literal
    line-continuation rules (which strip leading whitespace after
    [\<NL>]). *)

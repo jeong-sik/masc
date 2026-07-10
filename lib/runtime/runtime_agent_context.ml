@@ -81,9 +81,7 @@ type config =
   ; exit_condition_result : (int -> stop_reason * string option) option
   ; summarizer : (Agent_sdk.Types.message list -> string) option
     (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
-          Emergency-phase compaction. Defaults to OAS's extractive
-          default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
-          to scrub [STATE] blocks before the 100-char truncation. *)
+          Emergency-phase compaction. Defaults to OAS's extractive default. *)
   ; execution_idle_timeout_s : float option
     (** Per-run inactivity deadline forwarded to OAS
         [Builder.with_execution_idle_timeout]. Resets on each unit of

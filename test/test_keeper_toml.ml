@@ -752,7 +752,7 @@ goal = "works"
     (Sys.readdir tmp_dir);
   Unix.rmdir tmp_dir
 
-let test_bundled_keeper_profiles_resolve_prompt_self_model () =
+let test_bundled_keeper_profiles_resolve_prompt_defaults () =
   let repo = repo_root () in
   let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
   let original_personas = Sys.getenv_opt "MASC_PERSONAS_DIR" in
@@ -781,11 +781,7 @@ let test_bundled_keeper_profiles_resolve_prompt_self_model () =
            let name = Filename.chop_extension file in
            match KTP.load_keeper_profile_defaults_result name with
            | Error e -> fail (Printf.sprintf "%s failed to resolve: %s" path e)
-           | Ok _defaults ->
-             (* RFC-0282 removed the will/needs/desires self_model triple;
-                this gate now just asserts every bundled keeper TOML
-                resolves its profile defaults without error. *)
-             ()))
+           | Ok _defaults -> ()))
 
 let test_bundled_issue_king_uses_local_sandbox () =
   let repo = repo_root () in
@@ -957,7 +953,7 @@ let test_persona_resolver_omits_unspecified_tool_access () =
        | `Null -> ()
        | _ -> fail "unspecified tool_access should be omitted")
 
-let test_persona_defaults_load_self_model_fields () =
+let test_persona_defaults_load_prompt_fields () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -1757,14 +1753,14 @@ let () =
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "materializable helper uses base path" `Quick
             test_profile_defaults_materializable_for_name_uses_base_path;
-          test_case "bundled keeper profiles resolve prompt self-model" `Quick
-            test_bundled_keeper_profiles_resolve_prompt_self_model;
+          test_case "bundled keeper profiles resolve prompt defaults" `Quick
+            test_bundled_keeper_profiles_resolve_prompt_defaults;
           test_case "bundled issue_king uses local sandbox" `Quick
             test_bundled_issue_king_uses_local_sandbox;
           test_case "persona resolver omits unspecified tool_access" `Quick
             test_persona_resolver_omits_unspecified_tool_access;
-          test_case "persona defaults load self-model fields" `Quick
-            test_persona_defaults_load_self_model_fields;
+          test_case "persona defaults load prompt fields" `Quick
+            test_persona_defaults_load_prompt_fields;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver reports placeholder defaults source" `Quick

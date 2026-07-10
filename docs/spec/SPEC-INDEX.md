@@ -90,8 +90,7 @@ graph TB
 |----------|-------------|--------------|
 | `docs/ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md` | Dashboard operator control surface and review queue UX | `10-dashboard.md` |
 | `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-oas-integration.md` |
-| `docs/design/checkpoint-truth-replay-implementation-checklist.md` | Implementation checklist for checkpoint truth / replay | `13-oas-integration.md` |
-| `docs/design/keeper-continuity-product-rfc.md` | Keeper continuity contract and promise level | `05-keeper-agent.md` |
+| `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-oas-integration.md` |
 | `docs/design/check-evaluation-spec.md` | Deterministic check evaluation for contract verification | `15-testing.md` |
 | `docs/design/contract-driven-agent-loop-rfc.md` | Contract-driven agent loop (CDAL) framework | `05-keeper-agent.md` |
 

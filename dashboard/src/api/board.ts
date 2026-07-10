@@ -429,10 +429,8 @@ function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
   if (!isRecord(raw)) return null
   const next: Record<string, unknown> = { ...raw }
   const source = asString(raw.source, '').trim()
-  const stateBlock = asString(raw.state_block, '').trim()
   const classificationReason = asString(raw.classification_reason, '').trim()
   if (source) next.source = source
-  if (stateBlock) next.state_block = stateBlock
   if (classificationReason) next.classification_reason = classificationReason
   return Object.keys(next).length > 0 ? next : null
 }

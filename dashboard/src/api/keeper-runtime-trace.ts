@@ -134,8 +134,6 @@ export interface KeeperRuntimeLensContextAxis {
   context_compacted_count: number
   checkpoint_loaded_count: number
   checkpoint_saved_count: number
-  state_snapshot_sidecar_saved_count: number
-  active_open_loop_count: number
   last_compaction: unknown
 }
 
@@ -530,8 +528,6 @@ function parseRuntimeLensContextAxis(raw: unknown): KeeperRuntimeLensContextAxis
     context_compacted_count: numberField(obj, 'context_compacted_count'),
     checkpoint_loaded_count: numberField(obj, 'checkpoint_loaded_count'),
     checkpoint_saved_count: numberField(obj, 'checkpoint_saved_count'),
-    state_snapshot_sidecar_saved_count: numberField(obj, 'state_snapshot_sidecar_saved_count'),
-    active_open_loop_count: numberField(obj, 'active_open_loop_count'),
     last_compaction: obj.last_compaction ?? null,
   }
 }

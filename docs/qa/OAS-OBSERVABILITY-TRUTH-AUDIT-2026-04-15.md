@@ -89,9 +89,3 @@ These items were intentionally deferred from the April 2026 dashboard cleanup wa
 - Symptom: keeper runtime still persists a MASC-owned `working_context` wrapper around OAS context/checkpoint primitives.
 - Suspected owner path: keeper post-turn and restore flows.
 - Required outcome: shrink `working_context` until OAS owns runtime context/checkpoint state and MASC only projects workspace collaboration state.
-
-### 3. Raw `[STATE]` marker removal
-
-- Symptom: keeper continuity still depends on raw text markers such as `[STATE]`.
-- Suspected owner path: post-turn continuity writes, context reduction heuristics, replay/read surfaces.
-- Required outcome: replace raw marker coupling with structured metadata or typed replay facts.

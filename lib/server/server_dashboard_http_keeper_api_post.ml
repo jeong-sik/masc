@@ -523,7 +523,7 @@ let dashboard_config_int_fields =
     "proactive_cooldown_sec";
     "compaction_message_gate";
     "compaction_token_gate";
-    "continuity_compaction_cooldown_sec";
+    "compaction_cooldown_sec";
     "handoff_cooldown_sec";
   ]
 
@@ -651,9 +651,9 @@ let validate_dashboard_config_field key value =
          | "compaction_token_gate" ->
              validate_dashboard_normalized_int key
                Keeper_config.normalize_compaction_token_gate value
-         | "continuity_compaction_cooldown_sec" ->
+         | "compaction_cooldown_sec" ->
              validate_dashboard_normalized_int key
-               Keeper_config.normalize_continuity_compaction_cooldown_sec value
+               Keeper_config.normalize_compaction_cooldown_sec value
          | "handoff_cooldown_sec" ->
              validate_dashboard_nonnegative_int key value
          | _ -> Ok ())

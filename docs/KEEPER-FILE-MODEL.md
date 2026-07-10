@@ -84,12 +84,6 @@ These are the identity fields that should live in persona by default.
 | Field | Required | Meaning | Notes |
 | --- | --- | --- | --- |
 | `goal` | Required for a standalone operational persona | Primary goal | If absent, a caller must override it explicitly. |
-| `short_goal` | Optional | Short-horizon goal | Defaults to `goal` in create paths. |
-| `mid_goal` | Optional | Mid-horizon goal | Defaults to `goal` in create paths. |
-| `long_goal` | Optional | Long-horizon goal | Defaults to `goal` in create paths. |
-| `will` | Optional | Keeper drive / self-model | Used as prompt default unless a keeper TOML overlay overrides it. |
-| `needs` | Optional | Resources or context the keeper believes it needs | Used as prompt default unless a keeper TOML overlay overrides it. |
-| `desires` | Optional | Desired end state / motivational bias | Used as prompt default unless a keeper TOML overlay overrides it. |
 | `instructions` | Optional | Persona-specific behavior and voice instructions | Used as prompt default unless a keeper TOML overlay overrides it. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
 | `tool_access` | Optional | Default tool candidate profile list | String array of tool names used as profile input; omitted means `[]`. It is not the complete execution gate. |
@@ -97,16 +91,8 @@ These are the identity fields that should live in persona by default.
 | `policy_voice_enabled` | Optional | Whether voice tools should be surfaced | Policy default, not runtime state. |
 | `shards` | Optional | Default tool shards | Optional specialization hook. |
 
-### `keeper` object: compatibility-only fields
-
-These may still be parsed today, but they are **not** the preferred place to encode the concept.
-
-| Field | Status | Preferred owner |
-| --- | --- | --- |
-| `allowed_paths` | Ignored by design | nowhere in persona |
-| `runtime_id`, `model`, `runtime_ref` | Removed | `runtime.toml [[runtime.assignments]]` |
-| `persona_ref` | Removed | `keeper.persona_name` |
-| `telemetry_feedback_*` | Compatibility-only | `keeper.toml` or runtime policy |
+There is no compatibility-only persona surface. Removed or unknown fields are
+rejected instead of being interpreted as alternate state/config protocols.
 
 ## 2. Keeper Declaration
 
@@ -146,8 +132,7 @@ These are still accepted by the loader, but for consistency they should be used 
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `goal`, `short_goal`, `mid_goal`, `long_goal` | string | Override persona goals |
-| `will`, `needs`, `desires`, `instructions` | string | Override persona self-model / prompt |
+| `goal`, `instructions` | string | Override persona prompt identity |
 | `mention_targets` | string array | Override persona mention aliases |
 | `policy_voice_enabled` | bool | Override persona voice policy |
 | `proactive_enabled` | bool | Override default proactive scheduling |
@@ -174,9 +159,8 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | `network_mode` | `none`, `inherit` |
 | `tool_access` | string array of registered tool names used as the candidate profile list |
 
-`social_model` is not an allowed public keeper TOML value. The old
-`magentic_ledger_v1` axis was retired, and the non-public keeper input list is
-currently empty in code.
+Deprecated personality-state axes are not allowed public keeper TOML values.
+The retired non-public keeper input list is currently empty in code.
 
 ### Sandbox Example
 

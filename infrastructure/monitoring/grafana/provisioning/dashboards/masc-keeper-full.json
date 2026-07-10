@@ -2094,63 +2094,6 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Consecutive idle turn count by keeper.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 3
-              },
-              {
-                "color": "red",
-                "value": 5
-              }
-            ]
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 12,
-        "y": 103
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        }
-      },
-      "targets": [
-        {
-          "expr": "masc_keeper_consecutive_idle{keeper=~\"$keeper\"}",
-          "legendFormat": "{{keeper}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Consecutive Idle",
-      "transparent": true,
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
       "description": "Consecutive stay-silent turn count by keeper.",
       "fieldConfig": {
         "defaults": {

@@ -444,8 +444,12 @@ let adapter_loop ~token ~channel_id ~events ?base_url () =
         (* Loop exits after one turn. *)
         ()
     | Event_error { message } ->
-        send_message ~token ~channel_id
-          ~content:("Keeper error: " ^ message);
+        let error_text = "Keeper error: " ^ message in
+        let content =
+          if String.trim acc_text = "" then error_text
+          else acc_text ^ "\n\n" ^ error_text
+        in
+        send_message ~token ~channel_id ~content;
         (* Loop exits after error. *)
         ()
     | Run_started { run_id = _; thread_id = _ } ->

@@ -334,8 +334,17 @@ let adapter_loop ~token ~channel ~events ?base_url
             (send_message_with_blocks ~token ~channel ~content:acc_text ~blocks);
         ()
     | Event_error { message } ->
+        let error_text = "Keeper error: " ^ message in
+        let content =
+          if String.trim acc_text = "" then error_text
+          else acc_text ^ "\n\n" ^ error_text
+        in
+        let blocks =
+          final_message_blocks ~content:acc_text
+            ~event_blocks:(List.rev acc_blocks)
+        in
         on_send_result
-          (send_message ~token ~channel ~content:("Keeper error: " ^ message));
+          (send_message_with_blocks ~token ~channel ~content ~blocks);
         ()
     | Run_started { run_id; thread_id = _ } ->
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)

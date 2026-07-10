@@ -177,6 +177,17 @@ let test_strip_keeps_env_var_shaped_token () =
     "env var preserved verbatim" text
     (Scanner.strip_unresolved_tool_tokens text)
 
+let test_strip_keeps_plain_capitalized_words () =
+  (* 38-bug campaign #6 regression: the deleted legacy sanitizer
+     ([sanitize_retired_tool_names]) removed standalone words like "Grep"
+     and "Bash" from prompt prose outright, mangling legitimate sentences.
+     The registry-driven pass must leave plain capitalized words untouched
+     — they are not masc_/keeper_ tool tokens. *)
+  let text = "Use Grep to search the repo, then Bash to run the script." in
+  Alcotest.(check string)
+    "plain capitalized words preserved verbatim" text
+    (Scanner.strip_unresolved_tool_tokens text)
+
 let test_strip_keeps_wildcard_reference () =
   let text = "Do not call internal masc_web_* names or keeper_* placeholders." in
   Alcotest.(check string)
@@ -232,6 +243,8 @@ let () =
             test_strip_removes_unresolved_lowercase_token;
           Alcotest.test_case "strip keeps env-var-shaped token" `Quick
             test_strip_keeps_env_var_shaped_token;
+          Alcotest.test_case "strip keeps plain capitalized words (#6)" `Quick
+            test_strip_keeps_plain_capitalized_words;
           Alcotest.test_case "strip keeps wildcard reference" `Quick
             test_strip_keeps_wildcard_reference;
           Alcotest.test_case "strip is identity when all resolve" `Quick

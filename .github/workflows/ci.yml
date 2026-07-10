@@ -1042,12 +1042,6 @@ jobs:
           chmod +x scripts/check-toml-syntax.sh
           scripts/check-toml-syntax.sh
 
-      - name: Check Ollama capability drift (RFC-0265)
-        # Compares config/runtime.toml declared media caps against the committed
-        # /api/show baseline (scripts/ollama-caps-baseline.json). No network:
-        # refresh the baseline with --refresh (operator) when Ollama changes a model.
-        run: python3 scripts/masc-sync-ollama-caps.py --check
-
       - name: Check YAML syntax
         run: python3 scripts/ci/check-yaml-syntax.py
 

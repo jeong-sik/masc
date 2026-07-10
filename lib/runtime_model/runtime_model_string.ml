@@ -93,7 +93,11 @@ let make_registry_config
   let api_key =
     if effective_api_key_env = ""
     then ""
-    else Env_config_core.raw_value_opt effective_api_key_env |> Option.value ~default:""
+    else
+      (* An unset optional credential is represented explicitly as the empty
+         transport credential. DET-OK: it does not infer a provider capability
+         or alter a routing decision. *)
+      Env_config_core.raw_value_opt effective_api_key_env |> Option.value ~default:""
   in
   let headers = Binding.default_headers_for_kind defaults.kind in
   let discover =

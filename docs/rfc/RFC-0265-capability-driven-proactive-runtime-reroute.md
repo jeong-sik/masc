@@ -138,7 +138,7 @@ The modality predicate reuses the existing
    and `[runtime.assignments]`; an id that does not resolve to a configured
    runtime is a load error, no silent drop — RFC-0206 §2.1, RFC-0211 SSOT).
 2. **Implicit fallback** when `media_failover` is unset: every configured runtime
-   whose declared `model.capabilities` is non-default for any non-text modality,
+   whose resolved OAS model capability is non-default for any non-text modality,
    in **runtime.toml declaration order**.
 
 Both are deterministic; selection never consults provider liveness or wall-clock,
@@ -166,10 +166,9 @@ why.
 
 ### 3.4 Boundary & determinism
 
-- MASC-side only. OAS (`agent_sdk`) is untouched: the modality vocabulary and
-  declared caps already live in MASC's `runtime_schema` / `runtime_agent`
-  (`apply_runtime_model_input_capabilities` already treats MASC `model.capabilities`
-  as the media-input SSOT, overriding provider-level caps).
+- MASC owns reroute policy and runtime ordering. OAS owns provider/model
+  capability facts; MASC consumes the public capability projection and does not
+  redeclare those facts in `runtime.toml`.
 - persona ⊥ {model, runtime} preserved: the reroute target is chosen from config
   order + declared capabilities, never from persona JSON.
 - Deterministic: pure function of turn content + config; no randomness, no I/O.
@@ -182,82 +181,37 @@ New optional key in `runtime.toml`:
 [runtime]
 # When a turn's input modality exceeds the assigned runtime's declared
 # capabilities, reroute the turn to the first runtime here that can accept it.
-# Unset → derive capable runtimes from declared [models.*.capabilities] in
-# declaration order. Each id must resolve to a configured runtime (load error
-# otherwise).
+# Unset → derive capable runtimes from the resolved OAS model catalog in
+# runtime.toml declaration order. Each id must resolve to a configured runtime
+# (load error otherwise).
 media_failover = ["ollama_cloud.kimi-k2-7-code", "ollama_cloud.minimax-m3"]
 ```
 
-### 4.1 Prerequisite — declare media capabilities accurately (config, not code)
+### 4.1 Prerequisite — keep the OAS capability catalog accurate
 
-The reroute can only pick a runtime whose `model.capabilities` *declares* the
+The reroute can only pick a runtime whose resolved OAS catalog row declares the
 modality. The vision-capable cloud models must not be under-declared:
 
-- `[models.minimax-m3.capabilities]` declares JSON/structured-output only —
-  **no `supports-image-input`** (yet `/api/show` reports `vision`).
-- `[models.kimi-k2-7-code.capabilities]` must retain `supports-image-input` and
-  `supports-multimodal-inputs`.
+- the OAS `ollama_cloud/minimax-m3` row must declare `supports_image_input = true`
+  even when the transport's structured-output policy is separate;
+- the OAS `ollama_cloud/kimi-k2.7-code` row must retain
+  `supports_image_input = true` and `supports_multimodal_inputs = true`.
 
-Until those declarations match `/api/show`, no candidate qualifies and the floor
-(loud reject) fires. This is the same capability-declaration discipline that
-governs the memory-os librarian routing — declared caps are the SSOT, and they
-must match the provider's actual `/api/show`. Adding
-`supports-image-input = true` (and `supports-multimodal-inputs = true` where the
-provider accepts media) to those `.capabilities` blocks is the precondition. To
-keep it accurate without hand-maintenance, §4.2 generates the declarations from
-`/api/show` and gates drift.
+Until those OAS declarations match the provider evidence, no candidate qualifies
+and the floor (loud reject) fires. The MASC runtime seed may constrain context or
+request policy, but it must not override this provider/model fact.
 
-### 4.2 Capability sync + drift gate (generated truth-source)
+### 4.2 Capability evidence and ownership
 
-`scripts/masc-sync-ollama-caps.py` keeps the declared media caps aligned with
-what Ollama actually reports, without putting a network probe on the runtime
-path (the runtime stays static/deterministic per §3.4):
+The OAS model catalog is the capability SSOT. Provider-specific catalog updates
+must be made and reviewed in OAS, using the provider's current official
+capability documentation or API evidence. MASC CI checks the boundary invariant
+that execution code does not reintroduce a local provider/model capability
+projection; OAS CI owns catalog schema and request-builder validation.
 
-- `--refresh` (operator; needs network + `OLLAMA_CLOUD_API_KEY`) — `POST
-  {provider.endpoint − /v1}/api/show {"model": <api-name>}` for every
-  Ollama-family model in the config and (re)writes the baseline snapshot
-  `scripts/ollama-caps-baseline.json`.
-- `--check` (CI; no network) — compares each config-declared media flag against
-  the baseline. Hard-fails on `UNDER-DECLARED` (a vision model whose config
-  omits `supports-image-input` → reroute can't see it), `OVER-DECLARED`
-  (config claims a modality the model lacks → provider 400 at dispatch), or
-  `UNVERIFIED-DECLARED` (config declares image/audio but the model has no
-  `/api/show` evidence in the baseline). The last case closes the loop: a media
-  capability is valid only when backed by a baseline snapshot, so adding a vision
-  model to the config without refreshing the baseline fails CI instead of passing
-  on a soft warning (the gap that let a 31-model config expansion through
-  unverified). A *text-only* model absent from the baseline is fail-closed safe
-  and only soft-warns (`--strict` fails those too). Wired into
-  `.github/workflows/ci.yml`.
-- `--emit` — prints the recommended `[models.<id>.capabilities]` media lines for
-  the operator to merge into the live `runtime.toml`.
-
-Mapping (source: ollama `types/model/capability.go`, verified against live
-`/api/show` 2026-06-19): `vision`|`image` → `supports-image-input`; `audio` →
-`supports-audio-input`. `supports-multimodal-inputs` is intentionally **not**
-derived: MASC maps it to the `document` modality (§3.1
-`supports_required_modality "document" -> supports_multimodal_inputs`), and
-`/api/show` reports no document/multimodal capability string — only
-vision/image/audio. Deriving `multimodal` from `vision` would make the gate
-*admit* a document turn to an image-only model (a fail-open the gate exists to
-prevent). Document support therefore stays an explicit operator declaration that
-the script neither emits nor checks; it manages only the image/audio flags
-`/api/show` evidences.
-
-Two drift levels are both covered: *config vs baseline* by `--check`
-(deterministic, CI) and *baseline vs `/api/show`* by `--refresh` (surfaces as a
-reviewable baseline diff). This is the "generated truth-source + drift-gate"
-pattern; it deliberately does **not** derive caps at runtime.
-
-**Rejected alternative — derive in OAS discovery.** OAS already probes
-`/api/show` (`lib/llm_provider/discovery.ml`), but its derived `capabilities`
-reach no runtime path: the shared discovery atomic stores only
-context/endpoints, `provider_registry` reads `healthy`/`url` only, and
-`capabilities_to_json` has zero callers in `lib/`/`test/`/`examples/`. Extending
-that probe to parse the `capabilities` array would add code to a dead path, so
-the `/api/show` → flag mapping lives in the sync script (where it is consumed)
-and OAS is left untouched — preserving the MASC/OAS boundary with zero OAS
-change.
+Live provider probing is an operator evidence-gathering activity, not a runtime
+or MASC build dependency. It must update the OAS catalog through the OAS
+workflow; MASC must not maintain a second provider capability baseline.
 
 ## 5. As-built surface
 

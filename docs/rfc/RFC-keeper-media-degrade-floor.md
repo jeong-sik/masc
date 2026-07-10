@@ -73,8 +73,8 @@ original media is still in history.
 | Keeper liveness | can park in `pause_human` | continues |
 
 Reroute still takes precedence: when a vision-capable runtime is configured (and
-its `[models.*.capabilities]` declares `supports-image-input`, RFC-0265 §4.1), the
-turn reroutes there and is **not** degraded. Degrade fires only at the floor where
+its resolved OAS model catalog row declares image input, RFC-0265 §4.1), the turn
+reroutes there and is **not** degraded. Degrade fires only at the floor where
 RFC-0265 would otherwise hard-reject.
 
 ## 5. Non-goals / deferred

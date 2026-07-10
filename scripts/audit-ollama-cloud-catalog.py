@@ -3,7 +3,11 @@
 
 This script is intentionally not wired into CI: it performs live network calls
 to ollama.com. Use it when refreshing the runtime seed or proving that the
-checked-in catalog still covers the current Ollama Cloud model set.
+checked-in OAS catalog still covers the current Ollama Cloud model set.
+
+MASC runtime.toml is not a provider/model capability source. Its model rows
+contain runtime bindings and MASC-local context/request policy; provider/model
+capabilities are checked only against the OAS catalog projection.
 """
 
 from __future__ import annotations
@@ -126,7 +130,7 @@ def load_official_models(timeout: float) -> list[OfficialModel]:
                 max_context_tokens=context_length_from_show(name, show),
                 supports_tools="tools" in capabilities,
                 supports_thinking="thinking" in capabilities,
-                supports_vision="vision" in capabilities,
+                supports_vision=bool({"vision", "image"} & set(capabilities)),
                 capabilities=capabilities,
             )
         )
@@ -153,7 +157,7 @@ def int_value(table: dict[str, Any], key: str) -> int | None:
 
 def runtime_catalog(
     runtime: dict[str, Any],
-) -> tuple[dict[str, str], set[str], dict[str, Any]]:
+) -> tuple[dict[str, str], set[str]]:
     models = runtime.get("models", {})
     bindings = runtime.get("ollama_cloud", {})
     if not isinstance(models, dict):
@@ -171,7 +175,7 @@ def runtime_catalog(
         if not isinstance(api_name, str):
             raise RuntimeError(f"runtime.toml: models.{slug}.api-name must be a string")
         api_name_to_slug[api_name] = slug
-    return api_name_to_slug, set(bindings), models
+    return api_name_to_slug, set(bindings)
 
 
 def oas_catalog(
@@ -203,7 +207,7 @@ def check_catalog(
 ) -> tuple[dict[str, Any], list[str]]:
     official_by_name = {model.name: model for model in official}
     official_names = set(official_by_name)
-    runtime_api_to_slug, runtime_bindings, runtime_models = runtime_catalog(runtime)
+    runtime_api_to_slug, runtime_bindings = runtime_catalog(runtime)
     oas_provider_qualified, oas_bare_prefixes = oas_catalog(oas_models)
 
     errors: list[str] = []
@@ -232,40 +236,6 @@ def check_catalog(
         slug = runtime_api_to_slug.get(name)
         if slug is not None and slug not in runtime_bindings:
             errors.append(f"missing runtime provider binding: [ollama_cloud.{slug}]")
-
-        runtime_row = runtime_models.get(slug) if slug is not None else None
-        if isinstance(runtime_row, dict):
-            runtime_caps = runtime_row.get("capabilities", {})
-            if not isinstance(runtime_caps, dict):
-                errors.append(f"runtime model {slug}: capabilities must be a table")
-                runtime_caps = {}
-            if int_value(runtime_row, "max-context") != model.max_context_tokens:
-                errors.append(
-                    f"runtime model {slug}: max-context "
-                    f"{int_value(runtime_row, 'max-context')} != official {model.max_context_tokens}"
-                )
-            if bool_value(runtime_row, "tools-support") != model.supports_tools:
-                errors.append(
-                    f"runtime model {slug}: tools-support mismatch for official {name}"
-                )
-            if bool_value(runtime_row, "thinking-support") != model.supports_thinking:
-                errors.append(
-                    f"runtime model {slug}: thinking-support mismatch for official {name}"
-                )
-            if (
-                bool_value(runtime_caps, "supports-image-input")
-                != model.supports_vision
-            ):
-                errors.append(
-                    f"runtime model {slug}: supports-image-input mismatch for official {name}"
-                )
-            if (
-                bool_value(runtime_caps, "supports-multimodal-inputs")
-                != model.supports_vision
-            ):
-                errors.append(
-                    f"runtime model {slug}: supports-multimodal-inputs mismatch for official {name}"
-                )
 
         oas_row = oas_provider_qualified.get(name)
         if isinstance(oas_row, dict):

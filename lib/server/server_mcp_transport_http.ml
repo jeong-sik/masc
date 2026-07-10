@@ -337,6 +337,7 @@ let cleanup_committed_mcp_session ~transport ~session_id committed =
       connection_targets;
     List.iter
       (fun wire_session_id ->
+        (* fire-and-forget: backing SSE cleanup is best-effort after durable delete. *)
         ignore (Session.McpSessionStore.remove wire_session_id))
       wire_sessions;
     Mcp_server_eio_protocol.clear_resource_subscriptions_for_session session_id;

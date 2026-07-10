@@ -215,6 +215,7 @@ let finish_operation_locked t operation =
 
 let resolve_operation_release = function
   | Resolve_drain resolver ->
+      (* fire-and-forget: resolving an already-completed drain is harmless. *)
       ignore (Eio.Promise.try_resolve resolver () : bool)
   | Release_complete -> ()
   | Release_state_mismatch ->
@@ -564,6 +565,7 @@ let cleanup_backing_session t (lease : lease) =
     | Some { agent_name = Some agent_name; _ }
       when String.equal
              lease.owner.Server_transport_admission.agent_name agent_name ->
+        (* fire-and-forget: stale backing cleanup cannot change the owner state. *)
         ignore (Session.McpSessionStore.remove lease.session_id)
     | Some _ | None -> ()
 
@@ -680,6 +682,7 @@ let ensure_backing_session_for_owner t ~session_id ~requester =
          && Option.is_some (Store.find_active t.sessions ~session_id) ->
       (* Old initialized GETs created ownerless backing entries.  The caller's
          immutable transport owner has already been verified. *)
+      (* fire-and-forget: removing the obsolete ownerless backing entry is cleanup only. *)
       ignore (Session.McpSessionStore.remove session_id);
       create_or_validate ()
   | Some _ -> Error (owner_mismatch_message ~session_id)

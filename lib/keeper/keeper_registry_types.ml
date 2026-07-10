@@ -12,6 +12,8 @@ module StringMap = Set_util.StringMap
    [Keeper_registry_types_failure] (godfile decomp). *)
 include Keeper_registry_types_failure
 
+exception Operator_interrupt
+
 (* Turn_phase FSM types, witnesses, transitions, and resolver extracted to
    [Keeper_registry_types_turn_phase] (500-line decomp). *)
 include Keeper_registry_types_turn_phase
@@ -100,6 +102,7 @@ type registry_entry =
   ; last_failure_reason : failure_reason option
   ; turn_consecutive_failures : int
   ; livelock_state : livelock_attempt_state option Atomic.t
+  ; current_turn_switch : Eio.Switch.t option Atomic.t
   ; board_wakeups : float StringMap.t
   ; board_cursor_ts : float
   ; board_cursor_post_id : string option

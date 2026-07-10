@@ -366,6 +366,7 @@ let register_with_state
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
     ; livelock_state = Atomic.make None
+    ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
@@ -460,6 +461,7 @@ let register_restarting ~base_path name meta
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
     ; livelock_state = Atomic.make None
+    ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
@@ -886,4 +888,29 @@ let mark_turn_runtime_done ~base_path name =
     name
     ~event_kind:"runtime_done"
     (Packed Turn_finalizing)
+;;
+
+let set_turn_switch ~base_path name sw_opt =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | Some entry -> Atomic.set entry.current_turn_switch sw_opt
+  | None -> ()
+;;
+
+let clear_turn_switch ~base_path name =
+  set_turn_switch ~base_path name None
+;;
+
+let interrupt_current_turn ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> `No_turn_in_flight
+  | Some entry ->
+    (match entry.current_turn_observation with
+     | None -> `No_turn_in_flight
+     | Some obs ->
+       match Atomic.exchange entry.current_turn_switch None with
+       | None -> `No_turn_in_flight
+       | Some sw ->
+         (try Eio.Switch.fail sw Operator_interrupt with
+          | Invalid_argument _ -> ());
+         `Cancelled obs.turn_id)
 ;;

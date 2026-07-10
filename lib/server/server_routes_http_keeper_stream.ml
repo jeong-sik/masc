@@ -341,6 +341,43 @@ let handle_keeper_chat_request_cancel state request reqd =
           (keeper_chat_stream_error_json
              "request_id not found or already finished")
 
+let handle_keeper_turn_interrupt state request reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let name_result =
+      try
+        match Yojson.Safe.from_string body_str with
+        | `Assoc fields ->
+          (match List.assoc_opt "name" fields with
+           | Some (`String s) -> Ok (String.trim s)
+           | _ -> Error "name (string) is required")
+        | _ -> Error "JSON object body required"
+      with
+      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+    in
+    match name_result with
+    | Error msg ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (keeper_chat_stream_error_json msg)
+    | Ok keeper_name ->
+      if not (Keeper_registry.is_registered ~base_path keeper_name)
+      then
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (keeper_chat_stream_error_json "keeper not registered")
+      else (
+        match Keeper_registry.interrupt_current_turn ~base_path keeper_name with
+        | `Cancelled turn_id ->
+          Log.Keeper.info "keeper_turn_interrupt: keeper=%s turn_id=%d" keeper_name turn_id;
+          respond_json_value_with_cors ~status:`OK request reqd
+            (`Assoc [ ("cancelled", `Bool true); ("turn_id", `Int turn_id) ])
+        | `No_turn_in_flight ->
+          respond_json_value_with_cors ~status:`OK request reqd
+            (`Assoc
+               [ ("cancelled", `Bool false)
+               ; ("reason", `String "no_in_flight_turn")
+               ])))
+;;
+
 (* No external timeout for keeper_msg. Keeper has its own internal limits
    (max_turns, max_cost_usd, max_tokens) that control call duration.
    A fixed external timeout conflicts with multi-turn tool-use loops and

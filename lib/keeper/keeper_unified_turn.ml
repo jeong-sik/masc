@@ -866,7 +866,8 @@ let run_keeper_cycle
                        | Keeper_registry.Fiber_unresolved _
                        | Keeper_registry.Exception _
                        | Keeper_registry.Turn_overflow_pause
-                       | Keeper_registry.Turn_livelock_pause -> ());
+                       | Keeper_registry.Turn_livelock_pause
+                       | Keeper_registry.Operator_interrupt -> ());
                       Keeper_registry.set_failure_reason
                         ~base_path:config.base_path
                         meta.name

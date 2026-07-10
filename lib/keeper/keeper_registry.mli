@@ -258,6 +258,23 @@ val mark_turn_gate_rejected_by_name : string -> unit
     called. *)
 val mark_turn_finished : base_path:string -> string -> unit
 
+(** Store or clear the live [Eio.Switch.t] for the current turn.
+    The switch is used by [interrupt_current_turn] to cancel an
+    in-flight turn from the dashboard or operator tooling. *)
+val set_turn_switch :
+  base_path:string -> string -> Eio.Switch.t option -> unit
+
+(** Reset [current_turn_switch] to [None]. Idempotent no-op if the
+    keeper is not registered. *)
+val clear_turn_switch : base_path:string -> string -> unit
+
+(** Cancel the keeper's in-flight turn by failing its [Eio.Switch.t].
+    Returns [`Cancelled turn_id] when a live switch was held and
+    cancelled, or [`No_turn_in_flight] when there is no active turn or
+    no registered switch. *)
+val interrupt_current_turn :
+  base_path:string -> string -> [ `Cancelled of int | `No_turn_in_flight ]
+
 (** Record the verdict reasons from a [keeper_cycle_decision] that
     chose to skip the next turn.  Stamps [last_skip_observation] with
     [(now, reasons)] so the stale watchdog can surface *why* a keeper

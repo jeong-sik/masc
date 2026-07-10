@@ -198,6 +198,24 @@ let append_file_unix (path : string) (content : string) : unit =
         (fun () -> Stdlib.output_string oc content))
 ;;
 
+let write_all_fd ~path fd content =
+  let rec loop offset =
+    if offset < String.length content
+    then
+      match
+        Unix.write_substring
+          fd
+          content
+          offset
+          (String.length content - offset)
+      with
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop offset
+      | 0 -> raise (Sys_error (Printf.sprintf "%s: zero-byte append" path))
+      | wrote -> loop (offset + wrote)
+  in
+  loop 0
+;;
+
 let append_file_durable_unix (path : string) (content : string) : unit =
   let mu = get_append_path_mutex path in
   Stdlib.Mutex.lock mu;
@@ -210,23 +228,65 @@ let append_file_durable_unix (path : string) (content : string) : unit =
       Stdlib.Fun.protect
         ~finally:(fun () -> Unix.close fd)
         (fun () ->
-          let rec write_all offset =
-            if offset < String.length content
-            then
-              match
-                Unix.write_substring
-                  fd
-                  content
-                  offset
-                  (String.length content - offset)
-              with
-              | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_all offset
-              | 0 ->
-                raise (Sys_error (Printf.sprintf "%s: zero-byte append" path))
-              | wrote -> write_all (offset + wrote)
-          in
-          write_all 0;
+          write_all_fd ~path fd content;
           Unix.fsync fd);
+      match Atomic_write.fsync_directory (Filename.dirname path) with
+      | Ok () -> ()
+      | Error detail -> raise (Sys_error detail))
+;;
+
+let same_file_identity left right =
+  left.Unix.st_kind = right.Unix.st_kind
+  && left.Unix.st_dev = right.Unix.st_dev
+  && left.Unix.st_ino = right.Unix.st_ino
+;;
+
+let append_file_durable_no_follow_unix path content =
+  let mu = get_append_path_mutex path in
+  Stdlib.Mutex.lock mu;
+  Stdlib.Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
+    (fun () ->
+      let before =
+        try Some (Unix.lstat path) with
+        | Unix.Unix_error (Unix.ENOENT, _, _) -> None
+      in
+      (match before with
+       | Some stat when stat.Unix.st_kind <> Unix.S_REG ->
+         raise
+           (Sys_error
+              (Printf.sprintf "%s: append target is not a regular file" path))
+       | Some _ | None -> ());
+      let fd =
+        Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
+      in
+      Stdlib.Fun.protect
+        ~finally:(fun () -> Unix.close fd)
+        (fun () ->
+          let opened = Unix.fstat fd in
+          let linked = Unix.lstat path in
+          if
+            opened.Unix.st_kind <> Unix.S_REG
+            || linked.Unix.st_kind <> Unix.S_REG
+            || not (same_file_identity opened linked)
+            || not
+                 (Option.for_all
+                    (fun prior -> same_file_identity prior opened)
+                    before)
+          then
+            raise
+              (Sys_error
+                 (Printf.sprintf
+                    "%s: append target changed or resolved through a symlink"
+                    path));
+          write_all_fd ~path fd content;
+          Unix.fsync fd;
+          let after = Unix.lstat path in
+          if not (same_file_identity opened after)
+          then
+            raise
+              (Sys_error
+                 (Printf.sprintf "%s: append target changed during write" path)));
       match Atomic_write.fsync_directory (Filename.dirname path) with
       | Ok () -> ()
       | Error detail -> raise (Sys_error detail))
@@ -349,6 +409,19 @@ let append_file_durable path content =
     (try Eio_unix.run_in_systhread (fun () -> append_file_durable_unix path content) with
      | Stdlib.Effect.Unhandled _ -> append_file_durable_unix path content)
   | None -> append_file_durable_unix path content
+;;
+
+let append_file_durable_no_follow path content =
+  test_exec_home_guard ~op:"append_file_durable_no_follow" path;
+  match Atomic.get global_fs with
+  | Some _ ->
+    (try
+       Eio_unix.run_in_systhread (fun () ->
+         append_file_durable_no_follow_unix path content)
+     with
+     | Stdlib.Effect.Unhandled _ ->
+       append_file_durable_no_follow_unix path content)
+  | None -> append_file_durable_no_follow_unix path content
 ;;
 
 (** Check if file exists.

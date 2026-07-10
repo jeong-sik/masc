@@ -31,6 +31,12 @@ let keepers_dir () =
   | None -> Config_dir_resolver.keepers_dir ()
 ;;
 
+let ensure_configured_keepers_dir () =
+  let path = keepers_dir () in
+  ensure_dir path;
+  path
+;;
+
 let keeper_name_exn raw =
   match Keeper_id.Keeper_name.of_string raw with
   | Ok keeper_name -> keeper_name
@@ -38,6 +44,70 @@ let keeper_name_exn raw =
 ;;
 
 let keeper_name_string = Keeper_id.Keeper_name.to_string
+
+let trace_id_exn raw =
+  match Keeper_id.Trace_id.of_string raw with
+  | Ok trace_id -> trace_id
+  | Error detail -> invalid_arg detail
+;;
+
+let trace_id_string = Keeper_id.Trace_id.to_string
+
+let lstat_if_present path =
+  try Some (Unix.lstat path) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> None
+;;
+
+let require_real_directory path =
+  match lstat_if_present path with
+  | Some stat when stat.Unix.st_kind = Unix.S_DIR -> ()
+  | Some _ ->
+    invalid_arg (Printf.sprintf "expected a real directory, found another file kind: %s" path)
+  | None -> invalid_arg (Printf.sprintf "required directory does not exist: %s" path)
+;;
+
+let require_regular_file_or_missing path =
+  match lstat_if_present path with
+  | None -> ()
+  | Some stat when stat.Unix.st_kind = Unix.S_REG -> ()
+  | Some _ ->
+    invalid_arg
+      (Printf.sprintf "expected a regular file or missing path: %s" path)
+;;
+
+let fsync_directory_exn path =
+  match Fs_compat.fsync_directory path with
+  | Ok () -> ()
+  | Error detail -> raise (Sys_error detail)
+;;
+
+let ensure_real_child_directory ~parent ~child_name =
+  require_real_directory parent;
+  let child = Filename.concat parent child_name in
+  let created =
+    match lstat_if_present child with
+    | Some stat when stat.Unix.st_kind = Unix.S_DIR -> false
+    | Some _ ->
+      invalid_arg
+        (Printf.sprintf
+           "expected a real directory, found another file kind: %s"
+           child)
+    | None ->
+      (try
+         Unix.mkdir child 0o755;
+         true
+       with
+       | Unix.Unix_error (Unix.EEXIST, _, _) -> false)
+  in
+  require_real_directory parent;
+  require_real_directory child;
+  if created then fsync_directory_exn parent;
+  child
+;;
+
+let validate_lock_target base_path =
+  require_regular_file_or_missing (base_path ^ ".lock")
+;;
 
 module For_testing = struct
   let with_keepers_dir path f =
@@ -126,33 +196,79 @@ let episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id =
 ;;
 
 let with_episode_bundle_lock_for_keepers_dir ?clock ~keepers_dir ~keeper_id f =
-  File_lock_eio.with_lock
-    ?clock
-    (episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id)
-    f
+  require_real_directory keepers_dir;
+  let lock_base =
+    episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id
+  in
+  validate_lock_target lock_base;
+  File_lock_eio.with_lock ?clock lock_base f
 ;;
 
 let with_episode_bundle_lock ?clock ~keeper_id f =
   with_episode_bundle_lock_for_keepers_dir
     ?clock
-    ~keepers_dir:(keepers_dir ())
+    ~keepers_dir:(ensure_configured_keepers_dir ())
     ~keeper_id:(keeper_name_exn keeper_id)
     f
 ;;
 
+let facts_lock_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  facts_path_for_keepers_dir
+    ~keepers_dir
+    ~keeper_id:(keeper_name_string keeper_id)
+;;
+
+let with_facts_lock_unhandled_for_keepers_dir ?clock ~keepers_dir ~keeper_id f =
+  require_real_directory keepers_dir;
+  let lock_base = facts_lock_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  require_regular_file_or_missing lock_base;
+  validate_lock_target lock_base;
+  File_lock_eio.with_lock ?clock lock_base f
+;;
+
+let with_facts_lock_for_keepers_dir
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      ~on_timeout
+      f
+  =
+  try
+    with_facts_lock_unhandled_for_keepers_dir
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      f
+  with
+  | File_lock_eio.Flock_timeout { path; attempts; _ } ->
+    on_timeout (Printf.sprintf "lock timeout: %s after %d attempts" path attempts)
+;;
+
+let with_facts_lock ?clock ~keeper_id ~on_timeout f =
+  with_facts_lock_for_keepers_dir
+    ?clock
+    ~keepers_dir:(ensure_configured_keepers_dir ())
+    ~keeper_id:(keeper_name_exn keeper_id)
+    ~on_timeout
+    f
+;;
+
+let episodes_directory_name = "episodes"
+
 let episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id =
-  let d =
-    Filename.concat
-      keepers_dir
-      (Filename.concat (keeper_name_string keeper_id) "episodes")
+  let keeper_dir =
+    ensure_real_child_directory
+      ~parent:keepers_dir
+      ~child_name:(keeper_name_string keeper_id)
   in
-  ensure_dir d;
-  d
+  ensure_real_child_directory
+    ~parent:keeper_dir
+    ~child_name:episodes_directory_name
 ;;
 
 let episodes_dir ~keeper_id =
   episodes_dir_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
+    ~keepers_dir:(ensure_configured_keepers_dir ())
     ~keeper_id:(keeper_name_exn keeper_id)
 ;;
 
@@ -167,9 +283,10 @@ let tool_result_path ~keeper_id ~tool_call_id =
 ;;
 
 let episode_path ~keeper_id ~trace_id ~generation =
+  let trace_id = trace_id_exn trace_id in
   Filename.concat
     (episodes_dir ~keeper_id)
-    (Printf.sprintf "%s-g%04d.json" trace_id generation)
+    (Printf.sprintf "%s-g%04d.json" (trace_id_string trace_id) generation)
 ;;
 
 (* Raised when a durable atomic write fails. Distinct from [Failure] so the
@@ -211,15 +328,23 @@ let write_file_atomically path content =
   | Error msg -> raise (Atomic_write_failed msg)
 ;;
 
+let write_file_atomically_in_real_directory path content =
+  require_real_directory (Filename.dirname path);
+  require_regular_file_or_missing path;
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> ()
+  | Error msg -> raise (Atomic_write_failed msg)
+;;
+
 let generation_counter_path_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id =
   Filename.concat
     (episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id)
-    (Printf.sprintf "%s.generation" trace_id)
+    (Printf.sprintf "%s.generation" (trace_id_string trace_id))
 ;;
 
 let max_generation_from_files_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id =
   let dir = episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id in
-  let prefix = Printf.sprintf "%s-g" trace_id in
+  let prefix = Printf.sprintf "%s-g" (trace_id_string trace_id) in
   Sys.readdir dir
   |> Array.to_list
   |> List.filter_map (fun name ->
@@ -232,15 +357,16 @@ let max_generation_from_files_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id 
 ;;
 
 let read_generation_counter path =
-  if not (Sys.file_exists path)
-  then None
-  else (
+  require_regular_file_or_missing path;
+  match lstat_if_present path with
+  | None -> None
+  | Some _ ->
     let ic = open_in_bin path in
     Fun.protect
       ~finally:(fun () -> close_in_noerr ic)
       (fun () ->
-         let len = in_channel_length ic in
-         really_input_string ic len |> String.trim |> int_of_string_opt))
+        let len = in_channel_length ic in
+        really_input_string ic len |> String.trim |> int_of_string_opt)
 ;;
 
 (** Compute the next generation number for a trace's episode files.
@@ -259,6 +385,8 @@ let next_generation_with_floor_for_keepers_dir
   let counter_path =
     generation_counter_path_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id
   in
+  require_regular_file_or_missing counter_path;
+  validate_lock_target counter_path;
   File_lock_eio.with_lock counter_path (fun () ->
     let next_from_files =
       max_generation_from_files_for_keepers_dir
@@ -273,23 +401,30 @@ let next_generation_with_floor_for_keepers_dir
       | None -> 0
     in
     let generation = max floor (max next_from_files next_from_counter) in
-    write_file_atomically counter_path (Printf.sprintf "%d\n" (generation + 1));
+    write_file_atomically_in_real_directory
+      counter_path
+      (Printf.sprintf "%d\n" (generation + 1));
     generation)
 ;;
 
 let next_generation_with_floor ~floor ~keeper_id ~trace_id =
   next_generation_with_floor_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
+    ~keepers_dir:(ensure_configured_keepers_dir ())
     ~floor
     ~keeper_id:(keeper_name_exn keeper_id)
-    ~trace_id
+    ~trace_id:(trace_id_exn trace_id)
 ;;
 
 let next_generation ~keeper_id ~trace_id =
   next_generation_with_floor ~floor:0 ~keeper_id ~trace_id
 ;;
 
-let unique_episode_path_for_keepers_dir ~keepers_dir ~keeper_id episode =
+let unique_episode_path_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id
+      ~trace_id
+      episode
+  =
   let created_ms =
     episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float
   in
@@ -298,7 +433,7 @@ let unique_episode_path_for_keepers_dir ~keepers_dir ~keeper_id episode =
       (episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id)
       (Printf.sprintf
          "%s-g%04d-t%013Ld"
-         episode.trace_id
+         (trace_id_string trace_id)
          episode.generation
          created_ms)
   in
@@ -324,12 +459,22 @@ let append_json path json =
   append_line path (Yojson.Safe.to_string json)
 ;;
 
+let append_json_no_follow path json =
+  require_real_directory (Filename.dirname path);
+  require_regular_file_or_missing path;
+  Fs_compat.append_file_durable_no_follow
+    path
+    (Yojson.Safe.to_string json ^ "\n")
+;;
+
 let append_fact ~keeper_id fact =
   append_json (facts_path ~keeper_id) (fact_to_json fact)
 ;;
 
 let append_event_for_keepers_dir ~keepers_dir ~keeper_id episode =
-  append_json
+  ignore (trace_id_exn episode.trace_id : Keeper_id.Trace_id.t);
+  require_real_directory keepers_dir;
+  append_json_no_follow
     (events_path_for_keepers_dir
        ~keepers_dir
        ~keeper_id:(keeper_name_string keeper_id))
@@ -338,40 +483,53 @@ let append_event_for_keepers_dir ~keepers_dir ~keeper_id episode =
 
 let append_event ~keeper_id episode =
   append_event_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
+    ~keepers_dir:(ensure_configured_keepers_dir ())
     ~keeper_id:(keeper_name_exn keeper_id)
     episode
 ;;
 
 let append_episode_for_keepers_dir ~keepers_dir ~keeper_id episode =
-  let path = unique_episode_path_for_keepers_dir ~keepers_dir ~keeper_id episode in
-  write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
+  let trace_id = trace_id_exn episode.trace_id in
+  let path =
+    unique_episode_path_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id
+      ~trace_id
+      episode
+  in
+  write_file_atomically_in_real_directory
+    path
+    (Yojson.Safe.pretty_to_string (episode_to_json episode))
 ;;
 
 let append_episode ~keeper_id episode =
   append_episode_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
+    ~keepers_dir:(ensure_configured_keepers_dir ())
     ~keeper_id:(keeper_name_exn keeper_id)
     episode
 ;;
 
 let append_episode_bundle ~keeper_id episode =
   with_episode_bundle_lock ~keeper_id (fun () ->
-    File_lock_eio.with_lock (facts_path ~keeper_id) (fun () ->
-      List.iter (append_fact ~keeper_id) episode.claims);
+    with_facts_lock_unhandled_for_keepers_dir
+      ~keepers_dir:(ensure_configured_keepers_dir ())
+      ~keeper_id:(keeper_name_exn keeper_id)
+      (fun () -> List.iter (append_fact ~keeper_id) episode.claims);
     append_episode ~keeper_id episode;
     append_event ~keeper_id episode)
 ;;
 
 let rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts =
   let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  require_real_directory keepers_dir;
+  require_regular_file_or_missing path;
   let content =
     facts
     |> List.map (fun fact -> fact_to_json fact |> Yojson.Safe.to_string)
     |> String.concat "\n"
   in
   let content = if String.equal content "" then "" else content ^ "\n" in
-  write_file_atomically path content
+  write_file_atomically_in_real_directory path content
 ;;
 
 let rewrite_facts_atomically_for_base_path ~base_path ~keeper_id facts =
@@ -382,7 +540,10 @@ let rewrite_facts_atomically_for_base_path ~base_path ~keeper_id facts =
 ;;
 
 let rewrite_facts_atomically ~keeper_id facts =
-  rewrite_facts_atomically_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id facts
+  rewrite_facts_atomically_for_keepers_dir
+    ~keepers_dir:(ensure_configured_keepers_dir ())
+    ~keeper_id
+    facts
 ;;
 
 (* ---------- Facts snapshot CAS (optimistic concurrency) ---------- *)
@@ -407,19 +568,6 @@ let rec same_fact_snapshot left right =
   | l :: ls, r :: rs ->
     String.equal (fact_fingerprint l) (fact_fingerprint r) && same_fact_snapshot ls rs
   | [], _ :: _ | _ :: _, [] -> false
-;;
-
-(* Run [f] holding the per-keeper facts lock. On lock-acquisition timeout (another
-   writer holds the flock past the retry budget) [on_timeout msg] decides the
-   caller's result rather than letting [Flock_timeout] escape — callers that want a
-   typed skip/no-op outcome pass it here instead of catching the exception
-   themselves. Non-timeout body exceptions propagate after the lock finalizer runs.
-   Keep [on_timeout] total and non-raising so timeout remains a typed outcome, not
-   a second failure path. *)
-let with_facts_lock ?clock ~keeper_id ~on_timeout f =
-  try File_lock_eio.with_lock ?clock (facts_path ~keeper_id) f with
-  | File_lock_eio.Flock_timeout { path; attempts; _ } ->
-    on_timeout (Printf.sprintf "lock timeout: %s after %d attempts" path attempts)
 ;;
 
 let save_tool_result ~keeper_id ~tool_call_id json =
@@ -534,17 +682,18 @@ let parse_fact_json_line_strict ~path ~line_number line =
     Error (Printf.sprintf "%s:%d: invalid fact JSON: %s" path line_number message)
 ;;
 
-let read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id =
-  read_lines_all (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-  |> List.filter_map (parse_json_line fact_of_json)
-;;
-
-let read_facts_all ~keeper_id =
-  read_facts_all_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
-;;
-
-let read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
+let validated_facts_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  require_real_directory keepers_dir;
   let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  require_regular_file_or_missing path;
+  path
+;;
+
+let read_facts_all_at_path path =
+  read_lines_all path |> List.filter_map (parse_json_line fact_of_json)
+;;
+
+let read_facts_all_strict_at_path path =
   let rec loop line_number acc = function
     | [] -> Ok (List.rev acc)
     | line :: rest ->
@@ -554,18 +703,38 @@ let read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
   loop 1 [] (read_lines_all path)
 ;;
 
-let read_facts_all_strict ~keeper_id =
-  read_facts_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
-;;
-
-let read_facts_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
-  read_lines_tail (facts_path_for_keepers_dir ~keepers_dir ~keeper_id) ~n
+let read_facts_tail_at_path path ~n =
+  read_lines_tail path ~n
   |> List.filter_map (parse_json_line fact_of_json)
   |> take_last n
 ;;
 
+let read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id =
+  read_facts_all_at_path
+    (validated_facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+;;
+
+let read_facts_all ~keeper_id =
+  read_facts_all_at_path (facts_path ~keeper_id)
+;;
+
+let read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
+  read_facts_all_strict_at_path
+    (validated_facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+;;
+
+let read_facts_all_strict ~keeper_id =
+  read_facts_all_strict_at_path (facts_path ~keeper_id)
+;;
+
+let read_facts_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
+  read_facts_tail_at_path
+    (validated_facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    ~n
+;;
+
 let read_facts_tail ~keeper_id ~n =
-  read_facts_tail_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id ~n
+  read_facts_tail_at_path (facts_path ~keeper_id) ~n
 ;;
 
 let read_facts_tail_for_base_path ~base_path ~keeper_id ~n =
@@ -628,7 +797,7 @@ let read_facts_for_rewrite_for_keepers_dir ~keepers_dir ~keeper_id =
 
 let read_facts_for_rewrite ~keeper_id =
   read_facts_for_rewrite_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
+    ~keepers_dir:(ensure_configured_keepers_dir ())
     ~keeper_id:(keeper_name_exn keeper_id)
 ;;
 
@@ -773,7 +942,7 @@ let merge_and_cap_facts
       ~rank
   =
   merge_and_cap_facts_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
+    ~keepers_dir:(ensure_configured_keepers_dir ())
     ~now
     ~keeper_id:(keeper_name_exn keeper_id)
     ~merge
@@ -847,11 +1016,13 @@ let trim_target ~count ~keep ~trigger = if count <= trigger then None else Some 
    like any other, never silently dropped mid-file. Returns the number dropped
    (diagnostic; the rewrite is the mechanism). *)
 let cap_events_for_keepers_dir ~keepers_dir ~keeper_id ~keep ~trigger =
+  require_real_directory keepers_dir;
   let path =
     events_path_for_keepers_dir
       ~keepers_dir
       ~keeper_id:(keeper_name_string keeper_id)
   in
+  require_regular_file_or_missing path;
   (* RFC-0302 (#22823): submit the blocking full read to the domain pool so it
      does not starve the main Eio scheduler when a pool is installed (inline
      fallback in tests / before the pool is set up). [path] is resolved on main;
@@ -867,13 +1038,13 @@ let cap_events_for_keepers_dir ~keepers_dir ~keeper_id ~keep ~trigger =
       | [] -> ""
       | _ -> String.concat "\n" kept ^ "\n"
     in
-    write_file_atomically path content;
+    write_file_atomically_in_real_directory path content;
     List.length all - List.length kept
 ;;
 
 let cap_events ~keeper_id ~keep ~trigger =
   cap_events_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
+    ~keepers_dir:(ensure_configured_keepers_dir ())
     ~keeper_id:(keeper_name_exn keeper_id)
     ~keep
     ~trigger
@@ -919,7 +1090,7 @@ let cap_episode_files_for_keepers_dir ~keepers_dir ~keeper_id ~keep ~trigger =
 
 let cap_episode_files ~keeper_id ~keep ~trigger =
   cap_episode_files_for_keepers_dir
-    ~keepers_dir:(keepers_dir ())
+    ~keepers_dir:(ensure_configured_keepers_dir ())
     ~keeper_id:(keeper_name_exn keeper_id)
     ~keep
     ~trigger

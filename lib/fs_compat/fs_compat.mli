@@ -102,6 +102,11 @@ val append_file : string -> string -> unit
     a system thread. *)
 val append_file_durable : string -> string -> unit
 
+(** Like {!append_file_durable}, but reject a symlink/non-regular final target
+    and verify the opened descriptor remains linked at [path] before and after
+    the append. Use at explicit-root trust boundaries. *)
+val append_file_durable_no_follow : string -> string -> unit
+
 (** Check if file exists. *)
 val file_exists : string -> bool
 

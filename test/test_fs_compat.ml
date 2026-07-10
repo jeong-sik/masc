@@ -104,6 +104,28 @@ let test_save_file_atomic_overwrites_existing () =
   check string "overwrite succeeded" "new" (Fs_compat.load_file target)
 ;;
 
+let test_append_file_durable_no_follow_appends_regular_file () =
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "events.jsonl" in
+  Fs_compat.append_file_durable_no_follow target "first\n";
+  Fs_compat.append_file_durable_no_follow target "second\n";
+  check string "both rows persisted" "first\nsecond\n" (Fs_compat.load_file target)
+;;
+
+let test_append_file_durable_no_follow_rejects_symlink () =
+  with_tmp_dir
+  @@ fun base ->
+  let outside = Filename.concat base "outside.jsonl" in
+  let link = Filename.concat base "events.jsonl" in
+  Fs_compat.save_file outside "sentinel\n";
+  Unix.symlink outside link;
+  (match Fs_compat.append_file_durable_no_follow link "escaped\n" with
+   | () -> fail "expected Sys_error for symlink append target"
+   | exception Sys_error _ -> ());
+  check string "symlink target unchanged" "sentinel\n" (Fs_compat.load_file outside)
+;;
+
 let with_redirected_stderr (f : unit -> 'a) : 'a * string =
   let tmp = Filename.temp_file "masc_stderr_" ".log" in
   let saved = Unix.dup Unix.stderr in
@@ -323,6 +345,16 @@ let () =
             "overwrites existing target"
             `Quick
             test_save_file_atomic_overwrites_existing
+        ] )
+    ; ( "append_file_durable_no_follow"
+      , [ test_case
+            "appends a regular file"
+            `Quick
+            test_append_file_durable_no_follow_appends_regular_file
+        ; test_case
+            "rejects a symlink target"
+            `Quick
+            test_append_file_durable_no_follow_rejects_symlink
         ] )
     ; ( "load_jsonl_diagnostics"
       , [ test_case

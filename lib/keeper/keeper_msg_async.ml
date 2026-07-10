@@ -552,13 +552,20 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~base_path
         operator_cancelled_status ()
       | Eio.Cancel.Cancelled _ as e ->
         set_status_protected ~preserve_terminal:true request_id (runtime_cancelled_status ());
-        notify_aborted
-          (Worker_cancelled
-             { cancelled_by = Runtime_cancellation
-             ; reason =
-                 "keeper_msg worker was cancelled by runtime before terminal result"
-             });
-        clear_active_switch request_id;
+        (* [notify_aborted] re-raises callback exceptions now that delivery is
+           fail closed, so the switch-table release must be exception-safe or
+           every failed callback leaks a stale [active_switches] entry.
+           [clear_active_switch] is a mutex-guarded [Hashtbl.remove] and cannot
+           itself raise, so the finally carries no [Finally_raised] risk. *)
+        Fun.protect
+          ~finally:(fun () -> clear_active_switch request_id)
+          (fun () ->
+            notify_aborted
+              (Worker_cancelled
+                 { cancelled_by = Runtime_cancellation
+                 ; reason =
+                     "keeper_msg worker was cancelled by runtime before terminal result"
+                 }));
         raise e
       | exn ->
         Done

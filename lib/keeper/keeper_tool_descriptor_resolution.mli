@@ -25,6 +25,13 @@ val effect_domain_for_tool_name : string -> Tool_catalog.effect_domain option
 
 val capability_has : Tool_capability.kind -> string -> bool
 
+(** RFC-0331 — resolve a tool's typed {!Effect_class.t} from its declared
+    registration. [Read_only] only when the tool declares itself read-only
+    (via descriptor [readonly_hint] or [Tool_catalog] metadata); every
+    unknown / undeclared tool is [Mutating] (fail-closed). The verifier
+    consumes this instead of classifying free-text action descriptions. *)
+val effect_class_for_tool_name : string -> Effect_class.t
+
 val descriptor_and_input_for_tool_call :
   tool_name:string -> input:Yojson.Safe.t -> (Keeper_tool_descriptor.t * Yojson.Safe.t) option
 

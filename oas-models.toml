@@ -895,7 +895,7 @@ supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 supports_response_format_json = true
-supports_structured_output = true
+supports_structured_output = false
 
 [[models]]
 id_prefix = "ollama_cloud/devstral-small-2:24b"
@@ -912,7 +912,7 @@ supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 supports_response_format_json = true
-supports_structured_output = true
+supports_structured_output = false
 
 [[models]]
 id_prefix = "ollama_cloud/gemini-3-flash-preview"
@@ -1193,7 +1193,7 @@ supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_response_format_json = true
-supports_structured_output = true
+supports_structured_output = false
 supports_native_streaming = true
 
 [[models]]
@@ -1210,7 +1210,7 @@ supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_response_format_json = true
-supports_structured_output = true
+supports_structured_output = false
 supports_native_streaming = true
 
 [[models]]
@@ -1258,7 +1258,7 @@ supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 supports_response_format_json = true
-supports_structured_output = true
+supports_structured_output = false
 
 [[models]]
 id_prefix = "ollama_cloud/mistral-large-3:675b"

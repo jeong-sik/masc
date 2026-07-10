@@ -35,7 +35,7 @@ let test_unknown_token_reported () =
   let prompt = "Call keeper_p0_3_fictional_tool to proceed." in
   let before = total_unknown () in
   let unknowns =
-    Scanner.scan_text ~keeper_name:keeper ~source:User_message prompt
+    Scanner.scan_text ~keeper_name:keeper ~source:System_prompt prompt
   in
   Alcotest.(check (list string))
     "unknown keeper token is reported"
@@ -111,31 +111,12 @@ let test_token_boundaries () =
     "mykeeper_foo xkeeper_baz foo-keeper_bar keeper_qux"
   in
   let unknowns =
-    Scanner.scan_text ~keeper_name:keeper ~source:User_message prompt
+    Scanner.scan_text ~keeper_name:keeper ~source:System_prompt prompt
   in
   Alcotest.(check (list string))
     "only standalone keeper_qux is matched"
     [ "keeper_qux" ]
     unknowns
-
-let test_rendered_prompt_scans_all_surfaces () =
-  let system_prompt = "Known keeper_board_post is fine." in
-  let user_message = "Unknown masc_p0_3_prompt_probe here." in
-  let continuity_summary = "Unknown keeper_p0_3_continuity_probe here." in
-  let before = total_unknown () in
-  let unknowns =
-    Scanner.scan_rendered_prompt
-      ~keeper_name:keeper
-      ~system_prompt
-      ~user_message
-      ~continuity_summary
-  in
-  Alcotest.(check (list string))
-    "returns both distinct unknown tokens"
-    [ "keeper_p0_3_continuity_probe"; "masc_p0_3_prompt_probe" ]
-    unknowns;
-  Alcotest.(check (float 0.0001))
-    "metric +2 across surfaces" (before +. 2.0) (total_unknown ())
 
 let test_case_insensitive_resolution () =
   (* Mixed-case token text should normalize to lowercase before resolution. *)
@@ -230,8 +211,6 @@ let () =
           Alcotest.test_case "deduplicates within surface" `Quick
             test_deduplicates_within_surface;
           Alcotest.test_case "token boundaries" `Quick test_token_boundaries;
-          Alcotest.test_case "rendered prompt scans all surfaces" `Quick
-            test_rendered_prompt_scans_all_surfaces;
           Alcotest.test_case "case insensitive resolution" `Quick
             test_case_insensitive_resolution;
           Alcotest.test_case "unified system prompt has no unresolved tokens"

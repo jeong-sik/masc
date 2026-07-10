@@ -256,6 +256,7 @@ let run_turn
       ?trace_link
       ?continuation_channel
       ?hitl_delivery_channel
+      ?channel
       ?hitl_approval_grant
       ?autonomous_yield_requested
       ()
@@ -844,6 +845,7 @@ let run_turn
                          ~meta
                          ?clock:(Eio_context.get_clock_opt ())
                          ?continuation_channel
+                         ?channel
                          ~lane_policy:Keeper_approval_queue.Nonblocking
                          ?hitl_approval_grant
                          ())

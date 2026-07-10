@@ -34,6 +34,7 @@ module For_testing : sig
     typed_hit:bool ->
     Masc_exec.Shell_ir.t ->
     unit
+  val shell_ir_approval_overlay : unit -> Masc_exec.Approval_config.agent_overlay
   val shell_ir_approval_input :
     cmd:string ->
     cwd:string ->

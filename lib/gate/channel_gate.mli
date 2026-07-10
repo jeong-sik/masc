@@ -97,6 +97,7 @@ type dispatch_fn =
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  idempotency_key:string ->
   metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
@@ -108,6 +109,7 @@ type streaming_dispatch_fn =
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  idempotency_key:string ->
   metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result

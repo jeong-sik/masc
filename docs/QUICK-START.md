@@ -12,6 +12,27 @@ code_refs:
 이 문서는 `처음 띄우고`, `연결하고`, `첫 작업을 시작하는` 데 필요한 최소 절차만 모은다.
 세부 운영 규칙은 runbook 문서를 SSOT로 본다.
 
+## 0. 원터치 설치 (권장)
+
+clone 후 한 번의 명령으로 서버 빌드/기동 + keeper 팀 4명(테크리드·백엔드·프론트엔드·QA) seed + 대시보드까지 연다. macOS/Linux 공통.
+
+```bash
+export OLLAMA_CLOUD_API_KEY=...   # https://ollama.com/settings/keys
+./quickstart.sh                   # 네이티브 빌드+기동 후 대시보드 오픈
+#   또는 완전 컨테이너 (self-contained 이미지, 소스에서 빌드):
+./quickstart.sh --docker
+```
+
+- 대시보드: `http://127.0.0.1:8935/dashboard`
+- **네이티브**는 loopback 바인딩이라 대시보드가 데이터까지 나오고 로그인이 필요 없다 — 대시보드를 실제로 보려면 이 경로.
+- **`--docker`**는 self-contained 이미지로 서버+팀을 재현 가능하게 부팅한다. 컨테이너는 네트워크 주소에 바인딩하므로 대시보드 shell은 뜨지만 라이브 데이터는 admin 토큰이 필요하다(zero-auth loopback dev-token은 비-loopback 바인딩에 의도적으로 노출 안 함). 설치/부팅 검증용으로 쓰고, 대시보드 열람은 네이티브로.
+- 팀은 `runtime.toml`의 `[runtime].default = ollama_cloud.deepseek-v4-flash`를 상속하므로 모델 카탈로그를 건드리지 않는다.
+- 옵션: `--team <preset>`(목록은 `presets/`), `--port N`, `--base-path DIR`, `--no-open`, `--no-start`.
+- 팀만 별도로 seed: `scripts/seed-team.sh --preset classic --base-path <경로>`.
+- `curl | bash` 설치 시 팀 포함: `... | bash -s -- --team classic`.
+
+아래 절은 수동 절차와 내부 동작을 설명한다.
+
 ## 1. 설치와 서버 시작
 
 ```bash

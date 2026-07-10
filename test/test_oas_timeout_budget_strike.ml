@@ -103,8 +103,9 @@ let legacy_ambiguous_internal_error () =
 let tls_handshake_internal_error () =
   KTD.sdk_error_of_masc_internal_error
     (KTD.Internal_unhandled_exception
-       { site = "runtime_runner.execute"
+       { site = KTD.runtime_runner_execute_site
        ; exn_repr = "TLS alert from peer: handshake failure"
+       ; transport_error_kind = Some Llm_provider.Http_client.Tls_error
        })
 
 

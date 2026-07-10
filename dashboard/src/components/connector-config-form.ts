@@ -72,15 +72,23 @@ const formState = signal<Record<string, FormEntry>>({})
 
 interface InProcessConfigGuide {
   displayName: string
-  envVar: string
+  // One or more env vars the operator sets. The first is the activation
+  // credential; additional entries (Slack's outbound bot token) render
+  // alongside it. Each is looked up in FIELD_HINTS for a "where to find it" card.
+  envVars: string[]
   docsRef: string
 }
 
 const IN_PROCESS_CONFIG_GUIDES: Record<string, InProcessConfigGuide> = {
   discord: {
     displayName: 'Discord',
-    envVar: 'DISCORD_BOT_TOKEN',
+    envVars: ['DISCORD_BOT_TOKEN'],
     docsRef: 'docs/CONNECTOR-CONFIG-SCHEMA.md',
+  },
+  slack: {
+    displayName: 'Slack',
+    envVars: ['SLACK_APP_TOKEN', 'SLACK_BOT_TOKEN'],
+    docsRef: 'docs/rfc/RFC-0317-slack-builtin-gateway.md',
   },
 }
 
@@ -410,7 +418,6 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   const inProcess = inProcessConfigGuide(connectorId)
   if (inProcess !== null) {
-    const hint = getFieldHint(inProcess.envVar)
     return html`
       <${SurfaceCard}
         class="mt-3 !border-[var(--accent-22)] !bg-[var(--accent-12)]/5 !p-3 text-2xs v2-connector-config-form"
@@ -423,34 +430,44 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         </div>
         <div class="text-[var(--color-fg-secondary)]">
           ${inProcess.displayName}는 외부 sidecar가 아니라 서버 프로세스 내부 gateway로 실행됩니다. 이 패널은
-          <span class="mx-1 font-mono text-[var(--color-fg-primary)]">${inProcess.envVar}</span>
+          <span class="mx-1 font-mono text-[var(--color-fg-primary)]">${inProcess.envVars.join(', ')}</span>
           위치만 보여주며, sidecar schema/config/start/stop API를 호출하지 않습니다.
         </div>
-        ${hint === null
-          ? null
-          : html`
-              <${SurfaceCard} class="mt-2 !border-[var(--accent-22)] !bg-[var(--accent-12)]/5 !px-2 !py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${inProcess.envVar}>
-                <span>${hint.where}</span>
-                ${hint.url
-                  ? html`
-                      <a
-                        href=${hint.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="ml-1 underline hover:text-[var(--color-accent-fg)]"
-                      >열기 ↗</a>
-                    `
-                  : null}
-              </${SurfaceCard}>
-            `}
+        ${inProcess.envVars.map((envVar) => {
+          const hint = getFieldHint(envVar)
+          return hint === null
+            ? null
+            : html`
+                <${SurfaceCard} class="mt-2 !border-[var(--accent-22)] !bg-[var(--accent-12)]/5 !px-2 !py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${envVar}>
+                  <span class="font-mono text-[var(--color-fg-primary)]">${envVar}</span>
+                  <span class="ml-1">${hint.where}</span>
+                  ${hint.url
+                    ? html`
+                        <a
+                          href=${hint.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="ml-1 underline hover:text-[var(--color-accent-fg)]"
+                        >열기 ↗</a>
+                      `
+                    : null}
+                </${SurfaceCard}>
+              `
+        })}
         <div class="mt-3 border-t border-[var(--color-border-default)] pt-2.5">
           <div class="mb-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
             env
           </div>
-          <${CopyableCode}
-            command=${`${inProcess.envVar}=<token>`}
-            ariaLabel=${`${inProcess.displayName} in-process env var`}
-          />
+          ${inProcess.envVars.map(
+            (envVar) => html`
+              <div class="mt-1 first:mt-0">
+                <${CopyableCode}
+                  command=${`${envVar}=<token>`}
+                  ariaLabel=${`${inProcess.displayName} in-process env var ${envVar}`}
+                />
+              </div>
+            `,
+          )}
           <div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">
             ${inProcess.docsRef} 기준: 서버 환경변수에 설정한 뒤 MASC 서버를 재기동해야 gateway 연결에 반영됩니다.
           </div>

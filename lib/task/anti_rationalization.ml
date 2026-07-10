@@ -24,6 +24,7 @@ type review_request =
   ; completion_notes : string
   ; agent_name : string
   ; task_id : string
+  ; evidence_refs : string list
   }
 
 type verdict =
@@ -90,21 +91,25 @@ let verdict_constructor_name = function
 let valid_verdict_strings = [ "APPROVE"; "REJECT" ]
 
 type gate =
+  | Evidence
   | Length
   | Excuse
   | Contract
   | Structured_tool
   | Llm_text_fallback
   | Format_reject
+  | Evaluator_empty
   | Fallback
 
 let gate_to_string = function
+  | Evidence -> "evidence"
   | Length -> "length"
   | Excuse -> "excuse"
   | Contract -> "contract"
   | Structured_tool -> "structured_tool"
   | Llm_text_fallback -> "llm_text_fallback"
   | Format_reject -> "format_reject"
+  | Evaluator_empty -> "evaluator_empty"
   | Fallback -> "fallback"
 ;;
 
@@ -445,6 +450,7 @@ let build_prompt ?(few_shot_block = "") ?excuse_advisory ?completion_contract
     ; "completion_notes", notes_truncated
     ; "verification_contract_section", verification_contract_section
     ; "evidence_section", required_evidence_section
+    ; "evidence_refs", String.concat ", " req.evidence_refs
     ; "advisory_section", advisory_section
     ; "calibration_section", calibration_section
     ]
@@ -707,16 +713,15 @@ let review
       ?(completion_contract : string list option)
       ?(required_evidence = [])
       ?(verify_gate_evidence = [])
-      ?(on_verdict : (review_result -> unit) option)
+      ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(few_shot_block = "")
-      ?sw
+      ?(operator_override : bool = false)
+      ?(sw : Eio.Switch.t option = None)
       (req : review_request)
   : review_result
   =
   let emit result =
-    (match on_verdict with
-     | Some f -> f result
-     | None -> ());
+    on_verdict result;
     result
   in
 
@@ -735,7 +740,18 @@ let review
       (fun message -> Log.Task.error "task_id=%s %s" req.task_id message)
       fmt
   in
-  (* Gate 1: empty or trivially short notes *)
+  (* Gate 0: empty evidence_refs — required for all code task submissions.
+     Reject completions that lack code-level evidence (file paths, commit hashes,
+     trace/turn/receipt refs). *)
+  if List.is_empty req.evidence_refs then
+    emit
+      { verdict = Reject "no evidence references supplied"
+      ; evaluator_runtime
+      ; generator_runtime
+      ; gate = Evidence
+      ; fallback_reason = None
+      }
+  else
   let notes_trimmed = String.trim req.completion_notes in
   if String.length notes_trimmed < min_notes_length
   then
@@ -837,7 +853,16 @@ let review
            ; fallback_reason = None
            }
        | None ->
-         (* Gate 3: LLM review via evaluator runtime (structured tool output, ADR D3) *)
+         if operator_override then
+           emit
+             { verdict = Approve
+             ; evaluator_runtime
+             ; generator_runtime
+             ; gate = Fallback
+             ; fallback_reason = Some "operator override: shared-account self-approval deadlock"
+             }
+         else
+           (* Gate 3: LLM review via evaluator runtime (structured tool output, ADR D3) *)
          let prompt =
            build_prompt
              ~few_shot_block
@@ -876,17 +901,33 @@ let review
                 task_info "[anti-rationalization] verdict via native JSON response";
                 (match parse_review_verdict_from_response_text text with
                  | Ok v -> v, Llm_text_fallback, None
-                 | Error parse_error ->
+                 | Error Empty_review_output ->
+                   (* Misattribution fix (24h tool-error audit, 2026-07-08): an
+                      empty completion is an evaluator-side failure — the
+                      keeper's notes were never reviewed, so a reason phrased
+                      as "review format unrecognized" sent keepers into a
+                      revise-notes retry loop (305 hits/24h). Still a
+                      deterministic Reject: #22573's ratchet (empty must not
+                      approve by liveness, independent of the fail_mode knob)
+                      holds. Only the attribution and the gate change. *)
+                   task_warn
+                     "[anti-rationalization] evaluator returned empty completion \
+                      (rejecting fail-closed; evaluator-side failure — keeper \
+                      notes were not reviewed)";
+                   ( Reject
+                       "evaluator returned an empty response; the completion \
+                        notes were not reviewed (evaluator-side failure). \
+                        Revising notes will not help — retry later, and if \
+                        this repeats the evaluator runtime needs operator \
+                        attention (structured-output capability or token \
+                        budget)."
+                   , Evaluator_empty
+                   , Some (verdict_parse_error_to_string Empty_review_output) )
+                 | Error (Unrecognized_review_format _ as parse_error) ->
                    let parse_err = verdict_parse_error_to_string parse_error in
-                   (match parse_error with
-                    | Empty_review_output ->
-                      task_warn
-                        "[anti-rationalization] evaluator returned empty text \
-                         (rejecting)"
-                    | Unrecognized_review_format _ ->
-                      task_warn
-                        "[anti-rationalization] verdict parse failed: %s (rejecting)"
-                        parse_err);
+                   task_warn
+                     "[anti-rationalization] verdict parse failed: %s (rejecting)"
+                     parse_err;
                    ( Reject (sprintf "review format unrecognized: %s" parse_err)
                    , Format_reject
                    , Some parse_err ))

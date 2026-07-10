@@ -67,7 +67,8 @@ val inspect :
   unit ->
   Yojson.Safe.t
 
-(** Look up the repository URL from [repositories.toml] by repo name. *)
+(** Look up the repository URL from [repositories.toml] by registered id, name,
+    or explicit alias. *)
 val find_repo_url :
   config:Workspace.config -> repo_name:string -> string option
 

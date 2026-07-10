@@ -109,6 +109,35 @@ let test_git_op_destructive_detection () =
   | Error _ -> assert false
 ;;
 
+(* Refspec-borne destructiveness: the danger is in a positional token, not a
+   flag. [:dst] (empty source) deletes the remote ref; [+ref] force-overwrites
+   it. Without refspec parsing these graded as an ordinary [Mutating Push]. *)
+let test_git_op_push_delete_refspec () =
+  match Git_op.of_argv [ "git"; "push"; "origin"; ":refs/heads/main" ] with
+  | Ok (Git_op.Destructive `Push_delete) -> ()
+  | _ -> assert false
+;;
+
+let test_git_op_push_force_refspec () =
+  match Git_op.of_argv [ "git"; "push"; "origin"; "+refs/heads/main" ] with
+  | Ok (Git_op.Destructive `Push_force) -> ()
+  | _ -> assert false
+;;
+
+let test_git_op_push_prune_destructive () =
+  match Git_op.of_argv [ "git"; "push"; "--prune"; "origin"; "main" ] with
+  | Ok (Git_op.Destructive `Push_delete) -> ()
+  | _ -> assert false
+;;
+
+(* Guard against over-blocking: a plain [src:dst] refspec (no [+]/[:] marker)
+   is an ordinary push, not destructive. *)
+let test_git_op_push_plain_refspec_not_destructive () =
+  match Git_op.of_argv [ "git"; "push"; "origin"; "main:main" ] with
+  | Ok (Git_op.Mutating `Push) -> ()
+  | _ -> assert false
+;;
+
 let test_git_op_read () =
   match Git_op.of_argv [ "git"; "status" ] with
   | Ok (Git_op.Read _) -> ()
@@ -230,6 +259,10 @@ let () =
   test_grep_is_known_safe_exec_program ();
   test_exec_program_empty_rejected ();
   test_git_op_destructive_detection ();
+  test_git_op_push_delete_refspec ();
+  test_git_op_push_force_refspec ();
+  test_git_op_push_prune_destructive ();
+  test_git_op_push_plain_refspec_not_destructive ();
   test_git_op_read ();
   test_git_op_read_with_cwd_flag ();
   test_git_op_unknown ();

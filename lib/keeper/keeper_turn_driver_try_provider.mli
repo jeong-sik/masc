@@ -71,6 +71,7 @@ val run_try_provider :
   try_provider_ctx ->
   ?resume_checkpoint:Agent_sdk.Checkpoint.t ->
   ?per_provider_timeout_s:float ->
+  ?enable_thinking_override:bool ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
   * Agent_sdk.Checkpoint.t option

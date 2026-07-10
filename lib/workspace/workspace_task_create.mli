@@ -35,6 +35,11 @@ type add_task_error =
   | Goal_link_write_failed of string
   | Backlog_write_failed of string
   | Unexpected_error of string
+  | Unknown_predecessor of string
+      (** RFC-0323 W2: [predecessor_task_id] does not exist in the backlog *)
+  | Predecessor_not_terminal of { predecessor_task_id : string; status : string }
+      (** RFC-0323 W2: a re-run link requires a terminal (Done/Cancelled)
+          predecessor *)
 
 type batch_add_tasks_success =
   { task_ids : string list
@@ -56,6 +61,7 @@ val add_task_with_result :
   ?contract:Masc_domain.task_contract ->
   ?goal_id:string ->
   ?created_by:string ->
+  ?predecessor_task_id:string ->
   ?reject_if:(Masc_domain.backlog -> string option) ->
   config ->
   title:string ->

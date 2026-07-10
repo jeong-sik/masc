@@ -47,6 +47,9 @@ type pending_board_event_kind =
   | Schedule_due
   | External_attention
   | Goal_verification_failed
+  | Failure_judgment
+  | Goal_assigned
+  | Goal_stagnation
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -126,6 +129,7 @@ type event_queue_trigger =
   | No_progress_recovery_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
+  | Hitl_resolved_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -134,6 +138,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
+  | Hitl_resolved_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of
@@ -733,6 +738,114 @@ let pending_board_event_of_goal_verification_failure
   }
 ;;
 
+(* RFC-0313 W2: surface a deterministic turn failure as actionable turn input
+   for an LLM-boundary verdict. Same provenance choice as
+   [pending_board_event_of_fusion_completion]: own author + System_post ->
+   Self_narrative -> rendered inside the observational-data envelope
+   (RFC-0247) — a keeper reasons over its own failure, it is not trusted
+   operator instruction. *)
+let pending_board_event_of_failure_judgment
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (fj : Keeper_event_queue.failure_judgment)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let author = meta.name in
+  { event_kind = Failure_judgment
+  ; post_id = Keeper_event_queue.failure_judgment_post_id fj
+  ; author
+  ; title =
+      Printf.sprintf
+        "Turn failure escalated for judgment: %s on %s"
+        (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
+        fj.fj_runtime_id
+  ; preview = short_preview ~max_len:fusion_result_preview_max_len fj.fj_detail
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+
+(* RFC-0315 P3 W0: surface a fresh goal assignment as actionable turn input.
+   Author is the assigning actor (tool caller or "toml_reconcile"), rendered
+   as a System_post inside the observational-data envelope — the keeper
+   decides what to do with the goal; the event only states the fact. *)
+let pending_board_event_of_goal_assignment
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (ga : Keeper_event_queue.goal_assignment)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let author = ga.ga_assigned_by in
+  { event_kind = Goal_assigned
+  ; post_id = Keeper_event_queue.goal_assignment_post_id ga
+  ; author
+  ; title = Printf.sprintf "Goal assigned: %s" ga.ga_goal_title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Goal %s is now in your active goals (assigned by %s). Review it \
+            in Active Goals and either break it into a claimable task or \
+            post your plan."
+           ga.ga_goal_id
+           ga.ga_assigned_by)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some ga.ga_assigned_by
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+;;
+
+let pending_board_event_of_goal_stagnation
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (gs : Keeper_event_queue.goal_stagnation)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let author = "goal_loop" in
+  { event_kind = Goal_stagnation
+  ; post_id = Keeper_event_queue.goal_stagnation_post_id gs
+  ; author
+  ; title = Printf.sprintf "Goal stalled: %s" gs.gs_goal_title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Goal %s has had no progress since %s. Resume it now — advance one \
+            concrete step, or if you are blocked, post a progress note \
+            recording what is blocking and hand off. Do not leave it \
+            untouched."
+           gs.gs_goal_id
+           gs.gs_stale_since)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some author
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~continuity_summary
       ~(meta : keeper_meta)
@@ -760,6 +873,20 @@ let pending_board_event_of_stimulus
          ~meta
          ~arrived_at:stimulus.arrived_at
          failure)
+  | Keeper_event_queue.Failure_judgment fj ->
+    Some (pending_board_event_of_failure_judgment ~meta ~arrived_at:stimulus.arrived_at fj)
+  | Keeper_event_queue.Goal_assigned ga ->
+    Some
+      (pending_board_event_of_goal_assignment
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         ga)
+  | Keeper_event_queue.Goal_stagnation gs ->
+    Some
+      (pending_board_event_of_goal_stagnation
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         gs)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.No_progress_recovery
   | Keeper_event_queue.Connector_attention _

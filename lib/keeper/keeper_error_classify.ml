@@ -13,33 +13,44 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
+(** {1 Static ADT Classification}
+    RFC-0314 / task-1854: Replace heuristic string-matching predicates with
+    a static ADT that the compiler can exhaustively match. *)
+type error_classification =
+  | Transient_network
+  | Transient_internal_runner
+  | Transient_oas_timeout
+  | Transient_rate_limit
+  | Transient_capacity
+  | Non_transient
+  | Unclassified
+
 let string_contains_substring = String_util.string_contains_substring
 
-(** {1 Retry & Side-Effect Safety}
-
-    @boundary-contract
-    - MASC owns: side-effect detection (blocking retry after mutating tools),
-      cross-provider retry (2 attempts after all OAS per-provider retries
-      exhaust), error reclassification for ambiguous outcomes.
-    - OAS owns: per-provider retry (3 attempts), HTTP backoff, timeout
-      handling, provider failover within a single runtime call.
-    - Neither may: retry silently after a mutating tool succeeded (integrity
-      over availability); duplicate OAS per-provider retry counts. *)
+let is_structural_oas_timeout_message message =
+  Keeper_oas_timeout_message.is_structural message
 
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
-let is_structural_oas_timeout_message message =
-  Keeper_oas_timeout_message.is_structural message
+let is_transient_internal_transport_error = function
+  | Llm_provider.Http_client.Tls_error -> true
+  | Llm_provider.Http_client.Connection_refused
+  | Llm_provider.Http_client.Dns_failure
+  | Llm_provider.Http_client.Timeout
+  | Llm_provider.Http_client.Local_resource_exhaustion
+  | Llm_provider.Http_client.End_of_file
+  | Llm_provider.Http_client.Unknown ->
+    false
+;;
 
 let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Internal_unhandled_exception { site; exn_repr })
-    when String.equal site "runtime_runner.execute" ->
-    let lower = String.lowercase_ascii exn_repr in
-    string_contains_substring ~needle:"tls alert" lower
-    || string_contains_substring ~needle:"handshake failure" lower
-    || string_contains_substring ~needle:"tls_error" lower
+  | Some
+      (Keeper_turn_driver.Internal_unhandled_exception
+         { site; transport_error_kind = Some transport_error_kind; _ })
+    when String.equal site Keeper_turn_driver.runtime_runner_execute_site ->
+    is_transient_internal_transport_error transport_error_kind
   | Some
       ( Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Runtime_exhausted _
@@ -55,6 +66,68 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Internal_bridge_exception _
       | Keeper_turn_driver.Internal_contract_rejected _ )
   | None -> false
+
+(** Classify an [sdk_error] into a static [error_classification] variant.
+    Replaces the individual heuristic predicate functions with a single
+    exhaustive match. *)
+let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
+  if is_transient_internal_runner_error err
+  then Transient_internal_runner
+  else match err with
+  | Agent_sdk.Error.Api (NetworkError _) -> Transient_network
+  | Agent_sdk.Error.Api (Timeout { message }) ->
+      if is_structural_oas_timeout_message message then Transient_oas_timeout
+      else Transient_network
+  | Agent_sdk.Error.Api (Overloaded _) -> Transient_capacity
+  | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> Transient_network
+  | Agent_sdk.Error.Api (ServerError { status = 522; _ }) -> Transient_network
+  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> Transient_network
+  | Agent_sdk.Error.Api (RateLimited _) -> Transient_rate_limit
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.NetworkError
+         { kind =
+             Llm_provider.Http_client.Tls_error
+           | Llm_provider.Http_client.Local_resource_exhaustion
+         ; _
+         }) ->
+      Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
+      if is_structural_oas_timeout_message detail then Transient_oas_timeout
+      else Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
+      Transient_network
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
+      if transient then Transient_network else Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) -> Transient_rate_limit
+  | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidRequest _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) -> Transient_capacity
+  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderTerminal _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.MissingApiKey _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidConfig _) -> Non_transient
+  | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) -> Unclassified
+  | Agent_sdk.Error.Api (InvalidRequest _ | ServerError _ | AuthError _
+    | NotFound _ | PaymentRequired _ | ContextOverflow _) -> Non_transient
+  | Agent_sdk.Error.Agent _ | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _ | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _ | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ -> Unclassified
+
+(** {1 Retry & Side-Effect Safety}
+
+    @boundary-contract
+    - MASC owns: side-effect detection (blocking retry after mutating tools),
+      cross-provider retry (2 attempts after all OAS per-provider retries
+      exhaust), error reclassification for ambiguous outcomes.
+    - OAS owns: per-provider retry (3 attempts), HTTP backoff, timeout
+      handling, provider failover within a single runtime call.
+    - Neither may: retry silently after a mutating tool succeeded (integrity
+      over availability); duplicate OAS per-provider retry counts. *)
 
 let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   if is_transient_internal_runner_error err
@@ -190,8 +263,18 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
       (Keeper_turn_driver.Runtime_exhausted
          { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
       true
-  | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-      true
+  | Some (Keeper_turn_driver.Capacity_backpressure { cooldown_cause; _ }) ->
+      (* A pre-dispatch provider-health cooldown block carries the failure that
+         armed the cooldown.  Deterministic causes (config/build error, depleted
+         balance, structural provider failure) re-fail on the next tick, so they
+         must NOT be auto-recoverable: returning [false] makes [counts_toward_crash]
+         true so the existing failure-streak policy escalates instead of the
+         keeper oscillating (#23438).  Genuine upstream capacity backpressure
+         ([None]) and transient causes stay auto-recoverable. *)
+      (match cooldown_cause with
+       | Some cause ->
+         not (Keeper_turn_driver.provider_cooldown_cause_is_deterministic cause)
+       | None -> true)
   | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       false
   | Some (Keeper_turn_driver.Accept_rejected _)
@@ -712,6 +795,7 @@ let degraded_reason_allows_candidate_cycle = function
 let degraded_rotation_after_recoverable_error
       ?(credential_pool_of_runtime_id = fun _ -> None)
       ?fallback_hint
+      ~(pacing_enforced : bool)
       ~(base_runtime : string)
       ~(effective_runtime : string)
     ~(attempted_runtimes : string list)
@@ -767,18 +851,25 @@ let degraded_rotation_after_recoverable_error
          Some { next_runtime; fallback_reason }
        | None
          when (not (is_completion_contract_violation err))
-              && degraded_reason_allows_candidate_cycle fallback_reason ->
+              && (pacing_enforced
+                  || degraded_reason_allows_candidate_cycle fallback_reason) ->
          (* Non-contract transient infrastructure errors (provider timeout,
             server error, capacity backpressure) may succeed on a later
             candidate pass. Quota/rate-limit classes cap after all candidates:
             retrying the same credential pool just amplifies an account-scoped
-            limit. #19930 *)
+            limit. #19930
+
+            RFC-0313 W3: under enforced pacing the class cap is bypassed —
+            in-turn cycling stays bounded by the turn cycle budget
+            (Candidates_filtered_after_cycles) and cross-turn retries are
+            spaced by revisit pacing, which is what the cap approximated. *)
          (match candidates with
           | [] -> None
           | first_candidate :: _ ->
             Some { next_runtime = first_candidate; fallback_reason })
        | None ->
-         (* Contract violation or quota/rate-limit exhaustion: cap rotation. *)
+         (* Contract violation, or (shadow mode) quota/rate-limit exhaustion:
+            cap rotation. *)
          None)
 
 (** [true] when a structured error indicates context overflow. *)

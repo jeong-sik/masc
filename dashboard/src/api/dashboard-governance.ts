@@ -25,6 +25,8 @@ import type {
   KeeperResolvedApprovalItem,
   GovernanceCaseBundle,
   PendingConfirmation,
+  ApprovalMode,
+  HitlApprovalModeStatus,
 } from '../types'
 import type { AbortableRequestOptions } from './core'
 
@@ -57,6 +59,23 @@ function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
   }
 }
 
+// RFC-0319: normalize the operator approval mode. Any wire value other than the
+// two known modes collapses to 'manual' — fail-closed, so a corrupt/unknown mode
+// never renders as auto-approving. The band floor is enforced backend-side; this
+// only governs how the toggle displays.
+function normalizeApprovalMode(raw: unknown): HitlApprovalModeStatus | undefined {
+  if (!isRecord(raw)) return undefined
+  const mode: ApprovalMode = raw.mode === 'auto_low_risk' ? 'auto_low_risk' : 'manual'
+  return {
+    mode,
+    auto_eligible_bands: Array.isArray(raw.auto_eligible_bands)
+      ? raw.auto_eligible_bands.filter((value): value is string => typeof value === 'string')
+      : [],
+    fail_closed: asBoolean(raw.fail_closed) ?? false,
+    read_error: asNullableString(raw.read_error) ?? undefined,
+  }
+}
+
 function normalizeHitlStatus(raw: unknown): DashboardGovernanceResponse['hitl'] | undefined {
   if (!isRecord(raw)) return undefined
   return {
@@ -64,6 +83,7 @@ function normalizeHitlStatus(raw: unknown): DashboardGovernanceResponse['hitl'] 
     disabled_by_env: asBoolean(raw.disabled_by_env) ?? false,
     env_name: asString(raw.env_name, 'MASC_DISABLE_HITL'),
     default_enabled: asBoolean(raw.default_enabled) ?? true,
+    approval_mode: normalizeApprovalMode(raw.approval_mode),
   }
 }
 
@@ -205,6 +225,21 @@ export function deleteGovernanceApprovalRule(
   return post('/api/v1/dashboard/governance/approvals/rules/delete', { id })
 }
 
+export interface SetApprovalModeResponse {
+  ok: boolean
+  mode: ApprovalMode
+  previous_mode: ApprovalMode
+  actor: string
+  changed_at: string
+}
+
+// RFC-0319: set the operator approval mode. The backend rejects any value
+// outside the closed union and enforces the separation-of-duties floor
+// (critical/high never auto-approved) regardless of the mode set here.
+export function setApprovalMode(mode: ApprovalMode): Promise<SetApprovalModeResponse> {
+  return post('/api/v1/dashboard/governance/approval-mode', { mode })
+}
+
 export type DashboardScheduleDecision = 'approve' | 'reject'
 
 export interface DashboardScheduleResolveResponse {
@@ -225,6 +260,15 @@ export function resolveScheduleApproval(
     decision,
     reason,
   })
+}
+
+export interface DashboardSchedulePruneResponse {
+  ok: boolean
+  pruned_count: number
+}
+
+export function pruneSchedules(): Promise<DashboardSchedulePruneResponse> {
+  return post('/api/v1/dashboard/schedule/prune', {})
 }
 
 export function fetchGovernanceCaseStatus(caseId: string): Promise<GovernanceCaseBundle> {

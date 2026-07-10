@@ -60,9 +60,22 @@ val cancel :
   schedule_id:string ->
   (Schedule_domain.schedule_request, service_error) result
 
+val update :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  due_at:float ->
+  expires_at:float option ->
+  payload:Schedule_domain.payload ->
+  (Schedule_domain.schedule_request, service_error) result
+
 val due_candidates :
   Workspace_utils.config ->
   now:float ->
   (Schedule_domain.schedule_request list, service_error) result
 (** Refreshes due state and returns visible execution candidates. No execution
     is performed here. *)
+
+val prune :
+  Workspace_utils.config ->
+  (Schedule_store.state * int, service_error) result
+(** Deletes all terminal schedules and returns the new state and the number of pruned items. *)

@@ -166,14 +166,35 @@ let test_connector_attention_codec_roundtrips () =
     { Q.post_id = "evt-77"
     ; urgency = Q.Normal
     ; arrived_at = 1.0
-    ; payload = Q.Connector_attention { event_id = "evt-77" }
+    ; payload =
+        Q.Connector_attention
+          { event_id = "evt-77"
+          ; channel =
+              Keeper_continuation_channel.Discord
+                { guild_id = Some "guild-77"
+                ; channel_id = "chan-77"
+                ; parent_channel_id = Some "parent-77"
+                ; thread_id = Some "thread-77"
+                ; user_id = "user-77"
+                }
+          }
     }
   in
   match Q.stimulus_of_yojson (Q.stimulus_to_yojson s) with
   | Ok s' -> (
     match s'.Q.payload with
-    | Q.Connector_attention { event_id } ->
-      check string "event_id survives the JSON round-trip" "evt-77" event_id
+    | Q.Connector_attention { event_id; channel } ->
+      check string "event_id survives the JSON round-trip" "evt-77" event_id;
+      check bool "connector coordinates survive the JSON round-trip" true
+        (Keeper_continuation_channel.same_route
+           channel
+           (Keeper_continuation_channel.Discord
+              { guild_id = Some "guild-77"
+              ; channel_id = "chan-77"
+              ; parent_channel_id = Some "parent-77"
+              ; thread_id = Some "thread-77"
+              ; user_id = "user-77"
+              }))
     | _ -> check bool "round-trip payload stays Connector_attention" true false)
   | Error e -> check bool ("round-trip decode failed: " ^ e) true false
 
@@ -194,6 +215,19 @@ let test_external_attention_projects_to_prompt_event () =
      | WO.Unknown -> true
      | _ -> false)
 
+let test_external_attention_prompt_steers_continuation () =
+  (* RFC-0320 W3(a): the rendered prompt line for an external-attention wake must
+     steer the keeper to answer back into the originating conversation via
+     keeper_surface_post, instead of only proceeding on its own state. *)
+  let meta = make_meta "conn-keeper" in
+  let item = external_attention_item () in
+  let ev = WO.pending_board_event_of_external_attention ~meta item in
+  let line = Masc.Keeper_unified_prompt.format_board_event_text ev in
+  check bool "prompt line steers a keeper_surface_post reply" true
+    (contains ~needle:"keeper_surface_post" line);
+  check bool "prompt line marks a waiting continuation" true
+    (contains ~needle:"continuation" line)
+
 let () =
   init_runtime_default_for_tests ();
   run "connector_attention_wake"
@@ -210,5 +244,7 @@ let () =
     ; ( "projection",
         [ test_case "external attention becomes prompt event" `Quick
             test_external_attention_projects_to_prompt_event
+        ; test_case "external attention prompt steers continuation reply" `Quick
+            test_external_attention_prompt_steers_continuation
         ] )
     ]

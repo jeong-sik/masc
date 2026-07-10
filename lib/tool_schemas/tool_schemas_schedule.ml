@@ -132,7 +132,14 @@ let create_schema =
     ; string_prop ~description:"Optional board thread id." "board_thread_id"
     ; integer_prop ~description:"Optional board post TTL in hours." "board_ttl_hours"
     ; object_prop ~description:"Optional board post metadata object." "board_meta"
-    ; string_prop ~enum:risk_classes "risk_class"
+    ; string_prop
+        ~description:
+          "Risk class of the scheduled action. masc.keeper_wake is always \
+           reminder_only (an internal self-wake; it auto-schedules and needs no \
+           approval — any higher value is clamped down). masc.board_post writes \
+           to the board and requires workspace_write. Side-effecting classes \
+           start pending_approval and need a separate human grant."
+        ~enum:risk_classes "risk_class"
     ; bool_prop
         ~description:
           "Force a separate human grant even for reminder_only or read_only requests."

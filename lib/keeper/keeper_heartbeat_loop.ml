@@ -81,6 +81,7 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
   runtime_backpressure : runtime_backpressure_decision;
+  pacing_block : float option;
   should_run_turn : bool;
   verdict_reasons : string list;
   channel : string;
@@ -156,7 +157,10 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.No_progress_recovery
       | Keeper_event_queue.Hitl_resolved _
-      | Keeper_event_queue.Goal_verification_failed _ ->
+      | Keeper_event_queue.Goal_verification_failed _
+      | Keeper_event_queue.Failure_judgment _
+      | Keeper_event_queue.Goal_assigned _
+      | Keeper_event_queue.Goal_stagnation _ ->
         None)
     stimuli
 ;;
@@ -174,7 +178,10 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.No_progress_recovery
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Goal_verification_failed _ -> ())
+       | Keeper_event_queue.Goal_verification_failed _
+       | Keeper_event_queue.Failure_judgment _
+       | Keeper_event_queue.Goal_assigned _
+       | Keeper_event_queue.Goal_stagnation _ -> ())
     stimuli
 ;;
 
@@ -191,7 +198,10 @@ let record_schedule_due_event_queue_ack_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.No_progress_recovery
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Goal_verification_failed _ -> ())
+       | Keeper_event_queue.Goal_verification_failed _
+       | Keeper_event_queue.Failure_judgment _
+       | Keeper_event_queue.Goal_assigned _
+       | Keeper_event_queue.Goal_stagnation _ -> ())
     stimuli
 ;;
 
@@ -269,6 +279,24 @@ let run_keepalive_unified_turn
     let consumed_stimuli = ref [] in
     let consumed_stimuli_turn_completed = ref false in
     try
+      (* RFC-0310 §3.3: before intake, surface any live goal that has gone
+         stale as a Goal_stagnation stimulus so it flows through the normal
+         event-queue intake below and drives this turn. The producer is
+         edge-gated (episode key = goal_id + updated_at) and deduped against
+         the reaction ledger, so re-scanning an unadvanced goal each tick does
+         not re-enqueue — no blind cadence is introduced here. *)
+      (if meta_after_triage.active_goal_ids <> []
+       then
+         ignore
+           (Keeper_goal_stagnation_wake.enqueue_goal_stagnation_wakes
+              ~config:ctx.config
+              ~keeper_name:meta_after_triage.name
+              ~active_goal_ids:meta_after_triage.active_goal_ids
+              ~now:(Time_compat.now ())
+              ~threshold_sec:
+                (float_of_int
+                   (Keeper_config.keeper_goal_stagnation_threshold_sec ()))
+              ()));
       let event_intake =
         heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events
       in
@@ -287,6 +315,20 @@ let run_keepalive_unified_turn
           ~keeper_resilience_of_name:(fun keeper_name ->
             if Health.is_healthy ~agent_name:keeper_name then None
             else Some "unhealthy")
+            (* RFC-0313 W3: with [pacing.mode = enforce] the scheduler
+               consumes failure revisit pacing — the next turn waits until
+               the earliest runtime revisit is eligible. Shadow mode keeps
+               the pre-W3 behavior (pacing observed, never consulted).
+               [next_due_remaining] (in-memory) is consulted first so the
+               per-tick hot path only pays the [Runtime.pacing] toml read
+               while a revisit is actually pending. *)
+          ~pacing_block_of_name:(fun keeper_name ->
+            match Keeper_pacing_shadow.next_due_remaining ~keeper_name with
+            | None -> None
+            | Some _ as remaining
+              when Keeper_pacing_shadow.pacing_enforced () ->
+              remaining
+            | Some _ -> None)
           ~stop
           ~meta:meta_after_triage
           obs
@@ -453,9 +495,24 @@ let run_keepalive_unified_turn
             ~keeper_name:meta_after_triage.name
             !consumed_stimuli;
           let event_bus = Keeper_event_bus.get () in
+          (* RFC-0320 W3c: if this cycle was opened by a Hitl_resolved wake,
+             carry that wake's captured originating channel into the turn so the
+             reply is deterministically delivered back to the conversation the
+             approval was requested from. First routable resolution wins; other
+             lanes leave this [None] (fail-closed: no delivery). *)
+          let hitl_delivery_channel =
+            List.find_map
+              (fun (stim : Keeper_event_queue.stimulus) ->
+                match stim.Keeper_event_queue.payload with
+                | Keeper_event_queue.Hitl_resolved resolution ->
+                  Some resolution.Keeper_event_queue.channel
+                | _ -> None)
+              !consumed_stimuli
+          in
           let meta_after_cycle =
             run_keeper_cycle
               ?event_bus
+              ?hitl_delivery_channel
               ~ctx
               ~meta_after_triage
               ~stop

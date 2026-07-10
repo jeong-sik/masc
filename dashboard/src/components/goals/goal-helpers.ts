@@ -192,8 +192,21 @@ export function phaseFilterLabel(value: GoalPhaseFilter): string {
   }
 }
 
+// Priority is 1 (highest) .. N; a task with no priority set sorts as the
+// lowest urgency. Kept as one constant so every sort/filter/badge agrees on the
+// fallback (previously the literal 4 was copied across 5 task sites).
+export const DEFAULT_TASK_PRIORITY = 4
+// Priority at or below this is surfaced as "high priority" (the red planning KPI).
+export const HIGH_TASK_PRIORITY_MAX = 2
+
+/** Effective priority for sorting/filtering: the task's own priority, or the
+ * default when unset. */
+export function effectiveTaskPriority(task: { priority?: number | null }): number {
+  return task.priority ?? DEFAULT_TASK_PRIORITY
+}
+
 export function sortByPriority(a: Task, b: Task): number {
-  return (a.priority ?? 4) - (b.priority ?? 4)
+  return effectiveTaskPriority(a) - effectiveTaskPriority(b)
 }
 
 export function sortByTimeDesc(a: Task, b: Task): number {

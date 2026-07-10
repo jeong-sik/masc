@@ -212,11 +212,11 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('런타임 환경')
       // The prototype models section renders each model read-only: id + context
-      // (protoContext → "128k ctx") + capability chips. Model facts stay
-      // read-only; runtime execution knobs are edited per binding instead.
+      // (formatContextTokens SSOT → "128K ctx") + capability chips. Model facts
+      // stay read-only; runtime execution knobs are edited per binding instead.
       const modelsSection = container.querySelector('[data-testid="runtime-section-models"]')
       expect(modelsSection?.textContent).toContain('qwen')
-      expect(modelsSection?.textContent).toContain('128k ctx')
+      expect(modelsSection?.textContent).toContain('128K ctx')
       expect((container.querySelector('[data-testid="runtime-provider-runpod_mtp-transport"]') as HTMLInputElement | null)?.value)
         .toBe('https://runpod.example/v1')
     })

@@ -25,6 +25,14 @@ let tool_delete : Masc_domain.tool_schema =
                     [ "type", `String "string"
                     ; "description", `String "ID of the post to delete"
                     ] )
+              ; ( "author"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Author identity. Auto-filled from the caller's agent identity \
+                           when omitted by MCP runtime clients." )
+                    ] )
               ] )
         ; "required", `List [ `String "post_id" ]
         ]
@@ -212,20 +220,21 @@ let identity_fields_for_board_name = function
   | Tool_name.Board_name.Board_comment_vote -> [ "voter" ]
   | Tool_name.Board_name.Board_reaction -> [ "user_id" ]
   | Tool_name.Board_name.Board_sub_board_create -> [ "owner" ]
+  | Tool_name.Board_name.Board_sub_board_delete
+  | Tool_name.Board_name.Board_sub_board_update -> [ "owner" ]
   | Tool_name.Board_name.Board_curation_submit -> [ "submitted_by" ]
+  | Tool_name.Board_name.Board_delete -> [ "author" ]
   | Tool_name.Board_name.Board_cleanup
   | Tool_name.Board_name.Board_curation_read
-  | Tool_name.Board_name.Board_delete
   | Tool_name.Board_name.Board_post_get
   | Tool_name.Board_name.Board_hearths
   | Tool_name.Board_name.Board_list
   | Tool_name.Board_name.Board_profile
   | Tool_name.Board_name.Board_search
   | Tool_name.Board_name.Board_stats
-  | Tool_name.Board_name.Board_sub_board_delete
   | Tool_name.Board_name.Board_sub_board_get
   | Tool_name.Board_name.Board_sub_board_list
-  | Tool_name.Board_name.Board_sub_board_update -> []
+  -> []
 ;;
 
 let identity_input_fields =
@@ -235,7 +244,10 @@ let identity_input_fields =
   ; Tool_name.Board_name.Board_vote
   ; Tool_name.Board_name.Board_comment_vote
   ; Tool_name.Board_name.Board_reaction
+  ; Tool_name.Board_name.Board_delete
   ; Tool_name.Board_name.Board_sub_board_create
+  ; Tool_name.Board_name.Board_sub_board_delete
+  ; Tool_name.Board_name.Board_sub_board_update
   ; Tool_name.Board_name.Board_curation_submit
   ]
   |> List.concat_map identity_fields_for_board_name

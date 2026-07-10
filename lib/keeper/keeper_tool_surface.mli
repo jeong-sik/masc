@@ -15,6 +15,7 @@ type tool_result = Keeper_types_profile.tool_result
 val schemas : Masc_domain.tool_schema list
 
 val dispatch :
+  ?continuation_channel:Keeper_continuation_channel.t ->
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
 module For_testing : sig
@@ -33,4 +34,5 @@ end
 val dispatch_stream :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option

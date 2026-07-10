@@ -335,6 +335,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         };
         compaction = {
           profile = compaction_profile;
+          mode = Keeper_config.keeper_compaction_mode_default ();
           ratio_gate = compaction_ratio_gate;
           message_gate = compaction_message_gate;
           token_gate = compaction_token_gate;
@@ -507,6 +508,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("proactive_idle_sec", `Int meta.proactive.idle_sec);
           ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
           ("compaction_profile", `String meta.compaction.profile);
+          ("compaction_mode",
+            `String (Keeper_config.compaction_mode_to_string meta.compaction.mode));
           ("compaction_ratio_gate", `Float meta.compaction.ratio_gate);
           ("compaction_message_gate", `Int meta.compaction.message_gate);
           ("compaction_token_gate", `Int meta.compaction.token_gate);

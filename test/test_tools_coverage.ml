@@ -223,9 +223,17 @@ let test_masc_transition_schema () =
       Alcotest.(check bool) "description omits requires tools routing"
         false
         (contains_substring ~needle:"requires tools" schema.description);
-      Alcotest.(check bool) "description pins start before done"
+      Alcotest.(check bool) "description pins the verification completion path"
         true
-        (contains_substring ~needle:"action='start' before action='done'" schema.description);
+        (contains_substring
+           ~needle:"a verifier (not the assignee) then approves it to done"
+           schema.description);
+      (* RFC-0323 G-4: the weak-lane teaching sentence must stay gone. *)
+      Alcotest.(check bool) "description omits the verifier-bypass teaching"
+        false
+        (contains_substring
+           ~needle:"do not route normal completion"
+           schema.description);
       (match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has completion_contract" true

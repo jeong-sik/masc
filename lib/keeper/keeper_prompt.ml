@@ -175,6 +175,15 @@ let behavior_prompt_block name =
         name
 
 
+(* RFC-0324 B-1: the [registered_repositories] variant and its catalog-fed
+   prompt block are removed. The prompt used to assert that every id in
+   repositories.toml "resolves under repos/<name>/" — but the catalog and a
+   keeper's sandbox checkouts have no invariant linking them, so keepers that
+   trusted the prompt referenced un-cloned repos (path_not_found, 379/24h in
+   the 2026-07-08 tool-error audit). The filesystem is the repo truth; the
+   constant [repositories_block] below instructs self-discovery instead of
+   injecting a stale fact snapshot. *)
+
 let build_keeper_system_prompt
     ~goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
@@ -235,6 +244,23 @@ let build_keeper_system_prompt
          </home_ground>\n"
         (String_util.escape_xml home_ground)
   in
+  let repositories_block =
+    (* RFC-0324 B-1: constant self-discovery instruction. The filesystem is
+       the source of truth for a keeper's repositories — the global catalog
+       may register repositories that were never cloned into this sandbox,
+       and clone directory names may differ from catalog ids. A constant
+       block is also shared across all keepers (KV-cache friendly), unlike
+       the per-keeper catalog listing it replaces. *)
+    "\n\
+     <repositories>\n\
+     The filesystem is the source of truth for your repositories: only \
+     checkouts that actually exist under repos/ resolve. Before referencing \
+     a repository, list repos/ (for example: Execute ls repos) and use the \
+     directory names you find. Do not assume a repository exists because it \
+     is registered in a catalog — registration does not imply a checkout in \
+     your sandbox.\n\
+     </repositories>\n"
+  in
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
      and most of <world>/<capabilities> text.  Keeper-specific blocks
@@ -285,6 +311,8 @@ let build_keeper_system_prompt
       identity_anchor;
       (* ── Home ground (CWD anchor) ───────────────────────────── *)
       home_ground_block;
+      (* ── Registered repositories (valid repos/<name> segments) ─ *)
+      repositories_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
       "<identity>\n\

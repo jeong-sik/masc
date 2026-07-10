@@ -420,7 +420,7 @@ let task_fsm_transitions : (string * string list * string * string option) list 
   [
     ("claim",                   ["todo"],                                  "claimed",                None);
     ("start",                   ["claimed"],                               "in_progress",            None);
-    ("done",                    ["claimed"; "in_progress"],                "done",                   None);
+    ("done",                    ["claimed"; "in_progress"],                "done",                   Some "rejected for contract.strict tasks when MASC_VERIFICATION_FSM_ENABLED — use submit_for_verification (RFC-0323 G-1)");
     ("cancel",                  ["todo"; "claimed"; "in_progress"],        "cancelled",              None);
     ("release",                 ["claimed"; "in_progress"],                "todo",                   None);
     (* Action names match [Masc_domain.task_action_to_string] (SSOT):
@@ -465,7 +465,7 @@ let schema_markdown =
     "";
     "- claim: todo -> claimed";
     "- start: claimed(by you) -> in_progress";
-    "- done: claimed/in_progress(by you) -> done";
+    "- done: claimed/in_progress(by you) -> done (contract.strict + MASC_VERIFICATION_FSM_ENABLED: rejected — use submit_for_verification)";
     "- cancel: todo/claimed/in_progress(by you) -> cancelled";
     "- release: claimed/in_progress(by you) -> todo";
     "- submit_for_verification: claimed/in_progress(by you) -> awaiting_verification (MASC_VERIFICATION_FSM_ENABLED)";

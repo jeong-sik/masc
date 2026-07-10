@@ -79,6 +79,27 @@ let test_save_and_read_bindings_round_trip () =
   check string "read sorted channel" "a-channel" first.channel_id;
   check string "read sorted keeper" "arya" first.keeper_name
 
+let test_read_bindings_result_missing_store_is_empty () =
+  with_temp_dir @@ fun dir ->
+  let store = store_for_dir dir ~guild_id_field:Store.Omit in
+  match Store.read_bindings_result store with
+  | Ok bindings -> check int "missing store means no bindings" 0 (List.length bindings)
+  | Error err -> fail err
+
+let test_read_bindings_result_reports_invalid_json () =
+  with_temp_dir @@ fun dir ->
+  let store = store_for_dir dir ~guild_id_field:Store.Omit in
+  let binding_path = Filename.concat dir "bindings.json" in
+  let oc = open_out_bin binding_path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc "{not-json");
+  match Store.read_bindings_result store with
+  | Ok _ -> fail "expected invalid binding store to return Error"
+  | Error err ->
+    check bool "reports invalid JSON" true
+      (String.length err > 0 && String.contains err ':')
+
 let test_audit_guild_id_policy () =
   with_temp_dir @@ fun dir ->
   let omit = store_for_dir dir ~guild_id_field:Store.Omit in
@@ -114,6 +135,10 @@ let () =
           test_case "normalizes binding JSON" `Quick test_normalizes_bindings_json;
           test_case "saves and reads bindings" `Quick
             test_save_and_read_bindings_round_trip;
+          test_case "missing binding store is empty" `Quick
+            test_read_bindings_result_missing_store_is_empty;
+          test_case "invalid binding store is an error" `Quick
+            test_read_bindings_result_reports_invalid_json;
         ] );
       ( "audit",
         [

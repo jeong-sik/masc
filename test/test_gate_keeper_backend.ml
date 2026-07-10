@@ -145,12 +145,21 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "discord-reply-keeper" in
+      let surface =
+        Masc.Surface_ref.Discord
+          {
+            guild_id = Some "guild-1";
+            channel_id = "chan-9";
+            parent_channel_id = None;
+            thread_id = None;
+          }
+      in
       K.append_user_message ~base_dir ~keeper_name
         ~content:"<@bot> factorio?"
-        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
+        ~surface
         ~conversation_id:"discord:guild-1:channel:chan-9" ();
       Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~source:"discord"
+        ~keeper_name ~source:"discord" ~surface
         ~conversation_id:"discord:guild-1:channel:chan-9"
         ~reply:"already answered" ();
       match K.load ~base_dir ~keeper_name with
@@ -162,6 +171,10 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
           check string "assistant conversation id"
             "discord:guild-1:channel:chan-9"
             (Option.value assistant.K.conversation_id ~default:"");
+          check bool "assistant keeps typed surface" true
+            (match assistant.K.surface with
+             | Some actual -> Surface_ref.equal surface actual
+             | None -> false);
           check string "assistant content" "already answered" assistant.K.content
       | messages ->
           failf "expected 2 chat messages, got %d" (List.length messages))
@@ -2308,7 +2321,14 @@ let test_chat_surface_of_request_labels_copilot_gate () =
       attachments = [] }
   in
   let surface = Server_routes_http_keeper_stream.For_testing.chat_surface_of_request payload in
-  check string "copilot surface label" "copilot" (Surface_ref.lane_label surface)
+  check string "copilot surface label" "copilot" (Surface_ref.lane_label surface);
+  check bool "copilot surface keeps route address" true
+    (Surface_ref.equal surface
+       (Surface_ref.Gate
+          {
+            label = "copilot";
+            address = [ ("connector", "copilot"); ("workspace_id", "session-7") ];
+          }))
 
 let test_chat_speaker_of_request_copilot_is_owner () =
   let payload =
@@ -2600,6 +2620,18 @@ let test_route_busy_discord_enqueues () =
   | `Async_poll -> fail "Discord has an outbound adapter; must enqueue, not poll"
 
 
+let test_route_busy_slack_enqueues () =
+  match
+    Gate_keeper_backend.route_busy_connector Gate_keeper_backend.Slack
+      ~channel_id:"C0SLACK" ~user_id:"U-99"
+  with
+  | `Enqueue_chat_queue (Keeper_chat_queue.Slack { channel; user_id }) ->
+      check string "slack channel threaded" "C0SLACK" channel;
+      check string "slack user_id threaded" "U-99" user_id
+  | `Enqueue_chat_queue _ ->
+      fail "Slack must map to a Slack message_source, not another variant"
+  | `Async_poll -> fail "Slack has an outbound adapter; must enqueue, not poll"
+
 let test_route_busy_generic_falls_back () =
   match
     Gate_keeper_backend.route_busy_connector Gate_keeper_backend.Generic
@@ -2616,6 +2648,8 @@ let () =
         [
           test_case "Discord enqueues with channel_id/user_id" `Quick
             test_route_busy_discord_enqueues;
+          test_case "Slack enqueues with channel/user_id" `Quick
+            test_route_busy_slack_enqueues;
           test_case "Generic falls back to async poll" `Quick
             test_route_busy_generic_falls_back;
         ] );

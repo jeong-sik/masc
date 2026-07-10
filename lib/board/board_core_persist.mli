@@ -58,6 +58,7 @@ val max_jsonl_bytes : int
 val rotate_if_needed : string -> unit
 
 val posts_jsonl_unlocked : store -> string
+val save_posts_jsonl_result : string -> (unit, board_error) result
 val save_posts_jsonl : string -> unit
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
@@ -102,6 +103,7 @@ val find_status_rollup_target_unlocked :
   post option
 
 val create_post_with_outcome :
+  ?after_rollup_persist:(post -> (unit, string) result) ->
   store ->
   author:string ->
   content:string ->

@@ -125,3 +125,62 @@ The first draft proposed `self_observation_horizon_of_claim : claim -> bool`, a 
 - **(Low) Horizon length**: set `self_observation_ttl_seconds` shorter than 86_400, or equal? Shorter quiets the echo faster but risks dropping a legitimate short-lived self-state.
 - **(Low) Legacy durable rows**: the code fix does not retrofit a horizon onto existing `valid_until = None` self-observation rows (reobserve inherits `existing` whole). Removal is via the §5 cleanup only. Alternative: have reobserve take `min(existing, incoming) valid_until` to self-heal legacy rows — but that complicates the "inherit anchor, no reset" invariant. Pure-inherit is recommended (cleanup is already separate).
 - **(Low) `Unknown of string` escape on `claim_kind`**: add only if a round-trip drift-guard requires it; if added, pin to durable routing by test.
+
+## 8. Addendum (2026-07-07): echo anchor suppression — closing §7's mistag gap structurally
+
+**Status**: implemented alongside this addendum (task-1857).
+
+§7 (High) accepted that a librarian mistag "degrades to pre-RFC status quo (safe)".
+Keeper albini falsified the "safe" half: the librarian *affirmatively* tagged
+self-referential inaction doctrine ("zero tool calls, one short line" and 80
+sibling rows, 81/316 of the store) as `durable_knowledge`, so the §3 layers never
+engaged. The flywheel that resulted is one line of policy: `reobserve_fact`
+advanced `last_verified_at` on every librarian re-extraction, recall ranks by
+that anchor, and recall had *injected the same claim into the very window the
+librarian summarized* — so injection → restatement → re-extraction → anchor
+refresh → re-injection. A fact could hold its recall slot indefinitely,
+independent of truth and immune to every claim_kind-keyed defense, because the
+mistagged kind routed it to the anchor-refreshing arm.
+
+The §8 fix is structural and content-blind — it does not read the claim, so no
+mistag can route around it:
+
+- **`reobservation_provenance`** (closed sum in `keeper_memory_os_policy.ml`):
+  `Independent_observation | Recalled_echo`. `reobserve_fact` takes it as a
+  required argument; a `Recalled_echo` inherits the row whole, for every
+  `claim_kind`. Not an optional flag: no call site can skip the judgment and
+  silently default to anchor refresh.
+- **`Keeper_recall_injection_window`** (new, in-memory): recall's
+  `render_if_enabled` notes the injected `claim_identity` keys per keeper per
+  turn (bounded to `window_turns = 32`, over-approximating the librarian slice
+  span). This is deliberately NOT the RFC-0264 ledger, whose contract is
+  telemetry-only/never-read-on-decision-paths; the window is the load-bearing
+  read model. Lost window (restart) degrades to the pre-§8 status quo, never to
+  wrong suppression.
+- **Write-boundary join** (`keeper_librarian_runtime.ml`): before folding each
+  incoming claim, join its `claim_identity` against the window; injected ⇒
+  `Recalled_echo` (+ `masc_keeper_memory_os_reobserve_echo_suppressed_total`
+  counter, labelled by keeper), else `Independent_observation`.
+
+Resulting dynamics: a fact that recall keeps injecting can no longer sustain its
+own recency — its anchor freezes, the staleness marker appears after the §"one
+day" horizon, fresher independently-observed facts outrank it, and it rotates
+out of the recall window. Once it has been out of the window for
+`window_turns`, a genuinely independent re-derivation (from real work, not from
+reading the prompt) refreshes the anchor again. Growth stays possible; only
+self-sustained doctrine decays.
+
+Known limits (stated, not hidden):
+- A *reworded* echo with no stable `claim_id` produces a different
+  `normalize_claim` identity and appends as a new row (fresh anchor) — the same
+  append-path residual as §3.2(b); L1(b)'s stable-id discipline is the
+  mitigation, and the observed albini rows were verbatim re-mints, which §8
+  does catch.
+- A legitimate re-verification that the keeper performs *while the fact is
+  still being injected* is also suppressed (indistinguishable from echo by
+  identity alone). The anchor then refreshes only after rotation — one
+  recall-cycle of delay, bounded by `window_turns`. Typed re-verification
+  evidence (tool-outcome-backed) would lift this; out of scope here.
+- Existing on-disk doctrine rows keep their current anchors; §8 stops the
+  *refresh*, so they age out from now rather than being retroactively decayed
+  (§5 cleanup posture unchanged).

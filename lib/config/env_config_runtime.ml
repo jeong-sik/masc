@@ -297,19 +297,29 @@ module Transport = struct
 end
 
 module Verification = struct
-  (** Enable AwaitingVerification state and cross-agent approval. Default: false. *)
+  (** Enable AwaitingVerification state and cross-agent approval. Default: true (SSOT: [Feature_flag_registry.all_flags]). *)
   let fsm_enabled () =
     Feature_flag_registry.get_bool "MASC_VERIFICATION_FSM_ENABLED"
+
+  (** RFC-0323 G-5 Phase B default-on flip. Default: false (SSOT:
+      [Feature_flag_registry.all_flags]). When true, the done guard treats
+      every task as verification-required (completion routes through
+      submit→approve). The evidence gate is unaffected — it reads
+      [Masc_domain.task_requires_verification] (= contract.strict) directly,
+      so only the done guard flips. Flip only when readiness gate §5 holds:
+      solo-room flip-on starves (no timer backstop, RFC-0220 §5/§11). *)
+  let default_on () =
+    Feature_flag_registry.get_bool "MASC_VERIFICATION_DEFAULT_ON"
 
   (** Maximum time a task may remain AwaitingVerification before surfacing an
       operator-visible timeout. Default: 24h. *)
   let timeout_deadline_seconds () =
     get_float ~default:(24.0 *. 60.0 *. 60.0) "MASC_VERIFICATION_TIMEOUT_DEADLINE_SEC"
 
-  (** Interval for verification timeout check fiber (seconds). Default: 60.
-      Issue #7549. *)
-  let timeout_check_interval_seconds =
-    get_float ~default:60.0 "MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC"
+  (* MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC was deleted by RFC-0220 §11
+     PR-3 together with the [verification_timeout] server fork it paced and
+     the [Verification_protocol.check_timeouts] no-op it invoked. The knob
+     row was removed from docs/runtime-tunables.md in the same change. *)
 end
 
 (** {1 Approval Janitor}
@@ -882,6 +892,21 @@ module Shell_ir_approval_gate = struct
       to disable the gate (kill-switch) without recompilation. *)
   let enabled () =
     Feature_flag_registry.get_bool "MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
+end
+
+(** {1 Shell IR approval policy config (RFC-0254)} *)
+
+module Shell_ir_approval = struct
+  (** Single env spec that controls the approval overlay for keeper lanes.
+      Examples:
+
+      - [autonomous]
+      - [permissive]
+      - [safe=observe,audited=enforced,privileged=auto_safe]
+      - [profile=autonomous,safe=observe]
+
+      The parser is implemented in {!Masc_exec.Approval_config}. *)
+  let raw_overlay () = Sys.getenv_opt "MASC_SHELL_IR_APPROVAL" |> trim_opt
 end
 
 (** {1 Internal Safety Configuration} *)

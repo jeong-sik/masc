@@ -34,7 +34,8 @@ let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
     ?(notes = "Implemented JWT refresh token rotation") ?(agent = "alice") ()
   : AR.review_request =
   { task_title = title; task_description = desc;
-    completion_notes = notes; agent_name = agent; task_id = "test-task-eval" }
+    completion_notes = notes; agent_name = agent; task_id = "test-task-eval";
+    evidence_refs = [] }
 
 let make_result ?(verdict = AR.Approve) ?(runtime = "verifier")
     ?gen_runtime ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =

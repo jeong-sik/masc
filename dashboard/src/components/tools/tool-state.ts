@@ -3,16 +3,18 @@
 import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import { fetchDashboardTools, type DashboardToolsResponse, type DashboardToolInventoryItem } from '../../api'
-import { createAsyncResource, getData } from '../../lib/async-state'
+import { createManagedAsyncResource } from '../../lib/async-state'
 
-const toolsResource = createAsyncResource<DashboardToolsResponse>()
+// Managed (stale-while-revalidate): the previously loaded response stays
+// readable while a refetch is in flight. Panel-level polling — the keeper
+// lane strip re-fetches this shared resource on an interval — therefore
+// keeps showing the last inventory instead of flashing a loading gap every
+// cycle. A plain createAsyncResource would blank the data on each load.
+const toolsResource = createManagedAsyncResource<DashboardToolsResponse>()
 
-export const toolsData = computed(() => getData(toolsResource.state.value) ?? null)
-export const toolsError = computed<string | null>(() => {
-  const s = toolsResource.state.value
-  return s.status === 'error' ? s.message : null
-})
-export const toolsLoading = computed(() => toolsResource.state.value.status === 'loading')
+export const toolsData = computed(() => toolsResource.state.value.data)
+export const toolsError = computed<string | null>(() => toolsResource.state.value.error)
+export const toolsLoading = computed(() => toolsResource.state.value.loading)
 export const searchQuery = signal('')
 export const categoryFilter = signal('all')
 export const directOnly = signal(false)
@@ -38,7 +40,7 @@ export const SURFACE_LABELS: Record<SurfaceFilter, string> = {
 }
 
 export async function loadTools() {
-  await toolsResource.load(() => fetchDashboardTools())
+  await toolsResource.load(signal => fetchDashboardTools({ signal }))
 }
 
 export function hasSurface(item: DashboardToolInventoryItem, surface: string): boolean {

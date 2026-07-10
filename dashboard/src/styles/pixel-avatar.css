@@ -2,7 +2,34 @@
 
 /* ═══ Pixel Avatars ═══ */
 
+/* Base container — the 8x8 cell grid needs an explicit box or the empty
+   cells collapse it to 0x0 and every AgentAvatar surface renders blank.
+   Sizes restored verbatim from the original pixel-avatars.css (#1403);
+   the base rules were dropped in the #3912 CSS dedup and never re-extracted.
+   Corner radius comes from the markup's rounded-* utility, not here. */
+.pixel-avatar {
+  display: grid;
+  grid-template: repeat(8, 1fr) / repeat(8, 1fr);
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+}
+
+@utility pixel-avatar--sm {
+  width: 32px;
+  height: 32px;
+}
+
+@utility pixel-avatar--lg {
+  width: 64px;
+  height: 64px;
+}
+
 @utility pixel-avatar--xl {
+  width: 96px;
+  height: 96px;
   box-shadow:
     0 0 0 2px var(--color-bg-page),
     0 0 0 3px var(--brass-1),

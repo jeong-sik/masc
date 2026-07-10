@@ -161,6 +161,24 @@ let test_delete_goal_wraps_prune_failure_after_goal_delete () =
 
 let test_legacy_status_defaults_phase () =
   with_workspace @@ fun config ->
+  let legacy_goal ~id ~title ~status =
+    `Assoc
+      [
+        ("id", `String id);
+        ("horizon", `String "short");
+        ("title", `String title);
+        ("metric", `Null);
+        ("target_value", `Null);
+        ("due_date", `Null);
+        ("priority", `Int 3);
+        ("status", `String status);
+        ("parent_goal_id", `Null);
+        ("last_review_note", `Null);
+        ("last_review_at", `Null);
+        ("created_at", `String (iso_now ()));
+        ("updated_at", `String (iso_now ()));
+      ]
+  in
   Workspace.write_json config (Goal_store.goals_path config)
     (`Assoc
       [
@@ -169,32 +187,36 @@ let test_legacy_status_defaults_phase () =
         ( "goals",
           `List
             [
-              `Assoc
-                [
-                  ("id", `String "legacy-1");
-                  ("horizon", `String "short");
-                  ("title", `String "Legacy Goal");
-                  ("metric", `Null);
-                  ("target_value", `Null);
-                  ("due_date", `Null);
-                  ("priority", `Int 3);
-                  ("status", `String "active");
-                  ("parent_goal_id", `Null);
-                  ("last_review_note", `Null);
-                  ("last_review_at", `Null);
-                  ("created_at", `String (iso_now ()));
-                  ("updated_at", `String (iso_now ()));
-                ];
+              legacy_goal ~id:"legacy-active" ~title:"Legacy Active" ~status:"active";
+              legacy_goal ~id:"legacy-paused" ~title:"Legacy Paused" ~status:"paused";
+              legacy_goal ~id:"legacy-done" ~title:"Legacy Done" ~status:"done";
+              legacy_goal ~id:"legacy-dropped" ~title:"Legacy Dropped" ~status:"dropped";
             ] );
       ]);
   let state = Goal_store.read_state config in
-  match state.goals with
-  | [ goal ] ->
-      check string "legacy active becomes executing" "executing"
-        (Goal_phase.to_string goal.phase);
-      check string "legacy active status preserved" "active"
-        (match goal.status with Active -> "active" | _ -> "other")
-  | _ -> fail "expected one legacy goal"
+  let by_id id =
+    List.find_opt
+      (fun (goal : Goal_store.goal) -> String.equal goal.id id)
+      state.goals
+  in
+  let check_legacy id expected_phase expected_status =
+    match by_id id with
+    | None -> fail ("missing legacy goal " ^ id)
+    | Some goal ->
+        check string (id ^ " phase") expected_phase
+          (Goal_phase.to_string goal.phase);
+        check string (id ^ " status") expected_status
+          (match goal.status with
+          | Active -> "active"
+          | Paused -> "paused"
+          | Done -> "done"
+          | Dropped -> "dropped")
+  in
+  check int "legacy goal count" 4 (List.length state.goals);
+  check_legacy "legacy-active" "executing" "active";
+  check_legacy "legacy-paused" "paused" "paused";
+  check_legacy "legacy-done" "completed" "done";
+  check_legacy "legacy-dropped" "dropped" "dropped"
 
 let test_blocked_phase_projects_legacy_status () =
   with_workspace @@ fun config ->

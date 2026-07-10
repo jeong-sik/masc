@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## [0.20.0] - 2026-07-08
+
+### Added
+- RFC-0320 connector-aware HITL continuation delivery (W3a/W3b/W3c) — a `Hitl_resolved` wake resumes the keeper on its originating chat connector instead of stalling until an unrelated stimulus (#23628, #23639, #23663).
+- RFC-0323 verification-required Done guard + goal matrix: state-keyed done (G-1), RFC-0199 probe through a verification lane (G-2), state-keyed completion side effects (G-3), and `predecessor_task_id` linked re-run (G-8) (#23665, #23668, #23680, #23687).
+- RFC-0321 hard-block refusals switch to typed `Hooks.Block` (PreToolUse `is_error=true` policy rejection), PR-2 (#23654).
+- RFC-0271 `Retry_no_thinking` recovery arm for thinking-only turns (§4.1) and typed `stop_reason` threading into `Accept_rejected` (§4.5) (#23648, #23720).
+- RFC-0319 operator approval-mode backend (`Manual` | `Auto_low_risk` + segregation-of-duty invariant) (#23625).
+- `gh pr merge` moved to `Ask` (Requires_approval); the deny floor is removed at the operator's discretion (#23618).
+
+### Changed
+- New RFC drafts: RFC-0325 (compaction LLM provider-agnostic structured output) and RFC-0326 (typed keeper failure classification). Renumbered the filesystem-truth RFC 0323 → 0324 to resolve a number collision (#23673, #23675, #23696, #23717).
+- OAS `agent_sdk` pin bumped to v0.208.22 (oas#2492, masc #23697); consumer `.mli` surface unchanged.
+
+### Fixed
+- Keeper self-wake approval deadlock: `masc.keeper_wake` is now reminder-only (intrinsic risk class), ending the self-approval stall that produced empty placeholder replies (#23716).
+- Repo-id clone denials routed to HITL with a typed clone-probe ADT (fail-closed on unknown repo-id) (#23638).
+- `persona_crud` `.mli` added and module-name reference fixed, recovering main from a fleet-wide Structure Ratchet / build red (#23683, #23688, #23692, #23702).
+- `anti_rationalization` gate-0: a disabled gate now falls through to gate-1, and `evidence_refs` is threaded through all `review_request` construction sites (#23691, #23694, #23724).
+- Workspace gate-0 rejection blocking resolved and task evidence enforced (#23719).
+- Dashboard: top-bar ops chip ellipsis, fleet roster action-column width, Fusion surface copy tidy, generic title clamp (#23684, #23701, #23707, #23711).
+
 ## [0.19.56] - 2026-07-06
 
 ### Added

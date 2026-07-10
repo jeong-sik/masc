@@ -334,6 +334,7 @@ let accept_no_progress_error ?last_tool_effect ?any_mutating_tool
        ; model = Some "runtime"
        ; reason_kind = Some Masc.Keeper_turn_driver.Accept_no_usable_progress
        ; response_shape = Some Masc.Keeper_turn_driver.Accept_response_thinking_only
+       ; stop_reason = None
        ; last_tool_effect
        ; any_mutating_tool
        ; tool_effects_seen
@@ -1161,6 +1162,7 @@ let test_idle_detected_repeated_failure_pauses_keeper () =
            ~meta
            ~updated_meta:meta
            ~is_auto_recoverable:false
+           ~pacing_enforced:false
            ~err
            ~error_text:(Agent_sdk.Error.to_string err)
        done;
@@ -1212,6 +1214,7 @@ let test_read_only_no_progress_pause_uses_backoff_auto_resume () =
            ~meta
            ~updated_meta:meta
            ~is_auto_recoverable:false
+           ~pacing_enforced:false
            ~err
            ~error_text:(Agent_sdk.Error.to_string err)
        done;
@@ -1257,6 +1260,7 @@ let test_mutating_no_progress_pause_stays_manual_resume () =
            ~meta
            ~updated_meta:meta
            ~is_auto_recoverable:false
+           ~pacing_enforced:false
            ~err
            ~error_text:(Agent_sdk.Error.to_string err)
        done;
@@ -1295,6 +1299,7 @@ let test_runtime_pause_threshold_override_controls_idle_auto_pause () =
          ~meta
          ~updated_meta:meta
          ~is_auto_recoverable:false
+         ~pacing_enforced:false
          ~err
          ~error_text:(Agent_sdk.Error.to_string err);
        (match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
@@ -1307,6 +1312,7 @@ let test_runtime_pause_threshold_override_controls_idle_auto_pause () =
          ~meta
          ~updated_meta:meta
          ~is_auto_recoverable:false
+         ~pacing_enforced:false
          ~err
          ~error_text:(Agent_sdk.Error.to_string err);
        match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
@@ -1314,6 +1320,52 @@ let test_runtime_pause_threshold_override_controls_idle_auto_pause () =
          check bool "paused at runtime threshold" true
            entry.Masc.Keeper_registry.meta.paused
        | None -> fail "expected registered keeper after threshold")
+
+(* RFC-0313 W3 enforce twin: under the production default ([pacing]
+   mode = "enforce"), repeated IdleDetected failures past the runtime
+   threshold must NOT write [paused=true] — the failure is expressed as
+   pacing plus a judgment stimulus at the routing site instead.  The
+   legacy tests above pass [~pacing_enforced:false] to pin the shadow
+   kill-switch semantics until W4 deletes the auto-pause flags. *)
+let test_enforced_pacing_keeps_idle_detected_unpaused () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_runtime_config (runtime_toml_with_pause_threshold 2) @@ fun () ->
+  let base_path = temp_dir "masc-idle-detected-enforced-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "idle-detected-enforced" in
+       let meta = make_meta keeper_name in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       let err =
+         Agent_sdk.Error.Agent
+           (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 4 })
+       in
+       for _ = 1 to 3 do
+         Masc.Keeper_unified_turn_failure.record_failure_and_maybe_escalate
+           ~config
+           ~meta
+           ~updated_meta:meta
+           ~is_auto_recoverable:false
+           ~pacing_enforced:true
+           ~err
+           ~error_text:(Agent_sdk.Error.to_string err)
+       done;
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool "not paused past threshold under enforce" false
+           entry.Masc.Keeper_registry.meta.paused;
+         check
+           (option (float 0.001))
+           "no auto-resume timer under enforce"
+           None
+           entry.Masc.Keeper_registry.meta.auto_resume_after_sec
+       | None -> fail "expected registered keeper under enforce")
 
 let test_legacy_last_blocker_pair_rejected () =
   let legacy_json =
@@ -1437,5 +1489,7 @@ let () =
             test_idle_detected_repeated_failure_pauses_keeper;
           test_case "runtime [pause] threshold controls idle auto-pause" `Quick
             test_runtime_pause_threshold_override_controls_idle_auto_pause;
+          test_case "enforced pacing keeps IdleDetected unpaused (RFC-0313 W3)" `Quick
+            test_enforced_pacing_keeps_idle_detected_unpaused;
         ] );
     ]

@@ -11,7 +11,9 @@ import {
   patchKeeperConfig,
   setKeeperToolPolicy,
 } from '../api/dashboard'
-import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
+import { fetchKeeperComposite, pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
+import { KeeperGithubAppConfigPanel } from './keeper-github-app-config'
+import type { KeeperSecretProjection } from '../api/schemas/keeper-composite'
 import type { DashboardRuntimeProviderSnapshot, DashboardToolInventoryItem, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
@@ -37,6 +39,7 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 import { refreshKeeperRuntimeStatus } from '../store'
+import { navigate } from '../router'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
 import { StatusDot } from './common/status-dot'
@@ -139,6 +142,15 @@ export type KeeperConfigControlInventoryItem = {
 }
 
 const kcfTab = signal<KcfTabId>('identity')
+
+// Deep-link entry point: focus a specific config tab before the modal opens.
+// `kcfTab` is reset to 'identity' only on panel teardown (see
+// resetKeeperConfigPanelDrafts), never on mount, so a value set here survives the
+// next open. Used by the read-only runtime card (keeper-runtime-model-editor) to
+// land the operator on the 런타임 tab where runtime_id is actually edited.
+export function focusKeeperConfigTab(tab: KcfTabId): void {
+  kcfTab.value = tab
+}
 
 // ── State ────────────────────────────────────────────────
 
@@ -1681,6 +1693,23 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
 
+  // GitHub App credentials live in the keeper secret projection, which the
+  // config payload does not carry. Fetch it once per keeper (same source the
+  // monitoring detail reads via composite.secret_projection) so the access-tab
+  // panel can detect existing config; mutations return the fresh projection and
+  // update this state without a refetch.
+  const [secretProjection, setSecretProjection] = useState<KeeperSecretProjection | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchKeeperComposite(keeperName, { signal: controller.signal })
+      .then((snapshot) => setSecretProjection(snapshot.secret_projection ?? null))
+      .catch(() => {
+        // A failed/aborted secret fetch leaves the panel in its empty-projection
+        // state (save still works); it must not break the rest of the config UI.
+      })
+    return () => controller.abort()
+  }, [keeperName])
+
   // Trigger load on first render or name change
   if (configKeeperName.value !== keeperName || state.status === 'idle') {
     void loadKeeperConfig(keeperName)
@@ -1924,7 +1953,18 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${SectionHeader} size="xs" class="mt-2 mb-0.5">지시사항</${SectionHeader}>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
-    <${SectionHeader} size="xs" class="mt-3 mb-0.5">시스템 프롬프트</${SectionHeader}>
+    <${SectionHeader} size="xs" class="mt-3 mb-0.5" right=${html`
+      <button
+        type="button"
+        class="text-2xs text-accent-fg hover:underline v2-monitoring-action"
+        data-testid="kcf-prompt-global-edit-link"
+        title="세계관·능력 등 전역 프롬프트 블록은 설정 › 프롬프트에서 관리합니다"
+        onClick=${() => { navigate('settings', { section: 'prompts' }) }}
+      >설정 › 프롬프트 열기 →</button>
+    `}>시스템 프롬프트</${SectionHeader}>
+    <div class="text-3xs text-text-dim mb-2">
+      헌법·세계관·능력 블록은 <span class="font-mono">전역 프롬프트</span>입니다 (read-only) — 편집은 설정 › 프롬프트. 아래 목표·지시사항만 이 keeper 고유값입니다.
+    </div>
     <div class="flex gap-2 mb-2 v2-monitoring-toolbar">
       <button
         type="button"
@@ -2346,6 +2386,17 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${SectionHeader} size="xs" class="mb-1">참여 네임스페이스</${SectionHeader}>
       <${ModelList} models=${c.workspace.bound_workspace_ids} />
     </div>
+
+    ${'' /* GitHub App per-keeper credentials — surfaced here in 설정 → 권한·샌드박스
+       alongside the monitoring detail's 진단/운영 copy, because credentials are a
+       settings concept and this is where operators look for them. Both call sites
+       render the same KeeperGithubAppConfigPanel against secret_projection. */}
+    <${MajorSectionHeader} title="GitHub App 자격증명" />
+    <${KeeperGithubAppConfigPanel}
+      keeperName=${keeperName}
+      projection=${secretProjection}
+      onProjectionChange=${setSecretProjection}
+    />
   `
 
   // goals ◎ — assigned goal-store bindings (active_goal_ids picker)

@@ -173,12 +173,15 @@ let audit_approval_event
       ?(goal_ids = [])
       ?sandbox_target
       ?runtime_contract
-      ?selected_model
+      ?selected_model:(selected_model : string option)
       ?audit_disposition
       ?disposition
       ?disposition_reason
       ?rule_match
       ?source_approval_id
+      ?actor
+      ?approval_mode
+      ?authorizing_band
       ?auto_approved
       ?decision
       ()
@@ -218,6 +221,9 @@ let audit_approval_event
          ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
          ; "selected_model", `Null
          ; "sandbox_target", Json_util.string_opt_to_json sandbox_target
+         ; "actor", Json_util.string_opt_to_json actor
+         ; "approval_mode", Json_util.string_opt_to_json approval_mode
+         ; "authorizing_band", Json_util.string_opt_to_json authorizing_band
          ; "disposition", Json_util.string_opt_to_json disposition
          ; "disposition_reason", Json_util.string_opt_to_json disposition_reason
          ]
@@ -372,6 +378,10 @@ let resolved_approval_json_of_audit_event json =
     ; "sandbox_target", json_member_or_null "sandbox_target" json
     ; "disposition", json_member_or_null "disposition" json
     ; "disposition_reason", json_member_or_null "disposition_reason" json
+    ; "actor", json_member_or_null "actor" json
+    ; "approval_mode", json_member_or_null "approval_mode" json
+    ; "authorizing_band", json_member_or_null "authorizing_band" json
+    ; "auto_approved", json_member_or_null "auto_approved" json
     ; "rule_match", json_member_or_null "rule_match" json
     ]
 ;;
@@ -479,6 +489,8 @@ let create_entry
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?(continuation_channel =
+         Keeper_continuation_channel.unrouted "legacy: continuation channel not provided")
       ~audit_base_path
       ~resolver
       ~on_resolution
@@ -515,11 +527,13 @@ let create_entry
   ; disposition
   ; disposition_reason
   ; phase = Awaiting_operator
+  ; continuation_channel
   ; audit_base_path
   ; resolver
   ; on_resolution
   ; context_summary = None
   ; summary_status = Summary_not_requested
+  ; channel = Some continuation_channel
   }
 ;;
 
@@ -832,14 +846,23 @@ let approval_resolution_wake_hook :
      keeper_name:string ->
      approval_id:string ->
      decision:Keeper_event_queue.hitl_resolution_decision ->
+     channel:Keeper_continuation_channel.t option ->
      unit)
     ref =
-  ref (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ -> ())
+  ref
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_
+      ~channel:(_ : Keeper_continuation_channel.t option) -> ())
 
 let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := f
 
-let wake_keeper_on_approval_resolution ~base_path ~keeper_name ~approval_id ~decision =
-  try !approval_resolution_wake_hook ~base_path ~keeper_name ~approval_id ~decision with
+let wake_keeper_on_approval_resolution
+    ~base_path ~keeper_name ~approval_id ~decision
+    ~(channel : Keeper_continuation_channel.t option) =
+  try
+    !approval_resolution_wake_hook
+      ~base_path ~keeper_name ~approval_id ~decision ~channel
+  with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.warn
@@ -905,7 +928,8 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     ~base_path
     ~keeper_name:entry.keeper_name
     ~approval_id:entry.id
-    ~decision:(hitl_resolution_decision_of_approval_decision decision);
+    ~decision:(hitl_resolution_decision_of_approval_decision decision)
+    ~channel:entry.channel;
   try
     Sse.broadcast
       (`Assoc
@@ -1023,6 +1047,7 @@ let submit_and_await
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?continuation_channel
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
       ?(critical_escalation_after_s = default_critical_approval_escalation_after_s)
@@ -1049,6 +1074,7 @@ let submit_and_await
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?continuation_channel
       ~audit_base_path:base_path
       ~resolver:(Some resolver)
       ~on_resolution:None
@@ -1179,6 +1205,7 @@ let submit_pending
       ?selected_model
       ?disposition
       ?disposition_reason
+      ?continuation_channel
       ~on_resolution
       ()
   : string
@@ -1221,13 +1248,14 @@ let submit_pending
           ?sandbox_profile
           ?backend
           ?runtime_contract
-          ?selected_model
-          ?disposition
-          ?disposition_reason
-          ~audit_base_path:base_path
-          ~resolver:None
-          ~on_resolution:(Some on_resolution)
-          ()
+      ?selected_model
+      ?disposition
+      ?disposition_reason
+      ?continuation_channel
+      ~audit_base_path:base_path
+      ~resolver:None
+      ~on_resolution:(Some on_resolution)
+      ()
       in
       let updated = SMap.add id entry map in
       if Atomic.compare_and_set pending map updated
@@ -1495,7 +1523,8 @@ let expire_stale ~max_wait_s =
          ~base_path:entry.audit_base_path
          ~keeper_name:entry.keeper_name
          ~approval_id:id
-         ~decision:Keeper_event_queue.Hitl_rejected;
+         ~decision:Keeper_event_queue.Hitl_rejected
+         ~channel:entry.channel;
        (match entry.resolver with
         | Some resolver -> Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
         | None -> ());

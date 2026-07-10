@@ -305,6 +305,19 @@ let dispatch_error_deterministic_retry_fields error =
   | Some reason -> Keeper_tool_deterministic_error.deterministic_retry_fields reason
   | None -> []
 
+let shell_ir_approval_overlay =
+  let default_overlay = Masc_exec.Approval_config.autonomous in
+  match Env_config_runtime.Shell_ir_approval.raw_overlay () with
+  | None -> default_overlay
+  | Some raw ->
+    (match Masc_exec.Approval_config.shell_ir_approval_overlay_of_string raw with
+     | Some overlay -> overlay
+     | None ->
+       Log.Dashboard.warn
+         "invalid MASC_SHELL_IR_APPROVAL value %S; using autonomous overlay"
+         raw;
+       default_overlay)
+
 let pr_action_status_label = function
   | Unix.WEXITED 0 -> "success"
   | Unix.WEXITED _ -> "exit_nonzero"
@@ -325,6 +338,233 @@ let record_pr_action_metric ~keeper_name ~risk_class ~status ir =
         ; "risk_class", Masc_exec.Shell_ir_risk.string_of_risk_class risk_class
         ]
       ())
+;;
+
+let bool_label b = if b then "true" else "false"
+
+let gh_verb_label (verb : Masc_exec.Gh_verb.t) =
+  let family = Masc_exec.Gh_verb.string_of_family verb.family in
+  match verb.action with
+  | Some action -> family ^ ":" ^ action
+  | None -> family
+;;
+
+let gh_verb_of_simple (simple : Masc_exec.Shell_ir.simple) :
+    Masc_exec.Gh_verb.t option
+  =
+  match Masc_exec.Exec_program.known simple.bin with
+  | Some Masc_exec.Exec_program.Gh ->
+    (match Masc_exec.Shell_ir_typed.of_simple simple with
+     | Masc_exec.Shell_ir_typed.W
+         (Masc_exec.Shell_ir_typed_types.Gh { subcommand; action; _ }) ->
+       Some (Masc_exec.Gh_verb.of_fields ~subcommand ~action)
+     | Masc_exec.Shell_ir_typed.W _ ->
+       (match Masc_exec.Shell_ir_risk.literal_words_of_simple simple with
+        | Some words -> Some (Masc_exec.Gh_verb.classify words)
+        | None ->
+          let open Masc_exec.Gh_verb in
+          Some { family = Other "opaque"; action = None }))
+  | Some _ | None -> None
+;;
+
+let record_gh_classification_metric ~keeper_name ~risk_class ~typed_hit ir =
+  let risk_class = Masc_exec.Shell_ir_risk.string_of_risk_class risk_class in
+  let typed_hit = bool_label typed_hit in
+  let rec visit = function
+    | Masc_exec.Shell_ir.Simple simple ->
+      (match gh_verb_of_simple simple with
+       | None -> ()
+       | Some verb ->
+         let disposition =
+           match Masc_exec.Gh_capability_policy.disposition_of_simple simple with
+           | Some d -> Masc_exec.Gh_capability_policy.string_of_disposition d
+           | None -> "none"
+         in
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string GhClassificationTotal)
+           ~labels:
+             [ "keeper", keeper_name
+             ; "verb", gh_verb_label verb
+             ; "family", Masc_exec.Gh_verb.string_of_family verb.family
+             ; "action", (match verb.action with Some action -> action | None -> "")
+             ; "risk_class", risk_class
+             ; "typed_hit", typed_hit
+             ; "disposition", disposition
+             ]
+           ())
+    | Masc_exec.Shell_ir.Pipeline stages -> List.iter visit stages
+  in
+  visit ir
+;;
+
+let record_gated_gh_lifecycle ~keeper_name ~event ~risk_class ~typed_hit =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string GatedGhLifecycleTotal)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "event", event
+      ; "risk_class", Masc_exec.Shell_ir_risk.string_of_risk_class risk_class
+      ; "typed_hit", bool_label typed_hit
+      ]
+    ()
+;;
+
+let record_gated_gh_block_time ~keeper_name ~risk_class ~typed_hit ~seconds =
+  Otel_metric_store.observe_histogram
+    Keeper_metrics.(to_string GatedGhBlockTimeSeconds)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "risk_class", Masc_exec.Shell_ir_risk.string_of_risk_class risk_class
+      ; "typed_hit", bool_label typed_hit
+      ]
+    seconds
+;;
+
+let sandbox_target_label = function
+  | Masc_exec.Sandbox_target.Host -> "host"
+  | Masc_exec.Sandbox_target.Docker { image; _ } -> "docker:" ^ image
+;;
+
+let json_opt_string name = function
+  | Some value -> [ name, `String value ]
+  | None -> []
+;;
+
+let repo_create_visibility_label = function
+  | Masc_exec.Gh_capability_policy.Public -> "public"
+  | Masc_exec.Gh_capability_policy.Private -> "private"
+  | Masc_exec.Gh_capability_policy.Internal -> "internal"
+;;
+
+let repo_create_contract_json
+      (contract : Masc_exec.Gh_capability_policy.repo_create_contract)
+  =
+  let lifecycle = contract.lifecycle in
+  `Assoc
+    ([ "owner", `String contract.owner
+     ; "name", `String contract.name
+     ; "visibility", `String (repo_create_visibility_label contract.visibility)
+     ; ( "lifecycle"
+       , `Assoc
+           ([ "add_readme", `Bool lifecycle.add_readme
+            ; "clone", `Bool lifecycle.clone
+            ; "push", `Bool lifecycle.push
+            ]
+            @ json_opt_string "source" lifecycle.source
+            @ json_opt_string "remote" lifecycle.remote
+            @ json_opt_string "template" lifecycle.template) )
+     ])
+;;
+
+let repo_create_contract_json_of_ir ir =
+  let rec scan = function
+    | Masc_exec.Shell_ir.Simple simple ->
+      (match Masc_exec.Gh_capability_policy.repo_create_contract_of_simple simple with
+       | Some (Ok contract) -> Some (repo_create_contract_json contract)
+       | Some (Error _) | None -> None)
+    | Masc_exec.Shell_ir.Pipeline stages -> List.find_map scan stages
+  in
+  scan ir
+;;
+
+let shell_ir_approval_input
+      ~cmd
+      ~cwd
+      ~bin
+      ~summary
+      ~sandbox_profile
+      ~sandbox_target
+      ~risk_class
+      ~typed_hit
+      ?repo_create_contract
+      ()
+      =
+  let fields =
+    [ "schema", `String "masc.shell_ir_approval_request.v1"
+    ; "op", `String "shell_ir_approval_required"
+    ; "action", `String "execute"
+    ; "kind", `String "gh_capability_requires_approval"
+    ; "cmd", `String cmd
+    ; "cwd", `String cwd
+    ; "bin", `String bin
+    ; "summary", `String summary
+    ; "sandbox_profile", `String sandbox_profile
+    ; "sandbox_target", `String sandbox_target
+    ; ( "risk_class"
+      , `String (Masc_exec.Shell_ir_risk.string_of_risk_class risk_class) )
+    ; "typed_hit", `Bool typed_hit
+    ]
+  in
+  `Assoc
+    (fields
+     @
+     match repo_create_contract with
+     | Some contract -> [ "repo_create_contract", contract ]
+     | None -> [])
+;;
+
+let submit_shell_ir_approval_pending
+      ~base_path
+      ~keeper_name
+      ?task_id
+      ?(goal_ids = [])
+      ~cmd
+      ~cwd
+      ~bin
+      ~summary
+      ~sandbox_profile
+      ~sandbox_target
+      ~risk_class
+      ~typed_hit
+      ?repo_create_contract
+      ()
+  =
+  let input =
+    shell_ir_approval_input
+      ~cmd
+      ~cwd
+      ~bin
+      ~summary
+      ~sandbox_profile
+      ~sandbox_target
+      ~risk_class
+      ~typed_hit
+      ?repo_create_contract
+      ()
+  in
+  let on_resolution decision =
+    let event =
+      match decision with
+      | Agent_sdk.Hooks.Approve -> "approved"
+      | Agent_sdk.Hooks.Reject _ -> "denied"
+      | Agent_sdk.Hooks.Edit _ -> "edited"
+    in
+    record_gated_gh_lifecycle ~keeper_name ~event ~risk_class ~typed_hit;
+    Log.Keeper.info
+      "shell_ir approval resolved keeper=%s decision=%s cmd=%s"
+      keeper_name
+      (Keeper_approval_queue.approval_decision_to_string decision)
+      cmd
+  in
+  let approval_id =
+    Keeper_approval_queue.submit_pending
+      ~keeper_name
+      ~tool_name:"tool_execute"
+      ~input
+      ~risk_level:Keeper_approval_queue.High
+      ~base_path
+      ?task_id
+      ~goal_ids
+      ~sandbox_target
+      ~sandbox_profile
+      ~disposition:"requires_approval"
+      ~disposition_reason:summary
+      ~on_resolution
+      ()
+  in
+  record_gated_gh_lifecycle ~keeper_name ~event:"requested" ~risk_class ~typed_hit;
+  record_gated_gh_block_time ~keeper_name ~risk_class ~typed_hit ~seconds:0.0;
+  approval_id
 ;;
 
 let execute_secret_redaction ~base_path ~keeper_name =
@@ -348,6 +588,9 @@ module For_testing = struct
   let repo_cwd_relative_rewrite = repo_cwd_relative_rewrite
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
   let record_pr_action_metric = record_pr_action_metric
+  let record_gh_classification_metric = record_gh_classification_metric
+  let shell_ir_approval_input = shell_ir_approval_input
+  let submit_shell_ir_approval_pending = submit_shell_ir_approval_pending
   let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
     let redaction = execute_secret_redaction ~base_path ~keeper_name in
     redact_execute_output redaction ~stdout ~stderr
@@ -703,6 +946,13 @@ let handle_tool_execute_typed
                ())
         in
         let envelope = Keeper_tool_execute_shell_ir.classify ir in
+        let risk_class = Masc_exec.Shell_ir_risk.risk_class envelope in
+        let typed_hit = Masc_exec.Shell_ir_risk.typed_hit_of_ir ir in
+        record_gh_classification_metric
+          ~keeper_name:meta.name
+          ~risk_class
+          ~typed_hit
+          ir;
         let typed_error_json ?dispatch_error ?(extra_fields = []) msg =
           let deterministic_retry_fields =
             match dispatch_error with
@@ -839,7 +1089,7 @@ let handle_tool_execute_typed
                  the real remote even from a container), so no sandbox-conditional
                  branch is needed: both profiles use the same overlay. *)
               let approval_config =
-                { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.autonomous
+                { Masc_exec.Approval_config.defaults = shell_ir_approval_overlay
                 ; per_agent = []
                 }
               in
@@ -888,15 +1138,58 @@ let handle_tool_execute_typed
               ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
               e
           | Error
-              (Keeper_tool_execute_shell_ir.Approval_required { summary; bin } as err)
+              (Keeper_tool_execute_shell_ir.Approval_required { summary; bin; kind } as err)
             ->
             Log.Keeper.warn
-              "shell_ir approval_required keeper=%s cmd=%s bin=%s summary=%s"
+              "shell_ir approval_required keeper=%s cmd=%s bin=%s kind=%s summary=%s"
               meta.name
               cmd_for_log
               bin
+              (Keeper_tool_execute_shell_ir.approval_required_kind_to_string kind)
               summary;
-            typed_error_json ~dispatch_error:err summary
+            (match kind with
+             | Keeper_tool_execute_shell_ir.Gh_capability_requires_approval ->
+               let sandbox_profile =
+                 Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile
+               in
+               let sandbox_target = sandbox_target_label dispatch_sandbox in
+               let repo_create_contract = repo_create_contract_json_of_ir ir in
+               let approval_id =
+                 submit_shell_ir_approval_pending
+                   ~base_path:root
+                   ~keeper_name:meta.name
+                   ?task_id
+                   ~goal_ids:meta.active_goal_ids
+                   ~cmd:cmd_for_log
+                   ~cwd
+                   ~bin
+                   ~summary
+                   ~sandbox_profile
+                   ~sandbox_target
+                   ~risk_class
+                   ~typed_hit
+                   ?repo_create_contract
+                   ()
+               in
+               typed_error_json
+                 ~dispatch_error:err
+                 ~extra_fields:
+                   [ "approval_request_id", `String approval_id
+                   ; "approval_queue_status", `String "pending"
+                   ; "approval_nonblocking", `Bool true
+                   ; "approval_required_kind", `String "gh_capability_requires_approval"
+                   ; "approval_block_time_ms", `Int 0
+                   ; "approval_disposition", `String "requires_approval"
+                   ]
+                 summary
+             | Keeper_tool_execute_shell_ir.Privileged_program_floor ->
+               typed_error_json
+                 ~dispatch_error:err
+                 ~extra_fields:
+                   [ "approval_nonblocking", `Bool false
+                   ; "approval_required_kind", `String "privileged_program_floor"
+                   ]
+                 summary)
           | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason } as err) ->
             Log.Keeper.warn
               "shell_ir policy_denied keeper=%s cmd=%s reason=%s"
@@ -914,7 +1207,6 @@ let handle_tool_execute_typed
                of live traffic observable. An offline scan of typed_hit=true
                / total gives the real exercise rate of the typed model vs the
                Generic escape hatch. *)
-            let risk_class = Masc_exec.Shell_ir_risk.risk_class envelope in
             record_pr_action_metric
               ~keeper_name:meta.name
               ~risk_class
@@ -1022,6 +1314,18 @@ let handle_tool_execute_typed
                 ~status:result.status
                 ~stderr
             in
+            (* Mutually exclusive with the glob hint: both share the
+               execution_hint/shell_ir_hint keys, and a command carrying a glob
+               token gets the more specific glob guidance first. *)
+            let duplicate_argv0_failure_fields =
+              if glob_literal_failure_fields <> []
+              then []
+              else
+                Masc_exec.Shell_ir_diagnostics.duplicate_argv0_failure_fields
+                  ~ir
+                  ~status:result.status
+                  ~stderr
+            in
             let classification = Exec_core.classify_command_of_ir ir in
             (* Only include command_descriptor on success — errors already carry
                sufficient diagnostic info (exit code, stderr, classification). *)
@@ -1041,6 +1345,7 @@ let handle_tool_execute_typed
                  ~extra:
                    (failure_error_fields
                     @ glob_literal_failure_fields
+                    @ duplicate_argv0_failure_fields
                     @ sandbox_extra_fields
                     @ [ "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms

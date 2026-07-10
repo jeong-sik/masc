@@ -57,6 +57,27 @@ let write_file path contents =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc contents)
 
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec scan offset =
+    offset + needle_len <= haystack_len
+    && (String.equal (String.sub haystack offset needle_len) needle || scan (offset + 1))
+  in
+  String.equal needle "" || scan 0
+
+let restored_log_messages_since before_seq =
+  Log.Ring.recent ~limit:20 ~module_filter:"Keeper" ~since_seq:before_seq ()
+  |> List.filter_map (fun (entry : Log.Ring.entry) ->
+    if contains_substring ~needle:"event_queue_snapshot: restored " entry.message
+    then Some entry.message
+    else None)
+
 let () =
   let open Keeper_event_queue in
   let board_payload () =
@@ -250,10 +271,10 @@ let () =
        (stimulus_to_yojson
           { post_id =
               hitl_resolution_post_id
-                { approval_id = "appr-9"; decision = Hitl_approved }
+                { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
           ; urgency = Immediate
           ; arrived_at = 4.0
-          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = Hitl_approved }
+          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
           })
    with
    | Ok s ->
@@ -311,6 +332,134 @@ let () =
    | Error msg ->
      Alcotest.fail ("Goal_verification_failed stimulus round-trip failed: " ^ msg));
 
+  (* --- RFC-0315 P3 W0: Goal_assigned --- *)
+  let assignment =
+    { ga_goal_id = "goal-9"
+    ; ga_goal_title = "Harden wake continuity"
+    ; ga_assigned_by = "keeper_up"
+    }
+  in
+  assert (
+    String.equal (goal_assignment_post_id assignment) "goal-assigned:goal-9");
+  assert (
+    String.equal (payload_kind_label (Goal_assigned assignment)) "goal_assigned");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = goal_assignment_post_id assignment
+          ; urgency = Normal
+          ; arrived_at = 7.0
+          ; payload = Goal_assigned assignment
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Goal_assigned ga ->
+        assert (String.equal ga.ga_goal_id "goal-9");
+        assert (String.equal ga.ga_goal_title "Harden wake continuity");
+        assert (String.equal ga.ga_assigned_by "keeper_up")
+      | _ -> Alcotest.fail "Goal_assigned codec round-trip changed payload shape")
+   | Error msg ->
+     Alcotest.fail ("Goal_assigned stimulus round-trip failed: " ^ msg));
+  (* Identity strips display-only fields: re-assigning the same goal via a
+     different actor or after a title edit still dedups. *)
+  let assignment_stim =
+    { post_id = goal_assignment_post_id assignment
+    ; urgency = Normal
+    ; arrived_at = 7.0
+    ; payload = Goal_assigned assignment
+    }
+  in
+  let assignment_retitled =
+    { assignment_stim with
+      arrived_at = 8.0
+    ; payload =
+        Goal_assigned
+          { assignment with
+            ga_goal_title = "Harden wake continuity (v2)"
+          ; ga_assigned_by = "toml_reconcile"
+          }
+    }
+  in
+  assert (stimulus_identity_equal assignment_stim assignment_retitled);
+  (* Producer diff is edge-only: additions wake, removals and unchanged ids
+     never do. *)
+  assert (
+    Masc.Keeper_goal_assignment_wake.added_goal_ids
+      ~old_ids:[ "goal-1"; "goal-2" ]
+      ~new_ids:[ "goal-2"; "goal-9" ]
+    = [ "goal-9" ]);
+  assert (
+    Masc.Keeper_goal_assignment_wake.added_goal_ids
+      ~old_ids:[ "goal-1" ]
+      ~new_ids:[]
+    = []);
+
+  (* --- RFC-0310 §3.3: Goal_stagnation --- *)
+  let stagnation =
+    { gs_goal_id = "goal-9"
+    ; gs_stale_since = "2026-07-08T00:00:00Z"
+    ; gs_goal_title = "Harden wake continuity"
+    }
+  in
+  assert (
+    String.equal
+      (goal_stagnation_post_id stagnation)
+      "goal-stagnation:goal-9:2026-07-08T00:00:00Z");
+  assert (
+    String.equal
+      (payload_kind_label (Goal_stagnation stagnation))
+      "goal_stagnation");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = goal_stagnation_post_id stagnation
+          ; urgency = Normal
+          ; arrived_at = 11.0
+          ; payload = Goal_stagnation stagnation
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Goal_stagnation gs ->
+        assert (String.equal gs.gs_goal_id "goal-9");
+        assert (String.equal gs.gs_stale_since "2026-07-08T00:00:00Z");
+        assert (String.equal gs.gs_goal_title "Harden wake continuity")
+      | _ -> Alcotest.fail "Goal_stagnation codec round-trip changed payload shape")
+   | Error msg ->
+     Alcotest.fail ("Goal_stagnation stimulus round-trip failed: " ^ msg));
+  (* Identity strips the display-only title but keeps (goal_id, stale_since):
+     a title edit within the same stale episode dedups... *)
+  let stagnation_stim =
+    { post_id = goal_stagnation_post_id stagnation
+    ; urgency = Normal
+    ; arrived_at = 11.0
+    ; payload = Goal_stagnation stagnation
+    }
+  in
+  let stagnation_retitled =
+    { stagnation_stim with
+      arrived_at = 12.0
+    ; payload =
+        Goal_stagnation { stagnation with gs_goal_title = "Harden wake (v2)" }
+    }
+  in
+  assert (stimulus_identity_equal stagnation_stim stagnation_retitled);
+  (* ...but a goal that was advanced (new updated_at) and went stale again
+     carries a new [gs_stale_since], so it is a DISTINCT episode that fires
+     independently — the edge, not a blind clock. *)
+  let stagnation_next_episode =
+    { stagnation_stim with
+      post_id =
+        goal_stagnation_post_id
+          { stagnation with gs_stale_since = "2026-07-08T04:00:00Z" }
+    ; payload =
+        Goal_stagnation
+          { stagnation with gs_stale_since = "2026-07-08T04:00:00Z" }
+    }
+  in
+  assert (not (stimulus_identity_equal stagnation_stim stagnation_next_episode));
+
   (* --- queue operations preserved --- *)
   let board_stim =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }
@@ -339,7 +488,11 @@ let () =
   assert (String.equal stim.post_id "p1");
   assert (length q = 1);
 
-  (* --- drain_board_window: coalesces board signals within window --- *)
+  (* --- drain_board_all: turn-keyed digest drains every board signal
+     regardless of arrival time (RFC-0334 W2). [old_board] arrived far
+     outside the retired 2 s window — under the old arrival-keyed drain
+     it starved in the queue and cost one extra wake→turn cycle; the
+     turn digest consumes it with the rest. *)
   let now = Unix.gettimeofday () in
   let recent_board_1 =
     { post_id = "rb1"; urgency = Normal; arrived_at = now; payload = board_payload () }
@@ -358,15 +511,20 @@ let () =
   let q_drain = enqueue q_drain old_board in
   let q_drain = enqueue q_drain bootstrap_in_queue in
   let q_drain = enqueue q_drain recent_board_2 in
-  let board_in_window, rest_queue = drain_board_window ~window_sec:5.0 q_drain in
-  assert (List.length board_in_window = 2);
-  (match board_in_window with
-   | first :: _ -> assert (String.equal first.post_id "rb2") (* urgency-sorted: Immediate first *)
-   | [] -> Alcotest.fail "expected at least one board signal in window");
-  assert (length rest_queue = 2);
+  let board_digest, rest_queue = drain_board_all q_drain in
+  assert (List.length board_digest = 3);
+  (match board_digest with
+   | first :: _ ->
+     (* Explicit mentions enqueue as [Immediate], so they lead the digest. *)
+     assert (String.equal first.post_id "rb2")
+   | [] -> Alcotest.fail "expected board signals in digest");
+  assert (
+    List.exists (fun s -> String.equal s.post_id "ob1") board_digest);
+  (* Non-board stimuli are not part of the board digest. *)
+  assert (length rest_queue = 1);
 
-  (* --- drain_board_window: empty queue --- *)
-  let empty_board, empty_rest = drain_board_window empty in
+  (* --- drain_board_all: empty queue --- *)
+  let empty_board, empty_rest = drain_board_all empty in
   assert (List.length empty_board = 0);
   assert (is_empty empty_rest);
 
@@ -491,6 +649,35 @@ let () =
       assert (String.equal second.post_id "bootstrap");
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- health snapshot reads stay quiet; live hydration still announces replay. --- *)
+  let base_path = temp_dir "keeper-event-queue-restore-log-gate" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      Log.set_level Log.Info;
+      let keeper_name = "keeper-event-queue-restore-log-gate-test" in
+      let q = enqueue empty board_stim |> fun q -> enqueue q bootstrap_stim in
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name q;
+      let before_health_reads = latest_log_seq () in
+      ignore (Keeper_event_queue_persistence.load_snapshot_pair ~base_path ~keeper_name);
+      ignore
+        (Keeper_event_queue_persistence.load_snapshot_pair_with_errors
+           ~base_path
+           ~keeper_name);
+      Alcotest.(check (list string))
+        "health snapshot reads do not emit restore log"
+        []
+        (restored_log_messages_since before_health_reads);
+      let before_live_load = latest_log_seq () in
+      ignore (Keeper_event_queue_persistence.load ~base_path ~keeper_name);
+      Alcotest.(check bool)
+        "live load emits restore log"
+        true
+        (List.exists
+           (contains_substring
+              ~needle:"keeper=keeper-event-queue-restore-log-gate-test")
+           (restored_log_messages_since before_live_load)));
 
   (* --- durable snapshot load collapses legacy duplicates that differ only by
          arrival time. --- *)
@@ -740,6 +927,52 @@ let () =
       Masc.Keeper_registry_event_queue.ack_consumed ~base_path keeper_name [ replayed ];
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
+  (* --- registry drain_board: turn digest consumes every queued board
+     signal in one call, however spread their arrival times (RFC-0334 W2
+     pin: 5 signals spread over >2 s while the keeper was busy → one
+     drain, mention-urgency first; the non-board stimulus stays queued
+     for the single-dequeue lane). --- *)
+  let base_path = temp_dir "keeper-event-queue-turn-digest" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-turn-digest-test" in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-turn-digest-test" in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      let digest_now = Unix.gettimeofday () in
+      let board_at ~post_id ~urgency arrived_at =
+        { post_id; urgency; arrived_at; payload = board_payload () }
+      in
+      List.iter
+        (Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name)
+        [ board_at ~post_id:"dg1" ~urgency:Normal 0.0
+        ; board_at ~post_id:"dg2" ~urgency:Normal (digest_now -. 600.0)
+        ; board_at ~post_id:"dg3" ~urgency:Immediate (digest_now -. 90.0)
+        ; board_at ~post_id:"dg4" ~urgency:Normal (digest_now -. 3.0)
+        ; board_at ~post_id:"dg5" ~urgency:Normal digest_now
+        ; { post_id = "dg-bootstrap"
+          ; urgency = Normal
+          ; arrived_at = digest_now
+          ; payload = Bootstrap
+          }
+        ];
+      let digest = Masc.Keeper_registry_event_queue.drain_board ~base_path keeper_name in
+      assert (List.length digest = 5);
+      (match digest with
+       | first :: _ -> assert (String.equal first.post_id "dg3")
+       | [] -> Alcotest.fail "turn digest should not be empty");
+      (* Second drain finds no board signals; the bootstrap stimulus is
+         still queued for the non-board single-dequeue lane. *)
+      assert (
+        List.length (Masc.Keeper_registry_event_queue.drain_board ~base_path keeper_name)
+        = 0);
+      (match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+       | Some stim -> assert (String.equal stim.post_id "dg-bootstrap")
+       | None -> Alcotest.fail "bootstrap stimulus should remain after board drain"));
+
   (* --- registry unavailable window: enqueue persists before register --- *)
   let base_path = temp_dir "keeper-event-queue-unregistered" in
   Fun.protect
@@ -832,5 +1065,46 @@ let () =
         | None -> Alcotest.fail "original second stimulus should remain queued"
       in
       assert (String.equal second.post_id "bootstrap"));
+
+  (* RFC-0320 backward compat: pre-W2 persisted stimuli have no [channel] in
+     their payload and must replay as [Unrouted], not fail — a restart
+     replaying a legacy wake queue must not break. Simulate by serializing a W2
+     stimulus then stripping the [channel] field before parsing back. *)
+  (let strip_channel json =
+     match json with
+     | `Assoc top ->
+       `Assoc
+         (List.map
+            (fun (k, v) ->
+              if String.equal k "payload" then
+                ( k
+                , match v with
+                  | `Assoc p ->
+                    `Assoc
+                      (List.filter (fun (pk, _) -> not (String.equal pk "channel")) p)
+                  | other -> other )
+              else (k, v))
+            top)
+     | other -> other
+   in
+   let hitl_stim =
+     { post_id = "p-legacy"
+     ; urgency = Immediate
+     ; arrived_at = 1.0
+     ; payload =
+         Hitl_resolved
+           { approval_id = "a"
+           ; decision = Hitl_approved
+           ; channel = Keeper_continuation_channel.unrouted "seed"
+           }
+     }
+   in
+   match stimulus_of_yojson (strip_channel (stimulus_to_yojson hitl_stim)) with
+   | Ok s ->
+     (match s.payload with
+      | Hitl_resolved r ->
+        assert (not (Keeper_continuation_channel.is_routable r.channel))
+      | _ -> assert false)
+   | Error _ -> assert false);
 
   print_endline "test_keeper_event_queue: all passed"

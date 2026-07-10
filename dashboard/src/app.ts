@@ -253,6 +253,7 @@ export function App() {
 
   const currentTab = route.value.tab
   const isCodeSurface = currentTab === 'code'
+  const isScheduleSurface = currentTab === 'schedule'
   const widgetSoloMode = isWidgetSoloRoute(route.value)
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
   const mobileKeeperPane = isMobile && keeperDetailMode ? keeperMobilePane.value : null
@@ -325,9 +326,9 @@ export function App() {
             id="main-content"
             tabindex=${-1}
             class="v2-surface-host"
-            style=${{ minWidth: 0, minHeight: 0, overflowY: 'auto' }}
+            style=${{ minWidth: 0, minHeight: 0, overflowY: isCodeSurface || isScheduleSurface ? 'hidden' : 'auto' }}
           >
-            <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : 'dashboard-main-scroll h-full p-4 max-[900px]:pb-16'}>
+            <div class=${isCodeSurface || isScheduleSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : 'dashboard-main-scroll h-full p-4 max-[900px]:pb-16'}>
               <div class="v2-surface" key=${currentTab}>
                 <${DashboardMain} />
               </div>

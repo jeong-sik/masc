@@ -45,7 +45,17 @@ let normalize_response_text_for_finalization
       ~tool_names
       ()
   =
-  match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
+  (* Surface the model's reasoning when the turn produced no final answer text,
+     so an empty-answer turn shows why (e.g. a keeper waiting on approval)
+     instead of a bare tool list. *)
+  let reasoning =
+    run_result.response.Agent_sdk.Types.content
+    |> List.filter_map (function
+         | Agent_sdk.Types.Thinking { content; _ } -> Some content
+         | _ -> None)
+    |> String.concat "\n"
+  in
+  match Keeper_tool_response.normalize_response_text ~text ~tool_names ~reasoning () with
   | Ok response_text -> Ok response_text
   | Error _ ->
     (* Finalization intentionally exposes the higher-level accept-rejected
@@ -218,6 +228,8 @@ let run_turn
       ?shared_context
       ?event_bus
       ?trace_link
+      ?continuation_channel
+      ?hitl_delivery_channel
       ?yield_to_chat_waiting
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
@@ -772,6 +784,7 @@ let run_turn
                          ~keeper_name:meta.name
                          ~meta
                          ?clock:(Eio_context.get_clock_opt ())
+                         ?continuation_channel
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       (* Mutation-boundary is native to OAS now; [exit_condition]
@@ -895,6 +908,7 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
+                          ?hitl_delivery_channel
                           ~capture_replay_response:
                             (fun ~response_text ->
                               (* Phase O observability: capture the exact

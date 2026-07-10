@@ -49,7 +49,7 @@ val cleanup_stale :
 
 type playground_policy_status =
   | Policy_allowed
-  | Policy_denied_not_in_mapping
+  | Policy_unregistered_repository
   | Policy_mapping_load_error
   | Policy_repository_identity_mismatch
   | Policy_repository_store_error
@@ -58,6 +58,15 @@ val playground_policy_status_to_string : playground_policy_status -> string
 (** Wire-format label for the playground repo policy status.  Exposed so
     tests and callers can assert against the same strings the JSON response
     uses without duplicating them. *)
+
+val policy_source_basename_of_status : playground_policy_status -> string
+(** Basename of the config file that actually decided a status: the repository
+    catalog ([repositories.toml]) for every allow/deny verdict, since that is
+    the binding gate, and the advisory mapping ([keeper_repo_mappings.toml])
+    only for its own load failure (RFC-0312). Exposed so the [policy_source]
+    field's source-of-truth is asserted against the same mapping the JSON uses,
+    rather than a hardcoded basename that misreported catalog denials as
+    mapping denials. *)
 
 val playground_repos_json :
   config:Workspace.config ->

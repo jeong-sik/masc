@@ -73,6 +73,51 @@ export interface CollectAttachmentsResult {
   errors: string[]
 }
 
+export interface StableAttachmentIdentity {
+  name: string
+  type?: string | null
+  kind?: string | null
+  mimeType?: string | null
+  size?: number | null
+  dims?: string | null
+  data?: string | null
+  src?: string | null
+}
+
+function stableAttachmentHash(value: string): string {
+  let hash = 5381
+  for (let i = 0; i < value.length; i += 1) {
+    hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0
+  }
+  return (hash >>> 0).toString(36)
+}
+
+export function stableAttachmentId(input: StableAttachmentIdentity): string {
+  const payload = [
+    input.name,
+    input.type ?? '',
+    input.kind ?? '',
+    input.mimeType ?? '',
+    String(input.size ?? ''),
+    input.dims ?? '',
+    input.data ?? input.src ?? '',
+  ].join('\x1f')
+  return `att-${stableAttachmentHash(payload)}`
+}
+
+function uniqueStableAttachmentId(
+  baseId: string,
+  existing: KeeperConversationAttachment[],
+  pending: KeeperConversationAttachment[],
+): string {
+  const used = new Set([...existing, ...pending].map(att => att.id))
+  if (!used.has(baseId)) return baseId
+
+  let suffix = 2
+  while (used.has(`${baseId}-${suffix}`)) suffix += 1
+  return `${baseId}-${suffix}`
+}
+
 /** Validate, resize, and encode [files] into attachments, respecting the
  *  per-file rules plus the total-payload and count budgets relative to
  *  [existing]. Validation failures are collected, not thrown, so the
@@ -113,8 +158,16 @@ export async function collectAttachments(
       break
     }
     const dims = resized.type.startsWith('image/') ? await readImageDimensions(resized) : null
+    const baseId = stableAttachmentId({
+      name: resized.name,
+      type: resized.type.startsWith('image/') ? 'image' : 'file',
+      mimeType: resized.type,
+      size: base64Size,
+      data: dataUrl,
+      dims,
+    })
     attachments.push({
-      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: uniqueStableAttachmentId(baseId, existing, attachments),
       type: resized.type.startsWith('image/') ? 'image' : 'file',
       name: resized.name,
       size: base64Size,

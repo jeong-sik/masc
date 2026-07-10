@@ -1110,7 +1110,12 @@ export async function saveRuntimeTomlConfig(sourceText: string): Promise<Runtime
   }).then(normalizeRuntimeTomlConfig)
 }
 
-export type RuntimeRoutingLane = 'default' | 'librarian' | 'structured_judge' | 'cross_verifier'
+export type RuntimeRoutingLane =
+  | 'default'
+  | 'librarian'
+  | 'structured_judge'
+  | 'hitl_summary'
+  | 'cross_verifier'
 
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,

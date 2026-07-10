@@ -74,6 +74,8 @@ and metric_observation = {
 - `lib/workspace_goals.ml:571`의 `~iterations_without_progress:0` 하드코딩 제거.
 - `StagnationDetected` 발생 시 동작은 **pause가 아니라 wake**: #23322의 `Goal_verification_failed`와 같은 typed stimulus 계열로 `Goal_stagnation_detected`를 추가해 담당 keeper를 깨운다.
 
+**구현 노트 (2026-07-08, RFC-0315 W1 경유 착지)**: wake 절반(`Keeper_event_queue.Goal_stagnation` typed stimulus)이 먼저 착지했다. 단, 진행 척도로 §3.3 원안의 `iterations_without_progress` 카운터(주인 없음·미영속) 대신 goal의 **`updated_at` 벽시계 staleness**를 사용한다. 근거: `updated_at`은 이미 goal store에 영속되고 모든 goal mutation(metric/phase/note)에 bump되므로, 별도 카운터를 소유·영속하지 않고도 "미진행" 프록시가 된다. episode 키 = (goal_id, updated_at)로 edge 성질 확보 — 진행 시 새 episode, 미진행 시 live-queue identity dedup + reaction-ledger `turn_started_seen` 가드로 episode당 1회만 발화(consume 후 재발화 없음). detector는 heartbeat tick의 `Keeper_goal_stagnation_wake` 스캔, live phase 게이트는 `Goal_phase.admits_self_directed_progress`(Executing만), threshold는 `keeper.goal.stagnation_threshold_sec`(기본 3600s). LLM evaluator 배선(Phase 2 전체)과 `workspace_goals.ml:571` `~iterations_without_progress:0` 하드코딩 제거는 여전히 잔여 — 본 착지는 wake 경로에 한정된다.
+
 ### 3.4 Audited override
 
 - `override_note` 자유텍스트 우회를 typed 이벤트로 대체:

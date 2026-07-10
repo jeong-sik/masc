@@ -96,8 +96,13 @@ let core_discovery_tools =
   @ Keeper_tool_descriptor.public_names ()
 ;;
 
-let effective_core_tools () = core_discovery_tools
-;;
+(* [effective_core_tools] is defined below (see "Universe-aware effective core
+   tools"), after the injected-schema state it reads. The earlier static
+   definition here returned [core_discovery_tools] unconditionally and was dead:
+   the later universe-aware definition shadowed it, so every caller resolved to
+   the later one. Removed in #23440 so the guard tests assert against the single
+   live definition. [core_discovery_tools] itself is retained — it is still used
+   by [Keeper_tool_affinity.pre_populate_from_history]. *)
 
 let core_always_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length core_always_tools) in
@@ -312,7 +317,26 @@ let effective_core_tools () =
   in
   let descriptor_publics =
     Keeper_tool_descriptor.public_descriptors
-    |> List.filter (fun d -> Set_util.StringSet.mem d.Keeper_tool_descriptor.internal_name universe_set)
+    |> List.filter (fun d ->
+      (* Native-executor descriptors (Execute/Grep via [Shell_ir]; Read/Edit/
+         Write via [Filesystem]) reach the in-process execution gates directly
+         and are available regardless of the injected masc_* universe, so they
+         stay in the always-visible core. [In_process] descriptors (WebSearch/
+         WebFetch) are backed by masc dispatch and remain universe-gated, which
+         preserves the #20455 WARN-spam control (validate_allow_list prunes a
+         descriptor public whose backend schema was never injected). The
+         [executor] variant is the typed availability discriminator — no masc_
+         string-prefix test, and a new [executor] constructor fails this match
+         at compile time. Without the native-executor arm the code tools were
+         structurally excluded from the per-turn core surface, re-creating the
+         #19864/#20060 split-brain (#23440). *)
+      match d.Keeper_tool_descriptor.executor with
+      | Keeper_tool_descriptor.Shell_ir | Keeper_tool_descriptor.Filesystem ->
+        true
+      | Keeper_tool_descriptor.In_process ->
+        Set_util.StringSet.mem
+          d.Keeper_tool_descriptor.internal_name
+          universe_set)
     |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
   in
   base_core_tools @ descriptor_publics

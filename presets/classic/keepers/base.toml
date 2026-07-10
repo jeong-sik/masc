@@ -1,0 +1,41 @@
+[keeper]
+# team-presets/classic/keepers/base.toml — shared defaults for the "classic IT
+# team" preset. This is a loader template referenced by the four team keeper
+# TOMLs via `base = "base.toml"`; it is NOT itself a bootable keeper.
+#
+# autoboot_enabled = false so seeding this preset boots exactly the four named
+# keepers (tech_lead, backend, frontend, qa) and never a stray "base" keeper.
+# The repo config/keepers/base.toml keeps autoboot_enabled = true for the shared
+# production fleet; this preset copy intentionally diverges.
+autoboot_enabled = false
+
+# WORKAROUND: sandbox_profile = "local" (not "docker") for the one-touch preset.
+# Reason: the quick-start install can run the MASC server itself inside a Docker
+# container. With sandbox_profile = "docker" each keeper Execute would spawn a
+# nested container (Docker-in-Docker), which needs a mounted host docker socket
+# and fails closed on a plain `docker compose up`. The classic-team demo keepers
+# collaborate over the board/tasks/chat and do not require container-isolated
+# shell execution to show the dashboard working.
+# Root fix: when running the server natively on a host (not in a container),
+# override to sandbox_profile = "docker" per keeper for real Execute isolation,
+# or mount /var/run/docker.sock into the server container and switch back.
+sandbox_profile = "local"
+network_mode = "inherit"
+
+# persona⊥{model,runtime}: keeper TOML carries no model/runtime selection. The
+# four team keepers inherit [runtime].default from runtime.toml, which ships as
+# "ollama_cloud.deepseek-v4-flash" — the model this preset targets. No
+# [runtime.assignments] entry is needed; adding one is only required to pin a
+# keeper to a non-default lane.
+
+instructions = """
+MASC 기본 소양 — classic IT team 공통 행동 기반. persona instructions는 이 위에 stack.
+
+1. 코드 변경 라우팅: Read, Grep, Edit/Write, Execute를 사용한다. Execute redirection/tee 또는 직접 file write/edit 우회는 governance/path guard에 막힌다.
+2. 작업 공간: 각 keeper는 자기 clone `repos/<REPO_NAME>/`를 개별 작업 공간으로 가진다. 코드 작업은 clone에서 task 브랜치를 만들어 진행한다 (`git fetch origin` 후 `git checkout -b <name>/<task_id> origin/main`). 루트 `main` checkout 위에서 직접 편집하지 않는다.
+3. PR 생성 흐름: 코드 작업 완료 후 Execute typed argv 경로로 PR을 열거나 갱신한다. 이어서 keeper_task_done result에 PR URL과 검증 증거를 남긴다. Ready 전환은 사용자/테크리드 권한이다.
+4. Task 상태 조회: keeper_tasks_list 또는 masc_tasks를 사용한다. .task.json, task-*.json, .masc, backlog JSON을 find/grep/rg/ls로 찾지 않는다.
+5. Task lifecycle 변경: masc_transition으로 claim/start/done/cancel/release/approve/reject를 호출한다. expected_version으로 CAS 충돌을 회피한다.
+6. Execute 규칙: `Execute`가 노출된 경우 한 번에 하나의 typed argv 명령만 실행한다. shell quote, glob, brace expansion을 쓰지 않는다. command shape block 또는 workflow_rejection을 받으면 active schema에 보이는 typed tool로 전환한다.
+7. 협업: masc_broadcast (전체 공지) 또는 masc_messages (1:1)로 소통한다. 특정 keeper 호출은 @mention. 진행 상태는 masc_heartbeat로 유지한다. 팀 동료: @tech_lead, @backend, @frontend, @qa.
+"""

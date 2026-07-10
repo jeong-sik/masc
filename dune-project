@@ -55,13 +55,12 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.209.0 (tag v0.209.0, #2504; supersedes masc pin #23697).
-  ;; Beyond v0.208.22 it adds catalog-driven provider capability + Anthropic
-  ;; thinking policy (oas#2499), typed empty-completion boundary convergence
-  ;; (oas#2498), and Hooks.Block + 0.209 breaking release floor (oas#2495/#2497).
+  ;; Pinned to OAS v0.209.1 (tag v0.209.1, #2510). The patch repairs the
+  ;; oas#2499 library build while preserving the catalog-driven capability,
+  ;; typed empty-completion, and Hooks.Block 0.209 public boundary.
   ;; Exact pin sha lives
   ;; in scripts/oas-agent-sdk-pin.sh (SSOT); see check-oas-pin.sh.
-  (agent_sdk (>= 0.209.0))
+  (agent_sdk (>= 0.209.1))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

@@ -787,11 +787,13 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/board/reactions" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
+         (* DET-OK: absent filter means the unfiltered activity view. *)
          let target_type_raw =
            Server_utils.query_param request "target_type"
            (* DET-OK: absent filter means the unfiltered activity view. *)
            |> Option.value ~default:""
          in
+         (* DET-OK: absent filter means the unfiltered activity view. *)
          let target_id =
            Server_utils.query_param request "target_id"
            (* DET-OK: absent filter is the explicit unfiltered activity view. *)
@@ -828,16 +830,19 @@ let add_routes ~sw ~clock router =
                  (`Assoc [ "error", `String ("invalid JSON: " ^ message) ])
                  reqd
              | args ->
+               (* DET-OK: absent input is passed to the typed target parser for explicit rejection. *)
                let target_type_raw =
                  Safe_ops.json_string_opt "target_type" args
                  (* DET-OK: absent input is intentionally passed to the typed target parser for rejection. *)
                  |> Option.value ~default:""
                in
+               (* DET-OK: absent input is passed to the typed target parser for explicit rejection. *)
                let target_id =
                  Safe_ops.json_string_opt "target_id" args
                  (* DET-OK: malformed or absent optional input is rejected by the typed target parser. *)
                  |> Option.value ~default:""
                in
+               (* DET-OK: absent input is passed to the typed reaction parser for explicit rejection. *)
                let emoji =
                  Safe_ops.json_string_opt "emoji" args
                  (* DET-OK: malformed or absent optional input is rejected by the typed reaction parser. *)

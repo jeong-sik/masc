@@ -26,6 +26,12 @@ on:
 permissions:
   contents: read
 
+# Rapid label/draft transitions fire one run per event; only the newest
+# verdict matters, so collapse the backlog per PR instead of queueing it.
+concurrency:
+  group: merge-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   merge-guard:
     name: Merge Guard

@@ -142,15 +142,11 @@ let test_fail_to_skip () =
 (* ================================================================ *)
 
 let test_read_tools_are_readonly () =
-  (* Word boundary matching: underscore IS a word char, so "keeper_read"
-     does NOT match "read". Only tools with standalone patterns match. *)
-  let read_tools = [
-    "read file"; "grep code"; "search files";
-    "find module"; "list dir"; "ls output";
-    "git status"; "git log"; "git diff";
-    "view file"; "get status";
-    "fetch data"; "query db";
-  ] in
+  (* RFC-0331: read-only is a DECLARED property (Effect_class.Read_only),
+     resolved from tool registration — not inferred from read-ish words in a
+     free-text name. These tools declare Read_only via Tool_catalog
+     inference. *)
+  let read_tools = [ "tool_read_file"; "tool_search_files" ] in
   List.iter (fun name ->
     let schema = make_schema name in
     Alcotest.(check bool) (Printf.sprintf "%s is read-only" name)
@@ -159,11 +155,13 @@ let test_read_tools_are_readonly () =
   ) read_tools
 
 let test_write_tools_are_not_readonly () =
+  (* RFC-0331 regression: names containing read-ish words ("list", "status",
+     "get") but NOT declared read-only must resolve to Mutating. The removed
+     substring classifier would have mis-tagged the last two as read-only. *)
   let write_tools = [
     "tool_execute"; "tool_edit_file";
     "write_file"; "delete_node";
-    (* underscore-joined: "read" is NOT at word boundary *)
-    "keeper_read"; "bulk_search";
+    "delete_stale_list"; "reset_status_flag";
   ] in
   List.iter (fun name ->
     let schema = make_schema name in
@@ -256,11 +254,15 @@ let test_parse_response_text_rejects_plain_verdict () =
 (* ================================================================ *)
 
 let test_verify_skips_readonly () =
+  (* RFC-0331: verify skips iff the request's declared effect_class is
+     Read_only — the action_description text is deliberately read-ish but is
+     never classified; the typed field is what decides. *)
   let req : Core.verification_request = {
     action_description = "read file contents";
     action_result = "some data";
     goal = "test goal";
     context_summary = "test context";
+    effect_class = Effect_class.Read_only;
   } in
   Alcotest.(check bool) "read-only skips to Pass" true
     (Verifier_oas.verify req = Ok Core.Pass)
@@ -306,7 +308,7 @@ let test_hook_readonly_skips_verifier () =
     hook
       (Agent_sdk.Hooks.PreToolUse {
          tool_use_id = "test-id-2";
-         tool_name = "read file";
+         tool_name = "tool_read_file";
          input = `Assoc [ ("path", `String "README.md") ];
          accumulated_cost_usd = 0.0;
          turn = 1;
@@ -318,6 +320,35 @@ let test_hook_readonly_skips_verifier () =
   Alcotest.(check bool) "readonly still continues"
     true
     (decision = Agent_sdk.Hooks.Continue)
+
+(* RFC-0331 regression: a MUTATING tool whose name contains a read-ish word
+   ("list") must NOT skip verification. The removed substring classifier
+   would have matched "list" and continued past the verifier (fail-open);
+   the typed effect class resolves it to Mutating so verify_fn runs. *)
+let test_hook_mutating_readish_name_is_verified () =
+  let verify_called = ref false in
+  let hook =
+    Verifier_oas.make_pre_tool_hook
+      ~verify_fn:(fun _req ->
+        verify_called := true;
+        Ok Core.Pass)
+      ~goal:"test goal"
+      ~context_summary:"test context"
+  in
+  let (_ : Agent_sdk.Hooks.hook_decision) =
+    hook
+      (Agent_sdk.Hooks.PreToolUse {
+         tool_use_id = "test-id-3";
+         tool_name = "delete_stale_list";
+         input = `Assoc [ ("scope", `String "all") ];
+         accumulated_cost_usd = 0.0;
+         turn = 1;
+         schedule = { planned_index = 0; batch_index = 0;
+                      batch_size = 1; batch_kind = "sequential"; concurrency_class = "default" };
+       })
+  in
+  Alcotest.(check bool) "mutating read-ish name is verified (fail-open closed)"
+    true !verify_called
 
 (* ================================================================ *)
 (* Roundtrip: keeper_default_gate_config -> guardrails               *)
@@ -401,6 +432,8 @@ let () =
         test_hook_continues_on_verify_error;
       Alcotest.test_case "hook skips verifier for readonly tools" `Quick
         test_hook_readonly_skips_verifier;
+      Alcotest.test_case "hook verifies mutating read-ish name (RFC-0331)" `Quick
+        test_hook_mutating_readish_name_is_verified;
     ]);
     ("autonomous_gate roundtrip", [
       Alcotest.test_case "default -> AllowList (strict)" `Quick test_default_gate_roundtrip;

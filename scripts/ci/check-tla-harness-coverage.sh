@@ -14,6 +14,7 @@ specs/keeper-state-machine/KeeperRuntimeAttemptFSM.tla
 specs/keeper-state-machine/KeeperRuntimeRouting.tla
 specs/keeper-state-machine/KeeperPostTurnOrchestration.tla
 specs/keeper-state-machine/KeeperRolloverDecision.tla
+specs/boundary/ContinuationGated.tla
 EOF
 }
 

@@ -52,26 +52,76 @@ let parse_trigger_policy raw : Gw.trigger_policy =
         (Gw.trigger_policy_to_string default_trigger_policy);
       default_trigger_policy
 
+type trigger_policy_toml_load =
+  | Runtime_toml_missing
+  | Trigger_policy_missing
+  | Trigger_policy_loaded of Gw.trigger_policy
+
+type trigger_policy_load_error =
+  | Runtime_toml_unreadable of { path : string; detail : string }
+  | Runtime_toml_invalid of { path : string; detail : string }
+  | Trigger_policy_invalid of { path : string; detail : string }
+
+let trigger_policy_load_error_to_string = function
+  | Runtime_toml_unreadable { path; detail } ->
+    Printf.sprintf "cannot read %s: %s" path detail
+  | Runtime_toml_invalid { path; detail } ->
+    Printf.sprintf "invalid TOML in %s: %s" path detail
+  | Trigger_policy_invalid { path; detail } ->
+    Printf.sprintf "invalid slack.trigger_policy in %s: %s" path detail
+;;
+
+let load_trigger_policy_from_toml ~path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Runtime_toml_missing
+  | exception Unix.Unix_error (code, _, _) ->
+    Error
+      (Runtime_toml_unreadable
+         { path; detail = Unix.error_message code })
+  | _ ->
+    (match Safe_ops.read_file_safe path with
+     | Error detail -> Error (Runtime_toml_unreadable { path; detail })
+     | Ok content ->
+       (match Otoml.Parser.from_string_result content with
+        | Error detail -> Error (Runtime_toml_invalid { path; detail })
+        | Ok toml ->
+          (match
+             Field_resolution.resolve_string toml [ "slack"; "trigger_policy" ]
+           with
+           | Field_resolution.Missing -> Ok Trigger_policy_missing
+           | Field_resolution.Type_mismatch { expected; message; _ } ->
+             Error
+               (Trigger_policy_invalid
+                  { path
+                  ; detail =
+                      Printf.sprintf "expected %s: %s" expected message
+                  })
+           | Field_resolution.Present raw ->
+             let raw = String.trim raw in
+             if String.equal raw ""
+             then Ok Trigger_policy_missing
+             else
+               (match Gw.parse_trigger_policy raw with
+                | Ok policy -> Ok (Trigger_policy_loaded policy)
+                | Error detail ->
+                  Error (Trigger_policy_invalid { path; detail })))))
+;;
+
 let resolved_trigger_policy () =
-  let from_toml () =
-    try
-      let resolution = Config_dir_resolver.resolve () in
-      let toml_path =
-        Filename.concat resolution.Config_dir_resolver.config_root.path
-          Config_dir_resolver.runtime_toml_filename
-      in
-      if Sys.file_exists toml_path then
-        let tbl = Otoml.Parser.from_file toml_path in
-        Otoml.find_opt tbl Otoml.get_string [ "slack"; "trigger_policy" ]
-      else None
-    with _ -> None
+  let resolution = Config_dir_resolver.resolve () in
+  let toml_path =
+    Filename.concat resolution.Config_dir_resolver.config_root.path
+      Config_dir_resolver.runtime_toml_filename
   in
-  match from_toml () with
-  | Some raw -> parse_trigger_policy raw
-  | None ->
-    (match Env_config_slack.trigger_policy_opt () with
-     | None -> default_trigger_policy
-     | Some raw -> parse_trigger_policy raw)
+  match load_trigger_policy_from_toml ~path:toml_path with
+  | Error _ as error -> error
+  | Ok (Trigger_policy_loaded policy) -> Ok policy
+  | Ok (Runtime_toml_missing | Trigger_policy_missing) ->
+    Ok
+      (match Env_config_slack.trigger_policy_opt () with
+       | None -> default_trigger_policy
+       | Some raw -> parse_trigger_policy raw)
+;;
 
 (* ---------------------------------------------------------------- *)
 (* Metadata helpers (mirror the Discord gateway)                    *)
@@ -376,60 +426,73 @@ let on_event ~dispatch ~clock (ev : Gw.slack_event) =
 let start ~sw ~env ~state =
   match Env_config_slack.app_token_opt () with
   | None ->
+    State.clear_startup_error ();
     Log.Server.warn
       "RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not \
        started"
   | Some app_token ->
-    (* One clock for the whole gateway: bounds [auth.test] at start and every
-       outbound reply send/edit, and feeds the dispatch adapter. *)
-    let clock = Eio.Stdenv.clock env in
-    (* Resolve the bot's own identity for mention detection. Non-fatal: without
-       it, [app_mention] events still trigger (a mention by construction); only
-       plain-message mention detection on the [message] event degrades. *)
-    let bot_user_id =
-      match Env_config_slack.bot_token_opt () with
-      | None ->
-        Log.Server.warn
-          "RFC-0317: SLACK_BOT_TOKEN unset; Slack plain-message mention \
-           detection disabled (app_mention still triggers)";
-        None
-      | Some bot_token -> (
-        match Slack_rest_client.auth_test ~clock ~token:bot_token () with
-        | Ok { user_id; team_id = _ } ->
-          State.record_ready ~bot_user_id:user_id;
-          Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
-            user_id;
-          Some user_id
-        | Error e ->
-          Log.Server.warn
-            "RFC-0317: Slack auth.test failed (%s); proceeding without \
-             bot_user_id"
-            (Format.asprintf "%a" Slack_rest_client.pp_error e);
-          None)
-    in
-    let policy = resolved_trigger_policy () in
-    State.set_trigger_policy policy;
-    let dispatch =
-      (* Tag this dispatch as the Slack connector so a message arriving while
-         the keeper is in flight enqueues onto [Keeper_chat_queue] (drained by
-         the serial consumer, delivered via [Keeper_chat_slack.adapter_loop])
-         rather than the outbound-less async poll store. *)
-      Gate_keeper_backend.dispatch_with_text_snapshot
-        ~connector_kind:Gate_keeper_backend.Slack ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr ~net:state.Mcp_server.net
-        ~config:(Mcp_server.workspace_config state)
-    in
-    let policy_label = Gw.trigger_policy_to_string policy in
-    Log.Server.info
-      "RFC-0317: starting in-process Slack gateway (policy=%s)" policy_label;
-    Eio.Fiber.fork ~sw (fun () ->
-      try
-        Slack_socket_client.run ~sw ~env ~bot_user_id ~app_token
-          ~trigger_policy:policy
-          ~on_event:(fun ev -> on_event ~dispatch ~clock ev)
-          ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Log.Server.error "RFC-0317: in-process Slack gateway crashed: %s"
-          (Printexc.to_string exn))
+    (match resolved_trigger_policy () with
+     | Error error ->
+       let detail = trigger_policy_load_error_to_string error in
+       State.record_startup_error detail;
+       Log.Server.error
+         "RFC-0317: Slack trigger-policy configuration rejected; gateway not \
+          started (%s)"
+         detail
+     | Ok policy ->
+       State.clear_startup_error ();
+       (* One clock for the whole gateway: bounds [auth.test] at start and every
+          outbound reply send/edit, and feeds the dispatch adapter. *)
+       let clock = Eio.Stdenv.clock env in
+       (* Resolve the bot's own identity for mention detection. Non-fatal:
+          without it, [app_mention] events still trigger (a mention by
+          construction); only plain-message mention detection on the [message]
+          event degrades. *)
+       let bot_user_id =
+         match Env_config_slack.bot_token_opt () with
+         | None ->
+           Log.Server.warn
+             "RFC-0317: SLACK_BOT_TOKEN unset; Slack plain-message mention \
+              detection disabled (app_mention still triggers)";
+           None
+         | Some bot_token -> (
+           match Slack_rest_client.auth_test ~clock ~token:bot_token () with
+           | Ok { user_id; team_id = _ } ->
+             State.record_ready ~bot_user_id:user_id;
+             Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
+               user_id;
+             Some user_id
+           | Error e ->
+             Log.Server.warn
+               "RFC-0317: Slack auth.test failed (%s); proceeding without \
+                bot_user_id"
+               (Format.asprintf "%a" Slack_rest_client.pp_error e);
+             None)
+       in
+       State.set_trigger_policy policy;
+       let dispatch =
+         (* Tag this dispatch as the Slack connector so a message arriving while
+            the keeper is in flight enqueues onto [Keeper_chat_queue] (drained
+            by the serial consumer, delivered via
+            [Keeper_chat_slack.adapter_loop]) rather than the outbound-less
+            async poll store. *)
+         Gate_keeper_backend.dispatch_with_text_snapshot
+           ~connector_kind:Gate_keeper_backend.Slack ~sw ~clock
+           ~proc_mgr:state.Mcp_server.proc_mgr ~net:state.Mcp_server.net
+           ~config:(Mcp_server.workspace_config state)
+       in
+       let policy_label = Gw.trigger_policy_to_string policy in
+       Log.Server.info
+         "RFC-0317: starting in-process Slack gateway (policy=%s)"
+         policy_label;
+       Eio.Fiber.fork ~sw (fun () ->
+         try
+           Slack_socket_client.run ~sw ~env ~bot_user_id ~app_token
+             ~trigger_policy:policy
+             ~on_event:(fun ev -> on_event ~dispatch ~clock ev)
+             ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Server.error "RFC-0317: in-process Slack gateway crashed: %s"
+             (Printexc.to_string exn)))

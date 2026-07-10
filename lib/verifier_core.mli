@@ -16,6 +16,10 @@ type verification_request = {
   action_result : string;
   goal : string;
   context_summary : string;
+  effect_class : Effect_class.t;
+      (** RFC-0331: the tool's declared effect class. [Read_only] skips
+          verification; [Mutating] (the fail-closed default for
+          unknown/undeclared tools) runs it. *)
 }
 
 type verdict =
@@ -34,15 +38,9 @@ type grounded_verdict = private {
   evidence : grounded_ref list;
 }
 
-(** {1 Read-Only Detection} *)
-
-(** [should_skip ~action_description] returns [true] when the
-    description text contains a word-boundary match for any
-    read-only keyword ([read], [glob], [grep], [search], [find],
-    [list], [ls], [cat], [head], [tail], [git status], [git log],
-    [git diff], [status], [view], [get], [fetch], [query]).
-    Case-insensitive, word-boundary aware. *)
-val should_skip : action_description:string -> bool
+(* RFC-0331: the free-text read-only substring classifier was removed. The
+   verifier skips iff [request.effect_class = Read_only], resolved from tool
+   registration at the boundary — the description text is never classified. *)
 
 (** {1 Verdict Parsing} *)
 

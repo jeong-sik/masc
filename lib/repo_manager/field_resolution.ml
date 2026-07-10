@@ -16,11 +16,10 @@ let path_to_string path = String.concat "." path
    - the key is present and the accessor raises [Otoml.Type_error] →
      [Type_mismatch].
 
-   Otoml's [find_opt] returns [None] only for key-absence; type
-   errors come from the accessor itself. Using [Fun.id] as the
-   accessor in [find_opt] guarantees the [Otoml.Type_error] is
-   raised at the call to [accessor], not inside [find_opt], so the
-   two outcomes stay separable. *)
+   Otoml's [find_opt] also returns [None] when an intermediate path
+   component is not a table. Traverse the path explicitly so that
+   only a genuinely absent key becomes [Missing]; a scalar parent is
+   a schema [Type_mismatch]. *)
 let resolve_with
   (accessor : Otoml.t -> 'a)
   (expected : string)
@@ -28,11 +27,25 @@ let resolve_with
   (path : string list)
   : 'a t
   =
-  match Otoml.find_opt toml Fun.id path with
-  | None -> Missing
-  | Some raw ->
-    (try Present (accessor raw)
-     with Otoml.Type_error message -> Type_mismatch { path; expected; message })
+  let rec descend traversed value remaining =
+    match remaining with
+    | [] ->
+      (try Present (accessor value)
+       with Otoml.Type_error message -> Type_mismatch { path; expected; message })
+    | key :: rest ->
+      (match Otoml.get_table value with
+       | exception Otoml.Type_error message ->
+         Type_mismatch
+           { path = List.rev traversed
+           ; expected = "table"
+           ; message
+           }
+       | fields ->
+         (match List.assoc_opt key fields with
+          | None -> Missing
+          | Some child -> descend (key :: traversed) child rest))
+  in
+  descend [] toml path
 ;;
 
 let resolve_string toml path =

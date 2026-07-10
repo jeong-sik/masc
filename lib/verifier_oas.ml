@@ -104,7 +104,9 @@ end
     The fallback path is strict JSON and returns Error on failure instead of
     extracting a verdict from prose. *)
 let verify (req : Core.verification_request) : (Core.verdict, string) result =
-  if Core.should_skip ~action_description:req.action_description
+  (* RFC-0331: skip iff the tool declared itself Read_only; the action
+     description text is never classified. *)
+  if Effect_class.equal req.effect_class Effect_class.Read_only
   then Ok Core.Pass
   else (
     let prompt = build_prompt req in
@@ -203,7 +205,12 @@ let handle_pre_tool_use
   : Agent_sdk.Hooks.hook_decision
   =
   let action_description = sprintf "tool:%s" tool_name in
-  if Core.should_skip ~action_description
+  (* RFC-0331: gate on the tool's declared effect class (fail-closed:
+     unknown/undeclared tools resolve to Mutating and are verified). *)
+  let effect_class =
+    Keeper_tool_descriptor_resolution.effect_class_for_tool_name tool_name
+  in
+  if Effect_class.equal effect_class Effect_class.Read_only
   then Agent_sdk.Hooks.Continue
   else (
     match
@@ -217,7 +224,7 @@ let handle_pre_tool_use
         ~reason:(Printf.sprintf "input serialization failed: %s" msg)
     | Ok input_str ->
       let req : Core.verification_request =
-        { action_description; action_result = input_str; goal; context_summary }
+        { action_description; action_result = input_str; goal; context_summary; effect_class }
       in
       (match verify_fn req with
        | Ok verdict -> verdict_to_hook_decision verdict
@@ -290,11 +297,10 @@ let install_hook
 (** Create an OAS Guardrails config that uses read-only detection
     as a Custom tool filter.
 
-    Tools whose names match {!read_only_patterns} (read, grep,
-    search, git status, etc.) pass through. Tools that do NOT match are
-    also allowed -- the filter itself does not block anything. Its purpose
-    is to tag tools for downstream hooks that may skip verification for
-    read-only operations.
+    Tools whose declared {!Effect_class.t} is [Read_only] pass through.
+    Tools that are not are also allowed -- the filter itself does not block
+    anything. Its purpose is to tag tools for downstream hooks that may skip
+    verification for read-only operations.
 
     For actual filtering (blocking non-read-only tools), combine with a
     DenyList or use {!make_pre_tool_hook} which applies skip logic
@@ -316,7 +322,11 @@ let guardrails_with_read_only_tag ?(max_tool_calls_per_turn : int option) ()
     tool name matches read-only patterns. Can be used in custom
     guardrails pipelines for conditional verification bypass. *)
 let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
-  Core.should_skip ~action_description:schema.name
+  (* RFC-0331: read-only iff the tool declares itself so at registration,
+     not by matching read-ish words in its name. *)
+  Effect_class.equal
+    (Keeper_tool_descriptor_resolution.effect_class_for_tool_name schema.name)
+    Effect_class.Read_only
 ;;
 
 (* ================================================================ *)

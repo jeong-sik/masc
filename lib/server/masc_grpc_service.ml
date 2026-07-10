@@ -261,7 +261,8 @@ let compute_directives
         | Masc_domain.InProgress _
         | Masc_domain.AwaitingVerification _
         | Masc_domain.Done _
-        | Masc_domain.Cancelled _ -> None)
+        | Masc_domain.Cancelled _
+        | Masc_domain.OperatorBlocked _ -> None)
     in
     match unclaimed with
     | task_id :: _ -> directives := ("claim:" ^ task_id) :: !directives

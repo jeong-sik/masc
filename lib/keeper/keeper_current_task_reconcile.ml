@@ -69,7 +69,8 @@ let owned_active_tasks_for_meta ~(config : Workspace.config)
            | Masc_domain.AwaitingVerification _
            | Masc_domain.Todo
            | Masc_domain.Done _
-           | Masc_domain.Cancelled _ -> None)
+           | Masc_domain.Cancelled _
+           | Masc_domain.OperatorBlocked _ -> None)
       |> fun tasks -> Ok tasks
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

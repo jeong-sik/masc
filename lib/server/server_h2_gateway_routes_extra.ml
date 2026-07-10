@@ -9,6 +9,41 @@ open Server_h2_gateway_helpers
 let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
+  let h2_respond_auth_error error =
+    h2_respond_json
+      h2_reqd
+      (Server_auth.auth_error_json error)
+      ~status:(Server_auth.http_status_of_auth_error error :> H2.Status.t)
+      ~extra_headers:cors
+  in
+  let with_optional_board_reaction_actor f =
+    match config with
+    | None ->
+      (match
+         Httpun.Headers.get
+           httpun_request.Httpun.Request.headers
+           "authorization"
+       with
+       | None -> f None
+       | Some _ ->
+         h2_respond_json
+           h2_reqd
+           (Server_auth.not_initialized_response path)
+           ~status:`Internal_server_error
+           ~extra_headers:cors;
+         true)
+    | Some config ->
+      (match
+         Server_auth.authorize_optional_token_bound_permission_request
+           ~base_path:config.base_path
+           ~permission:Masc_domain.CanReadState
+           httpun_request
+       with
+       | Ok actor -> f (Option.map board_actor_author_for_write actor)
+       | Error error ->
+         h2_respond_auth_error error;
+         true)
+  in
   match httpun_meth, path with
   | `GET, "/api/v1/voice/config" ->
       let status, json = voice_config_payload () in
@@ -19,6 +54,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       true
 
   | `GET, "/api/v1/board" ->
+      with_optional_board_reaction_actor (fun reaction_actor ->
       let hearth = query_param httpun_request "hearth" in
       let sort_by = board_sort_order_of_request httpun_request in
       let exclude_system = bool_query_param httpun_request "exclude_system" ~default:false in
@@ -52,7 +88,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
                (fun (p : Board.post) ->
                   (Board.Reaction_post, Board.Post_id.to_string p.id))
                paged)
-          ~voter
+          ~voter:reaction_actor
       in
       let reactions_for = board_reactions_lookup reaction_rows in
       let contributor_quality_for = board_contributor_quality_lookup ?config () in
@@ -75,7 +111,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
         ("sort_by", `String (board_sort_label sort_by));
       ] in
       h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      true)
 
   | `GET, "/api/v1/board/curation" ->
       let json =
@@ -151,6 +187,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
   | `GET, p
     when String.starts_with ~prefix:"/api/v1/board/" p
          && String.length p > 14 ->
+      with_optional_board_reaction_actor (fun reaction_actor ->
       let post_id = String.sub p 14 (String.length p - 14) in
       let format = Option.value ~default:"nested" (query_param httpun_request "format") in
       let voter = board_voter_query httpun_request in
@@ -159,11 +196,11 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       in
       let (status, body) =
         board_post_detail_json ~include_moderation:false ~blind_votes ~voter
-          ~config
+          ~reaction_actor ~config
           ~response_format:format ~post_id
       in
       h2_respond_json h2_reqd body ~status ~extra_headers:cors;
-      true
+      true)
 
   | `GET, "/api/v1/karma" ->
       let karma_list = Board_dispatch.get_all_karma () in

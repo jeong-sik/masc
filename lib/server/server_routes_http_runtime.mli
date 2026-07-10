@@ -301,16 +301,17 @@ val board_post_detail_json :
   blind_votes:bool ->
   config:Workspace.config option ->
   voter:string option ->
+  reaction_actor:string option ->
   response_format:string ->
   post_id:string ->
   [> `OK | `Not_found ] * string
-(** [board_post_detail_json ~voter ~response_format ~post_id] returns
+(** [board_post_detail_json ~voter ~reaction_actor ~response_format ~post_id] returns
     [(status, json_string)] for [GET /api/v1/board/<post_id>].
     When [voter] is supplied, post/comment rows include vote state for
-    that voter.  When [include_moderation] is [true], rows also include
-    operator-only moderation projection fields.  When [blind_votes] is
-    [true], rows hide score fields until that voter has voted.
-    operator-only moderation projection fields.  When [config] is
+    that voter. [reaction_actor] independently selects the actor-aware
+    reaction state and must come from authenticated credential identity,
+    never a query parameter. When [include_moderation] is [true], rows also
+    include operator-only moderation projection fields. When [config] is
     supplied, post rows include contributor-quality projection fields.
     When [blind_votes] is [true], rows hide score fields until that
     voter has voted.

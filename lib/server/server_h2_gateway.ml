@@ -896,6 +896,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_reqd
             ~permission:Masc_domain.CanReadState
             (fun _state actor ->
+               let actor = board_actor_author_for_write actor in
                let result =
                  Result.bind
                    (Server_board_reaction_http.target_of_strings
@@ -910,6 +911,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_reqd
             ~permission:Masc_domain.CanVote
             (fun _state actor ->
+               let actor = board_actor_author_for_write actor in
                h2_read_body h2_reqd (fun body ->
                  let parsed =
                    match Yojson.Safe.from_string body with

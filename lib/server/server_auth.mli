@@ -314,8 +314,17 @@ val authorize_token_bound_permission_request :
   base_path:string ->
   permission:Masc_domain.permission ->
   Httpun.Request.t -> (string, Masc_domain.masc_error) result
-(** Like [authorize_permission_request] but returns the token id used
-    for auditing the call. *)
+(** Like [authorize_permission_request] but returns the credential's canonical
+    agent name for actor-bound operations. *)
+
+val authorize_optional_token_bound_permission_request :
+  base_path:string ->
+  permission:Masc_domain.permission ->
+  Httpun.Request.t -> (string option, Masc_domain.masc_error) result
+(** Return [Ok None] when the request has no Authorization header. If one is
+    present, validate its bearer credential and permission and return its
+    canonical agent name. Malformed, invalid, or underprivileged credentials
+    are errors rather than anonymous fallbacks. *)
 
 val is_dashboard_bootstrap_path : string -> bool
 (** [true] when the path is part of the dashboard bootstrap surface

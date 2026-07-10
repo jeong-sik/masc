@@ -1334,7 +1334,7 @@ let readiness_handler _request reqd =
       reqd
 
 let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
-    ~response_format ~post_id =
+    ~reaction_actor ~response_format ~post_id =
   match Board_dispatch.get_post ~post_id with
   | Error err ->
       (* Render a human-readable message (e.g. "Post not found: <id>") via the
@@ -1364,7 +1364,9 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
                 (Board.Reaction_comment, Board.Comment_id.to_string comment.id))
              comments
       in
-      let reaction_rows = board_reactions_batch ~targets:reaction_targets ~voter in
+      let reaction_rows =
+        board_reactions_batch ~targets:reaction_targets ~voter:reaction_actor
+      in
       let reactions_for = board_reactions_lookup reaction_rows in
       let reactions = reactions_for (Board.Reaction_post, post_id) in
       let contributor_quality =

@@ -917,6 +917,16 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
                   ; action = Masc_domain.show_permission permission
                   }))
 
+let authorize_optional_token_bound_permission_request
+    ~base_path
+    ~permission
+    request =
+  match Httpun.Headers.get request.Httpun.Request.headers "authorization" with
+  | None -> Ok None
+  | Some _ ->
+    authorize_token_bound_permission_request ~base_path ~permission request
+    |> Result.map Option.some
+
 let is_dashboard_bootstrap_path path =
   String.starts_with ~prefix:"/api/v1/dashboard/" path
 

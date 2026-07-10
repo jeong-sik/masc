@@ -1171,6 +1171,54 @@ let test_reaction_summary_batch () =
            Alcotest.(check bool) "comment reacted" true summary.reacted
        | [] -> Alcotest.fail "expected comment reaction summary")
 
+let test_dashboard_detail_uses_authenticated_reaction_actor () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"reaction-author"
+        ~content:"credential-bound reaction state"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_dispatch.toggle_reaction
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"credential-owner"
+       ~emoji:"👍"
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let status, body =
+    Server_routes_http_runtime.board_post_detail_json
+      ~include_moderation:false
+      ~blind_votes:false
+      ~config:None
+      ~voter:(Some "forgeable-query-voter")
+      ~reaction_actor:(Some "credential-owner")
+      ~response_format:"flat"
+      ~post_id
+  in
+  Alcotest.(check bool) "detail status" true (status = `OK);
+  let open Yojson.Safe.Util in
+  let summary =
+    Yojson.Safe.from_string body
+    |> member "reactions"
+    |> to_list
+    |> List.find_opt (fun json -> String.equal (json |> member "emoji" |> to_string) "👍")
+  in
+  match summary with
+  | None -> Alcotest.fail "expected thumbs-up reaction summary"
+  | Some summary ->
+    Alcotest.(check bool)
+      "reacted is bound to authenticated credential, not query voter"
+      true
+      (summary |> member "reacted" |> to_bool)
+
 let test_board_sse_reaction_changed () =
   let post_id =
     match
@@ -1819,6 +1867,8 @@ let () =
         (with_eio test_reaction_summary_recent_user_ids);
       Alcotest.test_case "summary batch" `Quick
         (with_eio test_reaction_summary_batch);
+      Alcotest.test_case "dashboard detail binds reaction actor" `Quick
+        (with_eio test_dashboard_detail_uses_authenticated_reaction_actor);
       Alcotest.test_case "SSE reaction_changed" `Quick
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "board signal reaction_changed resolves comment parent" `Quick

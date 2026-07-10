@@ -17,6 +17,13 @@ let describe_outcome = function
   | Skipped_empty -> "skipped:empty"
   | Failed { kind; error } -> Printf.sprintf "failed:%s:%s" kind error
 
+let outcome_metric_label = function
+  | Delivered _ -> "delivered"
+  | Skipped_unrouted -> "skipped_unrouted"
+  | Skipped_already_replied -> "skipped_already_replied"
+  | Skipped_empty -> "skipped_empty"
+  | Failed _ -> "failed"
+
 (* The originating surface identity captured by W2b (thread/session/parent
    coordinates) is preserved end-to-end so the reply lands in — and is audited
    against — the same conversation thread, not a fresh top-level post. *)

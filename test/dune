@@ -957,6 +957,7 @@
   test_keeper_busy_dashboard_deferred
   test_keeper_turn_interrupt
   test_keeper_chat_consumer_delivery
+  test_keeper_continuation_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params
   test_config_dir_resolver
@@ -1154,6 +1155,7 @@
   test_keeper_busy_dashboard_deferred
   test_keeper_turn_interrupt
   test_keeper_chat_consumer_delivery
+  test_keeper_continuation_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params
   test_config_dir_resolver

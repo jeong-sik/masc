@@ -39,12 +39,11 @@ let vision_default_max_tokens = 1024
 let max_image_bytes () = Env_config_keeper.KeeperVision.max_image_bytes ()
 
 let truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool = function
-  (* RepetitionTruncation: the provider's repetition guard terminated
-     generation before a natural end — the extraction is cut short exactly
-     like a MaxTokens stop, just on a different budget. *)
-  | Agent_sdk.Types.MaxTokens
-  | Agent_sdk.Types.RepetitionTruncation -> true
+  | Agent_sdk.Types.MaxTokens -> true
   (* ContentFilter is a policy terminal like Refusal, not a length cut.
+     RepetitionTruncation is a provider repetition guard, not token-budget
+     exhaustion; classifying it as truncated would prescribe the wrong
+     larger-budget remediation.
      UnmatchedToolCalls is OAS's internal fail-closed tool-turn shape;
      vision runs with tool_choice = None so it cannot legitimately occur,
      and it carries no partial-extraction signal either way. *)
@@ -53,6 +52,7 @@ let truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool = function
   | Agent_sdk.Types.StopSequence
   | Agent_sdk.Types.Refusal
   | Agent_sdk.Types.ContentFilter
+  | Agent_sdk.Types.RepetitionTruncation
   | Agent_sdk.Types.PauseTurn
   | Agent_sdk.Types.Compaction
   | Agent_sdk.Types.ContextWindowExceeded

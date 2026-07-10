@@ -48,10 +48,8 @@ val validate_image_size : string -> (unit, string) result
 
 val truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool
 (** Collapse the provider's typed terminal reason to the single [truncated] bit
-    {!Multimodal.Vision_analyze.classify} consumes:
-    [MaxTokens | RepetitionTruncation -> true] (generation cut before a natural
-    end), every other variant -> [false]. Exhaustive so a new SDK variant
-    forces a decision. *)
+    {!Multimodal.Vision_analyze.classify} consumes: [MaxTokens -> true], every
+    other variant -> [false]. Exhaustive so a new SDK variant forces a decision. *)
 
 val message_of_request
   :  Multimodal.Vision_analyze.request

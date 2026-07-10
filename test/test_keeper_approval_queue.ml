@@ -38,13 +38,15 @@ let rec yield_until ?(attempts = 50) predicate =
 
 let with_temp_runtime_toml content f =
   let path = Filename.temp_file "runtime" ".toml" in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
   let oc = open_out path in
   output_string oc content;
   close_out oc;
   Fun.protect
     ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
       try Sys.remove path with
-      | _ -> ())
+      | Sys_error _ -> ())
     (fun () -> f path)
 ;;
 

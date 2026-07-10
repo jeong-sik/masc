@@ -778,9 +778,16 @@ let provider_config_for_summary ~keeper_name =
     | Some id when String.trim id <> "" -> id
     | Some _ | None -> Keeper_config.default_runtime_id ()
   in
-  match resolve (Runtime.runtime_id_for_hitl_summary ()) with
+  let summary_runtime_id = Runtime.runtime_id_for_hitl_summary () in
+  match resolve summary_runtime_id with
   | Some _ as cfg -> cfg
-  | None -> resolve (keeper_runtime_id ())
+  | None ->
+    let fallback_runtime_id = keeper_runtime_id () in
+    Log.Keeper.warn ~keeper_name
+      "HITL summary lane runtime=%s is unavailable; falling back to keeper runtime=%s"
+      summary_runtime_id
+      fallback_runtime_id;
+    resolve fallback_runtime_id
 ;;
 
 let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =

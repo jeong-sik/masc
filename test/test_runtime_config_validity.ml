@@ -747,7 +747,7 @@ let test_repo_runtime_toml_loads () =
        check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
        check int "MiniMax M3 context" 524288 runtime.model.max_context;
        let caps = oas_caps_or_fail runtime in
-       check bool "MiniMax M3 response_format json disabled in OAS" false
+       check bool "MiniMax M3 response_format json enabled in OAS" true
          caps.supports_response_format_json;
        check bool "MiniMax M3 structured output disabled in OAS" false
          caps.supports_structured_output;

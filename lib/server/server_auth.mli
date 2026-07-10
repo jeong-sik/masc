@@ -321,8 +321,8 @@ val authorize_optional_token_bound_permission_request :
   base_path:string ->
   permission:Masc_domain.permission ->
   Httpun.Request.t -> (string option, Masc_domain.masc_error) result
-(** Return [Ok None] when the request has no Authorization header. If one is
-    present, validate its bearer credential and permission and return its
+(** Return [Ok None] when the request carries no supported bearer header. If a
+    bearer is present, validate its credential and permission and return its
     canonical agent name. Malformed, invalid, or underprivileged credentials
     are errors rather than anonymous fallbacks. *)
 

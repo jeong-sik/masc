@@ -921,7 +921,7 @@ let authorize_optional_token_bound_permission_request
     ~base_path
     ~permission
     request =
-  match Httpun.Headers.get request.Httpun.Request.headers "authorization" with
+  match auth_token_from_request request with
   | None -> Ok None
   | Some _ ->
     authorize_token_bound_permission_request ~base_path ~permission request

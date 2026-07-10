@@ -39,6 +39,12 @@ let reaction_auth_request ?token () =
   in
   Httpun.Request.create ~headers `GET "/api/v1/board/reactions"
 
+let reaction_internal_auth_request token =
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list [ "x-masc-internal-token", token ])
+    `GET
+    "/api/v1/board/reactions"
+
 (* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts.
    Kept in sync with that file — see module doc. *)
 let dashboard_board_tool_routes =
@@ -162,6 +168,20 @@ let test_board_reaction_optional_auth_rejects_invalid_header () =
     | Ok None -> fail "invalid Authorization header fell back to anonymous"
     | Ok (Some actor) -> failf "invalid credential resolved actor %s" actor)
 
+let test_board_reaction_optional_auth_rejects_invalid_internal_header () =
+  with_reaction_auth_base (fun base_path ->
+    match
+      Server_auth.authorize_optional_token_bound_permission_request
+        ~base_path
+        ~permission:Masc_domain.CanReadState
+        (reaction_internal_auth_request "invalid-internal-token")
+    with
+    | Error error ->
+      check bool "invalid internal credential is unauthorized" true
+        (Server_auth.http_status_of_auth_error error = `Unauthorized)
+    | Ok None -> fail "invalid internal bearer fell back to anonymous"
+    | Ok (Some actor) -> failf "invalid internal bearer resolved actor %s" actor)
+
 let test_dashboard_dev_token_can_vote_as_credential_owner () =
   with_reaction_auth_base (fun base_path ->
     match
@@ -206,6 +226,10 @@ let () =
             "optional reaction auth rejects invalid header"
             `Quick
             test_board_reaction_optional_auth_rejects_invalid_header
+        ; test_case
+            "optional reaction auth rejects invalid internal header"
+            `Quick
+            test_board_reaction_optional_auth_rejects_invalid_internal_header
         ; test_case
             "dashboard dev-token can vote as credential owner"
             `Quick

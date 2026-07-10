@@ -13,10 +13,6 @@
 val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
-val verifier_of_request :
-  base_path:string -> Httpun.Request.t -> string
-(** Derive the ["operator:<actor>"] verifier identity for a resolve
-    request. Falls back to ["operator:dashboard"] when no
-    sanitizable actor hint is present. Tested directly by
-    [test_dashboard_http_core] for the token-owner canonicalization
-    path. *)
+val verifier_of_authenticated_actor : string -> string
+(** Namespace the authenticated credential actor as an operator verifier.
+    Callers must obtain the actor from [Server_auth.with_tool_auth]. *)

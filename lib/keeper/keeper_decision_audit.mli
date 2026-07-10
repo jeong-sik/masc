@@ -56,13 +56,8 @@ val ring_capacity : unit -> int
     Shows the Guard→Thompson→ToolPolicy feedback loop with current
     phase highlighted and Thompson score annotated.
 
-    Optional parameters surface Decision Pipeline state from
-    [KeeperDecisionPipeline.tla] and Thompson Sampling stats.
-    [guard_penalty_total] is the cumulative count of heartbeat cycles
-    in which the guardrail fired (1/cycle cap enforced by the caller).
-    When omitted, the note block shows "n/a". *)
+    The optional turn outcome is included when it is available. *)
 val decision_pipeline_to_mermaid :
-  ?guard_penalty_total:int ->
   ?turn_outcome:[`Ok | `Failed] ->
   phase:Keeper_state_machine.phase ->
   thompson_alpha:float ->

@@ -1,6 +1,6 @@
-(** Keeper_prompt_token_integrity — scan rendered prompts and continuity
-    summaries for keeper_*/masc_* tokens and verify each one resolves through
-    the policy tool-name chain.
+(** Keeper_prompt_token_integrity — scan the instruction-owned system prompt
+    for keeper_*/masc_* tokens and verify each one resolves through the policy
+    tool-name chain.
 
     P0-3: Rendered Prompt Token Scanner. Emits the
     [masc_keeper_prompt_unknown_tool_tokens_total] CI metric for every token
@@ -8,19 +8,13 @@
 
 (* ── Types ────────────────────────────────────────────────────────── *)
 
-type source =
-  | System_prompt
-  | User_message
-  | Continuity
+type source = System_prompt
 
 type token_kind =
   | Keeper
   | Masc
 
-let source_to_string = function
-  | System_prompt -> "system_prompt"
-  | User_message -> "user_message"
-  | Continuity -> "continuity"
+let source_to_string System_prompt = "system_prompt"
 
 let kind_to_string = function
   | Keeper -> "keeper"
@@ -154,17 +148,10 @@ let scan_text ~keeper_name ~source text : string list =
   |> List.filter_map (verify_token ~keeper_name ~source)
   |> dedup_strings
 
-let scan_rendered_prompt
+let scan_instruction_surfaces
       ~keeper_name
-      ~system_prompt
-      ~user_message
-      ~continuity_summary =
-  let system_unknowns = scan_text ~keeper_name ~source:System_prompt system_prompt in
-  let user_unknowns = scan_text ~keeper_name ~source:User_message user_message in
-  let continuity_unknowns =
-    scan_text ~keeper_name ~source:Continuity continuity_summary
-  in
-  system_unknowns @ user_unknowns @ continuity_unknowns |> dedup_strings
+      ~system_prompt =
+  scan_text ~keeper_name ~source:System_prompt system_prompt
 
 (* ── Registry-driven sanitization ─────────────────────────────────── *)
 
@@ -174,14 +161,14 @@ let stale_tool_token_placeholder = "<stale_tool_token>"
     by [Keeper_tool_resolution] (the same source of truth the scanner uses).
 
     This is a presentation-layer band-aid for stale tool names that have
-    already leaked into prompt/continuity text. It is the SOLE prompt
+    already leaked into instruction-owned prompt text. It is the SOLE prompt
     sanitization pass: the legacy hardcoded
     [Keeper_unified_prompt.sanitize_retired_tool_names] retired-prefix list
     (which also deleted standalone words like "Grep"/"Bash" and mangled
     prompt prose — 38-bug campaign #6) was removed. This pass asks the
     registry: any lowercase masc_/keeper_ token that resolves is kept; one
     that does not (a removed/renamed tool, or a hallucinated name frozen in
-    an injected episode) is replaced with [stale_tool_token_placeholder] so
+    prompt material) is replaced with [stale_tool_token_placeholder] so
     the model never sees it as a callable tool while the surrounding
     sentence stays grammatically intact. Plain capitalized words are never
     touched; hallucinated calls to non-existent tools are rejected at the

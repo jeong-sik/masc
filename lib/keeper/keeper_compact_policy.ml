@@ -193,7 +193,7 @@ type compaction_decision =
   | Applied of Compaction_trigger.t
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
-  | Skipped_continuity_reflection of
+  | Skipped_cooldown of
       { hold_s : float
       ; cooldown_sec : int
       }
@@ -202,13 +202,13 @@ let compaction_decision_to_string = function
   | Applied trigger -> "applied:" ^ Compaction_trigger.to_human trigger
   | Blocked_below_thresholds -> "blocked:below_thresholds"
   | Skipped_no_checkpoint -> "skipped:no_checkpoint"
-  | Skipped_continuity_reflection { hold_s; cooldown_sec } ->
-    Printf.sprintf "skipped:continuity_reflection(%0.0fs<%ds)" hold_s cooldown_sec
+  | Skipped_cooldown { hold_s; cooldown_sec } ->
+    Printf.sprintf "skipped:cooldown(%0.0fs<%ds)" hold_s cooldown_sec
 ;;
 
 let compaction_decision_applied = function
   | Applied _ -> true
-  | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_continuity_reflection _ ->
+  | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_cooldown _ ->
     false
 ;;
 
@@ -220,27 +220,23 @@ let decide_compaction
       ~message_gate
       ~token_gate
       ~cooldown_sec
-      ~last_continuity_update_ts
-      ~last_proactive_ts
+      ~last_compaction_ts
       ~now_ts
   =
   let cooldown = Float.of_int cooldown_sec in
-  let last_reflection_ts =
-    max last_continuity_update_ts last_proactive_ts
-  in
   let emergency = ratio >= emergency_compact_ratio_threshold in
-  let reflection_ready =
+  let cooldown_ready =
     emergency
-    || last_reflection_ts <= 0.0
-    || (last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown)
+    || last_compaction_ts <= 0.0
+    || now_ts -. last_compaction_ts >= cooldown
   in
   let hold_s =
-    if cooldown <= 0.0 || emergency || last_reflection_ts <= 0.0
+    if cooldown <= 0.0 || emergency || last_compaction_ts <= 0.0
     then 0.0
-    else max 0.0 (Float.of_int cooldown_sec -. (now_ts -. last_reflection_ts))
+    else max 0.0 (Float.of_int cooldown_sec -. (now_ts -. last_compaction_ts))
   in
-  if not reflection_ready
-  then Skipped_continuity_reflection { hold_s; cooldown_sec }
+  if not cooldown_ready
+  then Skipped_cooldown { hold_s; cooldown_sec }
   else if ratio >= ratio_gate
   then Applied (Compaction_trigger.Ratio_threshold { ratio; threshold = ratio_gate })
   else if message_gate > 0 && msg_count >= message_gate
@@ -299,12 +295,11 @@ let compact_if_needed_typed
       ~message_gate
       ~token_gate
       ~cooldown_sec:meta.compaction.cooldown_sec
-      ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
-      ~last_proactive_ts:meta.runtime.proactive_rt.last_ts
+      ~last_compaction_ts:meta.runtime.compaction_rt.last_ts
       ~now_ts
   in
   match decision with
-  | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_continuity_reflection _ ->
+  | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_cooldown _ ->
     ctx, None, decision
   | Applied trigger ->
     (* PreCompact observability: log strategy and context state (#3165) *)

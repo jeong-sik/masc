@@ -131,13 +131,12 @@ Primary continuity fields:
 - `trace_id`
 - `generation`
 - `trace_history_count`
-- `continuity_summary` (optional before the first continuity snapshot exists)
+- OAS checkpoint inventory (`checkpoint_found`, `message_count`, `generation`)
+- runtime-manifest checkpoint load/save events
+- terminal turn receipts
 
-Supporting diagnostic field:
-
-- `last_continuity_update_ts` (detailed status tie-breaker)
-
-`continuity_summary` is the latest continuity snapshot text. It may be empty or `null` before the first continuity snapshot exists. During validation, a harness-validated continuity update should correlate with a non-empty latest snapshot in detailed keeper status.
+Assistant prose is not a continuity field. See
+`docs/KEEPER-STATE-OWNERSHIP.md` for the normative ownership contract.
 
 ## Triage System
 

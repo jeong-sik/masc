@@ -21,10 +21,16 @@ let test_all_variants () =
   label "StopSequence" "stop_sequence"
     (to_label Agent_sdk.Types.StopSequence);
   label "Refusal" "refusal" (to_label Agent_sdk.Types.Refusal);
+  label "ContentFilter" "content_filter"
+    (to_label Agent_sdk.Types.ContentFilter);
+  label "RepetitionTruncation" "repetition_truncation"
+    (to_label Agent_sdk.Types.RepetitionTruncation);
   label "PauseTurn" "pause_turn" (to_label Agent_sdk.Types.PauseTurn);
   label "Compaction" "compaction" (to_label Agent_sdk.Types.Compaction);
   label "ContextWindowExceeded" "model_context_window_exceeded"
     (to_label Agent_sdk.Types.ContextWindowExceeded);
+  label "UnmatchedToolCalls" "unmatched_tool_calls"
+    (to_label Agent_sdk.Types.UnmatchedToolCalls);
   label "Unknown" "unknown" (to_label (Agent_sdk.Types.Unknown "anything"))
 
 let test_agent_completed_stop_reason_wire_uses_oas_string () =

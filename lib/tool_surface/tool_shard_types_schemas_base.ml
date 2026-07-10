@@ -17,7 +17,7 @@ let base_tools : Masc_domain.tool_schema list =
     ; description =
         "Check your own context window usage and session state. Returns: name (your \
          keeper name), context_ratio (0.0-1.0), context_tokens, context_max, \
-         message_count, generation, last_model_used, continuity_summary, and canonical \
+         message_count, generation, last_model_used, and canonical \
          sandbox paths (sandbox_root, sandbox_mind, sandbox_repos) plus backend/profile \
          metadata. sandbox paths are tool-ready and can be passed directly as path or \
          cwd to keeper tools without prefix. Use when deciding whether to compact \
@@ -28,10 +28,10 @@ let base_tools : Masc_domain.tool_schema list =
   ; (* Memory *)
     { name = "keeper_memory_search"
     ; description =
-        "Search memory for past goals, decisions, progress, or conversation history. \
-         Returns scored results with metadata. Default searches the structured memory \
-         bank. Use 'kind' to filter (goal, decision, progress, next, open_question, \
-         constraints, long_term). Use source='history' for raw user messages, \
+        "Search memory for explicit durable notes or conversation history. \
+         Returns results with provenance metadata. Default searches the structured memory \
+         bank. Use 'kind' to filter the typed note categories exposed by the runtime. \
+         Use source='history' for raw user messages, \
          source='all' for both."
     ; input_schema =
         `Assoc
@@ -47,7 +47,10 @@ let base_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "enum"
-                        , `List (List.map (fun s -> `String s) memory_kind_enum_strings) )
+                        , `List
+                            (List.map
+                               (fun s -> `String s)
+                               memory_kind_enum_strings) )
                       ; "description", `String "Filter by memory kind"
                       ] )
                 ; ( "limit"
@@ -93,12 +96,11 @@ let base_tools : Masc_domain.tool_schema list =
      is rejected here. *)
     { name = "keeper_memory_write"
     ; description =
-        "Promote a structured decision/question/goal/etc into the memory bank, queryable \
-         on later turns by memory search. Use when board discussion converges to \
-         a fact worth crystallizing, or to record a constraint, open question, next \
-         step, or progress note. Subject to per-kind cap (typically 2) and total cap \
-         (12); oldest may be dropped. 'long_term' kind is reserved for tool-result \
-         emission and is not callable here."
+        "Promote an explicit decision, question, goal, or progress note into the memory \
+         bank for later search. Task sequencing and operating constraints belong to \
+         their typed domain stores, not memory prose. The runtime records explicit \
+         typed provenance and returns validation or persistence failures directly. \
+         'long_term' kind is reserved for tool-result emission and is not callable here."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -108,12 +110,15 @@ let base_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "enum"
-                        , `List (List.map (fun s -> `String s) memory_kind_enum_strings) )
+                        , `List
+                            (List.map
+                               (fun s -> `String s)
+                               writable_memory_kind_enum_strings) )
                       ; ( "description"
                         , `String
                             "Memory kind. One of \
-                             goal/progress/next/decision/open_question/constraints. \
-                             long_term not supported." )
+                             goal/progress/decision/open_question. long_term not \
+                             supported." )
                       ] )
                 ; ( "title"
                   , `Assoc
@@ -126,9 +131,8 @@ let base_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "Body. Required, must be non-empty. For \
-                             decisions/constraints, lead with the rule then **Why** and \
-                             **How to apply** lines." )
+                            "Body. Required, must be non-empty. For decisions, lead with \
+                             the decision then **Why** and **How to apply** lines." )
                       ] )
                 ] )
           ; "required", `List [ `String "kind"; `String "content" ]

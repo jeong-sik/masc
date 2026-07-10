@@ -170,18 +170,51 @@ let workflow_rejection_payload_of_json json =
   | None ->
     None
   in
+  let nested_payload_of_json json =
+    match json_assoc_string_opt "error" json with
+    | Some raw ->
+      (try
+         match Yojson.Safe.from_string raw with
+         | `Assoc _ as nested -> payload_from_json nested
+         | _ -> None
+       with
+       | Yojson.Json_error _ -> None)
+    | None -> None
+  in
+  let first_some left right =
+    match left with
+    | Some _ -> left
+    | None -> right
+  in
+  let merge_info outer nested =
+    { task_id = first_some nested.task_id outer.task_id
+    ; rule_id = first_some nested.rule_id outer.rule_id
+    ; tool_suggestion = first_some nested.tool_suggestion outer.tool_suggestion
+    ; alternatives = if nested.alternatives = [] then outer.alternatives else nested.alternatives
+    ; hint = first_some nested.hint outer.hint
+    ; scope_policy =
+        (match outer.scope_policy with
+         | Block_scope -> Block_scope
+         | Observe_scope -> nested.scope_policy)
+    }
+  in
+  let merge_payload outer nested =
+    { info = merge_info outer.info nested.info
+    ; error_class = first_some nested.error_class outer.error_class
+    ; recoverability = first_some nested.recoverability outer.recoverability
+    }
+  in
   match payload_from_json json with
-  | Some _ as payload -> payload
-  | None ->
-    (match json_assoc_string_opt "error" json with
-     | Some raw ->
-       (try
-          match Yojson.Safe.from_string raw with
-          | `Assoc _ as nested -> payload_from_json nested
-          | _ -> None
-        with
-        | Yojson.Json_error _ -> None)
-     | None -> None)
+  | Some payload ->
+    (* Tool dispatch may wrap a typed workflow payload in the outer [error]
+       string while retaining only [failure_class] at the outer level. The
+       nested payload owns the recoverability bit; losing it turns a terminal
+       rejection into a retry instruction. Merge both typed envelopes instead
+       of scraping the human-readable error text. *)
+    (match nested_payload_of_json json with
+     | Some nested -> Some (merge_payload payload nested)
+     | None -> Some payload)
+  | None -> nested_payload_of_json json
 ;;
 
 let workflow_rejection_retry_policy payload =
@@ -330,9 +363,17 @@ let workflow_rejection_recovery_instruction ~tool_name ~count (info : workflow_r
 ;;
 
 let workflow_rejection_recovery_fields ~tool_name ~count raw =
-  match workflow_rejection_info_of_raw raw with
+  let payload_opt =
+    try
+      workflow_rejection_payload_of_json (Yojson.Safe.from_string raw)
+    with
+    | Yojson.Json_error _ -> None
+  in
+  match payload_opt with
   | None -> []
-  | Some info ->
+  | Some payload ->
+    let info = payload.info in
+    let terminal = workflow_rejection_should_skip_retry payload in
     let optional_string key = function
       | Some value -> [ key, `String value ]
       | None -> []
@@ -355,9 +396,18 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
          | Some next_tool -> [ "suggested_next_tool", `String next_tool ]
          | None -> [])
     in
+    let instruction =
+      if terminal && Option.is_none info.tool_suggestion && info.alternatives = []
+      then
+        Printf.sprintf
+          "Do not retry this %s call: the workflow rejection is terminal for the \
+           current task state. Inspect task history and choose an allowed next action."
+          tool_name
+      else workflow_rejection_recovery_instruction ~tool_name ~count info
+    in
     let recovery =
       [ "count", `Int count
-      ; "instruction", `String (workflow_rejection_recovery_instruction ~tool_name ~count info)
+      ; "instruction", `String instruction
       ]
       @ optional_string "rule_id" info.rule_id
       @ optional_string "tool_suggestion" info.tool_suggestion
@@ -367,7 +417,8 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
           , `String (workflow_rejection_scope_policy_to_string info.scope_policy) )
         ]
     in
-    [ "self_correction_required", `Bool true
+    [ "self_correction_required", `Bool (not terminal)
+    ; "workflow_rejection_terminal", `Bool terminal
     ; "workflow_rejection_recovery", `Assoc recovery
     ]
     @ next_tool_fields

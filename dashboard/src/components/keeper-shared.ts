@@ -377,9 +377,9 @@ export function KeeperDiagnosticSummary({
           : null}
         ${busy ? html`<${DiagChip} label="refreshing" />` : null}
       </div>
-      ${diagnostic?.continuity_summary || diagnostic?.summary
+      ${diagnostic?.summary
         ? html`<div class="text-xs text-[var(--color-fg-primary)] leading-relaxed">
-            ${diagnostic.continuity_summary ?? diagnostic.summary}
+            ${diagnostic.summary}
           </div>`
         : null}
       <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed mt-1 v2-monitoring-row">

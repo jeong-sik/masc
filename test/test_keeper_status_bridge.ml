@@ -1,6 +1,6 @@
 open Masc
 
-let meta_with_summary summary =
+let make_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -11,18 +11,13 @@ let meta_with_summary summary =
           ("runtime_id", `String "ollama_cloud.deepseek-v4-flash");
         ])
   with
-  | Ok meta -> { meta with continuity_summary = summary }
+  | Ok meta -> meta
   | Error err -> Alcotest.fail ("meta_of_json_fixture failed: " ^ err)
-;;
-
-let blocker_of_summary summary =
-  let config = Workspace.default_config "/tmp/masc-test-status-bridge" in
-  Keeper_status_bridge.runtime_blocker_surface_opt config (meta_with_summary summary)
 ;;
 
 let blocker_of_typed_last_blocker klass ~detail =
   let config = Workspace.default_config "/tmp/masc-test-status-bridge" in
-  let meta = meta_with_summary "" in
+  let meta = make_meta () in
   let meta =
     { meta with
       runtime =
@@ -37,7 +32,7 @@ let blocker_of_typed_last_blocker klass ~detail =
 
 let runtime_blocker_facts_of_typed_last_blocker klass ~detail =
   let config = Workspace.default_config "/tmp/masc-test-status-bridge" in
-  let meta = meta_with_summary "" in
+  let meta = make_meta () in
   let meta =
     { meta with
       runtime =
@@ -58,7 +53,7 @@ let runtime_blocker_facts_of_typed_last_blocker klass ~detail =
 
 let runtime_blocker_facts_of_no_progress_blocker ~detail ~reason ~streak ~threshold =
   let config = Workspace.default_config "/tmp/masc-test-status-bridge" in
-  let meta = meta_with_summary "" in
+  let meta = make_meta () in
   let meta =
     { meta with
       runtime =
@@ -119,25 +114,6 @@ let init_runtime_default_for_tests () =
   match Runtime.init_default ~config_path:path with
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
-;;
-
-let test_progress_narrative_is_not_runtime_blocker_source () =
-  let summary =
-    "Progress: waiting on sandbox egress for github.com push\n\
-     Next: ask operator to approve the manual 4-gate unblock"
-  in
-  Alcotest.(check (option string))
-    "progress text never creates runtime blocker class"
-    None
-    (Option.map (fun b -> b.Keeper_status_bridge.blocker_class) (blocker_of_summary summary))
-;;
-
-let test_synthetic_narrative_is_not_runtime_blocker_source () =
-  let summary = "Decisions: [SYNTHETIC] No visible output this generation" in
-  Alcotest.(check (option string))
-    "synthetic text never creates runtime blocker class"
-    None
-    (Option.map (fun b -> b.Keeper_status_bridge.blocker_class) (blocker_of_summary summary))
 ;;
 
 let test_no_progress_loop_summary_normalizes_legacy_detail () =
@@ -247,9 +223,9 @@ let test_no_progress_blocker_facts_round_trip_independent_of_detail () =
       ()
   in
   let meta =
-    { (meta_with_summary "") with
+    { (make_meta ()) with
       runtime =
-        { (meta_with_summary "").runtime with
+        { (make_meta ()).runtime with
           last_blocker =
             Keeper_meta_contract.blocker_info_to_json blocker
             |> Keeper_meta_contract.blocker_info_of_json
@@ -300,7 +276,7 @@ let defaults_with_prompt_fields =
 let test_empty_live_meta_does_not_mask_profile_defaults_as_overrides () =
   init_runtime_default_for_tests ();
   let meta =
-    { (meta_with_summary "") with
+    { (make_meta ()) with
       goal = "";
       instructions = "";
       mention_targets = [];
@@ -315,7 +291,7 @@ let test_empty_live_meta_does_not_mask_profile_defaults_as_overrides () =
 let test_nonempty_live_meta_still_reports_profile_override () =
   init_runtime_default_for_tests ();
   let meta =
-    { (meta_with_summary "") with
+    { (make_meta ()) with
       goal = "live goal";
       instructions = "live instructions";
       mention_targets = [ "live-target" ];
@@ -331,16 +307,8 @@ let () =
   Alcotest.run
     "keeper_status_bridge"
     [
-      ( "progress narrative provenance",
+      ( "typed blocker provenance",
         [
-          Alcotest.test_case
-            "progress narrative is not blocker source"
-            `Quick
-            test_progress_narrative_is_not_runtime_blocker_source;
-          Alcotest.test_case
-            "synthetic narrative is not blocker source"
-            `Quick
-            test_synthetic_narrative_is_not_runtime_blocker_source;
           Alcotest.test_case
             "no-progress loop summary normalizes legacy detail"
             `Quick
@@ -361,11 +329,11 @@ let () =
       ( "profile default override provenance",
         [
           Alcotest.test_case
-            "empty live self-model inherits TOML without drift"
+            "empty live identity inherits TOML without drift"
             `Quick
             test_empty_live_meta_does_not_mask_profile_defaults_as_overrides;
           Alcotest.test_case
-            "non-empty live self-model still reports override"
+            "non-empty live identity still reports override"
             `Quick
             test_nonempty_live_meta_still_reports_profile_override;
         ] );

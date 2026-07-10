@@ -579,9 +579,7 @@ let test_masc_keeper_create_from_persona_schema () =
           Alcotest.(check bool) "has persona_name" true
             (List.mem_assoc "persona_name" props);
           Alcotest.(check bool) "has canonical tool_access" true
-            (List.mem_assoc "tool_access" props);
-          Alcotest.(check bool) "omits social_model" false
-            (List.mem_assoc "social_model" props)
+            (List.mem_assoc "tool_access" props)
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
 
 let test_masc_keeper_up_schema () =
@@ -594,8 +592,6 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "sandbox_profile" props);
           Alcotest.(check bool) "omits network_mode" false
             (List.mem_assoc "network_mode" props);
-          Alcotest.(check bool) "omits social_model" false
-            (List.mem_assoc "social_model" props);
           Alcotest.(check bool) "has autoboot_enabled" true
             (List.mem_assoc "autoboot_enabled" props);
           Alcotest.(check bool) "has canonical tool_access" true

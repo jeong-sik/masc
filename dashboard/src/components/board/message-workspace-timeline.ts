@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
-import { ArrowLeft, AtSign, Braces } from 'lucide-preact'
+import { ArrowLeft, AtSign } from 'lucide-preact'
 import { ActionButton } from '../common/button'
 import { EmptyState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
@@ -10,7 +10,6 @@ import { messages } from '../../store'
 import type { Message } from '../../types'
 import { ComposerV2 } from './composer-v2'
 import { extractMentionTargets } from './mention-inbox'
-import { extractStateBlocks } from './state-block-messages'
 import { navigateBoard } from './board-route'
 
 interface TimelineRow {
@@ -18,7 +17,6 @@ interface TimelineRow {
   index: number
   timestampMs: number | null
   mentionTargets: string[]
-  stateBlockCount: number
 }
 
 interface WorkspaceBucket {
@@ -30,7 +28,6 @@ export interface MessageWorkspaceModel {
   workspaces: WorkspaceBucket[]
   totalMessages: number
   totalMentions: number
-  totalStateBlocks: number
 }
 
 function normalizeWorkspace(value: string | null | undefined): string {
@@ -57,13 +54,10 @@ function timelineSort(left: TimelineRow, right: TimelineRow): number {
 export function buildMessageWorkspaceModel(messageList: readonly Message[]): MessageWorkspaceModel {
   const byWorkspace = new Map<string, TimelineRow[]>()
   let totalMentions = 0
-  let totalStateBlocks = 0
 
   messageList.forEach((message, index) => {
     const mentionTargets = extractMentionTargets(message.content)
-    const stateBlockCount = extractStateBlocks(message.content).length
     totalMentions += mentionTargets.length
-    totalStateBlocks += stateBlockCount
     const workspace = normalizeWorkspace(message.workspace)
     const rows = byWorkspace.get(workspace) ?? []
     rows.push({
@@ -71,7 +65,6 @@ export function buildMessageWorkspaceModel(messageList: readonly Message[]): Mes
       index,
       timestampMs: messageTimestampMs(message),
       mentionTargets,
-      stateBlockCount,
     })
     byWorkspace.set(workspace, rows)
   })
@@ -88,7 +81,6 @@ export function buildMessageWorkspaceModel(messageList: readonly Message[]): Mes
     workspaces,
     totalMessages: messageList.length,
     totalMentions,
-    totalStateBlocks,
   }
 }
 
@@ -107,14 +99,6 @@ function TimelineMessage({ row }: { row: TimelineRow }) {
             : null}
           ${row.message.type
             ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${row.message.type}</span>`
-            : null}
-          ${row.stateBlockCount > 0
-            ? html`
-                <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-accent-fg)]">
-                  <${Braces} size=${11} aria-hidden="true" />
-                  STATE ${row.stateBlockCount}
-                </span>
-              `
             : null}
         </div>
         <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">
@@ -176,7 +160,7 @@ export function MessageWorkspaceTimeline() {
         </div>
         <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
           <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Signals</div>
-          <div class="mt-1 text-sm font-bold tabular-nums text-[var(--color-fg-primary)]">${model.totalMentions} mentions · ${model.totalStateBlocks} state</div>
+          <div class="mt-1 text-sm font-bold tabular-nums text-[var(--color-fg-primary)]">${model.totalMentions} mentions</div>
         </div>
       </div>
 

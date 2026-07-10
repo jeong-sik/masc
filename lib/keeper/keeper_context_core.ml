@@ -813,47 +813,15 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          were already logged above at error level. *)
       (session, None)
 
-(** Patch an OAS checkpoint: unify session_id, normalize the last assistant
-    message's visible text, and attach the structured replay snapshot in message
-    metadata. OAS-owned internal replay blocks (reasoning/tool blocks) stay
+(** Patch an OAS checkpoint: unify session_id and normalize the last assistant
+    message's visible text. OAS-owned internal replay blocks (reasoning/tool blocks) stay
     typed content blocks; MASC only edits the visible text projection. New
     writes keep the checkpoint [working_context] empty. *)
 let patch_checkpoint_last_assistant
-    ?snapshot
-    ?snapshot_source
     (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
   : Agent_sdk.Checkpoint.t =
-  let snapshot, snapshot_source =
-    match snapshot with
-    | Some snapshot -> Some snapshot, snapshot_source
-    | None ->
-        (match Keeper_memory_policy.parse_state_snapshot_from_reply response_text with
-         | Some snapshot ->
-             let snapshot_source =
-               match snapshot_source with
-               | Some source -> Some source
-               | None -> Some Keeper_memory_policy.State_block
-             in
-             Some snapshot, snapshot_source
-         | None -> None, None)
-  in
-  let visible_response_text =
-    match snapshot with
-    | Some _ -> Keeper_text_processing.strip_state_blocks_text response_text
-    | None -> response_text
-  in
+  let visible_response_text = response_text in
   let patch_assistant_message (msg : Agent_sdk.Types.message) =
-    let metadata =
-      match snapshot with
-      | Some snapshot ->
-          [
-            ( Keeper_memory_policy.replay_metadata_key,
-              Keeper_memory_policy.replay_metadata_of_snapshot
-                ?state_snapshot_source:snapshot_source
-                snapshot );
-          ]
-      | None -> []
-    in
     let visible_is_blank = String.trim visible_response_text = "" in
     let rec patch_content replaced acc = function
       | [] ->
@@ -870,7 +838,6 @@ let patch_checkpoint_last_assistant
     in
     Agent_sdk.Types.make_message
       ~role:Agent_sdk.Types.Assistant
-      ~metadata
       (patch_content false [] msg.Agent_sdk.Types.content)
   in
   let rec patch_last_assistant suffix_rev = function

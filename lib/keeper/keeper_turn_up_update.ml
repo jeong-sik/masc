@@ -38,7 +38,7 @@ let blocker_requires_continue_gate (old : keeper_meta) =
   | None -> false
 
 let paused_state_requires_approval (old : keeper_meta) =
-  Keeper_approval_queue.has_pending_for_keeper ~keeper_name:old.name
+  Keeper_approval_queue.has_blocking_pending_for_keeper ~keeper_name:old.name
   || blocker_requires_continue_gate old
 
 let update_keeper ?(preserve_prompt_defaults = false)
@@ -265,8 +265,8 @@ let update_keeper ?(preserve_prompt_defaults = false)
       cooldown_sec =
         Option.value
           ~default:old.compaction.cooldown_sec
-          p.continuity_compaction_cooldown_sec_opt
-        |> normalize_continuity_compaction_cooldown_sec;
+          p.compaction_cooldown_sec_opt
+        |> normalize_compaction_cooldown_sec;
       max_checkpoint_messages = old.compaction.max_checkpoint_messages;
       keep_recent_tool_results = old.compaction.keep_recent_tool_results;
     };

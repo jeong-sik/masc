@@ -35,10 +35,6 @@ type agent_stats = {
   mutable posts_created : int;
   mutable comments_created : int;
   mutable skips : int;
-  (* Guard penalty tracking (Phase B1: Guard → Thompson bridge).
-     Cumulative count of [record_guard_penalty] calls — caller enforces
-     the 1/cycle cap so this approximates "cycles where guardrail fired". *)
-  mutable guard_penalties_total : int;
   (* Timestamp *)
   mutable updated_at : float;
 }
@@ -226,7 +222,6 @@ let make_default_stats name =
     posts_created = 0;
     comments_created = 0;
     skips = 0;
-    guard_penalties_total = 0;
     updated_at = now;
   }
 
@@ -264,7 +259,6 @@ let stats_to_json (s : agent_stats) : Yojson.Safe.t =
     ("posts_created", `Int s.posts_created);
     ("comments_created", `Int s.comments_created);
     ("skips", `Int s.skips);
-    ("guard_penalties_total", `Int s.guard_penalties_total);
     ("updated_at", `Float s.updated_at);
   ]
 
@@ -282,7 +276,6 @@ let copy_stats (s : agent_stats) : agent_stats =
     posts_created = s.posts_created;
     comments_created = s.comments_created;
     skips = s.skips;
-    guard_penalties_total = s.guard_penalties_total;
     updated_at = s.updated_at;
   }
 
@@ -300,7 +293,6 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
   let posts_created = Json_util.get_int json "posts_created" |> Option.value ~default:0 in
   let comments_created = Json_util.get_int json "comments_created" |> Option.value ~default:0 in
   let skips = Json_util.get_int json "skips" |> Option.value ~default:0 in
-  let guard_penalties_total = Json_util.get_int json "guard_penalties_total" |> Option.value ~default:0 in
   let updated_at = Json_util.get_float json "updated_at" |> Option.value ~default:0.0 in
   Some {
     name;
@@ -313,7 +305,6 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
     posts_created;
     comments_created;
     skips;
-    guard_penalties_total;
     updated_at;
   }
 
@@ -523,24 +514,6 @@ let record_action ~agent_name ~action =
 let quality_pass_alpha_boost = 0.3
 let quality_warn_beta_nudge  = 0.1
 let quality_fail_beta_penalty = 0.5
-
-(** Guard penalty β nudge: same magnitude as quality_fail.
-    Configurable via MASC_GUARD_PENALTY_BETA for B-SIM calibration.
-    Default 0.5 is a conservative pre-calibration estimate. *)
-let guard_penalty_beta_nudge =
-  Float.max 0.0 (Env_config_core.get_float ~default:0.5 "MASC_GUARD_PENALTY_BETA")
-
-(** Record a guard penalty (Guardrail_stop) into Thompson β.
-    Phase B1: Guard → Thompson bridge.
-    Penalty cap (1/cycle) is enforced by the caller. *)
-let record_guard_penalty ~agent_name =
-  let s = get_stats agent_name in
-  with_ts_rw (fun () ->
-    s.beta <- s.beta +. guard_penalty_beta_nudge;
-    s.beta <- Float.max min_prior s.beta;
-    s.guard_penalties_total <- s.guard_penalties_total + 1;
-    s.updated_at <- Time_compat.now ());
-  save_stats_if_configured ()
 
 (** Record Post Verifier result into Thompson Sampling priors. *)
 let record_quality_signal ~agent_name ~(verdict : quality_verdict) =

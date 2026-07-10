@@ -177,16 +177,14 @@ function App() {
         <DCArtboard id="bd-tog"  label="C · direct vs automation"   width={780} height={460}><BoardHotAuto/></DCArtboard>
       </DCSection>
 
-      <DCSection id="msgs" title="C2 · Messages / Broadcast" subtitle="Real messages/*_broadcast.json — seq, workspace, mentions, [STATE] blocks.">
+      <DCSection id="msgs" title="C2 · Messages / Broadcast" subtitle="Real messages/*_broadcast.json — seq, workspace, mentions.">
         <DCArtboard id="ms-rm"   label="A · Workspace timeline"          width={920} height={500}><MessageWorkspaceTimeline/></DCArtboard>
         <DCArtboard id="ms-inb"  label="B · Mention inbox (@nick0cave)" width={780} height={460}><MentionInbox/></DCArtboard>
-        <DCArtboard id="ms-st"   label="C · [STATE] block focus"    width={780} height={420}><StateBlockMessage/></DCArtboard>
       </DCSection>
 
-      <DCSection id="composer-v2" title="C3 · Composer v2" subtitle="Broadcast / mention autocomplete / structured [STATE] payload.">
+      <DCSection id="composer-v2" title="C3 · Composer v2" subtitle="Broadcast / mention autocomplete.">
         <DCArtboard id="cm-bc"   label="A · Broadcast"              width={780} height={220}><ComposerV2Broadcast/></DCArtboard>
         <DCArtboard id="cm-mn"   label="B · Mention autocomplete"   width={780} height={300}><ComposerV2Mention/></DCArtboard>
-        <DCArtboard id="cm-st"   label="C · [STATE]-block compose"  width={780} height={280}><ComposerV2State/></DCArtboard>
       </DCSection>
 
       {/* ════════ PHASE 2 · TRACK 3 · OBSERVABILITY PLANE ════════ */}
@@ -221,13 +219,12 @@ function App() {
 
       {/* ════════ PHASE 2 · TRACK 4 · COGNITION PLANE ════════ */}
 
-      <DCSection id="keeper-v2" title="K1 · Keeper Inspector v2" subtitle="BDI (will/needs/desires) · tool access · token & handoff stats — real keepers/*.json">
-        <DCArtboard id="ki-bdi"    label="A · BDI panel (will / needs / desires / goals)" width={920} height={400}><KeeperBDIPanel/></DCArtboard>
-        <DCArtboard id="ki-acc"    label="B · Tool access + runtime config"                width={920} height={360}><KeeperToolAccess/></DCArtboard>
-        <DCArtboard id="ki-stats"  label="C · Token / handoff stats (all keepers)"         width={920} height={360}><KeeperTokenStats/></DCArtboard>
+      <DCSection id="keeper-v2" title="K1 · Keeper Inspector v2" subtitle="Tool access · token & handoff stats — real keepers/*.json">
+        <DCArtboard id="ki-acc"    label="A · Tool access + runtime config"                width={920} height={360}><KeeperToolAccess/></DCArtboard>
+        <DCArtboard id="ki-stats"  label="B · Token / handoff stats (all keepers)"         width={920} height={360}><KeeperTokenStats/></DCArtboard>
       </DCSection>
 
-      <DCSection id="decisions" title="K2 · Decisions / Memory" subtitle="decisions.jsonl + memory.jsonl — belief · intention · blocker · latency per turn">
+      <DCSection id="decisions" title="K2 · Decisions / Memory" subtitle="decisions.jsonl + memory.jsonl — outcome · summary · blocker · latency per turn">
         <DCArtboard id="dc-stream" label="A · Decisions stream (all keepers, filterable)"  width={1080} height={500}><DecisionsStream/></DCArtboard>
         <DCArtboard id="dc-mem"    label="B · Memory entries (verified / learned / plan)"  width={920}  height={320}><MemoryEntries/></DCArtboard>
       </DCSection>

@@ -47,8 +47,8 @@ let test_workspace_projection_includes_messages_and_mentions () =
     (Workspace.broadcast
        config
        ~from_agent:"sangsu"
-       ~msg_type:"state_block:plan"
-       ~content:"{\"phase\":\"next\"}");
+       ~msg_type:"status"
+       ~content:"work remains in progress");
   let json = Dashboard_workspace.json ~config ~me:"sangsu" ~limit:10 () in
   let workspace = Yojson.Safe.Util.(json |> member "workspace") in
   let messages = list_field "messages" json in
@@ -73,7 +73,9 @@ let test_workspace_projection_includes_messages_and_mentions () =
     [ "sangsu" ]
     (string_list_field "mentions" first);
   let second = List.nth messages 1 in
-  Alcotest.(check string) "block kind" "plan" (string_field "block_kind" second);
+  Alcotest.(check string) "second type" "status" (string_field "type" second);
+  Alcotest.(check string) "second body" "work remains in progress"
+    (string_field "body" second);
   let inbox_item = List.hd inbox in
   Alcotest.(check string) "inbox sender" "operator" (string_field "sender" inbox_item)
 ;;

@@ -499,7 +499,7 @@ let test_librarian_prompt_omits_private_blocks () =
   let msg : Agent_sdk.Types.message =
     { role = Agent_sdk.Types.Assistant
     ; content =
-        [ Agent_sdk.Types.Text "[STATE]\nsecret runtime marker\n[/STATE]\nvisible fact"
+        [ Agent_sdk.Types.Text "visible fact"
         ; Agent_sdk.Types.Thinking
             { signature = None; content = "hidden chain of thought" }
         ; Agent_sdk.Types.RedactedThinking "redacted reasoning blob"
@@ -522,10 +522,6 @@ let test_librarian_prompt_omits_private_blocks () =
   with_prompt_registry (fun () ->
     let prompt = render_librarian_user_prompt inp in
     Alcotest.(check bool) "keeps visible text" true (contains "visible fact" prompt);
-    Alcotest.(check bool)
-      "omits state block"
-      false
-      (contains "secret runtime marker" prompt);
     Alcotest.(check bool)
       "omits thinking content"
       false
@@ -1462,8 +1458,7 @@ let test_librarian_runtime_appends_episode_bundle () =
         let private_msg : Agent_sdk.Types.message =
           { role = Agent_sdk.Types.Assistant
           ; content =
-              [ Agent_sdk.Types.Text
-                  "[STATE]\nruntime secret sentinel\n[/STATE]\nvisible durable fact"
+              [ Agent_sdk.Types.Text "visible durable fact"
               ; Agent_sdk.Types.Thinking
                   { signature = None; content = "hidden chain of thought" }
               ; Agent_sdk.Types.ToolResult
@@ -5407,8 +5402,6 @@ let expected_compaction_snapshot_event_class = function
   | Runtime_manifest.Provider_attempt_started
   | Runtime_manifest.Provider_attempt_finished
   | Runtime_manifest.Context_injected
-  | Runtime_manifest.State_snapshot_sidecar_saved
-  | Runtime_manifest.Working_state_sidecar_saved
   | Runtime_manifest.Checkpoint_loaded
   | Runtime_manifest.Checkpoint_saved
   | Runtime_manifest.Receipt_appended

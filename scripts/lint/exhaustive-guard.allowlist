@@ -575,13 +575,6 @@ lib/mcp_transport_protocol/mcp_transport_protocol.ml:31
 lib/mcp_transport_protocol/mcp_transport_protocol.ml:41
 lib/mcp_transport_protocol/mcp_transport_protocol.ml:49
 lib/mcp_transport_protocol/mcp_transport_protocol.ml:203
-lib/meta_cognition_digest.ml:21
-lib/meta_cognition_interpret.ml:14
-lib/meta_cognition_parse.ml:18
-lib/meta_cognition_parse.ml:24
-lib/meta_cognition_parse.ml:30
-lib/meta_cognition_parse.ml:34
-lib/meta_cognition_parse.ml:40
 lib/metrics_store_eio.ml:221
 lib/model_inference_metrics.ml:180
 lib/model_inference_metrics.ml:186

@@ -176,18 +176,4 @@ describe('mission keeper runtime helpers', () => {
     )
   })
 
-  it('renders dialogue-model fallback hints when the configured model is unknown', () => {
-    const keeper = {
-      name: 'uranium666',
-      status: 'busy',
-      social_model: 'bdi_speech_v1',
-      configured_social_model: 'experimental_v99',
-      social_model_recognized: false,
-      social_model_fallback: 'bdi_speech_v1',
-    } as Keeper
-
-    expect(keeperRuntimeHint(keeper)).toBe(
-      '대화 런타임 설정 확인 필요',
-    )
-  })
 })

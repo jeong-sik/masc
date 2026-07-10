@@ -102,6 +102,10 @@ type ready_info = {
 }
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
+let startup_error : string option Atomic.t = Atomic.make None
+
+let record_startup_error message = Atomic.set startup_error (Some message)
+let clear_startup_error () = Atomic.set startup_error None
 
 let record_ready ~bot_user_id =
   Atomic.set last_ready
@@ -112,6 +116,7 @@ let record_ready ~bot_user_id =
 
 let status_json ?(audit_limit = 10) () =
   let gateway_state = Slack_socket_client.connection_state () in
+  let startup_error = Atomic.get startup_error in
   let bot_present = Option.is_some (bot_token_opt ()) in
   let app_present = Option.is_some (app_token_opt ()) in
   (* Socket Mode needs the app token; without it the gateway never starts. *)
@@ -126,11 +131,14 @@ let status_json ?(audit_limit = 10) () =
      reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
   let error =
-    match gateway_state with
-    | Disconnected ->
-      if app_present then "" else "SLACK_APP_TOKEN is unset or empty"
-    | Failed msg -> msg
-    | Awaiting_hello | Connected | Reconnect_pending _ -> ""
+    match startup_error with
+    | Some message -> message
+    | None ->
+      (match gateway_state with
+       | Disconnected ->
+         if app_present then "" else "SLACK_APP_TOKEN is unset or empty"
+       | Failed msg -> msg
+       | Awaiting_hello | Connected | Reconnect_pending _ -> "")
   in
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
@@ -141,7 +149,11 @@ let status_json ?(audit_limit = 10) () =
     ; ("connected", `Bool connected)
     ; ("stale", `Bool stale)
     ; ("stale_after_sec", `Int (stale_after_sec ()))
-    ; ("status", `String (connector_state_label ~available ~connected ~stale))
+    ; ( "status"
+      , `String
+          (match startup_error with
+           | Some _ -> "unhealthy"
+           | None -> connector_state_label ~available ~connected ~stale) )
     ; ("error", `String error)
     ; ("status_source", `String "in_process_gateway")
     ; ("gateway_state", `String (gateway_state_label gateway_state))

@@ -424,7 +424,7 @@ let evidence_refs =
              | Some persisted -> Some persisted
              | None -> completion_contract)
           ~evaluator_runtime
-          ~operator_override:false
+          ~operator_override:force
           ~ctx
           ~task_opt
           ~task_id

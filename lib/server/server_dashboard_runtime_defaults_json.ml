@@ -93,14 +93,14 @@ let resolved_of_runtime () : resolved =
     { id = rt.id
     ; provider = rt.provider.display_name
     ; model = rt.model.api_name
-    ; max_context = rt.model.max_context
+    ; max_context = Runtime.max_context_of_runtime rt
     ; is_default = rt.binding.is_default
     }
   in
   { default_runtime_id = Option.map (fun (rt : Runtime.t) -> rt.id) default
   ; default_model = Option.map (fun (rt : Runtime.t) -> rt.model.api_name) default
   ; default_max_context =
-      Option.map (fun (rt : Runtime.t) -> rt.model.max_context) default
+      Option.map Runtime.max_context_of_runtime default
   ; runtimes = List.map entry (Runtime.get_runtimes ())
   ; keeper_assignments = Runtime.keeper_assignments ()
   ; librarian_runtime_id = Runtime.librarian_runtime_id ()

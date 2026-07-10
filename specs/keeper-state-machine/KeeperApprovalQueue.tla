@@ -28,16 +28,19 @@
 \* callback, returns the id immediately — NO suspended fiber; the
 \* decision is delivered later via the callback).  This spec models the
 \* [submit_and_await] variant — `suspended_fibers` counts those fibers.
-\* The [submit_pending] variant has a different, weaker failure mode (a
-\* dropped [on_resolution] callback, not a permanently blocked fiber);
-\* it is out of scope here.  [expire_stale] handles BOTH via two
+\* The [submit_pending] variant has no suspended fiber. Its decision must
+\* first commit a durable [Hitl_resolved] stimulus, then complete the domain
+\* callback, remove the pending id, and finally signal the keeper. Delivery
+\* failure leaves the id pending. Those durable-delivery and callback-order
+\* invariants are not projected by this count-only model; it remains scoped
+\* to the blocking promise path. [expire_stale] handles BOTH via two
 \* *syntactically* independent matches — `match entry.resolver with
 \* Some r -> Eio.Promise.resolve r (Reject ...) | None -> ()` and,
 \* separately, `match entry.on_resolution with Some f -> f (Reject ...)
 \* | None -> ()`.  The two matches are *control-flow independent* —
 \* neither references the other's field, so the choice on one side
 \* doesn't constrain the other; the four (Some/None x Some/None)
-\* combinations each have a defined branch (we do not promise clean
+\* combinations each have a defined branch after delivery succeeds (we do not promise clean
 \* termination, only structural independence: `Eio.Promise.resolve` and
 \* the `on_resolution` callback are unwrapped here and can still raise
 \* `Eio.Cancel.Cancelled` etc., which the surrounding runtime re-raises
@@ -139,20 +142,13 @@ Done ==
 \* Models the regression where [expire_stale] removes the pending
 \* entry of a [submit_and_await] request but never resolves its
 \* promise — the suspended fiber stays blocked forever.  In the OCaml
-\* runtime, [expire_stale] *already* removes stale entries from
-\* [pending] (via [atomic_update]) before it resolves/invokes anything,
-\* capturing each removed [(id, entry)] in [stale_ref] precisely so it
-\* can still call [Eio.Promise.resolve resolver (Reject ...)] (and
-\* [entry.on_resolution]) afterwards.  The modelled hazard is therefore
-\* NOT a reordering of removal vs resolve (removal is already first by
-\* design) — it is a future refactor that loses or skips the captured
-\* entry/resolver in that post-removal step (the [Some resolver] branch
-\* dropped, [stale_ref] mis-built), leaving the entry gone from
-\* [pending] with the resolve never run.  (NB: an [entry.resolver =
-\* None] entry is a [submit_pending] request — it has NO suspended
-\* fiber, so dropping it does not produce the modelled harm; its weaker
-\* failure mode — a dropped [on_resolution] callback — is out of scope,
-\* see the header.)
+\* runtime, [expire_stale] claims each stale id. A blocking entry is removed
+\* immediately before [complete_expiration] resolves its promise; a
+\* nonblocking entry stays pending through durable delivery and callback
+\* completion. The modelled hazard is a future refactor that loses or skips
+\* the blocking resolver after removal. (NB: [entry.resolver = None] is a
+\* [submit_pending] request with no suspended fiber; its durable-delivery
+\* ordering is explicitly out of scope, see the header.)
 ExpireStaleNoResolve ==
     /\ pending_count > 0
     /\ pending_count' = pending_count - 1

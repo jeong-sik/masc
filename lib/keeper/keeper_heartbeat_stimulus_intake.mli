@@ -80,7 +80,9 @@ val consume_board_stimulus_batch
 (** [heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events]
     drains the Event-Layer queue (per RFC-0020 §3 Rule 4) and merges
     newly-consumed board events with the [pending_board_events] already
-    accumulated by the caller, deduplicating by [post_id]. *)
+    accumulated by the caller, deduplicating by [post_id]. A
+    [Hitl_resolved] head remains queued until its exact approval id has left
+    the pending map, so domain callbacks complete before continuation intake. *)
 val heartbeat_event_intake
   :  ctx:'a context
   -> meta_after_triage:keeper_meta

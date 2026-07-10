@@ -504,6 +504,64 @@ let capabilities_for_runtime (rt : t) =
   Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config
 ;;
 
+type max_context_source =
+  | Override
+  | Capability
+  | Override_clamped_by_capability
+
+let max_context_source_to_string = function
+  | Override -> "override"
+  | Capability -> "capability"
+  | Override_clamped_by_capability -> "override_clamped_by_capability"
+;;
+
+(* Effective input context window and the source that produced it.
+   [None] means neither the runtime.toml [model.max-context] override nor the
+   OAS capability catalog declares a positive context window for this
+   binding — [validate_runtime_max_context] rejects such a runtime at load
+   (fail-closed; Unknown->Permissive anti-pattern, not a silent default). *)
+let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option =
+  let capability_cap =
+    match capabilities_for_runtime rt with
+    | Some caps ->
+      (match caps.Llm_provider.Capabilities.max_context_tokens with
+       | Some c when c > 0 -> Some c
+       | Some _ | None -> None)
+    | None -> None
+  in
+  match rt.model.max_context, capability_cap with
+  | Some o, Some c when o > c -> Some (c, Override_clamped_by_capability)
+  | Some o, (Some _ | None) -> Some (o, Override)
+  | None, Some c -> Some (c, Capability)
+  | None, None -> None
+;;
+
+(* Every materialized runtime must resolve a positive context window from the
+   runtime.toml override or the OAS capability catalog. A binding that leaves
+   both unset is a config error rejected here, not a runtime defaulted to a
+   fallback window (RFC-0206 §2.1 no silent fallback). *)
+let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
+  : (unit, string) result
+  =
+  match
+    List.find_opt
+      (fun (r : t) -> Option.is_none (resolve_max_context_of_runtime r))
+      runtimes
+  with
+  | None -> Ok ()
+  | Some r ->
+    Error
+      (Printf.sprintf
+         "%s: runtime %S (model=%s) has no [models.%s].max-context override \
+          and no OAS capability catalog max-context; set the override or add \
+          the model to the capability catalog (no silent default — \
+          RFC-0206 §2.1)"
+         config_path
+         r.id
+         r.provider_config.model_id
+         r.model.id)
+;;
+
 (* Every runtime binding's provider/model pair must be known to the OAS
    capability catalog. Use the materialized [Provider_config.t] so
    provider-qualified catalog rows are considered before bare model rows; this
@@ -849,6 +907,7 @@ let materialize_config ~(config_path : string) (cfg : config)
     validate_media_failover ~config_path ~dropped_bindings runtimes
       cfg.media_failover
   in
+  let* () = validate_runtime_max_context ~config_path runtimes in
   let* lanes =
     lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
   in
@@ -1044,8 +1103,9 @@ let librarian_runtime_id () = (runtime_state ()).librarian_runtime_id
    provider-native schema requests. *)
 let structured_judge_runtime_id () = (runtime_state ()).structured_judge_runtime_id
 
-(* [runtime].hitl_summary is the dedicated HITL approval-summary lane. [None]
-   keeps the structured-judge routing chain for backwards compatibility. *)
+(* [runtime].hitl_summary is the dedicated HITL approval-summary lane,
+   consumed by [Keeper_approval_queue.provider_config_for_summary]. [None]
+   falls through to the structured-judge routing chain. *)
 let hitl_summary_runtime_id () = (runtime_state ()).hitl_summary_runtime_id
 
 let runtime_id_for_structured_judge () =
@@ -1095,13 +1155,15 @@ let is_local_runtime_id (id : string) : bool option =
 ;;
 
 let max_context_of_runtime (rt : t) : int =
-  match capabilities_for_runtime rt with
-  | Some caps ->
-    (match caps.Llm_provider.Capabilities.max_context_tokens with
-     | Some provider_cap when provider_cap > 0 ->
-       min rt.model.max_context provider_cap
-     | Some _ | None -> rt.model.max_context)
-  | None -> rt.model.max_context
+  match resolve_max_context_of_runtime rt with
+  | Some (n, _source) -> n
+  | None ->
+    failwith
+      (Printf.sprintf
+         "Runtime.max_context_of_runtime: %s has no resolvable max-context; \
+          materialize_config should have rejected this at load (no silent \
+          fallback — RFC-0206 §2.1)"
+         rt.id)
 ;;
 
 (* Resolve a keeper assignment to either a lane or a single runtime. Lanes are

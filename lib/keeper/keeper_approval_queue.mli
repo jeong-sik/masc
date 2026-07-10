@@ -126,6 +126,10 @@ type resolution_result =
 type resolve_error =
   | Not_found of string
   | Already_resolved of string
+  | Delivery_failed of
+      { approval_id : string
+      ; reason : string
+      }
 
 val resolve_error_to_string : resolve_error -> string
 
@@ -150,6 +154,14 @@ val approved_action_matches_request :
     order is canonicalized, but no request field is removed or interpreted.
     This intentionally differs from remembered-rule matching, which has a
     broader persisted-policy contract. *)
+
+(** Resolve the provider config the HITL context-summary worker runs on.
+    Routes through [Runtime.runtime_id_for_hitl_summary] (fallback chain
+    hitl_summary -> structured_judge -> librarian -> default); falls back to
+    the keeper's own runtime when the resolved lane id has no runtime entry.
+    Returns [None] when no runtime resolves at all. *)
+val provider_config_for_summary :
+  keeper_name:string -> Llm_provider.Provider_config.t option
 
 (** {1 Rule store (persisted)} *)
 
@@ -264,6 +276,7 @@ val list_recent_resolved_json :
 module For_testing : sig
   val reset_audit_store : unit -> unit
   val first_cmd_token : string -> string option
+  val clear_approval_resolution_wake_hook : unit -> unit
 end
 
 (** {1 Submit & await} *)
@@ -336,26 +349,29 @@ val submit_pending :
 
 (** {1 Resolve (operator action)} *)
 
-(** Install the hook that wakes a keeper when one of its pending approvals is
-    resolved or expires. Injected (rather than a direct
+(** Install the hook that durably delivers a resolved or expired approval to
+    its keeper lane. Injected (rather than a direct
     [Keeper_keepalive_signal] call) to break a dependency cycle: this module
     sits below [Keeper_keepalive_signal], which depends on
     [Keeper_world_observation], which depends back here for
-    [has_blocking_pending_for_keeper]. The default is a no-op;
-    [Server_bootstrap] installs the [Hitl_resolved]-stimulus wake for
-    nonblocking entries. *)
+    [has_blocking_pending_for_keeper]. Before [Server_bootstrap] installs the
+    hook, nonblocking resolution fails explicitly and remains pending. A
+    successful hook returns the wake signal closure; the queue invokes it only
+    after the resolution callback has completed and the pending id is gone. *)
 val set_approval_resolution_wake_hook :
   (base_path:string ->
    keeper_name:string ->
    approval_id:string ->
    decision:Keeper_event_queue.hitl_resolution_decision ->
-   channel:Keeper_continuation_channel.t option ->
-   unit) ->
+   channel:Keeper_continuation_channel.t ->
+   (unit -> unit, string) result) ->
   unit
 
 (** Resolve a pending approval and optionally remember the decision
     as a rule. Returns [Not_found] when [id] is absent or
-    [Already_resolved] on concurrent-resolve race. *)
+    [Already_resolved] on a concurrent-resolve race. [Delivery_failed]
+    preserves the pending entry and reports that no resolution was
+    acknowledged. *)
 val resolve_with_policy :
   base_path:string ->
   id:string ->

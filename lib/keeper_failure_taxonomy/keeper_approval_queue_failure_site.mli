@@ -5,6 +5,8 @@ type t =
   | Upsert_rule_save
   | Matching_rule_save
   | Audit_store_create
+  | Resolution_delivery
+  | Resolution_signal
   | Resolution_callback
   | Remember_rule
   | Approval_expired

@@ -56,8 +56,10 @@ let test_chat_transport_metric_zero_filled () =
 let test_keeper_metrics_all_complete () =
   (* [Keeper_metrics.all] cannot be compiler-enforced without an enumerate
      ppx; this count is the drift tripwire.  If this fails after adding a
-     constructor, add it to [all] as well. *)
-  check int "Keeper_metrics.all covers every constructor" 251
+     constructor, add it to [all] as well.  245 since #23929 retired six
+     [STATE]/BDI metrics from the variant and [all] together but left this
+     tripwire at 251. *)
+  check int "Keeper_metrics.all covers every constructor" 245
     (List.length Keeper_metrics.all);
   let names = List.map Keeper_metrics.to_string Keeper_metrics.all in
   check int "to_string is injective over all"

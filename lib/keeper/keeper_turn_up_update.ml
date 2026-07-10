@@ -38,7 +38,7 @@ let blocker_requires_continue_gate (old : keeper_meta) =
   | None -> false
 
 let paused_state_requires_approval (old : keeper_meta) =
-  Keeper_approval_queue.has_pending_for_keeper ~keeper_name:old.name
+  Keeper_approval_queue.has_blocking_pending_for_keeper ~keeper_name:old.name
   || blocker_requires_continue_gate old
 
 let update_keeper ?(preserve_prompt_defaults = false)

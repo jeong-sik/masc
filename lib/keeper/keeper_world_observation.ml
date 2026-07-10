@@ -1411,7 +1411,8 @@ let keeper_cycle_decision
   in
   if meta.paused
   then blocked Keeper_paused
-  else if Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name
+  else if
+    Keeper_approval_queue.has_blocking_pending_for_keeper ~keeper_name:meta.name
   then blocked Approval_pending
   else (
     let scheduled_autonomous_decision () =

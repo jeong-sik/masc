@@ -230,6 +230,7 @@ let run_turn
       ?trace_link
       ?continuation_channel
       ?hitl_delivery_channel
+      ?hitl_approval_grant
       ?yield_to_chat_waiting
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
@@ -785,6 +786,8 @@ let run_turn
                          ~meta
                          ?clock:(Eio_context.get_clock_opt ())
                          ?continuation_channel
+                         ~lane_policy:Keeper_approval_queue.Nonblocking
+                         ?hitl_approval_grant
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       (* Mutation-boundary is native to OAS now; [exit_condition]

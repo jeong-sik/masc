@@ -1334,10 +1334,10 @@ function ChatAttachBlock({
           ? html`<img src=${safeSrc} alt=${name} class="chat-block-attach-img" />`
           : svg
             ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeSvg(svg) }} />`
-            : html`<div class="chat-block-attach-ph">${ph || '첨부 이미지'}${src ? ' (unsafe URL)' : ''}</div>`}
+            : html`<div class="chat-block-attach-ph">${ph || '첨부를 표시할 수 없습니다'}${src ? ' (unsafe URL)' : ''}</div>`}
       </div>
       <figcaption class="chat-block-attach-cap">
-        <span>이미지 첨부</span>${via ? ` · ${via}` : ''}${size ? ` · ${size}` : ''}
+        <span>첨부</span>${via ? ` · ${via}` : ''}${size ? ` · ${size}` : ''}
       </figcaption>
     </figure>
   `

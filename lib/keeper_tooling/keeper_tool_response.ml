@@ -1,20 +1,44 @@
 (** Keeper_tool_response - provider response acceptance and keeper reply text
     normalization. *)
 
-let normalize_response_text ~(text : string) ~(tool_names : string list) ()
+(* When a turn ends with no final answer text, surface a bounded tail of the
+   model's reasoning so an operator sees WHY (e.g. "waiting on approval")
+   instead of only a tool list. The tail is used because a reasoning block's
+   conclusion sits at its end. This is the keeper's user-facing fallback reply
+   only; the accept-rejection diagnostic still never carries thinking. *)
+let empty_reply_reasoning_tail_chars = 1200
+
+let reasoning_tail ~max_chars reasoning =
+  let len = String.length reasoning in
+  if len <= max_chars then reasoning else "…" ^ String.sub reasoning (len - max_chars) max_chars
+;;
+
+let normalize_response_text
+      ~(text : string)
+      ~(tool_names : string list)
+      ?(reasoning = "")
+      ()
   : (string, string) result
   =
   let trimmed = String.trim text in
   if trimmed <> ""
   then Ok text
   else (
-    match tool_names with
-    | [] -> Error "keeper turn completed with no textual reply"
-    | _ ->
+    let tools_note =
+      match tool_names with
+      | [] -> ""
+      | names -> Printf.sprintf " Tools used: %s." (String.concat ", " names)
+    in
+    match String.trim reasoning, tool_names with
+    | "", [] -> Error "keeper turn completed with no textual reply"
+    | "", _ ->
+      Ok (Printf.sprintf "Completed without a textual reply.%s" tools_note)
+    | reasoning_trimmed, _ ->
       Ok
         (Printf.sprintf
-           "Completed without a textual reply. Tools used: %s."
-           (String.concat ", " tool_names)))
+           "No final reply text was produced. Reasoning: %s%s"
+           (reasoning_tail ~max_chars:empty_reply_reasoning_tail_chars reasoning_trimmed)
+           tools_note))
 ;;
 
 type accept_rejection_kind =

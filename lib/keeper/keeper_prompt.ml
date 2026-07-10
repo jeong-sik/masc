@@ -20,55 +20,12 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 
-(* Compiled once to avoid recompilation on every constitution fallback. *)
-let re_state_block_instruction_var =
-  Re.(compile (str "{{state_block_instruction}}"))
-
-(* Fallback substitution for the [state_block_instruction] template variable on
-   the raw constitution template.  Used when [render_prompt_template] returns
-   [Error] (e.g. unrelated unresolved variable, malformed template) so the
-   "State block template" anchor still appears in the prompt — otherwise the
-   raw template surfaces a literal [{{state_block_instruction}}] placeholder
-   and [missing_critical_prompt_anchors] reports [state_block_template] missing,
-   triggering the recovery-guard warn loop observed in the keeper logs
-   (~51 emissions / restart, all with keeper_name=null because the constitution
-   path runs before the per-keeper context is bound). *)
-let substitute_state_block_instruction_fallback raw =
-  Re.replace_string re_state_block_instruction_var
-    ~by:Keeper_state_block_prompt.instruction_text raw
-
 let keeper_constitution () =
-  match
-    Prompt_registry.render_prompt_template Keeper_prompt_names.constitution
-      [ ("state_block_instruction", Keeper_state_block_prompt.instruction_text) ]
-  with
-  | Ok value -> value
-  | Error msg ->
-      (* Preserve the original Error path (the render error is still real, e.g.
-         a newly-introduced unresolved variable in the template) by emitting
-         the same counter + warn the world-prompt fallback below uses.  But
-         instead of returning the raw template with [{{state_block_instruction}}]
-         unsubstituted (the silent-fallback bug), substitute the single
-         variable we know about so the "State block template" anchor still
-         appears in the prompt.  Any *other* unresolved variables remain
-         visible as [{{name}}] placeholders, which is what the operator needs
-         to see in order to fix the template. *)
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string PromptFailures)
-        ~labels:[("prompt", Keeper_prompt_names.constitution)]
-        ();
-      Log.Keeper.warn
-        "keeper_constitution: template render failed (%s), falling back to \
-         raw template with state_block_instruction substituted; other \
-         variables may still be unresolved"
-        msg;
-      substitute_state_block_instruction_fallback
-        (Prompt_registry.get_prompt Keeper_prompt_names.constitution)
+  Prompt_registry.get_prompt Keeper_prompt_names.constitution
 
 let critical_prompt_anchors =
   [ ("continuity", "<continuity>");
     ("pr_merge_rules", "PR merge rules");
-    ("state_block_template", "State block template");
     ("world", "<world>") ]
 
 let missing_critical_prompt_anchors prompt =
@@ -82,9 +39,7 @@ let critical_prompt_recovery_block_fallback =
     [ "<continuity>";
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
       "PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.";
-      Printf.sprintf
-        "State block template: non-direct keeper turns must report structured continuity via [STATE]...[/STATE] blocks containing %s."
-        Keeper_state_block_prompt.field_summary;
+      "Continuity is runtime-owned: use the checkpoint, typed task/goal state, events, and tool results. Never infer a runtime transition from prose.";
       "</continuity>";
       "";
       "<world>";
@@ -120,9 +75,6 @@ let critical_prompt_recovery_block () =
            using in-code fallback to preserve safeguards"
           (String.concat "," missing);
         critical_prompt_recovery_block_fallback
-
-let state_block_output_guard_text =
-  "Output guard: this turn uses runtime-managed continuity. Report state via [STATE]...[/STATE] blocks. The runtime will synthesize and persist state metadata when needed."
 
 let ensure_critical_prompt_anchors prompt =
   match missing_critical_prompt_anchors prompt with
@@ -175,15 +127,19 @@ let behavior_prompt_block name =
         name
 
 
-type registered_repositories =
-  | Registered_repository_ids of string list
-  | Registered_repositories_unavailable of string
+(* RFC-0324 B-1: the [registered_repositories] variant and its catalog-fed
+   prompt block are removed. The prompt used to assert that every id in
+   repositories.toml "resolves under repos/<name>/" — but the catalog and a
+   keeper's sandbox checkouts have no invariant linking them, so keepers that
+   trusted the prompt referenced un-cloned repos (path_not_found, 379/24h in
+   the 2026-07-08 tool-error audit). The filesystem is the repo truth; the
+   constant [repositories_block] below instructs self-discovery instead of
+   injecting a stale fact snapshot. *)
 
 let build_keeper_system_prompt
     ~goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(home_ground = "") ?(active_goals = [])
-    ?(registered_repositories = Registered_repository_ids []) () =
+    ?(home_ground = "") ?(active_goals = []) () =
   let goal = normalize_goal_text goal in
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
@@ -240,41 +196,22 @@ let build_keeper_system_prompt
          </home_ground>\n"
         (String_util.escape_xml home_ground)
   in
-  let registered_repositories_block =
-    (* Enumerate the globally registered repository ids from [repositories.toml]
-       so the keeper has the closed set of valid
-       [repos/<name>] segments rather than guessing (org-prefixed, renamed,
-       or invented names are rejected as unregistered). Empty catalog renders
-       nothing. Catalog read failure renders a fail-closed block so the keeper
-       does not silently fall back to guessing. *)
-    match registered_repositories with
-    | Registered_repository_ids [] -> ""
-    | Registered_repositories_unavailable reason ->
-        Printf.sprintf
-          "\n\
-           <registered_repositories>\n\
-           Repository catalog unavailable: %s\n\
-           Do not guess repos/<name> segments while the catalog is unavailable. \
-           Refresh repositories.toml or ask the operator for the correct \
-           registered repository id before using repository-scoped tools.\n\
-           </registered_repositories>\n"
-          (String_util.escape_xml reason)
-    | Registered_repository_ids repos ->
-        let lines =
-          List.map
-            (fun id -> Printf.sprintf "- repos/%s" (String_util.escape_xml id))
-            repos
-        in
-        Printf.sprintf
-          "\n\
-           <registered_repositories>\n\
-           Only these globally registered repository names resolve under \
-           repos/<name>/. Any other \
-           name (org-prefixed, renamed, or invented) is rejected as \
-           unregistered.\n\
-           %s\n\
-           </registered_repositories>\n"
-          (String.concat "\n" lines)
+  let repositories_block =
+    (* RFC-0324 B-1: constant self-discovery instruction. The filesystem is
+       the source of truth for a keeper's repositories — the global catalog
+       may register repositories that were never cloned into this sandbox,
+       and clone directory names may differ from catalog ids. A constant
+       block is also shared across all keepers (KV-cache friendly), unlike
+       the per-keeper catalog listing it replaces. *)
+    "\n\
+     <repositories>\n\
+     The filesystem is the source of truth for your repositories: only \
+     checkouts that actually exist under repos/ resolve. Before referencing \
+     a repository, list repos/ (for example: Execute ls repos) and use the \
+     directory names you find. Do not assume a repository exists because it \
+     is registered in a catalog — registration does not imply a checkout in \
+     your sandbox.\n\
+     </repositories>\n"
   in
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
@@ -327,7 +264,7 @@ let build_keeper_system_prompt
       (* ── Home ground (CWD anchor) ───────────────────────────── *)
       home_ground_block;
       (* ── Registered repositories (valid repos/<name> segments) ─ *)
-      registered_repositories_block;
+      repositories_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
       "<identity>\n\

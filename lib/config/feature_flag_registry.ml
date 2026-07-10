@@ -223,6 +223,17 @@ let all_flags : flag list = [
     default = true; category = "runtime";
     lifecycle = Active; since = "0.9.3" };
 
+  (* RFC-0323 G-5 Phase B: route all task completion through submit→approve
+     (verification-required) regardless of contract.strict. Default off —
+     flip only when the readiness gate §5 holds (≥2 distinct verifier
+     identities per submitting room, else solo-room starvation with no timer
+     backstop, RFC-0220 §5/§11). Only the done guard flips; the evidence
+     gate stays on contract.strict (Phase A scope). *)
+  { env_name = "MASC_VERIFICATION_DEFAULT_ON";
+    description = "RFC-0323 G-5 Phase B: verification-required by default (submit→approve)";
+    default = false; category = "runtime";
+    lifecycle = Active; since = "0.20.0" };
+
 ]
 
 (** Lookup a flag by env var name. O(n) — acceptable for ~30 flags. *)

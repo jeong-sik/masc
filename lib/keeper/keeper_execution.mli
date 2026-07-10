@@ -61,7 +61,6 @@ val build_keeper_system_prompt :
   ?keeper_name:string ->
   ?home_ground:string ->
   ?active_goals:(string * string) list ->
-  ?registered_repositories:Keeper_prompt.registered_repositories ->
   unit ->
   string
 
@@ -69,9 +68,6 @@ val build_keeper_system_prompt :
 val append_trait_clause : base:string -> clause:string -> string
 
 (** {1 Text Processing} *)
-
-(** Remove [STATE]..[/STATE] blocks from text. *)
-val strip_state_blocks_text : string -> string
 
 (** Extract user-visible reply text, stripping internal markup. *)
 val user_visible_reply_text : ?fallback:string -> string -> string

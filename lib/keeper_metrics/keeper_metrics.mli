@@ -119,8 +119,6 @@ type t =
   | CycleExceptions
   | SnapshotReadFailures
   | SnapshotWriteFailures
-  | StateSnapshotSkippedNoState
-  | StateSnapshotInvalidGoal
   | PromptUnknownToolTokens
   | PromptTokenStripped
   | ProgressUpdatedLineFailures
@@ -148,11 +146,7 @@ type t =
   | MemoryLlmSummaryChainExhausted
   | HitlSummaryOutcomes
   | UserVisibleReplySource
-  | ContinuitySummarySource
-  | SummarizerStateScrubs
-  | SummarizerStateBlocksRemoved
   | OasEnvKeyRejections
-  | ContinuityTsRecovered
   | MemoryWriteFailures
   | MemoryLaneUnitFailures
   | MemoryConsolidations
@@ -173,7 +167,6 @@ type t =
   | KeeperMaterializationFailures
   | ObservationQueryFailures
   | OasOnStop
-  | OasOnIdleEscalated
   | InvariantViolations
   | FsmEdgeTransitions
   | TurnFsmTransitions
@@ -197,7 +190,6 @@ type t =
   | NearExhaustionTotal
   | RestartAttempts
   | RestartOutcomes
-  | ConsecutiveIdle
   | LastProductiveTs
   | ProviderTimeoutStrike
   | StaleTerminationTotal

@@ -123,9 +123,7 @@ let lane_policies =
   ; { lane = "oas_agent"
     ; mandatory_events = [ Keeper_runtime_manifest.Checkpoint_saved ]
     ; terminal_events =
-        [ Keeper_runtime_manifest.Checkpoint_saved
-        ; Keeper_runtime_manifest.State_snapshot_sidecar_saved
-        ]
+        [ Keeper_runtime_manifest.Checkpoint_saved ]
     }
   ; { lane = "memory_context"
     ; mandatory_events =
@@ -154,8 +152,6 @@ let event_lane = function
   | Keeper_runtime_manifest.Provider_attempt_finished ->
     "provider"
   | Keeper_runtime_manifest.Checkpoint_loaded
-  | Keeper_runtime_manifest.State_snapshot_sidecar_saved
-  | Keeper_runtime_manifest.Working_state_sidecar_saved
   | Keeper_runtime_manifest.Checkpoint_saved ->
     "oas_agent"
   | Keeper_runtime_manifest.Context_injected

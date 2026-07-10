@@ -875,7 +875,7 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (draft.compaction_ratio_gate !== orig.compaction.ratio_gate) payload.compaction_ratio_gate = draft.compaction_ratio_gate
   if (draft.compaction_message_gate !== orig.compaction.message_gate) payload.compaction_message_gate = draft.compaction_message_gate
   if (draft.compaction_token_gate !== orig.compaction.token_gate) payload.compaction_token_gate = draft.compaction_token_gate
-  if (draft.compaction_cooldown_sec !== orig.compaction.cooldown_sec) payload.continuity_compaction_cooldown_sec = draft.compaction_cooldown_sec
+  if (draft.compaction_cooldown_sec !== orig.compaction.cooldown_sec) payload.compaction_cooldown_sec = draft.compaction_cooldown_sec
   if (draft.auto_handoff !== orig.handoff.auto) payload.auto_handoff = draft.auto_handoff
   if (draft.handoff_threshold !== orig.handoff.threshold) payload.handoff_threshold = draft.handoff_threshold
   if (draft.handoff_cooldown_sec !== orig.handoff.cooldown_sec) payload.handoff_cooldown_sec = draft.handoff_cooldown_sec
@@ -922,7 +922,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     compaction_ratio_gate: 'compaction_ratio_gate' in payload,
     compaction_message_gate: 'compaction_message_gate' in payload,
     compaction_token_gate: 'compaction_token_gate' in payload,
-    compaction_cooldown_sec: 'continuity_compaction_cooldown_sec' in payload,
+    compaction_cooldown_sec: 'compaction_cooldown_sec' in payload,
     auto_handoff: 'auto_handoff' in payload,
     handoff_threshold: 'handoff_threshold' in payload,
     handoff_cooldown_sec: 'handoff_cooldown_sec' in payload,

@@ -42,7 +42,7 @@ stylesheet
 
   .goal_head {
     display: grid;
-    grid-template-columns: 1fr 160px 120px;
+    grid-template-columns: 1fr 120px;
     gap: 14px;
     align-items: baseline;
   }
@@ -60,14 +60,6 @@ stylesheet
     white-space: nowrap;
     margin: 0;
   }
-  .goal_horizon {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--color-fg-muted);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-  }
-
   .goal_meta {
     display: flex;
     flex-wrap: wrap;
@@ -154,7 +146,6 @@ stylesheet
       grid-template-columns: 1fr;
       gap: 8px;
     }
-    .goal_horizon { text-align: left; }
     .conv_bar_wrap { text-align: left; }
     .goal_indent { margin-left: 12px; padding-left: 10px; }
   }
@@ -244,9 +235,6 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
     Attr.create "style"
       (Printf.sprintf "width:%d%%" (Int.clamp_exn n.convergence_pct ~min:0 ~max:100))
   in
-  let horizon_text =
-    if String.is_empty n.horizon then "" else Printf.sprintf "%s · p%d" n.horizon n.priority
-  in
   let indent_attr =
     if depth > 0 then [ Style.goal_indent ] else []
   in
@@ -326,9 +314,6 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
        [ [ Node.div
              ~attrs:[ Style.goal_head ]
              [ title_node
-             ; Node.div
-                 ~attrs:[ Style.goal_horizon ]
-                 [ Node.text horizon_text ]
              ; Node.div
                  ~attrs:[ Style.conv_bar_wrap ]
                  [ Node.text (Printf.sprintf "%d%%" n.convergence_pct)

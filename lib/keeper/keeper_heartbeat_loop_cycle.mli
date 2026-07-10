@@ -2,7 +2,7 @@
 
 val run_keeper_cycle
   :  ?event_bus:Agent_sdk.Event_bus.t
-  -> ?hitl_delivery_channel:Keeper_continuation_channel.t
+  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ctx:_ Keeper_types_profile.context
   -> meta_after_triage:Keeper_meta_contract.keeper_meta
   -> stop:bool Atomic.t

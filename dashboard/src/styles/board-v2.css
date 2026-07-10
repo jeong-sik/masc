@@ -294,11 +294,6 @@
   flex: none;
 }
 
-.v2-board-surface .bd-badge.state {
-  color: var(--info);
-  border-color: color-mix(in oklab, var(--info) 35%, transparent);
-}
-
 .v2-board-surface .bd-badge.pin {
   color: var(--volt-strong);
   border-color: var(--volt-dim);
@@ -410,32 +405,6 @@
 .v2-board-surface .bd-post-foot .karma b {
   color: var(--volt-strong);
   font-weight: 600;
-}
-
-/* State block post */
-.v2-board-surface .bd-stateblock {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 14px;
-  margin-top: 9px; /* prototype surfaces.css:331 */
-  padding: 9px 12px; /* prototype surfaces.css:331 */
-  border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
-  border: 1px dashed var(--border-main);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-}
-
-.v2-board-surface .bd-stateblock .sk {
-  color: var(--text-dim);
-}
-
-.v2-board-surface .bd-stateblock .sv {
-  color: var(--text-mid);
-}
-
-.v2-board-surface .bd-stateblock .sv.hl {
-  color: var(--info);
 }
 
 /* ════ COMPOSER ════ */

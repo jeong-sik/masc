@@ -146,6 +146,9 @@ let invalid_vote_direction ~tool_name ~start_time raw : Tool_result.result =
     (Printf.sprintf "invalid vote direction %S; expected up or down" raw)
 ;;
 
+(* Rejection tombstone for the retired [vote] parameter. Deleting it (#23710)
+   made a legacy {vote:"down"} call silently default direction to "up" —
+   an inverted vote instead of a typed rejection (main red #23901, voting). *)
 let legacy_vote_parameter_removed ~tool_name ~start_time raw : Tool_result.result =
   Tool_result.make_err
     ~tool_name

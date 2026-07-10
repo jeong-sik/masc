@@ -140,18 +140,6 @@ let task_id_list_label = function
   | [] -> "[]"
   | ids -> "[" ^ String.concat "," ids ^ "]"
 
-let deliverable_claims_completion ~task_id deliverable =
-  let normalized =
-    deliverable
-    |> String.trim
-    |> String.lowercase_ascii
-    |> first_line
-  in
-  not (String.equal normalized "")
-  && (String.starts_with ~prefix:(String.lowercase_ascii task_id ^ " completed")
-        normalized
-      || String.starts_with ~prefix:"completed" normalized)
-
 let status_summary_string
     ~(ctx : context)
     ~(bound : bool)

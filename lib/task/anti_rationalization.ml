@@ -90,8 +90,11 @@ let verdict_constructor_name = function
 
 let valid_verdict_strings = [ "APPROVE"; "REJECT" ]
 
+(* No [Evidence] gate here: empty-evidence rejection is owned by L1
+   [Task_completion_gate.decide] (RFC-0337 decision 2 / migration 2). The
+   short-lived Anti Gate 0 (#23738) duplicated L1 ahead of every evaluator
+   gate and mis-attributed evaluator outcomes (main red #23901, family A). *)
 type gate =
-  | Evidence
   | Length
   | Excuse
   | Contract
@@ -102,7 +105,6 @@ type gate =
   | Fallback
 
 let gate_to_string = function
-  | Evidence -> "evidence"
   | Length -> "length"
   | Excuse -> "excuse"
   | Contract -> "contract"
@@ -713,17 +715,15 @@ let review
       ?(completion_contract : string list option)
       ?(required_evidence = [])
       ?(verify_gate_evidence = [])
-      ?(on_verdict : (review_result -> unit) option)
+      ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(few_shot_block = "")
       ?(operator_override : bool = false)
-      ?(sw : Eio.Switch.t option)
+      ?(sw : Eio.Switch.t option = None)
       (req : review_request)
   : review_result
   =
   let emit result =
-    (match on_verdict with
-     | Some f -> f result
-     | None -> ());
+    on_verdict result;
     result
   in
 
@@ -742,18 +742,9 @@ let review
       (fun message -> Log.Task.error "task_id=%s %s" req.task_id message)
       fmt
   in
-  (* Gate 0: empty evidence_refs — required for all code task submissions.
-     Reject completions that lack code-level evidence (file paths, commit hashes,
-     trace/turn/receipt refs). *)
-  if List.is_empty req.evidence_refs then
-    emit
-      { verdict = Reject "no evidence references supplied"
-      ; evaluator_runtime
-      ; generator_runtime
-      ; gate = Evidence
-      ; fallback_reason = None
-      }
-  else
+  (* Empty evidence_refs is NOT rejected here (RFC-0337 migration 2): L1
+     [Task_completion_gate.decide] owns that decision for every completion.
+     [req.evidence_refs] still feeds the L2 evaluator prompt below. *)
   let notes_trimmed = String.trim req.completion_notes in
   if String.length notes_trimmed < min_notes_length
   then

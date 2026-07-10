@@ -84,12 +84,14 @@ let dummy_pending_approval
   ; disposition = None
   ; disposition_reason = None
   ; phase = Q.Awaiting_operator
+  ; lane_policy = Q.Nonblocking
   ; continuation_channel = Keeper_continuation_channel.unrouted "test fixture"
   ; audit_base_path
   ; resolver = None
   ; on_resolution = None
   ; context_summary = None
   ; summary_status = Q.Summary_not_requested
+  ; channel = None
   }
 ;;
 

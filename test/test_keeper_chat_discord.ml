@@ -107,6 +107,23 @@ let test_rich_embeds_suppresses_credential_url () =
   in
   check int "credential URL does not become embed" 0 (List.length embeds)
 
+let test_rich_embeds_includes_code_and_mermaid () =
+  let embeds =
+    D.rich_embeds_of_text
+      "```ocaml\nlet x = 1 + 2\n```\n```mermaid\nflowchart TD\nA-->B\n```"
+  in
+  check int "code and mermaid embeds" 2 (List.length embeds);
+  let code_json = List.hd embeds |> Discord_rest_client.embed_to_json |> Yojson.Safe.to_string in
+  check bool "code title" true (contains code_json "Code (ocaml)");
+  check bool "code body" true
+    (contains code_json "```ocaml\\nlet x = 1 + 2\\n```");
+  let mermaid_json =
+    List.nth embeds 1 |> Discord_rest_client.embed_to_json |> Yojson.Safe.to_string
+  in
+  check bool "mermaid title" true (contains mermaid_json "Mermaid Diagram");
+  check bool "mermaid body" true
+    (contains mermaid_json "```mermaid\\nflowchart TD\\nA-->B\\n```")
+
 let () =
   run "keeper_chat_discord"
     [ ( "streaming-redaction"
@@ -130,6 +147,8 @@ let () =
             test_public_voice_audio_url_strips_trailing_slash
         ; test_case "projects text links and images to embeds" `Quick
             test_rich_embeds_of_text_projects_links_and_images
+        ; test_case "supports code and mermaid as embeds" `Quick
+            test_rich_embeds_includes_code_and_mermaid
         ; test_case "redacts text-derived image secrets" `Quick
             test_rich_embeds_redacts_text_derived_image_secrets
         ; test_case "suppresses credential URL embeds" `Quick

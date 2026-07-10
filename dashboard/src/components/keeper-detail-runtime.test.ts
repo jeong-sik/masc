@@ -613,8 +613,6 @@ describe('RuntimeLensSection', () => {
             context_compacted_count: 1,
             checkpoint_loaded_count: 1,
             checkpoint_saved_count: 1,
-            state_snapshot_sidecar_saved_count: 1,
-            active_open_loop_count: 2,
             last_compaction: null,
           },
           memory: {
@@ -756,7 +754,6 @@ describe('RuntimeLensSection', () => {
           stop_requested: false,
           restart_budget_remaining: true,
           backoff_elapsed: false,
-          guardrail_triggered: false,
           drain_complete: false,
           context_overflow: false,
           compact_retry_exhausted: false,
@@ -820,8 +817,6 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('tool log artifacts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(1)
     expect(screen.getByText('0/1')).toBeInTheDocument()
-    expect(screen.getByText('working loops')).toBeInTheDocument()
-    expect(screen.getAllByText('2').length).toBeGreaterThan(0)
     expect(screen.getByText('provider attempts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
     expect(screen.getByText('provider terminal')).toBeInTheDocument()

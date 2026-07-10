@@ -38,6 +38,10 @@ type pending_phase =
   | Awaiting_operator
   | Escalated
 
+type lane_policy =
+  | Nonblocking
+  | Blocking
+
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -59,12 +63,14 @@ type pending_approval =
   ; disposition : string option
   ; disposition_reason : string option
   ; phase : pending_phase
+  ; lane_policy : lane_policy
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
+  ; channel : Keeper_continuation_channel.t option
   }
 
 type decision = Agent_sdk.Hooks.approval_decision
@@ -130,6 +136,11 @@ let risk_level_of_string = function
 let pending_phase_to_string = function
   | Awaiting_operator -> "awaiting_operator"
   | Escalated -> "escalated"
+;;
+
+let lane_policy_to_string = function
+  | Nonblocking -> "nonblocking"
+  | Blocking -> "blocking"
 ;;
 
 let pending_phase_of_string = function

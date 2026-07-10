@@ -95,8 +95,6 @@ let event_started_at row =
   | Keeper_runtime_manifest.Runtime_completed
   | Keeper_runtime_manifest.Runtime_failed
   | Keeper_runtime_manifest.Provider_attempt_finished
-  | Keeper_runtime_manifest.State_snapshot_sidecar_saved
-  | Keeper_runtime_manifest.Working_state_sidecar_saved
   | Keeper_runtime_manifest.Checkpoint_saved
   | Keeper_runtime_manifest.Pre_dispatch_blocked
   | Keeper_runtime_manifest.Receipt_appended
@@ -108,8 +106,6 @@ let event_finished_at row =
   | Keeper_runtime_manifest.Runtime_completed
   | Keeper_runtime_manifest.Runtime_failed
   | Keeper_runtime_manifest.Provider_attempt_finished
-  | Keeper_runtime_manifest.State_snapshot_sidecar_saved
-  | Keeper_runtime_manifest.Working_state_sidecar_saved
   | Keeper_runtime_manifest.Checkpoint_saved
   | Keeper_runtime_manifest.Pre_dispatch_blocked
   | Keeper_runtime_manifest.Receipt_appended
@@ -156,9 +152,7 @@ let clock_edge_json ~idx ~provider_attempt_index row =
   let checkpoint_id =
   match event with
   | Keeper_runtime_manifest.Checkpoint_loaded
-  | Keeper_runtime_manifest.Checkpoint_saved
-  | Keeper_runtime_manifest.State_snapshot_sidecar_saved
-  | Keeper_runtime_manifest.Working_state_sidecar_saved ->
+  | Keeper_runtime_manifest.Checkpoint_saved ->
     first_string_opt [ clock_string row "checkpoint_id"; fallback_checkpoint_id row ]
     | _ -> clock_string row "checkpoint_id"
   in

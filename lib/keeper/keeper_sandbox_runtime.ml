@@ -235,10 +235,15 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
 ;;
 
 let remove_cleanup_container ~container_id ~timeout_sec =
-  let argv = docker_command_argv () @ [ "rm"; "-f"; container_id ] in
+  (* -v also removes the container's anonymous volumes. Without it the
+     per-turn sandbox volumes accumulate in the docker daemon's metadata
+     index (9563 volumes observed in production), starving even simple
+     commands like `docker ps` until they time out. Keeper sandbox volumes
+     are per-turn/ephemeral, so -v is safe here. *)
+  let argv = docker_command_argv () @ [ "rm"; "-f"; "-v"; container_id ] in
   let st, out =
     run_docker_argv_with_status
-      ~summary:"keeper sandbox docker rm cleanup"
+      ~summary:"keeper sandbox docker rm -v cleanup"
       ~timeout_sec
       argv
   in
@@ -247,7 +252,7 @@ let remove_cleanup_container ~container_id ~timeout_sec =
   else
     Error
       (Printf.sprintf
-         "docker rm -f failed for cleanup container %s: %s"
+         "docker rm -fv failed for cleanup container %s: %s"
          container_id
          (Exec_policy.truncate_for_log out))
 ;;

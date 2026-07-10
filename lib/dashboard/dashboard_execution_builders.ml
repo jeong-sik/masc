@@ -343,22 +343,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
             ("proactive_idle_sec", member_assoc "proactive_idle_sec" keeper);
             ("proactive_cooldown_sec", member_assoc "proactive_cooldown_sec" keeper);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
-            ("continuity_summary", `String (
-              match String_util.trim_to_option (string_field "continuity_summary" keeper) with
-              | Some s -> s
-              | None ->
-                if autonomous_turn_count = 0 && turn_count = 0 then
-                  "아직 활동 기록이 없습니다"
-                else if autonomous_turn_count = 0 then
-                  Printf.sprintf "대기 중 (턴 %d회, 자율 턴 0회)" turn_count
-                else
-                  let noop_note =
-                    if noop_turn_count > 0 then
-                      Printf.sprintf " · noop %d회" noop_turn_count
-                    else ""
-                  in
-                  Printf.sprintf "자율 턴 %d회, 도구 행동 %d회, 턴 %d회, 세대 %d%s"
-                    autonomous_turn_count autonomous_action_count turn_count generation noop_note));
             ("skill_route_summary", Json_util.string_opt_to_json skill_route_summary);
             ( "model",
               Json_util.string_opt_to_json (String_util.trim_to_option (string_field "active_model" keeper)) );
@@ -377,12 +361,15 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
 let task_operation_status (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Some "active"
-  | Masc_domain.AwaitingVerification _ -> Some "paused"
+  (* RFC-0323 G-6: awaiting verification is the normal completion lane,
+     not a pause — the operation is still moving (verifier's turn). *)
+  | Masc_domain.AwaitingVerification _ -> Some "active"
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
 let task_operation_severity (task : Masc_domain.task) =
   match task.task_status with
-  | Masc_domain.AwaitingVerification _ -> Tone_warn
+  (* RFC-0323 G-6: verification pending is not a warning tone. *)
+  | Masc_domain.AwaitingVerification _ -> Tone_ok
   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Tone_ok
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> Tone_ok
 

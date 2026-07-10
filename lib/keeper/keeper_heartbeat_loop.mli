@@ -58,6 +58,19 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
+(** Closed pre-intake admission result. A blocking approval is classified
+    before durable dequeue, just like fd/disk pressure, so a blocked cycle does
+    not repeatedly lease and requeue the same stimulus. *)
+type turn_intake_admission =
+  | Intake_admitted
+  | Intake_pressure_blocked of Keeper_pressure_admission.block
+  | Intake_blocking_approval_pending
+
+val classify_turn_intake_admission :
+  pressure:Keeper_pressure_admission.decision ->
+  blocking_approval_pending:bool ->
+  turn_intake_admission
+
 val heartbeat_event_intake :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
@@ -125,10 +138,10 @@ val turn_status_event :
   turn_fail_count:int -> max_allowed:int -> Keeper_state_machine.event
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
-    The fd/disk pressure precondition is pre-checked by the caller via
-    {!Keeper_pressure_admission_observer.decide_observed} BEFORE this is invoked, so
-    this function must NOT re-add inline pressure gates: doing so would reinstate
-    the consume-before-gate churn that hoisting the admission check removed. *)
+    The caller classifies fd/disk pressure and typed Blocking HITL ownership
+    with {!classify_turn_intake_admission} BEFORE this is invoked, so this
+    function must not re-add inline admission gates: doing so would reinstate
+    the consume-before-gate churn that hoisting the decision removed. *)
 val run_keepalive_unified_turn :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->

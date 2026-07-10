@@ -67,7 +67,7 @@ Lines 24-29 — six lines covering `Keeper_state_machine.mli:139-144` and three 
 ```
 \*   1. shared_measurement is the workspace collaboration hub (Context_measured event,
 \*      Keeper_state_machine.mli -- [Context_measured] constructor of
-\*      [type event], auto_rules_summary). Cite by symbol -- iter 64 N-2.a
+\*      [type event], context_actions_summary). Cite by symbol -- iter 64 N-2.a
 \*      (line numbers drift on every edit; [type event] / [Context_measured]
 \*      are stable identifiers, the OCaml compiler keeps them honest).
 \*      Adjacent NoDrainTransition / GhostDispatch *.mli docstring callouts

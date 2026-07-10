@@ -211,7 +211,7 @@ let manual_help_entry name =
           name;
           short_description = "Persist a structured keeper memory entry.";
           when_to_use =
-            "Use when a decision, constraint, open question, next step, or progress note should be searchable on later turns.";
+            "Use when an explicit decision, open question, goal, or progress note should be searchable on later turns.";
           key_constraints =
             [
               "kind must be one of the callable keeper memory kinds.";

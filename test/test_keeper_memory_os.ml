@@ -499,7 +499,7 @@ let test_librarian_prompt_omits_private_blocks () =
   let msg : Agent_sdk.Types.message =
     { role = Agent_sdk.Types.Assistant
     ; content =
-        [ Agent_sdk.Types.Text "[STATE]\nsecret runtime marker\n[/STATE]\nvisible fact"
+        [ Agent_sdk.Types.Text "visible fact"
         ; Agent_sdk.Types.Thinking
             { signature = None; content = "hidden chain of thought" }
         ; Agent_sdk.Types.RedactedThinking "redacted reasoning blob"
@@ -522,10 +522,6 @@ let test_librarian_prompt_omits_private_blocks () =
   with_prompt_registry (fun () ->
     let prompt = render_librarian_user_prompt inp in
     Alcotest.(check bool) "keeps visible text" true (contains "visible fact" prompt);
-    Alcotest.(check bool)
-      "omits state block"
-      false
-      (contains "secret runtime marker" prompt);
     Alcotest.(check bool)
       "omits thinking content"
       false
@@ -1462,8 +1458,7 @@ let test_librarian_runtime_appends_episode_bundle () =
         let private_msg : Agent_sdk.Types.message =
           { role = Agent_sdk.Types.Assistant
           ; content =
-              [ Agent_sdk.Types.Text
-                  "[STATE]\nruntime secret sentinel\n[/STATE]\nvisible durable fact"
+              [ Agent_sdk.Types.Text "visible durable fact"
               ; Agent_sdk.Types.Thinking
                   { signature = None; content = "hidden chain of thought" }
               ; Agent_sdk.Types.ToolResult
@@ -3816,7 +3811,13 @@ let test_consolidator_stale_peer_does_not_satisfy_min_keepers () =
 ;;
 
 (* A fact with no valid_until but an old last_verified_at is stale and must be
-   excluded from the representative and observed_by set. *)
+   excluded from the representative and observed_by set. Two fresh
+   contributors are required so the claim still meets min_keepers (=2) after
+   the stale one is filtered — with a single fresh peer nothing would be
+   promoted at all (that quorum behavior is pinned separately by
+   [test_consolidator_stale_peer_does_not_satisfy_min_keepers]). The original
+   #23748 version used one fresh peer and could never pass (main red #23901,
+   family consolidator). *)
 let test_consolidator_filters_stale_without_valid_until () =
   let now = 1_000_000.0 in
   let claim_id = Some "no-valid-until-stale" in
@@ -3827,7 +3828,14 @@ let test_consolidator_filters_stale_without_valid_until () =
     ; Types.claim_id = claim_id
     }
   in
-  let fresh =
+  let fresh_old =
+    { (mk_shared_fixture ~now ~category:"lesson" "fresh older no valid_until") with
+      Types.first_seen = 100.0
+    ; Types.last_verified_at = Some (now -. 100.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let fresh_new =
     { (mk_shared_fixture ~now ~category:"lesson" "fresh no valid_until") with
       Types.first_seen = now -. 1.0
     ; Types.last_verified_at = Some (now -. 1.0)
@@ -3835,7 +3843,9 @@ let test_consolidator_filters_stale_without_valid_until () =
     }
   in
   let promoted =
-    promote_one ~now [ "stale", [ stale ]; "fresh", [ fresh ] ]
+    promote_one
+      ~now
+      [ "stale", [ stale ]; "fresh-a", [ fresh_old ]; "fresh-b", [ fresh_new ] ]
   in
   Alcotest.(check string)
     "representative excludes stale contributor without valid_until"
@@ -3843,7 +3853,7 @@ let test_consolidator_filters_stale_without_valid_until () =
     promoted.Types.claim;
   Alcotest.(check (list string))
     "observed_by excludes stale contributor without valid_until"
-    [ "fresh" ]
+    [ "fresh-a"; "fresh-b" ]
     promoted.Types.observed_by
 ;;
 
@@ -5392,8 +5402,6 @@ let expected_compaction_snapshot_event_class = function
   | Runtime_manifest.Provider_attempt_started
   | Runtime_manifest.Provider_attempt_finished
   | Runtime_manifest.Context_injected
-  | Runtime_manifest.State_snapshot_sidecar_saved
-  | Runtime_manifest.Working_state_sidecar_saved
   | Runtime_manifest.Checkpoint_loaded
   | Runtime_manifest.Checkpoint_saved
   | Runtime_manifest.Receipt_appended

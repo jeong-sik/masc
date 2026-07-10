@@ -535,22 +535,15 @@ describe('laneTransitionCount', () => {
 
 describe('flagTooltip', () => {
   it('returns the on-description when the flag is active', () => {
-    const tip = flagTooltip('reflect', true)
-    expect(tip).toContain('reflect (active)')
-    expect(tip).toMatch(/self-evaluate|Reflexion/i)
+    const tip = flagTooltip('compact', true)
+    expect(tip).toContain('compact (active)')
+    expect(tip).toContain('압축')
   })
 
   it('returns the off-description when the flag is inactive', () => {
-    const tip = flagTooltip('reflect', false)
-    expect(tip).toContain('reflect (inactive)')
-    expect(tip).toContain('예약된 reflection 없음')
-  })
-
-  it('swaps description for guardrail based on state', () => {
-    const on = flagTooltip('guardrail', true)
-    const off = flagTooltip('guardrail', false)
-    expect(on).toContain('발동됨')
-    expect(off).toContain('활성 guardrail 없음')
+    const tip = flagTooltip('compact', false)
+    expect(tip).toContain('compact (inactive)')
+    expect(tip).toContain('예약된 압축 없음')
   })
 
   it('falls back to a generic tooltip for unknown labels', () => {

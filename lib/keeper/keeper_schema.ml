@@ -190,9 +190,9 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "Token count gate for compaction (0 disables this gate). Overrides compaction profile when set.");
         ]);
-        ("continuity_compaction_cooldown_sec", `Assoc [
+        ("compaction_cooldown_sec", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Minimum seconds to wait after a [STATE] continuity update before compaction. 0 disables the reflection hold.");
+          ("description", `String "Minimum seconds between completed compactions. 0 disables the cooldown.");
         ]);
         ("auto_handoff", `Assoc [
           ("type", `String "boolean");
@@ -308,10 +308,6 @@ let keeper_schemas : tool_schema list = [
         ("no_skill_route", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Optional: do not emit SKILL/SKILL_REASON headers in reply");
-        ]);
-        ("no_state_block", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: do not emit [STATE]...[/STATE] block in reply");
         ]);
         ("turn_instructions", `Assoc [
           ("type", `String "string");

@@ -88,6 +88,10 @@ let test_fresh_critical_entry_phase_is_awaiting_operator () =
          | None -> Alcotest.fail "in-memory entry not found"
        in
        Alcotest.(check bool)
+         "submit_and_await entry owns a blocking lane"
+         true
+         (AQ.has_blocking_pending_for_keeper ~keeper_name);
+       Alcotest.(check bool)
          "fresh Critical entry is Awaiting_operator in-memory"
          true
          (entry.phase = AQ.Awaiting_operator);
@@ -129,7 +133,7 @@ let test_resolve_with_live_resolver_does_not_fire_keeper_wake_hook () =
       ~keeper_name
       ~approval_id
       ~decision
-      ~continuation_channel:_ ->
+      ~channel:_ ->
       woke := Some (keeper_name, approval_id, decision));
   Fun.protect
     ~finally:(fun () ->
@@ -141,7 +145,7 @@ let test_resolve_with_live_resolver_does_not_fire_keeper_wake_hook () =
           ~keeper_name:_
           ~approval_id:_
           ~decision:_
-          ~continuation_channel:_ ->
+          ~channel:_ ->
           ());
       cleanup_dir base_path)
     (fun () ->
@@ -187,7 +191,7 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
       ~keeper_name
       ~approval_id
       ~decision
-      ~continuation_channel:_ ->
+      ~channel:_ ->
       woke := Some (keeper_name, approval_id, decision));
   Fun.protect
     ~finally:(fun () ->
@@ -197,17 +201,18 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
           ~keeper_name:_
           ~approval_id:_
           ~decision:_
-          ~continuation_channel:_ ->
+          ~channel:_ ->
           ());
       cleanup_dir base_path)
     (fun () ->
        let keeper_name = "pending-resolve-wake-test" in
        let callback_decision = ref None in
+       let input = `Assoc [ "kind", `String "critical_gate" ] in
        let id =
          AQ.submit_pending
            ~keeper_name
            ~tool_name:"keeper_continue_after_reconcile"
-           ~input:(`Assoc [ "kind", `String "critical_gate" ])
+           ~input
            ~risk_level:AQ.Critical
            ~base_path
            ~on_resolution:(fun decision -> callback_decision := Some decision)
@@ -225,11 +230,73 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
         | Some (kn, aid, decision) ->
           Alcotest.(check string) "wake targets the waiting keeper" keeper_name kn;
           Alcotest.(check string) "wake carries the resolved approval id" id aid;
-          Alcotest.(check bool)
-            "wake carries the typed decision label"
-            true
-            (decision = Keeper_event_queue.Hitl_approved)
+          (match decision with
+           | Keeper_event_queue.Hitl_approved action ->
+             Alcotest.(check bool)
+               "wake carries the exact approved action"
+               true
+               (AQ.approved_action_matches_request
+                  action
+                  ~keeper_name
+                  ~tool_name:"keeper_continue_after_reconcile"
+                  ~input)
+           | Keeper_event_queue.Hitl_rejected | Keeper_event_queue.Hitl_edited ->
+             Alcotest.fail "approved queue entry emitted a non-approved wake")
         | None -> Alcotest.fail "non-blocking resolve did not fire the keeper wake hook"))
+;;
+
+let test_blocking_callback_policy_owns_lane_without_resolver () =
+  let base_path = temp_dir () in
+  let woke = ref false in
+  let callback_decision = ref None in
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      woke := true);
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.set_approval_resolution_wake_hook
+        (fun
+          ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+          ());
+      cleanup_dir base_path)
+    (fun () ->
+       let keeper_name = "blocking-callback-policy-test" in
+       let id =
+         AQ.submit_pending
+           ~keeper_name
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "lifecycle_gate" ])
+           ~risk_level:AQ.Critical
+           ~base_path
+           ~lane_policy:AQ.Blocking
+           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ()
+       in
+       Alcotest.(check bool)
+         "explicit blocking callback owns the lane"
+         true
+         (AQ.has_blocking_pending_for_keeper ~keeper_name);
+       (match AQ.get_pending_entry ~id with
+        | Some entry ->
+          Alcotest.(check bool) "lane policy is typed as Blocking" true
+            (entry.lane_policy = AQ.Blocking)
+        | None -> Alcotest.fail "blocking callback entry not found");
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+       Alcotest.(check bool) "blocking callback does not emit duplicate wake" false !woke;
+       Alcotest.(check bool)
+         "resolved blocking callback releases the lane"
+         false
+         (AQ.has_blocking_pending_for_keeper ~keeper_name);
+       match !callback_decision with
+       | Some Agent_sdk.Hooks.Approve -> ()
+       | Some decision ->
+         Alcotest.fail
+           ("unexpected callback decision: "
+            ^ AQ.approval_decision_to_string decision)
+       | None -> Alcotest.fail "blocking callback did not run")
 ;;
 
 let test_resolution_wake_carries_originating_continuation_channel () =
@@ -241,20 +308,24 @@ let test_resolution_wake_carries_originating_continuation_channel () =
       ~keeper_name:_
       ~approval_id
       ~decision
-      ~continuation_channel ->
+      ~channel ->
       captured :=
         Some
           Keeper_event_queue.
-            { approval_id; decision; channel = continuation_channel });
+            { approval_id;
+              decision;
+              channel =
+                Option.value channel
+                  ~default:(Keeper_continuation_channel.unrouted "test: no channel") });
   let reset_hook () =
     AQ.set_approval_resolution_wake_hook
-      (fun
-        ~base_path:_
-        ~keeper_name:_
-        ~approval_id:_
-        ~decision:_
-        ~continuation_channel:_ ->
-        ())
+        (fun
+          ~base_path:_
+          ~keeper_name:_
+          ~approval_id:_
+          ~decision:_
+          ~channel:_ ->
+          ())
   in
   let submit_resolve_capture ?continuation_channel ~keeper_name () =
     captured := None;
@@ -335,7 +406,7 @@ let test_expire_stale_submit_and_await_does_not_fire_wake_hook () =
   let woke = ref false in
   AQ.set_approval_resolution_wake_hook
     (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~continuation_channel:_ ->
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
       woke := true);
   Fun.protect
     ~finally:(fun () ->
@@ -345,7 +416,7 @@ let test_expire_stale_submit_and_await_does_not_fire_wake_hook () =
           ~keeper_name:_
           ~approval_id:_
           ~decision:_
-          ~continuation_channel:_ ->
+          ~channel:_ ->
           ())
       ; cleanup_dir base_path)
     (fun () ->
@@ -392,8 +463,8 @@ let test_expire_stale_submit_pending_fires_wake_hook () =
       ~keeper_name
       ~approval_id
       ~decision
-      ~continuation_channel ->
-      woke := Some (keeper_name, approval_id, decision, continuation_channel));
+      ~channel ->
+      woke := Some (keeper_name, approval_id, decision, channel));
   Fun.protect
     ~finally:(fun () ->
       AQ.set_approval_resolution_wake_hook
@@ -402,7 +473,7 @@ let test_expire_stale_submit_pending_fires_wake_hook () =
           ~keeper_name:_
           ~approval_id:_
           ~decision:_
-          ~continuation_channel:_ ->
+          ~channel:_ ->
           ())
       ; cleanup_dir base_path)
     (fun () ->
@@ -441,7 +512,9 @@ let test_expire_stale_submit_pending_fires_wake_hook () =
             true
             (Keeper_continuation_channel.same_route
                continuation_channel
-               wake_channel)
+               (Option.value wake_channel
+                  ~default:
+                    (Keeper_continuation_channel.unrouted "test: no wake channel")))
         | None -> Alcotest.fail "submit_pending stale expiry must fire wake hook")
        )
 ;;
@@ -756,6 +829,81 @@ let test_w3c_continuation_delivery_gate () =
        (D.gate_decision ~channel:dashboard ~already_replied:false ~content:"hi"))
 ;;
 
+let reply_tool_call ?typed_outcome ~execution_outcome tool_name
+  : Masc.Keeper_agent_result.tool_call_detail
+  =
+  { tool_name
+  ; provider = "test"
+  ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
+  ; execution_outcome
+  ; typed_outcome
+  ; latency_ms = 1.0
+  ; task_id = None
+  ; route_evidence = None
+  ; input_fingerprint = None
+  ; output_fingerprint = None
+  }
+;;
+
+let test_w3c_reply_delivery_effect_requires_success () =
+  let module F = Masc.Keeper_agent_run_finalize_response in
+  let is_delivered detail =
+    match F.For_testing.reply_delivery_effect_of_tool_call detail with
+    | F.Reply_delivered -> true
+    | F.No_reply_delivery -> false
+  in
+  Alcotest.(check bool) "failed surface post has no delivery effect" false
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Error
+          "keeper_surface_post"));
+  Alcotest.(check bool) "successful surface post has delivery effect" true
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Ok
+          "keeper_surface_post"));
+  Alcotest.(check bool) "typed semantic error cannot claim delivery" false
+    (is_delivered
+       (reply_tool_call
+          ~typed_outcome:(Keeper_tool_outcome.Error { reason = "send failed" })
+          ~execution_outcome:Tool_result.Ok
+          "keeper_surface_post"));
+  Alcotest.(check bool) "keeper message is not a surface reply" false
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Ok
+          "masc_keeper_msg"));
+  Alcotest.(check bool) "MCP-prefixed keeper message is not a surface reply" false
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Ok
+          "mcp__masc__masc_keeper_msg"));
+  let keeper_message =
+    reply_tool_call ~execution_outcome:Tool_result.Ok "masc_keeper_msg"
+  in
+  let channel = Keeper_continuation_channel.Dashboard { thread_id = "thread-1" } in
+  let module D = Masc.Keeper_continuation_delivery in
+  Alcotest.(check bool) "keeper message leaves continuation fallback enabled" true
+    (match
+       F.For_testing.continuation_delivery_gate
+         ~channel
+         ~tool_calls:[ keeper_message ]
+         ~content:"fallback"
+     with
+     | D.Deliver -> true
+     | D.Skip _ -> false);
+  Alcotest.(check bool) "failed keeper message has no delivery effect" false
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Error
+          "masc_keeper_msg"));
+  Alcotest.(check bool) "unrelated successful tool has no delivery effect" false
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Ok
+          "keeper_tasks_list"))
+;;
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
@@ -779,6 +927,10 @@ let () =
             `Quick
             test_submit_pending_resolve_fires_keeper_wake_hook
         ; Alcotest.test_case
+            "explicit blocking callback owns a lane without resolver"
+            `Quick
+            test_blocking_callback_policy_owns_lane_without_resolver
+        ; Alcotest.test_case
             "expire_stale does not fire wake for blocking submit_and_await"
             `Quick
             test_expire_stale_submit_and_await_does_not_fire_wake_hook
@@ -794,6 +946,10 @@ let () =
             "W3c continuation delivery gate is fail-closed"
             `Quick
             test_w3c_continuation_delivery_gate
+        ; Alcotest.test_case
+            "W3c reply delivery effect requires success"
+            `Quick
+            test_w3c_reply_delivery_effect_requires_success
         ] )
     ; ( "summary"
       , [ Alcotest.test_case

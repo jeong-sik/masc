@@ -203,6 +203,40 @@ let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
           ~channel_user_id:user_id;
     }
 
+(* Shared by both the queue consumer's [handle_turn] and [on_stalled]
+   wiring below: both need the same synthetic
+   [Server_routes_http_keeper_stream.keeper_chat_stream_request] built from
+   a dequeued/leased [Keeper_chat_queue.queued_message], and a duplicated
+   copy would silently drift out of sync with [queued_chat_projection] the
+   next time either changes. *)
+let payload_of_queued_message ~keeper_name
+    (queued_message : Keeper_chat_queue.queued_message) :
+    Server_routes_http_keeper_stream.keeper_chat_stream_request =
+  let projection = queued_chat_projection queued_message in
+  { Server_routes_http_keeper_stream.name = keeper_name
+  ; message = queued_message.content
+  ; timeout_sec = None
+  ; turn_instructions = None
+  ; surface_context = None
+  ; channel = projection.payload_channel
+  ; channel_user_id = projection.payload_channel_user_id
+  ; channel_user_name = projection.payload_channel_user_name
+  ; channel_workspace_id = projection.payload_channel_workspace_id
+  ; user_blocks = queued_message.user_blocks
+  ; attachments = queued_message.attachments
+  }
+
+let connector_user_line_recorded_upstream_of_source
+    (source : Keeper_chat_queue.message_source) =
+  (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
+     line recorded at the gate inbound boundary before the message was
+     enqueued, so the turn records the assistant reply only and does not
+     re-write the user line. Dashboard-source queue messages have no
+     upstream recorder, so the turn records both sides. *)
+  match source with
+  | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
+  | Keeper_chat_queue.Dashboard -> false
+
 let trimmed_env_opt name =
   match Sys.getenv_opt name with
   | None -> None
@@ -248,6 +282,16 @@ let log_dashboard_fiber_crash =
 let filteri_with_fair_yield =
   Server_bootstrap_loops_fiber.filteri_with_fair_yield
 let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
+
+(* [Keeper_chat_consumer]'s per-turn dispatch watchdog margin, added on top
+   of [Keeper_runtime_resolved.turn_timeout_sec] to bound [handle_turn]. It
+   exists only to unwedge the consumer's dispatch gate if [handle_turn]
+   itself never returns (see [Keeper_chat_consumer.start]'s .mli); it is not
+   meant to race the turn's own internal timeout, so it must stay
+   comfortably larger than that timeout — 30s covers
+   [Keeper_msg_async.submit]'s own [Eio.Time.with_timeout_exn] race plus its
+   status-write cleanup (Hashtbl/Atomic updates, no I/O) finishing. *)
+let queue_dispatch_watchdog_margin_sec = 30.0
 
 let start_keeper_loops
       ~sw
@@ -512,14 +556,18 @@ let start_keeper_loops
      Keeper_world_observation -> Keeper_approval_queue dependency cycle. Mirrors
      the Fusion_completed/Bg_completed async-completion wakes. *)
   Keeper_approval_queue.set_approval_resolution_wake_hook
-    (fun ~base_path ~keeper_name ~approval_id ~decision ~continuation_channel ->
+    (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
        let resolution =
          Keeper_event_queue.
-           { approval_id
-           ; decision
-           (* RFC-0320 W2b: carry the submission-time continuation channel on
-              the HITL wake. W3 owns delivery/re-engagement. *)
-           ; channel = continuation_channel
+           {
+             approval_id;
+             decision;
+             channel =
+               Option.value
+                 channel
+                 ~default:
+                   (Keeper_continuation_channel.unrouted
+                      "legacy: no approval continuation channel");
            }
        in
        let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
@@ -787,9 +835,9 @@ let start_keeper_loops
      implementation (queue removal, audit event, promise [Reject]
      resolution, on_resolution callback) with a unit test since
      introduction, but was never invoked by any production caller.
-     Result: a HITL approval enqueued by a keeper turn would block
+     Result: a blocking HITL approval enqueued by a keeper turn would block
      [keeper_cycle_decision] forever via the
-     [has_pending_for_keeper → Skip Approval_pending] branch in
+     [has_blocking_pending_for_keeper → Skip Approval_pending] branch in
      [keeper_world_observation.ml:928].  At the 300s stale-watchdog
      threshold the supervisor would respawn the fiber, the same
      approval entry would still be in the queue, and the cycle
@@ -1022,6 +1070,16 @@ let start_keeper_loops
          Keeper_chat_queue.configure_persistence ~base_path;
          Keeper_chat_consumer.start ~sw ~clock
            ~base_path
+           ~dispatch_deadline_sec:
+             (Keeper_runtime_resolved.turn_timeout_sec ()
+              +. queue_dispatch_watchdog_margin_sec)
+           ~on_stalled:(fun ~keeper_name ~queued_message ->
+             let payload = payload_of_queued_message ~keeper_name queued_message in
+             let connector_user_line_recorded_upstream =
+               connector_user_line_recorded_upstream_of_source queued_message.source
+             in
+             Server_routes_http_keeper_stream.persist_queued_turn_stalled ~base_path
+               ~connector_user_line_recorded_upstream ~payload)
            ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
@@ -1033,23 +1091,8 @@ let start_keeper_loops
                Printf.sprintf "keeper-consumer-msg-%d"
                  (int_of_float ((now +. 0.001) *. 1000.0))
              in
-             let projection = queued_chat_projection queued_message in
-             let payload =
-               {
-                 name = keeper_name;
-                 message = queued_message.content;
-                 timeout_sec = None;
-                 turn_instructions = None;
-                 surface_context = None;
-                 channel = projection.payload_channel;
-                 channel_user_id = projection.payload_channel_user_id;
-                 channel_user_name = projection.payload_channel_user_name;
-                 channel_workspace_id = projection.payload_channel_workspace_id;
-                 user_blocks = queued_message.user_blocks;
-                 attachments = queued_message.attachments;
-               }
-             in
-             let agent_name = projection.agent_name in
+             let payload = payload_of_queued_message ~keeper_name queued_message in
+             let agent_name = (queued_chat_projection queued_message).agent_name in
              let events = Keeper_chat_events.create () in
              let closed = ref false in
              let thread_id = "keeper-consumer:" ^ keeper_name in
@@ -1107,32 +1150,39 @@ let start_keeper_loops
                              keeper_name (Printexc.to_string exn))
                          (fun () ->
                            Keeper_chat_slack.adapter_loop ~token
-                             ~channel ~events ())
+                             ~channel ~events
+                             ~on_send_result:(fun result ->
+                               Slack_observability.record_reply
+                                 (match result with
+                                  | Ok () -> Slack_observability.Reply_send_ok
+                                  | Error _ ->
+                                      Slack_observability.Reply_send_failed))
+                             ())
                    | None ->
-                       Log.Keeper.warn
+                       Log.Keeper.error
                          "keeper_chat_consumer: \
-                          SLACK_BOT_TOKEN not set, \
-                          skipping Slack delivery for keeper=%s"
+                          SLACK_BOT_TOKEN not set; \
+                          Slack delivery skipped for keeper=%s \
+                          (queued reply will not be delivered)"
                          keeper_name));
-             (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
-                line recorded at the gate inbound boundary before the message was
-                enqueued, so the turn records the assistant reply only and does
-                not re-write the user line. Dashboard-source queue messages have
-                no upstream recorder, so the turn records both sides. *)
-	             let connector_user_line_recorded_upstream =
-	               match queued_message.source with
-	               | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
-	               | Keeper_chat_queue.Dashboard -> false
-	             in
+             let connector_user_line_recorded_upstream =
+               connector_user_line_recorded_upstream_of_source queued_message.source
+             in
+             (* Derive the typed reply-continuation channel from the queued
+                message source so [process_single_turn] can route the
+                assistant reply to the originating connector (Discord/Slack)
+                or dashboard thread. [dashboard_thread_id] is the same
+                [thread_id] the turn itself uses. *)
              let continuation_channel =
                Keeper_chat_queue.continuation_channel_of_message_source
                  ~dashboard_thread_id:thread_id
                  queued_message.source
              in
-	             process_single_turn ~connector_user_line_recorded_upstream
-	               ~state ~clock ~sw ~auth_token:None
-	               ~thread_id ~continuation_channel ~closed ~client_disconnects:None ~payload ~run_id ~message_id
-	               ~agent_name ~events)
+             process_single_turn ~connector_user_line_recorded_upstream
+               ~queued_turn:true
+               ~state ~clock ~sw ~auth_token:None
+               ~thread_id ~continuation_channel ~closed ~client_disconnects:None
+               ~payload ~run_id ~message_id ~agent_name ~events)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

@@ -301,6 +301,16 @@ module Verification = struct
   let fsm_enabled () =
     Feature_flag_registry.get_bool "MASC_VERIFICATION_FSM_ENABLED"
 
+  (** RFC-0323 G-5 Phase B default-on flip. Default: false (SSOT:
+      [Feature_flag_registry.all_flags]). When true, the done guard treats
+      every task as verification-required (completion routes through
+      submit→approve). The evidence gate is unaffected — it reads
+      [Masc_domain.task_requires_verification] (= contract.strict) directly,
+      so only the done guard flips. Flip only when readiness gate §5 holds:
+      solo-room flip-on starves (no timer backstop, RFC-0220 §5/§11). *)
+  let default_on () =
+    Feature_flag_registry.get_bool "MASC_VERIFICATION_DEFAULT_ON"
+
   (** Maximum time a task may remain AwaitingVerification before surfacing an
       operator-visible timeout. Default: 24h. *)
   let timeout_deadline_seconds () =
@@ -319,7 +329,7 @@ end
     on_resolution callback) and a unit test, but was never invoked
     anywhere in production code.  Result: any HITL approval enqueued
     by a keeper turn would block [keeper_cycle_decision] forever via
-    [has_pending_for_keeper → Skip Approval_pending].  Once the 300s
+    [has_blocking_pending_for_keeper → Skip Approval_pending].  Once the 300s
     stale watchdog fired, the supervisor would respawn the fiber, the
     same approval would still be in the queue, and the cycle would
     repeat indefinitely.  This fork makes the existing timeout policy

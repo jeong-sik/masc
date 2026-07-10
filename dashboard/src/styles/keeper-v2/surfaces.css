@@ -323,7 +323,6 @@ body.rail-resizing .v2-body { transition: none; }
 .bd-av-link:hover { box-shadow: 0 0 0 2px var(--volt); }
 .bd-post-h .ts { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); margin-left: auto; flex: none; }
 .bd-badge { font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 6px; border-radius: var(--radius-xs); border: 1px solid var(--border-main); color: var(--text-dim); background: var(--bg-deep); white-space: nowrap; }
-.bd-badge.state { color: var(--info); border-color: color-mix(in oklab, var(--info) 35%, transparent); }
 .bd-badge.pin { color: var(--volt-strong); border-color: var(--volt-dim); }
 .bd-badge.mod { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 40%, transparent); }
 .bd-post-title { font-size: 13.5px; font-weight: 600; color: var(--text-bright); margin-top: 8px; line-height: 1.4; }
@@ -337,12 +336,6 @@ body.rail-resizing .v2-body { transition: none; }
 .bd-post-foot .replies { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
 .bd-post-foot .karma { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
 .bd-post-foot .karma b { color: var(--volt-strong); font-weight: 600; }
-
-/* state-block post */
-.bd-stateblock { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin-top: 9px; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--bg-sunken); border: 1px dashed var(--border-main); font-family: var(--font-mono); font-size: var(--fs-11); }
-.bd-stateblock .sk { color: var(--text-dim); }
-.bd-stateblock .sv { color: var(--text-mid); }
-.bd-stateblock .sv.hl { color: var(--info); }
 
 /* board composer */
 .bd-composer { flex: none; border-top: 1px solid var(--border-main); background: linear-gradient(0deg, var(--bg-panel), var(--bg-deep)); padding: 10px 18px 14px; }

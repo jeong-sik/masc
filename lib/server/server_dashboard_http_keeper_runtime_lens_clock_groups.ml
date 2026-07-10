@@ -49,10 +49,7 @@ let clock_group_terminal_event group_type event =
   | "turn", ("turn_finished" | "pre_dispatch_blocked") -> true
   | "provider_attempt", "provider_attempt_finished" -> true
   | "tool_batch", "provider_lane_resolved" -> true
-  | ( "checkpoint",
-      ("checkpoint_saved" | "state_snapshot_sidecar_saved" | "working_state_sidecar_saved") )
-    ->
-    true
+  | "checkpoint", "checkpoint_saved" -> true
   | "compaction", ("context_compacted" | "event_bus_correlated") -> true
   | "event_bus_correlation", "event_bus_correlated" -> true
   | _ -> false

@@ -30,14 +30,13 @@ val keeper_context_status_json
 
     Promotes a structured note into the keeper memory bank, queryable
     by [keeper_memory_search]. Body is stored as
-    [**title** content] when [title] is non-empty, mirroring the
-    auto-write path's text shape (priorities, dedup, cap drops are
-    handled by [Keeper_memory_bank.append_memory_notes_from_reply]).
+    [**title** content] when [title] is non-empty. The write is persisted
+    directly with typed [Explicit_memory_write] provenance.
 
     Args (JSON object):
     - [kind] — one of
-      [Keeper_memory_policy.valid_memory_kind_strings] EXCEPT
-      [long_term] (long_term is reserved for tool-result emission).
+      [Keeper_memory_policy.writable_memory_kind_strings]. [long_term] is
+      reserved for tool-result emission.
     - [title] — short hook (≤120 chars). May be empty; then [content]
       stands alone.
     - [content] — body. Required; must be non-empty.
@@ -47,7 +46,8 @@ val keeper_context_status_json
     - On validation failure: [ok=false] with [error_kind] in
       [{invalid_memory_kind, title_too_long, content_empty,
         long_term_via_explicit_write_not_yet_supported}].
-    - On cap drop: [ok=false], [error_kind=rows_dropped_by_cap]. *)
+    - On text-policy rejection or persistence failure: [ok=false] with the
+      corresponding explicit [error_kind]. *)
 val keeper_memory_write_json
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -64,17 +64,17 @@ type memory_write_error_kind =
   | Invalid_memory_kind
   | Title_too_long
   | Content_empty
+  | Content_rejected
   | Long_term_via_explicit_write_not_yet_supported
-  | Rows_dropped_by_cap
+  | Persistence_failed
   | No_memory_write_error
 
 val memory_write_error_kind_to_string : memory_write_error_kind -> string
 
 type memory_write_validation =
   | Memory_write_ok of
-      { kind : string
+      { kind : Keeper_memory_policy.memory_kind
       ; body : string
-      ; snapshot : Keeper_memory_policy.keeper_state_snapshot
       }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind
@@ -82,12 +82,3 @@ type memory_write_validation =
       }
 
 val validate_memory_write_args : Yojson.Safe.t -> memory_write_validation
-
-(** Build the single-field snapshot for a given memory kind.
-    Exposed for sync regression tests pinning the field-to-kind
-    mapping (mirrors
-    [Keeper_memory_bank.memory_candidates_from_snapshot]). *)
-val single_field_snapshot_for_kind
-  :  kind:string
-  -> text:string
-  -> Keeper_memory_policy.keeper_state_snapshot option

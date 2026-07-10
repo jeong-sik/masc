@@ -309,7 +309,7 @@ PR-1 머지 후 PR-2~7 은 모두 같은 SSOT 호출자이므로 **동시 진행
 
 ### Follow-up / 2026-05-21 — runtime organism projection
 
-- **흡수 대상**: `heartbeat stale`, `context ratio breach`, `social_model_recognized`, `fiberAlive`, `stopRequested`, `runtime trace`, `runtime warnings`, `execution.completion_contract_result`, FsmHub raw composite lanes.
+- **흡수 대상**: `heartbeat stale`, `context ratio breach`, `fiberAlive`, `stopRequested`, `runtime trace`, `runtime warnings`, `execution.completion_contract_result`, FsmHub raw composite lanes.
 - **이전 패턴**:
   - `monitoring-runtime.ts` 가 heartbeat/context/social/KSM phase 를 local OR-chain 으로 합류.
   - `keeper-detail-runtime.ts` 가 fiber/stop/trace/warning/completion-contract 를 별도 derive.

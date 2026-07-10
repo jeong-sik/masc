@@ -21,7 +21,7 @@ type compaction_decision =
   | Applied of Compaction_trigger.t
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
-  | Skipped_continuity_reflection of
+  | Skipped_cooldown of
       { hold_s : float
       ; cooldown_sec : int
       }
@@ -40,8 +40,7 @@ val decide_compaction
   -> message_gate:int
   -> token_gate:int
   -> cooldown_sec:int
-  -> last_continuity_update_ts:float
-  -> last_proactive_ts:float
+  -> last_compaction_ts:float
   -> now_ts:float
   -> compaction_decision
 

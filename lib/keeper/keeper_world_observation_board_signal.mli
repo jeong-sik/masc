@@ -22,8 +22,7 @@ val list_posts_after_cursor : float * string option -> Board.post list
 val text : Board_dispatch.board_signal -> string
 
 val match_signal
-  :  continuity_summary:string
-  -> meta:Keeper_meta_contract.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
   -> match_result
 
@@ -46,8 +45,7 @@ val wake_reason_label : wake_reason -> string
 (** Stable string label for logs/metrics. *)
 
 val wake_reason
-  :  continuity_summary:string
-  -> meta:Keeper_meta_contract.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
   -> wake_reason option
 (** [None] means the structural reactive pipeline found no deterministic

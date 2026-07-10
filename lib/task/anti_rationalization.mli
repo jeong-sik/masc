@@ -55,9 +55,10 @@ val valid_verdict_strings : string list
     compilation in [verdict_constructor_name]. *)
 
 (** Which gate produced the verdict. Variant type prevents typos that
-    would silently compile with a stringly-typed field. *)
+    would silently compile with a stringly-typed field. There is no
+    [Evidence] constructor: empty-evidence rejection belongs to L1
+    [Task_completion_gate.decide] (RFC-0337 decision 2 / migration 2). *)
 type gate =
-  | Evidence
   | Length
   | Excuse
   | Contract
@@ -103,7 +104,7 @@ val review :
   ?on_verdict:(review_result -> unit) ->
   ?few_shot_block:string ->
   ?operator_override:bool ->
-  ?sw:Eio.Switch.t ->
+  ?sw:Eio.Switch.t option ->
   review_request -> review_result
 
 (** Check completion notes against a contract. Returns unmet items.

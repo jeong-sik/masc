@@ -34,30 +34,13 @@ type submit_request_spec =
          contract's demanded artifacts apart from what the agent submitted. *)
   }
 
-let first_line text =
-  match String.index_opt text '\n' with
-  | Some i -> String.sub text 0 i
-  | None -> text
-
-let deliverable_claims_completion ~task_id deliverable =
-  let normalized =
-    deliverable
-    |> String.trim
-    |> String.lowercase_ascii
-    |> first_line
-  in
-  normalized <> ""
-  && (String.starts_with
-        ~prefix:(String.lowercase_ascii task_id ^ " completed")
-        normalized
-      || String.starts_with ~prefix:"completed" normalized)
-
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
   let request_kind, request_summary, next_action, board_type, board_title, board_content =
     match Masc_task_handlers.Planning_eio.load config ~task_id:task.id with
     | Ok plan_ctx
-      when deliverable_claims_completion ~task_id:task.id plan_ctx.deliverable ->
+      when Task_completion_claim.deliverable_claims_completion ~task_id:task.id
+             plan_ctx.deliverable ->
         ( "conflict_triage",
           "Conflict verification required: board / planning / mutation path disagree.",
           "Reconcile board / planning / mutation surfaces before ordinary approval.",

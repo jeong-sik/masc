@@ -31,7 +31,7 @@ A PM keeper (`albini`, `active_goal_ids=[goal-pm-flow]`, `current_task_id=null`)
 
 ### 2.3 Why the existing machinery did not catch it
 
-`Keeper_tool_visibility_projection` is the SSOT and provides `render_reference ~context:Schema_allowed` (unbound/unknown names expand into a blocker-report) and `blocker_guidance`. But it has only three consumers (`mcp_server_eio_execute`, `keeper_run_tools_setup`, `keeper_hooks_oas_idle`); the producer at `keeper_tool_execute_command_semantics.ml` is not one of them. Enforcement is voluntary — nothing asserts that other modules route their schema-allowed guidance through the projection. The previous no-op `tool_registration_check.ml` placeholder has been removed; the real boot invariant (`unified_tool_registry.enforce_visible_tag_coverage`) checks only schema↔dispatch-tag presence, never the visibility leg.
+`Keeper_tool_visibility_projection` is the SSOT and provides `render_reference ~context:Schema_allowed` (unbound/unknown names expand into a blocker-report) and `blocker_guidance`. Its surviving consumers are `mcp_server_eio_execute` and `keeper_run_tools_setup`; the producer at `keeper_tool_execute_command_semantics.ml` is not one of them. Enforcement is voluntary — nothing asserts that other modules route their schema-allowed guidance through the projection. The previous no-op `tool_registration_check.ml` placeholder has been removed; the real boot invariant (`unified_tool_registry.enforce_visible_tag_coverage`) checks only schema↔dispatch-tag presence, never the visibility leg.
 
 ## 3. Invariant
 

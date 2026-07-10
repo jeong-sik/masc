@@ -1,6 +1,12 @@
 let temp_dir prefix =
   Filename.temp_dir prefix ""
 
+let approved_action : Keeper_event_queue.hitl_approved_action =
+  { keeper_name = "keeper-hitl-test"
+  ; tool_name = "keeper_continue_after_reconcile"
+  ; input_hash = String.make 64 'a'
+  }
+
 let rec rm_rf path =
   if Sys.file_exists path
   then
@@ -271,17 +277,27 @@ let () =
        (stimulus_to_yojson
           { post_id =
               hitl_resolution_post_id
-                { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
+                { approval_id = "appr-9"
+                ; decision = Hitl_approved approved_action
+                ; channel = Keeper_continuation_channel.unrouted "test"
+                }
           ; urgency = Immediate
           ; arrived_at = 4.0
-          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
+          ; payload =
+              Hitl_resolved
+                { approval_id = "appr-9"
+                ; decision = Hitl_approved approved_action
+                ; channel = Keeper_continuation_channel.unrouted "test"
+                }
           })
    with
    | Ok s ->
      (match s.payload with
-      | Hitl_resolved { approval_id; decision } ->
+      | Hitl_resolved { approval_id; decision = Hitl_approved action } ->
         assert (String.equal approval_id "appr-9");
-        assert (decision = Hitl_approved);
+        assert (String.equal action.keeper_name approved_action.keeper_name);
+        assert (String.equal action.tool_name approved_action.tool_name);
+        assert (String.equal action.input_hash approved_action.input_hash);
         assert (String.equal s.post_id "hitl-approval:appr-9")
       | _ -> Alcotest.fail "Hitl_resolved codec round-trip changed payload shape")
   | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));
@@ -1016,6 +1032,50 @@ let () =
         [ first; second ];
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
+  (* A pending durable stimulus is the structural cooperative-yield signal for
+     an already-running autonomous OAS loop. The classifier reads the same
+     registry queue this test dequeues below; no age, count, or payload text
+     heuristic participates. *)
+  let base_path = temp_dir "keeper-event-queue-autonomous-yield" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      Masc.Keeper_chat_queue.clear ~keeper_name:"keeper-event-queue-yield-test";
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-yield-test" in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-yield-test" in
+      Masc.Keeper_registry.clear ();
+      Masc.Keeper_chat_queue.clear ~keeper_name;
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      (match
+         Masc.Keeper_unified_turn_execution.autonomous_yield_request
+           ~base_path
+           ~keeper_name
+           ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
+       with
+       | None -> ()
+       | Some _ ->
+         Alcotest.fail "empty work queues must not request an autonomous yield");
+      Masc.Keeper_registry_event_queue.enqueue
+        ~base_path
+        keeper_name
+        bootstrap_stim;
+      match
+        Masc.Keeper_unified_turn_execution.autonomous_yield_request
+          ~base_path
+          ~keeper_name
+          ~channel:Masc.Keeper_world_observation.Reactive
+      with
+      | Some
+          { Masc.Keeper_agent_run.reason =
+              Masc.Keeper_agent_run.Durable_stimulus_waiting
+          ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
+          } ->
+        ()
+      | None | Some _ ->
+        Alcotest.fail "pending durable stimulus must request a typed yield");
+
   (* --- crash recovery: consumed stimuli can be put back for replay --- *)
   let base_path = temp_dir "keeper-event-queue-requeue-front" in
   Fun.protect
@@ -1094,7 +1154,7 @@ let () =
      ; payload =
          Hitl_resolved
            { approval_id = "a"
-           ; decision = Hitl_approved
+           ; decision = Hitl_approved approved_action
            ; channel = Keeper_continuation_channel.unrouted "seed"
            }
      }

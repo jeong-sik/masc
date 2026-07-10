@@ -44,6 +44,10 @@ type pending_phase =
   | Awaiting_operator
   | Escalated
 
+type lane_policy =
+  | Nonblocking
+  | Blocking
+
 (** [Agent_sdk.Hooks.approval_decision] alias used as the resolver type. *)
 type decision = Agent_sdk.Hooks.approval_decision
 
@@ -54,8 +58,8 @@ type approval_audit_decision =
 type approval_audit_disposition =
   | Approval_escalated of string
 
-(** Pending approval entry — the suspended-fiber side of the
-    Eio.Promise rendez-vous. *)
+(** Pending approval entry. [lane_policy] records whether this approval owns
+    the Keeper lane independently of whether it has an Eio promise resolver. *)
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -78,12 +82,14 @@ type pending_approval =
   ; disposition : string option
   ; disposition_reason : string option
   ; phase : pending_phase
+  ; lane_policy : lane_policy
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
+  ; channel : Keeper_continuation_channel.t option
   }
 
 (** Persisted auto-approval rule that can satisfy a pending entry
@@ -128,10 +134,22 @@ val risk_level_to_int : risk_level -> int
 val risk_level_of_string : string -> risk_level option
 val pending_phase_to_string : pending_phase -> string
 val pending_phase_of_string : string -> pending_phase option
+val lane_policy_to_string : lane_policy -> string
 val approval_decision_to_string : decision -> string
 val approval_audit_decision_to_string : approval_audit_decision -> string
 val hitl_context_summary_to_yojson : hitl_context_summary -> Yojson.Safe.t
 val summary_status_to_yojson : summary_status -> Yojson.Safe.t
+
+val approved_action_matches_request :
+  Keeper_event_queue.hitl_approved_action ->
+  keeper_name:string ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  bool
+(** Exact structural match for a one-cycle operator approval. Object field
+    order is canonicalized, but no request field is removed or interpreted.
+    This intentionally differs from remembered-rule matching, which has a
+    broader persisted-policy contract. *)
 
 (** {1 Rule store (persisted)} *)
 
@@ -203,12 +221,11 @@ val audit_approval_event :
   ?disposition_reason:string ->
   ?rule_match:rule_match ->
   ?source_approval_id:string ->
-  ?auto_approved:bool ->
   ?actor:string ->
   ?approval_mode:string ->
   ?authorizing_band:string ->
+  ?auto_approved:bool ->
   ?decision:approval_audit_decision ->
-  ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   unit
 
@@ -281,17 +298,19 @@ val submit_and_await :
   ?selected_model:string ->
   ?disposition:string ->
   ?disposition_reason:string ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
   ?critical_escalation_after_s:float ->
-  ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   Agent_sdk.Hooks.approval_decision
 
 (** Submit a tool call for approval without suspending the caller —
     the supplied [on_resolution] callback is invoked when the
-    operator resolves. Returns the new pending entry's id, or the
-    existing id when an equivalent entry is already pending. *)
+    operator resolves. [lane_policy] defaults to [Nonblocking]; lifecycle
+    gates that deliberately pause a keeper must pass [Blocking] and resume
+    that pause from their callback. Returns the new pending entry's id, or
+    the existing id when an equivalent entry with the same policy is pending. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->
@@ -310,29 +329,27 @@ val submit_pending :
   ?disposition:string ->
   ?disposition_reason:string ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?lane_policy:lane_policy ->
   on_resolution:(Agent_sdk.Hooks.approval_decision -> unit) ->
   unit ->
   string
 
 (** {1 Resolve (operator action)} *)
 
-(** Install the hook that wakes a keeper when a non-blocking pending approval
-    is resolved or expired. Blocking [submit_and_await] entries resolve through
-    their resolver promise and must not also enqueue a [Hitl_resolved] wake. This
-    includes the stale-expiry path: expiry must preserve resolver-first behavior for
-    blocking entries and only wake non-blocking entries.
-    Injected (rather than a direct
+(** Install the hook that wakes a keeper when one of its pending approvals is
+    resolved or expires. Injected (rather than a direct
     [Keeper_keepalive_signal] call) to break a dependency cycle: this module
     sits below [Keeper_keepalive_signal], which depends on
     [Keeper_world_observation], which depends back here for
-    [has_pending_for_keeper]. The default is a no-op; [Server_bootstrap]
-    installs the [Hitl_resolved]-stimulus wake. *)
+    [has_blocking_pending_for_keeper]. The default is a no-op;
+    [Server_bootstrap] installs the [Hitl_resolved]-stimulus wake for
+    nonblocking entries. *)
 val set_approval_resolution_wake_hook :
   (base_path:string ->
    keeper_name:string ->
    approval_id:string ->
    decision:Keeper_event_queue.hitl_resolution_decision ->
-   continuation_channel:Keeper_continuation_channel.t ->
+   channel:Keeper_continuation_channel.t option ->
    unit) ->
   unit
 
@@ -374,6 +391,12 @@ val update_pending_entry : id:string -> (pending_approval -> pending_approval) -
 
 val pending_count : unit -> int
 val pending_count_for_keeper : keeper_name:string -> int
+val blocking_pending_count_for_keeper : keeper_name:string -> int
+(** Number of pending approvals with [Blocking] lane policy. *)
+
+val has_blocking_pending_for_keeper : keeper_name:string -> bool
+(** Whether a [Blocking] approval currently owns a live Keeper lane. *)
+
 val has_pending_for_keeper : keeper_name:string -> bool
 
 (** {1 Timeout cleanup} *)

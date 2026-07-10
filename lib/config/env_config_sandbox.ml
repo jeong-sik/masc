@@ -172,7 +172,7 @@ module Shell_timeout = struct
     | Git_meta -> Some 5.0
     | Gh_min -> Some (timeout_floor_default_sec Tool_dispatch_floor)
     | User_max -> Some 180.0
-    | Cleanup_rm -> Some 5.0
+    | Cleanup_rm -> Some 10.0
     | Unknown _ -> None
 
   let upper_case s =

@@ -1,30 +1,6 @@
 import { asNumber, asString, isRecord } from './components/common/normalize'
 import type { KeeperConversationDetails, KeeperTurnOutcome } from './types'
 
-const STATE_START = '[STATE]'
-const STATE_END = '[/STATE]'
-
-function extractStateBlock(text: string): string | null {
-  const start = text.indexOf(STATE_START)
-  if (start < 0) return null
-  const bodyStart = start + STATE_START.length
-  const end = text.indexOf(STATE_END, bodyStart)
-  if (end < 0) return null
-  const state = text.slice(bodyStart, end).trim()
-  return state || null
-}
-
-export function stripStateBlocks(text: string): string {
-  let next = text
-  for (;;) {
-    const start = next.indexOf(STATE_START)
-    if (start < 0) return next
-    const end = next.indexOf(STATE_END, start + STATE_START.length)
-    if (end < 0) return next.slice(0, start)
-    next = `${next.slice(0, start)}${next.slice(end + STATE_END.length)}`
-  }
-}
-
 function stripSkillRouteLines(text: string): string {
   return text
     .split('\n')
@@ -36,9 +12,7 @@ function stripSkillRouteLines(text: string): string {
 }
 
 export function formatKeeperVisibleReply(reply: string): string {
-  const withoutSkill = stripSkillRouteLines(reply)
-  const withoutState = stripStateBlocks(withoutSkill)
-  return withoutState.replace(/\n{3,}/g, '\n\n').trim()
+  return stripSkillRouteLines(reply).replace(/\n{3,}/g, '\n\n').trim()
 }
 
 // RFC-0232 P2: closed decode of the producer-typed `turn_outcome` label.
@@ -93,7 +67,6 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
   if (!payload) return null
 
   const reply = asString(payload.reply) ?? ''
-  const stateBlock = reply ? extractStateBlock(reply) : null
   const usage = normalizeKeeperUsage(payload.usage)
 
   return {
@@ -108,7 +81,6 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
     usage,
     skillPrimary: asString(payload.skill_primary) ?? null,
     skillReason: asString(payload.skill_reason) ?? null,
-    stateBlock,
     replyText: reply || null,
     turnOutcome: normalizeKeeperTurnOutcome(payload.turn_outcome),
     rawPayload: payload,

@@ -106,6 +106,13 @@ let override_text (d : Agent_sdk.Hooks.hook_decision) : string =
 
 let no_gate_observer = KG.ignore_gate_decision
 
+let check_single_observed_decision ~label ~expected observed =
+  match !observed with
+  | [ event ] ->
+    check string label expected (KG.gate_decision_to_string event.KG.decision)
+  | events ->
+    failf "%s: expected one observer event, got %d" label (List.length events)
+
 (* ----------------------------------------------------------------- *)
 (* Utility tests                                                      *)
 (* ----------------------------------------------------------------- *)
@@ -136,6 +143,10 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+(* Retired security-sensitive knob retained only as a regression input: setting
+   it must not alter the governance decision. *)
+let retired_code_exempt_keepers_env_key = "MASC_CODE_EXEMPT_KEEPERS"
+
 let test_render_inline_skip_reason () =
   let s = KG.render_inline_skip_reason
     ~tool_name:"tool_read_file"
@@ -163,12 +174,16 @@ let test_render_inline_skip_reason () =
 let test_gate_decision_vocabulary () =
   check string "override" "override"
     (KG.gate_decision_to_string KG.Gate_override);
+  check string "block" "block"
+    (KG.gate_decision_to_string KG.Gate_block);
   check string "continue" "continue"
     (KG.gate_decision_to_string KG.Gate_continue);
   check string "approval_required" "approval_required"
     (KG.gate_decision_to_string KG.Gate_approval_required);
   check bool "override rejects" true
     (KG.gate_decision_is_rejection KG.Gate_override);
+  check bool "block rejects" true
+    (KG.gate_decision_is_rejection KG.Gate_block);
   check bool "continue does not reject" false
     (KG.gate_decision_is_rejection KG.Gate_continue);
   check bool "approval waits without rejection" false
@@ -285,7 +300,7 @@ let test_deny_guard_notifies_gate_observer () =
   | [ event ] ->
     check string "stage" "keeper_deny" event.KG.stage;
     check string "keeper_name" "test_keeper" event.KG.keeper_name;
-    check string "decision" "override"
+    check string "decision" "block"
       (KG.gate_decision_to_string event.KG.decision);
     check string "reason_code" "keeper_deny" event.KG.reason_code;
     check string "tool_name" "dangerous_tool" event.KG.tool_name;
@@ -367,6 +382,34 @@ let test_cost_guard_disabled () =
   in
   check string "no budget -> Continue" "Continue" (decision_kind d)
 
+let test_destructive_guard_notifies_block_observer () =
+  let meta_ref = make_meta_ref "test_keeper" in
+  let observed = ref [] in
+  let on_gate_decision event = observed := event :: !observed in
+  let hook =
+    KG.destructive_guard
+      ~meta_ref
+      ~on_gate_decision
+      ~policy:Masc.Destructive_ops_policy.default
+  in
+  let d =
+    invoke hook
+      (pre_tool_use_event
+         ~tool_name:"shell_exec"
+         ~input:(`Assoc [ ("command", `String "rm -rf /") ])
+         ())
+  in
+  check string "destructive command -> Block" "Block" (decision_kind d);
+  match !observed with
+  | [ event ] ->
+    check string "stage" "destructive_guard" event.KG.stage;
+    check string "decision" "block"
+      (KG.gate_decision_to_string event.KG.decision);
+    check string "reason_code" "destructive_guard" event.KG.reason_code;
+    check string "tool_name" "shell_exec" event.KG.tool_name
+  | events ->
+    failf "expected one destructive observer event, got %d" (List.length events)
+
 let test_streak_guard_under_threshold () =
   let meta_ref = make_meta_ref "test_keeper" in
   let state = KG.make_streak_state () in
@@ -383,8 +426,10 @@ let test_streak_guard_under_threshold () =
 let test_streak_guard_at_threshold () =
   let meta_ref = make_meta_ref "test_keeper" in
   let state = KG.make_streak_state () in
+  let observed = ref [] in
+  let on_gate_decision event = observed := event :: !observed in
   let hook =
-    KG.streak_guard ~meta_ref ~on_gate_decision:no_gate_observer
+    KG.streak_guard ~meta_ref ~on_gate_decision
       ~state ~threshold:5
   in
   (* 4 calls Continue, 5th blocks *)
@@ -396,7 +441,11 @@ let test_streak_guard_at_threshold () =
   check string "5th consecutive -> Override" "Override" (decision_kind d);
   let text = override_text d in
   check bool "override mentions streak_gate" true
-    (contains_substring text "code=streak_gate")
+    (contains_substring text "code=streak_gate");
+  check_single_observed_decision
+    ~label:"streak telemetry stays override"
+    ~expected:"override"
+    observed
 
 let test_streak_guard_resets_on_different_tool () =
   let meta_ref = make_meta_ref "test_keeper" in
@@ -429,14 +478,16 @@ let test_streak_state_manual_reset () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"t" ()) in
   check string "after reset -> Continue" "Continue" (decision_kind d)
 
-let readonly_observation_hook () =
+let readonly_observation_hook ?(on_gate_decision = no_gate_observer) () =
   let meta_ref = make_meta_ref "test_keeper" in
   let state = KG.make_readonly_observation_state () in
   KG.readonly_observation_duplicate_guard
-    ~meta_ref ~on_gate_decision:no_gate_observer ~state
+    ~meta_ref ~on_gate_decision ~state
 
 let test_readonly_observation_duplicate_blocks_same_input () =
-  let hook = readonly_observation_hook () in
+  let observed = ref [] in
+  let on_gate_decision event = observed := event :: !observed in
+  let hook = readonly_observation_hook ~on_gate_decision () in
   let input = `Assoc [ ("limit", `Int 15) ] in
   let first =
     invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
@@ -456,7 +507,11 @@ let test_readonly_observation_duplicate_blocks_same_input () =
     "Override" (decision_kind second);
   let text = override_text second in
   check bool "override mentions readonly duplicate" true
-    (contains_substring text "code=readonly_observation_duplicate")
+    (contains_substring text "code=readonly_observation_duplicate");
+  check_single_observed_decision
+    ~label:"readonly duplicate telemetry stays override"
+    ~expected:"override"
+    observed
 
 let test_readonly_observation_duplicate_blocks_pending_same_input () =
   let hook = readonly_observation_hook () in
@@ -748,14 +803,20 @@ let test_readonly_observation_duplicate_exempts_polling_read () =
 
 let test_custom_guard_blocks () =
   let meta_ref = make_meta_ref "test_keeper" in
+  let observed = ref [] in
+  let on_gate_decision event = observed := event :: !observed in
   let guard ~tool_name ~input:_ =
     if tool_name = "bad" then Some "user blocked" else None
   in
   let hook =
-    KG.custom_guard ~meta_ref ~on_gate_decision:no_gate_observer ~guard
+    KG.custom_guard ~meta_ref ~on_gate_decision ~guard
   in
   let d = invoke hook (pre_tool_use_event ~tool_name:"bad" ()) in
-  check string "custom blocked -> Override" "Override" (decision_kind d)
+  check string "custom blocked -> Override" "Override" (decision_kind d);
+  check_single_observed_decision
+    ~label:"custom telemetry stays override"
+    ~expected:"override"
+    observed
 
 let test_custom_guard_passthrough () =
   let meta_ref = make_meta_ref "test_keeper" in
@@ -766,9 +827,10 @@ let test_custom_guard_passthrough () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"ok" ()) in
   check string "custom None -> Continue" "Continue" (decision_kind d)
 
-let test_governance_approval_notifies_gate_observer () =
+let test_governance_approval_legacy_exemption_cannot_bypass_high () =
   with_env "MASC_GOVERNANCE_LEVEL" "production" (fun () ->
   with_env "MASC_DISABLE_HITL" "false" (fun () ->
+  with_env retired_code_exempt_keepers_env_key "test_keeper" (fun () ->
     let meta_ref = make_meta_ref "test_keeper" in
     let observed = ref [] in
     let on_gate_decision event = observed := event :: !observed in
@@ -779,7 +841,7 @@ let test_governance_approval_notifies_gate_observer () =
            ~input:(`Assoc [ ("title", `String "follow up") ])
            ())
     in
-    check string "high-risk tool -> ApprovalRequired"
+    check string "legacy exemption cannot bypass high-risk approval"
       "ApprovalRequired" (decision_kind d);
     match !observed with
     | [ event ] ->
@@ -796,7 +858,39 @@ let test_governance_approval_notifies_gate_observer () =
          | Some line -> line > 0
          | None -> false)
   | events ->
-      failf "expected one observer event, got %d" (List.length events)))
+      failf "expected one observer event, got %d" (List.length events))))
+
+let test_governance_approval_critical_code_blocks_with_legacy_exemption () =
+  with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+  with_env retired_code_exempt_keepers_env_key "test_keeper" (fun () ->
+    let meta_ref = make_meta_ref "test_keeper" in
+    let observed = ref [] in
+    let on_gate_decision event = observed := event :: !observed in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let d =
+      invoke hook
+        (pre_tool_use_event ~tool_name:"tool_execute"
+           ~input:(`Assoc [ ("cmd", `String "git status") ])
+           ())
+    in
+    check string "legacy exemption cannot bypass critical code block"
+      "Block" (decision_kind d);
+    check bool "override carries hard-forbidden reason" true
+      (contains_substring (override_text d) "code=hard_forbidden");
+    match !observed with
+    | [ event ] ->
+      check string "stage" "governance_approval" event.KG.stage;
+      check string "decision" "block"
+        (KG.gate_decision_to_string event.KG.decision);
+      check string "reason_code" "hard_forbidden" event.KG.reason_code;
+      check string "tool_name" "tool_execute" event.KG.tool_name;
+      check (option string) "source_path"
+        (Some "lib/keeper/keeper_guards.ml")
+        event.KG.source_path
+    | events ->
+      failf "expected one hard-forbidden observer event, got %d"
+        (List.length events))))
 
 let test_governance_approval_hard_forbidden_blocks_without_hitl () =
   with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
@@ -813,12 +907,12 @@ let test_governance_approval_hard_forbidden_blocks_without_hitl () =
     in
     check string "critical hard-forbidden tool -> Block"
       "Block" (decision_kind d);
-    check bool "override carries hard-forbidden reason" true
+    check bool "block carries hard-forbidden reason" true
       (contains_substring (override_text d) "code=hard_forbidden");
     match !observed with
     | [ event ] ->
       check string "stage" "governance_approval" event.KG.stage;
-      check string "decision" "override"
+      check string "decision" "block"
         (KG.gate_decision_to_string event.KG.decision);
       check string "reason_code" "hard_forbidden" event.KG.reason_code;
       check string "tool_name" "masc_force_reset" event.KG.tool_name;
@@ -851,7 +945,7 @@ let test_governance_approval_serious_blocker_overrides () =
     in
     check string "serious last_blocker -> Block"
       "Block" (decision_kind d);
-    check bool "override carries hard-forbidden reason" true
+    check bool "block carries hard-forbidden reason" true
       (contains_substring (override_text d) "code=hard_forbidden")))
 
 let test_governance_approval_transient_blocker_allows () =
@@ -985,6 +1079,10 @@ let () = run "Keeper_guards" [
     test_case "continues under limit" `Quick test_cost_guard_under_limit;
     test_case "no budget -> continue" `Quick test_cost_guard_disabled;
   ];
+  "destructive_guard", [
+    test_case "notifies observer on block" `Quick
+      test_destructive_guard_notifies_block_observer;
+  ];
   "streak_guard", [
     test_case "under threshold -> continue" `Quick test_streak_guard_under_threshold;
     test_case "at threshold -> override" `Quick test_streak_guard_at_threshold;
@@ -1022,9 +1120,11 @@ let () = run "Keeper_guards" [
     test_case "user passes through" `Quick test_custom_guard_passthrough;
   ];
   "governance_approval_guard", [
-    test_case "notifies observer on approval required" `Quick
-      test_governance_approval_notifies_gate_observer;
-    test_case "hard-forbidden overrides without HITL" `Quick
+    test_case "legacy exemption cannot bypass high-risk approval" `Quick
+      test_governance_approval_legacy_exemption_cannot_bypass_high;
+    test_case "critical code blocks with legacy exemption" `Quick
+      test_governance_approval_critical_code_blocks_with_legacy_exemption;
+    test_case "hard-forbidden blocks without HITL" `Quick
       test_governance_approval_hard_forbidden_blocks_without_hitl;
     test_case "serious last_blocker overrides without HITL" `Quick
       test_governance_approval_serious_blocker_overrides;

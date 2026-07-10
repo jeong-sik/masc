@@ -6,11 +6,6 @@ type metrics_summary = {
   turn_points : int;
   heartbeat_points : int;
   proactive_points : int;
-  auto_reflect_count : int;
-  auto_plan_count : int;
-  auto_compact_count : int;
-  auto_handoff_count : int;
-  guardrail_stop_count : int;
   drift_applied_count : int;
   handoff_count : int;
   compaction_events : int;
@@ -27,14 +22,6 @@ type metrics_summary = {
   memory_score_sum : float;
   memory_weather_checks : int;
   memory_weather_passed : int;
-  repetition_risk_sum : float;
-  repetition_risk_points : int;
-  goal_alignment_sum : float;
-  goal_alignment_points : int;
-  response_alignment_sum : float;
-  response_alignment_points : int;
-  goal_drift_sum : float;
-  goal_drift_points : int;
   last_handoff : Yojson.Safe.t option;
   last_compaction : Yojson.Safe.t option;
 }
@@ -77,11 +64,6 @@ let empty_metrics_summary =
     turn_points = 0;
     heartbeat_points = 0;
     proactive_points = 0;
-    auto_reflect_count = 0;
-    auto_plan_count = 0;
-    auto_compact_count = 0;
-    auto_handoff_count = 0;
-    guardrail_stop_count = 0;
     drift_applied_count = 0;
     handoff_count = 0;
     compaction_events = 0;
@@ -98,14 +80,6 @@ let empty_metrics_summary =
     memory_score_sum = 0.0;
     memory_weather_checks = 0;
     memory_weather_passed = 0;
-    repetition_risk_sum = 0.0;
-    repetition_risk_points = 0;
-    goal_alignment_sum = 0.0;
-    goal_alignment_points = 0;
-    response_alignment_sum = 0.0;
-    response_alignment_points = 0;
-    goal_drift_sum = 0.0;
-    goal_drift_points = 0;
     last_handoff = None;
     last_compaction = None;
   }
@@ -133,26 +107,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
     if interaction_points = 0 then 0.0
     else float_of_int s.drift_applied_count /. float_of_int interaction_points
   in
-  let auto_reflect_rate =
-    if interaction_points = 0 then 0.0
-    else float_of_int s.auto_reflect_count /. float_of_int interaction_points
-  in
-  let auto_plan_rate =
-    if interaction_points = 0 then 0.0
-    else float_of_int s.auto_plan_count /. float_of_int interaction_points
-  in
-  let auto_compact_rate =
-    if interaction_points = 0 then 0.0
-    else float_of_int s.auto_compact_count /. float_of_int interaction_points
-  in
-  let auto_handoff_rate =
-    if interaction_points = 0 then 0.0
-    else float_of_int s.auto_handoff_count /. float_of_int interaction_points
-  in
-  let guardrail_stop_rate =
-    if interaction_points = 0 then 0.0
-    else float_of_int s.guardrail_stop_count /. float_of_int interaction_points
-  in
   let memory_pass_rate =
     if s.memory_checks = 0 then 0.0
     else float_of_int s.memory_passed /. float_of_int s.memory_checks
@@ -177,22 +131,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
       float_of_int s.memory_compaction_dropped_notes
       /. float_of_int s.memory_compaction_events
   in
-  let repetition_risk_avg =
-    if s.repetition_risk_points = 0 then 0.0
-    else s.repetition_risk_sum /. float_of_int s.repetition_risk_points
-  in
-  let goal_alignment_avg =
-    if s.goal_alignment_points = 0 then 0.0
-    else s.goal_alignment_sum /. float_of_int s.goal_alignment_points
-  in
-  let response_alignment_avg =
-    if s.response_alignment_points = 0 then 0.0
-    else s.response_alignment_sum /. float_of_int s.response_alignment_points
-  in
-  let goal_drift_avg =
-    if s.goal_drift_points = 0 then 0.0
-    else s.goal_drift_sum /. float_of_int s.goal_drift_points
-  in
   `Assoc
     [
       ("sample_points", `Int s.sample_points);
@@ -202,16 +140,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
       ("window_interactions", `Int interaction_points);
       ("intervention_share", `Float intervention_share);
       ("intervention_per_turn", `Float intervention_per_turn);
-      ("auto_reflect_count", `Int s.auto_reflect_count);
-      ("auto_plan_count", `Int s.auto_plan_count);
-      ("auto_compact_count", `Int s.auto_compact_count);
-      ("auto_handoff_count", `Int s.auto_handoff_count);
-      ("guardrail_stop_count", `Int s.guardrail_stop_count);
-      ("auto_reflect_rate", `Float auto_reflect_rate);
-      ("auto_plan_rate", `Float auto_plan_rate);
-      ("auto_compact_rate", `Float auto_compact_rate);
-      ("auto_handoff_rate", `Float auto_handoff_rate);
-      ("guardrail_stop_rate", `Float guardrail_stop_rate);
       ("drift_applied_count", `Int s.drift_applied_count);
       ("drift_applied_rate", `Float drift_applied_rate);
       ("handoff_count", `Int s.handoff_count);
@@ -233,10 +161,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
       ("memory_weather_checks", `Int s.memory_weather_checks);
       ("memory_weather_passed", `Int s.memory_weather_passed);
       ("memory_weather_pass_rate", `Float memory_weather_pass_rate);
-      ("repetition_risk_avg", `Float repetition_risk_avg);
-      ("goal_alignment_avg", `Float goal_alignment_avg);
-      ("response_alignment_avg", `Float response_alignment_avg);
-      ("goal_drift_avg", `Float goal_drift_avg);
       ("last_handoff", match s.last_handoff with Some j -> j | None -> `Null);
       ("last_compaction", match s.last_compaction with Some j -> j | None -> `Null);
     ]
@@ -331,36 +255,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
         let memory_is_weather =
           match memory_expected_topic with Some "weather" -> true | _ -> false
         in
-        let auto_rules = m "auto_rules" in
-        let auto_reflect_now =
-          Safe_ops.json_bool
-            ~default:(Safe_ops.json_bool ~default:false "reflect" auto_rules)
-            "auto_reflect" j
-        in
-        let auto_plan_now =
-          Safe_ops.json_bool
-            ~default:(Safe_ops.json_bool ~default:false "plan" auto_rules)
-            "auto_plan" j
-        in
-        let auto_compact_now =
-          Safe_ops.json_bool
-            ~default:(Safe_ops.json_bool ~default:false "compact" auto_rules)
-            "auto_compact" j
-        in
-        let auto_handoff_now =
-          Safe_ops.json_bool
-            ~default:(Safe_ops.json_bool ~default:false "handoff" auto_rules)
-            "auto_handoff" j
-        in
-        let guardrail_stop_now =
-          Safe_ops.json_bool
-            ~default:(Safe_ops.json_bool ~default:false "guardrail_stop" auto_rules)
-            "guardrail_stop" j
-        in
-        let repetition_risk_opt = Safe_ops.json_float_opt "repetition_risk" j in
-        let goal_alignment_opt = Safe_ops.json_float_opt "goal_alignment" j in
-        let response_alignment_opt = Safe_ops.json_float_opt "response_alignment" j in
-        let goal_drift_opt = Safe_ops.json_float_opt "goal_drift" j in
         let handoff_json =
           if handoff_performed then
             Some
@@ -403,16 +297,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           heartbeat_points = acc.heartbeat_points + (if is_heartbeat then 1 else 0);
           proactive_points =
             acc.proactive_points + (if is_scheduled_autonomous then 1 else 0);
-          auto_reflect_count =
-            acc.auto_reflect_count + (if is_interaction && auto_reflect_now then 1 else 0);
-          auto_plan_count =
-            acc.auto_plan_count + (if is_interaction && auto_plan_now then 1 else 0);
-          auto_compact_count =
-            acc.auto_compact_count + (if is_interaction && auto_compact_now then 1 else 0);
-          auto_handoff_count =
-            acc.auto_handoff_count + (if is_interaction && auto_handoff_now then 1 else 0);
-          guardrail_stop_count =
-            acc.guardrail_stop_count + (if is_interaction && guardrail_stop_now then 1 else 0);
           drift_applied_count =
             acc.drift_applied_count + (if is_interaction && drift_applied_now then 1 else 0);
           handoff_count =
@@ -457,28 +341,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           memory_weather_passed =
             acc.memory_weather_passed
             + (if is_interaction && memory_performed && memory_is_weather && memory_passed then 1 else 0);
-          repetition_risk_sum =
-            acc.repetition_risk_sum
-            +. (match repetition_risk_opt with Some v -> v | None -> 0.0);
-          repetition_risk_points =
-            acc.repetition_risk_points + (if Option.is_some repetition_risk_opt then 1 else 0);
-          goal_alignment_sum =
-            acc.goal_alignment_sum
-            +. (match goal_alignment_opt with Some v -> v | None -> 0.0);
-          goal_alignment_points =
-            acc.goal_alignment_points + (if Option.is_some goal_alignment_opt then 1 else 0);
-          response_alignment_sum =
-            acc.response_alignment_sum
-            +. (if is_interaction then Option.value ~default:0.0 response_alignment_opt else 0.0);
-          response_alignment_points =
-            acc.response_alignment_points
-            + (if is_interaction && Option.is_some response_alignment_opt then 1 else 0);
-          goal_drift_sum =
-            acc.goal_drift_sum
-            +. (if is_interaction then Option.value ~default:0.0 goal_drift_opt else 0.0);
-          goal_drift_points =
-            acc.goal_drift_points
-            + (if is_interaction && Option.is_some goal_drift_opt then 1 else 0);
           last_handoff = handoff_json;
           last_compaction = compaction_json;
         }

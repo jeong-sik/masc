@@ -33,7 +33,7 @@ PRESSURE_BYTES="${PRESSURE_BYTES:-20000}"
 PRESSURE_PAUSE_SEC="${PRESSURE_PAUSE_SEC:-1}"
 KEEPER_COMPACTION_RATIO_GATE="${KEEPER_COMPACTION_RATIO_GATE:-0.10}"
 KEEPER_COMPACTION_MESSAGE_GATE="${KEEPER_COMPACTION_MESSAGE_GATE:-2}"
-KEEPER_CONTINUITY_COOLDOWN_SEC="${KEEPER_CONTINUITY_COOLDOWN_SEC:-0}"
+KEEPER_COMPACTION_COOLDOWN_SEC="${KEEPER_COMPACTION_COOLDOWN_SEC:-0}"
 KEEPER_HANDOFF_THRESHOLD="${KEEPER_HANDOFF_THRESHOLD:-0.01}"
 
 SERVER_PID=""
@@ -399,6 +399,50 @@ runtime_terminal_summary() {
   trim_preview "$summary"
 }
 
+CHECKPOINT_FILE=""
+CHECKPOINT_MESSAGE_COUNT=""
+CHECKPOINT_ERROR=""
+
+load_checkpoint_evidence() {
+  local status_json="$1"
+  local trace_id candidate
+
+  CHECKPOINT_FILE=""
+  CHECKPOINT_MESSAGE_COUNT=""
+  CHECKPOINT_ERROR=""
+  trace_id="$(printf '%s' "$status_json" | jq -r '.meta.trace_id // empty')"
+  if [[ -z "$trace_id" ]]; then
+    CHECKPOINT_ERROR="trace_id missing from keeper status"
+    return 1
+  fi
+
+  for candidate in \
+    "${BASE_PATH}/.masc/keepers/${KEEPER_NAME}/${trace_id}/${trace_id}.json" \
+    "${BASE_PATH}/.masc/traces/${trace_id}/${trace_id}.json"; do
+    if [[ -f "$candidate" ]]; then
+      CHECKPOINT_FILE="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$CHECKPOINT_FILE" ]]; then
+    CHECKPOINT_ERROR="checkpoint file not found for trace ${trace_id}"
+    return 1
+  fi
+
+  if ! CHECKPOINT_MESSAGE_COUNT="$(jq -er '
+    if (.messages | type) == "array" then (.messages | length)
+    else error("messages is not an array")
+    end
+  ' "$CHECKPOINT_FILE" 2>/dev/null)"; then
+    CHECKPOINT_ERROR="checkpoint JSON is invalid or has no typed messages array: ${CHECKPOINT_FILE}"
+    return 1
+  fi
+  if [[ "$CHECKPOINT_MESSAGE_COUNT" -le 0 ]]; then
+    CHECKPOINT_ERROR="checkpoint contains no messages: ${CHECKPOINT_FILE}"
+    return 1
+  fi
+}
+
 wait_for_bootstrap() {
   local deadline=$(( $(date +%s) + HEARTBEAT_WAIT_SEC ))
   local status_json
@@ -491,7 +535,7 @@ create_keeper() {
     --arg runtime_id "$KEEPER_RUNTIME_NAME" \
     --argjson compaction_ratio_gate "$KEEPER_COMPACTION_RATIO_GATE" \
     --argjson compaction_message_gate "$KEEPER_COMPACTION_MESSAGE_GATE" \
-    --argjson continuity_compaction_cooldown_sec "$KEEPER_CONTINUITY_COOLDOWN_SEC" \
+    --argjson compaction_cooldown_sec "$KEEPER_COMPACTION_COOLDOWN_SEC" \
     --argjson handoff_threshold "$KEEPER_HANDOFF_THRESHOLD" \
     '{
       name:$name,
@@ -503,7 +547,7 @@ create_keeper() {
       compaction_ratio_gate:$compaction_ratio_gate,
       compaction_message_gate:$compaction_message_gate,
       compaction_token_gate:0,
-      continuity_compaction_cooldown_sec:$continuity_compaction_cooldown_sec,
+      compaction_cooldown_sec:$compaction_cooldown_sec,
       handoff_threshold:$handoff_threshold,
       handoff_cooldown_sec:30,
       drift_enabled:false
@@ -738,9 +782,9 @@ EOF
 EOF
   else
     cat >>"$RUN_DIR/summary.md" <<'EOF'
-- **PASS**: real live keeper continuity proven. Heartbeat, live turns, continuity updates, compaction, handoff, and restart recovery all produced runtime evidence.
-- **PARTIAL**: keeper was live and continuity updated, but one or more lifecycle transitions did not happen within the validation window.
-- **FAIL**: only stale metadata or heuristic summaries were observed; a live continuity lifecycle was not proven.
+- **PASS**: real live keeper continuity proven. Heartbeat, completed turns, typed checkpoint messages, compaction, handoff, and restart recovery all produced runtime evidence.
+- **PARTIAL**: keeper was live and a typed checkpoint was observed, but one or more lifecycle transitions did not happen within the validation window.
+- **FAIL**: the typed checkpoint and lifecycle evidence required for live continuity was not observed.
 EOF
   fi
 
@@ -779,7 +823,7 @@ EOF
 
 real_run() {
   local status_json heartbeat_output snapshot_info snapshot_file heartbeat_file workspace_file
-  local baseline_continuity_ts baseline_compactions baseline_generation baseline_handoffs baseline_trace
+  local baseline_compactions baseline_generation baseline_handoffs baseline_trace
   local turn status_after heartbeat_after agent_name compaction_done handoff_done
 
   require_cmd jq || { echo "jq is required" >&2; return 1; }
@@ -887,7 +931,6 @@ real_run() {
   snapshot_info="$(capture_snapshot baseline)"
   snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
   status_json="$(cat "$snapshot_file")"
-  baseline_continuity_ts="$(printf '%s' "$status_json" | jq -r '(.meta.last_continuity_update_ts | tonumber?) // 0')"
   baseline_compactions="$(printf '%s' "$status_json" | jq -r '((.compaction_count // .meta.compaction_count) | tonumber?) // 0')"
   baseline_generation="$(printf '%s' "$status_json" | jq -r '((.generation // .meta.generation) | tonumber?) // 0')"
   baseline_handoffs="$(printf '%s' "$status_json" | jq -r '(.handoff_count_total | tonumber?) // 0')"
@@ -906,31 +949,29 @@ real_run() {
       append_phase "continuity" "fail" "continuity turn failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
-	    if ! wait_for_keeper_status_condition "(((.meta.total_turns | tonumber?) // 0) > $continuity_baseline_turns) and (((.meta.last_continuity_update_ts | tonumber?) // 0) > ($baseline_continuity_ts | tonumber)) and (((.continuity_summary // .meta.continuity_summary // \"\") | length) > 0)" "$((TURN_TIMEOUT_SEC + 30))" >/dev/null; then
-	      snapshot_info="$(capture_snapshot continuity)"
-	      snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
-	      heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
-	      status_json="$(cat "$snapshot_file")"
-	      runtime_summary="$(runtime_terminal_summary "$status_json" "$((continuity_baseline_turns + 1))")"
-	      if [[ -n "$runtime_summary" ]]; then
-	        append_phase "continuity" "fail" "keeper message was queued but continuity did not update before timeout; $runtime_summary" "$snapshot_file" "$heartbeat_file"
-	      else
-	        append_phase "continuity" "fail" "keeper message was queued but continuity did not update before timeout" "$snapshot_file" "$heartbeat_file"
-	      fi
-	      return 1
-	    fi
+    if ! wait_for_keeper_status_condition "((.meta.total_turns | tonumber?) // 0) > $continuity_baseline_turns" "$((TURN_TIMEOUT_SEC + 30))" >/dev/null; then
+      snapshot_info="$(capture_snapshot continuity)"
+      snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
+      heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
+      status_json="$(cat "$snapshot_file")"
+      runtime_summary="$(runtime_terminal_summary "$status_json" "$((continuity_baseline_turns + 1))")"
+      if [[ -n "$runtime_summary" ]]; then
+        append_phase "continuity" "fail" "keeper message was queued but no completed turn was observed; $runtime_summary" "$snapshot_file" "$heartbeat_file"
+      else
+        append_phase "continuity" "fail" "keeper message was queued but no completed turn was observed" "$snapshot_file" "$heartbeat_file"
+      fi
+      return 1
+    fi
     snapshot_info="$(capture_snapshot continuity)"
     snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
     heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
     status_json="$(cat "$snapshot_file")"
     refresh_latest_evidence_from_status "$status_json"
-    if [[ "$(printf '%s' "$status_json" | jq -r '(((.meta.last_continuity_update_ts | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_continuity_ts")" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '(.continuity_summary // .meta.continuity_summary // "") | length > 0')" == "true" ]]; then
+    if load_checkpoint_evidence "$status_json"; then
       CONTINUITY_PASS=1
-      append_phase "continuity" "pass" "continuity summary and timestamp advanced after a real turn" "$snapshot_file" "$heartbeat_file"
-      baseline_continuity_ts="$(printf '%s' "$status_json" | jq -r '(.meta.last_continuity_update_ts | tonumber?) // 0')"
+      append_phase "continuity" "pass" "typed checkpoint contains ${CHECKPOINT_MESSAGE_COUNT} messages after a real turn" "$snapshot_file" "$heartbeat_file"
     else
-      append_phase "continuity" "fail" "continuity summary did not advance after a real turn" "$snapshot_file" "$heartbeat_file"
+      append_phase "continuity" "fail" "$CHECKPOINT_ERROR" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
   fi
@@ -1026,40 +1067,17 @@ real_run() {
           refresh_latest_evidence_from_status "$status_after"
           if [[ "$(printf '%s' "$status_after" | jq -r '.keepalive_running')" == "true" ]] \
             && [[ "$(printf '%s' "$status_after" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
-            && [[ "$(printf '%s' "$status_after" | jq -r '(.continuity_summary // .meta.continuity_summary // "") | length > 0')" == "true" ]] \
             && [[ "$(printf '%s' "$status_after" | jq -r '.agent.exists')" == "true" ]]; then
-            # OAS #467 regression guard: verify checkpoint messages > 0
-            recovery_trace_id="$(printf '%s' "$status_after" | jq -r '.meta.trace_id // empty')"
-            if [[ -z "$recovery_trace_id" ]]; then
-              append_phase "checkpoint_truth" "skip" "trace_id missing from status — cannot locate checkpoint" "$snapshot_file" "$heartbeat_file"
+            if load_checkpoint_evidence "$status_after"; then
+              append_phase "checkpoint_truth" "pass" "checkpoint contains ${CHECKPOINT_MESSAGE_COUNT} typed messages after restart" "$snapshot_file" "$heartbeat_file"
+              RECOVERY_PASS=1
+              append_phase "recovery" "pass" "keeper restarted on the same name and resumed from typed checkpoint state" "$snapshot_file" "$heartbeat_file"
             else
-              ckpt_file=""
-              for candidate in \
-                "${BASE_PATH}/.masc/keepers/${KEEPER_NAME}/${recovery_trace_id}/${recovery_trace_id}.json" \
-                "${BASE_PATH}/.masc/traces/${recovery_trace_id}/${recovery_trace_id}.json"; do
-                if [[ -f "$candidate" ]]; then
-                  ckpt_file="$candidate"
-                  break
-                fi
-              done
-              if [[ -n "$ckpt_file" ]]; then
-                if ckpt_msg_count="$(jq '.messages | length' "$ckpt_file")"; then
-                  if [[ "$ckpt_msg_count" -gt 0 ]]; then
-                    append_phase "checkpoint_truth" "pass" "load_oas checkpoint contains ${ckpt_msg_count} messages (OAS #467 regression guard)" "$snapshot_file" "$heartbeat_file"
-                  else
-                    append_phase "checkpoint_truth" "fail" "load_oas checkpoint has 0 messages — OAS #467 regression" "$snapshot_file" "$heartbeat_file"
-                  fi
-                else
-                  append_phase "checkpoint_truth" "error" "checkpoint JSON parse failed at ${ckpt_file} — possible file corruption" "$snapshot_file" "$heartbeat_file"
-                fi
-              else
-                append_phase "checkpoint_truth" "skip" "checkpoint file not found under keeper or trace checkpoint paths for ${recovery_trace_id}" "$snapshot_file" "$heartbeat_file"
-              fi
+              append_phase "checkpoint_truth" "fail" "$CHECKPOINT_ERROR" "$snapshot_file" "$heartbeat_file"
+              append_phase "recovery" "fail" "keeper restarted but typed checkpoint recovery was not proven" "$snapshot_file" "$heartbeat_file"
             fi
-            RECOVERY_PASS=1
-            append_phase "recovery" "pass" "keeper restarted on the same name and resumed live turns with continuity intact" "$snapshot_file" "$heartbeat_file"
           else
-            append_phase "recovery" "fail" "keeper restarted but continuity/liveness did not fully recover" "$snapshot_file" "$heartbeat_file"
+            append_phase "recovery" "fail" "keeper restarted but liveness did not fully recover" "$snapshot_file" "$heartbeat_file"
           fi
         fi
       fi

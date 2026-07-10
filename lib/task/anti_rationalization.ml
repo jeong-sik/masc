@@ -742,13 +742,8 @@ let review
   in
   (* Gate 0: empty evidence_refs — required for all code task submissions.
      Reject completions that lack code-level evidence (file paths, commit hashes,
-     trace/turn/receipt refs).
-
-     NOTE: Disabled until the call site is wired (PR #23666 regression).
-     The `handoff_context.evidence_refs` field exists in the type but is not
-     yet passed through to `review_request` by any caller.  Re-enable once
-     task-1889 (call site wiring) is complete. *)
-  if false && List.is_empty req.evidence_refs then
+     trace/turn/receipt refs). *)
+  if List.is_empty req.evidence_refs then
     emit
       { verdict = Reject "no evidence references supplied"
       ; evaluator_runtime

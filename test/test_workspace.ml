@@ -1598,7 +1598,14 @@ let test_submit_and_approve_rejects_empty_justification () =
 let strict_contract : Masc_domain.task_contract =
   { strict = true
   ; completion_contract = [ "deliverable verified by a second agent" ]
-  ; required_evidence = []
+  ; (* Declared up front so the #23719/#23740 strict evidence precheck is
+       satisfied by the contract itself and direct done reaches the RFC-0308
+       G-1 guard, whose error names the submit lane. With an empty
+       required_evidence the precheck fires first and its message does not
+       mention submit_for_verification (main red #23901, family A); the
+       precheck fail-closed path is pinned separately by
+       [test_submit_and_approve_strict_without_evidence_fail_closed]. *)
+    required_evidence = [ "artifact:deliverable" ]
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
   ; evidence_claims = []
@@ -1614,9 +1621,8 @@ let test_strict_task_done_routes_to_submit () =
     in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    (* Direct done is blocked and the error names the submit lane — whether
-       the strict evidence gate (no handoff supplied here) or the RFC-0308
-       lifecycle guard fires first, both route to submit_for_verification. *)
+    (* Direct done is blocked by the RFC-0308 lifecycle guard (G-1), whose
+       error routes to submit_for_verification. *)
     let direct =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Done_action ~notes:"done" ()

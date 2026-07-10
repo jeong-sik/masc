@@ -6,7 +6,10 @@
 
     Queue contents can be mirrored to a per-keeper durable snapshot once
     [configure_persistence] is called from server bootstrap.  This keeps
-    queued connector/dashboard follow-up messages replayable across restart.
+    queued connector/dashboard follow-up messages replayable across restart,
+    and (RFC-connector-deferred-reply-via-chat-queue lease/ack/nack) makes
+    delivery at-least-once: a leased-but-unacknowledged batch survives a
+    crash and is redelivered on the next [configure_persistence].
 
     @since 2.145.0 *)
 
@@ -21,6 +24,11 @@ type queued_message = {
   attachments : Keeper_chat_store.attachment list;
   timestamp : float;
   source : message_source;
+}
+
+type lease = {
+  lease_id : string;
+  messages : queued_message list;
 }
 
 let dashboard_queue_default_thread_id = "dashboard"
@@ -52,12 +60,15 @@ let continuation_channel_of_message_source ?dashboard_thread_id = function
 type queue_entry = {
   mutex : Eio.Mutex.t;
   q : queued_message Queue.t;
+  mutable inflight : lease option;
 }
 
 let schema = "keeper_chat_queue.v1"
 let persistence_file = "chat-queue.json"
 let persistence_base_path : string option Atomic.t = Atomic.make None
 let fail_next_persist_for_testing = Atomic.make false
+let lease_counter = Atomic.make 0
+let receipt_counter = Atomic.make 0
 
 exception Persistence_failed of string
 
@@ -74,6 +85,28 @@ let valid_keeper_name name =
     | _ -> false
   in
   (not (String.equal name "")) && String.for_all valid_char name
+
+(* [generate_lease_id]/[generate_receipt_id] follow the same
+   counter+keeper+epoch-ms shape as [Keeper_msg_async.generate_request_id] —
+   unique within a process without a UUID dependency. Neither needs to be
+   globally unique across restarts: a lease_id only has to distinguish the
+   single outstanding lease from a stale one within one process lifetime, and
+   a receipt_id is an ephemeral enqueue-time echo token, not a durable key. *)
+let generate_lease_id ~keeper_name =
+  let n = Atomic.fetch_and_add lease_counter 1 in
+  let safe_keeper_name =
+    Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
+  in
+  Printf.sprintf "lease_%s_%d_%d" safe_keeper_name n
+    (int_of_float (Unix.gettimeofday () *. 1000.0))
+
+let generate_receipt_id ~keeper_name =
+  let n = Atomic.fetch_and_add receipt_counter 1 in
+  let safe_keeper_name =
+    Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
+  in
+  Printf.sprintf "chatq_%s_%d_%d" safe_keeper_name n
+    (int_of_float (Unix.gettimeofday () *. 1000.0))
 
 let snapshot_path ~base_path ~keeper_name =
   if valid_keeper_name keeper_name
@@ -161,27 +194,76 @@ let replace_queue q items =
   Queue.clear q;
   List.iter (fun item -> Queue.push item q) items
 
-let queue_to_yojson q =
+let messages_of_yojson items_json =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+      (match queued_message_of_yojson item with
+       | Ok parsed -> loop (parsed :: acc) rest
+       | Error err -> Error err)
+  in
+  match items_json with
+  | `List items -> loop [] items
+  | _ -> Error "chat queue expects an items array"
+
+let inflight_to_yojson = function
+  | None -> `Null
+  | Some { lease_id; messages } ->
+    `Assoc
+      [ ("lease_id", `String lease_id)
+      ; ("items", `List (List.map queued_message_to_yojson messages))
+      ]
+
+let inflight_of_yojson json =
+  match json with
+  | `Null -> Ok None
+  | `Assoc _ -> (
+    match Json_util.get_string json "lease_id" with
+    | None -> Error "chat queue inflight lease requires lease_id"
+    | Some lease_id -> (
+      match Json_util.assoc_member_opt "items" json with
+      | None -> Error "chat queue inflight lease requires items array"
+      | Some items_json -> (
+        match messages_of_yojson items_json with
+        | Error err -> Error err
+        | Ok [] -> Error "chat queue inflight lease requires at least one message"
+        | Ok messages -> Ok (Some { lease_id; messages }))))
+  | _ -> Error "chat queue inflight lease must be null or an object"
+
+(* Snapshot envelope: the still-queued messages plus the (at most one)
+   outstanding lease, so a crash between [lease_batch] and [ack]/[nack]
+   leaves the leased batch durably recorded instead of vanishing — see the
+   [configure_persistence] mli comment for the boot-time requeue this
+   enables. The schema string is intentionally unchanged from the
+   pre-lease/ack/nack format: [inflight] is a new optional field, absent in
+   every file written before this change, and its absence has exactly one
+   meaning ("no lease was outstanding when this was written") — not an
+   unknown value being defaulted, so no schema bump is needed. *)
+let entry_state_to_yojson ~items ~inflight =
   `Assoc
     [ ("schema", `String schema)
-    ; ("items", `List (List.map queued_message_to_yojson (queue_to_list q)))
+    ; ("items", `List (List.map queued_message_to_yojson items))
+    ; ("inflight", inflight_to_yojson inflight)
     ]
 
-let queue_of_yojson json =
+let entry_state_of_yojson json =
   match (Json_util.get_string json "schema", Json_util.assoc_member_opt "items" json) with
   | Some s, _ when not (String.equal s schema) ->
     Error (Printf.sprintf "unexpected chat queue snapshot schema: %s" s)
   | None, _ -> Error "chat queue snapshot requires schema"
-  | Some _, Some (`List items) ->
-    let rec loop acc = function
-      | [] -> Ok (queue_of_list (List.rev acc))
-      | item :: rest ->
-        (match queued_message_of_yojson item with
-         | Ok parsed -> loop (parsed :: acc) rest
-         | Error err -> Error err)
-    in
-    loop [] items
-  | Some _, _ -> Error "chat queue snapshot requires items array"
+  | Some _, None -> Error "chat queue snapshot requires items array"
+  | Some _, Some items_json -> (
+    match messages_of_yojson items_json with
+    | Error err -> Error err
+    | Ok items -> (
+      let inflight_json =
+        match Json_util.assoc_member_opt "inflight" json with
+        | None -> `Null
+        | Some j -> j
+      in
+      match inflight_of_yojson inflight_json with
+      | Error err -> Error err
+      | Ok inflight -> Ok (items, inflight)))
 
 let save_json_atomic path json =
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -194,10 +276,10 @@ let load_snapshot ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name with
   | Error msg ->
     Log.Keeper.warn "chat_queue_snapshot: %s" msg;
-    Queue.create ()
+    (Queue.create (), None)
   | Ok path ->
     if not (Sys.file_exists path)
-    then Queue.create ()
+    then (Queue.create (), None)
     else (
       match Safe_ops.read_json_file_safe path with
       | Error msg ->
@@ -206,33 +288,37 @@ let load_snapshot ~base_path ~keeper_name =
           keeper_name
           path
           msg;
-        Queue.create ()
+        (Queue.create (), None)
       | Ok json ->
-        (match queue_of_yojson json with
-         | Ok q ->
-           if Queue.length q > 0
+        (match entry_state_of_yojson json with
+         | Ok (items, inflight) ->
+           if items <> [] || inflight <> None
            then
              Log.Keeper.info
-               "chat_queue_snapshot: restored %d queued messages for keeper=%s"
-               (Queue.length q)
+               "chat_queue_snapshot: restored %d queued message(s) (inflight \
+                lease=%s) for keeper=%s"
+               (List.length items)
+               (match inflight with
+                | Some { lease_id; _ } -> lease_id
+                | None -> "none")
                keeper_name;
-           q
+           (queue_of_list items, inflight)
          | Error msg ->
            Log.Keeper.warn
              "chat_queue_snapshot: failed to parse keeper=%s path=%s: %s"
              keeper_name
              path
              msg;
-           Queue.create ()))
+           (Queue.create (), None)))
 
-let persist_snapshot ~base_path ~keeper_name q =
+let persist_snapshot ~base_path ~keeper_name ~items ~inflight =
   if Atomic.exchange fail_next_persist_for_testing false
   then Error "injected chat queue persist failure"
   else match snapshot_path ~base_path ~keeper_name with
   | Error msg -> Error msg
   | Ok path ->
     (try
-       match save_json_atomic path (queue_to_yojson q) with
+       match save_json_atomic path (entry_state_to_yojson ~items ~inflight) with
        | Ok () -> Ok ()
        | Error msg ->
          Error
@@ -251,21 +337,32 @@ let persist_snapshot ~base_path ~keeper_name q =
             path
             (Printexc.to_string exn)))
 
-let persist_if_configured ~keeper_name q =
+let persist_if_configured ~keeper_name (entry : queue_entry) =
   match Atomic.get persistence_base_path with
   | None -> ()
   | Some base_path ->
-    (match persist_snapshot ~base_path ~keeper_name q with
+    let items = queue_to_list entry.q in
+    (match persist_snapshot ~base_path ~keeper_name ~items ~inflight:entry.inflight with
      | Ok () -> ()
      | Error msg -> raise (Persistence_failed msg))
 
-let persist_or_rollback ~keeper_name q ~before =
-  try persist_if_configured ~keeper_name q with
+(* [before_items]/[before_inflight] are the pre-mutation state to restore if
+   the durable rewrite fails, keeping in-memory state and the last-known-good
+   snapshot aligned (never acknowledge a mutation the snapshot doesn't
+   reflect). Every mutator captures both, even ones that only ever touch one
+   of the two fields, because the persisted file always encodes the full
+   entry — a rollback that only restored [q] would silently commit an
+   unrelated, already-applied [inflight] change (or vice versa) on the next
+   successful write. *)
+let persist_or_rollback ~keeper_name (entry : queue_entry) ~before_items ~before_inflight =
+  try persist_if_configured ~keeper_name entry with
   | Eio.Cancel.Cancelled _ as exn ->
-    replace_queue q before;
+    replace_queue entry.q before_items;
+    entry.inflight <- before_inflight;
     raise exn
   | exn ->
-    replace_queue q before;
+    replace_queue entry.q before_items;
+    entry.inflight <- before_inflight;
     raise exn
 
 let persistence_configured () =
@@ -277,7 +374,7 @@ let get_or_create_entry keeper_name =
   match Hashtbl.find_opt registry keeper_name with
   | Some entry -> entry
   | None ->
-      let entry = { mutex = Eio.Mutex.create (); q = Queue.create () } in
+      let entry = { mutex = Eio.Mutex.create (); q = Queue.create (); inflight = None } in
       Hashtbl.add registry keeper_name entry;
       entry
 
@@ -301,9 +398,11 @@ let with_entry_lock entry f =
 let enqueue ~keeper_name msg =
   let entry = get_or_create_entry_locked keeper_name in
   with_entry_lock entry (fun () ->
-      let before = queue_to_list entry.q in
+      let before_items = queue_to_list entry.q in
+      let before_inflight = entry.inflight in
       Queue.push msg entry.q;
-      persist_or_rollback ~keeper_name entry.q ~before)
+      persist_or_rollback ~keeper_name entry ~before_items ~before_inflight;
+      generate_receipt_id ~keeper_name)
 
 let dequeue ~keeper_name =
   match find_entry keeper_name with
@@ -313,9 +412,10 @@ let dequeue ~keeper_name =
           if Queue.is_empty entry.q
           then None
           else (
-            let before = queue_to_list entry.q in
+            let before_items = queue_to_list entry.q in
+            let before_inflight = entry.inflight in
             let msg = Queue.pop entry.q in
-            persist_or_rollback ~keeper_name entry.q ~before;
+            persist_or_rollback ~keeper_name entry ~before_items ~before_inflight;
             Some msg))
 
 let same_source a b =
@@ -332,25 +432,72 @@ let same_source a b =
   | Slack _, (Dashboard | Discord _) ->
       false
 
-let dequeue_batch ~keeper_name =
+let lease_batch ~keeper_name =
   match find_entry keeper_name with
-  | None -> []
+  | None -> `Empty
   | Some entry ->
       with_entry_lock entry (fun () ->
-          let before = queue_to_list entry.q in
-          match Queue.take_opt entry.q with
-          | None -> []
-          | Some first ->
-              let rec drain acc =
-                match Queue.peek_opt entry.q with
-                | Some next when same_source first.source next.source ->
-                    let next = Queue.pop entry.q in
-                    drain (next :: acc)
-                | Some _ | None -> List.rev acc
-              in
-              let batch = first :: drain [] in
-              persist_or_rollback ~keeper_name entry.q ~before;
-              batch)
+          match entry.inflight with
+          | Some { lease_id; _ } -> `Already_leased lease_id
+          | None -> (
+              let before_items = queue_to_list entry.q in
+              match Queue.take_opt entry.q with
+              | None -> `Empty
+              | Some first ->
+                  let rec drain acc =
+                    match Queue.peek_opt entry.q with
+                    | Some next when same_source first.source next.source ->
+                        let next = Queue.pop entry.q in
+                        drain (next :: acc)
+                    | Some _ | None -> List.rev acc
+                  in
+                  let messages = first :: drain [] in
+                  let lease_id = generate_lease_id ~keeper_name in
+                  entry.inflight <- Some { lease_id; messages };
+                  (try
+                     persist_or_rollback ~keeper_name entry ~before_items
+                       ~before_inflight:None;
+                     `Leased { lease_id; messages }
+                   with
+                   | Persistence_failed msg -> `Persist_failed msg)))
+
+let ack ~keeper_name ~lease_id =
+  match find_entry keeper_name with
+  | None -> `Unknown_lease
+  | Some entry ->
+      with_entry_lock entry (fun () ->
+          match entry.inflight with
+          | Some { lease_id = current; _ } when String.equal current lease_id ->
+              let before_items = queue_to_list entry.q in
+              let before_inflight = entry.inflight in
+              entry.inflight <- None;
+              (try
+                 persist_or_rollback ~keeper_name entry ~before_items ~before_inflight;
+                 `Acked
+               with
+               | Persistence_failed msg -> `Persist_failed msg)
+          | Some _ | None -> `Unknown_lease)
+
+let nack ~keeper_name ~lease_id =
+  match find_entry keeper_name with
+  | None -> `Unknown_lease
+  | Some entry ->
+      with_entry_lock entry (fun () ->
+          match entry.inflight with
+          | Some { lease_id = current; messages } when String.equal current lease_id ->
+              let before_items = queue_to_list entry.q in
+              let before_inflight = entry.inflight in
+              (* Requeue ahead of anything that arrived while the lease was
+                 outstanding: the leased batch was already the head run, so
+                 retrying it before newer arrivals preserves FIFO order. *)
+              replace_queue entry.q (messages @ before_items);
+              entry.inflight <- None;
+              (try
+                 persist_or_rollback ~keeper_name entry ~before_items ~before_inflight;
+                 `Requeued
+               with
+               | Persistence_failed msg -> `Persist_failed msg)
+          | Some _ | None -> `Unknown_lease)
 
 let merge_batch batch =
   match batch with
@@ -444,11 +591,11 @@ let queued_message_equal (a : queued_message) (b : queued_message) =
 
 (* Remove the first message structurally equal to [target] from the head run —
    the leading messages sharing the head message's source, i.e. the exact set
-   [dequeue_batch] coalesces into one turn. Returns the item list with that one
+   [lease_batch] coalesces into one turn. Returns the item list with that one
    message dropped, or [None] when no head-run message matches. Confining the
-   search to the head run keeps [remove_matching] and [dequeue_batch] acting on
-   the same region under the shared per-keeper mutex, so a queued message is
-   answered by at most one of them. *)
+   search to the head run keeps [remove_matching] and [lease_batch] acting on
+   the same region under the shared per-keeper mutex, so a still-queued
+   message is answered by at most one of them. *)
 let remove_first_in_head_run items target =
   match items with
   | [] -> None
@@ -469,18 +616,20 @@ let remove_matching ~keeper_name target =
   | None -> `Not_found
   | Some entry ->
       with_entry_lock entry (fun () ->
-          let before = queue_to_list entry.q in
-          match remove_first_in_head_run before target with
+          let before_items = queue_to_list entry.q in
+          let before_inflight = entry.inflight in
+          match remove_first_in_head_run before_items target with
           | None -> `Not_found
           | Some remaining ->
               replace_queue entry.q remaining;
               (* Reuse the persist-abort idiom: on snapshot rewrite failure
-                 [persist_or_rollback] restores [before] and re-raises, so the
-                 removal is aborted (queue unchanged) before it is reported.
-                 Only [Persistence_failed] becomes a typed result; [Cancelled]
-                 and any other exception still propagate. *)
+                 [persist_or_rollback] restores [before_items]/[before_inflight]
+                 and re-raises, so the removal is aborted (queue unchanged)
+                 before it is reported. Only [Persistence_failed] becomes a
+                 typed result; [Cancelled] and any other exception still
+                 propagate. *)
               (try
-                 persist_or_rollback ~keeper_name entry.q ~before;
+                 persist_or_rollback ~keeper_name entry ~before_items ~before_inflight;
                  `Removed
                with Persistence_failed msg -> `Persist_failed msg))
 
@@ -501,9 +650,10 @@ let clear ~keeper_name =
   | None -> ()
   | Some entry ->
       with_entry_lock entry (fun () ->
-          let before = queue_to_list entry.q in
+          let before_items = queue_to_list entry.q in
+          let before_inflight = entry.inflight in
           Queue.clear entry.q;
-          persist_or_rollback ~keeper_name entry.q ~before)
+          persist_or_rollback ~keeper_name entry ~before_items ~before_inflight)
 
 let all_keeper_names () =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
@@ -518,15 +668,29 @@ let configure_persistence ~base_path =
     |> Array.iter (fun keeper_name ->
       if valid_keeper_name keeper_name
       then
-        let q = load_snapshot ~base_path ~keeper_name in
-        if Queue.length q > 0
+        let loaded_q, loaded_inflight = load_snapshot ~base_path ~keeper_name in
+        let inflight_items =
+          match loaded_inflight with
+          | None -> []
+          | Some { lease_id; messages } ->
+            Log.Keeper.warn
+              "chat_queue_snapshot: requeuing %d message(s) from unacknowledged \
+               lease=%s for keeper=%s after restart (at-least-once redelivery)"
+              (List.length messages)
+              lease_id
+              keeper_name;
+            messages
+        in
+        let snapshot_items = inflight_items @ queue_to_list loaded_q in
+        if snapshot_items <> []
         then
-          let snapshot_items = queue_to_list q in
           let entry = get_or_create_entry_locked keeper_name in
           with_entry_lock entry (fun () ->
-              let before = queue_to_list entry.q in
-              replace_queue entry.q (snapshot_items @ before);
-              persist_or_rollback ~keeper_name entry.q ~before))
+              let before_items = queue_to_list entry.q in
+              let before_inflight = entry.inflight in
+              replace_queue entry.q (snapshot_items @ before_items);
+              entry.inflight <- None;
+              persist_or_rollback ~keeper_name entry ~before_items ~before_inflight))
 
 module For_testing = struct
   let reset () =

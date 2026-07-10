@@ -56,6 +56,20 @@ let with_env body =
       Keeper_chat_queue.clear ~keeper_name;
       body ~base ~clock)
 
+(* Generously above every [await_or_timeout] window this suite uses (longest
+   is 5.0s), so the dispatch watchdog never preempts a [handle_turn] fake that
+   is only waiting on a test-controlled promise. *)
+let test_dispatch_deadline_sec = 10.0
+
+(* None of these tests exercise a [handle_turn] that outlives
+   [test_dispatch_deadline_sec] — that path is [test_dispatch_stall] below.
+   Failing loudly here turns a silent hang into a clear assertion if a future
+   change makes a fake [handle_turn] block longer than intended. *)
+let unexpected_on_stalled ~keeper_name ~queued_message:_ =
+  check
+    (Printf.sprintf "on_stalled must not fire for keeper=%s in this test" keeper_name)
+    false
+
 (* Capture handle_turn calls; resolve [first] on the first call so the test can
    wait without polling. The queue is emptied by the first drain, so the consumer
    does not call handle_turn again. *)
@@ -93,12 +107,16 @@ let with_consumer_switch f =
 let test_drains_discord_to_handle_turn () =
   Printf.printf "Test: consumer drains a Discord queue entry to handle_turn\n%!";
   with_env (fun ~base ~clock ->
-    Keeper_chat_queue.enqueue ~keeper_name
-      (discord_msg ~content:"are you free now?" ~channel_id:"chan-1"
-         ~user_id:"u-1" ~ts:1.0);
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name
+         (discord_msg ~content:"are you free now?" ~channel_id:"chan-1"
+            ~user_id:"u-1" ~ts:1.0)
+        : string);
     let captured, first, handle_turn = capturing () in
     with_consumer_switch (fun sw ->
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
+        ~dispatch_deadline_sec:test_dispatch_deadline_sec
+        ~on_stalled:unexpected_on_stalled ~handle_turn;
       (match await_or_timeout ~clock ~secs:5.0 first with
        | `Got -> ()
        | `Timeout -> check "consumer drained within timeout" false));
@@ -117,13 +135,19 @@ let test_coalesces_same_source_run () =
   Printf.printf
     "Test: same-source messages coalesce into one delivered turn\n%!";
   with_env (fun ~base ~clock ->
-    Keeper_chat_queue.enqueue ~keeper_name
-      (discord_msg ~content:"first" ~channel_id:"chan-9" ~user_id:"u-9" ~ts:1.0);
-    Keeper_chat_queue.enqueue ~keeper_name
-      (discord_msg ~content:"second" ~channel_id:"chan-9" ~user_id:"u-9" ~ts:2.0);
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name
+         (discord_msg ~content:"first" ~channel_id:"chan-9" ~user_id:"u-9" ~ts:1.0)
+        : string);
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name
+         (discord_msg ~content:"second" ~channel_id:"chan-9" ~user_id:"u-9" ~ts:2.0)
+        : string);
     let captured, first, handle_turn = capturing () in
     with_consumer_switch (fun sw ->
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
+        ~dispatch_deadline_sec:test_dispatch_deadline_sec
+        ~on_stalled:unexpected_on_stalled ~handle_turn;
       ignore (await_or_timeout ~clock ~secs:5.0 first));
     match !captured with
     | [ (_, qm) ] ->
@@ -138,9 +162,11 @@ let test_coalesces_same_source_run () =
 let test_gates_while_turn_in_flight () =
   Printf.printf "Test: queue is not drained while a turn is in flight\n%!";
   with_env (fun ~base ~clock ->
-    Keeper_chat_queue.enqueue ~keeper_name
-      (discord_msg ~content:"during busy" ~channel_id:"chan-5" ~user_id:"u-5"
-         ~ts:1.0);
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name
+         (discord_msg ~content:"during busy" ~channel_id:"chan-5" ~user_id:"u-5"
+            ~ts:1.0)
+        : string);
     let captured, first, handle_turn = capturing () in
     with_consumer_switch (fun sw ->
       (* Hold the admission slot busy in a sibling fiber. *)
@@ -153,7 +179,9 @@ let test_gates_while_turn_in_flight () =
                Eio.Promise.resolve set_started ();
                Eio.Promise.await release)));
       Eio.Promise.await started;
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
+        ~dispatch_deadline_sec:test_dispatch_deadline_sec
+        ~on_stalled:unexpected_on_stalled ~handle_turn;
       (* The first poll runs immediately; if the consumer ignored the in-flight
          gate it would drain within this window. *)
       (match await_or_timeout ~clock ~secs:0.3 first with
@@ -175,12 +203,16 @@ let test_queued_dispatch_is_per_keeper () =
     let keeper_b = keeper_name ^ "-b" in
     Keeper_chat_queue.clear ~keeper_name:keeper_a;
     Keeper_chat_queue.clear ~keeper_name:keeper_b;
-    Keeper_chat_queue.enqueue ~keeper_name:keeper_a
-      (discord_msg ~content:"alpha waits" ~channel_id:"chan-a" ~user_id:"u-a"
-         ~ts:1.0);
-    Keeper_chat_queue.enqueue ~keeper_name:keeper_b
-      (discord_msg ~content:"beta should pass" ~channel_id:"chan-b"
-         ~user_id:"u-b" ~ts:2.0);
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name:keeper_a
+         (discord_msg ~content:"alpha waits" ~channel_id:"chan-a" ~user_id:"u-a"
+            ~ts:1.0)
+        : string);
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name:keeper_b
+         (discord_msg ~content:"beta should pass" ~channel_id:"chan-b"
+            ~user_id:"u-b" ~ts:2.0)
+        : string);
     let first_keeper = ref None in
     let second_keeper = ref None in
     let first_started, set_first_started = Eio.Promise.create () in
@@ -206,7 +238,9 @@ let test_queued_dispatch_is_per_keeper () =
             Eio.Promise.resolve set_second_seen ())
     in
     with_consumer_switch (fun sw ->
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
+        ~dispatch_deadline_sec:test_dispatch_deadline_sec
+        ~on_stalled:unexpected_on_stalled ~handle_turn;
       (match await_or_timeout ~clock ~secs:5.0 first_started with
        | `Got -> ()
        | `Timeout -> check "first queued keeper dispatch started" false);
@@ -223,11 +257,54 @@ let test_queued_dispatch_is_per_keeper () =
           || (String.equal first keeper_b && String.equal second keeper_a))
     | _ -> check "both keeper dispatches were observed" false)
 
+(* PR-4a (busy-queue lease/ack/nack): a [handle_turn] that never returns must
+   not wedge this keeper's queue forever (the L1/L2 root cause — see
+   Keeper_chat_queue.mli and Keeper_chat_consumer.mli). The dispatch
+   watchdog races [handle_turn] against [dispatch_deadline_sec]; on timeout
+   it calls [on_stalled] then acks (not nacks) the lease, since retrying a
+   turn [Keeper_msg_async]'s own timeout has already abandoned would not
+   help. *)
+let test_dispatch_stall_calls_on_stalled_and_acks () =
+  Printf.printf
+    "Test: a handle_turn that never returns triggers on_stalled and acks \
+     (not nacks)\n%!";
+  with_env (fun ~base ~clock ->
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name
+         (discord_msg ~content:"stuck turn" ~channel_id:"chan-stall"
+            ~user_id:"u-stall" ~ts:1.0)
+        : string);
+    let never, _never_resolve = Eio.Promise.create () in
+    let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ = Eio.Promise.await never in
+    let stalled, set_stalled = Eio.Promise.create () in
+    let stalled_call = ref None in
+    let on_stalled ~keeper_name:kn ~queued_message:qm =
+      stalled_call := Some (kn, qm);
+      Eio.Promise.resolve set_stalled ()
+    in
+    with_consumer_switch (fun sw ->
+      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
+        ~dispatch_deadline_sec:0.2 ~on_stalled ~handle_turn;
+      (match await_or_timeout ~clock ~secs:5.0 stalled with
+       | `Got -> ()
+       | `Timeout -> check "on_stalled fires once the dispatch deadline elapses" false);
+      (* Let the synchronous ack that follows on_stalled land. *)
+      Eio.Time.sleep clock 0.3);
+    (match !stalled_call with
+     | Some (kn, qm) ->
+         check "on_stalled sees the bound keeper" (kn = keeper_name);
+         check "on_stalled sees the stuck message"
+           (String.equal qm.Keeper_chat_queue.content "stuck turn")
+     | None -> check "on_stalled was called" false);
+    check "the stalled lease is acked, not requeued"
+      (Keeper_chat_queue.length ~keeper_name = 0))
+
 let () =
   test_drains_discord_to_handle_turn ();
   test_coalesces_same_source_run ();
   test_gates_while_turn_in_flight ();
   test_queued_dispatch_is_per_keeper ();
+  test_dispatch_stall_calls_on_stalled_and_acks ();
   if !failures > 0 then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;
     exit 1)

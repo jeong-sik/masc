@@ -43,23 +43,108 @@ module For_testing = struct
   let clear_dispatching = clear_dispatching
 end
 
-let dispatch_queued_turn state ~sw ~handle_turn ~keeper_name ~queued =
+(* Single broadcast site for every queue-depth-affecting mutation this module
+   performs (lease/ack/nack — [enqueue]'s callers broadcast their own, since
+   they already have the post-enqueue length in hand). Keeping it here rather
+   than scattered across each [`Leased]/[`Acked]/[`Requeued] call site avoids
+   an N-of-M gap where a future new call site forgets to broadcast. *)
+let broadcast_queue_changed ~keeper_name =
+  Keeper_chat_broadcast.queue_changed ~keeper_name
+    ~depth:(Keeper_chat_queue.length ~keeper_name)
+    ()
+
+let ack_or_warn ~keeper_name ~lease_id =
+  match Keeper_chat_queue.ack ~keeper_name ~lease_id with
+  | `Acked -> broadcast_queue_changed ~keeper_name
+  | `Unknown_lease ->
+      Log.Keeper.warn
+        "keeper_chat_consumer: ack found no matching lease=%s for keeper=%s \
+         (already acked/nacked?)"
+        lease_id
+        keeper_name
+  | `Persist_failed msg ->
+      Log.Keeper.warn
+        "keeper_chat_consumer: ack persist failed for keeper=%s lease=%s: %s"
+        keeper_name
+        lease_id
+        msg
+
+(* Best-effort: called both on a genuine dispatch failure and (via
+   [Eio.Cancel.protect]) while this fiber is itself being cancelled from
+   outside, so a [Persistence_failed]/`Unknown_lease] result here is logged,
+   not retried — retrying I/O under an active cancellation would just raise
+   [Eio.Cancel.Cancelled] again. Worst case the message stays recorded as an
+   outstanding lease in the durable snapshot and is requeued by the next
+   [Keeper_chat_queue.configure_persistence] (process restart). *)
+let nack_or_warn ~keeper_name ~lease_id =
+  match Keeper_chat_queue.nack ~keeper_name ~lease_id with
+  | `Requeued -> broadcast_queue_changed ~keeper_name
+  | `Unknown_lease ->
+      Log.Keeper.warn
+        "keeper_chat_consumer: nack found no matching lease=%s for keeper=%s \
+         (already acked/nacked?)"
+        lease_id
+        keeper_name
+  | `Persist_failed msg ->
+      Log.Keeper.warn
+        "keeper_chat_consumer: nack persist failed for keeper=%s lease=%s: %s"
+        keeper_name
+        lease_id
+        msg
+
+(* Races [handle_turn] against [dispatch_deadline_sec] so one wedged turn
+   cannot permanently starve this keeper's queue: [handle_turn] normally
+   blocks until the turn's terminal status is observed (see
+   [Server_routes_http_keeper_stream.process_single_turn]), and if the
+   underlying async execution is cancelled mid-turn by its own internal
+   timeout, nothing ever wakes that wait. [dispatch_deadline_sec] is set well
+   above that internal timeout (see the .mli) so by the time it fires here,
+   the turn's own machinery has already given up. *)
+let run_leased_turn ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled ~keeper_name
+    ~lease_id ~queued =
+  match
+    Eio.Fiber.first
+      (fun () ->
+        handle_turn ~sw ~keeper_name ~queued_message:queued;
+        `Completed)
+      (fun () ->
+        Eio.Time.sleep clock dispatch_deadline_sec;
+        `Stalled)
+  with
+  | `Completed -> ack_or_warn ~keeper_name ~lease_id
+  | `Stalled -> (
+      match on_stalled ~keeper_name ~queued_message:queued with
+      | () -> ack_or_warn ~keeper_name ~lease_id
+      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+      | exception exn ->
+          Log.Keeper.warn
+            "keeper_chat_consumer: on_stalled failed for keeper=%s: %s; nacking \
+             instead of acking so the batch is retried"
+            keeper_name
+            (Printexc.to_string exn);
+          nack_or_warn ~keeper_name ~lease_id)
+
+let dispatch_queued_turn state ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled
+    ~keeper_name ~lease_id ~queued =
   Eio.Fiber.fork ~sw (fun () ->
       try
-        handle_turn ~sw ~keeper_name ~queued_message:queued;
+        run_leased_turn ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled
+          ~keeper_name ~lease_id ~queued;
         clear_dispatching state keeper_name
       with
       | Eio.Cancel.Cancelled _ as e ->
+          Eio.Cancel.protect (fun () -> nack_or_warn ~keeper_name ~lease_id);
           clear_dispatching state keeper_name;
           raise e
       | exn ->
+          nack_or_warn ~keeper_name ~lease_id;
           clear_dispatching state keeper_name;
           Log.Keeper.warn
             "keeper_chat_consumer: handle_turn failed for keeper=%s: %s"
             keeper_name
             (Printexc.to_string exn))
 
-let start ~sw ~clock ~base_path ~handle_turn =
+let start ~sw ~clock ~base_path ~dispatch_deadline_sec ~handle_turn ~on_stalled =
   let dispatch_state = create_dispatch_state () in
   let rec poll_loop () =
     let keeper_names = Keeper_chat_queue.all_keeper_names () in
@@ -78,42 +163,76 @@ let start ~sw ~clock ~base_path ~handle_turn =
            | None -> (
                if mark_dispatching dispatch_state keeper_name
                then (
-                 let batch =
-                   try Keeper_chat_queue.dequeue_batch ~keeper_name with
+                 let leased =
+                   try Keeper_chat_queue.lease_batch ~keeper_name with
                    | Eio.Cancel.Cancelled _ as e -> raise e
                    | exn ->
-                       Log.Keeper.warn
-                         "keeper_chat_consumer: dequeue_batch failed for \
-                          keeper=%s: %s"
+                       Log.Keeper.error
+                         "keeper_chat_consumer: lease_batch raised for keeper=%s: %s \
+                          (typed API contract violation — skipping this tick)"
                          keeper_name
                          (Printexc.to_string exn);
-                       []
+                       `Empty
                  in
-                 (match batch with
-                  | _ :: _ :: _ ->
-                      Log.Keeper.info
-                        "keeper_chat_consumer: coalesced %d queued messages \
-                         into one turn for keeper=%s"
-                        (List.length batch)
-                        keeper_name
-                  | [] | [ _ ] -> ());
-                 match Keeper_chat_queue.merge_batch batch with
-                 | None -> clear_dispatching dispatch_state keeper_name
-                 | Some queued ->
-                     (try
-                        dispatch_queued_turn dispatch_state ~sw ~handle_turn
-                          ~keeper_name ~queued
-                      with
-                      | Eio.Cancel.Cancelled _ as e ->
-                          clear_dispatching dispatch_state keeper_name;
-                          raise e
-                      | exn ->
-                          clear_dispatching dispatch_state keeper_name;
-                          Log.Keeper.warn
-                            "keeper_chat_consumer: dispatch fork failed for \
-                             keeper=%s: %s"
+                 match leased with
+                 | `Empty -> clear_dispatching dispatch_state keeper_name
+                 | `Already_leased lease_id ->
+                     Log.Keeper.warn
+                       "keeper_chat_consumer: lease_batch found an already-outstanding \
+                        lease=%s for keeper=%s while this consumer holds the dispatch \
+                        gate; leaving it for the next poll"
+                       lease_id
+                       keeper_name;
+                     clear_dispatching dispatch_state keeper_name
+                 | `Persist_failed msg ->
+                     Log.Keeper.warn
+                       "keeper_chat_consumer: lease_batch persist failed for keeper=%s: \
+                        %s; retrying next poll"
+                       keeper_name
+                       msg;
+                     clear_dispatching dispatch_state keeper_name
+                 | `Leased { Keeper_chat_queue.lease_id; messages } ->
+                     broadcast_queue_changed ~keeper_name;
+                     (match messages with
+                      | _ :: _ :: _ ->
+                          Log.Keeper.info
+                            "keeper_chat_consumer: coalesced %d queued messages \
+                             into one turn for keeper=%s"
+                            (List.length messages)
                             keeper_name
-                            (Printexc.to_string exn)))
+                      | [] | [ _ ] -> ());
+                     (match Keeper_chat_queue.merge_batch messages with
+                      | None ->
+                          (* Unreachable in practice: [lease_batch] only returns
+                             [`Leased] with a non-empty [messages]. Nack rather
+                             than silently drop, and let the log carry the
+                             invariant violation for triage. *)
+                          Log.Keeper.error
+                            "keeper_chat_consumer: lease=%s for keeper=%s carried \
+                             zero messages; nacking"
+                            lease_id
+                            keeper_name;
+                          nack_or_warn ~keeper_name ~lease_id;
+                          clear_dispatching dispatch_state keeper_name
+                      | Some queued ->
+                          (try
+                             dispatch_queued_turn dispatch_state ~sw ~clock
+                               ~dispatch_deadline_sec ~handle_turn ~on_stalled
+                               ~keeper_name ~lease_id ~queued
+                           with
+                           | Eio.Cancel.Cancelled _ as e ->
+                               Eio.Cancel.protect (fun () ->
+                                   nack_or_warn ~keeper_name ~lease_id);
+                               clear_dispatching dispatch_state keeper_name;
+                               raise e
+                           | exn ->
+                               nack_or_warn ~keeper_name ~lease_id;
+                               clear_dispatching dispatch_state keeper_name;
+                               Log.Keeper.warn
+                                 "keeper_chat_consumer: dispatch fork failed for \
+                                  keeper=%s: %s"
+                                 keeper_name
+                                 (Printexc.to_string exn))))
                else
                  Log.Keeper.warn
                    "keeper_chat_consumer: duplicate dispatch suppressed for \

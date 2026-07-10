@@ -583,12 +583,21 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
                 connector message routed there is answered into the dashboard
                 transcript only and never reaches the channel — the RFC-connector-deferred-reply-via-chat-queue
                 root cause. *)
-             Keeper_chat_queue.enqueue ~keeper_name
-               { Keeper_chat_queue.content = String.trim content
-               ; user_blocks = []
-               ; attachments = []
-               ; timestamp = Eio.Time.now clock
-               ; source };
+             (* [receipt_id] is not surfaced on this path: unlike the
+                dashboard busy-ack (RFC-connector-deferred-reply-via-chat-queue), the connector reply has no
+                request envelope to carry a correlation token in (see
+                [`Queued_to_chat_lane]'s comment below) — the queue position
+                is the only durable handle a connector gets today. *)
+             ignore
+               (Keeper_chat_queue.enqueue ~keeper_name
+                  { Keeper_chat_queue.content = String.trim content
+                  ; user_blocks = []
+                  ; attachments = []
+                  ; timestamp = Eio.Time.now clock
+                  ; source }
+                : string);
+             Keeper_chat_broadcast.queue_changed ~keeper_name
+               ~depth:(Keeper_chat_queue.length ~keeper_name) ();
              `Queued_to_chat_lane info
          | `Async_poll ->
              `Async_ack

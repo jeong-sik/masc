@@ -42,3 +42,16 @@ val chat_appended :
     downstream. [content] is used to derive rich blocks for the event. *)
 val chat_appended_with_audio :
   keeper_name:string -> source:string -> audio:audio_clip -> ?content:string -> unit -> unit
+
+(** Broadcast a [keeper_chat_queue_changed] SSE event whenever a keeper's
+    still-queued (not leased) message count changes: enqueue, lease, ack, or
+    nack. [depth] is the count {!Keeper_chat_queue.length} would report right
+    after the mutation. The busy-ack HTTP response already carries a
+    one-shot [queue_length] at enqueue time (RFC-connector-deferred-reply-via-chat-queue); this event is
+    what keeps that number live for a dashboard session that is already
+    open and watching a keeper it did not just send a message to.
+
+    Same failure contract as {!chat_appended}: exceptions from
+    [Sse.broadcast] are counted and logged at WARN, {!Eio.Cancel.Cancelled}
+    propagates. *)
+val queue_changed : keeper_name:string -> depth:int -> unit -> unit

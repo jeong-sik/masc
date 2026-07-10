@@ -130,7 +130,6 @@ type t =
   | SnapshotWriteFailures
   | PromptUnknownToolTokens
   | PromptTokenStripped
-  | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
@@ -393,7 +392,6 @@ let to_string = function
     "masc_keeper_prompt_unknown_tool_tokens_total"
   | PromptTokenStripped ->
     "masc_keeper_prompt_token_stripped_total"
-  | ProgressUpdatedLineFailures -> "masc_keeper_progress_updated_line_failures_total"
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
   | TurnMetricsSnapshotFailures -> "masc_keeper_turn_metrics_snapshot_failures_total"
@@ -572,7 +570,6 @@ let all : t list =
     TurnFailureStreakPaused;
     CycleExceptions; SnapshotReadFailures; SnapshotWriteFailures; PromptUnknownToolTokens;
     PromptTokenStripped;
-    ProgressUpdatedLineFailures;
     SseBroadcastFailures; WorkspaceHeartbeatFailures; TurnMetricsSnapshotFailures; OasExecutionErrors;
     EpisodeCreateFailures; MemoryActivityEmitFailures; SupervisorSweepFailures; TomlReconcileSweepFailures;
     TomlReconcileDedup; ReconcileDisabled; ToolUsageFlushFailures; TurnTimeoutCommitted;

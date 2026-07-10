@@ -100,15 +100,8 @@ val read_meta_if_changed :
   last_mtime:float ->
   (Keeper_meta_contract.keeper_meta * float) option
 
-(** Refresh the [Updated:] line in the keeper progress markdown.
-    Best-effort: a missing progress file is a no-op; other failures
-    increment [metric_keeper_progress_updated_line_failures] and log a
-    warning. *)
-val refresh_progress_updated_line : Workspace.config -> string -> unit
-
 (** Atomic write of [persisted] to [path]; runs the
-    [runtime_meta_write_sync_hook] and refreshes the progress
-    timestamp on success. *)
+    [runtime_meta_write_sync_hook] on success. *)
 val persist_meta :
   Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 

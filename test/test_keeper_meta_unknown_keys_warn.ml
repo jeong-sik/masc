@@ -128,38 +128,6 @@ let test_config_keys_are_warned_before_parse () =
         true
         (after > before))
 
-let fresh_tmpdir () =
-  let path = Filename.temp_file "masc-progress-refresh-" ".tmp" in
-  Sys.remove path;
-  let (_ : string) = Keeper_fs.ensure_dir path in
-  path
-
-let cleanup_tmpdir path =
-  Fs_compat.remove_tree path
-
-let test_progress_updated_line_failure_is_observable () =
-  let dir = fresh_tmpdir () in
-  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
-    let config = Workspace.default_config dir in
-    let keeper_name = "progress-refresh-failure" in
-    let progress_path =
-      Keeper_types_support.keeper_progress_path config keeper_name
-    in
-    let (_ : string) = Keeper_fs.ensure_dir progress_path in
-    let before =
-      Otel_metric_store.metric_total
-        Keeper_metrics.(to_string ProgressUpdatedLineFailures)
-    in
-    Keeper_meta_store.refresh_progress_updated_line config keeper_name;
-    let after =
-      Otel_metric_store.metric_total
-        Keeper_metrics.(to_string ProgressUpdatedLineFailures)
-    in
-    Alcotest.(check bool)
-      "progress Updated-line refresh failure increments counter"
-      true
-      (after > before))
-
 let () =
   Alcotest.run
     "keeper_meta_unknown_keys_warn"
@@ -184,10 +152,6 @@ let () =
             "config keys are warned before parse"
             `Quick
             test_config_keys_are_warned_before_parse
-        ; Alcotest.test_case
-            "progress Updated-line refresh failure is observable"
-            `Quick
-            test_progress_updated_line_failure_is_observable
         ] )
     ]
 ;;

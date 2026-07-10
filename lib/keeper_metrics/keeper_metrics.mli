@@ -121,7 +121,6 @@ type t =
   | SnapshotWriteFailures
   | PromptUnknownToolTokens
   | PromptTokenStripped
-  | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures

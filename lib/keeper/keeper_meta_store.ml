@@ -295,49 +295,11 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
   read_candidate requested_name
 ;;
 
-let is_missing_progress_file_error exn =
-  match exn with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> true
-  | _ ->
-    let message = Printexc.to_string exn in
-    String_util.contains_substring message "ENOENT"
-    || String_util.contains_substring message "No such file"
-;;
-
-let refresh_progress_updated_line config name =
-  let progress_path = Keeper_types_support.keeper_progress_path config name in
-  if Fs_compat.file_exists progress_path then try
-    let content = Fs_compat.load_file progress_path in
-    let now_str = Masc_domain.now_iso () in
-    let updated =
-      String.split_on_char '\n' content
-      |> List.map (fun line ->
-        if String.starts_with ~prefix:"Updated:" (String.trim line)
-        then "Updated: " ^ now_str
-        else line)
-      |> String.concat "\n"
-    in
-    Fs_compat.save_file progress_path updated
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn when is_missing_progress_file_error exn -> ()
-  | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ProgressUpdatedLineFailures)
-      ~labels:[("keeper", name)]
-      ();
-    Log.Keeper.warn ~keeper_name:name
-      "progress Updated line refresh failed for %s: %s"
-      progress_path
-      (Printexc.to_string exn)
-;;
-
 let persist_meta config path persisted =
   let json = meta_to_json persisted in
   match Keeper_fs.save_json_atomic path json with
   | Ok () ->
     Atomic.get runtime_meta_write_sync_hook_atomic config persisted;
-    refresh_progress_updated_line config persisted.name;
     Ok ()
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
 ;;

@@ -10,22 +10,60 @@
 import type { KeeperConversationAttachment } from '../../types'
 
 export const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
-export const ALLOWED_FILE_TYPES = ['text/plain', 'text/markdown', 'application/json', 'text/csv']
+export const ALLOWED_FILE_TYPES = [
+  'text/plain',
+  'text/markdown',
+  'text/html',
+  'application/json',
+  'text/csv',
+]
 export const ALLOWED_AUDIO_TYPES = ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg']
+
+// File API permits an EMPTY File.type when the user agent cannot determine a
+// MIME type. Only that absence may use the closed extension catalog. A present
+// but unsupported MIME type is authoritative and must never be overwritten by
+// the filename (for example, application/x-msdownload + renamed .md).
+const EXTENSION_MIME_FALLBACK: Record<string, string> = {
+  md: 'text/markdown',
+  markdown: 'text/markdown',
+  html: 'text/html',
+  htm: 'text/html',
+  txt: 'text/plain',
+  json: 'application/json',
+  csv: 'text/csv',
+}
+
+export const ATTACHMENT_INPUT_ACCEPT = [
+  ...ALLOWED_IMAGE_TYPES,
+  ...ALLOWED_AUDIO_TYPES,
+  ...ALLOWED_FILE_TYPES,
+  ...Object.keys(EXTENSION_MIME_FALLBACK).map(extension => `.${extension}`),
+].join(',')
+
+export function resolveAttachmentMimeType(file: File): string {
+  const declared = file.type
+  if (declared !== '') return declared
+  const dot = file.name.lastIndexOf('.')
+  const ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : ''
+  return EXTENSION_MIME_FALLBACK[ext] ?? ''
+}
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 export const MAX_FILE_SIZE = 2 * 1024 * 1024
 export const MAX_TOTAL_PAYLOAD = 10 * 1024 * 1024
 export const MAX_ATTACHMENTS = 5
 
 export function validateFile(file: File): string | null {
-  if (file.type.startsWith('image/')) {
-    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) return `지원하지 않는 이미지 형식: ${file.type}`
+  const mimeType = resolveAttachmentMimeType(file)
+  if (mimeType.startsWith('image/')) {
+    if (!ALLOWED_IMAGE_TYPES.includes(mimeType)) return `지원하지 않는 이미지 형식: ${mimeType}`
     if (file.size > MAX_IMAGE_SIZE) return '이미지 크기 초과 (최대 5MB)'
-  } else if (file.type.startsWith('audio/')) {
-    if (!ALLOWED_AUDIO_TYPES.includes(file.type)) return `지원하지 않는 오디오 형식: ${file.type}`
+  } else if (mimeType.startsWith('audio/')) {
+    if (!ALLOWED_AUDIO_TYPES.includes(mimeType)) return `지원하지 않는 오디오 형식: ${mimeType}`
     if (file.size > MAX_FILE_SIZE) return '오디오 크기 초과 (최대 2MB)'
   } else {
-    if (!ALLOWED_FILE_TYPES.includes(file.type)) return `지원하지 않는 파일 형식: ${file.type}`
+    if (!ALLOWED_FILE_TYPES.includes(mimeType)) {
+      return `지원하지 않는 파일 형식: ${mimeType === '' ? file.name : mimeType}`
+    }
     if (file.size > MAX_FILE_SIZE) return '파일 크기 초과 (최대 2MB)'
   }
   return null
@@ -157,21 +195,24 @@ export async function collectAttachments(
       errors.push('총 첨부 크기가 10MB를 초과합니다.')
       break
     }
-    const dims = resized.type.startsWith('image/') ? await readImageDimensions(resized) : null
+    // Resolved (not declared) type, so a blank-MIME .md/.html file carries
+    // its real markdown/html mime downstream to the keeper turn.
+    const mimeType = resolveAttachmentMimeType(resized)
+    const dims = mimeType.startsWith('image/') ? await readImageDimensions(resized) : null
     const baseId = stableAttachmentId({
       name: resized.name,
-      type: resized.type.startsWith('image/') ? 'image' : 'file',
-      mimeType: resized.type,
+      type: mimeType.startsWith('image/') ? 'image' : 'file',
+      mimeType,
       size: base64Size,
       data: dataUrl,
       dims,
     })
     attachments.push({
       id: uniqueStableAttachmentId(baseId, existing, attachments),
-      type: resized.type.startsWith('image/') ? 'image' : 'file',
+      type: mimeType.startsWith('image/') ? 'image' : 'file',
       name: resized.name,
       size: base64Size,
-      mimeType: resized.type,
+      mimeType,
       data: dataUrl,
       dims: dims ?? undefined,
     })

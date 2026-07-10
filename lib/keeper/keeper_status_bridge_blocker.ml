@@ -354,4 +354,10 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
       ; summary = Printf.sprintf "Keeper runtime exception: %s" detail
       ; continue_gate = false
       }
+  | Keeper_registry.Operator_interrupt ->
+    Some
+      { blocker_class = "operator_interrupt"
+      ; summary = "Current turn was cancelled by explicit operator request."
+      ; continue_gate = true
+      }
 ;;

@@ -35,6 +35,35 @@ type keeper_ctx_sample = {
 val keeper_ctx_sample_of_yojson : Yojson.Safe.t -> keeper_ctx_sample Ppx_deriving_yojson_runtime.error_or
 val keeper_ctx_sample_to_yojson : keeper_ctx_sample -> Yojson.Safe.t
 
+(** Total run-state classification (#16, 38-bug campaign PR-5). Mirrors
+    [Keeper_composite_observer.run_state] one-to-one; kept as a separate
+    type here because this library does not depend on [Keeper_registry] /
+    [Keeper_composite_observer] (see README) — the server-side converter
+    lives in [server_routes_http_pages.ml]. *)
+type keeper_run_state_kind =
+  | In_turn
+  | Waiting
+  | Suspended
+
+val keeper_run_state_kind_of_yojson : Yojson.Safe.t -> keeper_run_state_kind Ppx_deriving_yojson_runtime.error_or
+val keeper_run_state_kind_to_yojson : keeper_run_state_kind -> Yojson.Safe.t
+
+(** Per-kind fields are [None] / [[]] when not applicable to [kind] — e.g.
+    [wake_kind] is only present for [In_turn]. *)
+type keeper_run_state = {
+  kind : keeper_run_state_kind;
+  wake_kind : string option;
+  stimulus_kinds : string list;
+  started_at : float option;
+  active_tool_count : int option;
+  queue_depth : int option;
+  skip_reasons : string list;
+  phase : string option;
+}
+
+val keeper_run_state_of_yojson : Yojson.Safe.t -> keeper_run_state Ppx_deriving_yojson_runtime.error_or
+val keeper_run_state_to_yojson : keeper_run_state -> Yojson.Safe.t
+
 (** Per-keeper summary. *)
 type keeper = {
   name : string;
@@ -48,6 +77,7 @@ type keeper = {
   last_tool : string option;
   lane_frames : keeper_lane_frame list;
   ctx_history : keeper_ctx_sample list;
+  run_state : keeper_run_state;
 }
 
 val keeper_of_yojson : Yojson.Safe.t -> keeper Ppx_deriving_yojson_runtime.error_or

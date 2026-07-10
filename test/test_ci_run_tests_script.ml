@@ -47,14 +47,12 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-(* ci-run-tests.sh sets these itself (isolated build dir, cache disable, RPC
-   unset on retry) and the assertions below record their exact values. Letting
-   them leak in from the ambient environment makes the test observe whatever
-   the runner exports rather than what the script does: the Build and Test job
-   exports DUNE_CACHE=enabled, which turns the first-attempt record from
-   "test|||<cwd>" into "test||enabled|<cwd>". Explicit overrides are applied
-   after this removal, so a test that wants a value can still set one. *)
-let dune_vars_owned_by_script = [ "DUNE_BUILD_DIR"; "DUNE_CACHE"; "DUNE_RPC" ]
+(* Each scenario below asserts exact Dune environment transitions. Start from
+   an explicit baseline instead of inheriting the runner's values: the Build
+   and Test job exports [DUNE_CACHE=enabled], while scenarios that exercise the
+   first attempt intentionally expect no cache override. Explicit scenario
+   overrides are applied after this removal and therefore still win. *)
+let dune_vars_controlled_by_test = [ "DUNE_BUILD_DIR"; "DUNE_CACHE"; "DUNE_RPC" ]
 
 let env_array overrides =
   let table = Hashtbl.create 64 in
@@ -68,7 +66,7 @@ let env_array overrides =
                String.sub entry (idx + 1) (String.length entry - idx - 1)
              in
              Hashtbl.replace table key value);
-  List.iter (Hashtbl.remove table) dune_vars_owned_by_script;
+  List.iter (Hashtbl.remove table) dune_vars_controlled_by_test;
   List.iter (fun (key, value) -> Hashtbl.replace table key value) overrides;
   Hashtbl.fold
     (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)

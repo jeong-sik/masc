@@ -426,6 +426,7 @@ let test_live_turn_keeper_is_busy_without_waiting_rows () =
            meta);
       Keeper_registry.mark_turn_started
         ~base_path:config.Workspace_utils_backend_setup.base_path
+        ~wake:Keeper_registry.Proactive_tick
         keeper_name;
       let json = Server_keeper_waiting_inventory.dashboard_json config in
       check_metric_float "busy keeper metric"

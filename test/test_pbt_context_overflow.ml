@@ -759,8 +759,13 @@ let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
     false
     (text_contains "old visible reply" texts);
   let thinking_preserved =
+    (* The param annotation is load-bearing: [message] and [api_response] both
+       declare a [content] field in Agent_sdk.Types, and an unannotated
+       [message.Agent_sdk.Types.content] projection resolves to whichever
+       record OCaml saw last — which flipped to [api_response] under the
+       OAS 0.209 pin and broke this test's compile. *)
     patched.Agent_sdk.Checkpoint.messages
-    |> List.exists (fun message ->
+    |> List.exists (fun (message : Agent_sdk.Types.message) ->
       List.exists
         (function
           | Agent_sdk.Types.Thinking { content; _ } ->

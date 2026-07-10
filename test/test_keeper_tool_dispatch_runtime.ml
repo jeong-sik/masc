@@ -136,6 +136,28 @@ let outcome_label = function
   | `Success -> "success"
   | `Failure -> "failure"
 
+let tool_call_detail_of_execution tool_name
+      (result : KET.executed_tool_result)
+  : Masc.Keeper_agent_result.tool_call_detail
+  =
+  let execution_outcome =
+    match result.outcome with
+    | `Success -> Tool_result.Ok
+    | `Failure -> Tool_result.Error
+  in
+  { tool_name
+  ; provider = "test"
+  ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
+  ; execution_outcome
+  ; typed_outcome = None
+  ; latency_ms = 1.0
+  ; task_id = None
+  ; route_evidence = None
+  ; input_fingerprint = None
+  ; output_fingerprint = None
+  }
+;;
+
 let non_empty_lines text =
   String.split_on_char '\n' text
   |> List.map String.trim
@@ -221,6 +243,52 @@ let test_malformed_json_like_payload_detected () =
     fail
       (Printf.sprintf "expected malformed_structured, got %s"
          (payload_kind other))
+
+let test_surface_post_execution_controls_continuation_fallback () =
+  with_exec_fixture
+    ~tool_access:[ "keeper_surface_post" ]
+    "keeper_surface_post_continuation_fallback"
+    (fun ~config ~meta ~ctx_work ->
+      let execute input =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"keeper_surface_post"
+          ~input
+          ()
+      in
+      let failed = execute (`Assoc [ ("content", `String "reply") ]) in
+      let succeeded =
+        execute
+          (`Assoc
+            [ "surface", `String "dashboard"
+            ; "content", `String "reply"
+            ])
+      in
+      check string "missing surface is execution failure" "failure"
+        (outcome_label failed.outcome);
+      check string "dashboard post is execution success" "success"
+        (outcome_label succeeded.outcome);
+      let channel =
+        Keeper_continuation_channel.Dashboard { thread_id = "thread-1" }
+      in
+      let gate result =
+        Masc.Keeper_agent_run_finalize_response.For_testing.continuation_delivery_gate
+          ~channel
+          ~tool_calls:
+            [ tool_call_detail_of_execution "keeper_surface_post" result ]
+          ~content:"deterministic fallback"
+      in
+      let module D = Masc.Keeper_continuation_delivery in
+      check bool "failed post leaves fallback enabled" true
+        (match gate failed with D.Deliver -> true | D.Skip _ -> false);
+      check bool "successful post suppresses duplicate fallback" true
+        (match gate succeeded with
+         | D.Skip D.Skipped_already_replied -> true
+         | D.Deliver | D.Skip _ -> false))
+;;
 
 let test_registered_descriptor_bypasses_tool_access_allowlist () =
   with_exec_fixture
@@ -1606,6 +1674,8 @@ let () =
         test_malformed_json_like_payload_detected;
     ]);
     ("execute_keeper_tool_call_with_outcome", [
+      test_case "surface post execution controls continuation fallback" `Quick
+        test_surface_post_execution_controls_continuation_fallback;
       test_case "registered descriptor bypasses tool_access allowlist" `Quick
         test_registered_descriptor_bypasses_tool_access_allowlist;
       test_case "public Read rejects unsupported range fields" `Quick

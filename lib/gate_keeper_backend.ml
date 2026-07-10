@@ -199,7 +199,7 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
    message was enqueued onto [Keeper_chat_queue], so the durable handle is the
    queue position, not a poll request_id. The reply is delivered later by the
    serial consumer through the connector's outbound adapter. *)
-let busy_ack_reply_text_queued ~in_flight ~keeper_name =
+let busy_ack_reply_text_queued ~in_flight ~keeper_name ~queue_length ~receipt_id =
   let in_flight_text =
     match in_flight with
     | None -> ""
@@ -209,9 +209,11 @@ let busy_ack_reply_text_queued ~in_flight ~keeper_name =
           (Keeper_turn_admission.lane_to_string lane)
   in
   Printf.sprintf
-    "%s is busy; your message is queued and will be answered once the current \
-     turn finishes.%s"
+    "%s is busy; your message is queued (receipt=%s, waiting=%d) and will be \
+     answered once the current turn finishes.%s"
     keeper_name
+    receipt_id
+    queue_length
     in_flight_text
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
@@ -589,16 +591,17 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
                 [`Queued_to_chat_lane]'s comment below) — the queue position
                 is the only durable handle a connector gets today. *)
              (* fire-and-forget: receipt_id has no consumer on this path. *)
-             ignore (Keeper_chat_queue.enqueue ~keeper_name
+             let receipt_id = Keeper_chat_queue.enqueue ~keeper_name
                { Keeper_chat_queue.content = String.trim content
                ; user_blocks = []
                ; attachments = []
                ; timestamp = Eio.Time.now clock
                ; source }
-               : string);
+               in
+             let queue_length = Keeper_chat_queue.length ~keeper_name in
              Keeper_chat_broadcast.queue_changed ~keeper_name
-               ~depth:(Keeper_chat_queue.length ~keeper_name) ();
-             `Queued_to_chat_lane info
+               ~depth:queue_length ();
+             `Queued_to_chat_lane (info, queue_length, receipt_id)
          | `Async_poll ->
              `Async_ack
                ( info
@@ -665,7 +668,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
           }
       in
       Gate_protocol.Reply { content = reply; structured; stats; message_request }
-  | `Queued_to_chat_lane in_flight ->
+  | `Queued_to_chat_lane (in_flight, queue_length, receipt_id) ->
       (* RFC-connector-deferred-reply-via-chat-queue: the message was enqueued onto [Keeper_chat_queue]; the
          connector gets a busy ACK now and the deferred reply later via the
          serial consumer's outbound adapter. There is no [Keeper_msg_async]
@@ -677,7 +680,9 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
         |> Int64.to_int
       in
       let reply =
-        redact_text (busy_ack_reply_text_queued ~in_flight:(Some in_flight) ~keeper_name)
+        redact_text
+          (busy_ack_reply_text_queued ~in_flight:(Some in_flight) ~keeper_name
+             ~queue_length ~receipt_id)
       in
       let stats =
         Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.20.1] - 2026-07-10
+
+### Changed
+- Bump OAS pin to v0.209.0 (tag v0.209.0, oas#2504): catalog-driven provider capability + Anthropic thinking policy (oas#2499), typed empty-completion boundary convergence (oas#2498), Hooks.Block + 0.209 breaking release floor (oas#2495/#2497). Exact pin SHA in `scripts/oas-agent-sdk-pin.sh`.
+
 ## [0.20.0] - 2026-07-08
 
 ### Added

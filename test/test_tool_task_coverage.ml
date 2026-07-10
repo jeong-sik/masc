@@ -592,21 +592,39 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
   Eval_calibration.reset_store_for_testing ()
 )
 
+(* RFC-0337 decision 2 / migration 2: empty-evidence rejection is owned by L1
+   [Task_completion_gate.decide], not by an anti-rationalization pre-gate
+   (the short-lived Anti Gate 0, #23738, is deleted). This test installs the
+   REAL L1 gate — the production adapter shape from
+   [Workspace_metric_hooks.install] — and pins that an empty evidence_refs
+   completion is rejected with L1's canonical wording. *)
 let () = test "handle_done_rejects_empty_evidence_refs" (fun () ->
+  let task_title = "Empty evidence refs task" in
+  let completion_contract =
+    Workspace_task_classify.default_completion_contract_text
+      ~title:task_title
+      ~description:""
+  in
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-    (`Assoc [("title", `String "Empty evidence refs task")]) in
+    (`Assoc [("title", `String task_title)]) in
   let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [("task_id", `String "task-001")]) in
-  let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
-    (`Assoc [
-      ("task_id", `String "task-001");
-      ("notes", `String "Task scope satisfied: long enough notes to avoid the length gate, but evidence_refs is empty.");
-      ("evidence_refs", `List [])
-    ]) in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Completion rejected by anti-rationalization gate")
-)
+  with_task_completion_gate_decide real_task_completion_gate (fun () ->
+    let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [
+        ("task_id", `String "task-001");
+        ( "notes"
+        , `String
+            (completion_contract
+             ^ ". The notes satisfy the advisory contract so the test reaches the L1 evidence gate.") );
+        ("evidence_refs", `List [])
+      ]) in
+    assert (not (Tool_result.is_success result));
+    assert (str_contains (Tool_result.message result)
+      "Task-completion evidence is insufficient");
+    assert (str_contains (Tool_result.message result)
+      "handoff_context.evidence_refs")))
 
 let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->
   (* Legacy substring gate (Gate 2.5). When
@@ -731,6 +749,13 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
     tasks
 )
 
+(* Non-strict on purpose: RFC-0323 G-1 structurally blocks direct done on a
+   strict task while the verification FSM is enabled
+   (Verification_required_use_submit, workspace_task_lifecycle.ml) — the
+   strict lane is covered by the submit/approve tests. This test's subject is
+   the direct-done path: LLM review runs and there is no keeper-verifier
+   redirect. Previously strict=true only "worked" because CI was infra-blind
+   (main red #23901, family A). *)
 let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     with_env "MASC_CDAL_GATE_ENABLED" (Some "true") (fun () ->
@@ -740,11 +765,11 @@ let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fu
           Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
             (`Assoc
               [
-                ("title", `String "Strict verifier task");
+                ("title", `String "Direct-done LLM review task");
                 ( "contract",
                   `Assoc
                     [
-                      ("strict", `Bool true);
+                      ("strict", `Bool false);
                       ( "completion_contract",
                         `List [ `String "deliverable-ready" ] );
                       ("required_evidence", `List [ `String "run_deliverable" ]);
@@ -1602,12 +1627,31 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
           ])
     in
     let _ = Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
-    let _ =
+    (* A strict submit must carry evidence (#23719/#23740 strict precheck) or
+       the task never reaches AwaitingVerification and this test would assert
+       against the precheck error instead (main red #23901, family A). *)
+    let submitted =
       Workspace.transition_task_r ctx.config ~agent_name:"test-agent"
         ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification
         ~notes:"strict contract verification setup notes"
+        ~handoff_context:
+          { Masc_domain.summary = "strict contract verification setup notes"
+          ; reason = None
+          ; next_step = None
+          ; failure_mode = None
+          ; reclaim_policy = None
+          ; evidence_refs = [ "tests green: dune runtest" ]
+          ; updated_at = None
+          ; updated_by = None
+          }
         ()
     in
+    (match submitted with
+     | Ok _ -> ()
+     | Error e ->
+       failwith
+         ("setup submit should reach AwaitingVerification: "
+          ^ Masc_domain.masc_error_to_string e));
     let result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc

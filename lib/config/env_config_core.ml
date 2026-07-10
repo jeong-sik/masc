@@ -570,29 +570,6 @@ let disable_hitl_env_key = "MASC_DISABLE_HITL"
 let disable_hitl () =
   get_bool ~default:false disable_hitl_env_key
 
-(** {1 Keeper Code-Execution Exemptions} *)
-
-module String_set = Set.Make(String)
-
-(** Environment variable for space-separated keeper names exempt from
-    code-execution governance gates (per task-1807).
-    @category Security
-    @ops_class operator *)
-let code_exempt_keepers_env_key = "MASC_CODE_EXEMPT_KEEPERS"
-
-(** Parse space-separated keeper exemption list from env. *)
-let code_exempt_keepers_set () =
-  match raw_value_opt code_exempt_keepers_env_key |> trim_opt with
-  | None | Some "" -> String_set.empty
-  | Some s ->
-    String.split_on_char ' ' s
-    |> List.filter (fun x -> x <> "")
-    |> String_set.of_list
-
-(** Check whether a given keeper name is in the exemption set. *)
-let code_exempt_keeper ~keeper_name =
-  String_set.mem keeper_name (code_exempt_keepers_set ())
-
 (** {1 Build Identity} *)
 
 (** Git commit hash override for build identity. *)

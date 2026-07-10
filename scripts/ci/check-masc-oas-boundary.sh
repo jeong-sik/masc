@@ -146,8 +146,9 @@ fi
 #     workspace documents, but the effective provider/model capability record
 #     is owned by OAS and must be read from the materialized Provider_config.
 echo "=== Scan: OAS model-capability SSOT ==="
-legacy_capability_matches=$(
-  rg -n --type ml --type mli \
+legacy_capability_matches=""
+if legacy_capability_matches=$(
+  rg -n --glob '*.ml' --glob '*.mli' \
     -e 'Runtime_schema\.model_capabilities' \
     -e 'model_capabilities_default' \
     -e '\.model\.capabilities' \
@@ -160,8 +161,16 @@ legacy_capability_matches=$(
     lib/runtime/runtime_adapter.ml \
     lib/runtime/runtime_agent.ml \
     lib/runtime/runtime_inference.ml \
-    lib/keeper/ 2>/dev/null || true
-)
+    lib/keeper/ 2>/dev/null
+); then
+  :
+else
+  scan_status=$?
+  if [ "$scan_status" -ne 1 ]; then
+    echo "FAIL: OAS model-capability SSOT scan failed (rg exit ${scan_status})"
+    exit_code=1
+  fi
+fi
 if [ -n "$legacy_capability_matches" ]; then
   echo "FAIL: execution code consumes legacy MASC model capability declarations:"
   echo "$legacy_capability_matches"

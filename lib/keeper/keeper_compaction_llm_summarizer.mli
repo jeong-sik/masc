@@ -14,11 +14,23 @@
     fiber-local Eio context captured at construction, and the summarizer type
     stays synchronous+total. *)
 
+(** A byte-bounded, complete-message serialization of a working transcript.
+    [visible_indices] is the exact set of message indices whose content appears
+    in [text]; [message_count] is the full input size. The private constructor
+    prevents callers from separating serialized content from its visibility
+    provenance. *)
+type bounded_transcript = private
+  { text : string
+  ; message_count : int
+  ; visible_indices : int list
+  }
+
 (** A validated compaction plan over a working set of [n] messages. Every
     index in [kept]/[summarized]/[dropped] is in [\[0, n)], the three sets are
     pairwise disjoint, and together they cover every index exactly once. For
     non-empty inputs, at least one [kept] or [summarized] index is required so
-    applying the plan cannot erase the entire working set. *)
+    applying the plan cannot erase the entire working set. Every index omitted
+    from the bounded transcript is in [kept]. *)
 type compaction_plan = private
   { summary : string
   ; kept : int list
@@ -43,6 +55,12 @@ type complete_fn =
   unit ->
   (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
 
+(** Serialize the longest complete-message prefix that fits the provider input
+    bound, retaining the exact visible-index provenance used by validation. *)
+val serialize_indexed_messages
+  :  Agent_sdk.Types.message list
+  -> bounded_transcript
+
 (** [make ~runtime_id ~keeper_name ()] builds a summarizer bound to the
     librarian lane resolved from [runtime_id], or [None] if the Eio context
     or a schema-capable provider is unavailable. The caller treats [None] as
@@ -56,13 +74,13 @@ val make
   -> unit
   -> summarizer option
 
-(** Parse+validate a raw structured response into a plan over [message_count]
-    messages. Exposed for tests. Returns [Error] with a reason on any
+(** Parse+validate a raw structured response against [transcript]. Exposed for
+    tests. Returns [Error] with a reason on any
     structural violation (out-of-range / negative / duplicate / non-covering
-    indices, empty output for a non-empty working set, or a missing/empty
-    summary). *)
+    indices, any non-kept index omitted from the bounded prompt, empty output
+    for a non-empty working set, or a missing/empty summary). *)
 val plan_of_json
-  :  message_count:int
+  :  transcript:bounded_transcript
   -> Yojson.Safe.t
   -> (compaction_plan, string) result
 

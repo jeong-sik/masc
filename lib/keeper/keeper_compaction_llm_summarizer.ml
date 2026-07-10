@@ -13,9 +13,16 @@ let summary_max_tokens = 1024
 
 (* Bound the serialized working set handed to the model. A compaction fires
    near the context limit, so the notes text must itself be bounded well below
-   the window; the model classifies by index, so truncation loses tail detail
-   but never the index mapping (the tail simply lands in [kept]). *)
+   the window. Serialization stops at a complete-message boundary and carries
+   the exact visible indices into plan validation; unseen tail indices are only
+   valid in [kept]. *)
 let max_notes_bytes = 24_000
+
+type bounded_transcript =
+  { text : string
+  ; message_count : int
+  ; visible_indices : int list
+  }
 
 type compaction_plan =
   { summary : string
@@ -71,43 +78,69 @@ let plan_schema_supported provider_cfg =
 
 let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
 
-(* One indexed line per message: "[i] role: <text>". The model must classify
-   every [i] into exactly one of kept/summarized/dropped. *)
-let indexed_messages_text (messages : Agent_sdk.Types.message list) =
-  messages
-  |> List.mapi (fun idx (m : Agent_sdk.Types.message) ->
-    let role =
-      match m.role with
-      | Agent_sdk.Types.System -> "system"
-      | Agent_sdk.Types.User -> "user"
-      | Agent_sdk.Types.Assistant -> "assistant"
-      | Agent_sdk.Types.Tool -> "tool"
-    in
-    let text = Agent_sdk.Types.text_of_message m |> String.trim in
-    Printf.sprintf "[%d] %s: %s" idx role text)
-  |> String.concat "\n"
-  |> String_util.utf8_safe ~max_bytes:max_notes_bytes ~suffix:"..."
-  |> String_util.to_string
+let indexed_message_text idx (m : Agent_sdk.Types.message) =
+  let role =
+    match m.role with
+    | Agent_sdk.Types.System -> "system"
+    | Agent_sdk.Types.User -> "user"
+    | Agent_sdk.Types.Assistant -> "assistant"
+    | Agent_sdk.Types.Tool -> "tool"
+  in
+  let text = Agent_sdk.Types.text_of_message m |> String.trim in
+  Printf.sprintf "[%d] %s: %s" idx role text
 
-let messages_for_plan ~(messages : Agent_sdk.Types.message list) =
-  let count = List.length messages in
+(* Add only complete indexed messages. This makes [visible_indices] the typed
+   provenance of exactly what the model saw instead of inferring visibility
+   after an arbitrary byte truncation. *)
+let serialize_indexed_messages (messages : Agent_sdk.Types.message list) =
+  let message_count = List.length messages in
+  let buffer = Buffer.create max_notes_bytes in
+  let rec add idx visible_indices = function
+    | [] ->
+      { text = Buffer.contents buffer
+      ; message_count
+      ; visible_indices = List.rev visible_indices
+      }
+    | m :: rest ->
+      let indexed = indexed_message_text idx m in
+      let separator_bytes = if Buffer.length buffer = 0 then 0 else 1 in
+      if Buffer.length buffer + separator_bytes + String.length indexed > max_notes_bytes
+      then
+        { text = Buffer.contents buffer
+        ; message_count
+        ; visible_indices = List.rev visible_indices
+        }
+      else (
+        if separator_bytes <> 0 then Buffer.add_char buffer '\n';
+        Buffer.add_string buffer indexed;
+        add (idx + 1) (idx :: visible_indices) rest)
+  in
+  add 0 [] messages
+
+let messages_for_plan ~(transcript : bounded_transcript) =
+  let count = transcript.message_count in
+  let visible_count = List.length transcript.visible_indices in
   let system =
     "You compact a keeper's working context. Classify EVERY message, by its \
      0-based index, into exactly one of: kept (verbatim, still load-bearing), \
      summarized (folded into the summary), or dropped (low value, discard). \
      Every index in range must appear in exactly one list; do not invent \
-     indices. Prefer keeping recent messages and any with concrete code paths, \
-     commands, decisions, or unresolved blockers. Write one durable [summary] \
-     prose block that stands in for the summarized messages. Do not invent \
-     facts. Do not include markdown fences."
+     indices. You receive a bounded prefix of the transcript: only indices in \
+     visible_index_range may be summarized or dropped. Every index outside \
+     visible_index_range MUST be put in kept_indices. Prefer keeping recent \
+     messages and any with concrete code paths, commands, decisions, or \
+     unresolved blockers. Write one durable [summary] prose block that stands \
+     in for the summarized messages. Do not invent facts. Do not include \
+     markdown fences."
   in
   let user =
     Printf.sprintf
-      "message_count: %d\nmessages:\n%s\n\nReturn a JSON object with fields \
+      "message_count: %d\nvisible_index_range: [0, %d)\nmessages:\n%s\n\nReturn a JSON object with fields \
        summary, kept_indices, summarized_indices, dropped_indices covering \
        every index in [0, %d) exactly once."
       count
-      (indexed_messages_text messages)
+      visible_count
+      transcript.text
       count
   in
   [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
@@ -174,7 +207,30 @@ let validate_non_empty_output ~message_count ~kept ~summarized =
     Error "plan would produce empty compaction output"
   else Ok ()
 
-let plan_of_json ~message_count json =
+let validate_unseen_indices_kept ~(transcript : bounded_transcript) ~kept =
+  let visible =
+    List.fold_left (fun indices idx -> Int_set.add idx indices) Int_set.empty
+      transcript.visible_indices
+  in
+  let kept =
+    List.fold_left (fun indices idx -> Int_set.add idx indices) Int_set.empty kept
+  in
+  let rec first_unkept_unseen idx =
+    if idx >= transcript.message_count
+    then None
+    else if Int_set.mem idx visible || Int_set.mem idx kept
+    then first_unkept_unseen (idx + 1)
+    else Some idx
+  in
+  match first_unkept_unseen 0 with
+  | None -> Ok ()
+  | Some idx ->
+    Error
+      (Printf.sprintf
+         "index %d was omitted from the bounded prompt and must be kept"
+         idx)
+
+let plan_of_json ~(transcript : bounded_transcript) json =
   let* summary = string_field Schema.compaction_plan_field_summary json in
   let summary = String.trim summary in
   let* kept = int_list_field Schema.compaction_plan_field_kept_indices json in
@@ -191,7 +247,9 @@ let plan_of_json ~message_count json =
     then Error "summary must be non-empty when summarized indices are present"
     else Ok ()
   in
+  let message_count = transcript.message_count in
   let* () = validate_partition ~message_count ~kept ~summarized ~dropped in
+  let* () = validate_unseen_indices_kept ~transcript ~kept in
   let* () = validate_non_empty_output ~message_count ~kept ~summarized in
   Ok { summary; kept; summarized; dropped }
 
@@ -218,13 +276,13 @@ let apply (plan : compaction_plan) ~(messages : Agent_sdk.Types.message list) =
       if idx = first_summarized then Some summary_msg else None
     else Some m)
 
-let plan_of_response ~message_count response =
+let plan_of_response ~transcript response =
   match
     Agent_sdk_response.structured_json_of_response
       ~schema_name:"keeper_compaction_plan"
       response
   with
-  | Ok json -> plan_of_json ~message_count json
+  | Ok json -> plan_of_json ~transcript json
   | Error detail -> Error ("invalid structured response: " ^ detail)
 
 type 'a timeout_result =
@@ -250,9 +308,9 @@ let run_plan
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(messages : Agent_sdk.Types.message list)
     () : compaction_plan option =
-  let message_count = List.length messages in
+  let transcript = serialize_indexed_messages messages in
   let provider_cfg = provider_for_plan ~runtime_id provider_cfg in
-  let request = messages_for_plan ~messages in
+  let request = messages_for_plan ~transcript in
   match
     with_timeout ?clock ~timeout_sec (fun () ->
       complete ~sw ~net ?clock ~config:provider_cfg ~messages:request ())
@@ -274,7 +332,7 @@ let run_plan
       runtime_id (Provider_http_error.to_message err);
     None
   | Completed (Ok response) ->
-    (match plan_of_response ~message_count response with
+    (match plan_of_response ~transcript response with
      | Ok plan -> Some plan
      | Error detail ->
        Log.Keeper.warn ~keeper_name

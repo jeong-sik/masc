@@ -263,7 +263,7 @@ let is_masc_internal_state_path (raw : string) : bool =
   | masc_dir :: "playground" :: _ when String.equal masc_dir Common.masc_dirname ->
     false
   | masc_dir :: _ when String.equal masc_dir Common.masc_dirname -> true
-  | [] | _ -> false
+  | _ -> false
 ;;
 
 let is_masc_internal_state_norm ~(root_norm : string) ~(target_norm : string) : bool =

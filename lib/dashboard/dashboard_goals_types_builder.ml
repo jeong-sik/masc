@@ -350,7 +350,8 @@ let rec build_tree context goals goal =
         match task.task_status with
         | Masc_domain.AwaitingVerification _ -> true
         | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.Done _
-        | Masc_domain.Cancelled _ ->
+        | Masc_domain.Cancelled _
+        | Masc_domain.OperatorBlocked _ ->
             false)
       linked_tasks
   in

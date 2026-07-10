@@ -31,6 +31,14 @@ let keepers_dir () =
   | None -> Config_dir_resolver.keepers_dir ()
 ;;
 
+let keeper_name_exn raw =
+  match Keeper_id.Keeper_name.of_string raw with
+  | Ok keeper_name -> keeper_name
+  | Error detail -> invalid_arg detail
+;;
+
+let keeper_name_string = Keeper_id.Keeper_name.to_string
+
 module For_testing = struct
   let with_keepers_dir path f =
     ensure_dir path;
@@ -111,18 +119,41 @@ let events_path ~keeper_id =
   events_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
-let episode_bundle_lock_path ~keeper_id =
-  Filename.concat (keepers_dir ()) (keeper_id ^ ".episode-bundle")
+let episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat
+    keepers_dir
+    (keeper_name_string keeper_id ^ ".episode-bundle")
+;;
+
+let with_episode_bundle_lock_for_keepers_dir ?clock ~keepers_dir ~keeper_id f =
+  File_lock_eio.with_lock
+    ?clock
+    (episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    f
 ;;
 
 let with_episode_bundle_lock ?clock ~keeper_id f =
-  File_lock_eio.with_lock ?clock (episode_bundle_lock_path ~keeper_id) f
+  with_episode_bundle_lock_for_keepers_dir
+    ?clock
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id:(keeper_name_exn keeper_id)
+    f
+;;
+
+let episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id =
+  let d =
+    Filename.concat
+      keepers_dir
+      (Filename.concat (keeper_name_string keeper_id) "episodes")
+  in
+  ensure_dir d;
+  d
 ;;
 
 let episodes_dir ~keeper_id =
-  let d = Filename.concat (keepers_dir ()) (Filename.concat keeper_id "episodes") in
-  ensure_dir d;
-  d
+  episodes_dir_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id:(keeper_name_exn keeper_id)
 ;;
 
 let tool_results_dir ~keeper_id =
@@ -180,12 +211,14 @@ let write_file_atomically path content =
   | Error msg -> raise (Atomic_write_failed msg)
 ;;
 
-let generation_counter_path ~keeper_id ~trace_id =
-  Filename.concat (episodes_dir ~keeper_id) (Printf.sprintf "%s.generation" trace_id)
+let generation_counter_path_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id =
+  Filename.concat
+    (episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id)
+    (Printf.sprintf "%s.generation" trace_id)
 ;;
 
-let max_generation_from_files ~keeper_id ~trace_id =
-  let dir = episodes_dir ~keeper_id in
+let max_generation_from_files_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id =
+  let dir = episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id in
   let prefix = Printf.sprintf "%s-g" trace_id in
   Sys.readdir dir
   |> Array.to_list
@@ -217,10 +250,23 @@ let read_generation_counter path =
     lock. The counter intentionally allows gaps when extraction later fails;
     uniqueness is more important than contiguous numbering across fibers or
     processes. *)
-let next_generation_with_floor ~floor ~keeper_id ~trace_id =
-  let counter_path = generation_counter_path ~keeper_id ~trace_id in
+let next_generation_with_floor_for_keepers_dir
+      ~keepers_dir
+      ~floor
+      ~keeper_id
+      ~trace_id
+  =
+  let counter_path =
+    generation_counter_path_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id
+  in
   File_lock_eio.with_lock counter_path (fun () ->
-    let next_from_files = max_generation_from_files ~keeper_id ~trace_id + 1 in
+    let next_from_files =
+      max_generation_from_files_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id
+        ~trace_id
+      + 1
+    in
     let next_from_counter =
       match read_generation_counter counter_path with
       | Some next -> next
@@ -231,17 +277,25 @@ let next_generation_with_floor ~floor ~keeper_id ~trace_id =
     generation)
 ;;
 
+let next_generation_with_floor ~floor ~keeper_id ~trace_id =
+  next_generation_with_floor_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~floor
+    ~keeper_id:(keeper_name_exn keeper_id)
+    ~trace_id
+;;
+
 let next_generation ~keeper_id ~trace_id =
   next_generation_with_floor ~floor:0 ~keeper_id ~trace_id
 ;;
 
-let unique_episode_path ~keeper_id episode =
+let unique_episode_path_for_keepers_dir ~keepers_dir ~keeper_id episode =
   let created_ms =
     episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float
   in
   let base =
     Filename.concat
-      (episodes_dir ~keeper_id)
+      (episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id)
       (Printf.sprintf
          "%s-g%04d-t%013Ld"
          episode.trace_id
@@ -263,8 +317,7 @@ let unique_episode_path ~keeper_id episode =
 
 let append_line path line =
   ensure_dir (Filename.dirname path);
-  let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
-  with_out_channel oc ~f:(fun oc -> output_string oc (line ^ "\n"))
+  Fs_compat.append_file_durable path (line ^ "\n")
 ;;
 
 let append_json path json =
@@ -275,13 +328,31 @@ let append_fact ~keeper_id fact =
   append_json (facts_path ~keeper_id) (fact_to_json fact)
 ;;
 
+let append_event_for_keepers_dir ~keepers_dir ~keeper_id episode =
+  append_json
+    (events_path_for_keepers_dir
+       ~keepers_dir
+       ~keeper_id:(keeper_name_string keeper_id))
+    (episode_to_json episode)
+;;
+
 let append_event ~keeper_id episode =
-  append_json (events_path ~keeper_id) (episode_to_json episode)
+  append_event_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id:(keeper_name_exn keeper_id)
+    episode
+;;
+
+let append_episode_for_keepers_dir ~keepers_dir ~keeper_id episode =
+  let path = unique_episode_path_for_keepers_dir ~keepers_dir ~keeper_id episode in
+  write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
 ;;
 
 let append_episode ~keeper_id episode =
-  let path = unique_episode_path ~keeper_id episode in
-  write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
+  append_episode_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id:(keeper_name_exn keeper_id)
+    episode
 ;;
 
 let append_episode_bundle ~keeper_id episode =
@@ -537,24 +608,28 @@ let read_all_facts ~keeper_id =
   read_facts_all ~keeper_id
 ;;
 
-let read_facts_for_rewrite ~keeper_id =
-  (* RFC-0302 (#22823) phase-2b: resolve keepers_dir on the main domain (it touches
-     the Config_dir_resolver plain-ref memo), then offload the blocking full read +
-     strict parse of the fact store off the main Eio scheduler. This is the
-     per-write read on the librarian hot path (merge_and_cap_facts) and cap_facts.
-     Byte-equivalent to [read_facts_all_strict ~keeper_id] (which is exactly
-     [read_facts_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ())]) — only
-     the resolution is hoisted to main and the read is offloaded. Callers hold a
+let read_facts_for_rewrite_for_keepers_dir ~keepers_dir ~keeper_id =
+  (* RFC-0302 (#22823) phase-2b: [keepers_dir] is resolved by the caller before
+     this boundary. Offload the blocking full read + strict parse of the fact
+     store off the main Eio scheduler. This is the per-write read on the
+     librarian hot path ([merge_and_cap_facts]) and [cap_facts]. Callers hold a
      File_lock_eio flock on main across this (inline-in-tests) submit; the closure
-     reads only [keepers]/[keeper_id] and no shared mutable state, and the
-     Fs_compat rewrite that follows stays on main. *)
-  let keepers = keepers_dir () in
+     reads only the explicit root and [keeper_id], and the Fs_compat rewrite that
+     follows stays on main. *)
   match
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      read_facts_all_strict_for_keepers_dir ~keepers_dir:keepers ~keeper_id)
+      read_facts_all_strict_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id:(keeper_name_string keeper_id))
   with
   | Ok facts -> facts
   | Error message -> invalid_arg message
+;;
+
+let read_facts_for_rewrite ~keeper_id =
+  read_facts_for_rewrite_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id:(keeper_name_exn keeper_id)
 ;;
 
 (* RFC-0239 Q4 (supersedes RFC-0238 Capped_by_score): bound the append-only
@@ -645,8 +720,19 @@ let merge_episode_facts ~merge ~existing ~incoming =
    that carries claims; the librarian runs at most once per turn after an LLM
    call, so a full rewrite of at most [trigger] facts is off the hot path. An
    empty [incoming] with the store already under [trigger] is a no-op. *)
-let merge_and_cap_facts ~now ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
-  let existing = read_facts_for_rewrite ~keeper_id in
+let merge_and_cap_facts_for_keepers_dir
+      ~keepers_dir
+      ~now
+      ~keeper_id
+      ~merge
+      ~incoming
+      ~keep
+      ~trigger
+      ~rank
+  =
+  let existing =
+    read_facts_for_rewrite_for_keepers_dir ~keepers_dir ~keeper_id
+  in
   let merged_list, merged, appended = merge_episode_facts ~merge ~existing ~incoming in
   (* RFC-0259 §3.6 (P5): drop effective-horizon-expired rows on the same boundary the
      GC sweep uses, before the trigger gate and ranking, so an under-cap store
@@ -670,8 +756,31 @@ let merge_and_cap_facts ~now ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
         in
         kept, total - List.length kept)
     in
-    rewrite_facts_atomically ~keeper_id kept;
+    rewrite_facts_atomically_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id:(keeper_name_string keeper_id)
+      kept;
     { merged; appended; dropped = rank_dropped + List.length expired })
+;;
+
+let merge_and_cap_facts
+      ~now
+      ~keeper_id
+      ~merge
+      ~incoming
+      ~keep
+      ~trigger
+      ~rank
+  =
+  merge_and_cap_facts_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~now
+    ~keeper_id:(keeper_name_exn keeper_id)
+    ~merge
+    ~incoming
+    ~keep
+    ~trigger
+    ~rank
 ;;
 
 let read_events_tail ~keeper_id ~n =
@@ -737,8 +846,12 @@ let trim_target ~count ~keep ~trigger = if count <= trigger then None else Some 
    [read_lines_tail] has: a line [episode_of_json] cannot parse is tail-trimmed
    like any other, never silently dropped mid-file. Returns the number dropped
    (diagnostic; the rewrite is the mechanism). *)
-let cap_events ~keeper_id ~keep ~trigger =
-  let path = events_path ~keeper_id in
+let cap_events_for_keepers_dir ~keepers_dir ~keeper_id ~keep ~trigger =
+  let path =
+    events_path_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id:(keeper_name_string keeper_id)
+  in
   (* RFC-0302 (#22823): submit the blocking full read to the domain pool so it
      does not starve the main Eio scheduler when a pool is installed (inline
      fallback in tests / before the pool is set up). [path] is resolved on main;
@@ -758,6 +871,14 @@ let cap_events ~keeper_id ~keep ~trigger =
     List.length all - List.length kept
 ;;
 
+let cap_events ~keeper_id ~keep ~trigger =
+  cap_events_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id:(keeper_name_exn keeper_id)
+    ~keep
+    ~trigger
+;;
+
 (* RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
    parseable-file count exceeds [trigger], keep the [keep] most-recent files by
    [compare_episode_recency] (the order recall uses) and unlink the rest. Only
@@ -766,16 +887,14 @@ let cap_events ~keeper_id ~keep ~trigger =
    best-effort / [Sys_error]-tolerant: a concurrent reader holding a file is
    fine, and no lock is taken here that could deadlock with the bundle lock the
    caller already holds. Returns the number unlinked. *)
-let cap_episode_files ~keeper_id ~keep ~trigger =
-  (* RFC-0302 (#22823): resolve [episodes_dir] on the main domain (it touches the
-     Config_dir_resolver plain-ref memo + mkdir), then offload the blocking
-     readdir + per-file episode read + best-effort unlink scan to the shared
-     domain pool so the scan does not starve the main Eio scheduler. The offloaded
-     closure reads only the resolved [dir] string and does no Eio/lock/shared-
-     mutable work (Sys.remove is a filesystem unlink, not OCaml shared state), so
-     it is domain-safe; the caller's bundle flock stays held on main across the
+let cap_episode_files_for_keepers_dir ~keepers_dir ~keeper_id ~keep ~trigger =
+  (* RFC-0302 (#22823): resolve and create [episodes_dir] from the explicit root
+     on the main domain, then offload the blocking readdir + per-file episode read
+     + best-effort unlink scan to the shared domain pool. The closure captures
+     only immutable [dir]/[keep]/[trigger]; no mutable OCaml state is shared, so
+     it is domain-safe. The caller's bundle flock stays held on main across the
      (inline-fallback in tests) submit. *)
-  let dir = episodes_dir ~keeper_id in
+  let dir = episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id in
   Domain_pool_ref.submit_io_or_inline (fun () ->
     let parsed =
       Sys.readdir dir
@@ -796,4 +915,12 @@ let cap_episode_files ~keeper_id ~keep ~trigger =
       let to_drop = sorted |> List.filteri (fun i _ -> i < n_drop) |> List.map fst in
       List.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) to_drop;
       List.length to_drop)
+;;
+
+let cap_episode_files ~keeper_id ~keep ~trigger =
+  cap_episode_files_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id:(keeper_name_exn keeper_id)
+    ~keep
+    ~trigger
 ;;

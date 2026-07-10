@@ -2217,9 +2217,9 @@ let test_post_has_high_risk_evidence_returns_true_for_high_risk_claim () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let post_id = Board_core.create_post ~body:"high risk post"
+  let post_id = Board_core.create_post ~content:"high risk post"
     ~author:(make_keeper_eta ())
-    ~claims:["artifact_exists"]
+    ~claims:[`artifact_exists]
     ~artifact_refs:["/tmp/test-artifact"]
     ()
   in
@@ -2230,7 +2230,7 @@ let test_post_has_high_risk_evidence_returns_false_for_no_claims () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let post_id = Board_core.create_post ~body:"no claims post"
+  let post_id = Board_core.create_post ~content:"no claims post"
     ~author:(make_keeper_eta ())
     ()
   in

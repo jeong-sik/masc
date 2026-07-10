@@ -233,6 +233,8 @@ type task_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
+  | Block_for_operator
+  | Unblock
 [@@deriving show]
 
 (** RFC-0262: who authorizes a transition that would otherwise require the
@@ -269,6 +271,8 @@ let task_action_of_string s =
   | "submit_for_verification" -> Ok Submit_for_verification
   | "approve" -> Ok Approve_verification
   | "reject" -> Ok Reject_verification
+  | "block_for_operator" -> Ok Block_for_operator
+  | "unblock" -> Ok Unblock
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
 
 let task_action_to_string = function
@@ -280,11 +284,14 @@ let task_action_to_string = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve"
   | Reject_verification -> "reject"
+  | Block_for_operator -> "block_for_operator"
+  | Unblock -> "unblock"
 
 (** All valid task actions, derived from the ADT (single source of truth). *)
 let all_task_actions =
   [ Claim; Start; Done_action; Cancel; Release;
-    Submit_for_verification; Approve_verification; Reject_verification ]
+    Submit_for_verification; Approve_verification; Reject_verification;
+    Block_for_operator; Unblock ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
 (* RFC-0220: the verification sub-state (previously a separate request_status

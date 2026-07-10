@@ -185,20 +185,25 @@ let assert_metric_increment label before after =
          after)
 ;;
 
-(* Only MaxTokens -> true. Exhaustive over all 9 SDK variants so a new one forces
-   a decision rather than silently bucketing to false. *)
+(* MaxTokens and RepetitionTruncation -> true (generation cut before a natural
+   end). Exhaustive over all 12 SDK variants so a new one forces a decision
+   rather than silently bucketing to false. *)
 let test_truncated_of_stop_reason () =
-  assert (Vt.truncated_of_stop_reason Agent_sdk.Types.MaxTokens = true);
+  List.iter
+    (fun r -> assert (Vt.truncated_of_stop_reason r = true))
+    [ Agent_sdk.Types.MaxTokens; Agent_sdk.Types.RepetitionTruncation ];
   List.iter
     (fun r -> assert (Vt.truncated_of_stop_reason r = false))
     [ Agent_sdk.Types.EndTurn
     ; Agent_sdk.Types.StopToolUse
     ; Agent_sdk.Types.StopSequence
     ; Agent_sdk.Types.Refusal
+    ; Agent_sdk.Types.ContentFilter
     ; Agent_sdk.Types.PauseTurn
     ; Agent_sdk.Types.Compaction
     ; Agent_sdk.Types.ContextWindowExceeded
-    ; Agent_sdk.Types.Unknown "content_filter"
+    ; Agent_sdk.Types.UnmatchedToolCalls
+    ; Agent_sdk.Types.Unknown "some_novel_reason"
     ]
 
 (* One User message [text query; image]; image data is base64 of the raw bytes

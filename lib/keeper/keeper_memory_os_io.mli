@@ -34,6 +34,8 @@ val current_path_for_legacy_memory_filename :
     to the current store path under [keepers_dir], when the filename is a
     supported legacy memory artifact. *)
 val episodes_dir : keeper_id:string -> string
+val episodes_dir_for_keepers_dir :
+  keepers_dir:string -> keeper_id:Keeper_id.Keeper_name.t -> string
 val tool_results_dir : keeper_id:string -> string
 val tool_result_path : keeper_id:string -> tool_call_id:string -> string
 val episode_path : keeper_id:string -> trace_id:string -> generation:int -> string
@@ -47,7 +49,15 @@ val next_generation : keeper_id:string -> trace_id:string -> int
 
 (** Like {!next_generation}, but preserves a caller-provided generation lower
     bound while still advancing the counter past it. *)
-val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:string -> int
+val next_generation_with_floor :
+  floor:int -> keeper_id:string -> trace_id:string -> int
+
+val next_generation_with_floor_for_keepers_dir :
+  keepers_dir:string ->
+  floor:int ->
+  keeper_id:Keeper_id.Keeper_name.t ->
+  trace_id:string ->
+  int
 
 (** {1 Atomic writes} *)
 
@@ -60,13 +70,27 @@ val with_out_channel : out_channel -> f:(out_channel -> unit) -> unit
 
 val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
+val append_event_for_keepers_dir :
+  keepers_dir:string -> keeper_id:Keeper_id.Keeper_name.t -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
+val append_episode_for_keepers_dir :
+  keepers_dir:string -> keeper_id:Keeper_id.Keeper_name.t -> episode -> unit
 
 (** Serialize a cross-file episode bundle write for one keeper. Callers that
     write facts plus episode/event artifacts should take this before the facts
     lock, then publish [events_path] last as the reader-visible commit marker. *)
 val with_episode_bundle_lock :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t -> keeper_id:string -> (unit -> 'a) -> 'a
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  keeper_id:string ->
+  (unit -> 'a) ->
+  'a
+
+val with_episode_bundle_lock_for_keepers_dir :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  keepers_dir:string ->
+  keeper_id:Keeper_id.Keeper_name.t ->
+  (unit -> 'a) ->
+  'a
 
 val append_episode_bundle : keeper_id:string -> episode -> unit
 val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
@@ -147,12 +171,25 @@ val trim_target : count:int -> keep:int -> trigger:int -> int option
     malformed-line tolerant) and atomically rewrite; otherwise no-op. Returns the
     number of lines dropped. *)
 val cap_events : keeper_id:string -> keep:int -> trigger:int -> int
+val cap_events_for_keepers_dir :
+  keepers_dir:string ->
+  keeper_id:Keeper_id.Keeper_name.t ->
+  keep:int ->
+  trigger:int ->
+  int
 
 (** RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
     parseable-file count exceeds [trigger], keep the [keep] most-recent files by
     recency and best-effort unlink the rest; otherwise no-op. Unparseable files
     are left untouched. Returns the number unlinked. *)
-val cap_episode_files : keeper_id:string -> keep:int -> trigger:int -> int
+val cap_episode_files :
+  keeper_id:string -> keep:int -> trigger:int -> int
+val cap_episode_files_for_keepers_dir :
+  keepers_dir:string ->
+  keeper_id:Keeper_id.Keeper_name.t ->
+  keep:int ->
+  trigger:int ->
+  int
 
 (** Read and parse every fact in the store (unbounded; used by retention). *)
 val read_all_facts : keeper_id:string -> fact list
@@ -193,6 +230,17 @@ type fact_merge_stats =
 val merge_and_cap_facts :
   now:float
   -> keeper_id:string
+  -> merge:(existing:fact -> incoming:fact -> fact)
+  -> incoming:fact list
+  -> keep:int
+  -> trigger:int
+  -> rank:(fact -> float)
+  -> fact_merge_stats
+
+val merge_and_cap_facts_for_keepers_dir :
+  keepers_dir:string
+  -> now:float
+  -> keeper_id:Keeper_id.Keeper_name.t
   -> merge:(existing:fact -> incoming:fact -> fact)
   -> incoming:fact list
   -> keep:int

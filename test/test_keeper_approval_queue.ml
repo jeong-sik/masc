@@ -207,11 +207,12 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
     (fun () ->
        let keeper_name = "pending-resolve-wake-test" in
        let callback_decision = ref None in
+       let input = `Assoc [ "kind", `String "critical_gate" ] in
        let id =
          AQ.submit_pending
            ~keeper_name
            ~tool_name:"keeper_continue_after_reconcile"
-           ~input:(`Assoc [ "kind", `String "critical_gate" ])
+           ~input
            ~risk_level:AQ.Critical
            ~base_path
            ~on_resolution:(fun decision -> callback_decision := Some decision)
@@ -229,10 +230,18 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
         | Some (kn, aid, decision) ->
           Alcotest.(check string) "wake targets the waiting keeper" keeper_name kn;
           Alcotest.(check string) "wake carries the resolved approval id" id aid;
-          Alcotest.(check bool)
-            "wake carries the typed decision label"
-            true
-            (decision = Keeper_event_queue.Hitl_approved)
+          (match decision with
+           | Keeper_event_queue.Hitl_approved action ->
+             Alcotest.(check bool)
+               "wake carries the exact approved action"
+               true
+               (AQ.approved_action_matches_request
+                  action
+                  ~keeper_name
+                  ~tool_name:"keeper_continue_after_reconcile"
+                  ~input)
+           | Keeper_event_queue.Hitl_rejected | Keeper_event_queue.Hitl_edited ->
+             Alcotest.fail "approved queue entry emitted a non-approved wake")
         | None -> Alcotest.fail "non-blocking resolve did not fire the keeper wake hook"))
 ;;
 

@@ -122,8 +122,14 @@ and bg_job_kind = Subprocess
       (* RFC-0290: closed sum of background job kinds (v1 = [Subprocess]); a new
          kind forces every match to add an arm rather than defaulting. *)
 
+and hitl_approved_action = {
+  keeper_name : string;
+  tool_name : string;
+  input_hash : string;
+}
+
 and hitl_resolution_decision =
-  | Hitl_approved
+  | Hitl_approved of hitl_approved_action
   | Hitl_rejected
   | Hitl_edited
 
@@ -236,12 +242,11 @@ let goal_stagnation_post_id (gs : goal_stagnation) =
   "goal-stagnation:" ^ gs.gs_goal_id ^ ":" ^ gs.gs_stale_since
 
 let hitl_resolution_decision_to_string = function
-  | Hitl_approved -> "approve"
+  | Hitl_approved _ -> "approve"
   | Hitl_rejected -> "reject"
   | Hitl_edited -> "edit"
 
-let hitl_resolution_decision_of_string = function
-  | "approve" -> Ok Hitl_approved
+let hitl_nonapproved_resolution_decision_of_string = function
   | "reject" -> Ok Hitl_rejected
   | "edit" -> Ok Hitl_edited
   | other -> Error (Printf.sprintf "unknown hitl_resolution decision: %s" other)
@@ -567,10 +572,21 @@ let payload_to_yojson = function
       ; "channel", Keeper_continuation_channel.to_yojson ca.channel
       ]
   | Hitl_resolved r ->
+    let approved_action =
+      match r.decision with
+      | Hitl_approved action ->
+        `Assoc
+          [ "keeper_name", `String action.keeper_name
+          ; "tool_name", `String action.tool_name
+          ; "input_hash", `String action.input_hash
+          ]
+      | Hitl_rejected | Hitl_edited -> `Null
+    in
     `Assoc
       [ "kind", `String "hitl_resolved"
       ; "approval_id", `String r.approval_id
       ; "decision", `String (hitl_resolution_decision_to_string r.decision)
+      ; "approved_action", approved_action
       ; "channel", Keeper_continuation_channel.to_yojson r.channel
       ]
   | Goal_verification_failed failure ->
@@ -675,7 +691,23 @@ let payload_of_yojson json =
   | "hitl_resolved" ->
     let* approval_id = string_field ~context "approval_id" fields in
     let* decision_s = string_field ~context "decision" fields in
-    let* decision = hitl_resolution_decision_of_string decision_s in
+    let* decision =
+      match decision_s with
+      | "approve" ->
+        let* action_json = required_field ~context "approved_action" fields in
+        let* action_fields = assoc_fields ~context:(context ^ ".approved_action") action_json in
+        let* keeper_name =
+          string_field ~context:(context ^ ".approved_action") "keeper_name" action_fields
+        in
+        let* tool_name =
+          string_field ~context:(context ^ ".approved_action") "tool_name" action_fields
+        in
+        let* input_hash =
+          string_field ~context:(context ^ ".approved_action") "input_hash" action_fields
+        in
+        Ok (Hitl_approved { keeper_name; tool_name; input_hash })
+      | other -> hitl_nonapproved_resolution_decision_of_string other
+    in
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
   | "goal_verification_failed" ->

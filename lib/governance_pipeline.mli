@@ -137,6 +137,16 @@ val combinatorial_risk_escalation :
 (** If trifecta is active and the tool is a state_modification tool,
     escalate risk to at least High. Otherwise return base_risk unchanged. *)
 
+type hitl_approval_grant
+(** Cycle-scoped, one-shot authorization derived from a durable
+    [Hitl_resolved] wake. The type is abstract so callers cannot reset or forge
+    its consumed state. *)
+
+val hitl_approval_grant_of_resolution :
+  Keeper_event_queue.hitl_resolution -> hitl_approval_grant option
+(** Return a fresh one-shot grant for an approved resolution. Rejected and
+    edited resolutions do not authorize a tool call. *)
+
 val to_oas_approval_callback :
   config:Workspace.config ->
   governance_level:string ->
@@ -144,7 +154,8 @@ val to_oas_approval_callback :
   ?meta:Keeper_meta_contract.keeper_meta ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
-  ?nonblocking:bool ->
+  ?lane_policy:Keeper_approval_queue.lane_policy ->
+  ?hitl_approval_grant:hitl_approval_grant ->
   unit ->
   Agent_sdk.Hooks.approval_callback
 (** Build an OAS approval callback with HITL approval handling.
@@ -152,13 +163,18 @@ val to_oas_approval_callback :
     Pre-computes trifecta status from the keeper's active shard tool set.
     When trifecta is active, state-modifying tools get risk escalation.
 
-    When [nonblocking] is [false] (the compatibility default), a tool that
+    With [lane_policy = Blocking] (the compatibility default), a tool that
     exceeds the governance threshold suspends via
-    [Keeper_approval_queue.submit_and_await]. When [nonblocking] is [true],
-    the approval is registered with [submit_pending], the callback returns a
+    [Keeper_approval_queue.submit_and_await]. With [Nonblocking], the approval
+    is registered with [submit_pending], the callback returns a
     typed-in-protocol rejection, and the resolution wake starts a later
-    independent Keeper cycle. Production Keeper runs use [true] so ordinary
-    tool approval cannot monopolize the Keeper lane.
+    independent Keeper cycle. Production Keeper runs use [Nonblocking] so
+    ordinary tool approval cannot monopolize the Keeper lane.
+
+    [hitl_approval_grant] authorizes only the exact keeper/tool/full-input
+    fingerprint approved by the operator, and is atomically consumed once.
+    It is scoped by the caller to the independent cycle opened by that wake;
+    there is no persisted blanket rule or time-based grant.
 
     Tools below the threshold are auto-approved unless auto-approval is
     explicitly forbidden. Critical risk and runtime safety blockers still enter

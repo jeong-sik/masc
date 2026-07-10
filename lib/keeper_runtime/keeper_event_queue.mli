@@ -138,8 +138,17 @@ and bg_job_outcome =
   | Bg_ok of string  (** result payload *)
   | Bg_failed of string  (** failure label *)
 
+and hitl_approved_action = {
+  keeper_name : string;
+  tool_name : string;
+  input_hash : string;
+}
+(** Exact action identity authorized by an operator. [input_hash] is the
+    canonical full-input fingerprint produced by [Keeper_approval_queue]; it
+    is not an action-name heuristic or a persistent approval rule. *)
+
 and hitl_resolution_decision =
-  | Hitl_approved
+  | Hitl_approved of hitl_approved_action
   | Hitl_rejected
   | Hitl_edited
 
@@ -149,10 +158,10 @@ and hitl_resolution = {
   channel : Keeper_continuation_channel.t;
 }
 (** Payload for [Hitl_resolved]: [approval_id] correlates to the resolved
-    pending-approval queue entry; [decision] is the resolved label
-    ("approve" | "reject" | ...), carried for observability. The keeper
-    re-evaluates from its own state once the approval leaves the queue, so the
-    decision is not itself control flow. *)
+    pending-approval queue entry. An approved decision carries the exact action
+    identity authorized by the operator; rejected and edited decisions carry no
+    grant. The action is consumed at most once in the independent Keeper cycle
+    opened by this durable wake. *)
 
 and connector_attention = {
   event_id : string;

@@ -413,8 +413,30 @@ let list_recent_resolved_json ~base_path ?(n = recent_resolved_history_limit) ()
 
 let generate_id () = make_generated_id "appr"
 
+let rec canonical_exact_input = function
+  | `Assoc fields ->
+    fields
+    |> List.map (fun (key, value) -> key, canonical_exact_input value)
+    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
+    |> fun normalized -> `Assoc normalized
+  | `List items -> `List (List.map canonical_exact_input items)
+  | other -> other
+;;
+
 let normalized_input_hash (input : Yojson.Safe.t) =
-  Digestif.SHA256.(digest_string (Yojson.Safe.to_string input) |> to_hex)
+  let canonical = canonical_exact_input input |> Yojson.Safe.to_string in
+  Digestif.SHA256.(digest_string canonical |> to_hex)
+;;
+
+let approved_action_matches_request
+      (approved : Keeper_event_queue.hitl_approved_action)
+      ~keeper_name
+      ~tool_name
+      ~input
+  =
+  String.equal approved.keeper_name keeper_name
+  && String.equal approved.tool_name tool_name
+  && String.equal approved.input_hash (normalized_input_hash input)
 ;;
 
 let first_cmd_token (cmd : string) =
@@ -879,8 +901,15 @@ let wake_keeper_on_approval_resolution
       (Printexc.to_string exn)
 ;;
 
-let hitl_resolution_decision_of_approval_decision = function
-  | Agent_sdk.Hooks.Approve -> Keeper_event_queue.Hitl_approved
+let hitl_resolution_decision_of_approval_decision
+      (entry : pending_approval)
+  = function
+  | Agent_sdk.Hooks.Approve ->
+    Keeper_event_queue.Hitl_approved
+      { keeper_name = entry.keeper_name
+      ; tool_name = entry.tool_name
+      ; input_hash = entry.input_hash
+      }
   | Agent_sdk.Hooks.Reject _ -> Keeper_event_queue.Hitl_rejected
   | Agent_sdk.Hooks.Edit _ -> Keeper_event_queue.Hitl_edited
 ;;
@@ -941,7 +970,7 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
        ~base_path
        ~keeper_name:entry.keeper_name
        ~approval_id:entry.id
-       ~decision:(hitl_resolution_decision_of_approval_decision decision)
+       ~decision:(hitl_resolution_decision_of_approval_decision entry decision)
        ~channel:entry.channel);
   try
     Sse.broadcast

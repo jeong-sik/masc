@@ -324,6 +324,34 @@ let forbidden_reject_reason ~risk ~runtime_blocked =
       "forbidden_reject_reason: expected Critical risk or runtime auto-approval blocker"
 ;;
 
+type hitl_approval_grant =
+  { approval_id : string
+  ; approved_action : Keeper_event_queue.hitl_approved_action
+  ; consumed : bool Atomic.t
+  }
+
+let hitl_approval_grant_of_resolution
+      (resolution : Keeper_event_queue.hitl_resolution)
+  =
+  match resolution.decision with
+  | Keeper_event_queue.Hitl_approved approved_action ->
+    Some
+      { approval_id = resolution.approval_id
+      ; approved_action
+      ; consumed = Atomic.make false
+      }
+  | Keeper_event_queue.Hitl_rejected | Keeper_event_queue.Hitl_edited -> None
+;;
+
+let consume_hitl_approval_grant grant ~keeper_name ~tool_name ~input =
+  Keeper_approval_queue.approved_action_matches_request
+    grant.approved_action
+    ~keeper_name
+    ~tool_name
+    ~input
+  && Atomic.compare_and_set grant.consumed false true
+;;
+
 (* Reject a hard-forbidden request outright, auditing the decision as a
    terminal event. Called before any HITL queue path so the request can
    never be approved by an operator or a remembered rule. *)
@@ -383,7 +411,8 @@ let to_oas_approval_callback
       ?meta
       ?clock
       ?continuation_channel
-      ?(nonblocking = false)
+      ?(lane_policy = Keeper_approval_queue.Blocking)
+      ?hitl_approval_grant
       ()
   : Agent_sdk.Hooks.approval_callback
   =
@@ -488,20 +517,41 @@ let to_oas_approval_callback
              | None -> false)
           | None -> false
         in
-        let rule_match =
-          Keeper_approval_queue.find_matching_rule
+        let consumed_approval_id =
+          match hitl_approval_grant with
+          | Some grant ->
+            if consume_hitl_approval_grant grant ~keeper_name ~tool_name ~input
+            then Some grant.approval_id
+            else None
+          | None -> None
+        in
+        match consumed_approval_id with
+        | Some approval_id ->
+          Keeper_approval_queue.audit_approval_event
             ~base_path
+            ~event_type:"approved_continuation_consumed"
+            ~id:approval_id
             ~keeper_name
             ~tool_name
-            ~input
             ~risk_level
-            ?sandbox_profile
-            ?backend
+            ?turn_id
+            ?task_id
+            ?goal_id
+            ~goal_ids
+            ?sandbox_target
             ?runtime_contract
-            ()
-        in
-        if (not auto_approval_forbidden) && always_approve
-        then (
+            ?selected_model
+            ~disposition:"Pass"
+            ~disposition_reason:"operator_approved_one_shot"
+            ~auto_approved:false
+            ();
+          Log.Governance.info
+            "one-shot HITL approval consumed keeper=%s tool=%s approval=%s"
+            keeper_name
+            tool_name
+            approval_id;
+          Agent_sdk.Hooks.Approve
+        | None when (not auto_approval_forbidden) && always_approve ->
           Keeper_approval_queue.audit_approval_event
             ~base_path
             ~event_type:"auto_approved_always"
@@ -520,9 +570,20 @@ let to_oas_approval_callback
             ~disposition_reason:"always_approve_enabled"
             ~auto_approved:true
             ();
-          Agent_sdk.Hooks.Approve)
-        else
-          match rule_match with
+          Agent_sdk.Hooks.Approve
+        | None ->
+          match
+            Keeper_approval_queue.find_matching_rule
+              ~base_path
+              ~keeper_name
+              ~tool_name
+              ~input
+              ~risk_level
+              ?sandbox_profile
+              ?backend
+              ?runtime_contract
+              ()
+          with
           | Some matched ->
             Keeper_approval_queue.audit_approval_event
               ~base_path
@@ -551,8 +612,8 @@ let to_oas_approval_callback
               let disposition_reason =
                 Operator_approval.approval_mode_queue_reason_to_string reason
               in
-              if nonblocking
-              then
+              match lane_policy with
+              | Keeper_approval_queue.Nonblocking ->
                 let approval_id =
                   Keeper_approval_queue.submit_pending
                     ~keeper_name
@@ -571,6 +632,7 @@ let to_oas_approval_callback
                     ~disposition:"Blocked"
                     ~disposition_reason
                     ?continuation_channel
+                    ~lane_policy
                     ~risk_level
                     ~on_resolution:(fun decision ->
                       Log.Governance.info
@@ -584,7 +646,7 @@ let to_oas_approval_callback
                   (Printf.sprintf
                      "HITL approval pending: id=%s; the Keeper will be woken after the operator decision; do not retry this tool call until then"
                      approval_id)
-              else
+              | Keeper_approval_queue.Blocking ->
                 Keeper_approval_queue.submit_and_await
                   ~keeper_name
                   ~tool_name

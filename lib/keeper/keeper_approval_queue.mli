@@ -140,6 +140,17 @@ val approval_audit_decision_to_string : approval_audit_decision -> string
 val hitl_context_summary_to_yojson : hitl_context_summary -> Yojson.Safe.t
 val summary_status_to_yojson : summary_status -> Yojson.Safe.t
 
+val approved_action_matches_request :
+  Keeper_event_queue.hitl_approved_action ->
+  keeper_name:string ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  bool
+(** Exact structural match for a one-cycle operator approval. Object field
+    order is canonicalized, but no request field is removed or interpreted.
+    This intentionally differs from remembered-rule matching, which has a
+    broader persisted-policy contract. *)
+
 (** {1 Rule store (persisted)} *)
 
 (** List every persisted rule for the given [base_path]. *)

@@ -287,12 +287,10 @@ let consume_single_heartbeat_stimulus
       meta_after_triage.name;
     pending_events
   | Keeper_event_queue.Hitl_resolved r ->
-    (* The HITL approval this keeper was skipping on ([Skip Approval_pending])
-       was resolved. The wake is the whole point: the approval has left the
-       queue, so this cycle no longer skips and the keeper resumes on its own
-       state. There is no observation to inject — the decision reached the
-       keeper's suspended tool call (or the reject/expire teardown) through the
-       resolver, not turn input; injecting a pending event would fabricate one. *)
+    (* The approval has left the queue, so this cycle no longer skips. There is
+       no observation to fabricate: the typed resolution itself is threaded as
+       cycle context. An approved exact-action grant is consumed at governance;
+       reject/edit wakes carry no grant. *)
     Log.Keeper.info
       "turn entry: hitl resolution delivered approval=%s decision=%s (keeper=%s)"
       r.approval_id

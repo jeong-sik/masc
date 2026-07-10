@@ -40,7 +40,7 @@
 <body>
 <main>
   <h1>MASC live System/Keeper log adversarial audit</h1>
-  <p class="sub">Capture: 2026-07-10 10:24:43 KST / 2026-07-10T01:24:43Z · Runtime root: <code>/Users/dancer/me/.masc</code> · Source window: 2026-07-07 through capture time</p>
+  <p class="sub">Capture: 2026-07-10 10:24:43 KST / 2026-07-10T01:24:43Z · Runtime root: <code>&lt;base_path&gt;/.masc</code> · Source window: 2026-07-07 through capture time</p>
 
   <div class="summary">
     <div class="stat"><strong>degraded</strong><span>health overall status</span></div>
@@ -58,7 +58,7 @@
   <table>
     <tr><th>항목</th><th>관찰값</th><th>판정</th></tr>
     <tr><td>Health</td><td><code>status=ok</code>, version <code>0.20.0</code>, <code>overall_status=degraded</code></td><td>프로세스 응답은 정상. degraded 사유는 reaction ledger pending stimulus와 stale durable queue.</td></tr>
-    <tr><td>Config</td><td>effective base <code>/Users/dancer/me</code>, runtime root <code>/Users/dancer/me/.masc</code>, parse error 0, unknown key 0</td><td class="oktext">현재 설정 파싱 오류는 아님</td></tr>
+    <tr><td>Config</td><td>effective base <code>&lt;base_path&gt;</code>, runtime root <code>&lt;base_path&gt;/.masc</code>, parse error 0, unknown key 0</td><td class="oktext">현재 설정 파싱 오류는 아님</td></tr>
     <tr><td>Scheduler</td><td>tick/failure counters는 정상이고 crash 0</td><td class="oktext">스케줄러 자체의 정지 증거 없음</td></tr>
     <tr><td><code>verifier</code> queue</td><td><code>schedule_due</code> pending 1, 약 3,864초; durable meta는 <code>operator_paused</code></td><td>운영 상태와 autoboot 설정의 충돌. pause 중 queue가 남는 것은 현재 pause semantics의 결과이지 queue 손실 증거는 아님.</td></tr>
     <tr><td><code>nick0cave</code> queue</td><td><code>board_signal</code> inflight 1, 약 195초</td><td>처리 중인 lane의 receipt/ack를 재확인해야 함. queue 파일을 직접 삭제하면 안 됨.</td></tr>
@@ -72,11 +72,11 @@
   <h3>10:59 KST live recheck — source 수정 미배포</h3>
   <table>
     <tr><th>항목</th><th>현재 관찰값</th><th>판정</th></tr>
-    <tr><td>실행 파일</td><td>commit <code>61a643565b</code>, <code>/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin/main_eio.exe</code></td><td>worktree branch의 HITL/prompt 수정 미포함</td></tr>
+    <tr><td>실행 파일</td><td>commit <code>61a643565b</code>, <code>&lt;masc-repo&gt;/_build/default/bin/main_eio.exe</code></td><td>worktree branch의 HITL/prompt 수정 미포함</td></tr>
     <tr><td>Health</td><td><code>status=ok</code>, <code>overall_status=degraded</code></td><td>operator reasons는 reaction-ledger pending stimulus와 stale durable queue</td></tr>
     <tr><td>Durable queue</td><td><code>verifier</code>의 <code>schedule_due</code> pending 1개, inflight 0개, oldest age 약 6,075초, ack 0</td><td><code>operator_paused</code> 상태와 일치하는 미처리 항목. 직접 삭제/ack하지 않음</td></tr>
     <tr><td>Keeper fleet</td><td>running/healthy 10개, paused 4개</td><td>전체 fleet 정지는 아니지만 paused/autoboot 정책 충돌은 남음</td></tr>
-    <tr><td>BasePath/config</td><td>cwd/base <code>/Users/dancer/me</code>, mascot root <code>/Users/dancer/me/.masc</code>, roots diverge false, startup warnings 없음</td><td class="oktext">현재 path/config bootstrap 오류 증거 없음</td></tr>
+    <tr><td>BasePath/config</td><td>cwd/base <code>&lt;base_path&gt;</code>, runtime root <code>&lt;base_path&gt;/.masc</code>, roots diverge false, startup warnings 없음</td><td class="oktext">현재 path/config bootstrap 오류 증거 없음</td></tr>
   </table>
   <p>따라서 이번 recheck는 라이브 개선을 입증하지 않는다. 현재 바이너리는 이전 동작을 계속 실행하고 있고, 같은 날 로그에도 pending HITL 9건, 기존 blocking warning 150건, no-progress failure 8건, stale-turn 5건이 남아 있다.</p>
   <p><strong>11:14 KST delta recheck:</strong> health는 여전히 <code>degraded</code>이고, keeper fibers는 9개, durable queue는 pending 1개·inflight 1개·event-queue ack 0·stale 2개였다. 이 변동성 때문에 초기 queue 수치를 현재 SSOT로 해석하지 않으며, 라이브 queue를 직접 조작하지 않았다.</p>
@@ -102,7 +102,7 @@
     <tr><td>Keeper fleet</td><td>running/healthy/executable 10개, target 10개, failing/recovering 0개</td><td class="oktext">이전 reaction-capacity shortfall은 현재 snapshot에서 회복됨</td></tr>
     <tr><td>Turn admission</td><td>autonomous in-flight 6개, chat waiting/rejected 0개</td><td><code>mad-improver</code> lane은 약 39분째 in-flight이므로 F-05 장기 turn 관찰은 계속 필요</td></tr>
     <tr><td>Durable queue</td><td><code>verifier</code> <code>schedule_due</code> pending 1개, inflight 0개, age 약 20,095초</td><td><code>verifier</code>는 <code>operator_paused</code>; 직접 ack·삭제·resume하지 않음</td></tr>
-    <tr><td>Config/paths</td><td>parse error 0, unknown key 0, schema <code>ok</code>, startup degradation false; root <code>/Users/dancer/me/.masc</code></td><td class="oktext">현재 config/bootstrap 오류 증거 없음</td></tr>
+    <tr><td>Config/paths</td><td>parse error 0, unknown key 0, schema <code>ok</code>, startup degradation false; root <code>&lt;base_path&gt;/.masc</code></td><td class="oktext">현재 config/bootstrap 오류 증거 없음</td></tr>
   </table>
   <p><code>overall_status=degraded</code>의 현재 원인은 reaction ledger의 pending stimulus와 stale durable queue다. fleet recovery는 확인했지만, paused Keeper의 durable event가 5시간 이상 남은 상태와 source 수정 미배포 사실은 별개다.</p>
 
@@ -205,8 +205,8 @@
 
   <h2>검증 근거</h2>
   <pre>curl -fsS 'http://127.0.0.1:8935/health?full=1'
-rg 'keeper cycle FAILED.*no_usable_progress' /Users/dancer/me/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl
-rg 'pending HITL approval|Unrecognized stop_reason|stale_turn_timeout|release.*cancelled' /Users/dancer/me/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl</pre>
+rg 'keeper cycle FAILED.*no_usable_progress' &lt;base_path&gt;/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl
+rg 'pending HITL approval|Unrecognized stop_reason|stale_turn_timeout|release.*cancelled' &lt;base_path&gt;/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl</pre>
   <p class="small">로그 line count는 동일 사건이 structured message/details/supervisor 전파로 여러 번 기록된 경우를 deduplicate하지 않는다. 사건 수를 주장할 때는 위의 패턴과 source flow를 함께 보아야 한다. Durable queue 파일은 read-only evidence로만 확인했으며 삭제·ack·resume 조작은 하지 않았다. 12:35, 13:11, 14:52 KST recheck health evidence는 build commit <code>61a643565b</code> 기준이며, 각 snapshot의 동적 상태 차이를 보존하기 위해 분리했다.</p>
 
   <footer>이 보고서와 MASC 수정은 <a href="https://github.com/jeong-sik/masc/pull/23923">MASC draft PR #23923</a>, OAS provider-catalog 수정은 <a href="https://github.com/jeong-sik/oas/pull/2506">OAS draft PR #2506</a>에서 추적한다. Dune full build는 CI authority로 남기고, 소스 수정 후에는 touched target 중심의 narrow validation만 수행한다.</footer>

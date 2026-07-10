@@ -937,7 +937,6 @@ let make_test_meta ?(last_blocker = None) () =
     ; trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-test"
     ; trace_history = []
     ; last_handoff_ts = 0.0
-    ; last_continuity_update_ts = 0.0
     ; last_autonomous_action_at = ""
     ; autonomous_action_count = 0
     ; autonomous_turn_count = 0
@@ -983,7 +982,6 @@ let make_test_meta ?(last_blocker = None) () =
   ; created_at = ""
   ; updated_at = ""
   ; max_context_override = None
-  ; continuity_summary = ""
   ; active_goal_ids = []
   ; paused = false
   ; latched_reason = None

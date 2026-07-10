@@ -43,11 +43,6 @@ type agent_stats = {
   mutable posts_created : int;
   mutable comments_created : int;
   mutable skips : int;
-  (* Guard penalty tracking (Phase B1: Guard → Thompson bridge).
-     Incremented on each [record_guard_penalty] call. The caller enforces
-     the 1/cycle cap so this value approximates "cycles in which the
-     guardrail fired" without a separate cycle-boundary state machine. *)
-  mutable guard_penalties_total : int;
   (* Timestamp *)
   mutable updated_at : float;
 }
@@ -146,13 +141,6 @@ val record_quality_signal :
   agent_name:string ->
   verdict:quality_verdict ->
   unit
-
-(** Record a guard penalty into Thompson β.
-    Called when Guardrail_stop fires during a heartbeat cycle.
-    Capped at 1 per heartbeat cycle by the caller (keeper_keepalive.ml).
-    Default β nudge: 0.5 (configurable via MASC_GUARD_PENALTY_BETA).
-    Part of Phase B1: Guard → Thompson bridge. *)
-val record_guard_penalty : agent_name:string -> unit
 
 (** {1 Persistence} *)
 

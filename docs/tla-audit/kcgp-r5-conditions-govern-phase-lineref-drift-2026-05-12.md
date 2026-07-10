@@ -11,7 +11,7 @@
 
 ## PhaseSet spot-check (the reason this spec was picked) — clean
 
-After iter 77 KDM R-4 found `PhaseSet` missing `"Zombie"`, I picked this spec because it also has a `PhaseSet`. Result: **no drift**. `PhaseSet == {"Running","HandingOff"}` is a *2-phase projection* of the 13-phase FSM, and the preamble says so explicitly in its *"Scope projection"* paragraph: *"spec models the 2-phase fragment (Running / HandingOff). The full 13-phase variant is out of scope here ... Adding new OCaml phases does NOT require updating this spec unless the new phase competes with HandingOff for the handoff_needed signal."* `Zombie` (terminal) does not compete for the handoff signal, so it's correctly out of scope. The structured `OCaml ↔ TLA+ mapping` table in the preamble is already symbol-anchored (`:phase`, `:context_handoff_needed`, `:update_conditions`) and accurate (`conditions.context_handoff_needed : bool` on the `conditions` record; `context_handoff_needed = auto_rules.handoff` stamped in `update_conditions`).
+After iter 77 KDM R-4 found `PhaseSet` missing `"Zombie"`, I picked this spec because it also has a `PhaseSet`. Result: **no drift**. `PhaseSet == {"Running","HandingOff"}` is a *2-phase projection* of the 13-phase FSM, and the preamble says so explicitly in its *"Scope projection"* paragraph: *"spec models the 2-phase fragment (Running / HandingOff). The full 13-phase variant is out of scope here ... Adding new OCaml phases does NOT require updating this spec unless the new phase competes with HandingOff for the handoff_needed signal."* `Zombie` (terminal) does not compete for the handoff signal, so it's correctly out of scope. The structured `OCaml ↔ TLA+ mapping` table in the preamble is already symbol-anchored (`:phase`, `:context_handoff_needed`, `:update_conditions`) and accurate (`conditions.context_handoff_needed : bool` on the `conditions` record; `context_handoff_needed = context_actions.handoff` stamped in `update_conditions`).
 
 ## The two stale line-refs (sub-class 8: line-reference drift)
 
@@ -28,7 +28,7 @@ The `dashboard/src/components/keeper-conditions-divergent.ts` consumer reference
 |---|---|---|
 | `phase ∈ {"Running","HandingOff"}` (2-phase projection) | `type phase` in `keeper_state_machine.ml` — projection explicitly disclosed | ✓ |
 | `handoff_needed : BOOLEAN` | `conditions.context_handoff_needed : bool` (`keeper_state_machine.ml:79`) | ✓ |
-| condition stamped from auto-rule | `context_handoff_needed = auto_rules.handoff` in `update_conditions` (`:565`, fn at `:547`) | ✓ |
+| condition stamped from auto-rule | `context_handoff_needed = context_actions.handoff` in `update_conditions` (`:565`, fn at `:547`) | ✓ |
 | `Transition` (handoff_needed ∧ Running → HandingOff) | `derive_phase`'s `else if c.handoff_active then HandingOff` branch (`:~523`) | ✓ |
 | consumer surfaces the divergent condition | `dashboard/src/components/keeper-conditions-divergent.ts` (`context_handoff_needed: (v,p) => ...`) | ✓ |
 | `.cfg` / `-buggy.cfg` | both present | ✓ |

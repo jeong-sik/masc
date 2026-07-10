@@ -160,8 +160,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
            fabricate a class — the previous string-only stamp is the
            substring anti-pattern this refactor closes (CLAUDE.md
            "워크어라운드 거부 기준 #2").  cap_blocker_detail preserves a
-           structured [masc_oas_error] payload up to ~2000 chars (#9933,
-           re-homed from the purged social model — RFC-0276 §3.3) and
+           structured [masc_oas_error] payload up to ~2000 chars (#9933) and
            truncates plain narrative to the narrative budget. *)
         (match sdk_error with
          | Some err ->

@@ -12,8 +12,6 @@ let run
   ~oas_turn_count
   ~response_text
   ~actual_tools
-  ~state_snapshot
-  ~state_snapshot_source
   ~librarian_messages
   ~post_turn_t0
   ~runtime_id
@@ -39,33 +37,17 @@ let run
      three touch the keeper's memory bank (no internal lock); the lane's
      per-keeper mutex serializes them. meta/config are immutable snapshots, so
      using them after the turn returns does not race a later turn.
-     Uses meta-based fallback when [STATE] parsing fails.
      See RFC #3646 Section 3: Det/NonDet boundary. *)
   let memory_series () =
   (try
-     let notes_written, kinds_written =
-       Memory.append_from_reply
-         config
-         meta
-         ~snapshot:state_snapshot
-         ~state_snapshot_source
-         ~turn
-         ~reply:response_text
-         ()
-     in
-     let tool_result_notes_written =
+     let notes_written =
        match tool_results_snapshot with
        | Some tool_results ->
          Memory.append_from_tool_results config meta ~turn ~results:tool_results
        | None -> 0
      in
-     let notes_written = notes_written + tool_result_notes_written in
      let kinds_written =
-       if
-         tool_result_notes_written > 0
-         && not (List.mem "long_term" kinds_written)
-       then kinds_written @ [ "long_term" ]
-       else kinds_written
+       if notes_written > 0 then [ "long_term" ] else []
      in
      if notes_written > 0
      then
@@ -213,15 +195,8 @@ let run
       ~keeper_name:meta.name
       memory_series
   in
-  (* Post-turn quality metrics — goal alignment + memory recall.
-     Logged to decisions.jsonl for feedback loop analysis. *)
+  (* Post-turn memory recall evidence is logged to decisions.jsonl. *)
   (try
-     let goal_score =
-       Keeper_memory_recall.goal_alignment_score
-         ~meta
-         ~user_message:None
-         ~assistant_reply:(Some response_text)
-     in
      let used_search =
        List.exists (fun t -> t = "keeper_memory_search") actual_tools
      in
@@ -275,7 +250,6 @@ let run
           ; "keeper_name", `String meta.name
           ; "turn", `Int turn
           ; "oas_turn_count", `Int oas_turn_count
-          ; "goal_alignment", `Float goal_score
           ; "used_memory_search", `Bool used_search
           ; "post_turn_ms", `Float post_turn_ms
           ]

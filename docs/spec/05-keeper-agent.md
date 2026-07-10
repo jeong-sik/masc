@@ -25,7 +25,7 @@ code_refs:
 Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession), 검증(verification)을 담당한다.
 
 Keeper 하나는 다음을 소유한다:
-- **identity**: `keeper_meta` 레코드 (이름, 목표, will/needs/desires)
+- **identity**: `keeper_meta` 레코드 (이름, persona, instructions, typed goal/task links)
 - **context**: `working_context` (system prompt + messages + token count + OAS context)
 - **memory**: memory bank + memory policy + recall scoring
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
@@ -92,7 +92,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 
 - **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
 - **Lineage**: `generation`, `trace_id`, `trace_history`, `last_handoff_ts`
-- **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
+- **Goal/Task links**: `active_goal_ids`, `current_task_id`, typed goal/task transitions
 - **Model**: `runtime_id`, `last_model_used`, derived `active_model`
 - **Capability**: `policy_voice_enabled`, `allowed_paths`
 - **Scope**: `mention_targets`, `bound_workspace_ids`
@@ -193,7 +193,7 @@ stateDiagram-v2
 3. **AgentRun**: `keeper_agent_run.run_turn`이 OAS `Agent.run`에 위임. tools + hooks + context_reducer를 전달하며 memory object는 전달하지 않는다
 4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_oas`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
 5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
-6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`가 compaction, handoff rollover, continuity summary를 single-writer로 처리
+6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`가 compaction, handoff rollover, typed checkpoint metadata를 single-writer로 처리
 7. **Checkpoint / Compact / Handoff**: checkpoint 저장 후 gate에 따라 compaction 또는 handoff rollover를 실행
 8. **MemoryWrite**: `keeper_agent_run` tail에서 MASC-owned memory bank note append를 수행한다
 
@@ -203,7 +203,7 @@ stateDiagram-v2
 |------|-------------|--------|---------|
 | compaction | `keeper_post_turn.ml` | 현재 trace checkpoint | `KeeperContextLifecycle.tla` |
 | handoff rollover | `keeper_post_turn.ml` + `keeper_rollover.ml` | 새 trace checkpoint + keeper meta lineage | `KeeperGenerationLineage.tla`, keeper FSM `Handoff_*` events |
-| continuity summary | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
+| typed checkpoint metadata | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
 | memory bank | `keeper_agent_run.ml` | `.masc/keepers/<name>.memory.jsonl` | memory policy / bank compaction |
 | collaboration activity signal | `workspace_task.ml` + `workspace.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 
@@ -331,7 +331,7 @@ Profile별 종류당 보존 상한:
 
 ### 6.5 MASC-Owned Memory
 
-`run_turn`은 더 이상 OAS memory object를 만들거나 memory hook을 설치하지 않는다. 턴 후 기억 기록은 `Keeper_memory_bank.append_memory_notes_from_reply`와 tool-result memory note 경로에 남고, institution/procedural memory는 MASC 소유 파일/모듈에 머문다.
+`run_turn`은 더 이상 OAS memory object를 만들거나 memory hook을 설치하지 않는다. 기억 기록은 명시적 `keeper_memory_write` 도구와 typed tool-result memory note 경로에서만 수행하며, institution/procedural memory는 MASC 소유 파일/모듈에 머문다.
 
 ---
 
@@ -345,8 +345,6 @@ Profile별 종류당 보존 상한:
 
 ```
 proposed_action
-  |-- cost_guard: estimated_cost > $0.10 -> Block
-  |-- risk_guard: `Dangerous -> Block
   |-- Verifier_oas.verify -> Pass/Warn/Fail -> Proceed/Caution/Block
 ```
 
@@ -358,7 +356,8 @@ proposed_action
 | `ProceedWithCaution(reason)` | 실행하되 trajectory에 경고 기록 |
 | `Block(reason)` | 실행 거부, broadcast 알림 |
 
-Risk 추정: goal의 horizon + priority 조합으로 `Safe` / `Moderate` / `Dangerous` 결정.
+Risk 판단은 goal metadata의 고정 조합으로 계산하지 않는다. 판단이 필요한
+경우 verifier LLM 경계가 구조화된 verdict를 내고, 비용/turn 정보는 관측만 한다.
 
 ### 7.2 Eval Harness (`lib/eval_harness.ml`)
 
@@ -418,7 +417,7 @@ Destructive check 대상 도구: `tool_execute`, `tool_edit_file`, `keeper_edit`
 
 **Other**: `DEBUG`(0), `SKILL_SELECTION`(agent), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
 
-**Rule Engine**: `RULE_REFLECT_REPETITION`(0.86), `RULE_GUARDRAIL_REPETITION`(0.90), `RULE_GUARDRAIL_CONTEXT_MIN`(0.70)
+**Context capacity**: compaction/handoff decisions are typed capacity signals. They do not classify model text or infer goals; semantic decisions remain at the model boundary.
 
 ### 9.2 TOML Configuration
 
@@ -467,20 +466,6 @@ Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 
 ---
 
-## 11. Self-Model Drift
-
-**소스**: `keeper_config.ml` (`compact_self_model_text`)
-
-Keeper는 자기 모델(will, needs, desires)의 텍스트를 상한 내로 유지한다.
-
-- `drift_enabled`: 드리프트 활성화 여부
-- `drift_max_clauses`: 최대 절 수 (기본 6개)
-- `drift_max_chars`: 최대 문자 수 (기본 320자)
-
-`compact_self_model_text`가 semicolon으로 구분된 절 목록을 상한 내로 유지하며, 초과 시 오래된 절을 제거(`take_last`).
-
----
-
 ## 12. Learning System (retired)
 
 전용 learning 모듈(`lib/keeper/keeper_learning.ml`, `keeper_feedback_tool.ml`)은 #2589 dead-module sweep에서 제거됐다. decision_record JSONL 스키마와 `record_decision`/`record_outcome`/`record_feedback` 파이프라인도 runtime에서 사라졌다. 심의 기록은 현재 `keeper_deliberation.ml` + trajectory(`lib/trajectory.ml`) + procedural memory(`lib/procedural_memory.ml`)가 나눠 담당한다.
@@ -516,7 +501,9 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 ### INV-KEEPER-004: compaction cooldown 강제
 
-`compact_if_needed`에서 `last_reflection_ts`가 `continuity_compaction_cooldown_sec` 이내면 compaction을 건너뛴다. 이는 reflexion 직후 context가 즉시 압축되어 반성 내용이 손실되는 것을 방지한다.
+`compact_if_needed`는 실제 완료된 마지막 compaction 시각을 기준으로
+`compaction_cooldown_sec`를 적용한다. Assistant text나 proactive turn은 이
+clock을 갱신하지 않는다.
 
 
 
@@ -539,10 +526,6 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 ### INV-KEEPER-010: UTF-8 안전성
 
 `utf8_safe_prefix_bytes`가 max_bytes에서 UTF-8 코드포인트 경계를 지키며 절단한다. `utf8_repair_string`이 잘못된 바이트를 U+FFFD로 치환한다. Checkpoint 직렬화 시 `sanitize_text_utf8`이 적용된다.
-
-### INV-KEEPER-011: self-model drift 상한
-
-`compact_self_model_text`가 semicolon 절을 최대 `drift_max_clauses`(6)개, `drift_max_chars`(320자)로 제한한다. 상한 초과 시 오래된 절부터 제거한다.
 
 ### INV-KEEPER-012: destructive pattern screening
 

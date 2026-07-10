@@ -280,14 +280,13 @@ describe('summarizeKeeperMonitoring', () => {
     })
   })
 
-  it('routes heartbeat/context/social attention through the runtime projection', () => {
+  it('routes heartbeat and context attention through the runtime projection', () => {
     const summary = summarizeKeeperMonitoring({
       name: 'keeper-organism',
       status: 'idle',
       phase: 'Running',
       last_heartbeat: '1970-01-01T00:00:00Z',
       context_ratio: 0.99,
-      social_model_recognized: false,
     } as Keeper)
 
     expect(summary.band.key).toBe('attention')

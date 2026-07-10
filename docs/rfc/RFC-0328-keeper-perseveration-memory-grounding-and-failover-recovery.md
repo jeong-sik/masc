@@ -6,7 +6,7 @@
 - Scope: `lib/keeper/keeper_memory_bank.ml`, keeper runtime routing (`config/runtime.toml [runtime.assignments]`), provider health, stagnation detection.
 - Companion: RFC-0329 owns the operative-gate fixes (Gap A payload-blind Execute governance and Gap B's typed-exemption acceptance bar). This RFC and RFC-0329 come from the same incident; each is independently landable.
 - Relates to / activates: RFC-0207 Part B (Draft, deferred), RFC-0260 (Draft, unimplemented), RFC-keeper-memory-consolidation (Draft, unimplemented).
-- Cross-references: RFC-0082, RFC-0126, RFC-0207, RFC-0211, RFC-0216, RFC-0239, RFC-0246, RFC-0257, RFC-0259, RFC-0260, RFC-0271, RFC-0285, RFC-0302, RFC-0312, RFC-0315, RFC-0326.
+- Cross-references: RFC-0082, RFC-0126, RFC-0207, RFC-0211, RFC-0216, RFC-0239, RFC-0246, RFC-0257, RFC-0259, RFC-0260, RFC-0271, RFC-0285, RFC-0302, RFC-0312, RFC-0326.
 
 ---
 
@@ -117,7 +117,7 @@ It gates on a typed structural fact (`tool_use_count → Grounded/Ungrounded`) r
 
 An in-turn `degraded_rotation` lane exists (`keeper_error_classify.ml`) but is ephemeral (rotates within one turn, never rewrites the pin) and error-triggered only. `mad-improver`'s turns mostly *pass accept* — the dead provider returns empty, but the poisoned-text broadcasts pass accept, so no error is raised and no rotation fires.
 
-Every existing stuck-loop detector keys on the wrong invariant: `keeper_turn_livelock` on identical `turn_id` re-attempts; `Goal_stagnation` (RFC-0315) only on a stale goal in Executing phase (`mad-improver` has `active_goal_ids=[]`, so it cannot fire); `consecutive_noop_count` only on turns with no visible output; RFC-0082 only on a `last_blocker` latch (`null` during the confabulation); `NoProgressStreak` is a metric with no control. `mad-improver`'s signature — N consecutive distinct turns that each pass accept (visible ~640-token broadcast) with zero task/goal/PR transition and near-identical content — is invisible to all of them. Stagnation is defined *structurally* everywhere; `mad-improver`'s stagnation is *semantic*.
+Every existing stuck-loop detector keys on the wrong invariant: `keeper_turn_livelock` on identical `turn_id` re-attempts; the typed `Goal_stagnation` wake only on a stale goal in Executing phase (`mad-improver` has `active_goal_ids=[]`, so it cannot fire); `consecutive_noop_count` only on turns with no visible output; RFC-0082 only on a `last_blocker` latch (`null` during the confabulation); `NoProgressStreak` is a metric with no control. `mad-improver`'s signature — N consecutive distinct turns that each pass accept (visible ~640-token broadcast) with zero task/goal/PR transition and near-identical content — is invisible to all of them. Stagnation is defined *structurally* everywhere; `mad-improver`'s stagnation is *semantic*.
 
 ### 5.1 (D1) Provider health lattice + persisted failover
 
@@ -202,7 +202,7 @@ Replay the incident shape: keeper pinned to a `Down` provider producing empty co
 | RFC-0211 persona-runtime-decouple | Draft | Establishes `[runtime.assignments]` as the runtime SSOT; Gap D1 makes the pin an ordered health-gated binding and notes the boot-cache reload gap. |
 | RFC-0082 keeper-last-blocker-autoclear-and-recovery-escalation | Implemented | Recovery escalation is scoped to a `last_blocker` latch (`null` here), so it never engaged. Explains why an existing recovery path missed this soft loop. |
 | RFC-0271 in-turn-recovery-accept-rejected | Draft (§4.1 landed) | Confirms empty responses are typed `Accept_rejected{Accept_no_usable_progress}`, the signal Gap D1 arms failover with; disclaims health failover (defers to 0207B/0260). |
-| RFC-0315 wake-turn-self-description | Draft (Goal_stagnation impl) | The only stagnation wake is goal-scoped and requires an Executing-phase goal; `active_goal_ids=[]` here. Gap D2 is the non-goal, successful-turn detector 0315 does not cover. |
+| Typed `Goal_stagnation` wake | Implemented | The wake is goal-scoped and requires an Executing-phase goal; `active_goal_ids=[]` here. Gap D2 needs a non-goal, successful-turn detector. |
 | RFC-0326 keeper-failure-typed-classification | present in tree | Types keeper *failures*; Gap D2 is stagnation over *successful* turns (a distinct axis). Align the `No_effect`/`Progress` sum with 0326's failure taxonomy where they meet. |
 | RFC-0246 wake-cascade-recovery-tombstone | Draft | Recovery/tombstone for stuck wake cascades; does not cover successful-turn semantic stagnation. |
 | RFC-0126 silent-fallback-discipline | Implemented | The fail-closed requirement Gap D1 honors: an exhausted failover chain is an explicit typed error, never a silent local-model default. |
@@ -212,7 +212,7 @@ Replay the incident shape: keeper pinned to a `Down` provider producing empty co
 
 ## 9. Open questions
 
-- Gap C: the authoritative `tool_use_count` read site at `append_memory_notes_from_reply` — confirm it is available at the producer boundary without a new plumb-through, and the exact non-external-progress tool set to exclude from `Grounded` (`keeper_memory_write` at minimum).
+- Gap C: confirm `tool_use_count` is available at the typed turn-receipt producer boundary without a new plumb-through, and define the exact non-external-progress tool set to exclude from `Grounded` (`keeper_memory_write` at minimum).
 - Gap C: the `valid_until` TTL length for a consolidated `Self_observation` narrative and its producer-tag key; the purge pass cadence (per consolidation vs per (re)start vs both).
 - Gap D2: the window size N default and the structural-signature equivalence definition for `No_effect` (which effect fields enter the digest).
 - Gap D1: interaction with RFC-0211's per-turn read and the boot-cache — the persisted `assignment_change` must be the SSOT the resolution consults, not a shadow store, and must survive without a server restart.

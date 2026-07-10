@@ -635,7 +635,7 @@ let test_post_create_success () =
   Alcotest.(check bool) "create ok" true ok;
   Alcotest.(check bool) "body has post" true (String.length body > 0)
 
-let test_post_create_structured_payload () =
+let test_post_create_metadata_payload () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
@@ -643,7 +643,7 @@ let test_post_create_structured_payload () =
     (make_args
        [
          ("title", `String "Why");
-         ("content", `String "Visible answer\n\n[STATE]\nGoal: keep context\n[/STATE]");
+         ("content", `String "Visible answer\n\nSupporting detail");
          ("author", `String "sangsu");
          ("meta", `Assoc [ ("source", `String "keeper_autonomy") ]);
        ])
@@ -652,24 +652,20 @@ let test_post_create_structured_payload () =
   let json = parse_create_response_json body in
   Alcotest.(check string) "title kept" "Why"
     Yojson.Safe.Util.(json |> member "title" |> to_string);
-  Alcotest.(check string) "body stripped" "Visible answer"
+  Alcotest.(check string) "body kept" "Visible answer\n\nSupporting detail"
     Yojson.Safe.Util.(json |> member "body" |> to_string);
-  Alcotest.(check string) "content alias" "Visible answer"
+  Alcotest.(check string) "content alias" "Visible answer\n\nSupporting detail"
     Yojson.Safe.Util.(json |> member "content" |> to_string);
   Alcotest.(check string) "public posts stay direct" "direct"
     Yojson.Safe.Util.(json |> member "post_kind" |> to_string);
   Alcotest.(check string) "source meta kept" "keeper_autonomy"
-    Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string);
-  (* state_block is stripped by board_tool before reaching board_core,
-     so meta.state_block is absent (null) in the created post. *)
-  Alcotest.(check bool) "state_block absent after strip" true
-    (Yojson.Safe.Util.(json |> member "meta" |> member "state_block") = `Null)
+    Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string)
 
 (* Regression guard: board_post must return STRUCTURED [data] (`Assoc), not a
    `String that embeds stringified JSON. The `String form double-encodes the
    payload — a consumer that re-serializes the result (e.g. the dashboard's
    JSON.stringify) escapes the inner newlines back to literal "\n". Unlike
-   [test_post_create_structured_payload], which parses [message] (and passes for
+   [test_post_create_metadata_payload], which parses [message] (and passes for
    either shape via parse_create_response_json's `\n`-suffix branch), this test
    inspects [Tool_result.data] directly and fails on the `String shape. Guards
    against reverting to [make_ok ~data:(`String "Post created:\n...")]. *)
@@ -2638,7 +2634,7 @@ let () =
         [
           Alcotest.test_case "create success" `Quick test_post_create_success;
           Alcotest.test_case "create structured payload" `Quick
-            test_post_create_structured_payload;
+            test_post_create_metadata_payload;
           Alcotest.test_case "create data is structured not double-encoded" `Quick
             test_post_create_data_is_structured;
           Alcotest.test_case "claim gate rejects missing artifact post creation" `Quick

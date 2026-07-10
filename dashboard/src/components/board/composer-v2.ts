@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
-import { AtSign, Braces, Megaphone, Mic, Paperclip, Send, Square, UserRound, X } from 'lucide-preact'
+import { AtSign, Megaphone, Mic, Paperclip, Send, Square, UserRound, X } from 'lucide-preact'
 import { currentDashboardActor, sendBroadcast } from '../../api'
 import { keepers as dashboardKeepers, refreshExecution } from '../../store'
 import {
@@ -12,11 +12,6 @@ import { ActionButton } from '../common/button'
 import { Select } from '../common/select'
 import { TextArea } from '../common/input'
 import {
-  ensureStateBlockDraft,
-  stateBlockKeys,
-  STATE_BLOCK_TEMPLATE,
-} from '../ops/ops-state'
-import {
   keeperNameFromTarget,
   replaceTrailingMentionDraft,
 } from '../../lib/mention-utils'
@@ -24,17 +19,11 @@ import { useOperatorMentionContext } from '../common/use-operator-mention-contex
 import { stableAttachmentId } from '../chat/attachments'
 import { useVoiceInput } from '../chat/voice-input'
 
-export type ComposerV2Mode = 'broadcast' | 'dm' | 'state-block'
+export type ComposerV2Mode = 'broadcast' | 'dm'
 
 interface ComposerV2Target {
   workspace_id?: string
   keeper_id?: string
-}
-
-interface StructuredStateBlock {
-  kind: 'state-block'
-  raw: string
-  keys: string[]
 }
 
 export interface ComposerAttachmentDraft {
@@ -58,7 +47,7 @@ export interface ComposerV2Request {
   compose: {
     mode: ComposerV2Mode
     target?: ComposerV2Target
-    body: string | StructuredStateBlock
+    body: string
     attachments?: unknown[]
   }
 }
@@ -66,7 +55,6 @@ export interface ComposerV2Request {
 const MODE_OPTIONS: Array<{ value: ComposerV2Mode; label: string; description: string }> = [
   { value: 'broadcast', label: 'Broadcast', description: 'Workspace broadcast' },
   { value: 'dm', label: 'DM', description: 'Keeper DM' },
-  { value: 'state-block', label: 'State', description: 'State block' },
 ]
 
 const MENTION_LISTBOX_ID = 'composer-v2-mention-listbox'
@@ -80,16 +68,10 @@ function modeIcon(mode: ComposerV2Mode) {
   switch (mode) {
     case 'dm':
       return UserRound
-    case 'state-block':
-      return Braces
     case 'broadcast':
     default:
       return Megaphone
   }
-}
-
-function composeBodyText(body: ComposerV2Request['compose']['body']): string {
-  return typeof body === 'string' ? body : body.raw
 }
 
 export function composerAttachmentTrayMeta(attachment: ComposerAttachmentDraft): string {
@@ -135,14 +117,11 @@ export function buildComposerV2Request(input: {
   } else {
     target.workspace_id = normalizeWorkspaceId(input.workspaceId)
   }
-  const composeBody = input.mode === 'state-block'
-    ? { kind: 'state-block' as const, raw: body, keys: stateBlockKeys(body) }
-    : body
   return {
     compose: {
       mode: input.mode,
       target: Object.keys(target).length > 0 ? target : undefined,
-      body: composeBody,
+      body,
       attachments: input.attachments ?? [],
     },
   }
@@ -245,7 +224,6 @@ export function ComposerV2({
     dismissedMentionQuery,
     setDismissedMentionQuery,
   } = mention
-  const stateKeys = mode === 'state-block' ? stateBlockKeys(draft) : []
   const attachmentDeliveryReason = composerAttachmentDeliveryReason(attachments)
   const hasDraftContent = draft.trim() !== '' || attachments.length > 0
   const sendDisabled = busy
@@ -253,7 +231,6 @@ export function ComposerV2({
     || !hasDraftContent
     || attachmentDeliveryReason !== null
     || (mode === 'dm' && (!effectiveKeeperOnline || unresolvedTrailingMention))
-    || (mode === 'state-block' && stateKeys.length === 0)
   const targetLabel = mode === 'dm'
     ? effectiveKeeper
       ? `@${effectiveKeeper}`
@@ -282,11 +259,9 @@ export function ComposerV2({
               ? 'resolve mention'
               : mode === 'dm' && !effectiveKeeperOnline
                 ? 'keeper unavailable'
-                : mode === 'state-block' && stateKeys.length === 0
-                  ? 'state block required'
-                  : mode === 'dm'
-                    ? 'keeper message'
-                    : 'workspace broadcast'
+                : mode === 'dm'
+                  ? 'keeper message'
+                  : 'workspace broadcast'
   const deliveryToneClass = deliveryState === 'ready'
     ? 'border-[var(--color-status-ok)] text-[var(--color-status-ok)]'
     : deliveryState === 'sending'
@@ -309,9 +284,6 @@ export function ComposerV2({
   function chooseMode(nextMode: ComposerV2Mode): void {
     setMode(nextMode)
     setSubmitError(null)
-    if (nextMode === 'state-block') {
-      setDraft(current => ensureStateBlockDraft(current))
-    }
   }
 
   function chooseMentionTarget(keeperName: string): void {
@@ -374,10 +346,10 @@ export function ComposerV2({
           action_type: 'keeper_message',
           target_type: 'keeper',
           target_id: keeperId,
-          payload: { message: composeBodyText(request.compose.body) },
+          payload: { message: request.compose.body },
         })
       } else {
-        await sendBroadcast(currentDashboardActor(), composeBodyText(request.compose.body))
+        await sendBroadcast(currentDashboardActor(), request.compose.body)
       }
       if (keeperId) setKeeperTarget(`keeper:${keeperId}`)
       resetDraft()
@@ -544,8 +516,8 @@ export function ComposerV2({
 
         <${TextArea}
           class="min-h-24 border-[var(--color-border-default)] bg-[var(--color-bg-surface)] font-mono text-xs leading-[1.55]"
-          rows=${mode === 'state-block' ? 6 : 4}
-          placeholder=${mode === 'state-block' ? STATE_BLOCK_TEMPLATE : 'Message'}
+          rows=${4}
+          placeholder="Message"
           value=${draft}
           name="composer_v2_body"
           role=${mode === 'dm' ? 'combobox' : undefined}
@@ -553,7 +525,7 @@ export function ComposerV2({
           ariaControls=${mentionListOpen ? MENTION_LISTBOX_ID : undefined}
           ariaExpanded=${mode === 'dm' ? String(mentionListOpen) : undefined}
           ariaActiveDescendant=${activeMentionOptionId}
-          ariaLabel=${mode === 'state-block' ? 'Composer v2 state block' : 'Composer v2 message'}
+          ariaLabel="Composer v2 message"
           onInput=${(event: Event) => {
             if (dismissedMentionQuery !== null) setDismissedMentionQuery(null)
             setDraft((event.target as HTMLTextAreaElement).value)
@@ -582,7 +554,7 @@ export function ComposerV2({
               return
             }
             const shouldSubmit = event.key === 'Enter'
-              && ((event.metaKey || event.ctrlKey) || (mode !== 'state-block' && !event.shiftKey && !event.altKey))
+              && ((event.metaKey || event.ctrlKey) || (!event.shiftKey && !event.altKey))
             if (!shouldSubmit) return
             event.preventDefault()
             void submit()
@@ -630,26 +602,6 @@ export function ComposerV2({
           </div>
           <span class="text-2xs text-[var(--color-fg-muted)]">⌘ ↵ 전송 · 파일/음성 포함</span>
         </div>
-
-        ${mode === 'state-block'
-          ? html`
-              <div class="flex flex-wrap items-center gap-2" aria-live="polite">
-                ${stateKeys.length > 0
-                  ? stateKeys.map(key => html`
-                      <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]" key=${key}>${key}</span>
-                    `)
-                  : html`<span class="text-2xs text-[var(--color-status-warn)]">State block required</span>`}
-                <${ActionButton}
-                  variant="subtle"
-                  size="sm"
-                  onClick=${() => { setDraft(current => ensureStateBlockDraft(current)) }}
-                  disabled=${busy}
-                >
-                  Insert state block
-                <//>
-              </div>
-            `
-          : null}
 
         ${submitError
           ? html`<div class="text-xs text-[var(--color-status-error)]" role="alert">${submitError}</div>`

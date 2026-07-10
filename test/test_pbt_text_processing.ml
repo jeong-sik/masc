@@ -44,25 +44,6 @@ let prop_normalize_idempotent =
        let twice = Tp.normalize_proactive_text once in
        String.equal once twice)
 
-(* strip_state_blocks preserves content without STATE markers *)
-let prop_strip_state_preserves_no_markers =
-  QCheck.Test.make ~count:1000 ~name:"strip_state_blocks preserves non-STATE content"
-    arb_ascii_text
-    (fun text ->
-       QCheck.assume (not (String.ends_with ~suffix:"[STATE]" text
-                           || String.ends_with ~suffix:"[/STATE]" text));
-       let safe = String.map (fun c -> if c = '[' then '(' else c) text in
-       String.equal safe (Tp.strip_state_blocks_text safe))
-
-(* strip_state_blocks removes STATE blocks *)
-let prop_strip_state_removes_block =
-  QCheck.Test.make ~count:500 ~name:"strip_state_blocks removes STATE block"
-    arb_ascii_text
-    (fun inner ->
-       let input = "before[STATE]" ^ inner ^ "[/STATE]after" in
-       let result = Tp.strip_state_blocks_text input in
-       String.equal result "beforeafter")
-
 (* terminal punct detection: non-empty text + period *)
 let prop_terminal_punct =
   QCheck.Test.make ~count:500 ~name:"word + period has terminal punct"
@@ -105,8 +86,6 @@ let () =
   let suite =
     List.map QCheck_alcotest.to_alcotest
       [ prop_normalize_idempotent;
-        prop_strip_state_preserves_no_markers;
-        prop_strip_state_removes_block;
         prop_terminal_punct;
         prop_terminal_korean;
         prop_fragmentary_trailing_colon;

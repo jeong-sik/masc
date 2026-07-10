@@ -154,15 +154,15 @@ Axis 3: Runtime State (KeeperOASAdvanced) — provider hang (trigger)
 
 **Anchor commit (PR #11210) 의 의도와 결과 정반대**:
 
-PR #11210 의 motivation 인용: "Resolves the permanent BDI defer loop where keepers using keeper_unified (cli-tool-a + ollama) had zero tool-capable providers." 즉 **defer loop 해결을 위해 cross-runtime fallback 을 도입** — 그러나 4월 28일 사고에서는 정반대로 **cross-runtime fallback 자체가 keeper 11분 멈춤의 trigger**. RFC-0001 anti-pattern ("silent fallback or low-visibility substitution") 이 운영 사고로 실증된 사례.
+PR #11210은 tool-capable provider가 없는 keeper의 영구 defer loop를 해소하려고 cross-runtime fallback을 도입했다. 그러나 4월 28일 사고에서는 정반대로 **cross-runtime fallback 자체가 keeper 11분 멈춤의 trigger**가 됐다. RFC-0001 anti-pattern ("silent fallback or low-visibility substitution") 이 운영 사고로 실증된 사례다.
 
 ### 2.5 Anchor commit 의 의도와 누락된 invariant
 
 PR #11210 (commit `065e568be1`, 2026-04-27) 본문:
 
-> "When all providers in the current runtime fail the tool-capability filter, search all other runtimes for a healthy tool-capable provider... Resolves the permanent BDI defer loop where keepers using keeper_unified (cli-tool-a + ollama) had zero tool-capable providers because cli-tool-a is blocked by keeper-bound MCP and ollama lacks tool_choice support."
+> When the current runtime has no tool-capable provider, the resolver searches other runtimes for a healthy tool-capable provider.
 
-도입 의도는 **"BDI defer loop 해결"** 이었으나 다음 invariant 가 누락되었다:
+도입 의도는 **tool-capability defer loop 해결**이었으나 다음 invariant 가 누락되었다:
 
 - **I-Intent**: 사용자가 runtime.toml 에 명시한 model 집합과 실제 실행 model 은 같거나, 명시적 fallback chain 의 결과여야 한다.
 - **I-Visibility**: routing 결정에 substitution 이 발생하면 runtime observation 에 즉시 표현되어야 한다 (metric 만으로는 부족).
@@ -188,7 +188,7 @@ RFC-0027 §3.4 PR #3 가 "cross-runtime fallback resolver capability propagation
 | NG1 | ollama transport 가 keeper-bound MCP HTTP header (`X-MASC-Agent-Name`) 를 carry 하도록 만드는 것 — fundamental architectural change, 별도 RFC. |
 | NG2 | Permission-aware candidate filtering (keeper credential set 과 모델 권한 매칭) — 별도 RFC, RFC-0026 admission layer 와 통합 검토. |
 | NG3 | `provider-k-coding:*` ↔ retired planning namespace mismatch (B2 — 100% substitution 의 직접 원인) — 본 RFC 와 병렬 단일 hot fix PR 로 분리 (`retired_coding_profile` runtime 의 model label 정규화). |
-| NG4 | BDI defer loop (PR #11210 의 원래 motivation) — fallback chain 명시화로 자연스레 해소될 것으로 예상하나 본 RFC 의 success criterion 에는 미포함. |
+| NG4 | Tool-capability defer loop (PR #11210 의 원래 motivation) — fallback chain 명시화로 자연스레 해소될 것으로 예상하나 본 RFC 의 success criterion 에는 미포함. |
 | NG5 | RFC-0026 admission scheduler 변경. |
 | NG6 | **Streaming-state provider-level timeout** (현재 keeper hard cap 3600s 만 존재, provider 가 stream tool-call 없이 멈출 때 graceful recovery 부재). 별도 RFC — Provider-C `executor_reanalysis.md` §4 문제 1. |
 | NG7 | **Watchdog `in_turn_stale` 판정 가속화** (현재 grace 360s 후에도 stale=false 유지, fiber kill 까지 OAS hard cap 까지 기다림). 별도 RFC — Provider-C `executor_reanalysis.md` §4 문제 2. |
@@ -340,7 +340,7 @@ and capability_filter_summary = {
 
 | Risk | Mitigation |
 |------|------------|
-| L0 default 변경으로 BDI defer loop 재발 (PR #11210 의 원래 motivation) | Phase 1 default = `Legacy`. runtime.toml 마이그레이션 (Phase 2) 후 default 변경. metric `cross_runtime_fallback_legacy_total` 모니터링. |
+| L0 default 변경으로 tool-capability defer loop 재발 (PR #11210 의 원래 motivation) | Phase 1 default = `Legacy`. runtime.toml 마이그레이션 (Phase 2) 후 default 변경. metric `cross_runtime_fallback_legacy_total` 모니터링. |
 | L1 pattern table 이 model 출시 속도를 못 따라감 | runtime.toml `[capability_overrides]` 가 일급 escape hatch. 운영 중 즉시 추가 가능. |
 | L1 live probe 가 ollama 서버 부하 | 24h TTL cache + per-server semaphore. probe 실패 시 pattern table fallback. |
 | RFC-0027 §3.4 PR #3/PR #4 와 scope 중복 | 본 RFC 는 PR #3/#4 specification 을 가속화/구체화. RFC-0027 author (jeong-sik) 의 명시적 ack 필요. |
@@ -356,7 +356,7 @@ and capability_filter_summary = {
 
 ## 10. Open questions
 
-- Q1: L0 default 변경 후 BDI defer loop 가 재발하는 keeper 가 있다면 emergency rollback 절차? (env flag 즉시 `Legacy` 로 되돌릴 수 있는 path)
+- Q1: L0 default 변경 후 tool-capability defer loop 가 재발하는 keeper 가 있다면 emergency rollback 절차? (env flag 즉시 `Legacy` 로 되돌릴 수 있는 path)
 - Q2: L1 의 `runtime.toml [capability_overrides]` block 이 RFC-0026 admission schema 와 충돌 가능성?
 - Q3: B2 (provider-k namespace) hot fix 는 본 RFC 와 병렬 PR 로 가는데, 의존 관계 명시 필요? (PR-C 가 PR-B 보다 먼저 들어가야 substitution 률이 의미있게 떨어짐)
 - Q4: L2 별도 RFC 작성 시점 — L1 PR-D~PR-F 운영 결과 후가 합리적인가?

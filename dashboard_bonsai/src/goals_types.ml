@@ -19,7 +19,6 @@ type task =
 type node =
   { id : string
   ; title : string
-  ; horizon : string         (* "short" | "mid" | "long" | ... *)
   ; status : string          (* active / paused / done / ... *)
   ; priority : int
   ; metric : string option
@@ -133,7 +132,6 @@ let rec node_of_yojson json : node =
   in
   { id = string_field json "id"
   ; title = string_field json "title"
-  ; horizon = string_field json "horizon"
   ; status = string_field json "status"
   ; priority = int_field json "priority"
   ; metric = string_opt_field json "metric"

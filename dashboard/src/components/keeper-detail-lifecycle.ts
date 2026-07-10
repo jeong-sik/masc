@@ -75,7 +75,7 @@ export function KeeperClearContextDialog({
         <div class="flex flex-col gap-1">
           <h3 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-secondary)]">키퍼 컨텍스트 비우기</h3>
           <p id=${descId} class="m-0 text-sm leading-relaxed text-[var(--color-fg-muted)]">
-            ${keeperName}의 checkpoint 대화와 continuity summary를 비웁니다. 사유는 감사 로그에 남습니다.
+            ${keeperName}의 checkpoint 대화 기록을 비웁니다. 사유는 감사 로그에 남습니다.
           </p>
         </div>
 
@@ -84,7 +84,7 @@ export function KeeperClearContextDialog({
           <${TextArea}
             inputRef=${reasonRef}
             class="!bg-[var(--color-bg-surface)] !min-h-[112px] !text-sm leading-paragraph"
-            placeholder="예: stale continuity replay 제거"
+            placeholder="예: 손상된 checkpoint 대화 기록 제거"
             ariaLabel="비우기 사유"
             disabled=${pending}
             value=${reason}
@@ -107,7 +107,7 @@ export function KeeperClearContextDialog({
         </label>
 
         <div class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)] v2-monitoring-panel">
-          마지막 수단용 액션입니다. 잘못된 continuity가 재주입될 때만 쓰고, 실행 후 즉시 상태를 다시 확인하세요.
+          마지막 수단용 액션입니다. 손상된 checkpoint 대화가 다시 로드될 때만 쓰고, 실행 후 즉시 상태를 다시 확인하세요.
         </div>
 
         <div class="flex items-center justify-end gap-2 v2-monitoring-toolbar">

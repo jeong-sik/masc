@@ -315,8 +315,8 @@ collapsed into `turn_ref`.
 
 - board post → exact chat turn: `origin.turn_ref` anchors the chat surface to
   that turn (scroll/highlight), superseding the keeper-level `navigateToAuthor`.
-- chat turn → board post(s): fusion today; then state-block lifecycle and
-  keeper-authored posts as they gain `origin`.
+- chat turn → board post(s): fusion today; then typed board workflow events
+  and keeper-authored posts as they gain `origin`.
 
 ### §7.3 Boundary invariant (unchanged from §3)
 

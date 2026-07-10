@@ -84,8 +84,3 @@ val episode_of_output
   -> input
   -> string
   -> Keeper_memory_os_types.episode option
-
-(** Scrub private runtime markers from messages before prompt rendering. *)
-val scrub_messages_for_librarian
-  :  Agent_sdk.Types.message list
-  -> Agent_sdk.Types.message list

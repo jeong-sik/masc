@@ -4,7 +4,7 @@
 \* Models keeper_memory_bank.ml compact_memory_bank_if_needed.
 \* Correct code: selection respects kind caps + recent floor.
 \* Bug: priority-only selection lets high-priority long_term notes
-\* fill all slots, starving constraints and other kinds.
+\* fill all slots, starving goals and other kinds.
 \*
 \* Reference (verified 2026-04-20):
 \*   lib/keeper/keeper_memory_bank.ml:346
@@ -12,21 +12,20 @@
 \*   lib/keeper/keeper_memory_bank.ml:296
 \*       memory_kind_caps_for_compaction (per-target cap derivation)
 \*   lib/keeper/keeper_memory_policy.ml:806
-\*       kind_caps () : (string * int) list — SSOT
+\*       kind_caps () : (memory_kind * int) list — closed-variant SSOT
 \*
 \* ── Abstraction note ──
-\* The real kind_caps SSOT enumerates 7 kinds:
-\*   constraints:2, decision:2, next:2, goal:2, progress:2,
-\*   open_question:2, long_term:4
+\* The real kind_caps SSOT enumerates 5 closed memory_kind constructors,
+\* rendered canonically on the wire as:
+\*   decision:2, goal:2, progress:2, open_question:2, long_term:4
 \* This bug model collapses them to 4 representative kinds for the
 \* "starvation under priority-only selection" invariant:
-\*   constraint  — collapses {constraints} (note singular in spec
-\*                 vs plural "constraints" in source kind_caps)
+\*   goal        — collapses {goal}
 \*   decision    — collapses {decision}
-\*   progress    — collapses {next, goal, progress, open_question}
+\*   progress    — collapses {progress, open_question}
 \*                 (all per-cap=2 generic notes)
 \*   long_term   — collapses {long_term} (only kind with cap=4)
-\* Two abstract caps (ConstraintCap, LongTermCap) are sufficient to
+\* Two abstract caps (SmallKindCap, LongTermCap) are sufficient to
 \* express the bug because the asymmetry that causes starvation is
 \* between "the high-priority kind" (long_term) and "the small-cap
 \* kinds" (everything else with cap=2).
@@ -35,7 +34,7 @@ EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS
     TargetNotes,       \* Max notes after compaction (e.g. 8 for small model)
-    ConstraintCap,     \* Max constraint notes to keep (e.g. 2)
+    SmallKindCap,      \* Max notes to keep for each ordinary kind (e.g. 2)
     LongTermCap        \* Max long_term notes to keep (e.g. 3)
 
 VARIABLES
@@ -46,7 +45,7 @@ VARIABLES
 vars == <<bank, result, phase>>
 
 \* Kinds and their priorities (matching OCaml code)
-Kinds == {"constraint", "decision", "progress", "long_term"}
+Kinds == {"goal", "decision", "progress", "long_term"}
 
 \* Count notes of a given kind in a sequence
 KindCount(seq, kind) ==
@@ -65,10 +64,10 @@ Init ==
 
 \* ── Accumulation (add notes to bank) ──────────────────
 
-AppendConstraint ==
+AppendGoal ==
     /\ phase = "accumulating"
     /\ Len(bank) < TargetNotes * 2   \* Allow growth beyond target
-    /\ bank' = Append(bank, [kind |-> "constraint", priority |-> 90])
+    /\ bank' = Append(bank, [kind |-> "goal", priority |-> 72])
     /\ UNCHANGED <<result, phase>>
 
 AppendDecision ==
@@ -105,26 +104,26 @@ SafeCompact ==
     /\ phase = "compacting"
     /\ LET
          \* Phase 1: kind-capped selection (respects per-kind caps)
-         constraints == SelectSeq(bank, LAMBDA n : n.kind = "constraint")
-         kept_constraints == SubSeq(constraints, 1, IF Len(constraints) > ConstraintCap
-                                                    THEN ConstraintCap
-                                                    ELSE Len(constraints))
+         goals == SelectSeq(bank, LAMBDA n : n.kind = "goal")
+         kept_goals == SubSeq(goals, 1, IF Len(goals) > SmallKindCap
+                                          THEN SmallKindCap
+                                          ELSE Len(goals))
          longtermNotes == SelectSeq(bank, LAMBDA n : n.kind = "long_term")
          kept_longterm == SubSeq(longtermNotes, 1, IF Len(longtermNotes) > LongTermCap
                                                    THEN LongTermCap
                                                    ELSE Len(longtermNotes))
          decisions == SelectSeq(bank, LAMBDA n : n.kind = "decision")
-         kept_decisions == SubSeq(decisions, 1, IF Len(decisions) > ConstraintCap
-                                                THEN ConstraintCap
+         kept_decisions == SubSeq(decisions, 1, IF Len(decisions) > SmallKindCap
+                                                THEN SmallKindCap
                                                 ELSE Len(decisions))
          progress == SelectSeq(bank, LAMBDA n : n.kind = "progress")
-         remaining == TargetNotes - Len(kept_constraints)
+         remaining == TargetNotes - Len(kept_goals)
                                   - Len(kept_longterm)
                                   - Len(kept_decisions)
          kept_progress == SubSeq(progress, 1, IF Len(progress) > remaining
                                               THEN IF remaining > 0 THEN remaining ELSE 0
                                               ELSE Len(progress))
-         capped == kept_constraints \o kept_longterm \o kept_decisions \o kept_progress
+         capped == kept_goals \o kept_longterm \o kept_decisions \o kept_progress
          \* Phase 2: fallback fill (ignore kind caps to reach TargetNotes).
          \* Models keeper_memory_bank.ml:407-408:
          \*   if !selected_count < target_notes then
@@ -144,12 +143,12 @@ BugPriorityOnlyCompact ==
     /\ phase = "compacting"
     /\ LET
          \* Just take the first TargetNotes entries (bank is appended
-         \* in priority order: long_term(95) > constraint(90) > decision(86) > progress(66))
+         \* in priority order: long_term(95) > decision(86) > goal(72) > progress(66))
          \* So highest-priority notes fill all slots, starving lower kinds.
          \*
-         \* Sort by priority descending: long_term first, then constraint,
-         \* then decision, then progress.  If there are more long_term
-         \* notes than TargetNotes, constraints get 0 slots.
+         \* Sort by priority descending: long_term first, then decision,
+         \* then goal, then progress. If there are more long_term notes
+         \* than TargetNotes, goals get 0 slots.
          sortedByPri == SelectSeq(bank, LAMBDA n : n.priority >= 90)
          lowPri == SelectSeq(bank, LAMBDA n : n.priority < 90)
          allSorted == sortedByPri \o lowPri
@@ -164,12 +163,12 @@ BugPriorityOnlyCompact ==
 \* ── Specifications ────────────────────────────────────
 
 NextSafe ==
-    \/ AppendConstraint \/ AppendDecision \/ AppendProgress \/ AppendLongTerm
+    \/ AppendGoal \/ AppendDecision \/ AppendProgress \/ AppendLongTerm
     \/ TriggerCompaction
     \/ SafeCompact
 
 NextBuggy ==
-    \/ AppendConstraint \/ AppendDecision \/ AppendProgress \/ AppendLongTerm
+    \/ AppendGoal \/ AppendDecision \/ AppendProgress \/ AppendLongTerm
     \/ TriggerCompaction
     \/ BugPriorityOnlyCompact
 
@@ -178,14 +177,14 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 
 \* ── Safety Invariants ─────────────────────────────────
 
-\* After compaction, constraint notes are preserved up to their cap.
-\* If the bank had N constraint notes, the result must have min(N, ConstraintCap).
-ConstraintsPreserved ==
+\* After compaction, goal notes are preserved up to their cap.
+\* If the bank had N goal notes, the result must have min(N, SmallKindCap).
+GoalsPreserved ==
     phase = "done" =>
-        KindCount(result, "constraint") >=
-            IF KindCount(bank, "constraint") > ConstraintCap
-            THEN ConstraintCap
-            ELSE KindCount(bank, "constraint")
+        KindCount(result, "goal") >=
+            IF KindCount(bank, "goal") > SmallKindCap
+            THEN SmallKindCap
+            ELSE KindCount(bank, "goal")
 
 \* Compaction never produces an empty result from a non-empty bank.
 NeverEmpty ==
@@ -196,7 +195,7 @@ ResultBounded ==
     phase = "done" => Len(result) <= TargetNotes
 
 \* Long-term notes are preserved up to their cap.
-\* Mirrors ConstraintsPreserved but for the long_term kind.
+\* Mirrors GoalsPreserved but for the long_term kind.
 LongTermProtected ==
     phase = "done" =>
         KindCount(result, "long_term") >=

@@ -215,7 +215,7 @@ Trigger investigation, but not auto-rollback, on:
 Each rollout stage must leave behind:
 
 - read-path summary json
-- continuity summary json
+- checkpoint-validation receipt json
 - benchmark output
 - keeper sample payload
 - transport-health sample payload

@@ -1,31 +1,14 @@
 
-(** Board_core_payload — [STATE] block extraction and post payload
-    normalisation for the board store.
+(** Board_core_payload — post payload normalisation for the board store.
 
     Pulled out of [board_core.ml] as part of the god-file split;
     {!Board_core} re-exports the public surface via
     [include Board_core_payload]. Callers therefore reach these
-    functions either qualified ([Board_core.normalize_post_payload])
-    or via the {!Board_core_payload} module directly (the test
-    suite does the latter for [derive_post_title]).
-
-    Internal helpers (the precompiled [start_re] / [end_re] regexes
-    and the raw [state_start_marker] / [state_end_marker] strings)
-    are hidden — callers consume only the parser, the meta-merge
-    helper, the title deriver, and the payload normaliser. *)
-
-val extract_state_block : string -> string option * string
-(** Extract a single [\[STATE\]…\[/STATE\]] block from [text].
-
-    Returns [(state_block_with_markers, body_without_block)] —
-    the trimmed state block (markers retained) when present and
-    the trimmed remainder of [text] with the block stripped out.
-    When no opening marker is found, returns [(None, String.trim
-    text)]. When the opening marker has no matching close, the
-    block extends to end-of-text. *)
+    functions either qualified ([Board_core.normalize_post_payload]) or via
+    the {!Board_core_payload} module directly. *)
 
 type meta_parse_error = Meta_not_assoc of Yojson.Safe.t
-(** Typed parse failure for [merge_meta_json] / [normalize_post_payload].
+(** Typed parse failure for [normalize_meta_json] / [normalize_post_payload].
 
     [Meta_not_assoc payload] indicates the caller passed a
     [Some yojson] meta value whose top-level shape is not
@@ -35,18 +18,12 @@ type meta_parse_error = Meta_not_assoc of Yojson.Safe.t
     ([fields = []]) at [board_core_payload.ml:73], discarding the
     original value without any caller-visible signal. *)
 
-val merge_meta_json :
-  ?state_block:string ->
-  Yojson.Safe.t option ->
-  (Yojson.Safe.t option, meta_parse_error) result
-(** Merge a [state_block] string into the JSON meta object.
+val normalize_meta_json :
+  Yojson.Safe.t option -> (Yojson.Safe.t option, meta_parse_error) result
+(** Validate and normalize the JSON meta object.
 
-    When [meta_json] is [None] or [Some (`Assoc _)], returns
-    [Ok merged] where [merged] is the [`Assoc] payload with
-    [state_block] added iff it is [Some non_empty] and the object
-    does not already contain a [state_block] entry (existing
-    entries are preserved). [None] meta with no state_block
-    yields [Ok None]; otherwise [Ok (Some (`Assoc fields))].
+    [None] and an empty [`Assoc] normalize to [Ok None]. A non-empty
+    [`Assoc] is preserved.
 
     Returns [Error (Meta_not_assoc payload)] when [meta_json] is
     [Some payload] with [payload] not of shape [`Assoc _]. Callers
@@ -79,12 +56,9 @@ val normalize_post_payload :
 
     Pipeline:
     - body defaults to [content] when omitted;
-    - any embedded [\[STATE\]…\[/STATE\]] block is extracted via
-      {!extract_state_block} and lifted into [meta.state_block]
-      via {!merge_meta_json};
     - the body is trimmed;
     - title is the trimmed [?title] when non-empty, else
-      {!derive_post_title} of the stripped body;
+      {!derive_post_title} of the body;
     - [post_kind] is passed through unchanged.
 
     Returns [Error (Meta_not_assoc _)] when [?meta_json] is

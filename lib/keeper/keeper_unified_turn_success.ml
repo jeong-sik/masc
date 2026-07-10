@@ -69,18 +69,15 @@ let budget_exhausted_no_progress_threshold_override
   else None
 ;;
 
-(* RFC-0276 §3.2: runtime-observed delivery classification. Replaces the LLM
-   self-declared delivery class (the social-model header protocol) as the
-   input to the no-progress loop detector. Derived once from turn facts already
-   in scope — the tool names actually called and whether visible text was
-   emitted — so the anti-thrash verdict no longer trusts a model-authored
-   header.
+(* Runtime-observed delivery classification for the no-progress loop detector.
+   It is derived once from turn facts already in scope — the tool capabilities
+   actually exercised and whether visible text was emitted — so the
+   anti-thrash verdict never trusts a model-authored delivery label.
 
    Tool-capability classification is delegated to [Keeper_tool_capability_axis],
    the typed SSOT for tool-name capabilities, rather than matching tool-name
    string literals here (CLAUDE.md anti-pattern #1: no scattered hardcoded tool
-   names; the social-model [inferred_tool_surface] enumerated the same names and
-   is removed in RFC-0276 Phase 2b). *)
+   names). *)
 type turn_delivery =
   | Peer_only
     (* peer-surface tool (board/comment/broadcast/keeper-msg), or silent:
@@ -105,20 +102,17 @@ type reply_delivery =
 (* Classify from observable facts. Order is significant: a turn that calls a
    peer-surface tool is [Peer_only] even if it also produced text, because the
    board/broadcast post is the salient delivery; a claim turn is exempt because
-   claiming is itself progress (RFC-0239). This precedence (peer > claim > text)
-   mirrors the removed social-model [inferred_tool_surface] if/else-if order, so
-   a multi-signal turn cannot flip the anti-thrash verdict to exempt.
+   claiming is itself progress (RFC-0239). The canonical precedence is
+   peer > claim > text, so a multi-signal turn cannot flip the anti-thrash
+   verdict to exempt.
 
    Behavior change (RFC-0276 §2.4): the [Board_activity] capability set is
    {keeper_board_post, keeper_board_comment, keeper_broadcast, masc_broadcast,
-   masc_keeper_msg} — wider than the old social-model peer set {board_post,
-   board_comment, broadcast} by the public broadcast form and
-   [masc_keeper_msg] (keeper->keeper message). A turn that only sends a peer
-   message with no durable evidence now accrues the no-progress streak (it
-   previously reset it). This is intentional: a bare peer message is exactly the
-   "posts to peers without evidence" case RFC-0239 targets. The set is pinned
-   in test_no_progress_loop_detector so any axis change forces a conscious
-   no-progress review. *)
+   masc_keeper_msg}. A turn that only sends a peer message with no durable
+   evidence accrues the no-progress streak. This is intentional: a bare peer
+   message is exactly the "posts to peers without evidence" case RFC-0239
+   targets. The set is pinned in test_no_progress_loop_detector so any axis
+   change forces a conscious no-progress review. *)
 let classify_delivery ~is_autonomous ~reply_delivery ~tools ~has_visible_text =
   if Keeper_tool_capability_axis.(supports_any Board_activity tools)
   then Peer_only

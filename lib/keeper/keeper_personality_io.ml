@@ -1,9 +1,7 @@
 (** Keeper_personality_io — symmetric I/O harness for the keeper
     [instructions] persona field.
 
-    RFC-0282 removed the [will]/[needs]/[desires] BDI-state triple; the
-    harness now carries the single surviving free-text persona field
-    ([instructions]). It still provides the parse / coerce / byte-cap /
+    The harness provides the parse / coerce / byte-cap /
     drift-compare / prompt-render machinery that [Keeper_meta_json_parse]
     and [Keeper_runtime_personality_diff] depend on. *)
 
@@ -108,8 +106,8 @@ let compare_normalized (current : coerced_personality)
 let to_prompt_form ~max_bytes (p : raw_personality) : raw_personality =
   (* Delegate to the SSOT helper so render layer auto-inherits any future
      normalization fixes (e.g. PR #10557 idempotency hardening on
-     [normalize_self_model_text]).  Behaviour today is identical to the
+     [normalize_prompt_text]). Behaviour today is identical to the
      prior inline [trim → String_util.utf8_prefix] sequence; the value is
      in not having two copies of the trim/cap recipe drift apart. *)
-  let render s = Keeper_config.normalize_self_model_text ~max_bytes s in
+  let render s = Keeper_config.normalize_prompt_text ~max_bytes s in
   { instructions = render p.instructions }

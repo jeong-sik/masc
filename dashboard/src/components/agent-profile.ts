@@ -225,10 +225,7 @@ function CharacterPlate({ name }: { name: string }) {
   const generation = keeper?.generation
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   const signalTruth = brief?.signal_truth
-  const continuitySummary =
-    trimText(contBrief?.continuity_summary, 160)
-    ?? trimText(contBrief?.skill_route_summary, 160)
-    ?? null
+  const skillRouteSummary = trimText(contBrief?.skill_route_summary, 160) ?? null
   const isKeeper = keeper != null
   const workerState = worker?.state
   const workerFocus = worker?.focus
@@ -297,11 +294,11 @@ function CharacterPlate({ name }: { name: string }) {
           </div>
         ` : null}
 
-        ${keeperIdent || continuitySummary || brief?.related_session_id ? html`
+        ${keeperIdent || skillRouteSummary || brief?.related_session_id ? html`
           <div class="flex gap-3 flex-wrap text-sm text-[var(--color-fg-muted)]">
             ${keeperIdent ? html`<span>${keeperIdent}</span>` : null}
             ${brief?.related_session_id ? html`<span>세션 ${brief.related_session_id}</span>` : null}
-            ${continuitySummary ? html`<span>${continuitySummary}</span>` : null}
+            ${skillRouteSummary ? html`<span>${skillRouteSummary}</span>` : null}
           </div>
         ` : null}
       </div>

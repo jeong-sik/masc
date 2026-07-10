@@ -495,24 +495,23 @@ let run_keepalive_unified_turn
             ~keeper_name:meta_after_triage.name
             !consumed_stimuli;
           let event_bus = Keeper_event_bus.get () in
-          (* RFC-0320 W3c: if this cycle was opened by a Hitl_resolved wake,
-             carry that wake's captured originating channel into the turn so the
-             reply is deterministically delivered back to the conversation the
-             approval was requested from. First routable resolution wins; other
-             lanes leave this [None] (fail-closed: no delivery). *)
-          let hitl_delivery_channel =
+          (* A [Hitl_resolved] wake is the SSOT for both continuation delivery
+             and an optional exact-action grant. The unified turn derives those
+             two cycle-scoped views from this single typed resolution. First
+             consumed resolution wins; other lanes leave this [None]. *)
+          let hitl_resolution =
             List.find_map
               (fun (stim : Keeper_event_queue.stimulus) ->
                 match stim.Keeper_event_queue.payload with
                 | Keeper_event_queue.Hitl_resolved resolution ->
-                  Some resolution.Keeper_event_queue.channel
+                  Some resolution
                 | _ -> None)
               !consumed_stimuli
           in
           let meta_after_cycle =
             run_keeper_cycle
               ?event_bus
-              ?hitl_delivery_channel
+              ?hitl_resolution
               ~ctx
               ~meta_after_triage
               ~stop
@@ -1003,7 +1002,8 @@ let run_heartbeat_loop
           | Keeper_pressure_admission.Blocked _ -> false
         in
         let approval_pending =
-          Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta_current.name
+          Keeper_approval_queue.has_blocking_pending_for_keeper
+            ~keeper_name:meta_current.name
         in
         let keeper_health_blocker =
           if Health.is_healthy ~agent_name:meta_current.name then None else Some "unhealthy"

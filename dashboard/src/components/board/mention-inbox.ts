@@ -122,7 +122,6 @@ export function buildMentionInboxModel(
 
 function MessageRow({ row }: { row: MentionInboxRow }) {
   const preview = previewBoardMessage(row.message)
-  const hasState = row.message.content.includes('[STATE]')
   return html`
     <article class="v2-workspace-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-3 hover:border-[var(--color-border-strong)] transition-colors">
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -132,9 +131,6 @@ function MessageRow({ row }: { row: MentionInboxRow }) {
           : null}
         ${row.message.type
           ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${row.message.type}</span>`
-          : null}
-        ${hasState
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-accent-fg)]">STATE</span>`
           : null}
       </div>
       <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">

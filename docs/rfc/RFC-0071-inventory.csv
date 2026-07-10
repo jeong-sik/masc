@@ -597,13 +597,6 @@ lib/memory_oas_bridge.ml,323,None,unclassified
 lib/memory_oas_bridge.ml,334,None,unclassified
 lib/memory_jsonl/memory_jsonl.ml,79,None,unclassified
 lib/memory_jsonl/memory_jsonl.ml,94,None,unclassified
-lib/meta_cognition_digest.ml,21,None,unclassified
-lib/meta_cognition_interpret.ml,14,false,unclassified
-lib/meta_cognition_parse.ml,18,None,unclassified
-lib/meta_cognition_parse.ml,24,None,unclassified
-lib/meta_cognition_parse.ml,30,None,unclassified
-lib/meta_cognition_parse.ml,34,None,unclassified
-lib/meta_cognition_parse.ml,40,None,unclassified
 lib/metrics_store_eio.ml,221,None,unclassified
 lib/model_inference_metrics.ml,180,None,unclassified
 lib/model_inference_metrics.ml,186,None,unclassified

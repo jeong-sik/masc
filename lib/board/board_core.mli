@@ -11,9 +11,8 @@
       [reclassify_report] record reach callers via this
       facade.
     - {b Payload normalisation} re-exported via
-      [include Board_core_payload] — state-block extraction,
-      post-title derivation, and the canonical
-      [normalize_post_payload].
+      [include Board_core_payload] — metadata validation, post-title
+      derivation, and the canonical [normalize_post_payload].
     - {b Local store + persistence} (this .mli's locally
       pinned surface) — sweeper / lock / cache /
       JSONL-rotate / append helpers.
@@ -252,8 +251,8 @@ val create_post_with_outcome
 
 (** Owner-gated in-place edit of an existing post's title/body.  Validates
     [editor] via {!Agent_id.of_string}, folds the canonical [title / body] via
-    {!normalize_post_payload} (seeded with the existing [meta_json] so a [STATE]
-    block in the edited body lifts into meta instead of being dropped), then
+    {!normalize_post_payload} (seeded with the existing [meta_json] so metadata
+    is preserved independently from body text), then
     replaces the stored post under {!with_lock} and persists a full JSONL
     snapshot.  Returns [Unauthorized] when [editor] does not own the post,
     [Post_not_found] for a missing id, and [Validation_error] for

@@ -201,6 +201,7 @@ val run_keeper_cycle
   -> meta:Keeper_meta_contract.keeper_meta
   -> observation:Keeper_world_observation.world_observation
   -> generation:int
+  -> wake:Keeper_registry.wake_reason
   -> ?channel:Keeper_world_observation.keeper_cycle_channel
   -> ?turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> ?shared_context:Agent_sdk.Context.t
@@ -220,6 +221,12 @@ val run_keeper_cycle
     @param meta Current keeper metadata
     @param observation World state snapshot
     @param generation Current generation counter
+    @param wake What triggered this turn (#16, 38-bug campaign PR-5):
+    reactive stimulus batch or the proactive cadence tick. Installed on
+    [current_turn_observation] via [Keeper_registry.mark_turn_started] so
+    the composite observer / dashboard can surface it. Distinct from
+    [turn_decision] below, which carries the scheduler verdict into the
+    prompt text rather than the registry observation.
     @param turn_decision The scheduler's cycle decision that fired this turn
     (RFC-0315). Threaded into [Keeper_unified_prompt.build_prompt] so the
     prompt renders the real wake reason instead of a context-blind recompute.

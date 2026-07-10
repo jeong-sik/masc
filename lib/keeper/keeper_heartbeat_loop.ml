@@ -509,6 +509,24 @@ let run_keepalive_unified_turn
                 | _ -> None)
               !consumed_stimuli
           in
+          (* #16 (38-bug campaign PR-5): [reactive_wake] tells us this cycle
+             was triggered by an external signal rather than the proactive
+             cadence tick, but by itself does not say *which* stimulus (or
+             whether the event queue drained anything at all). Pairing it
+             with [!consumed_stimuli] — already drained above, unchanged
+             until the post-turn ack/requeue below — gives
+             [mark_turn_started] a total, typed answer instead of the
+             boolean the registry previously discarded. *)
+          let wake : Keeper_registry.wake_reason =
+            if reactive_wake
+            then
+              Keeper_registry.Woken
+                (List.map
+                   (fun (stim : Keeper_event_queue.stimulus) ->
+                      stim.Keeper_event_queue.payload)
+                   !consumed_stimuli)
+            else Keeper_registry.Proactive_tick
+          in
           let meta_after_cycle =
             run_keeper_cycle
               ?event_bus
@@ -519,6 +537,7 @@ let run_keepalive_unified_turn
               ~obs
               ~turn_decision
               ~shared_context
+              ~wake
               ()
           in
           consumed_stimuli_turn_completed := true;

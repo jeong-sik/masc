@@ -9,5 +9,6 @@ val run_keeper_cycle
   -> obs:Keeper_world_observation.world_observation
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> shared_context:Agent_sdk.Context.t
+  -> wake:Keeper_registry.wake_reason
   -> unit
   -> Keeper_meta_contract.keeper_meta

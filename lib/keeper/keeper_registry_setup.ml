@@ -684,7 +684,7 @@ let stamp_turn_progress ~now ~event_kind obs =
   }
 ;;
 
-let mark_turn_started ~base_path name =
+let mark_turn_started ~base_path ~wake name =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
@@ -700,6 +700,7 @@ let mark_turn_started ~base_path name =
         ; measurement = None
         ; measurement_bind_count = 0
         ; selected_model = None
+        ; wake
         }
       in
       { e with

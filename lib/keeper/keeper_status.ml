@@ -199,6 +199,25 @@ let handle_keeper_list ctx args : tool_result =
           let attention_fields =
             attention_fields_json ctx.config m
           in
+          (* #16 (38-bug campaign PR-5): the persisted [m] (keeper_meta) alone
+             cannot distinguish actively executing a turn from idle waiting
+             from reactively woken — that state lives only in the in-memory
+             registry entry, not on disk. [None] (keeper not currently
+             registered, e.g. never launched) surfaces as JSON [null] rather
+             than a guessed default. *)
+          let run_state_json =
+            match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
+            | Some entry ->
+              let last_skip =
+                match entry.Keeper_registry.last_skip_observation with
+                | Some (ts, reasons) ->
+                  Some Keeper_composite_observer.{ ls_ts = ts; ls_reasons = reasons }
+                | None -> None
+              in
+              Keeper_composite_observer.run_state_to_json
+                (Keeper_composite_observer.run_state_of_entry entry ~last_skip)
+            | None -> `Null
+          in
           Some (`Assoc ([
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
@@ -206,6 +225,7 @@ let handle_keeper_list ctx args : tool_result =
               ("generation", `Int m.runtime.generation);
               ("goal", `String m.goal);
               ("keepalive_running", `Bool (runtime_keepalive_running ctx.config m));
+              ("run_state", run_state_json);
               ("active_model", `String active_model);
               ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
               ("keeper_age_s", `Float keeper_age_s);

@@ -151,9 +151,10 @@ val set_failure_reason : base_path:string -> string -> failure_reason option -> 
 val set_last_correlation_id : base_path:string -> string -> string -> unit
 
 (** Mark the beginning of a keeper turn. Installs a fresh
-    [current_turn_observation] with [turn_id = usage.total_turns + 1].
+    [current_turn_observation] with [turn_id = usage.total_turns + 1] and
+    [wake] frozen for the turn's lifetime (#16, 38-bug campaign PR-5).
     Must be paired with [mark_turn_finished] (or [mark_turn_failed]). *)
-val mark_turn_started : base_path:string -> string -> unit
+val mark_turn_started : base_path:string -> wake:wake_reason -> string -> unit
 
 (** Refresh the live turn's progress timestamp without changing its FSM
     projection.  No-op when no turn is active.  [event_kind] must be a

@@ -3480,6 +3480,7 @@ let test_assess_in_turn_progress () =
      ; measurement = None
      ; measurement_bind_count = 0
      ; selected_model = None
+     ; wake = Proactive_tick
      }
       : Masc.Keeper_registry_types.turn_observation)
   in

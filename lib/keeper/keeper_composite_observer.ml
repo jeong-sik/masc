@@ -110,12 +110,25 @@ type live_turn = {
   last_progress_kind : string option;
   selected_model : string option;
   active_tool_count : int;
+  wake : Keeper_registry.wake_reason;
 }
 
 type last_skip = {
   ls_ts : float;
   ls_reasons : string list;
 }
+
+type run_state =
+  | In_turn of {
+      rs_wake : Keeper_registry.wake_reason;
+      rs_started_at : float;
+      rs_active_tool_count : int;
+    }
+  | Waiting of {
+      rs_queue_depth : int;
+      rs_last_skip : last_skip option;
+    }
+  | Suspended of Keeper_state_machine.phase
 
 type livelock = {
   ll_turn_id : int;
@@ -150,6 +163,7 @@ type snapshot = {
   conditions : Keeper_state_machine.conditions;
   is_live : bool;
   live_turn : live_turn option;
+  run_state : run_state;
   last_outcome : last_outcome option;
   last_skip : last_skip option;
   livelock : livelock option;
@@ -351,6 +365,76 @@ let live_measurement (entry : Keeper_registry.registry_entry) =
   | Some { measurement = Some measurement; _ } -> Some measurement.tm_auto_rules
   | _ -> None
 
+(* Run-state classification (#16, 38-bug campaign PR-5). Exhaustive on
+   [Keeper_state_machine.phase]: a future phase addition must be classified
+   here explicitly rather than silently inheriting a catch-all arm. *)
+let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
+    : run_state =
+  match entry.phase with
+  | Keeper_state_machine.Running ->
+    (match entry.current_turn_observation with
+     | Some obs ->
+       In_turn
+         {
+           rs_wake = obs.wake;
+           rs_started_at = obs.started_at;
+           rs_active_tool_count = obs.active_tool_count;
+         }
+     | None ->
+       Waiting
+         {
+           rs_queue_depth = Keeper_event_queue.length (Atomic.get entry.event_queue);
+           rs_last_skip = last_skip;
+         })
+  | Keeper_state_machine.Offline
+  | Keeper_state_machine.Failing
+  | Keeper_state_machine.Overflowed
+  | Keeper_state_machine.Compacting
+  | Keeper_state_machine.HandingOff
+  | Keeper_state_machine.Draining
+  | Keeper_state_machine.Paused
+  | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Crashed
+  | Keeper_state_machine.Restarting
+  | Keeper_state_machine.Dead
+  | Keeper_state_machine.Zombie ->
+    Suspended entry.phase
+
+(* [wake_kind] + [stimulus_kinds] pair shared by [run_state_to_json]'s
+   [In_turn] arm; also exposed via .mli for the Bonsai [keepers/summary]
+   converter, which has its own typed wire record and cannot consume
+   [run_state_to_json]'s [Yojson.Safe.t] directly. *)
+let wake_reason_kind_and_stimuli (wake : Keeper_registry.wake_reason) : string * string list =
+  match wake with
+  | Keeper_registry.Proactive_tick -> "proactive_tick", []
+  | Keeper_registry.Woken stimuli ->
+    "woken", List.map Keeper_event_queue.payload_kind_label stimuli
+
+let run_state_to_json (rs : run_state) : Yojson.Safe.t =
+  match rs with
+  | In_turn { rs_wake; rs_started_at; rs_active_tool_count } ->
+    let wake_kind, stimulus_kinds = wake_reason_kind_and_stimuli rs_wake in
+    `Assoc
+      [
+        "kind", `String "in_turn";
+        "wake_kind", `String wake_kind;
+        "stimulus_kinds", `List (List.map (fun s -> `String s) stimulus_kinds);
+        "started_at", `Float rs_started_at;
+        "active_tool_count", `Int rs_active_tool_count;
+      ]
+  | Waiting { rs_queue_depth; rs_last_skip } ->
+    `Assoc
+      [
+        "kind", `String "waiting";
+        "queue_depth", `Int rs_queue_depth;
+        "skip_reasons",
+          (match rs_last_skip with
+           | Some ls -> `List (List.map (fun r -> `String r) ls.ls_reasons)
+           | None -> `List []);
+      ]
+  | Suspended phase ->
+    `Assoc [ "kind", `String "suspended"; "phase", `String (Keeper_state_machine.phase_to_string phase) ]
+
 (* Invariants *)
 
 let check_phase_turn_alignment
@@ -504,6 +588,11 @@ let observe
     Keeper_failure_circuit_breaker.display_state_of
       ~keeper_name:entry.name
   in
+  let last_skip =
+    match entry.last_skip_observation with
+    | Some (ts, reasons) -> Some { ls_ts = ts; ls_reasons = reasons }
+    | None -> None
+  in
   {
     keeper_name = entry.name;
     correlation_id;
@@ -530,8 +619,10 @@ let observe
              last_progress_kind = obs.last_progress_kind;
              selected_model = obs.selected_model;
              active_tool_count = obs.active_tool_count;
+             wake = obs.wake;
            }
        | None -> None);
+    run_state = run_state_of_entry entry ~last_skip;
     last_outcome =
       (match entry.last_completed_turn with
        | Some lc ->
@@ -543,10 +634,7 @@ let observe
            selected_model = lc.ct_selected_model;
          }
        | None -> None);
-    last_skip =
-      (match entry.last_skip_observation with
-       | Some (ts, reasons) -> Some { ls_ts = ts; ls_reasons = reasons }
-       | None -> None);
+    last_skip;
     livelock =
       (match Atomic.get entry.livelock_state with
        | Some ll ->
@@ -749,6 +837,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           "active_tool_count", `Int live.active_tool_count;
         ]
       | None -> `Null);
+    "run_state", run_state_to_json s.run_state;
     "last_outcome", (match s.last_outcome with
       | Some lo -> `Assoc [
           "turn_id", `Int lo.turn_id;

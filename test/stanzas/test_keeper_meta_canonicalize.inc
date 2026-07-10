@@ -1,8 +1,8 @@
 ; Boot-time keeper meta canonicalization
-; (Keeper_meta_store.canonicalize_persisted_meta_files +
+; (Keeper_meta_store.migrate_retired_keeper_meta_keys +
 ; Keeper_meta_json.unknown_keeper_meta_keys): #23929's continuity purge left
 ; retired keys in .masc/keepers/*.json, re-warning on every read; the boot
-; pass converges every persisted file onto the canonical serializer key set.
+; pass removes only the explicitly retired keys from every persisted file.
 
 (test
  (name test_keeper_meta_canonicalize)

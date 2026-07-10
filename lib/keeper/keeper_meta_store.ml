@@ -406,13 +406,13 @@ let retired_keeper_meta_keys json =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> []
 ;;
 
-let canonicalize_persisted_meta_files config =
+let migrate_retired_keeper_meta_keys config =
   persisted_keeper_names config
   |> List.iter (fun name ->
     let path = keeper_meta_path config name in
     match Safe_ops.read_json_file_safe path with
     | Error msg ->
-      Log.Keeper.warn "keeper meta canonicalize: unreadable %s: %s" path msg
+      Log.Keeper.warn "retired keeper meta key migration: unreadable %s: %s" path msg
     | Ok json ->
       (match retired_keeper_meta_keys json with
        | [] -> ()
@@ -423,7 +423,7 @@ let canonicalize_persisted_meta_files config =
                operator repair; editing it could destroy whatever evidence
                explains the rejection. *)
             Log.Keeper.warn
-              "keeper meta canonicalize: parse failed for %s, leaving file untouched: %s"
+              "retired keeper meta key migration: parse failed for %s, leaving file untouched: %s"
               path
               msg
           | Ok _ ->
@@ -436,12 +436,12 @@ let canonicalize_persisted_meta_files config =
             (match Keeper_fs.save_json_atomic path cleaned with
              | Ok () ->
                Log.Keeper.info
-                 "canonicalized keeper meta %s: dropped retired keys: %s"
+                 "migrated keeper meta %s: dropped retired keys: %s"
                  path
                  (String.concat ", " retired)
              | Error msg ->
                Log.Keeper.warn
-                 "keeper meta canonicalize: rewrite failed for %s (file unchanged, unknown-key warning persists): %s"
+                 "retired keeper meta key migration: rewrite failed for %s (file unchanged, unknown-key warning persists): %s"
                  path
                  msg))))
 ;;

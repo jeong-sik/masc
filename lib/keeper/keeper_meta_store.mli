@@ -144,7 +144,7 @@ val is_version_conflict_error : string -> bool
     not CAS-guarded, so the only writers that can race it are external
     request-driven mutations inside the per-file read/save span during
     boot — a CAS-guarded loser self-heals on its retry path. *)
-val canonicalize_persisted_meta_files : Workspace.config -> unit
+val migrate_retired_keeper_meta_keys : Workspace.config -> unit
 
 (** Retry [write_meta] on CAS version conflicts using caller-declared
     field ownership via [merge]. Use [Keeper_meta_merge.caller_wins]

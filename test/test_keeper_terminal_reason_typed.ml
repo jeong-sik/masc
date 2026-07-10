@@ -352,6 +352,7 @@ let base_receipt : R.t =
   ; oas_turn_count = None
   ; oas_dispatch_mode = None
   ; oas_internal_runtime_disabled = false
+  ; post_turn_memory_job_id = None
   ; current_task_id = None
   ; goal_ids = []
   ; outcome = `Error
@@ -892,6 +893,7 @@ let () =
     ; run_validation = None
     ; stop_reason
     ; inference_telemetry = None
+    ; post_turn_memory_job = None
     ; tool_surface
     ; pre_dispatch_compacted = false
     ; pre_dispatch_compaction_trigger = None

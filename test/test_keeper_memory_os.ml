@@ -1560,6 +1560,138 @@ let test_librarian_runtime_appends_episode_bundle () =
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
 
+let test_librarian_runtime_operation_id_replays_without_provider_or_duplicate () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      with_eio (fun ~sw ~net ~clock ->
+        let keeper_id = "runtime-librarian-idempotent-keeper" in
+        let operation_id = "memory-job-idempotency-1" in
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          incr calls;
+          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+        in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-runtime-idempotent"
+          ; generation = 3
+          ; messages = [ text_message "Persist this exactly once." ]
+          }
+        in
+        let run () =
+          Librarian_runtime.extract_and_append_with_provider_classified
+            ~operation_id
+            ~keepers_dir
+            ~complete
+            ~clock
+            ~timeout_sec:1.0
+            ~sw
+            ~net
+            ~keeper_id
+            ~provider_cfg:(test_provider_cfg ())
+            inp
+        in
+        (match run () with
+         | Ok _ -> ()
+         | Error error ->
+           Alcotest.fail
+             (Librarian_runtime.extraction_error_to_string error));
+        (match
+           Memory_io.inspect_operation_episode
+             ~clock:(Some clock)
+             ~keepers_dir
+             ~keeper_id
+             ~operation_id
+         with
+         | Ok (Memory_io.Operation_committed _) -> ()
+         | Ok Memory_io.Operation_absent ->
+           Alcotest.fail "expected committed operation episode"
+         | Ok (Memory_io.Operation_staged _) ->
+           Alcotest.fail "expected operation event commit marker"
+         | Error error -> Alcotest.fail error);
+        (match run () with
+         | Ok _ -> ()
+         | Error error ->
+           Alcotest.fail
+             (Librarian_runtime.extraction_error_to_string error));
+        Alcotest.(check int) "provider called once" 1 !calls;
+        Alcotest.(check int)
+          "one committed event"
+          1
+          (List.length (Memory_io.read_events_tail ~keeper_id ~n:10));
+        Alcotest.(check int)
+          "operation journal is not a recall episode file"
+          0
+          (json_episode_file_count ~keeper_id))))
+;;
+
+let test_staged_operation_is_typed_and_commits_without_provider () =
+  with_temp_keepers_dir (fun keepers_dir ->
+    with_eio (fun ~sw:_ ~net:_ ~clock ->
+      let keeper_id = "runtime-librarian-staged-keeper" in
+      let operation_id = "memory-job-staged-1" in
+      let episode =
+        episode_fixture
+          ~now:1_000_000.0
+          ~trace_id:"trace-runtime-staged"
+          ~generation:7
+          ~summary:"Staged result survives replay gates"
+      in
+      let staged =
+        match
+          Memory_io.stage_operation_episode_once
+            ~clock
+            ~keepers_dir
+            ~keeper_id
+            ~operation_id
+            ~model_id:"test-model"
+            ~provider_latency_ms:12.5
+            episode
+        with
+        | Ok staged -> staged
+        | Error error -> Alcotest.fail error
+      in
+      (match
+         Memory_io.inspect_operation_episode
+           ~clock:(Some clock)
+           ~keepers_dir
+           ~keeper_id
+           ~operation_id
+       with
+       | Ok (Memory_io.Operation_staged _) -> ()
+       | Ok Memory_io.Operation_absent -> Alcotest.fail "staged operation disappeared"
+       | Ok (Memory_io.Operation_committed _) ->
+         Alcotest.fail "stage was visible as committed before event publication"
+       | Error error -> Alcotest.fail error);
+      (match
+         Librarian_runtime.commit_staged_operation
+           ~keepers_dir
+           ~clock
+           ~keeper_id
+           ~operation_id
+           staged
+       with
+       | Ok () -> ()
+       | Error error ->
+         Alcotest.fail (Librarian_runtime.extraction_error_to_string error));
+      match
+        Memory_io.inspect_operation_episode
+          ~clock:(Some clock)
+          ~keepers_dir
+          ~keeper_id
+          ~operation_id
+      with
+      | Ok (Memory_io.Operation_committed committed) ->
+        Alcotest.(check string) "staged model retained" "test-model" committed.model_id;
+        Alcotest.(check (float 0.0))
+          "provider latency retained"
+          12.5
+          committed.provider_latency_ms
+      | Ok Memory_io.Operation_absent -> Alcotest.fail "committed operation disappeared"
+      | Ok (Memory_io.Operation_staged _) ->
+        Alcotest.fail "staged operation was not committed"
+      | Error error -> Alcotest.fail error))
+;;
+
 let test_librarian_runtime_falls_back_when_schema_unavailable () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -1666,10 +1798,6 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
           ; messages = [ text_message "Please remember the fallback path." ]
           }
         in
-        Alcotest.(check bool)
-          "production cadence gate is due before provider attempt"
-          true
-          (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id);
         let fallback_result =
           Librarian_runtime.extract_and_append_with_provider_classified
             ~complete
@@ -1683,7 +1811,7 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
         in
         (match fallback_result with
          | Ok _ -> Alcotest.fail "unstructured provider output must not persist"
-         | Error (Librarian_runtime.Provider_unparseable_response reason as err) ->
+         | Error (Librarian_runtime.Provider_unparseable_response reason) ->
            Alcotest.(check int)
              "initial attempt + parse retries"
              (1 + Librarian_runtime.librarian_max_parse_retries)
@@ -1698,15 +1826,7 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
              "typed provider error preserves JSON parser detail"
              true
              (contains "JSON parse error" reason);
-           Alcotest.(check bool)
-             "unparseable provider error enters cadence backoff path"
-             true
-             (Librarian_runtime.should_record_cadence_backoff_after_error err);
-           Librarian_runtime.cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
-           Alcotest.(check bool)
-             "cadence attempt defers the next provider retry"
-             false
-             (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id)
+           ()
          | Error err ->
            Alcotest.failf
              "expected Provider_unparseable_response, got %s"
@@ -5651,6 +5771,156 @@ let test_self_observation_excluded_from_user_model () =
       (List.hd model.Keeper_user_model.preferences).Keeper_user_model.claim)
 ;;
 
+let with_temp_base_path label f =
+  let marker = Filename.temp_file ("keeper-memory-os-" ^ label ^ "-") ".tmp" in
+  Sys.remove marker;
+  Unix.mkdir marker 0o700;
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree marker)
+    (fun () -> f marker)
+;;
+
+let test_memory_store_migration_moves_only_runtime_artifacts () =
+  with_temp_base_path "migration" (fun base_path ->
+    let config_root =
+      Config_dir_resolver.base_path_config_root ~cwd:base_path base_path
+    in
+    let source_root = Filename.concat config_root "keepers" in
+    let destination_root = Masc.Common.keepers_runtime_dir_of_base ~base_path in
+    let source_facts = Filename.concat source_root "keeper-a.facts.jsonl" in
+    let source_episode =
+      Filename.concat source_root "keeper-a/episodes/episode.json"
+    in
+    let config_file = Filename.concat source_root "keeper-a.toml" in
+    write_text_file source_facts "{\"fact\":true}\n";
+    write_text_file source_episode "{\"episode\":true}\n";
+    write_text_file config_file "name = \"keeper-a\"\n";
+    let migration = Memory_io.migrate_legacy_config_store ~base_path in
+    (match migration.errors with
+     | error :: _ -> Alcotest.fail (Memory_io.migration_error_to_string error)
+     | [] -> ());
+    Alcotest.(check int) "moved runtime files" 2 migration.stats.moved_files;
+    Alcotest.(check int)
+      "no dedup on first migration"
+      0
+      migration.stats.deduplicated_files;
+    Alcotest.(check bool) "source facts removed" false (Sys.file_exists source_facts);
+    Alcotest.(check bool)
+      "source episode removed"
+      false
+      (Sys.file_exists source_episode);
+    Alcotest.(check bool) "keeper config remains" true (Sys.file_exists config_file);
+    Alcotest.(check string)
+      "facts moved byte-for-byte"
+      "{\"fact\":true}\n"
+      (Fs_compat.load_file (Filename.concat destination_root "keeper-a.facts.jsonl"));
+    Alcotest.(check string)
+      "episode moved byte-for-byte"
+      "{\"episode\":true}\n"
+      (Fs_compat.load_file
+         (Filename.concat destination_root "keeper-a/episodes/episode.json")))
+;;
+
+let test_memory_store_migration_rejects_divergent_destination () =
+  with_temp_base_path "migration-conflict" (fun base_path ->
+    let config_root =
+      Config_dir_resolver.base_path_config_root ~cwd:base_path base_path
+    in
+    let source =
+      Filename.concat config_root "keepers/keeper-a.events.jsonl"
+    in
+    let destination =
+      Filename.concat
+        (Masc.Common.keepers_runtime_dir_of_base ~base_path)
+        "keeper-a.events.jsonl"
+    in
+    let independent_source =
+      Filename.concat config_root "keepers/keeper-b.facts.jsonl"
+    in
+    let independent_destination =
+      Filename.concat
+        (Masc.Common.keepers_runtime_dir_of_base ~base_path)
+        "keeper-b.facts.jsonl"
+    in
+    write_text_file source "source\n";
+    write_text_file destination "destination\n";
+    write_text_file independent_source "independent\n";
+    let migration = Memory_io.migrate_legacy_config_store ~base_path in
+    Alcotest.(check int)
+      "divergent destination reported"
+      1
+      (List.length migration.errors);
+    Alcotest.(check int)
+      "independent artifact still moved"
+      1
+      migration.stats.moved_files;
+    Alcotest.(check string) "source preserved" "source\n" (Fs_compat.load_file source);
+    Alcotest.(check string)
+      "destination preserved"
+      "destination\n"
+      (Fs_compat.load_file destination);
+    Alcotest.(check bool)
+      "independent source removed"
+      false
+      (Sys.file_exists independent_source);
+    Alcotest.(check string)
+      "independent destination preserved"
+      "independent\n"
+      (Fs_compat.load_file independent_destination))
+;;
+
+let test_operation_commit_quarantines_malformed_event_rows () =
+  with_temp_keepers_dir (fun keepers_dir ->
+    let keeper_id = "keeper-event-repair" in
+    let operation_id = "memory-job-repair-1" in
+    let episode =
+      episode_fixture
+        ~now:1_000_000.0
+        ~trace_id:"trace-event-repair"
+        ~generation:1
+        ~summary:"valid event survives repair"
+    in
+    let valid =
+      match Types.episode_to_json episode with
+      | `Assoc fields ->
+        `Assoc (("memory_operation_id", `String operation_id) :: fields)
+      | _ -> Alcotest.fail "episode JSON must be an object"
+    in
+    let events_path =
+      Memory_io.events_path_for_keepers_dir ~keepers_dir ~keeper_id
+    in
+    write_text_file
+      events_path
+      ("{torn-json\n" ^ Yojson.Safe.to_string valid ^ "\n");
+    let committed =
+      Memory_io.with_episode_bundle_lock_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id
+        (fun () ->
+           Memory_io.operation_event_committed
+             ~keepers_dir
+             ~keeper_id
+             ~operation_id)
+    in
+    (match committed with
+     | Ok true -> ()
+     | Ok false -> Alcotest.fail "valid operation marker was lost during repair"
+     | Error detail -> Alcotest.fail detail);
+    let events, malformed = Fs_compat.load_jsonl_diagnostics events_path in
+    Alcotest.(check int) "malformed rows removed" 0 malformed;
+    Alcotest.(check int) "valid event retained" 1 (List.length events);
+    let quarantine_dir =
+      Filename.concat
+        (Filename.concat keepers_dir keeper_id)
+        "memory-event-quarantine"
+    in
+    Alcotest.(check bool)
+      "malformed evidence quarantined"
+      true
+      (Sys.file_exists quarantine_dir
+       && Array.length (Sys.readdir quarantine_dir) = 1))
+;;
+
 let test_gc_default_on () =
   (* Defaults are module-load constants; env overrides are tested separately. *)
   Alcotest.(check bool) "gc default is true" true Env_config.KeeperMemoryOs.gc_enabled_default
@@ -5760,6 +6030,14 @@ let () =
             `Quick
             test_librarian_runtime_appends_episode_bundle
         ; Alcotest.test_case
+            "librarian operation replay is idempotent"
+            `Quick
+            test_librarian_runtime_operation_id_replays_without_provider_or_duplicate
+        ; Alcotest.test_case
+            "staged operation commits without provider replay gates"
+            `Quick
+            test_staged_operation_is_typed_and_commits_without_provider
+        ; Alcotest.test_case
             "librarian runtime falls back when schema unavailable"
             `Quick
             test_librarian_runtime_falls_back_when_schema_unavailable
@@ -5832,6 +6110,18 @@ let () =
         ] )
     ; ( "io"
       , [ Alcotest.test_case
+            "legacy config store migrates runtime artifacts"
+            `Quick
+            test_memory_store_migration_moves_only_runtime_artifacts
+        ; Alcotest.test_case
+            "migration rejects divergent destination"
+            `Quick
+            test_memory_store_migration_rejects_divergent_destination
+        ; Alcotest.test_case
+            "malformed event rows are quarantined"
+            `Quick
+            test_operation_commit_quarantines_malformed_event_rows
+        ; Alcotest.test_case
             "episode files do not overwrite generation"
             `Quick
             test_episode_files_do_not_overwrite_generation

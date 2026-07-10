@@ -112,7 +112,7 @@ let test_http_json_surfaces_user_model_projection () =
     (fun () ->
       let config = Workspace_utils.default_config dir in
       let keepers_dir =
-        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+        Common.keepers_runtime_dir_of_base ~base_path:config.base_path
       in
       Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
         Memory_io.append_fact
@@ -164,7 +164,7 @@ let test_http_json_user_model_uses_config_base_path () =
     (fun () ->
       let config = Workspace_utils.default_config dir in
       let base_keepers_dir =
-        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+        Common.keepers_runtime_dir_of_base ~base_path:config.base_path
       in
       Memory_io.For_testing.with_keepers_dir base_keepers_dir (fun () ->
         Memory_io.append_fact
@@ -487,7 +487,7 @@ let test_http_json_hebbian_derives_from_shared_facts () =
     (fun () ->
        let config = Workspace_utils.default_config dir in
        let keepers_dir =
-         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+         Common.keepers_runtime_dir_of_base ~base_path:config.base_path
        in
        Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
          Memory_io.append_fact
@@ -546,7 +546,7 @@ let test_http_json_hebbian_dedupes_duplicate_observers () =
     (fun () ->
        let config = Workspace_utils.default_config dir in
        let keepers_dir =
-         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+         Common.keepers_runtime_dir_of_base ~base_path:config.base_path
        in
        Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
          (* A duplicate observer in a single fact must not inflate the edge. *)

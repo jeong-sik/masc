@@ -6,14 +6,30 @@ let append_with_coverage_gap
       ~on_appended
   : (unit, string) result
   =
-  try
-    Keeper_execution_receipt.append config receipt;
-    on_appended ();
+  let append_result =
+    try
+      Keeper_execution_receipt.append config receipt;
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
+  match append_result with
+  | Ok () ->
+    (* The durable receipt is the transaction commit. Manifest projection is a
+       post-commit observer and cannot roll that commit back or cause the
+       awaiting memory outbox to be aborted. *)
+    (try on_appended () with
+     | exn ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string DispatchEventFailures)
+         ~labels:[ "keeper", keeper_name; "site", "receipt_manifest_post_commit" ]
+         ();
+       Log.Keeper.error ~keeper_name
+         "execution_receipt committed but post-commit manifest append failed: %s"
+         (Printexc.to_string exn));
     Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    let err_msg = Printexc.to_string exn in
+  | Error err_msg ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", keeper_name; "site", "receipt_append" ]

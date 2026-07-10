@@ -1,18 +1,17 @@
 (** Keeper Memory Health dashboard HTTP JSON helper.
 
     Produces a read-only snapshot of per-keeper fact-store sizes, GC-dry-run
-    statistics, and the fleet-wide librarian cadence counter for the
+    statistics, and the librarian cadence clock contract for the
     /api/v1/dashboard/keeper-memory-health endpoint.
 
     Data sources:
-    - [Config_dir_resolver.keepers_dir_for_base_path] for request-scoped paths.
+    - [Common.keepers_runtime_dir_of_base] for request-scoped output paths.
     - [Keeper_memory_os_io.list_fact_store_keeper_ids] for the keeper list.
     - [Keeper_memory_os_io.read_facts_all] and file stat for facts count/bytes.
     - [Keeper_memory_os_io.events_path] + file stat for events bytes.
     - [Keeper_memory_os_gc.run_gc ~dry_run:true] for TTL-expired and
       near-duplicate counts without mutating the store.
-    - [Keeper_librarian_runtime.cadence_counter_entries] for the cadence table
-      size (one fleet-wide value). *)
+    - Keeper timeline turn ids as the stateless cadence clock. *)
 
 type keeper_health =
   { keeper_id : string
@@ -220,8 +219,7 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
      scans; no retention or control logic depends on the exact value. *)
   (* NDT-OK: diagnostic snapshot timestamp only. *)
   let now = Unix.gettimeofday () in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let cadence_counter_entries = Keeper_librarian_runtime.cadence_counter_entries () in
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
   let entries =
     Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir
     |> List.filter_map (fun keeper_id ->
@@ -248,7 +246,7 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   in
   `Assoc
     [ "generated_at", `Float now
-    ; "cadence_counter_entries", `Int cadence_counter_entries
+    ; "cadence_clock", `String "keeper_turn_id"
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"
       , `Assoc

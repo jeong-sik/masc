@@ -160,8 +160,10 @@ type t =
   | MemoryLaneUnitFailures
   | MemoryConsolidations
   | MemoryLaneSubmitted
-  | MemoryLaneRanInline
-  | MemoryLaneDropped
+  | MemoryLaneAdmissionRejected
+  | MemoryLaneReplayed
+  | MemoryLaneCompleted
+  | MemoryLaneFailed
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryBankCompactionFailures
@@ -425,8 +427,11 @@ let to_string = function
   | MemoryLaneUnitFailures -> "masc_keeper_memory_lane_unit_failures_total"
   | MemoryConsolidations -> "masc_keeper_memory_consolidations_total"
   | MemoryLaneSubmitted -> "masc_keeper_memory_lane_submitted_total"
-  | MemoryLaneRanInline -> "masc_keeper_memory_lane_ran_inline_total"
-  | MemoryLaneDropped -> "masc_keeper_memory_lane_dropped_total"
+  | MemoryLaneAdmissionRejected ->
+    "masc_keeper_memory_lane_admission_rejected_total"
+  | MemoryLaneReplayed -> "masc_keeper_memory_lane_replayed_total"
+  | MemoryLaneCompleted -> "masc_keeper_memory_lane_completed_total"
+  | MemoryLaneFailed -> "masc_keeper_memory_lane_failed_total"
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
   | MemoryBankCompactionFailures -> "masc_keeper_memory_bank_compaction_failures_total"
@@ -580,7 +585,7 @@ let all : t list =
     CheckpointFailures; DecisionAuditRingOverflows; ReplySkillRouteStrips; ReplySkillRouteLinesRemoved;
     MemoryLlmSummaryOutcomes; MemoryLlmSummaryChainExhausted; HitlSummaryOutcomes; UserVisibleReplySource;
     OasEnvKeyRejections;
-    MemoryWriteFailures; MemoryLaneUnitFailures; MemoryConsolidations; MemoryLaneSubmitted; MemoryLaneRanInline; MemoryLaneDropped;
+    MemoryWriteFailures; MemoryLaneUnitFailures; MemoryConsolidations; MemoryLaneSubmitted; MemoryLaneAdmissionRejected; MemoryLaneReplayed; MemoryLaneCompleted; MemoryLaneFailed;
     MemoryLanePending; MemoryLaneInFlight; MemoryBankCompactionFailures; MemoryOsMaintenanceKeeperTimeout; WriteMetaCycleFailures; AlertPersistFailures;
     MetricsSseFailures; ChatStoreFailures; ChatTransportFailures; PersonNoteStoreFailures; KeeperMaterializationFailures; ObservationQueryFailures; OasOnStop;
     InvariantViolations; FsmEdgeTransitions; TurnFsmTransitions;

@@ -171,6 +171,7 @@ type t =
   ; oas_turn_count : int option
   ; oas_dispatch_mode : string option
   ; oas_internal_runtime_disabled : bool
+  ; post_turn_memory_job_id : string option
   ; current_task_id : string option
   ; goal_ids : string list
   ; outcome : outcome_kind
@@ -218,6 +219,15 @@ val to_json : t -> Yojson.Safe.t
 
 (** Return the receipt terminal reason without deriving extra tool evidence. *)
 val enrich_contract_violation_reason : t -> string
+
+val committed_post_turn_memory_job_ids :
+  Workspace.config ->
+  keeper_name:string ->
+  candidate_ids:string list ->
+  (string list, string) result
+(** Strictly scan durable execution receipts for candidate post-turn outbox
+    ids. Malformed JSON/schema rows fail with path+line evidence; they are never
+    skipped when deciding whether an awaiting job may activate. *)
 
 (** Operator-facing classification of a finished turn. Closed set.
 

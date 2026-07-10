@@ -22,6 +22,9 @@ val dated_path_now : base_dir:string -> dated_path
 val append_jsonl : path:string -> Yojson.Safe.t -> unit
 (** Append one JSON value as a JSONL row using the common per-path writer. *)
 
+val append_jsonl_durable : path:string -> Yojson.Safe.t -> unit
+(** Append one JSON value and fsync the file before returning. *)
+
 val append_dated_jsonl :
   base_dir:string -> ts:float -> Yojson.Safe.t -> dated_path
 (** Append one JSON value to the timestamp-selected dated path and return the

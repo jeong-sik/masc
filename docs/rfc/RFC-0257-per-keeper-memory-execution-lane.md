@@ -29,53 +29,78 @@ Give each keeper its own memory execution lane, detached from the turn lane.
 
 ### Lane registry
 
-New module `Keeper_memory_lane` mirroring `keeper_turn_admission`:
+`Keeper_memory_lane` owns execution; `Keeper_memory_job_store` owns durable
+state:
 
-- Per-keeper entry keyed by `Keeper_registry_types.registry_key ~base_path keeper_name`:
-  `{ state_mu; jobs; pending; active_worker }`.
-- One drain daemon consumes each keeper's explicit FIFO, preserving turn N before turn N+1.
+- Per-keeper in-process entries contain only worker/wake ownership. They never
+  retain a closure or payload backlog on the OCaml heap.
+- One domain-safe `Eio.Mutex` per keeper serializes filesystem state
+  transitions and yields while contended; short worker-token and registry
+  critical sections use `Stdlib.Mutex` and never perform I/O or switch fibers.
+- A typed job is atomically staged below
+  `<BasePath>/.masc/keepers/<keeper>/memory-jobs/awaiting-turn-commit/` before
+  turn finalization returns. This outbox state is not runnable.
+- The owning execution receipt includes the job id and is appended with file
+  and directory fsync. Only after that commit does the job move
+  `awaiting-turn-commit -> pending -> inflight -> terminal receipt`. Receipt
+  failure aborts the awaiting row. A crash between receipt append and activation
+  is recovered by a strict receipt scan; malformed receipt rows fail explicitly
+  with path and line evidence rather than authorizing work.
+- If receipt append reports an error after an uncertain filesystem boundary,
+  the same strict scan classifies the exact job id before abort or activation.
+  A proof-read failure preserves the awaiting payload and starts reconciliation;
+  it never guesses that the receipt committed or silently drops the outbox.
+- The full
+  SHA-256 job id is derived from the typed Keeper/trace/generation/turn/OAS-turn
+  identity; a conflicting payload for the same identity is rejected.
+- One drain daemon validates and sorts the current pending batch once, leases
+  it in Keeper turn order, and executes it serially. This preserves turn N
+  before turn N+1 without re-reading and re-sorting the full directory for
+  every job.
 - Different keepers run concurrently (independent lanes).
-- Accepted units are not discarded because earlier memory work is slow. The pending gauge reports
-  backlog directly; only executor shutdown or worker-spawn failure can abandon queued work, and
-  those exceptional outcomes are counted and logged.
+- Executor shutdown or worker-spawn failure leaves committed work durable.
+  Startup discovery or activation wakes it; retryable execution/store failures
+  self-schedule from the shared typed Keeper backoff policy without requiring a
+  later submission. A post-receipt activation failure starts the same strict
+  receipt reconciliation loop immediately rather than waiting for restart.
 
 ### Executor switch
 
 The detached fibers are owned by the server root switch, established at startup:
 
-```
-lib/server/server_runtime_bootstrap.ml:139
-  Eio_context.set_switch sw   (* server root switch *)
-```
+The server composition root installs `sw` in `Eio_context` before runtime
+restoration and memory-lane initialization.
 
-`Keeper_memory_lane.init ~sw` records this switch. The first queued unit starts one drain daemon
+`Keeper_memory_lane.init ~sw ~clock ~base_path ~execute` records this switch only
+after Runtime/config restoration. It discovers pending/inflight jobs and starts
+one drain daemon
 with `Eio.Fiber.fork_daemon ~sw`; that daemon re-binds the switch via
 `Eio_context.with_turn_switch sw` for every unit so that
 `run_best_effort` (which reads `sw`/`net`/`clock` from `Eio_context`, `keeper_librarian_runtime.ml:331,347`)
 issues its provider call under the executor switch. `net`/`clock` are global atomics set at the
 same startup point, available everywhere.
 
-Leak-safety follows `keeper_turn_admission.run_locked`: the in-flight and pending decrements are
-bound to every unit exit including `Eio.Cancel.Cancelled`, while a switch release atomically clears
-and reports any queue it still owns. The daemon does not keep normal server shutdown alive; when
-the executor has no non-daemon work left, Eio cancels the drain and the same abandonment path runs.
-A cancelled or normally released executor therefore cannot leak worker ownership or counters.
+The daemon does not keep normal server shutdown alive. Cancellation releases
+only process-local worker ownership; the inflight file deliberately remains.
+On restart, receipt-less inflight jobs return to pending, while an inflight job
+whose terminal receipt already committed is acknowledged without re-execution.
 
 ### What moves to the lane vs stays inline
 
-`Keeper_agent_run_post_turn_memory.run` does four things:
+`Keeper_agent_run_post_turn_memory.run` does five things:
 
 1. typed tool-result memory promotion (`Memory.append_from_tool_results`)
 2. librarian extraction (`Keeper_librarian_runtime.run_best_effort`)
-3. memory-bank compaction (`Memory.compact_if_needed`)
-4. post-turn quality metrics → decision log (`append_jsonl_line` to `keeper_decision_log_path`)
+3. advisory draft-skill projection (`Skill_candidate_store.write_all_post_turn_candidates`)
+4. memory-bank compaction (`Memory.compact_if_needed`)
+5. post-turn quality metrics → decision log (`append_jsonl_line` to `keeper_decision_log_path`)
 
 `Memory.append_from_tool_results` / `compact_if_needed` carry no internal lock; they are safe today only
-because the turn lane calls them single-fiber-per-keeper. Detaching (3) while (1) still ran inline
-would let two fibers touch the same keeper's memory bank concurrently. Therefore **(1) (2) (3) — all
-memory-bank-touching work — move onto the lane** (serialized by the keeper's FIFO worker). **(4) stays
+because the turn lane calls them single-fiber-per-keeper. Detaching (4) while (1) still ran inline
+would let two fibers touch the same keeper's memory bank concurrently. Therefore **(1)–(4) — all
+memory-system work — move onto the lane** (serialized by the keeper's FIFO worker). **(5) stays
 inline**: it only reads the typed turn history and writes the *decision* log, a separate
-file independent of (1)(2)(3).
+file independent of (1)–(4).
 
 ### Separate keeper ordering from provider-call protection
 
@@ -94,17 +119,54 @@ keeps independent Keeper lanes and does not recreate a cross-Keeper provider sch
 Detaching means a keeper's turn N+1 can run while turn N's memory unit is still
 on the lane. The data the unit reads must not race that later turn:
 
-- `Keeper_meta_contract.keeper_meta` and `Workspace.config` have no `mutable`
-  fields; updates return new records (`map_usage`, `reset_runtime_state` are
-  `keeper_meta -> keeper_meta`). Turn N's unit closes over turn N's immutable
-  record; turn N+1 gets its own. No race.
-- The one mutable per-keeper read in the deterministic write is the tool-emission
-  accumulator (`Keeper_tool_emission_hook.snapshot (accumulator_for_keeper
-  meta.name)`). It is snapshotted **synchronously at turn end**, before submit,
-  and the immutable snapshot is passed into the unit — so a later turn's
-  emissions cannot fold into this turn's notes.
-- The remaining shared mutable state is the on-disk memory bank, which the
-  lane's single per-keeper worker serializes.
+- `Keeper_meta_contract.keeper_meta` is serialized through its canonical JSON
+  codec. Replay reconstructs the exact immutable turn snapshot and validates
+  Keeper/trace identity against the durable envelope.
+- The one mutable per-keeper read in the deterministic write is the
+  tool-emission accumulator. Finalization consumes it exactly once with
+  `take_all`; the immutable value fans out to the durable memory job and, after
+  successful admission, the post-turn multimodal working context. On admission
+  failure, or when the owning execution receipt fails and aborts the staged
+  outbox, it is restored behind any concurrently captured items. This prevents
+  later-turn bleed, receipt-failure loss, and stale-checkpoint re-snapshot
+  duplication.
+- The librarian checkpoint is an OAS checkpoint value reduced to the same
+  bounded raw-message window the librarian consumes. Tool schemas, MCP
+  sessions, working context, and unbounded history are not copied into each
+  job.
+- Tool-result promotion de-duplicates persisted `artifact_id` values under the
+  memory-bank lock. Librarian extraction stages the provider episode under
+  `memory-jobs/operations/<job-id>.json` before publishing facts/events; the
+  event carries that operation id as its commit marker. Inspection has three
+  typed states (`absent`, `staged`, `committed`). A staged result bypasses all
+  enablement/cadence/runtime/provider gates and enters publication directly.
+  The terminal job receipt commits before operation/pending/inflight cleanup.
+  Cleanup errors are reported as debt but cannot roll back the receipt or block
+  later jobs. It therefore does not duplicate a provider call or expose an
+  uncommitted stage through episode recall.
+- The librarian enablement/cadence decision is encoded in the immutable job
+  payload at admission. Cadence is a pure function of the Keeper's durable
+  timeline turn id; there is no process-local cadence table for restart, detached
+  execution, or admission failure to corrupt. Replay consumes the typed
+  decision verbatim.
+- Every Memory OS path used by the detached executor receives the worker's
+  explicit BasePath-derived `keepers_dir`; no librarian write consults ambient
+  config-dir state. Startup performs an explicit byte-preserving migration from
+  the historical canonical `<BasePath>/.masc/config/keepers` runtime artifacts;
+  divergent destinations remain untouched and are reported individually
+  without stopping unrelated Keeper/artifact migrations or healthy lane
+  startup. Keeper TOML remains in the config root.
+- Facts publish atomically and event rows use a durable append as the episode
+  commit marker. A retryable persistence failure keeps the job inflight. A
+  malformed historical event row is first durably quarantined, then the valid
+  rows are atomically rewritten under the episode-bundle lock.
+- Queue envelopes are accepted only when their typed keeper, job id filename,
+  and state directory agree. Atomic-write temp orphans use the filesystem SSOT:
+  zero-length files are removed and non-empty files are moved to a private
+  forensic directory with an explicit error log.
+- Startup discovery isolates malformed Keeper-local backlogs and starts every
+  healthy Keeper lane. Only failure to inspect the Keeper root itself prevents
+  fleet discovery.
 
 ## Accepted consequence
 
@@ -125,30 +187,53 @@ reintroduced #21408's per-Keeper semaphore shape even though the lane already se
 production caller. This revision restores one ownership primitive: the memory lane owns Keeper
 ordering; the OAS provider runtime owns provider capacity.
 
-## Known limitations
+## Failure and replay semantics
 
-- Drain daemons are owned by the server root switch, not the per-keeper supervisor switch
-  (`keeper_supervisor_launch.ml`). If a keeper is stopped/recovered while a memory unit is in flight,
-  that unit runs to completion rather than being cancelled with the keeper.
-- The FIFO preserves accepted work during the current server lifetime but stores closures in memory.
-  Root-switch shutdown explicitly abandons and counts unfinished units; restart replay requires the
-  durable due/start/success/failure receipt tracked by production-hardening issue #23925 item 31.
-- The in-memory FIFO is not admission-bounded. Sustained producer/drain imbalance or a stalled job
-  can therefore grow one keeper's closure backlog until it threatens the process. Item 31 must move
-  accepted work to a durable, replayable queue with explicit admission and terminal receipts; an
-  arbitrary drop threshold is not an acceptable substitute.
+- A terminal-only stage failure produces a failed terminal job receipt; it does
+  not block the Keeper turn lane or the next memory job. If weakly-coupled
+  stages contain both terminal and retryable failures, retryable persistence
+  wins at the job boundary so the terminal stage cannot acknowledge and discard
+  the other stage's work. Typed retryable failures keep the inflight job and
+  self-schedule. Disabled/not-due librarian work is a typed skip, not a failure.
+  Tool-result promotion and librarian publication carry unique turn input and
+  therefore retry persistence failures. Draft-skill projection and compaction
+  are derivable hygiene; their failure is recorded for this job and a later job
+  recomputes them without holding the Keeper lane indefinitely.
+- The retained terminal receipt carries typed turn identity, the original
+  enqueue timestamp, a canonical payload SHA-256 (never the checkpoint/tool
+  payload itself), worker start/end timestamps, and per-stage outcomes.
+  Queue directories are mode `0700` and atomic files finish at mode `0600`.
+  Librarian detail includes the
+  resolved runtime/model, measured latency, typed error or skip reason, and the
+  exact turn-count distance to the next cadence decision (`null` while
+  disabled). Accepted jobs have no drop transition; admission rejection is a
+  separate typed result and metric.
+- If terminal receipt persistence itself fails, the worker leaves the inflight
+  job intact and retries with the typed Keeper backoff even when no new wake
+  arrives. All lane store transitions share one domain-safe, fiber-yielding
+  mutex per Keeper. Other Keepers continue independently.
+- A crash after a provider response but before its atomic staged-episode write
+  may repeat the external provider call. No local side effect has committed at
+  that point. Once staging succeeds, replay is idempotent through the operation
+  event marker.
+- Terminal receipt files are retained as audit evidence. Retention must be an
+  explicit operator/storage policy; the execution path does not invent a
+  heuristic count cap or silently delete receipts.
 
 ## Runtime tunables and metrics
 
 Per-keeper lane:
 
 - `masc_keeper_memory_lane_submitted_total`
-- `masc_keeper_memory_lane_ran_inline_total`
-- `masc_keeper_memory_lane_dropped_total`
+- `masc_keeper_memory_lane_admission_rejected_total`
+- `masc_keeper_memory_lane_replayed_total`
+- `masc_keeper_memory_lane_completed_total`
+- `masc_keeper_memory_lane_failed_total`
 - `masc_keeper_memory_lane_pending` (gauge, per-keeper)
 - `masc_keeper_memory_lane_in_flight` (gauge, per-keeper)
 
-Exceptional queue abandonment is logged at WARN level with the keeper name. If the retired
+Admission, claim, replay, and terminal-receipt failures are logged with the
+Keeper/job identity; no accepted job has an abandonment path. If the retired
 `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` variable is still configured, startup logs and
 counts the ignored setting explicitly.
 
@@ -156,17 +241,38 @@ counts the ignored setting explicitly.
 
 `test/test_keeper_memory_lane.ml`:
 
-- ungated path when executor not initialized falls back to inline (no lost work in tests).
+- an awaiting outbox row is runnable after restart only when its strict
+  execution-receipt proof exists; an uncommitted row is explicitly aborted.
+- duplicate staging is idempotent; conflicting payloads are rejected.
+- queue files whose typed state disagrees with their directory are rejected.
+- queue files whose Keeper or filename coordinate disagrees with their envelope
+  are rejected.
+- zero-length atomic orphans are removed and non-empty ones are preserved
+  outside the queue.
+- terminal receipts omit the full job payload and receipt acknowledgement
+  removes the staged provider journal only after the receipt is durable.
 - one FIFO daemon serializes submissions for the same keeper.
 - two different keepers run concurrently (no cross-keeper blocking).
-- a backlog larger than two units is accepted, drained without loss, and preserves FIFO order.
-- a submitted unit that raises decrements `pending` and the worker continues (no leak).
-- cancelling the executor switch while a unit is in flight clears worker ownership and decrements
-  `pending`.
-- replacing the lane's initialized executor switch is rejected explicitly.
+- one malformed Keeper backlog does not suppress healthy Keeper discovery.
+- a failed job commits a failed receipt and the next job still runs.
+- cancelling the executor with an inflight job leaves it durable; a fresh
+  executor replays it and commits one success receipt.
+- a receipt-backed inflight artifact is acknowledged without execution.
+- cleanup failure after a terminal receipt is surfaced as debt without blocking
+  the lane.
+- a retryable failure self-schedules without a later submit signal.
+- a post-receipt activation failure self-reconciles without a later turn or
+  restart.
+- legacy Memory OS runtime artifacts migrate byte-for-byte, divergent
+  destinations are reported without stopping independent artifacts, and
+  malformed event rows are quarantined before repair.
+- a receipt-write failure racing with a second submit replays inflight work and
+  continues to the second job without losing the wake.
+- librarian operation replay makes one provider call and one event; a staged
+  result is a distinct typed state and commits without provider replay gates.
 
 ## Rollback
 
-Reverting the lane requires re-inlining the memory series in
-`keeper_agent_run_post_turn_memory.ml` and dropping `Keeper_memory_lane` plus its `init` call.
-It must not restore the retired timeout/drop gate. No schema or on-disk format changes.
+Rollback must drain or explicitly migrate the on-disk memory-job schema before
+removing the executor. Re-inlining while pending jobs exist would orphan
+accepted work and is therefore not a valid source-only revert.

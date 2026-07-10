@@ -290,7 +290,11 @@ let dedup_candidates candidates =
     candidates
 ;;
 
-let write_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit ~procedure_limit =
+let fact_candidates facts ~keeper_id =
+  Skill_candidate_projection.candidates_of_memory_facts ~agent_name:keeper_id facts
+;;
+
+let fact_candidates_for_post_turn ~base_path ~keeper_id ~fact_tail_limit =
   let facts =
     if fact_tail_limit <= 0
     then []
@@ -298,17 +302,29 @@ let write_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit ~procedure
       Keeper_memory_os_io.read_facts_tail_for_base_path ~base_path ~keeper_id
         ~n:fact_tail_limit
   in
-  let fact_candidates =
-    Skill_candidate_projection.candidates_of_memory_facts ~agent_name:keeper_id facts
-  in
-  let procedure_candidates =
-    if procedure_limit <= 0
-    then []
-    else
-      Skill_candidate_projection.top_candidates ~base_path ~agent_name:keeper_id
-        ~limit:procedure_limit
-  in
-  let candidates = dedup_candidates (fact_candidates @ procedure_candidates) in
+  fact_candidates facts ~keeper_id
+;;
+
+let strict_fact_candidates_for_post_turn ~base_path ~keeper_id ~fact_tail_limit =
+  if fact_tail_limit <= 0
+  then Ok []
+  else
+    let keepers_dir =
+      Common.keepers_runtime_dir_of_base ~base_path
+    in
+    let* facts =
+      Keeper_memory_os_io.read_facts_all_strict_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id
+    in
+    Ok
+      (facts
+       |> List_util.take_last fact_tail_limit
+       |> fact_candidates ~keeper_id)
+;;
+
+let write_projected_candidates ~base_path candidates =
+  let candidates = dedup_candidates candidates in
   let* index_keys = load_index_keys ~index_path:(index_path ~base_path) in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
@@ -322,6 +338,59 @@ let write_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit ~procedure
       loop acc rest
   in
   loop [] candidates
+;;
+
+let write_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit ~procedure_limit =
+  let fact_candidates =
+    fact_candidates_for_post_turn ~base_path ~keeper_id ~fact_tail_limit
+  in
+  let procedure_candidates =
+    if procedure_limit <= 0
+    then []
+    else
+      Skill_candidate_projection.top_candidates ~base_path ~agent_name:keeper_id
+        ~limit:procedure_limit
+  in
+  write_projected_candidates
+    ~base_path
+    (fact_candidates @ procedure_candidates)
+;;
+
+let procedural_load_error_to_string
+      (error : Procedural_memory.load_error)
+  =
+  Printf.sprintf
+    "%s:%d: %s"
+    error.path
+    error.line_number
+    error.message
+;;
+
+let write_all_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit =
+  let* fact_candidates =
+    strict_fact_candidates_for_post_turn
+      ~base_path
+      ~keeper_id
+      ~fact_tail_limit
+  in
+  let* procedures =
+    Procedural_memory.load_procedures_strict
+      ~base_path
+      ~agent_name:keeper_id
+      ()
+    |> Result.map_error (fun errors ->
+      String.concat
+        "; "
+        (List.map procedural_load_error_to_string errors))
+  in
+  let procedure_candidates =
+    procedures
+    |> List.filter Procedural_memory.is_crystallized
+    |> Skill_candidate_projection.candidates_of_procedures
+  in
+  write_projected_candidates
+    ~base_path
+    (fact_candidates @ procedure_candidates)
 ;;
 
 let json_float_opt name json =

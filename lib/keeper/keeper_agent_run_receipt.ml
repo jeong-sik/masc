@@ -142,6 +142,14 @@ let finalize
     ; oas_turn_count = !receipt_turn_count_ref
     ; oas_dispatch_mode = Some "single_provider_agent_run"
     ; oas_internal_runtime_disabled = true
+    ; post_turn_memory_job_id =
+        (match turn_result with
+         | Ok result ->
+           Option.map
+             (fun (submission : Keeper_agent_result.post_turn_memory_job) ->
+                submission.durable_job.id)
+             result.post_turn_memory_job
+         | Error _ -> None)
     ; current_task_id =
         Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
     ; goal_ids = meta.active_goal_ids
@@ -276,6 +284,69 @@ let finalize
           ~site:"receipt_appended"
           Keeper_runtime_manifest.Receipt_appended)
   in
+  let finalize_post_turn_memory_submission
+        (submission : Keeper_agent_result.post_turn_memory_job)
+    =
+    let job = submission.durable_job in
+    let commit_state =
+      match receipt_append_outcome with
+      | Ok () -> `Committed
+      | Error append_error ->
+        (match
+           Keeper_execution_receipt.committed_post_turn_memory_job_ids
+             config
+             ~keeper_name:meta.name
+             ~candidate_ids:[ job.id ]
+         with
+         | Ok committed_ids when List.mem job.id committed_ids ->
+           Log.Keeper.warn ~keeper_name:meta.name
+             "execution receipt append reported failure but strict durable proof exists; activating memory outbox job_id=%s append_error=%s"
+             job.id
+             append_error;
+           `Committed
+         | Ok _ -> `Not_committed
+         | Error proof_error ->
+           Log.Keeper.error ~keeper_name:meta.name
+             "execution receipt append failed and memory outbox commit is unknown job_id=%s append_error=%s proof_error=%s"
+             job.id
+             append_error
+             proof_error;
+           `Unknown)
+    in
+    match commit_state with
+    | `Committed ->
+      (match Keeper_memory_lane.activate ~base_path:config.base_path job with
+       | Keeper_memory_lane.Admitted _ -> ()
+       | Keeper_memory_lane.Rejected error ->
+         Log.Keeper.error ~keeper_name:meta.name
+           "execution receipt committed but memory outbox activation is deferred job_id=%s: %s"
+           job.id
+           (Keeper_memory_job_store.error_to_string error))
+    | `Not_committed ->
+      (match Keeper_memory_lane.abort ~base_path:config.base_path job with
+       | Ok () -> ()
+       | Error error ->
+         Log.Keeper.error ~keeper_name:meta.name
+           "execution receipt failed and memory outbox abort is deferred job_id=%s: %s"
+           job.id
+           (Keeper_memory_job_store.error_to_string error));
+      (match submission.tool_results_to_restore with
+       | [] -> ()
+       | items ->
+         Keeper_tool_emission_hook.restore
+           (Keeper_tool_emission_hook.accumulator_for_keeper meta.name)
+           items)
+    | `Unknown ->
+      Keeper_memory_lane.request_reconciliation
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+  in
+  (match turn_result with
+   | Error _ -> ()
+   | Ok result ->
+     (match result.post_turn_memory_job with
+      | None -> ()
+      | Some submission -> finalize_post_turn_memory_submission submission));
   Keeper_agent_run_phase5_task_link.run ~config ~meta ~acc ();
   let final_result =
     match turn_result_with_operator_disposition, receipt_append_outcome with

@@ -159,7 +159,7 @@ let synapse_saturation_facts = 10.0
 let compute_hebbian ~base_path ~now () =
   try
     let keepers_dir =
-      Config_dir_resolver.keepers_dir_for_base_path ~base_path
+      Common.keepers_runtime_dir_of_base ~base_path
     in
     let shared_facts =
       Keeper_memory_os_io.read_facts_all_for_keepers_dir

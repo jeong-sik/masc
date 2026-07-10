@@ -72,6 +72,16 @@ val write_post_turn_candidates
   -> procedure_limit:int
   -> (stored_draft list, string) result
 
+val write_all_post_turn_candidates
+  :  base_path:string
+  -> keeper_id:string
+  -> fact_tail_limit:int
+  -> (stored_draft list, string) result
+(** Production post-turn projection with no arbitrary procedure-count cap.
+    Every crystallized procedure is considered. Fact and procedure JSONL are
+    both loaded via strict parsers so malformed persisted rows are explicit
+    errors rather than silent omissions. *)
+
 (** Read the latest unique candidate rows from [.masc/draft-skills/index.jsonl],
     newest first. Missing index files return an empty listing. *)
 val list_drafts : base_path:string -> limit:int -> (draft_listing, string) result

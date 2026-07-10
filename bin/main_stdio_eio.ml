@@ -3,6 +3,7 @@
 module Mcp_eio = Masc.Mcp_server_eio
 module Server_runtime_bootstrap = Server_runtime_bootstrap
 module Server_bootstrap_loops = Server_bootstrap_loops
+module Server_startup_takeover = Server_startup_takeover
 module Shutdown_hooks = Masc.Shutdown_hooks
 module Board_dispatch = Masc.Board_dispatch
 
@@ -25,6 +26,15 @@ let run_cmd cli_base_path =
   Server_base_path_guard.exit_on_violation
     (Server_base_path_guard.enforce resolved_base_path);
   let base_path = resolved_base_path.normalized_base_path in
+  (match Server_startup_takeover.acquire_base_path_lock base_path with
+   | Server_startup_takeover.Acquired -> ()
+   | Server_startup_takeover.Already_running { pid } ->
+     Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+       (Printf.sprintf
+          "[FATAL] Another MASC server (PID %d) already owns base path %s"
+          pid
+          base_path);
+     exit 1);
   Unix.putenv "MASC_BASE_PATH_INPUT" resolved_base_path.raw_base_path;
   Unix.putenv "MASC_BASE_PATH" base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE"
@@ -44,6 +54,18 @@ let run_cmd cli_base_path =
         ~mono_clock ~net ~proc_mgr ~fs ~env ())
   in
   Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+  Masc.Runtime_params.restore ~base_path;
+  (match Server_runtime_bootstrap.initialize_memory_lane ~sw ~clock state with
+   | Ok report ->
+     Log.Server.info
+       "stdio memory lane initialized discovered=%d started=%d deferred=%d keeper_errors=%d root_error=%b"
+       report.discovered_keepers
+       report.workers_started
+       report.workers_deferred
+       (List.length report.keeper_discovery_errors)
+       (Option.is_some report.discovery_error)
+   | Error detail ->
+     Log.Server.error "stdio memory lane initialization deferred: %s" detail);
   ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
   Fun.protect
     ~finally:(fun () ->

@@ -433,10 +433,6 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
   Masc_eio_env.init ~sw ~net ~clock ();
-  (* RFC-0257: own detached per-keeper memory-lane fibers on the server root
-     switch. After [set_switch] so the lane and provider calls it forks share
-     the same long-lived switch (cancelled together at shutdown). *)
-  Keeper_memory_lane.init ~sw;
   (* RFC-0107 Phase D.2c — record full Eio.Stdenv for piaf-backed
      Pool in Masc_http_client.  Optional: tests / pre-bootstrap
      callers may omit [env], in which case Pool falls back to a
@@ -530,6 +526,32 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   Config_dir_resolver.reset ();
   let (_init_msg : string) = Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
+
+let initialize_memory_lane ~sw ~clock (state : Mcp_server.server_state) =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  let migration = Keeper_memory_os_io.migrate_legacy_config_store ~base_path in
+  if migration.stats.moved_files > 0 || migration.stats.deduplicated_files > 0
+  then
+    Log.Server.warn
+      "Memory OS runtime-root migration moved=%d deduplicated=%d errors=%d"
+      migration.stats.moved_files
+      migration.stats.deduplicated_files
+      (List.length migration.errors);
+  List.iter
+    (fun error ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string DispatchEventFailures)
+         ~labels:[ "site", "memory_os_runtime_root_migration" ]
+         ();
+       Log.Server.error "%s" (Keeper_memory_os_io.migration_error_to_string error))
+    migration.errors;
+  Ok
+    (Keeper_memory_lane.init
+       ~sw
+       ~clock
+       ~base_path
+       ~execute:Keeper_agent_run_post_turn_memory.execute_job)
+;;
 
 
 type lazy_startup_execution =
@@ -873,6 +895,27 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Governance_registry.ensure_init ();
       Runtime_params.restore ~base_path;
       Log.Server.info "Runtime_params restored from %s" base_path;
+      (* RFC-0257: install the durable memory-job executor only after Runtime
+         default/config restoration. Replayed jobs may call the librarian
+         immediately, so starting the worker earlier would race provider/model
+         resolution during bootstrap. The executor owns no in-memory job FIFO;
+         it discovers BasePath-backed pending/inflight jobs here. *)
+      let memory_lane_init =
+        initialize_memory_lane ~sw ~clock state
+      in
+      (match memory_lane_init with
+       | Error detail ->
+         Log.Server.error
+           "memory lane initialization deferred: %s"
+           detail
+       | Ok report ->
+         Log.Server.info
+           "memory lane initialized discovered=%d started=%d deferred=%d keeper_errors=%d root_error=%b"
+           report.discovered_keepers
+           report.workers_started
+           report.workers_deferred
+           (List.length report.keeper_discovery_errors)
+           (Option.is_some report.discovery_error));
       Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
       (* #10130: sweep [save_file_atomic] orphan temp files left by
          SIGKILL'd or ENFILE-crashed prior processes.  Zero-byte

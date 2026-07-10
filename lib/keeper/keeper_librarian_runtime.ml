@@ -63,92 +63,69 @@ let cadence_turns () =
   Env_config.KeeperMemoryOs.librarian_cadence_turns ()
 ;;
 
-(* Per-keeper "turns since last successful extraction" counter, paired with the
-   trace it belongs to. Keyed by [keeper_id] (the long-lived owner), NOT by
-   (keeper_id, trace_id): trace_id rotates on every keeper run, so a pair-keyed
-   table mints a fresh row per rotation and never reclaims the previous one,
-   growing without bound over the process lifetime. Keying by keeper_id bounds
-   the table to one row per live keeper; a rotated trace is detected as a stored
-   mismatch and resets the schedule in place.
+type cadence_decision =
+  | Due
+  | Not_due of { turns_remaining : int }
 
-   [Eio_guard.with_mutex]: the cadence table is reachable from concurrent keeper
-   fibers, and a blocking stdlib mutex can stall unrelated Eio work if a fiber
-   holds that lock while waiting on another Eio resource. [Eio_guard] gives
-   runtime fibers cooperative locking while preserving a direct path for focused
-   tests that call the pure cadence helpers before the Eio runtime is enabled. *)
-let cadence_mu = Eio.Mutex.create ()
-let cadence_counters : (string, string * int) Hashtbl.t = Hashtbl.create 16
-
-(* A counter value below 0 means the keeper has never had a successful
-   extraction on the current trace: the next turn is due immediately. *)
-let fresh_counter = -1
-
-(* Pure cadence decision. Given the keeper's current [counter] (turns since its
-   last successful extraction) and the [cadence], return the updated counter and
-   whether extraction is due now.
-
-   - counter < 0 (fresh) is due immediately.
-   - cadence <= 1 is always due with the counter pinned at 0.
-   - When due, the counter is set to [cadence] and stays there until
-     [cadence_record_success] or [cadence_record_attempt] resets it to 0. This
-     keeps the keeper due across skipped work, while completed non-success
-     provider attempts can defer the next attempt to the cadence window instead
-     of retrying on every keeper turn. *)
-let cadence_step ~cadence ~counter =
-  if cadence <= 1
-  then 0, true
-  else if counter < 0
-  then cadence, true
-  else (
-    let next = counter + 1 in
-    if next >= cadence then cadence, true else next, false)
+(* The Keeper timeline turn id is the durable cadence clock. It starts at one;
+   zero is the explicit pre-turn state and is also due. No process-local table
+   is involved, so restart,
+   BasePath multiplexing, detached execution order, and admission failure cannot
+   change a turn's decision. *)
+let cadence_decision_for_keeper_turn ~cadence ~keeper_turn =
+  if cadence <= 1 || keeper_turn <= 1
+  then Due
+  else
+    let offset = (keeper_turn - 1) mod cadence in
+    if offset = 0
+    then Due
+    else Not_due { turns_remaining = cadence - offset }
 ;;
 
-(* Pure keyed cadence decision. Given a keeper's [prior] stored (trace, counter)
-   and the [current_trace], a stored entry from a different (rotated) trace is
-   treated as fresh — due immediately, not inheriting the old trace's schedule —
-   exactly like an unseen keeper ([prior = None]). Returns the value to store and
-   whether extraction is due now. Exposed for testing the rollover decision
-   without the global table. *)
-let cadence_step_keyed ~cadence ~current_trace ~prior =
-  let counter =
-    (* sound-partial: allow — an unseen keeper or a rotated trace is fresh
-       (due immediately via [fresh_counter]); fresh-state init, not a default
-       hiding a parse error. *)
-    match prior with
-    | Some (t, c) when String.equal t current_trace -> c
-    | _ -> fresh_counter
-  in
-  let updated, due = cadence_step ~cadence ~counter in
-  (current_trace, updated), due
+type librarian_admission_decision =
+  | Admission_disabled
+  | Admission_not_due of { turns_remaining : int }
+  | Admission_due
+
+let decide_librarian_admission ~keeper_turn =
+  if not (enabled ())
+  then Admission_disabled
+  else
+    match
+      cadence_decision_for_keeper_turn
+        ~cadence:(cadence_turns ())
+        ~keeper_turn
+    with
+    | Due -> Admission_due
+    | Not_due { turns_remaining } -> Admission_not_due { turns_remaining }
 ;;
 
-let cadence_due ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    let prior = Hashtbl.find_opt cadence_counters keeper_id in
-    let value, due =
-      cadence_step_keyed ~cadence:(cadence_turns ()) ~current_trace:trace_id ~prior
-    in
-    Hashtbl.replace cadence_counters keeper_id value;
-    due)
+let librarian_admission_decision_to_json = function
+  | Admission_disabled -> `Assoc [ "kind", `String "disabled" ]
+  | Admission_due -> `Assoc [ "kind", `String "due" ]
+  | Admission_not_due { turns_remaining } ->
+    `Assoc
+      [ "kind", `String "not_due"
+      ; "turns_remaining", `Int turns_remaining
+      ]
 ;;
 
-let cadence_record_success ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
-;;
-
-let cadence_record_attempt ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
-;;
-
-(* Live per-keeper cadence rows. Bounded by the number of keepers that have run
-   (one row each), so it doubles as a leak-regression signal: it must not grow
-   with trace rotations. Read-only; consumed by the cadence test and the
-   dashboard memory-health panel. *)
-let cadence_counter_entries () =
-  Eio_guard.with_mutex_ro cadence_mu (fun () -> Hashtbl.length cadence_counters)
+let librarian_admission_decision_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "disabled") -> Ok Admission_disabled
+     | Some (`String "due") -> Ok Admission_due
+     | Some (`String "not_due") ->
+       (match List.assoc_opt "turns_remaining" fields with
+        | Some (`Int turns_remaining) when turns_remaining > 0 ->
+          Ok (Admission_not_due { turns_remaining })
+        | Some _ -> Error "librarian admission turns_remaining must be positive"
+        | None -> Error "librarian admission missing turns_remaining")
+     | Some (`String kind) ->
+       Error (Printf.sprintf "unknown librarian admission kind: %s" kind)
+     | Some _ -> Error "librarian admission kind must be a string"
+     | None -> Error "librarian admission missing kind")
+  | _ -> Error "librarian admission decision must be an object"
 ;;
 
 let max_messages () =
@@ -158,7 +135,13 @@ let max_messages () =
 (* Scale the prompt window by the cadence so skipped turns stay visible until
    the next due extraction. Without this, a tool-heavy skipped turn can scroll
    out of the per-turn cap before its first successful extraction. *)
-let prompt_max_messages () = max_messages () * cadence_turns ()
+let prompt_max_messages () =
+  let per_turn = max_messages () in
+  let cadence = cadence_turns () in
+  if per_turn > Int.max_int / cadence
+  then Int.max_int
+  else per_turn * cadence
+;;
 ;;
 
 let default_timeout_sec () =
@@ -182,6 +165,10 @@ let select_recent_messages ~max_messages messages =
       | _ :: rest -> drop (n - 1) rest)
   in
   drop drop_count messages
+;;
+
+let prompt_window_messages messages =
+  select_recent_messages ~max_messages:(prompt_max_messages ()) messages
 ;;
 
 let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
@@ -327,6 +314,7 @@ type extraction_error =
   | Provider_empty_response
   | Provider_unparseable_response of string
   | Memory_fact_upsert_failed of string
+  | Memory_episode_persistence_failed of string
 
 let librarian_provider_clock_unavailable_error =
   "memory os librarian provider clock unavailable"
@@ -342,6 +330,8 @@ let extraction_error_to_string = function
   | Provider_unparseable_response msg ->
     "librarian provider returned unparseable structured response: " ^ msg
   | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
+  | Memory_episode_persistence_failed msg ->
+    "memory os episode persistence failed: " ^ msg
 ;;
 
 type unparseable_response =
@@ -360,19 +350,6 @@ type attempt_outcome =
 type parse_retry_error =
   | Retry_exhausted_unparseable of unparseable_response
   | Retry_transport_failed of extraction_error
-
-let should_record_cadence_backoff_after_error = function
-  | Provider_timeout
-  | Provider_transport_failed _
-  | Provider_empty_response
-  | Provider_unparseable_response _ ->
-    true
-  | Provider_clock_unavailable
-  | Provider_config_rejected _
-  | Prompt_render_failed _
-  | Memory_fact_upsert_failed _ ->
-    false
-;;
 
 let prefer_unparseable_response prior current =
   match current.raw_evidence with
@@ -414,7 +391,7 @@ let render_prompt key variables =
 
 let messages_for_librarian (inp : Keeper_librarian.input) =
   let input =
-    { inp with messages = select_recent_messages ~max_messages:(prompt_max_messages ()) inp.messages }
+    { inp with messages = prompt_window_messages inp.messages }
   in
   match render_prompt Keeper_prompt_names.librarian_system [] with
   | Error _ as e -> e
@@ -530,9 +507,215 @@ let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~
   | Ok episode -> Ok episode
 ;;
 
-let extract_and_append_with_provider_classified
+let publish_episode
+    ?operation_id
+    ?clock
+    ?keepers_dir
+    ~keeper_id
+    ~operation_model_id
+    ~provider_latency_ms
+    episode
+  =
+  let now = episode.Keeper_memory_os_types.created_at in
+  (* RFC-0243: UPSERT claims into the fact store instead of blind-appending. A claim
+     re-extracted across turns is folded into the existing row
+     (Keeper_memory_os_policy.reobserve_fact: RFC-0247 refreshes
+     [last_verified_at] only) rather than accumulating as a duplicate. The same
+     call applies the RFC-0239 Q4 retention cap (ranked by the structural
+     [retention_rank]) in one atomic rewrite. Only after the facts are durable
+     do we publish the episode file and append the event row; the event row is
+     the reader-visible commit marker for [read_episodes_tail].
+
+     RFC-0285 §8: before folding, decide each claim's provenance. A claim
+     whose identity was recall-injected into this keeper's recent prompts is
+     an echo — the model restating what it just read — and must not advance
+     the truth anchor recall's recency ranking reads. The judgment (window
+     join + metric) lives here at the write boundary; the fold itself stays
+     a pure function of the decision. *)
+  let with_bundle_lock f =
+    match keepers_dir with
+    | Some keepers_dir ->
+      Keeper_memory_os_io.with_episode_bundle_lock_for_keepers_dir
+        ?clock
+        ~keepers_dir
+        ~keeper_id
+        f
+    | None ->
+      Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id f
+  in
+  let facts_path () =
+    match keepers_dir with
+    | Some keepers_dir ->
+      Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id
+    | None -> Keeper_memory_os_io.facts_path ~keeper_id
+  in
+  with_bundle_lock (fun () ->
+    let committed =
+      match operation_id with
+      | None -> Ok false
+      | Some operation_id ->
+        (match keepers_dir with
+         | None ->
+           Error
+             (Memory_episode_persistence_failed
+                "operation-backed publication requires an explicit keepers_dir")
+         | Some keepers_dir ->
+        Keeper_memory_os_io.operation_event_committed
+          ~keepers_dir
+          ~keeper_id
+          ~operation_id
+        |> Result.map_error (fun detail ->
+          Memory_episode_persistence_failed detail))
+    in
+    match committed with
+    | Error _ as error -> error
+    | Ok true -> Ok (episode, operation_model_id, provider_latency_ms)
+    | Ok false ->
+      (match
+         try
+           let window = Keeper_memory_os_io.fact_recall_window in
+           let merge ~existing ~incoming =
+             let provenance =
+               let key = Keeper_memory_os_types.claim_identity incoming in
+               if Keeper_recall_injection_window.recently_injected ~keeper_id ~key
+               then (
+                 Otel_metric_store.inc_counter
+                   Keeper_metrics.(to_string MemoryOsReobserveEchoSuppressed)
+                   ~labels:[ "keeper", keeper_id ]
+                   ();
+                 Keeper_memory_os_policy.Recalled_echo)
+               else Keeper_memory_os_policy.Independent_observation
+             in
+             Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
+           in
+           let (_ : Keeper_memory_os_io.fact_merge_stats) =
+             File_lock_eio.with_lock
+               ?clock
+               (facts_path ())
+               (fun () ->
+                  match keepers_dir with
+                  | Some keepers_dir ->
+                    Keeper_memory_os_io.merge_and_cap_facts_for_keepers_dir
+                      ~keepers_dir
+                      ~now
+                      ~keeper_id
+                      ~merge
+                      ~incoming:episode.Keeper_memory_os_types.claims
+                      ~keep:window
+                      ~trigger:Keeper_memory_os_io.fact_store_max
+                      ~rank:(Keeper_memory_os_policy.retention_rank ~now)
+                  | None ->
+                    Keeper_memory_os_io.merge_and_cap_facts
+                      ~now
+                      ~keeper_id
+                      ~merge
+                      ~incoming:episode.Keeper_memory_os_types.claims
+                      ~keep:window
+                      ~trigger:Keeper_memory_os_io.fact_store_max
+                      ~rank:(Keeper_memory_os_policy.retention_rank ~now))
+           in
+           Ok ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           let message = Printexc.to_string exn in
+           Log.Keeper.warn
+             "memory os fact upsert failed keeper=%s: %s"
+             keeper_id
+             message;
+           Error message
+       with
+       | Error message -> Error (Memory_fact_upsert_failed message)
+       | Ok () ->
+         let publication =
+           match operation_id with
+           | None ->
+             (try
+                (match keepers_dir with
+                 | Some keepers_dir ->
+                   Keeper_memory_os_io.append_episode_for_keepers_dir
+                     ~keepers_dir
+                     ~keeper_id
+                     episode;
+                   Keeper_memory_os_io.append_event_for_keepers_dir
+                     ~keepers_dir
+                     ~keeper_id
+                     episode
+                 | None ->
+                   Keeper_memory_os_io.append_episode ~keeper_id episode;
+                   Keeper_memory_os_io.append_event ~keeper_id episode);
+                Ok ()
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Printexc.to_string exn))
+           | Some operation_id ->
+             (match keepers_dir with
+              | None ->
+                Error
+                  "operation-backed publication requires an explicit keepers_dir"
+              | Some keepers_dir ->
+                Keeper_memory_os_io.append_operation_event
+                  ~keepers_dir
+                  ~keeper_id
+                  ~operation_id
+                  ~model_id:operation_model_id
+                  ~provider_latency_ms
+                  episode)
+         in
+         (match publication with
+          | Error detail -> Error (Memory_episode_persistence_failed detail)
+          | Ok () ->
+            (* RFC-0272 (defect D): bound the append-only episode log under the
+               same bundle lock that serialized the writes above. *)
+            (match keepers_dir with
+             | Some keepers_dir ->
+               ignore
+                 (Keeper_memory_os_io.cap_events_for_keepers_dir
+                    ~keepers_dir
+                    ~keeper_id
+                    ~keep:Keeper_memory_os_io.event_recall_window
+                    ~trigger:Keeper_memory_os_io.event_store_max
+                  : int);
+               ignore
+                 (Keeper_memory_os_io.cap_episode_files_for_keepers_dir
+                    ~keepers_dir
+                    ~keeper_id
+                    ~keep:Keeper_memory_os_io.episode_file_window
+                    ~trigger:Keeper_memory_os_io.episode_file_store_max
+                  : int)
+             | None ->
+               ignore
+                 (Keeper_memory_os_io.cap_events
+                    ~keeper_id
+                    ~keep:Keeper_memory_os_io.event_recall_window
+                    ~trigger:Keeper_memory_os_io.event_store_max
+                  : int);
+               ignore
+                 (Keeper_memory_os_io.cap_episode_files
+                    ~keeper_id
+                    ~keep:Keeper_memory_os_io.episode_file_window
+                    ~trigger:Keeper_memory_os_io.episode_file_store_max
+                  : int));
+            Ok (episode, operation_model_id, provider_latency_ms))))
+;;
+
+let commit_staged_operation ~keepers_dir ?clock ~keeper_id ~operation_id staged =
+  publish_episode
+    ~operation_id
+    ?clock
+    ~keepers_dir
+    ~keeper_id
+    ~operation_model_id:staged.Keeper_memory_os_io.model_id
+    ~provider_latency_ms:staged.provider_latency_ms
+    staged.episode
+  |> Result.map (fun _ -> ())
+;;
+
+let extract_and_append_with_provider_classified_with_model
+    ?operation_id
     ?complete
     ?clock
+    ?keepers_dir
     ?timeout_sec
     ~sw
     ~net
@@ -542,108 +725,134 @@ let extract_and_append_with_provider_classified
   =
   match clock with
   | None -> Error Provider_clock_unavailable
-  | Some _ ->
-    let generation =
-      Keeper_memory_os_io.next_generation_with_floor
-        ~floor:inp.Keeper_librarian.generation
-        ~keeper_id
-        ~trace_id:inp.Keeper_librarian.trace_id
+  | Some clock ->
+    let extract_new_episode () =
+      let provider_started_at = Eio.Time.now clock in
+      let generation =
+        match keepers_dir with
+        | Some keepers_dir ->
+          Keeper_memory_os_io.next_generation_with_floor_for_keepers_dir
+            ~keepers_dir
+            ~floor:inp.Keeper_librarian.generation
+            ~keeper_id
+            ~trace_id:inp.Keeper_librarian.trace_id
+        | None ->
+          Keeper_memory_os_io.next_generation_with_floor
+            ~floor:inp.Keeper_librarian.generation
+            ~keeper_id
+            ~trace_id:inp.Keeper_librarian.trace_id
+      in
+      extract_with_provider_classified
+        ?complete
+        ~clock
+        ?timeout_sec
+        ~sw
+        ~net
+        ~provider_cfg
+        ~generation
+        inp
+      |> Result.map (fun episode ->
+        let provider_latency_ms =
+          max 0.0 (Eio.Time.now clock -. provider_started_at)
+          *. 1000.0
+          |> Keeper_timing.round1
+        in
+        episode, provider_latency_ms)
     in
-    (match
-       extract_with_provider_classified
-         ?complete
+    let episode_result =
+      match operation_id with
+      | None ->
+        extract_new_episode ()
+        |> Result.map (fun (episode, provider_latency_ms) ->
+          episode, provider_cfg.model_id, provider_latency_ms)
+      | Some operation_id ->
+        (match keepers_dir with
+         | None ->
+           Error
+             (Memory_episode_persistence_failed
+                "operation-backed extraction requires an explicit keepers_dir")
+         | Some keepers_dir ->
+        (match
+           Keeper_memory_os_io.load_operation_episode
+             ~keepers_dir
+             ~keeper_id
+             ~operation_id
+         with
+         | Error detail -> Error (Memory_episode_persistence_failed detail)
+         | Ok (Some staged) ->
+           Ok
+             ( staged.Keeper_memory_os_io.episode
+             , staged.model_id
+             , staged.provider_latency_ms )
+         | Ok None ->
+           (match extract_new_episode () with
+            | Error _ as error -> error
+            | Ok (episode, provider_latency_ms) ->
+              (match
+                 Keeper_memory_os_io.stage_operation_episode_once
+                   ?clock
+                   ~keepers_dir
+                   ~keeper_id
+                   ~operation_id
+                   ~model_id:provider_cfg.model_id
+                   ~provider_latency_ms
+                   episode
+               with
+               | Ok winner ->
+                 Ok
+                   ( winner.Keeper_memory_os_io.episode
+                   , winner.model_id
+                   , winner.provider_latency_ms )
+               | Error detail ->
+                 Error (Memory_episode_persistence_failed detail)))))
+    in
+    (match episode_result with
+     | Error _ as error -> error
+     | Ok (episode, operation_model_id, provider_latency_ms) ->
+       publish_episode
+         ?operation_id
          ?clock
-         ?timeout_sec
-         ~sw
-         ~net
-         ~provider_cfg
-         ~generation
-         inp
-     with
-  | Error _ as e -> e
-  | Ok episode ->
-    let now = episode.Keeper_memory_os_types.created_at in
-    (* RFC-0243: UPSERT claims into the fact store instead of blind-appending. A claim
-       re-extracted across turns is folded into the existing row
-       (Keeper_memory_os_policy.reobserve_fact: RFC-0247 refreshes
-       [last_verified_at] only) rather than accumulating as a duplicate. The same
-       call applies the RFC-0239 Q4 retention cap (ranked by the structural
-       [retention_rank]) in one atomic rewrite. Only after the facts are durable
-       do we publish the episode file and append the event row; the event row is
-       the reader-visible commit marker for [read_episodes_tail].
+         ?keepers_dir
+         ~keeper_id
+         ~operation_model_id
+         ~provider_latency_ms
+         episode)
+;;
 
-       RFC-0285 §8: before folding, decide each claim's provenance. A claim
-       whose identity was recall-injected into this keeper's recent prompts is
-       an echo — the model restating what it just read — and must not advance
-       the truth anchor recall's recency ranking reads. The judgment (window
-       join + metric) lives here at the write boundary; the fold itself stays
-       a pure function of the decision. *)
-    Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
-      match
-        try
-          let window = Keeper_memory_os_io.fact_recall_window in
-          let merge ~existing ~incoming =
-            let provenance =
-              let key = Keeper_memory_os_types.claim_identity incoming in
-              if Keeper_recall_injection_window.recently_injected ~keeper_id ~key
-              then (
-                Otel_metric_store.inc_counter
-                  Keeper_metrics.(to_string MemoryOsReobserveEchoSuppressed)
-                  ~labels:[ "keeper", keeper_id ]
-                  ();
-                Keeper_memory_os_policy.Recalled_echo)
-              else Keeper_memory_os_policy.Independent_observation
-            in
-            Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
-          in
-          let (_ : Keeper_memory_os_io.fact_merge_stats) =
-            File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-              Keeper_memory_os_io.merge_and_cap_facts
-                ~now
-                ~keeper_id
-                ~merge
-                ~incoming:episode.Keeper_memory_os_types.claims
-                ~keep:window
-                ~trigger:Keeper_memory_os_io.fact_store_max
-                ~rank:(Keeper_memory_os_policy.retention_rank ~now))
-          in
-          Ok ()
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          let message = Printexc.to_string exn in
-          Log.Keeper.warn "memory os fact upsert failed keeper=%s: %s" keeper_id message;
-          Error message
-      with
-      | Ok () ->
-        Keeper_memory_os_io.append_episode ~keeper_id episode;
-        Keeper_memory_os_io.append_event ~keeper_id episode;
-        (* RFC-0272 (defect D): bound the append-only episode log under the same
-           bundle lock that serialized the writes above, so a re-extraction cannot
-           grow events.jsonl / episodes/ without limit. Hysteresis-gated: the trim
-           is a no-op until the high-water, so this is off the per-turn hot path. *)
-        ignore
-          (Keeper_memory_os_io.cap_events
-             ~keeper_id
-             ~keep:Keeper_memory_os_io.event_recall_window
-             ~trigger:Keeper_memory_os_io.event_store_max
-            : int);
-        ignore
-          (Keeper_memory_os_io.cap_episode_files
-             ~keeper_id
-             ~keep:Keeper_memory_os_io.episode_file_window
-             ~trigger:Keeper_memory_os_io.episode_file_store_max
-            : int);
-        (* RFC-0251: the co-occurrence edge / spreading-activation organ was removed
-           (dark-by-default, no recall consumer), so the fact upsert above is the only
-           post-merge work. *)
-        Ok episode
-      | Error message -> Error (Memory_fact_upsert_failed message)))
+let extract_and_append_with_provider_classified
+    ?operation_id
+    ?complete
+    ?clock
+    ?keepers_dir
+    ?timeout_sec
+    ~sw
+    ~net
+    ~keeper_id
+    ~provider_cfg
+    inp
+  =
+  match
+    extract_and_append_with_provider_classified_with_model
+      ?operation_id
+      ?complete
+      ?clock
+      ?keepers_dir
+      ?timeout_sec
+      ~sw
+      ~net
+      ~keeper_id
+      ~provider_cfg
+      inp
+  with
+  | Error _ as error -> error
+  | Ok (episode, _, _) -> Ok episode
 ;;
 
 let extract_and_append_with_provider
+    ?operation_id
     ?complete
     ?clock
+    ?keepers_dir
     ?timeout_sec
     ~sw
     ~net
@@ -653,8 +862,10 @@ let extract_and_append_with_provider
   =
   match
     extract_and_append_with_provider_classified
+      ?operation_id
       ?complete
       ?clock
+      ?keepers_dir
       ?timeout_sec
       ~sw
       ~net
@@ -670,30 +881,184 @@ let provider_for_runtime ~runtime_id =
   Keeper_memory_runtime_resolution.provider_for_runtime ~runtime_id
 ;;
 
-let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_librarian.input) =
-  (* [cadence_due] short-circuits after [enabled]: a disabled keeper never
-     advances its cadence counter, and a not-due turn skips extraction entirely
-     (the messages remain in the window for the next due turn). The cadence
-     counter is scoped to the active trace so a rollover does not inherit the
-     previous trace's schedule. *)
-  if enabled () && cadence_due ~keeper_id ~trace_id:inp.trace_id
-  then (
-    try
+type skip_reason =
+  | Librarian_disabled
+  | Cadence_not_due
+
+type run_error =
+  | Eio_context_unavailable
+  | Runtime_resolution_failed of string
+  | Provider_not_direct_completion
+  | Extraction_failed of extraction_error
+  | Unexpected_failure of string
+
+type run_outcome =
+  | Run_skipped of
+      { runtime_id : string
+      ; model_id : string option
+      ; reason : skip_reason
+      ; latency_ms : float
+      ; next_due_after_turns : int option
+      }
+  | Run_succeeded of
+      { runtime_id : string
+      ; model_id : string
+      ; episode : Keeper_memory_os_types.episode
+      ; provider_latency_ms : float
+      ; latency_ms : float
+      ; next_due_after_turns : int
+      }
+  | Run_failed of
+      { runtime_id : string
+      ; model_id : string option
+      ; error : run_error
+      ; latency_ms : float
+      ; next_due_after_turns : int
+      }
+
+let skip_reason_to_string = function
+  | Librarian_disabled -> "disabled"
+  | Cadence_not_due -> "cadence_not_due"
+;;
+
+let run_error_to_string = function
+  | Eio_context_unavailable -> "Eio context unavailable"
+  | Runtime_resolution_failed detail -> "runtime resolution failed: " ^ detail
+  | Provider_not_direct_completion -> "provider does not support direct completion"
+  | Extraction_failed error -> extraction_error_to_string error
+  | Unexpected_failure detail -> detail
+;;
+
+let next_due_after_turns_to_json = function
+  | None -> `Null
+  | Some turns -> `Int turns
+;;
+
+let run_outcome_to_json = function
+  | Run_skipped
+      { runtime_id
+      ; model_id
+      ; reason
+      ; latency_ms
+      ; next_due_after_turns
+      } ->
+    `Assoc
+      [ "status", `String "skipped"
+      ; "runtime_id", `String runtime_id
+      ; "model_id", Json_util.string_opt_to_json model_id
+      ; "reason", `String (skip_reason_to_string reason)
+      ; "latency_ms", `Float latency_ms
+      ; "next_due_after_turns"
+        , next_due_after_turns_to_json next_due_after_turns
+      ]
+  | Run_succeeded
+      { runtime_id
+      ; model_id
+      ; episode
+      ; provider_latency_ms
+      ; latency_ms
+      ; next_due_after_turns
+      } ->
+    `Assoc
+      [ "status", `String "succeeded"
+      ; "runtime_id", `String runtime_id
+      ; "model_id", `String model_id
+      ; "episode_generation", `Int episode.Keeper_memory_os_types.generation
+      ; "claim_count", `Int (List.length episode.claims)
+      ; "provider_latency_ms", `Float provider_latency_ms
+      ; "latency_ms", `Float latency_ms
+      ; "next_due_after_turns", `Int next_due_after_turns
+      ]
+  | Run_failed
+      { runtime_id
+      ; model_id
+      ; error
+      ; latency_ms
+      ; next_due_after_turns
+      } ->
+    `Assoc
+      [ "status", `String "failed"
+      ; "runtime_id", `String runtime_id
+      ; "model_id", Json_util.string_opt_to_json model_id
+      ; "error", `String (run_error_to_string error)
+      ; "latency_ms", `Float latency_ms
+      ; "next_due_after_turns", `Int next_due_after_turns
+      ]
+;;
+
+let run_outcome_is_failure = function
+  | Run_failed _ -> true
+  | Run_skipped _ | Run_succeeded _ -> false
+;;
+
+let run_best_effort
+      ?operation_id
+      ?complete
+      ?timeout_sec
+      ~keepers_dir
+      ~admission_decision
+      ~runtime_id
+      ~keeper_id
+      (inp : Keeper_librarian.input)
+  =
+  let started_at = Time_compat.now () in
+  let latency_ms () =
+    Keeper_timing.round1 ((Time_compat.now () -. started_at) *. 1000.0)
+  in
+  let cadence = cadence_turns () in
+  (* The admission decision was made synchronously with the durable job payload.
+     Replay consumes that typed decision verbatim; runtime restart or a failed
+     receipt write can never turn one admitted provider attempt into a later
+     cadence skip. *)
+  match admission_decision with
+  | Admission_disabled ->
+    Run_skipped
+      { runtime_id
+      ; model_id = None
+      ; reason = Librarian_disabled
+      ; latency_ms = latency_ms ()
+      ; next_due_after_turns = None
+      }
+  | Admission_not_due { turns_remaining } ->
+       Run_skipped
+         { runtime_id
+         ; model_id = None
+         ; reason = Cadence_not_due
+         ; latency_ms = latency_ms ()
+         ; next_due_after_turns = Some turns_remaining
+         }
+  | Admission_due ->
+      try
       match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
       | Some sw, Some net ->
         let runtime_id = runtime_id_for_librarian ~runtime_id in
         (match provider_for_runtime ~runtime_id with
          | Error err ->
            Log.Keeper.warn ~keeper_name:keeper_id
-             "memory os librarian skipped runtime=%s: %s"
+             "memory os librarian failed runtime=%s: %s"
              runtime_id
-             err
+             err;
+           Run_failed
+             { runtime_id
+             ; model_id = None
+             ; error = Runtime_resolution_failed err
+             ; latency_ms = latency_ms ()
+             ; next_due_after_turns = cadence
+             }
          | Ok provider_cfg ->
            if not (Keeper_memory_llm_summary.is_direct_completion_provider provider_cfg)
-           then
+           then (
              Log.Keeper.warn ~keeper_name:keeper_id
-               "memory os librarian skipped runtime=%s: provider does not support direct completion"
+               "memory os librarian failed runtime=%s model=%s: provider does not support direct completion"
                runtime_id
+               provider_cfg.model_id;
+             Run_failed
+               { runtime_id
+               ; model_id = Some provider_cfg.model_id
+               ; error = Provider_not_direct_completion
+               ; latency_ms = latency_ms ()
+               ; next_due_after_turns = cadence
+               })
            else (
              let clock = Eio_context.get_clock_opt () in
              let timeout_sec =
@@ -708,11 +1073,20 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                Log.Keeper.warn ~keeper_name:keeper_id
                  "memory os librarian failed runtime=%s: %s"
                  runtime_id
-                 librarian_provider_clock_unavailable_error
+                 librarian_provider_clock_unavailable_error;
+               Run_failed
+                 { runtime_id
+                 ; model_id = Some provider_cfg.model_id
+                 ; error = Extraction_failed Provider_clock_unavailable
+                 ; latency_ms = latency_ms ()
+                 ; next_due_after_turns = cadence
+                 }
              | Some clock ->
                (match
-                  extract_and_append_with_provider_classified
+                  extract_and_append_with_provider_classified_with_model
+                    ?operation_id
                     ?complete
+                    ~keepers_dir
                     ~clock
                     ~timeout_sec
                     ~sw
@@ -721,29 +1095,47 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                     ~provider_cfg
                     inp
                 with
-                | Ok episode ->
-               cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
+                | Ok (episode, operation_model_id, provider_latency_ms) ->
                Log.Keeper.info ~keeper_name:keeper_id
                  "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
                  episode.Keeper_memory_os_types.trace_id
                  episode.generation
-                 (List.length episode.claims)
+                 (List.length episode.claims);
+               Run_succeeded
+                 { runtime_id
+                 ; model_id = operation_model_id
+                 ; episode
+                 ; provider_latency_ms
+                 ; latency_ms = latency_ms ()
+                 ; next_due_after_turns = cadence
+                 }
                 | Error err ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)
                  ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
                  ();
-               if should_record_cadence_backoff_after_error err
-               then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
                Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian failed runtime=%s: %s; cadence deferred=%b"
+                 "memory os librarian failed runtime=%s: %s"
                  runtime_id
-                 (extraction_error_to_string err)
-                 (should_record_cadence_backoff_after_error err))))
+                 (extraction_error_to_string err);
+               Run_failed
+                 { runtime_id
+                 ; model_id = Some provider_cfg.model_id
+                 ; error = Extraction_failed err
+                 ; latency_ms = latency_ms ()
+                 ; next_due_after_turns = cadence
+                 })))
       | _ ->
         Log.Keeper.warn ~keeper_name:keeper_id
-          "memory os librarian skipped: Eio context unavailable runtime=%s"
-          runtime_id
+          "memory os librarian failed: Eio context unavailable runtime=%s"
+          runtime_id;
+        Run_failed
+          { runtime_id
+          ; model_id = None
+          ; error = Eio_context_unavailable
+          ; latency_ms = latency_ms ()
+          ; next_due_after_turns = cadence
+          }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -754,5 +1146,12 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
       Log.Keeper.warn ~keeper_name:keeper_id
         "memory os librarian failed runtime=%s: %s"
         runtime_id
-        (Printexc.to_string exn))
+        (Printexc.to_string exn);
+      Run_failed
+        { runtime_id
+        ; model_id = None
+        ; error = Unexpected_failure (Printexc.to_string exn)
+        ; latency_ms = latency_ms ()
+        ; next_due_after_turns = cadence
+        }
 ;;

@@ -91,6 +91,20 @@ val drain_into_working_context :
     The returned list preserves capture order. *)
 val snapshot : accumulator -> Yojson.Safe.t list
 
+(** Atomically remove and return all captured items in capture order. *)
+val take_all : accumulator -> Yojson.Safe.t list
+
+(** Restore a previously taken oldest-first batch behind any items captured
+    since the take. Used only when durable admission fails. *)
+val restore : accumulator -> Yojson.Safe.t list -> unit
+
+(** Emit an immutable captured batch into a working context without reading or
+    mutating an accumulator. *)
+val emit_snapshot_into_working_context :
+  Yojson.Safe.t list ->
+  working_context:Yojson.Safe.t option ->
+  Yojson.Safe.t option
+
 (** Number of items currently held in the accumulator. Useful for
     tests and metrics. *)
 val accumulator_size : accumulator -> int

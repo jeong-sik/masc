@@ -230,6 +230,7 @@ let record_pre_dispatch_terminal_observation
     ; oas_turn_count = None
     ; oas_dispatch_mode = None
     ; oas_internal_runtime_disabled = true
+    ; post_turn_memory_job_id = None
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; goal_ids = meta.active_goal_ids
     ; outcome

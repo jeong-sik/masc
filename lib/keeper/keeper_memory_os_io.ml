@@ -7,6 +7,13 @@
 open Keeper_memory_os_types
 open Result.Syntax
 
+let facts_file_suffix = ".facts.jsonl"
+let events_file_suffix = ".events.jsonl"
+let episodes_directory_name = "episodes"
+let tool_results_directory_name = "tool-results"
+let private_memory_directory_mode = 0o700
+let private_memory_file_mode = 0o600
+
 let rec ensure_dir path =
   if path = "" || path = Filename.current_dir_name
   then ()
@@ -28,7 +35,9 @@ let keepers_dir_override : string option ref = ref None
 let keepers_dir () =
   match !keepers_dir_override with
   | Some path -> path
-  | None -> Config_dir_resolver.keepers_dir ()
+  | None ->
+    Common.keepers_runtime_dir_of_base
+      ~base_path:(Env_config_core.base_path ())
 ;;
 
 module For_testing = struct
@@ -43,7 +52,7 @@ module For_testing = struct
 end
 
 let facts_path_for_keepers_dir ~keepers_dir ~keeper_id =
-  Filename.concat keepers_dir (keeper_id ^ ".facts.jsonl")
+  Filename.concat keepers_dir (keeper_id ^ facts_file_suffix)
 ;;
 
 let facts_path ~keeper_id =
@@ -64,7 +73,7 @@ let list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir =
     Sys.readdir dir
     |> Array.to_list
     |> List.filter_map (fun name ->
-      match Filename.chop_suffix_opt ~suffix:".facts.jsonl" name with
+      match Filename.chop_suffix_opt ~suffix:facts_file_suffix name with
       | Some id when not (String.equal id shared_store_id) -> Some id
       | Some _ | None -> None)
     |> List.sort String.compare
@@ -76,11 +85,11 @@ let list_fact_store_keeper_ids () =
 
 let list_fact_store_keeper_ids_for_base_path ~base_path =
   list_fact_store_keeper_ids_for_keepers_dir
-    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)
 ;;
 
 let events_path_for_keepers_dir ~keepers_dir ~keeper_id =
-  Filename.concat keepers_dir (keeper_id ^ ".events.jsonl")
+  Filename.concat keepers_dir (keeper_id ^ events_file_suffix)
 ;;
 
 type legacy_memory_file =
@@ -107,26 +116,369 @@ let current_path_for_legacy_memory_filename ~keepers_dir ~keeper_id ~filename =
   | None -> None
 ;;
 
+type migration_stats =
+  { moved_files : int
+  ; deduplicated_files : int
+  }
+
+type migration_error =
+  { source : string
+  ; destination : string
+  ; detail : string
+  }
+
+type migration_report =
+  { stats : migration_stats
+  ; errors : migration_error list
+  }
+
+let migration_error_to_string error =
+  Printf.sprintf
+    "Memory OS migration failed source=%s destination=%s: %s"
+    error.source
+    error.destination
+    error.detail
+;;
+
+let migration_error ~source ~destination detail =
+  Error { source; destination; detail }
+;;
+
+let migration_protect ~source ~destination f =
+  try Ok (f ()) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> migration_error ~source ~destination (Printexc.to_string exn)
+;;
+
+let add_migration_stats left right =
+  { moved_files = left.moved_files + right.moved_files
+  ; deduplicated_files =
+      left.deduplicated_files + right.deduplicated_files
+  }
+;;
+
+let empty_migration_stats = { moved_files = 0; deduplicated_files = 0 }
+
+let empty_migration_report =
+  { stats = empty_migration_stats; errors = [] }
+;;
+
+let add_migration_report left right =
+  { stats = add_migration_stats left.stats right.stats
+  ; errors = left.errors @ right.errors
+  }
+;;
+
+let migration_report_of_result = function
+  | Ok stats -> { stats; errors = [] }
+  | Error error -> { stats = empty_migration_stats; errors = [ error ] }
+;;
+
+let migration_lstat_opt ~source ~destination =
+  try Ok (Some (Unix.lstat source)) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> migration_error ~source ~destination (Printexc.to_string exn)
+;;
+
+let ensure_private_migration_directory ~source path =
+  let* () =
+    migration_protect ~source ~destination:path (fun () -> ensure_dir path)
+  in
+  migration_protect ~source ~destination:path (fun () ->
+    Unix.chmod path private_memory_directory_mode)
+;;
+
+let remove_migrated_source ~source ~destination =
+  let* () =
+    migration_protect ~source ~destination (fun () -> Sys.remove source)
+  in
+  match Fs_compat.fsync_directory (Filename.dirname source) with
+  | Ok () -> Ok ()
+  | Error detail -> migration_error ~source ~destination detail
+;;
+
+let migrate_memory_file ~source ~destination =
+  let* source_content =
+    migration_protect ~source ~destination (fun () -> Fs_compat.load_file source)
+  in
+  let* destination_exists =
+    migration_protect ~source ~destination (fun () ->
+      Fs_compat.file_exists destination)
+  in
+  let* disposition =
+    if destination_exists
+    then
+      let* destination_stat =
+        migration_protect ~source ~destination (fun () -> Unix.lstat destination)
+      in
+      if destination_stat.Unix.st_kind <> Unix.S_REG
+      then
+        migration_error
+          ~source
+          ~destination
+          "destination exists but is not a regular file"
+      else
+      let* destination_content =
+        migration_protect ~source ~destination (fun () ->
+          Fs_compat.load_file destination)
+      in
+      if String.equal source_content destination_content
+      then Ok `Deduplicated
+      else
+        migration_error
+          ~source
+          ~destination
+          "destination exists with different bytes; refusing overwrite or merge"
+    else
+      let* () =
+        ensure_private_migration_directory
+          ~source
+          (Filename.dirname destination)
+      in
+      (match Fs_compat.save_file_atomic destination source_content with
+       | Error detail -> migration_error ~source ~destination detail
+       | Ok () ->
+         let* () =
+           migration_protect ~source ~destination (fun () ->
+             Unix.chmod destination private_memory_file_mode)
+         in
+         Ok `Moved)
+  in
+  let* () = remove_migrated_source ~source ~destination in
+  match disposition with
+  | `Moved -> Ok { moved_files = 1; deduplicated_files = 0 }
+  | `Deduplicated -> Ok { moved_files = 0; deduplicated_files = 1 }
+;;
+
+let rec migrate_memory_directory ~source ~destination =
+  match ensure_private_migration_directory ~source destination with
+  | Error error -> migration_report_of_result (Error error)
+  | Ok () ->
+    (match
+       migration_protect ~source ~destination (fun () ->
+         Sys.readdir source |> Array.to_list |> List.sort String.compare)
+     with
+     | Error error -> migration_report_of_result (Error error)
+     | Ok entries ->
+       let report =
+         List.fold_left
+           (fun report name ->
+              let source_entry = Filename.concat source name in
+              let destination_entry = Filename.concat destination name in
+              let entry_report =
+                match
+                  migration_protect
+                    ~source:source_entry
+                    ~destination:destination_entry
+                    (fun () -> Unix.lstat source_entry)
+                with
+                | Error error -> migration_report_of_result (Error error)
+                | Ok stat ->
+                  (match stat.Unix.st_kind with
+                   | Unix.S_REG ->
+                     migrate_memory_file
+                       ~source:source_entry
+                       ~destination:destination_entry
+                     |> migration_report_of_result
+                   | Unix.S_DIR ->
+                     migrate_memory_directory
+                       ~source:source_entry
+                       ~destination:destination_entry
+                   | Unix.S_CHR
+                   | Unix.S_BLK
+                   | Unix.S_LNK
+                   | Unix.S_FIFO
+                   | Unix.S_SOCK ->
+                     migration_error
+                       ~source:source_entry
+                       ~destination:destination_entry
+                       "unsupported non-regular Memory OS artifact"
+                     |> migration_report_of_result)
+              in
+              add_migration_report report entry_report)
+           empty_migration_report
+           entries
+       in
+       if report.errors <> []
+       then report
+       else
+         let removal_report =
+           match
+             migration_protect ~source ~destination (fun () -> Unix.rmdir source)
+           with
+           | Error error -> migration_report_of_result (Error error)
+           | Ok () ->
+             (match Fs_compat.fsync_directory (Filename.dirname source) with
+              | Ok () -> empty_migration_report
+              | Error detail ->
+                migration_error ~source ~destination detail
+                |> migration_report_of_result)
+         in
+         add_migration_report report removal_report)
+;;
+
+let migrate_legacy_config_store ~base_path =
+  let config_root =
+    Config_dir_resolver.base_path_config_root ~cwd:base_path base_path
+  in
+  let source_root = Filename.concat config_root "keepers" in
+  let destination_root = Common.keepers_runtime_dir_of_base ~base_path in
+  let runtime_flat_file name =
+    Filename.check_suffix name facts_file_suffix
+    || Filename.check_suffix name events_file_suffix
+  in
+  let migrate_keeper_directory ~keeper_name ~source ~destination =
+    let selected_subdirectories =
+      [ episodes_directory_name; tool_results_directory_name ]
+    in
+    List.fold_left
+      (fun report child ->
+         let source_child = Filename.concat source child in
+         let destination_child = Filename.concat destination child in
+         let child_report =
+           match
+             migration_lstat_opt
+               ~source:source_child
+               ~destination:destination_child
+           with
+           | Error error -> migration_report_of_result (Error error)
+           | Ok None -> empty_migration_report
+           | Ok (Some child_stat) ->
+             (match Keeper_id.Keeper_name.of_string keeper_name with
+              | Error detail ->
+                migration_error
+                  ~source:source_child
+                  ~destination:destination_child
+                  detail
+                |> migration_report_of_result
+              | Ok _ ->
+                if child_stat.Unix.st_kind <> Unix.S_DIR
+                then
+                  migration_error
+                    ~source:source_child
+                    ~destination:destination_child
+                    "selected Memory OS artifact is not a directory"
+                  |> migration_report_of_result
+                else
+                  migrate_memory_directory
+                    ~source:source_child
+                    ~destination:destination_child)
+         in
+         add_migration_report report child_report)
+      empty_migration_report
+      selected_subdirectories
+  in
+  if String.equal source_root destination_root
+  then empty_migration_report
+  else
+    match migration_lstat_opt ~source:source_root ~destination:destination_root with
+    | Error error -> migration_report_of_result (Error error)
+    | Ok None -> empty_migration_report
+    | Ok (Some source_stat) when source_stat.Unix.st_kind <> Unix.S_DIR ->
+      migration_error
+        ~source:source_root
+        ~destination:destination_root
+        "legacy Memory OS root is not a directory"
+      |> migration_report_of_result
+    | Ok (Some _) ->
+      (match
+         ensure_private_migration_directory ~source:source_root destination_root
+       with
+       | Error error -> migration_report_of_result (Error error)
+       | Ok () ->
+         (match
+            migration_protect ~source:source_root ~destination:destination_root
+              (fun () ->
+                 Sys.readdir source_root
+                 |> Array.to_list
+                 |> List.sort String.compare)
+          with
+          | Error error -> migration_report_of_result (Error error)
+          | Ok entries ->
+            List.fold_left
+              (fun report name ->
+                 let source = Filename.concat source_root name in
+                 let destination = Filename.concat destination_root name in
+                 let entry_report =
+                   match
+                     migration_protect ~source ~destination (fun () ->
+                       Unix.lstat source)
+                   with
+                   | Error error -> migration_report_of_result (Error error)
+                   | Ok stat ->
+                     (match stat.Unix.st_kind with
+                      | Unix.S_REG when runtime_flat_file name ->
+                        migrate_memory_file ~source ~destination
+                        |> migration_report_of_result
+                      | Unix.S_DIR ->
+                        migrate_keeper_directory
+                          ~keeper_name:name
+                          ~source
+                          ~destination
+                      | Unix.S_REG -> empty_migration_report
+                      | Unix.S_CHR
+                      | Unix.S_BLK
+                      | Unix.S_LNK
+                      | Unix.S_FIFO
+                      | Unix.S_SOCK ->
+                        if runtime_flat_file name
+                        then
+                          migration_error
+                            ~source
+                            ~destination
+                            "legacy Memory OS artifact is not a regular file"
+                          |> migration_report_of_result
+                        else empty_migration_report)
+                 in
+                 add_migration_report report entry_report)
+              empty_migration_report
+              entries))
+;;
+
 let events_path ~keeper_id =
   events_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
-let episode_bundle_lock_path ~keeper_id =
-  Filename.concat (keepers_dir ()) (keeper_id ^ ".episode-bundle")
+let episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ ".episode-bundle")
+;;
+
+let with_episode_bundle_lock_for_keepers_dir ?clock ~keepers_dir ~keeper_id f =
+  File_lock_eio.with_lock
+    ?clock
+    (episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    f
 ;;
 
 let with_episode_bundle_lock ?clock ~keeper_id f =
-  File_lock_eio.with_lock ?clock (episode_bundle_lock_path ~keeper_id) f
+  with_episode_bundle_lock_for_keepers_dir
+    ?clock
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    f
 ;;
 
-let episodes_dir ~keeper_id =
-  let d = Filename.concat (keepers_dir ()) (Filename.concat keeper_id "episodes") in
+let episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id =
+  let d =
+    Filename.concat
+      keepers_dir
+      (Filename.concat keeper_id episodes_directory_name)
+  in
   ensure_dir d;
   d
 ;;
 
+let episodes_dir ~keeper_id =
+  episodes_dir_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
+;;
+
 let tool_results_dir ~keeper_id =
-  let d = Filename.concat (keepers_dir ()) (Filename.concat keeper_id "tool-results") in
+  let d =
+    Filename.concat
+      (keepers_dir ())
+      (Filename.concat keeper_id tool_results_directory_name)
+  in
   ensure_dir d;
   d
 ;;
@@ -180,12 +532,14 @@ let write_file_atomically path content =
   | Error msg -> raise (Atomic_write_failed msg)
 ;;
 
-let generation_counter_path ~keeper_id ~trace_id =
-  Filename.concat (episodes_dir ~keeper_id) (Printf.sprintf "%s.generation" trace_id)
+let generation_counter_path_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id =
+  Filename.concat
+    (episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id)
+    (Printf.sprintf "%s.generation" trace_id)
 ;;
 
-let max_generation_from_files ~keeper_id ~trace_id =
-  let dir = episodes_dir ~keeper_id in
+let max_generation_from_files_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id =
+  let dir = episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id in
   let prefix = Printf.sprintf "%s-g" trace_id in
   Sys.readdir dir
   |> Array.to_list
@@ -217,10 +571,23 @@ let read_generation_counter path =
     lock. The counter intentionally allows gaps when extraction later fails;
     uniqueness is more important than contiguous numbering across fibers or
     processes. *)
-let next_generation_with_floor ~floor ~keeper_id ~trace_id =
-  let counter_path = generation_counter_path ~keeper_id ~trace_id in
+let next_generation_with_floor_for_keepers_dir
+      ~keepers_dir
+      ~floor
+      ~keeper_id
+      ~trace_id
+  =
+  let counter_path =
+    generation_counter_path_for_keepers_dir ~keepers_dir ~keeper_id ~trace_id
+  in
   File_lock_eio.with_lock counter_path (fun () ->
-    let next_from_files = max_generation_from_files ~keeper_id ~trace_id + 1 in
+    let next_from_files =
+      max_generation_from_files_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id
+        ~trace_id
+      + 1
+    in
     let next_from_counter =
       match read_generation_counter counter_path with
       | Some next -> next
@@ -231,17 +598,25 @@ let next_generation_with_floor ~floor ~keeper_id ~trace_id =
     generation)
 ;;
 
+let next_generation_with_floor ~floor ~keeper_id ~trace_id =
+  next_generation_with_floor_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~floor
+    ~keeper_id
+    ~trace_id
+;;
+
 let next_generation ~keeper_id ~trace_id =
   next_generation_with_floor ~floor:0 ~keeper_id ~trace_id
 ;;
 
-let unique_episode_path ~keeper_id episode =
+let unique_episode_path_for_keepers_dir ~keepers_dir ~keeper_id episode =
   let created_ms =
     episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float
   in
   let base =
     Filename.concat
-      (episodes_dir ~keeper_id)
+      (episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id)
       (Printf.sprintf
          "%s-g%04d-t%013Ld"
          episode.trace_id
@@ -263,8 +638,7 @@ let unique_episode_path ~keeper_id episode =
 
 let append_line path line =
   ensure_dir (Filename.dirname path);
-  let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
-  with_out_channel oc ~f:(fun oc -> output_string oc (line ^ "\n"))
+  Fs_compat.append_file_durable path (line ^ "\n")
 ;;
 
 let append_json path json =
@@ -275,13 +649,431 @@ let append_fact ~keeper_id fact =
   append_json (facts_path ~keeper_id) (fact_to_json fact)
 ;;
 
+let append_event_for_keepers_dir ~keepers_dir ~keeper_id episode =
+  append_json
+    (events_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    (episode_to_json episode)
+;;
+
 let append_event ~keeper_id episode =
-  append_json (events_path ~keeper_id) (episode_to_json episode)
+  append_event_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    episode
+;;
+
+let append_episode_for_keepers_dir ~keepers_dir ~keeper_id episode =
+  let path = unique_episode_path_for_keepers_dir ~keepers_dir ~keeper_id episode in
+  write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
 ;;
 
 let append_episode ~keeper_id episode =
-  let path = unique_episode_path ~keeper_id episode in
-  write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
+  append_episode_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    episode
+;;
+
+let operation_id_field = "memory_operation_id"
+let operation_model_id_field = "memory_operation_model_id"
+let operation_provider_latency_ms_field = "memory_operation_provider_latency_ms"
+let event_quarantine_directory_name = "memory-event-quarantine"
+(* Legacy episode-directory prefix retained only so readers/caps never expose
+   or delete a stage written by an interrupted pre-journal runtime. *)
+let operation_episode_prefix = "operation-"
+let private_operation_directory_mode = 0o700
+
+let is_operation_episode_name name =
+  String.starts_with name ~prefix:operation_episode_prefix
+  && Filename.check_suffix name ".json"
+;;
+
+type operation_episode =
+  { episode : episode
+  ; model_id : string
+  ; provider_latency_ms : float
+  }
+
+let operation_episode_path ~keepers_dir ~keeper_id ~operation_id =
+  if not (Keeper_config.validate_name operation_id)
+  then Error (Printf.sprintf "invalid memory operation id: %S" operation_id)
+  else
+    Ok
+      (Keeper_memory_job_store.operation_stage_path_for_keepers_dir
+         ~keepers_dir
+         ~keeper_name:keeper_id
+         ~operation_id)
+;;
+
+let operation_episode_json
+      ~operation_id
+      ~model_id
+      ~provider_latency_ms
+      episode
+  =
+  match episode_to_json episode with
+  | `Assoc fields ->
+    `Assoc
+      ((operation_id_field, `String operation_id)
+       :: (operation_model_id_field, `String model_id)
+       :: (operation_provider_latency_ms_field, `Float provider_latency_ms)
+       :: fields)
+  | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _) as json ->
+    json
+;;
+
+let save_operation_episode
+      ~keepers_dir
+      ~keeper_id
+      ~operation_id
+      ~model_id
+      ~provider_latency_ms
+      episode
+  =
+  if String.equal (String.trim model_id) ""
+  then Error "memory operation model id must be non-empty"
+  else if (not (Float.is_finite provider_latency_ms)) || provider_latency_ms < 0.0
+  then Error "memory operation provider latency must be finite and non-negative"
+  else match operation_episode_path ~keepers_dir ~keeper_id ~operation_id with
+  | Error _ as error -> error
+  | Ok path ->
+    (try
+      let dir = Filename.dirname path in
+      ensure_dir dir;
+      Unix.chmod dir private_operation_directory_mode;
+       write_file_atomically
+         path
+         (Yojson.Safe.pretty_to_string
+            (operation_episode_json
+               ~operation_id
+               ~model_id
+               ~provider_latency_ms
+               episode));
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printf.sprintf "%s: %s" path (Printexc.to_string exn)))
+;;
+
+let load_operation_episode ~keepers_dir ~keeper_id ~operation_id =
+  match operation_episode_path ~keepers_dir ~keeper_id ~operation_id with
+  | Error _ as error -> error
+  | Ok path ->
+    if not (Fs_compat.file_exists path)
+    then Ok None
+    else
+      (match Safe_ops.read_json_file_safe path with
+       | Error detail -> Error (Printf.sprintf "%s: %s" path detail)
+       | Ok json ->
+         (match json with
+          | `Assoc fields ->
+            (match
+               ( List.assoc_opt operation_model_id_field fields
+               , List.assoc_opt operation_provider_latency_ms_field fields )
+             with
+             | ( Some (`String model_id)
+               , Some (`Float provider_latency_ms) )
+               when not (String.equal (String.trim model_id) "")
+                    && Float.is_finite provider_latency_ms
+                    && provider_latency_ms >= 0.0 ->
+               (match episode_of_json json with
+                | Some episode ->
+                  Ok (Some { episode; model_id; provider_latency_ms })
+                | None -> Error (Printf.sprintf "%s: invalid episode JSON" path))
+             | ( Some (`String model_id)
+               , Some (`Int provider_latency_ms) )
+               when not (String.equal (String.trim model_id) "")
+                    && provider_latency_ms >= 0 ->
+               (match episode_of_json json with
+                | Some episode ->
+                  Ok
+                    (Some
+                       { episode
+                       ; model_id
+                       ; provider_latency_ms = float_of_int provider_latency_ms
+                       })
+                | None -> Error (Printf.sprintf "%s: invalid episode JSON" path))
+             | _ ->
+               Error
+                 (Printf.sprintf
+                    "%s: missing or invalid operation model/latency"
+                    path))
+          | _ -> Error (Printf.sprintf "%s: invalid operation episode JSON" path)))
+;;
+
+let stage_operation_episode_once
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      ~operation_id
+      ~model_id
+      ~provider_latency_ms
+      episode
+  =
+  match operation_episode_path ~keepers_dir ~keeper_id ~operation_id with
+  | Error _ as error -> error
+  | Ok path ->
+    (try
+       File_lock_eio.with_lock ?clock path (fun () ->
+         match load_operation_episode ~keepers_dir ~keeper_id ~operation_id with
+         | Error _ as error -> error
+         | Ok (Some winner) -> Ok winner
+         | Ok None ->
+           (match
+              save_operation_episode
+                ~keepers_dir
+                ~keeper_id
+                ~operation_id
+                ~model_id
+                ~provider_latency_ms
+                episode
+            with
+            | Error _ as error -> error
+            | Ok () -> Ok { episode; model_id; provider_latency_ms }))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printf.sprintf "%s: %s" path (Printexc.to_string exn)))
+;;
+
+let operation_id_of_event = function
+  | `Assoc fields ->
+    (match List.assoc_opt operation_id_field fields with
+     | Some (`String operation_id) -> Some operation_id
+     | Some _ | None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+;;
+
+type parsed_event_line =
+  { raw : string
+  ; json : Yojson.Safe.t
+  }
+
+type malformed_event_line =
+  { line_number : int
+  ; raw : string
+  ; detail : string
+  }
+
+let parse_event_log_strict path =
+  let lines =
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+  in
+  let rec loop line_number valid malformed = function
+    | [] -> List.rev valid, List.rev malformed
+    | raw :: rest when String.equal (String.trim raw) "" ->
+      loop (line_number + 1) valid malformed rest
+    | raw :: rest ->
+      let parsed =
+        try
+          let json = Yojson.Safe.from_string raw in
+          match episode_of_json json with
+          | Some _ -> Ok { raw; json }
+          | None -> Error "row does not satisfy the episode schema"
+        with
+        | Yojson.Json_error detail -> Error detail
+      in
+      (match parsed with
+       | Ok event -> loop (line_number + 1) (event :: valid) malformed rest
+       | Error detail ->
+         loop
+           (line_number + 1)
+           valid
+           ({ line_number; raw; detail } :: malformed)
+           rest)
+  in
+  loop 1 [] [] lines
+;;
+
+let quarantine_malformed_events
+      ~keepers_dir
+      ~keeper_id
+      ~events_path
+      malformed
+  =
+  let quarantine_dir =
+    Filename.concat
+      (Filename.concat keepers_dir keeper_id)
+      event_quarantine_directory_name
+  in
+  let rows =
+    List.map
+      (fun row ->
+         `Assoc
+           [ "source", `String events_path
+           ; "line_number", `Int row.line_number
+           ; "detail", `String row.detail
+           ; "raw", `String row.raw
+           ])
+      malformed
+  in
+  let content =
+    rows
+    |> List.map Yojson.Safe.to_string
+    |> String.concat "\n"
+    |> fun body -> body ^ "\n"
+  in
+  let digest =
+    Digestif.SHA256.digest_string content
+    |> Digestif.SHA256.to_hex
+  in
+  let destination = Filename.concat quarantine_dir (digest ^ ".jsonl") in
+  try
+    ensure_dir quarantine_dir;
+    Unix.chmod quarantine_dir private_memory_directory_mode;
+    if Fs_compat.file_exists destination
+    then
+      let existing = Fs_compat.load_file destination in
+      if not (String.equal existing content)
+      then
+        Error
+          (Printf.sprintf
+             "event quarantine digest collision at %s"
+             destination)
+      else Ok destination
+    else
+      (match Fs_compat.save_file_atomic destination content with
+       | Error detail -> Error detail
+       | Ok () ->
+         Unix.chmod destination private_memory_file_mode;
+         Ok destination)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let load_and_repair_event_log ~keepers_dir ~keeper_id path =
+  try
+    let valid, malformed = parse_event_log_strict path in
+    match malformed with
+    | [] -> Ok (List.map (fun event -> event.json) valid)
+    | _ ->
+      (match
+         quarantine_malformed_events
+           ~keepers_dir
+           ~keeper_id
+           ~events_path:path
+           malformed
+       with
+       | Error detail ->
+         Error
+           (Printf.sprintf
+              "%s: cannot quarantine %d malformed event row(s): %s"
+              path
+              (List.length malformed)
+              detail)
+       | Ok quarantine_path ->
+         let repaired_content =
+           match valid with
+           | [] -> ""
+           | _ ->
+             valid
+             |> List.map (fun event -> event.raw)
+             |> String.concat "\n"
+             |> fun body -> body ^ "\n"
+         in
+         (match Fs_compat.save_file_atomic path repaired_content with
+          | Error detail ->
+            Error
+              (Printf.sprintf
+                 "%s: quarantined malformed rows at %s but repair failed: %s"
+                 path
+                 quarantine_path
+                 detail)
+          | Ok () ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string MemoryWriteFailures)
+              ~labels:[ "keeper", keeper_id; "site", "event_log_repair" ]
+              ~delta:(float_of_int (List.length malformed))
+              ();
+            Log.Keeper.error ~keeper_name:keeper_id
+              "memory event log repaired malformed_rows=%d source=%s quarantine=%s"
+              (List.length malformed)
+              path
+              quarantine_path;
+            Ok (List.map (fun event -> event.json) valid)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "%s: %s" path (Printexc.to_string exn))
+;;
+
+let operation_event_committed ~keepers_dir ~keeper_id ~operation_id =
+  if not (Keeper_config.validate_name operation_id)
+  then Error (Printf.sprintf "invalid memory operation id: %S" operation_id)
+  else
+    let path = events_path_for_keepers_dir ~keepers_dir ~keeper_id in
+    if not (Fs_compat.file_exists path)
+    then Ok false
+    else
+      let* events = load_and_repair_event_log ~keepers_dir ~keeper_id path in
+      Ok
+        (List.exists
+           (fun event ->
+              Option.equal
+                String.equal
+                (operation_id_of_event event)
+                (Some operation_id))
+           events)
+;;
+
+type operation_episode_state =
+  | Operation_absent
+  | Operation_staged of operation_episode
+  | Operation_committed of operation_episode
+
+let inspect_operation_episode ~clock ~keepers_dir ~keeper_id ~operation_id =
+  match load_operation_episode ~keepers_dir ~keeper_id ~operation_id with
+  | Error _ as error -> error
+  | Ok None -> Ok Operation_absent
+  | Ok (Some _) ->
+    with_episode_bundle_lock_for_keepers_dir
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      (fun () ->
+      match load_operation_episode ~keepers_dir ~keeper_id ~operation_id with
+      | Error _ as error -> error
+      | Ok None ->
+        Error
+          (Printf.sprintf
+             "memory operation %s lost its staged episode during commit inspection"
+             operation_id)
+      | Ok (Some episode) ->
+        (match
+           operation_event_committed ~keepers_dir ~keeper_id ~operation_id
+         with
+         | Error _ as error -> error
+         | Ok false -> Ok (Operation_staged episode)
+         | Ok true -> Ok (Operation_committed episode)))
+;;
+
+let append_operation_event
+      ~keepers_dir
+      ~keeper_id
+      ~operation_id
+      ~model_id
+      ~provider_latency_ms
+      episode
+  =
+  if String.equal (String.trim model_id) ""
+  then Error "memory operation model id must be non-empty"
+  else if (not (Float.is_finite provider_latency_ms)) || provider_latency_ms < 0.0
+  then Error "memory operation provider latency must be finite and non-negative"
+  else if not (Keeper_config.validate_name operation_id)
+  then Error (Printf.sprintf "invalid memory operation id: %S" operation_id)
+  else
+    try
+      append_json
+        (events_path_for_keepers_dir ~keepers_dir ~keeper_id)
+        (operation_episode_json
+           ~operation_id
+           ~model_id
+           ~provider_latency_ms
+           episode);
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
 ;;
 
 let append_episode_bundle ~keeper_id episode =
@@ -305,7 +1097,7 @@ let rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts =
 
 let rewrite_facts_atomically_for_base_path ~base_path ~keeper_id facts =
   rewrite_facts_atomically_for_keepers_dir
-    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)
     ~keeper_id
     facts
 ;;
@@ -499,7 +1291,7 @@ let read_facts_tail ~keeper_id ~n =
 
 let read_facts_tail_for_base_path ~base_path ~keeper_id ~n =
   read_facts_tail_for_keepers_dir
-    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)
     ~keeper_id
     ~n
 ;;
@@ -537,7 +1329,7 @@ let read_all_facts ~keeper_id =
   read_facts_all ~keeper_id
 ;;
 
-let read_facts_for_rewrite ~keeper_id =
+let read_facts_for_rewrite_for_keepers_dir ~keepers_dir ~keeper_id =
   (* RFC-0302 (#22823) phase-2b: resolve keepers_dir on the main domain (it touches
      the Config_dir_resolver plain-ref memo), then offload the blocking full read +
      strict parse of the fact store off the main Eio scheduler. This is the
@@ -548,13 +1340,18 @@ let read_facts_for_rewrite ~keeper_id =
      File_lock_eio flock on main across this (inline-in-tests) submit; the closure
      reads only [keepers]/[keeper_id] and no shared mutable state, and the
      Fs_compat rewrite that follows stays on main. *)
-  let keepers = keepers_dir () in
   match
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      read_facts_all_strict_for_keepers_dir ~keepers_dir:keepers ~keeper_id)
+      read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id)
   with
   | Ok facts -> facts
   | Error message -> invalid_arg message
+;;
+
+let read_facts_for_rewrite ~keeper_id =
+  read_facts_for_rewrite_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
 ;;
 
 (* RFC-0239 Q4 (supersedes RFC-0238 Capped_by_score): bound the append-only
@@ -645,8 +1442,19 @@ let merge_episode_facts ~merge ~existing ~incoming =
    that carries claims; the librarian runs at most once per turn after an LLM
    call, so a full rewrite of at most [trigger] facts is off the hot path. An
    empty [incoming] with the store already under [trigger] is a no-op. *)
-let merge_and_cap_facts ~now ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
-  let existing = read_facts_for_rewrite ~keeper_id in
+let merge_and_cap_facts_for_keepers_dir
+      ~keepers_dir
+      ~now
+      ~keeper_id
+      ~merge
+      ~incoming
+      ~keep
+      ~trigger
+      ~rank
+  =
+  let existing =
+    read_facts_for_rewrite_for_keepers_dir ~keepers_dir ~keeper_id
+  in
   let merged_list, merged, appended = merge_episode_facts ~merge ~existing ~incoming in
   (* RFC-0259 §3.6 (P5): drop effective-horizon-expired rows on the same boundary the
      GC sweep uses, before the trigger gate and ranking, so an under-cap store
@@ -670,8 +1478,31 @@ let merge_and_cap_facts ~now ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
         in
         kept, total - List.length kept)
     in
-    rewrite_facts_atomically ~keeper_id kept;
+    rewrite_facts_atomically_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id
+      kept;
     { merged; appended; dropped = rank_dropped + List.length expired })
+;;
+
+let merge_and_cap_facts
+      ~now
+      ~keeper_id
+      ~merge
+      ~incoming
+      ~keep
+      ~trigger
+      ~rank
+  =
+  merge_and_cap_facts_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~now
+    ~keeper_id
+    ~merge
+    ~incoming
+    ~keep
+    ~trigger
+    ~rank
 ;;
 
 let read_events_tail ~keeper_id ~n =
@@ -712,7 +1543,9 @@ let read_episode_files_tail ~keeper_id ~n =
   else (
     Sys.readdir dir
     |> Array.to_list
-    |> List.filter (fun name -> Filename.check_suffix name ".json")
+    |> List.filter (fun name ->
+      Filename.check_suffix name ".json"
+      && not (is_operation_episode_name name))
     |> List.map (fun name -> Filename.concat dir name)
     |> List.filter Sys.file_exists
     |> List.filter_map read_episode_file
@@ -737,8 +1570,8 @@ let trim_target ~count ~keep ~trigger = if count <= trigger then None else Some 
    [read_lines_tail] has: a line [episode_of_json] cannot parse is tail-trimmed
    like any other, never silently dropped mid-file. Returns the number dropped
    (diagnostic; the rewrite is the mechanism). *)
-let cap_events ~keeper_id ~keep ~trigger =
-  let path = events_path ~keeper_id in
+let cap_events_for_keepers_dir ~keepers_dir ~keeper_id ~keep ~trigger =
+  let path = events_path_for_keepers_dir ~keepers_dir ~keeper_id in
   (* RFC-0302 (#22823): submit the blocking full read to the domain pool so it
      does not starve the main Eio scheduler when a pool is installed (inline
      fallback in tests / before the pool is set up). [path] is resolved on main;
@@ -758,6 +1591,14 @@ let cap_events ~keeper_id ~keep ~trigger =
     List.length all - List.length kept
 ;;
 
+let cap_events ~keeper_id ~keep ~trigger =
+  cap_events_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    ~keep
+    ~trigger
+;;
+
 (* RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
    parseable-file count exceeds [trigger], keep the [keep] most-recent files by
    [compare_episode_recency] (the order recall uses) and unlink the rest. Only
@@ -766,7 +1607,7 @@ let cap_events ~keeper_id ~keep ~trigger =
    best-effort / [Sys_error]-tolerant: a concurrent reader holding a file is
    fine, and no lock is taken here that could deadlock with the bundle lock the
    caller already holds. Returns the number unlinked. *)
-let cap_episode_files ~keeper_id ~keep ~trigger =
+let cap_episode_files_for_keepers_dir ~keepers_dir ~keeper_id ~keep ~trigger =
   (* RFC-0302 (#22823): resolve [episodes_dir] on the main domain (it touches the
      Config_dir_resolver plain-ref memo + mkdir), then offload the blocking
      readdir + per-file episode read + best-effort unlink scan to the shared
@@ -775,12 +1616,14 @@ let cap_episode_files ~keeper_id ~keep ~trigger =
      mutable work (Sys.remove is a filesystem unlink, not OCaml shared state), so
      it is domain-safe; the caller's bundle flock stays held on main across the
      (inline-fallback in tests) submit. *)
-  let dir = episodes_dir ~keeper_id in
+  let dir = episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id in
   Domain_pool_ref.submit_io_or_inline (fun () ->
     let parsed =
       Sys.readdir dir
       |> Array.to_list
-      |> List.filter (fun name -> Filename.check_suffix name ".json")
+      |> List.filter (fun name ->
+        Filename.check_suffix name ".json"
+        && not (is_operation_episode_name name))
       |> List.map (fun name -> Filename.concat dir name)
       |> List.filter Sys.file_exists
       |> List.filter_map (fun p ->
@@ -796,4 +1639,12 @@ let cap_episode_files ~keeper_id ~keep ~trigger =
       let to_drop = sorted |> List.filteri (fun i _ -> i < n_drop) |> List.map fst in
       List.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) to_drop;
       List.length to_drop)
+;;
+
+let cap_episode_files ~keeper_id ~keep ~trigger =
+  cap_episode_files_for_keepers_dir
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    ~keep
+    ~trigger
 ;;

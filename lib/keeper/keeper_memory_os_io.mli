@@ -33,7 +33,35 @@ val current_path_for_legacy_memory_filename :
 (** Map a legacy per-keeper Memory OS filename under [.masc/keepers/<keeper>/]
     to the current store path under [keepers_dir], when the filename is a
     supported legacy memory artifact. *)
+
+type migration_stats =
+  { moved_files : int
+  ; deduplicated_files : int
+  }
+
+type migration_error =
+  { source : string
+  ; destination : string
+  ; detail : string
+  }
+
+type migration_report =
+  { stats : migration_stats
+  ; errors : migration_error list
+  }
+
+val migration_error_to_string : migration_error -> string
+
+val migrate_legacy_config_store :
+  base_path:string -> migration_report
+(** Move Memory OS runtime artifacts from the canonical historical
+    [<base>/.masc/config/keepers] root into the BasePath runtime root. Config
+    files remain in place. Existing byte-identical destinations are
+    deduplicated; divergent destinations are preserved and reported without
+    stopping migration of unrelated keepers or artifacts. *)
+
 val episodes_dir : keeper_id:string -> string
+val episodes_dir_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 val tool_results_dir : keeper_id:string -> string
 val tool_result_path : keeper_id:string -> tool_call_id:string -> string
 val episode_path : keeper_id:string -> trace_id:string -> generation:int -> string
@@ -47,7 +75,11 @@ val next_generation : keeper_id:string -> trace_id:string -> int
 
 (** Like {!next_generation}, but preserves a caller-provided generation lower
     bound while still advancing the counter past it. *)
-val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:string -> int
+val next_generation_with_floor :
+  floor:int -> keeper_id:string -> trace_id:string -> int
+
+val next_generation_with_floor_for_keepers_dir :
+  keepers_dir:string -> floor:int -> keeper_id:string -> trace_id:string -> int
 
 (** {1 Atomic writes} *)
 
@@ -60,13 +92,99 @@ val with_out_channel : out_channel -> f:(out_channel -> unit) -> unit
 
 val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
+val append_event_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
+val append_episode_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> episode -> unit
+
+type operation_episode =
+  { episode : episode
+  ; model_id : string
+  ; provider_latency_ms : float
+  }
+
+val save_operation_episode :
+  keepers_dir:string ->
+  keeper_id:string ->
+  operation_id:string ->
+  model_id:string ->
+  provider_latency_ms:float ->
+  episode ->
+  (unit, string) result
+(** Atomically stage one provider-produced episode under a deterministic
+    operation id before publishing facts/events. *)
+
+val load_operation_episode :
+  keepers_dir:string ->
+  keeper_id:string ->
+  operation_id:string ->
+  (operation_episode option, string) result
+
+val stage_operation_episode_once :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  keepers_dir:string ->
+  keeper_id:string ->
+  operation_id:string ->
+  model_id:string ->
+  provider_latency_ms:float ->
+  episode ->
+  (operation_episode, string) result
+(** Atomically install the first stage for an operation and return the winning
+    stage. Concurrent producers never overwrite one another. *)
+
+val operation_event_committed :
+  keepers_dir:string ->
+  keeper_id:string ->
+  operation_id:string ->
+  (bool, string) result
+(** Check the events commit log for [operation_id]. Malformed event rows are an
+    explicit recovery event: raw rows are durably quarantined before the valid
+    prefix/set is atomically rewritten. A quarantine or rewrite failure is
+    returned and is never treated as "not committed". Call while holding
+    {!with_episode_bundle_lock_for_keepers_dir}. *)
+
+type operation_episode_state =
+  | Operation_absent
+  | Operation_staged of operation_episode
+  | Operation_committed of operation_episode
+
+val inspect_operation_episode :
+  clock:float Eio.Time.clock_ty Eio.Resource.t option ->
+  keepers_dir:string ->
+  keeper_id:string ->
+  operation_id:string ->
+  (operation_episode_state, string) result
+(** Inspect an operation and atomically distinguish absence, a provider result
+    staged before publication, and a fully committed event. Missing staged
+    operations avoid an event-log scan. *)
+
+val append_operation_event :
+  keepers_dir:string ->
+  keeper_id:string ->
+  operation_id:string ->
+  model_id:string ->
+  provider_latency_ms:float ->
+  episode ->
+  (unit, string) result
+(** Append an episode event carrying [operation_id]. Call only after
+    {!operation_event_committed} returned [false], under the bundle lock. *)
 
 (** Serialize a cross-file episode bundle write for one keeper. Callers that
     write facts plus episode/event artifacts should take this before the facts
     lock, then publish [events_path] last as the reader-visible commit marker. *)
 val with_episode_bundle_lock :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t -> keeper_id:string -> (unit -> 'a) -> 'a
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  keeper_id:string ->
+  (unit -> 'a) ->
+  'a
+
+val with_episode_bundle_lock_for_keepers_dir :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  keepers_dir:string ->
+  keeper_id:string ->
+  (unit -> 'a) ->
+  'a
 
 val append_episode_bundle : keeper_id:string -> episode -> unit
 val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
@@ -147,12 +265,17 @@ val trim_target : count:int -> keep:int -> trigger:int -> int option
     malformed-line tolerant) and atomically rewrite; otherwise no-op. Returns the
     number of lines dropped. *)
 val cap_events : keeper_id:string -> keep:int -> trigger:int -> int
+val cap_events_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> keep:int -> trigger:int -> int
 
 (** RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
     parseable-file count exceeds [trigger], keep the [keep] most-recent files by
     recency and best-effort unlink the rest; otherwise no-op. Unparseable files
     are left untouched. Returns the number unlinked. *)
-val cap_episode_files : keeper_id:string -> keep:int -> trigger:int -> int
+val cap_episode_files :
+  keeper_id:string -> keep:int -> trigger:int -> int
+val cap_episode_files_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> keep:int -> trigger:int -> int
 
 (** Read and parse every fact in the store (unbounded; used by retention). *)
 val read_all_facts : keeper_id:string -> fact list
@@ -192,6 +315,17 @@ type fact_merge_stats =
     store free of expired rows even below the cap; they count toward [dropped]. *)
 val merge_and_cap_facts :
   now:float
+  -> keeper_id:string
+  -> merge:(existing:fact -> incoming:fact -> fact)
+  -> incoming:fact list
+  -> keep:int
+  -> trigger:int
+  -> rank:(fact -> float)
+  -> fact_merge_stats
+
+val merge_and_cap_facts_for_keepers_dir :
+  keepers_dir:string
+  -> now:float
   -> keeper_id:string
   -> merge:(existing:fact -> incoming:fact -> fact)
   -> incoming:fact list

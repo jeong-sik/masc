@@ -435,7 +435,7 @@ let finalize
                         completion_contract_result) );
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
-         Ok (Some patched)
+         Ok (Some patched, patched)
        | Ok (Keeper_checkpoint_store.Stale_noop
                 { incoming_turn_count; known_turn_count }) ->
          Log.Keeper.warn ~keeper_name:meta.name
@@ -446,7 +446,11 @@ let finalize
            "masc_keeper_checkpoint_stale_noop_total"
            ~labels:[ "keeper", meta.name; "site", "finalize" ]
            ();
-         Ok None
+         (* The canonical checkpoint remains at the newer watermark, but this
+            turn's immutable patched checkpoint is still the exact input for
+            its durable post-turn memory job. It is never written back to the
+            canonical OAS path. *)
+         Ok (None, patched)
        | Error e ->
          Log.Keeper.error ~keeper_name:meta.name
            "runtime=%s OAS checkpoint save failed: %s"
@@ -475,28 +479,74 @@ let finalize
   in
   match saved_checkpoint_result with
   | Error e -> Error e
-  | Ok saved_checkpoint ->
+  | Ok (saved_checkpoint, librarian_checkpoint) ->
+    (* Consume the per-keeper hook accumulator exactly once. The immutable
+       snapshot fans out to the durable memory job and, after durable admission,
+       to the post-turn multimodal working context. This also covers stale-noop
+       checkpoint saves, where the later lifecycle has [checkpoint=None] and
+       therefore cannot drain the accumulator itself. *)
+    let tool_emission_accumulator =
+      Keeper_tool_emission_hook.accumulator_for_keeper meta.name
+    in
+    let taken_tool_results =
+      Keeper_tool_emission_hook.take_all tool_emission_accumulator
+    in
+    let tool_results_snapshot =
+      if Keeper_tool_emission_hook.masc_tool_emission_enabled ()
+      then Some taken_tool_results
+      else None
+    in
     (* Contract-verification proof evaluation / verdict-ledger persistence removed: task/goal
        completion is verified by [Task_completion_gate] (evidence-substantiveness),
        not by an internal proof/verdict pipeline. *)
-    let librarian_messages =
-      match saved_checkpoint with
-      | Some checkpoint -> checkpoint.Agent_sdk.Checkpoint.messages
-      | None -> Option.to_list assistant_msg
+    let memory_submission =
+      Keeper_agent_run_post_turn_memory.run
+        ~config
+        ~meta
+        ~generation
+        ~turn:manifest_keeper_turn_id
+        ~oas_turn_count:result.turns
+        ~response_text
+        ~actual_tools:actual_keeper_tool_names
+        ~librarian_checkpoint
+        ~tool_results_snapshot
+        ~post_turn_t0
+        ~runtime_id:runtime_id_string
+        ~inference_telemetry:result.response.telemetry
+        ()
     in
-    Keeper_agent_run_post_turn_memory.run
-      ~config
-      ~meta
-      ~generation
-      ~turn:manifest_keeper_turn_id
-      ~oas_turn_count:result.turns
-      ~response_text
-      ~actual_tools:actual_keeper_tool_names
-      ~librarian_messages
-      ~post_turn_t0
-      ~runtime_id:runtime_id_string
-      ~inference_telemetry:result.response.telemetry
-      ();
+    let saved_checkpoint =
+      match memory_submission, tool_results_snapshot, saved_checkpoint with
+      | Keeper_agent_run_post_turn_memory.Durable _, Some items, Some checkpoint ->
+        let working_context =
+          Keeper_tool_emission_hook.emit_snapshot_into_working_context
+            items
+            ~working_context:checkpoint.Agent_sdk.Checkpoint.working_context
+        in
+        Some
+          { checkpoint with
+            Agent_sdk.Checkpoint.working_context = working_context
+          }
+      | Keeper_agent_run_post_turn_memory.Not_durable, Some items, checkpoint ->
+        Keeper_tool_emission_hook.restore tool_emission_accumulator items;
+        checkpoint
+      | ( Keeper_agent_run_post_turn_memory.Durable _
+        | Keeper_agent_run_post_turn_memory.Not_durable )
+        , None
+        , checkpoint -> checkpoint
+      | Keeper_agent_run_post_turn_memory.Durable _, Some _, None -> None
+    in
+    let post_turn_memory_job =
+      match memory_submission with
+      | Keeper_agent_run_post_turn_memory.Durable durable_job ->
+        Some
+          Keeper_agent_result.
+            { durable_job
+            ; tool_results_to_restore =
+                Option.value tool_results_snapshot ~default:[]
+            }
+      | Keeper_agent_run_post_turn_memory.Not_durable -> None
+    in
     Ok
       { response_text
       ; model_used = model
@@ -514,6 +564,7 @@ let finalize
       ; run_validation = result.run_validation
       ; stop_reason = result.stop_reason
       ; inference_telemetry = result.response.telemetry
+      ; post_turn_memory_job
       ; tool_surface = acc.tool_surface
       ; pre_dispatch_compacted
       ; pre_dispatch_compaction_trigger

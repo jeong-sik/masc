@@ -125,6 +125,11 @@ val runtime_path_diagnostics :
 val restore_persisted_sessions : Mcp_server.server_state -> unit
 val reconcile_active_agents_gauge : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
+val initialize_memory_lane :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Mcp_server.server_state ->
+  (Keeper_memory_lane.init_report, string) result
 val bootstrap_prompt_state : Mcp_server.server_state -> unit
 
 (** {1 Startup Tasks} *)

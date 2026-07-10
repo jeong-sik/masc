@@ -408,6 +408,32 @@ let test_skill_candidate_store_writes_post_turn_memory_fact_candidates () =
   check int "unchanged candidate skipped" 0 (List.length second)
 ;;
 
+let test_skill_candidate_store_production_projection_rejects_malformed_fact () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let fact =
+    memory_fact ~category:M.Lesson ~trace_id:"trace-strict-skill" ~turn:15
+      ~tool_call_id:"tool-strict-skill"
+      "When production projection reads facts, malformed rows must be explicit"
+  in
+  write_facts_for_base_path ~base_path ~keeper_id:"keeper" [ fact ];
+  let keepers_dir =
+    Masc.Common.keepers_runtime_dir_of_base ~base_path
+  in
+  let facts_path =
+    Memory_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  Fs_compat.append_file facts_path "not-json\n";
+  match
+    Store.write_all_post_turn_candidates
+      ~base_path
+      ~keeper_id:"keeper"
+      ~fact_tail_limit:16
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "production projection silently accepted a malformed fact row"
+;;
+
 let noisy_index_event ~i =
   let suffix = Printf.sprintf "%03d" i in
   let noise_path name = Filename.concat "/tmp/masc-skill-candidate-noise" name in
@@ -760,6 +786,8 @@ let () =
             test_skill_candidate_store_keeps_same_id_distinct_sources;
           test_case "writes post-turn memory fact candidates" `Quick
             test_skill_candidate_store_writes_post_turn_memory_fact_candidates;
+          test_case "production projection rejects malformed fact rows" `Quick
+            test_skill_candidate_store_production_projection_rejects_malformed_fact;
           test_case "skips unchanged candidate with noisy index" `Quick
             test_skill_candidate_store_skips_unchanged_candidate_with_noisy_index;
           test_case "recovers partial candidate artifacts" `Quick

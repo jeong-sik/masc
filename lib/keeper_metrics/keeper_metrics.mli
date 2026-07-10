@@ -151,8 +151,10 @@ type t =
   | MemoryLaneUnitFailures
   | MemoryConsolidations
   | MemoryLaneSubmitted
-  | MemoryLaneRanInline
-  | MemoryLaneDropped
+  | MemoryLaneAdmissionRejected
+  | MemoryLaneReplayed
+  | MemoryLaneCompleted
+  | MemoryLaneFailed
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryBankCompactionFailures

@@ -516,6 +516,8 @@ let to_json (receipt : t) =
     ; ( "oas_dispatch_mode", string_opt_json receipt.oas_dispatch_mode )
     ; ( "oas_internal_runtime_disabled"
       , `Bool receipt.oas_internal_runtime_disabled )
+    ; ( "post_turn_memory_job_id"
+      , string_opt_json receipt.post_turn_memory_job_id )
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
@@ -590,6 +592,66 @@ let to_json (receipt : t) =
     ; ( "pre_dispatch_compaction_after_tokens"
       , Json_util.int_opt_to_json receipt.pre_dispatch_compaction_after_tokens )
     ]
+;;
+
+let committed_post_turn_memory_job_ids
+      (config : Workspace.config)
+      ~keeper_name
+      ~candidate_ids
+  =
+  match
+    List.find_opt
+      (fun id -> not (Keeper_memory_job_store.is_valid_job_id id))
+      candidate_ids
+  with
+  | Some id -> Error (Printf.sprintf "invalid candidate memory job id: %S" id)
+  | None ->
+    let store =
+      Keeper_types_support.keeper_execution_receipt_store config keeper_name
+    in
+    let parse found = function
+      | `Assoc fields ->
+        (match List.assoc_opt "schema" fields with
+         | Some (`String schema)
+           when String.equal schema Keeper_types_support.execution_receipt_schema ->
+           (match List.assoc_opt "keeper_name" fields with
+            | Some (`String row_keeper_name)
+              when String.equal row_keeper_name keeper_name ->
+              (match List.assoc_opt "post_turn_memory_job_id" fields with
+               | None | Some `Null -> Ok found
+               | Some (`String id)
+                 when Keeper_memory_job_store.is_valid_job_id id ->
+                 if List.mem id candidate_ids && not (List.mem id found)
+                 then Ok (id :: found)
+                 else Ok found
+               | Some (`String id) ->
+                 Error (Printf.sprintf "invalid post_turn_memory_job_id: %S" id)
+               | Some _ ->
+                 Error "post_turn_memory_job_id must be a string or null")
+            | Some (`String row_keeper_name) ->
+              Error
+                (Printf.sprintf
+                   "execution receipt keeper coordinate mismatch expected=%s actual=%s"
+                   keeper_name
+                   row_keeper_name)
+            | Some _ -> Error "execution receipt keeper_name must be a string"
+            | None -> Error "execution receipt keeper_name is missing")
+         | Some (`String schema) ->
+           Error (Printf.sprintf "unexpected execution receipt schema: %s" schema)
+         | Some _ -> Error "execution receipt schema must be a string"
+         | None -> Error "execution receipt schema is missing")
+      | _ -> Error "execution receipt row must be a JSON object"
+    in
+    (match Dated_jsonl.fold_all_strict store ~init:[] ~f:parse with
+     | Ok ids -> Ok (List.rev ids)
+     | Error error ->
+       let location =
+         match error.Dated_jsonl.line_number with
+         | None -> error.path
+         | Some line_number ->
+           Printf.sprintf "%s:%d" error.path line_number
+       in
+       Error (Printf.sprintf "%s: %s" location error.detail))
 ;;
 
 (* Operator broadcast hook (#fleet-stall 2026-04-26): operator_disposition
@@ -917,7 +979,7 @@ let append (config : Workspace.config) (receipt : t) =
     Keeper_types_support.keeper_execution_receipt_store config receipt.keeper_name
   in
   let receipt_json = to_json receipt in
-  Dated_jsonl.append store receipt_json;
+  Dated_jsonl.append_durable store receipt_json;
   (try
      Keeper_reaction_ledger.record_execution_receipt_reaction
        config
@@ -931,7 +993,6 @@ let append (config : Workspace.config) (receipt : t) =
        ~receipt_json
        ()
    with
-   | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      Log.Keeper.warn
        ~keeper_name:receipt.keeper_name
@@ -960,7 +1021,6 @@ let append (config : Workspace.config) (receipt : t) =
            reason_s
            (operator_broadcast_turn_key receipt.turn_count)
      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         (* fail-closed: log loud, do not silently swallow. The append itself
            has already persisted the receipt; the broadcast failure is its

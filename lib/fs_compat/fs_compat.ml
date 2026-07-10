@@ -198,6 +198,39 @@ let append_file_unix (path : string) (content : string) : unit =
         (fun () -> Stdlib.output_string oc content))
 ;;
 
+let append_file_durable_unix (path : string) (content : string) : unit =
+  let mu = get_append_path_mutex path in
+  Stdlib.Mutex.lock mu;
+  Stdlib.Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
+    (fun () ->
+      let fd =
+        Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
+      in
+      Stdlib.Fun.protect
+        ~finally:(fun () -> Unix.close fd)
+        (fun () ->
+          let rec write_all offset =
+            if offset < String.length content
+            then
+              let wrote =
+                Unix.write_substring
+                  fd
+                  content
+                  offset
+                  (String.length content - offset)
+              in
+              if wrote = 0
+              then raise (Sys_error (Printf.sprintf "%s: zero-byte append" path))
+              else write_all (offset + wrote)
+          in
+          write_all 0;
+          Unix.fsync fd);
+      match Atomic_write.fsync_directory (Filename.dirname path) with
+      | Ok () -> ()
+      | Error detail -> raise (Sys_error detail))
+;;
+
 let mkdir_p_unix (path : string) : unit =
   let rec ensure_dir (p : string) : unit =
     if String.equal p "" || String.equal p "." || String.equal p "/"
@@ -241,7 +274,20 @@ let save_file_atomic path content =
   Atomic_write.save_file_atomic ~save_file path content
 ;;
 
+let fsync_directory path = Atomic_write.fsync_directory path
+
 let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
+
+type atomic_orphan_recovery = Atomic_write.atomic_orphan_recovery =
+  | Deleted_zero_length
+  | Preserved_nonempty of string
+
+let recover_atomic_orphan ~path ~recovered_dir =
+  Atomic_write.recover_atomic_orphan
+    ~mkdir_p_unix
+    ~path
+    ~recovered_dir
+;;
 
 let cleanup_atomic_orphans ~base_path ?recovered_subdir () =
   Atomic_write.cleanup_atomic_orphans ~mkdir_p_unix ~base_path ?recovered_subdir ()
@@ -258,6 +304,13 @@ let append_file (path : string) (content : string) : unit =
     (fun fs ->
        let eio_path = Eio.Path.(fs / path) in
        Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
+;;
+
+let append_file_durable path content =
+  test_exec_home_guard ~op:"append_file_durable" path;
+  match Atomic.get global_fs with
+  | Some _ -> Eio_unix.run_in_systhread (fun () -> append_file_durable_unix path content)
+  | None -> append_file_durable_unix path content
 ;;
 
 (** Check if file exists.

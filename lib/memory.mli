@@ -88,7 +88,7 @@ val append_from_tool_results :
   Keeper_meta_contract.keeper_meta ->
   turn:int ->
   results:Yojson.Safe.t list ->
-  int
+  (int, string) result
 
 val compact_if_needed :
   ?summarizer:consolidation_summarizer ->

@@ -1,67 +1,103 @@
-(** Per-keeper memory execution lane (RFC-0257).
+(** Restart-durable per-keeper memory execution lane (RFC-0257).
 
-    Detaches post-turn memory work (deterministic write, librarian extraction,
-    compaction) from the keeper turn lane. Each keeper has one FIFO drain
-    daemon, so memory work is serialized within a keeper and runs independently
-    across keepers without keeping the server executor switch alive during
-    shutdown. This replaces the process-global [Eio.Semaphore.make 1] in
-    [Keeper_librarian_runtime] that previously serialized every keeper's
-    librarian work fleet-wide — the opposite of the lane-per-keeper model
-    (RFC-0225).
+    The lane keeps only worker ownership in process memory. Accepted work is a
+    typed {!Keeper_memory_job_store.job} persisted under its BasePath before
+    [submit] returns. Each keeper has one drain daemon; different keepers drain
+    independently. A process crash leaves pending/inflight jobs replayable and
+    never requires retaining an unbounded closure FIFO on the OCaml heap. *)
 
-    The unit submitted must be self-contained over immutable values: it reads
-    its Eio capabilities from [Eio_context] (the lane binds the executor switch
-    via [Eio_context.with_turn_switch] before running it), and must not close
-    over mutable turn-local state that a later turn can overwrite. The OCaml
-    type system cannot enforce this immutability precondition; callers are
-    responsible for passing a closure that only closes over immutable snapshots
-    (e.g. [Keeper_meta_contract.keeper_meta], [Workspace.config]) and never over
-    mutable turn-local references.
+type retryability =
+  | Retryable
+  | Terminal
 
-    Submissions append immutable work closures and return without waiting for
-    earlier memory work; the worker processes every accepted unit in turn
-    order. Submission outcomes are counted under [masc_keeper_memory_lane_*]
-    and per-keeper pending / in-flight gauges are exported.
+type execution_error =
+  { retryability : retryability
+  ; kind : string
+  ; message : string
+  ; detail : Yojson.Safe.t
+  }
 
-    The FIFO owns closures for the lifetime of the server executor switch; it
-    is not a restart-durable job store. Switch shutdown explicitly abandons,
-    counts, and logs unfinished units. *)
+type execute =
+  base_path:string ->
+  Keeper_memory_job_store.job ->
+  (Yojson.Safe.t, execution_error) result
 
-type outcome =
-  | Submitted
-      (** Accepted by the keeper's FIFO and owned by its drain daemon. *)
-  | Ran_inline
-      (** Executor switch not initialized; the unit ran synchronously in the
-          caller so no work is lost (tests, or startup before {!init}). A
-          raising unit is contained and emits a metric instead of escaping. *)
-  | Dropped
-      (** The executor switch could not own the unit (shutdown or worker-spawn
-          failure). Accepted work is never dropped merely because earlier
-          memory work is still running. Exceptional abandonment is counted and
-          logged. *)
+type worker_deferred_reason =
+  | Executor_not_initialized
+  | Executor_base_path_mismatch
+  | Executor_switch_released
+  | Hook_registration_failed
+  | Fork_failed
 
-val init : sw:Eio.Switch.t -> unit
-(** Record the long-lived switch that owns detached memory fibers. Call once at
-    server startup, after [Eio_context.set_switch]. Repeating [init] with the
-    same switch is idempotent; replacing it with another switch is an explicit
-    programming error. *)
+type worker_state =
+  | Started
+  | Already_running
+  | Not_needed
+  | Deferred of worker_deferred_reason
 
-val submit
-  :  base_path:string
-  -> keeper_name:string
-  -> (unit -> unit)
-  -> outcome
-(** [submit ~base_path ~keeper_name f] runs [f] on [keeper_name]'s memory lane.
-    When the executor switch is set, [f] is appended to that keeper's FIFO and
-    drained by one daemon. The caller does not wait for earlier work. When the
-    executor is not initialized, [f] runs inline and any exception is contained
-    and counted rather than escaping. Outcomes and per-keeper pending/in-flight
-    state are exported as metrics. *)
+type admission =
+  | Admitted of
+      { job_id : string
+      ; activation : Keeper_memory_job_store.activation
+      ; worker : worker_state
+      }
+  | Rejected of Keeper_memory_job_store.error
+
+type staging =
+  | Staged of
+      { job_id : string
+      ; durable : Keeper_memory_job_store.admission
+      }
+  | Stage_rejected of Keeper_memory_job_store.error
+
+type init_report =
+  { discovered_keepers : int
+  ; workers_started : int
+  ; workers_deferred : int
+  ; discovery_error : Keeper_memory_job_store.error option
+  ; keeper_discovery_errors : Keeper_memory_job_store.error list
+  }
+
+val init :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  base_path:string ->
+  execute:execute ->
+  init_report
+(** Install the one long-lived executor and start workers for every keeper with
+    durable backlog. Repeating with the same switch/BasePath/handler is
+    idempotent; replacing any of them is a programming error. A root discovery
+    failure is returned in [discovery_error]. Keeper-local malformed backlogs
+    are isolated in [keeper_discovery_errors], while healthy keepers still
+    start. Every error is logged, never hidden. *)
+
+val stage :
+  base_path:string ->
+  Keeper_memory_job_store.job ->
+  staging
+(** Durably admit a non-runnable awaiting-turn-commit job. *)
+
+val activate :
+  base_path:string -> Keeper_memory_job_store.job -> admission
+(** Activate a staged job only after the owning execution receipt committed,
+    then wake its Keeper lane. *)
+
+val abort :
+  base_path:string ->
+  Keeper_memory_job_store.job ->
+  (unit, Keeper_memory_job_store.error) result
+(** Remove a staged job after execution-receipt failure. *)
+
+val request_reconciliation :
+  base_path:string -> keeper_name:string -> unit
+(** Start or retain the self-retrying strict execution-receipt reconciliation
+    loop for one Keeper. Used when the caller cannot safely classify an
+    awaiting outbox as committed or aborted. Missing/mismatched executor
+    ownership is logged explicitly and the durable outbox remains untouched. *)
+
+val worker_deferred_reason_to_string : worker_deferred_reason -> string
 
 module For_testing : sig
   val reset : unit -> unit
-  (** Clear the lane registry and the executor switch. *)
-
-  val pending : base_path:string -> keeper_name:string -> int option
-  (** Current pending count for a keeper ([None] if the keeper has no entry). *)
+  val backlog_count : base_path:string -> keeper_name:string -> (int, Keeper_memory_job_store.error) result
 end

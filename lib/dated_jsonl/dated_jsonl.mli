@@ -29,6 +29,10 @@ val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)
 
+val append_durable : t -> Yojson.Safe.t -> unit
+(** Append one row and fsync the current day file before returning. Retention
+    and byte-budget cleanup run only after that durability boundary. *)
+
 val append_if_current_file_fits :
   t -> max_current_file_bytes:int -> Yojson.Safe.t -> bool
 (** Append [json] only when today's current [DD.jsonl] would remain at or
@@ -76,6 +80,20 @@ val iter_all : t -> (Yojson.Safe.t -> unit) -> unit
 (** [iter_all t f] calls [f] for every parseable JSONL entry in chronological
     order without loading a whole day-file into memory. Malformed rows are
     skipped, matching {!read_recent} and {!read_range}. *)
+
+type strict_read_error =
+  { path : string
+  ; line_number : int option
+  ; detail : string
+  }
+
+val fold_all_strict :
+  t ->
+  init:'acc ->
+  f:('acc -> Yojson.Safe.t -> ('acc, string) result) ->
+  ('acc, strict_read_error) result
+(** Fold every dated row without skipping malformed JSON, I/O failures, or
+    callback schema errors. The first failure carries its exact path and line. *)
 
 val iter_range : t -> since:string -> until:string -> (Yojson.Safe.t -> unit) -> unit
 (** Streaming variant of {!read_range}. Invalid dates iterate zero rows. *)

@@ -72,6 +72,7 @@ type t = {
   oas_turn_count : int option;
   oas_dispatch_mode : string option;
   oas_internal_runtime_disabled : bool;
+  post_turn_memory_job_id : string option;
   current_task_id : string option;
   goal_ids : string list;
   outcome : outcome_kind;

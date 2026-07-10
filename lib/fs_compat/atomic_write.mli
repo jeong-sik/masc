@@ -30,11 +30,28 @@ val save_file_atomic
   -> string
   -> (unit, string) Result.t
 
+val fsync_directory : string -> (unit, string) result
+(** Durably publish prior directory-entry changes. Unsupported-filesystem
+    [EINVAL]/[EOPNOTSUPP] is treated as success by the underlying portability
+    boundary; every other failure is returned explicitly. *)
+
 (** [true] iff [name] matches the [.atomic_*.tmp] shape produced
     by {!save_file_atomic}. Exposed so a periodic sweep can match
     the same filename pattern without re-deriving the prefix and
     suffix — #10205 finding 2. *)
 val is_atomic_orphan_name : string -> bool
+
+type atomic_orphan_recovery =
+  | Deleted_zero_length
+  | Preserved_nonempty of string
+
+val recover_atomic_orphan
+  :  mkdir_p_unix:(string -> unit)
+  -> path:string
+  -> recovered_dir:string
+  -> (atomic_orphan_recovery, string) result
+(** Reconcile one recognized atomic-write orphan. Zero-length files are
+    deleted; non-empty files are moved without overwrite for forensic review. *)
 
 (** #10130: boot-time sweep for [.atomic_*.tmp] orphans.
 
@@ -42,8 +59,8 @@ val is_atomic_orphan_name : string -> bool
     [recovered_subdir] and anything that isn't a directory).
     - Zero-byte orphans are deleted (they lost the rename race
       but never held data).
-    - Non-zero orphans are MOVED to
-      [<base_path>/<recovered_subdir>/<original-name>.<ts-ms>]
+    - Non-zero orphans are MOVED into a source-directory bucket under
+      [<base_path>/<recovered_subdir>]
       so operators can forensically inspect data-loss events
       instead of having them silently cleaned up.
 

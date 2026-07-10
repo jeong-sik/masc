@@ -29,9 +29,8 @@ let masc_tool_emission_enabled () =
   | _ -> false
 
 let push acc (json : Yojson.Safe.t) : unit =
-  Stdlib.Mutex.lock acc.mutex;
-  acc.items <- json :: acc.items;
-  Stdlib.Mutex.unlock acc.mutex;
+  Stdlib.Mutex.protect acc.mutex (fun () ->
+    acc.items <- json :: acc.items);
   (* Tier K6 — emit per-keeper push counter. Counter is incremented
      OUTSIDE the accumulator mutex so the metric write does not
      extend the critical section. The [keeper_name] field is read-
@@ -45,23 +44,24 @@ let push acc (json : Yojson.Safe.t) : unit =
       ()
 
 let drain acc : Yojson.Safe.t list =
-  Stdlib.Mutex.lock acc.mutex;
-  let items = List.rev acc.items in
-  acc.items <- [];
-  Stdlib.Mutex.unlock acc.mutex;
-  items
+  Stdlib.Mutex.protect acc.mutex (fun () ->
+    let items = List.rev acc.items in
+    acc.items <- [];
+    items)
+
+let take_all = drain
+
+let restore acc items =
+  Stdlib.Mutex.protect acc.mutex (fun () ->
+    (* [items] is oldest-first while [acc.items] is newest-first. Items captured
+       after [take_all] stay newer than the restored batch. *)
+    acc.items <- acc.items @ List.rev items)
 
 let snapshot acc : Yojson.Safe.t list =
-  Stdlib.Mutex.lock acc.mutex;
-  let items = List.rev acc.items in
-  Stdlib.Mutex.unlock acc.mutex;
-  items
+  Stdlib.Mutex.protect acc.mutex (fun () -> List.rev acc.items)
 
 let accumulator_size acc =
-  Stdlib.Mutex.lock acc.mutex;
-  let n = List.length acc.items in
-  Stdlib.Mutex.unlock acc.mutex;
-  n
+  Stdlib.Mutex.protect acc.mutex (fun () -> List.length acc.items)
 
 let try_parse (s : string) : Yojson.Safe.t option =
   try Some (Yojson.Safe.from_string s)
@@ -108,6 +108,15 @@ let drain_into_working_context acc ~(working_context : Yojson.Safe.t option)
     else
       Multimodal.Tool_emission.emit_from_tool_results
         ~emit:Multimodal.Keeper_emitter.emit ~working_context items
+
+let emit_snapshot_into_working_context items ~working_context =
+  match items with
+  | [] -> working_context
+  | _ ->
+    Multimodal.Tool_emission.emit_from_tool_results
+      ~emit:Multimodal.Keeper_emitter.emit
+      ~working_context
+      items
 
 let global_accumulator = create_accumulator ()
 

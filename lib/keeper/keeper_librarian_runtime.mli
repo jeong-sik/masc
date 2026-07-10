@@ -14,74 +14,37 @@ type complete_fn =
   (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
 
 val enabled : unit -> bool
-(** Opt-in gate controlled by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
+(** Default-on gate with [MASC_KEEPER_MEMORY_OS_LIBRARIAN] as the explicit kill
+    switch. *)
 
 val cadence_turns : unit -> int
 (** Turns between librarian extractions per keeper. Default 3, floored at 1,
     overridable with [MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS]. 1 restores
     per-turn extraction. *)
 
-val cadence_step : cadence:int -> counter:int -> int * bool
-(** Pure cadence decision. [(updated_counter, due)] for a keeper whose counter
-    (turns since last successful extraction) is [counter] under [cadence].
-    [counter < 0] is treated as fresh and is due immediately.
-    cadence<=1 is always due with the counter pinned at 0. When due, the updated
-    counter is set to [cadence] and stays there until [cadence_record_success] or
-    [cadence_record_attempt] resets it. Skipped work leaves the counter due;
-    completed non-success attempts may be recorded to wait for the next cadence
-    window. Exposed for testing the cadence logic without the per-keeper counter
-    table. *)
+type cadence_decision =
+  | Due
+  | Not_due of { turns_remaining : int }
 
-val cadence_step_keyed
-  :  cadence:int
-  -> current_trace:string
-  -> prior:(string * int) option
-  -> (string * int) * bool
-(** Pure keyed cadence decision. Given a keeper's [prior] stored
-    [(trace, counter)] and the [current_trace], returns the [(trace, counter)]
-    value to store and whether extraction is due now. A [prior] from a different
-    (rotated) trace, or [None], is treated as fresh — due immediately, not
-    inheriting the old trace's schedule. Exposed for testing the rollover
-    decision without the global table. *)
+val cadence_decision_for_keeper_turn :
+  cadence:int -> keeper_turn:int -> cadence_decision
+(** Pure, restart-stable cadence decision derived from the Keeper's durable
+    timeline turn id. Turn ids zero and one are the initial due state;
+    subsequent due turns are spaced exactly [cadence] turns apart. *)
 
-val cadence_due : keeper_id:string -> trace_id:string -> bool
-(** Advance the persistent cadence counter for [keeper_id] by one turn and
-    report whether extraction is due now. This is what [run_best_effort] gates
-    on. The counter is keyed by [keeper_id] and stores the active [trace_id]
-    alongside it, so a handoff rollover (a new [trace_id]) resets the cadence
-    cycle in place — bounding the table to one row per keeper. First call for an
-    unseen keeper, or the first call after a rollover, is due immediately.
+type librarian_admission_decision =
+  | Admission_disabled
+  | Admission_not_due of { turns_remaining : int }
+  | Admission_due
 
-    Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
-    focused pre-Eio tests keep a direct single-threaded path. *)
+val decide_librarian_admission :
+  keeper_turn:int -> librarian_admission_decision
 
-val cadence_record_success : keeper_id:string -> trace_id:string -> unit
-(** Record a successful structured extraction for [keeper_id] on [trace_id] so
-    the cadence counter resets and the next cycle can begin. Must only be called
-    after a due turn actually produced a structured episode; skipped, failed, or
-    unparseable provider attempts must not call this.
+val librarian_admission_decision_to_json :
+  librarian_admission_decision -> Yojson.Safe.t
 
-    Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
-    focused pre-Eio tests keep a direct single-threaded path. *)
-
-val cadence_record_attempt : keeper_id:string -> trace_id:string -> unit
-(** Record a completed non-success extraction attempt for [keeper_id] on
-    [trace_id] so transient provider failures and unparseable structured-output
-    failures do not immediately retry every keeper turn. This intentionally does
-    not mark the extraction as semantically successful. Skipped work such as a
-    busy provider slot must not call this, because no provider attempt happened.
-
-    Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
-    focused pre-Eio tests keep a direct single-threaded path. *)
-
-val cadence_counter_entries : unit -> int
-(** Number of live per-keeper cadence rows. Bounded by the number of keepers
-    that have run (one row each), independent of trace rotations — so it is the
-    leak-regression signal for the keeper-keyed cadence table and a memory-health
-    metric for the dashboard. Read-only.
-
-    Uses [Eio_guard.with_mutex_ro] so runtime fibers take a cooperative mutex
-    while focused pre-Eio tests keep a direct single-threaded path. *)
+val librarian_admission_decision_of_json :
+  Yojson.Safe.t -> (librarian_admission_decision, string) result
 
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The
@@ -101,6 +64,14 @@ val select_recent_messages
   :  max_messages:int
   -> Agent_sdk.Types.message list
   -> Agent_sdk.Types.message list
+
+val prompt_window_messages
+  :  Agent_sdk.Types.message list
+  -> Agent_sdk.Types.message list
+(** Snapshot exactly the bounded raw-message window that
+    {!messages_for_librarian} will consume. Durable memory jobs use this helper
+    so the cadence/window policy has one SSOT and job payloads do not duplicate
+    an entire unbounded checkpoint history. *)
 
 val messages_for_librarian
   :  Keeper_librarian.input
@@ -136,6 +107,7 @@ type extraction_error =
   | Provider_empty_response
   | Provider_unparseable_response of string
   | Memory_fact_upsert_failed of string
+  | Memory_episode_persistence_failed of string
 
 val extraction_error_to_string : extraction_error -> string
 
@@ -157,11 +129,6 @@ type attempt_outcome =
 type parse_retry_error =
   | Retry_exhausted_unparseable of unparseable_response
   | Retry_transport_failed of extraction_error
-
-val should_record_cadence_backoff_after_error : extraction_error -> bool
-(** Whether an extraction error represents enough completed work to defer the
-    next attempt until the next cadence window. Only completed provider-attempt
-    failures should defer cadence; local deterministic failures stay due. *)
 
 val run_with_parse_retries
   :  max_retries:int
@@ -210,8 +177,10 @@ val extract_with_provider_classified
     production calls cannot silently run without timeout enforcement. *)
 
 val extract_and_append_with_provider
-  :  ?complete:complete_fn
+  :  ?operation_id:string
+  -> ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?keepers_dir:string
   -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -221,8 +190,10 @@ val extract_and_append_with_provider
   -> (Keeper_memory_os_types.episode, string) result
 
 val extract_and_append_with_provider_classified
-  :  ?complete:complete_fn
+  :  ?operation_id:string
+  -> ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?keepers_dir:string
   -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -231,13 +202,66 @@ val extract_and_append_with_provider_classified
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, extraction_error) result
 
+val commit_staged_operation
+  :  keepers_dir:string
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keeper_id:string
+  -> operation_id:string
+  -> Keeper_memory_os_io.operation_episode
+  -> (unit, extraction_error) result
+(** Publish an already staged provider result without re-running enablement,
+    cadence, runtime resolution, or provider gates. *)
+
+type skip_reason =
+  | Librarian_disabled
+  | Cadence_not_due
+
+type run_error =
+  | Eio_context_unavailable
+  | Runtime_resolution_failed of string
+  | Provider_not_direct_completion
+  | Extraction_failed of extraction_error
+  | Unexpected_failure of string
+
+type run_outcome =
+  | Run_skipped of
+      { runtime_id : string
+      ; model_id : string option
+      ; reason : skip_reason
+      ; latency_ms : float
+      ; next_due_after_turns : int option
+      }
+  | Run_succeeded of
+      { runtime_id : string
+      ; model_id : string
+      ; episode : Keeper_memory_os_types.episode
+      ; provider_latency_ms : float
+      ; latency_ms : float
+      ; next_due_after_turns : int
+      }
+  | Run_failed of
+      { runtime_id : string
+      ; model_id : string option
+      ; error : run_error
+      ; latency_ms : float
+      ; next_due_after_turns : int
+      }
+
+val run_outcome_to_json : run_outcome -> Yojson.Safe.t
+val run_outcome_is_failure : run_outcome -> bool
+
 val run_best_effort
-  :  ?complete:complete_fn
+  :  ?operation_id:string
+  -> ?complete:complete_fn
   -> ?timeout_sec:float
+  -> keepers_dir:string
+  -> admission_decision:librarian_admission_decision
   -> runtime_id:string
   -> keeper_id:string
   -> Keeper_librarian.input
-  -> unit
-(** Run the opt-in post-turn librarian path.
+  -> run_outcome
+(** Run the opt-in post-turn librarian path and return its typed terminal
+    outcome.
 
-    Non-cancel failures are logged and counted, never raised. *)
+    Non-cancel failures are logged and counted, never raised or flattened into
+    a successful unit result. *)

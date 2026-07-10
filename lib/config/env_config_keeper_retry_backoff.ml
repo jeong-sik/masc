@@ -37,7 +37,12 @@ let transient_backoff_cap_sec () =
 let transient_backoff_sec (attempt : int) : float =
   let base = transient_backoff_base_sec () in
   let cap = transient_backoff_cap_sec () in
-  Float.min cap (base *. Float.of_int (1 lsl (attempt - 1)))
+  let rec grow remaining delay =
+    if remaining <= 0 || delay >= cap
+    then Float.min cap delay
+    else grow (remaining - 1) (Float.min cap (delay *. 2.0))
+  in
+  grow (max 0 (attempt - 1)) base
 ;;
 
 (** Productive retry-phase budget (seconds).  PR #13120: when a

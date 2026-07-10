@@ -24,6 +24,11 @@ type operator_disposition =
   ; reason : Keeper_execution_receipt.operator_disposition_reason
   }
 
+type post_turn_memory_job =
+  { durable_job : Keeper_memory_job_store.job
+  ; tool_results_to_restore : Yojson.Safe.t list
+  }
+
 let tool_call_detail_to_json (detail : tool_call_detail) =
   let route_evidence_field =
     match detail.route_evidence with
@@ -86,6 +91,7 @@ type run_result =
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
+  ; post_turn_memory_job : post_turn_memory_job option
   ; tool_surface : tool_surface_metrics
   ; pre_dispatch_compacted : bool
   ; pre_dispatch_compaction_trigger : string option

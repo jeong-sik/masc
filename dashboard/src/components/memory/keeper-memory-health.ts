@@ -1,8 +1,8 @@
 // KeeperMemoryHealth — per-keeper fact-store observability panel.
 //
 // Read-only diagnostic surface for Lab > 키퍼 메모리 상태.
-// Shows fact-store sizes, GC dry-run statistics, and the fleet-wide
-// librarian cadence counter so operators can monitor what the
+// Shows fact-store sizes, GC dry-run statistics, and the durable
+// librarian cadence clock so operators can monitor what the
 // disabled GC leaves on disk.
 
 import { html } from 'htm/preact'
@@ -172,9 +172,9 @@ export function KeeperMemoryHealth() {
               ${totalAlerts}
             </span>
           </div>
-          <div class="kmh-stat" data-stat-key="cadence-counter">
-            <span class="kmh-stat-label">케이던스 카운터</span>
-            <span class="kmh-stat-value">${data.cadence_counter_entries}</span>
+          <div class="kmh-stat" data-stat-key="cadence-clock">
+            <span class="kmh-stat-label">케이던스 기준</span>
+            <span class="kmh-stat-value">${data.cadence_clock}</span>
           </div>
           <div class="kmh-stat" data-stat-key="keeper-count">
             <span class="kmh-stat-label">키퍼 수</span>

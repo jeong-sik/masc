@@ -121,10 +121,10 @@ let test_uses_explicit_base_path_not_ambient_resolver () =
   let target_base = fresh_dir "masc-memory-health-target" in
   let ambient_base = fresh_dir "masc-memory-health-ambient" in
   let target_keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:target_base
+    Common.keepers_runtime_dir_of_base ~base_path:target_base
   in
   let ambient_keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:ambient_base
+    Common.keepers_runtime_dir_of_base ~base_path:ambient_base
   in
   Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir:target_keepers_dir
@@ -149,7 +149,7 @@ let test_reports_per_keeper_metric_values () =
   @@ fun _env ->
   let now = test_now in
   let base = fresh_dir "masc-memory-health-metrics" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir
     ~keeper_id:"solo"
@@ -179,10 +179,10 @@ let test_reports_per_keeper_metric_values () =
     "totals.facts_bytes positive"
     true
     (int_field "facts_bytes" (totals json) > 0);
-  Alcotest.(check bool)
-    "cadence_counter_entries non-negative"
-    true
-    (int_field "cadence_counter_entries" json >= 0);
+  Alcotest.(check string)
+    "cadence clock is the durable Keeper timeline"
+    "keeper_turn_id"
+    (string_field "cadence_clock" json);
   Alcotest.(check bool)
     "generated_at is present as wall-clock float"
     true
@@ -194,7 +194,7 @@ let test_dry_run_gc_reports_expired_and_duplicates () =
   @@ fun _env ->
   let now = test_now in
   let base = fresh_dir "masc-memory-health-gc" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir
     ~keeper_id:"gc"
@@ -238,7 +238,7 @@ let test_sorts_keepers_by_facts_bytes_desc () =
   @@ fun _env ->
   let now = test_now in
   let base = fresh_dir "masc-memory-health-sort" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id:"small" [ fact ~now "x" ];
   Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir
@@ -269,7 +269,7 @@ let test_skips_corrupt_jsonl_keeper () =
   @@ fun _env ->
   let now = test_now in
   let base = fresh_dir "masc-memory-health-corrupt" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir
     ~keeper_id:"good"

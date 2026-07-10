@@ -1,12 +1,17 @@
 (** Post-turn memory write series for [Keeper_agent_run.run_turn].
 
-    Extracts the four post-turn side-effect stages from Step 8 body
-    (deterministic write, episodic record, compaction, quality-metrics
-    JSONL append) into a single typed boundary so that the orchestrator
-    only sees [run ~config ~meta ...].
+    Extracts the durable post-turn side-effect stages from Step 8 body
+    (tool-result promotion, episodic record, draft-skill projection, and
+    compaction) into a typed job boundary. Quality-metrics JSONL append remains
+    synchronous because it targets the separate decision log.
 
-    Each sub-stage is best-effort: non-cancel exceptions are logged and
-    counted, never propagated.  [Eio.Cancel.Cancelled] is re-raised. *)
+    Each durable sub-stage has an explicit succeeded/skipped/failed outcome in
+    the terminal receipt. Non-cancel exceptions become failed stage evidence;
+    [Eio.Cancel.Cancelled] is re-raised so the inflight job can replay. *)
+
+type submission_outcome =
+  | Durable of Keeper_memory_job_store.job
+  | Not_durable
 
 val run :
   config:Workspace.config ->
@@ -16,13 +21,13 @@ val run :
   oas_turn_count:int ->
   response_text:string ->
   actual_tools:string list ->
-  librarian_messages:Agent_sdk.Types.message list ->
+  librarian_checkpoint:Agent_sdk.Checkpoint.t ->
+  tool_results_snapshot:Yojson.Safe.t list option ->
   post_turn_t0:float ->
   runtime_id:string ->
   inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
-  ?deliberation_execution:Keeper_deliberation.execution_result ->
   unit ->
-  unit
+  submission_outcome
 (** Run the full post-turn memory series.
 
     [post_turn_t0] is the timestamp (from [Time_compat.now ()]) taken
@@ -32,6 +37,9 @@ val run :
     [inference_telemetry] is [result.response.telemetry] from the OAS
     result; it is optional because some providers do not emit telemetry.
 
-    [deliberation_execution], when available, is persisted as advisory
-    delegation request artifacts on this post-turn memory lane rather than on
-    the decision-record append path. *)
+    The OAS checkpoint is reduced to the librarian's bounded message window
+    before durable admission; replay therefore uses the exact turn snapshot
+    without duplicating unbounded conversation/tool state. *)
+
+val execute_job : Keeper_memory_lane.execute
+(** Durable job handler installed once by server bootstrap. *)

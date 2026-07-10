@@ -38,11 +38,26 @@ val save_file : string -> string -> unit
     Returns [Error msg] on I/O failure instead of raising. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
+val fsync_directory : string -> (unit, string) result
+(** Durably publish directory-entry changes without hiding unsupported I/O
+    failures. *)
+
 (** [true] iff [name] matches the [.atomic_*.tmp] pattern produced
     by [Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp"] inside
     {!save_file_atomic}.  Exposed for tests and for a potential
     periodic sweep. *)
 val is_atomic_orphan_name : string -> bool
+
+type atomic_orphan_recovery =
+  | Deleted_zero_length
+  | Preserved_nonempty of string
+
+val recover_atomic_orphan
+  :  path:string
+  -> recovered_dir:string
+  -> (atomic_orphan_recovery, string) result
+(** Reconcile one recognized atomic-write orphan using the same policy as
+    {!cleanup_atomic_orphans}, while preserving failures as typed results. *)
 
 (** #10130: boot-time sweep for [.atomic_*.tmp] orphans left
     behind when [save_file_atomic]'s with-handler never ran (the
@@ -52,8 +67,8 @@ val is_atomic_orphan_name : string -> bool
     Scans [base_path] and its immediate subdirectories (skipping
     [recovered_subdir] and anything that isn't a directory).
     - Zero-byte orphans are deleted.
-    - Non-zero orphans are moved to
-      [<base_path>/<recovered_subdir>/<original-name>.<ts-ms>]
+    - Non-zero orphans are moved into a source-directory bucket under
+      [<base_path>/<recovered_subdir>]
       so operators can forensically inspect data-loss events
       instead of having them silently cleaned up.
 
@@ -68,6 +83,11 @@ val cleanup_atomic_orphans
 
 (** Append string to file. *)
 val append_file : string -> string -> unit
+
+(** Append the complete byte string under the per-path append lock and fsync the
+    file before returning. Runtime calls execute the blocking fd operations in
+    a system thread. *)
+val append_file_durable : string -> string -> unit
 
 (** Check if file exists. *)
 val file_exists : string -> bool

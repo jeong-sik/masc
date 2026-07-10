@@ -232,7 +232,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 
 export interface KeeperMemoryHealthResponse {
   generated_at: number
-  cadence_counter_entries: number
+  cadence_clock: 'keeper_turn_id'
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
     facts: number

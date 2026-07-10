@@ -102,12 +102,15 @@ let list_subdirs path =
     with Sys_error _ -> []
 
 (** Month directories matching [YYYY-MM] pattern, newest first. *)
+let is_month_dir_name d =
+  String.length d = 7
+  && d.[4] = '-'
+  && Option.is_some (int_of_string_opt (String.sub d 0 4))
+;;
+
 let list_month_dirs base_dir =
   list_subdirs base_dir
-  |> List.filter (fun d ->
-    String.length d = 7
-    && d.[4] = '-'
-    && Option.is_some (int_of_string_opt (String.sub d 0 4)))
+  |> List.filter is_month_dir_name
 
 (** Day files matching [DD.jsonl], newest first. *)
 let list_day_files month_path =
@@ -288,7 +291,7 @@ let prune_to_max_bytes_unlocked t ~max_bytes ~keep_path =
 
 (* ── Public API ───────────────────────────────────────── *)
 
-let append_unlocked ?max_current_file_bytes t json =
+let append_unlocked ?max_current_file_bytes ?(durable = false) t json =
   let mutex = Atomic.get t.mutex in
   (* [use_ro] serializes file appends without poisoning the shared mutex on
      IO failure, so retry paths can keep using the same registry entry.
@@ -310,27 +313,38 @@ let append_unlocked ?max_current_file_bytes t json =
     if not fits_current_file
     then false
     else begin
-      Jsonl_writer.append_jsonl ~path:dated.path json;
-      (match t.retention_days with
-       | None -> ()
-       | Some days ->
-         let today = dated.month_dir ^ "/" ^ dated.day_file in
-         if
-           not
-             (Option.equal String.equal
-                (Atomic.get t.last_prune_day)
-                (Some today))
-         then begin
-           (* See retention pruning is opportunistic after append durability. *)
-           ignore (prune_unlocked t ~days : int);
-           Atomic.set t.last_prune_day (Some today)
-         end);
-      (match t.max_bytes with
-       | None -> ()
-       | Some max_bytes ->
-         (* See byte-budget pruning is best-effort cleanup after append. *)
-         ignore
-           (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int));
+      if durable
+      then Jsonl_writer.append_jsonl_durable ~path:dated.path json
+      else Jsonl_writer.append_jsonl ~path:dated.path json;
+      let cleanup label f =
+        try f () with
+        | exn ->
+          Stdlib.Printf.eprintf
+            "[dated_jsonl] post-append %s failed store=%s: %s\n%!"
+            label
+            t.base_dir
+            (Printexc.to_string exn)
+      in
+      cleanup "retention" (fun () ->
+        match t.retention_days with
+        | None -> ()
+        | Some days ->
+          let today = dated.month_dir ^ "/" ^ dated.day_file in
+          if
+            not
+              (Option.equal String.equal
+                 (Atomic.get t.last_prune_day)
+                 (Some today))
+          then begin
+            ignore (prune_unlocked t ~days : int);
+            Atomic.set t.last_prune_day (Some today)
+          end);
+      cleanup "byte-budget" (fun () ->
+        match t.max_bytes with
+        | None -> ()
+        | Some max_bytes ->
+          ignore
+            (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int));
       true
     end)
 
@@ -338,6 +352,10 @@ let append_inner t json = ignore (append_unlocked t json : bool)
 
 let append t json =
   (Atomic.get append_guard) (fun () -> append_inner t json)
+
+let append_durable t json =
+  (Atomic.get append_guard) (fun () ->
+    ignore (append_unlocked ~durable:true t json : bool))
 
 let append_if_current_file_fits t ~max_current_file_bytes json =
   let appended = ref false in
@@ -431,6 +449,112 @@ let iter_all t f =
          (fun d -> iter_json_file (Filename.concat month_path d) f)
          days)
     months
+
+type strict_read_error =
+  { path : string
+  ; line_number : int option
+  ; detail : string
+  }
+
+let strict_read_error ?line_number path detail =
+  Error { path; line_number; detail }
+;;
+
+let strict_dated_paths base_dir =
+  match Unix.lstat base_dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn -> strict_read_error base_dir (Printexc.to_string exn)
+  | root_stat when root_stat.Unix.st_kind <> Unix.S_DIR ->
+    strict_read_error base_dir "dated JSONL root is not a real directory"
+  | _ ->
+    (try
+        let months =
+          Sys.readdir base_dir
+          |> Array.to_list
+          |> List.filter is_month_dir_name
+          |> List.sort String.compare
+        in
+        let rec collect_months paths = function
+          | [] -> Ok (List.rev paths)
+          | month :: rest ->
+            let month_path = Filename.concat base_dir month in
+            let month_stat = Unix.lstat month_path in
+            if month_stat.Unix.st_kind <> Unix.S_DIR
+            then
+              strict_read_error
+                month_path
+                "dated JSONL month is not a real directory"
+            else
+              let days =
+                Sys.readdir month_path
+                |> Array.to_list
+                |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+                |> List.sort String.compare
+              in
+              let rec collect_days month_paths = function
+                | [] ->
+                  let month_paths = List.rev month_paths in
+                  collect_months (List.rev_append month_paths paths) rest
+                | day :: remaining ->
+                  let path = Filename.concat month_path day in
+                  let stat = Unix.lstat path in
+                  if stat.Unix.st_kind <> Unix.S_REG
+                  then strict_read_error path "dated JSONL day is not a regular file"
+                  else collect_days (path :: month_paths) remaining
+              in
+              collect_days [] days
+        in
+        collect_months [] months
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> strict_read_error base_dir (Printexc.to_string exn))
+;;
+
+let fold_file_strict path ~init ~f =
+  try
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let rec loop line_number acc =
+           match input_line ic with
+           | line ->
+             if String.equal (String.trim line) ""
+             then loop (line_number + 1) acc
+             else
+               (match
+                  try Ok (Yojson.Safe.from_string line) with
+                  | Yojson.Json_error detail -> Error detail
+                with
+                | Error detail -> strict_read_error ~line_number path detail
+                | Ok json ->
+                  (match f acc json with
+                   | Ok next -> loop (line_number + 1) next
+                   | Error detail -> strict_read_error ~line_number path detail))
+           | exception End_of_file -> Ok acc
+         in
+         loop 1 init)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> strict_read_error path (Printexc.to_string exn)
+;;
+
+let fold_all_strict t ~init ~f =
+  let mutex = Atomic.get t.mutex in
+  Eio.Mutex.use_ro mutex (fun () ->
+    match strict_dated_paths t.base_dir with
+    | Error _ as error -> error
+    | Ok paths ->
+      let rec loop acc = function
+        | [] -> Ok acc
+        | path :: rest ->
+          (match fold_file_strict path ~init:acc ~f with
+           | Error _ as error -> error
+           | Ok next -> loop next rest)
+      in
+      loop init paths)
+;;
 
 let iter_range t ~since ~until f =
   match parse_date since, parse_date until with

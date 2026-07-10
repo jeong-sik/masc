@@ -46,7 +46,7 @@ function makeResponse(
 ): KeeperMemoryHealthResponse {
   return {
     generated_at: 1_700_000_000,
-    cadence_counter_entries: 3,
+    cadence_clock: 'keeper_turn_id',
     keepers,
     totals: {
       facts: 0,
@@ -278,7 +278,7 @@ describe('KeeperMemoryHealth', () => {
       const rows = container.querySelectorAll('tbody tr')
       expect(rows.length).toBe(2)
       expect(screen.getByText('beta')).not.toBeNull()
-      // The cadence counter total surfaces in the header strip.
+      expect(screen.getByText('keeper_turn_id')).not.toBeNull()
       expect(screen.getByText('키퍼 메모리 상태')).not.toBeNull()
     })
   })

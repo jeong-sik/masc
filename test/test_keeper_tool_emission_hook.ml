@@ -192,6 +192,30 @@ let test_snapshot_preserves_accumulator () =
         (H.accumulator_size acc));
   print_endline "  snapshot_preserves_accumulator: OK"
 
+let test_take_restore_preserves_capture_order () =
+  with_env_set "MASC_TOOL_EMISSION" "1" (fun () ->
+      let acc = H.create_accumulator () in
+      let hook = H.make_post_tool_use_hook acc in
+      let first = `Assoc [ "sequence", `Int 1 ] in
+      let second = `Assoc [ "sequence", `Int 2 ] in
+      let third = `Assoc [ "sequence", `Int 3 ] in
+      List.iter
+        (fun json ->
+           let _ : THooks.hook_decision =
+             hook (make_post_tool_use ~content:(Yojson.Safe.to_string json))
+           in
+           ())
+        [ first; second ];
+      let taken = H.take_all acc in
+      assert_eq_int ~label:"take_clears" 0 (H.accumulator_size acc);
+      let _ : THooks.hook_decision =
+        hook (make_post_tool_use ~content:(Yojson.Safe.to_string third))
+      in
+      H.restore acc taken;
+      let restored = H.take_all acc in
+      assert (List.equal Yojson.Safe.equal [ first; second; third ] restored));
+  print_endline "  take_restore_preserves_capture_order: OK"
+
 let test_drain_skips_untagged () =
   with_env_set "MASC_TOOL_EMISSION" "1" (fun () ->
       let acc = H.create_accumulator () in
@@ -358,6 +382,7 @@ let () =
   test_other_events_ignored ();
   test_drain_empties_accumulator ();
   test_snapshot_preserves_accumulator ();
+  test_take_restore_preserves_capture_order ();
   test_drain_skips_untagged ();
   test_install_chain_preserves_decision ();
   test_install_no_existing_hook ();
@@ -366,4 +391,4 @@ let () =
   test_registry_registered_names_sorted ();
   test_registry_drop_keeper_unknown_name_ok ();
   test_registry_drop_then_recreate_yields_fresh_accumulator ();
-  print_endline "=== Keeper_tool_emission_hook: 15/15 OK ==="
+  print_endline "=== Keeper_tool_emission_hook: 16/16 OK ==="

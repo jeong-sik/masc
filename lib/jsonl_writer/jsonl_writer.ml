@@ -24,6 +24,28 @@ let dated_path_now ~base_dir =
 let append_jsonl ~path json =
   Fs_compat.append_jsonl path json
 
+let ensure_parent_durable path =
+  let dir = Filename.dirname path in
+  let rec missing current acc =
+    if Fs_compat.file_exists current
+       || String.equal current (Filename.dirname current)
+    then acc
+    else missing (Filename.dirname current) (current :: acc)
+  in
+  let created = missing dir [] in
+  Fs_compat.mkdir_p dir;
+  List.iter
+    (fun created_dir ->
+       match Fs_compat.fsync_directory (Filename.dirname created_dir) with
+       | Ok () -> ()
+       | Error detail -> raise (Sys_error detail))
+    created
+;;
+
+let append_jsonl_durable ~path json =
+  ensure_parent_durable path;
+  Fs_compat.append_file_durable path (Yojson.Safe.to_string json ^ "\n")
+
 let append_dated_jsonl ~base_dir ~ts json =
   let dated = dated_path ~base_dir ~ts in
   append_jsonl ~path:dated.path json;

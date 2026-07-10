@@ -22,6 +22,15 @@ let fsync_path path =
         ())
 ;;
 
+let fsync_directory path =
+  try
+    fsync_path path;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "fsync directory %s: %s" path (Printexc.to_string exn))
+;;
+
 (* #10205 finding 2: keep the atomic-tmp filename shape in one place
    so the writer ([save_file_atomic]) and the orphan-sweep matcher
    ([is_atomic_orphan_name]) cannot drift independently. A
@@ -45,8 +54,7 @@ let save_file_atomic
     save_file tmp content;
     fsync_path tmp;
     Stdlib.Sys.rename tmp path;
-    (try fsync_path dir with
-     | Unix.Unix_error _ -> ());
+    fsync_path dir;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e ->
@@ -68,6 +76,44 @@ let is_atomic_orphan_name name =
   && String.ends_with ~suffix:atomic_tmp_suffix name
 ;;
 
+type atomic_orphan_recovery =
+  | Deleted_zero_length
+  | Preserved_nonempty of string
+
+let recover_atomic_orphan ~mkdir_p_unix ~path ~recovered_dir =
+  let name = Stdlib.Filename.basename path in
+  if not (is_atomic_orphan_name name)
+  then Error (Printf.sprintf "not an atomic-write orphan: %s" path)
+  else
+    try
+      let stat = Unix.lstat path in
+      if stat.Unix.st_kind <> Unix.S_REG
+      then Error (Printf.sprintf "atomic-write orphan is not a regular file: %s" path)
+      else if stat.Unix.st_size = 0
+      then (
+        Stdlib.Sys.remove path;
+        fsync_path (Stdlib.Filename.dirname path);
+        Ok Deleted_zero_length)
+      else (
+        mkdir_p_unix recovered_dir;
+        let destination = Stdlib.Filename.concat recovered_dir name in
+        if Stdlib.Sys.file_exists destination
+        then
+          Error
+            (Printf.sprintf
+               "atomic-write recovery destination already exists: %s"
+               destination)
+        else (
+          Stdlib.Sys.rename path destination;
+          fsync_path (Stdlib.Filename.dirname path);
+          if not (String.equal recovered_dir (Stdlib.Filename.dirname path))
+          then fsync_path recovered_dir;
+          Ok (Preserved_nonempty destination)))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printf.sprintf "%s: %s" path (Printexc.to_string exn))
+;;
+
 let cleanup_atomic_orphans
   ~(mkdir_p_unix : string -> unit)
   ~(base_path : string)
@@ -83,32 +129,40 @@ let cleanup_atomic_orphans
      [mkdir_p_unix] is recursive, idempotent (handles [EEXIST] precisely
      instead of swallowing every [Unix_error]), and correct when
      [base_path] itself does not exist yet (boot-time race). *)
-  let ensure_recovered_dir () =
-    try mkdir_p_unix recovered_dir with
-    | Unix.Unix_error _ -> ()
+  let report_error detail =
+    Stdlib.Printf.eprintf "[fs_compat] atomic orphan sweep: %s\n%!" detail
+  in
+  let ensure_recovered_dir path =
+    try
+      mkdir_p_unix path;
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Error
+        (Printf.sprintf
+           "cannot create recovered directory %s: %s"
+           path
+           (Printexc.to_string exn))
   in
   let handle_file dir name =
     let path = Stdlib.Filename.concat dir name in
-    match Unix.stat path with
-    | exception Unix.Unix_error _ -> ()
-    | stat when stat.Unix.st_size = 0 ->
-      (try
-         Stdlib.Sys.remove path;
-         incr deleted
+    let bucket =
+      if String.equal dir base_path then "root" else Stdlib.Filename.basename dir
+    in
+    let file_recovered_dir = Stdlib.Filename.concat recovered_dir bucket in
+    match ensure_recovered_dir file_recovered_dir with
+    | Error detail -> report_error detail
+    | Ok () ->
+      (match
+         recover_atomic_orphan
+           ~mkdir_p_unix
+           ~path
+           ~recovered_dir:file_recovered_dir
        with
-       | Sys_error _ -> ())
-    | _stat ->
-      ensure_recovered_dir ();
-      let target =
-        Stdlib.Filename.concat
-          recovered_dir
-          (Printf.sprintf "%s.%.0f" name (Unix.gettimeofday () *. 1000.0))
-      in
-      (try
-         Stdlib.Sys.rename path target;
-         incr preserved
-       with
-       | Sys_error _ | Unix.Unix_error _ -> ())
+       | Ok Deleted_zero_length -> incr deleted
+       | Ok (Preserved_nonempty _) -> incr preserved
+       | Error detail -> report_error detail)
   in
   let scan_dir dir entries =
     Array.iter
@@ -117,7 +171,9 @@ let cleanup_atomic_orphans
   in
   let read_dir_entries dir =
     match Stdlib.Sys.readdir dir with
-    | exception Sys_error _ -> [||]
+    | exception Sys_error detail ->
+      report_error (Printf.sprintf "cannot list %s: %s" dir detail);
+      [||]
     | entries -> entries
   in
   (* #10205 finding 4: previous body called [Stdlib.Sys.readdir base_path]
@@ -132,8 +188,15 @@ let cleanup_atomic_orphans
       then ()
       else (
         let sub = Stdlib.Filename.concat base_path name in
-        match Unix.stat sub with
-        | exception Unix.Unix_error _ -> ()
+        match Unix.lstat sub with
+        | exception Unix.Unix_error (error, operation, argument) ->
+          report_error
+            (Printf.sprintf
+               "cannot inspect %s: %s (%s %s)"
+               sub
+               (Unix.error_message error)
+               operation
+               argument)
         | stat when stat.Unix.st_kind = Unix.S_DIR ->
           scan_dir sub (read_dir_entries sub)
         | _ -> ()))

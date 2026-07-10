@@ -856,52 +856,95 @@ let append_memory_notes_from_tool_results
     (config : Workspace.config)
     (meta : keeper_meta)
     ~(turn : int)
-    ~(results : Yojson.Safe.t list) : int =
+    ~(results : Yojson.Safe.t list) : (int, string) result =
   let now_ts = Time_compat.now () in
   let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
-  let seen_artifacts : (string, unit) Hashtbl.t = Hashtbl.create 16 in
-  let written = ref 0 in
-  with_memory_bank_lock path (fun () ->
-    List.iter
-      (fun result ->
-         match
-           ( Multimodal.Tool_emission.extract_kind_from_result result,
-             Multimodal.Tool_emission.extract_id_from_result result )
-         with
-         | Some kind_tag, Some artifact_id
-           when String.trim artifact_id <> ""
-                && not (Hashtbl.mem seen_artifacts artifact_id) ->
-           Hashtbl.add seen_artifacts artifact_id ();
-           let kind = Multimodal.Artifact.kind_tag_to_string kind_tag in
-           let payload_preview = tool_result_payload_preview result in
-           let text = tool_result_memory_text ~kind ~artifact_id ~payload_preview in
-           if is_meaningful_memory_text text then begin
-             Keeper_types_support.append_jsonl_line path
-               (`Assoc
-                 [ ("ts", `String (now_iso ()))
-                 ; ("ts_unix", `Float now_ts)
-                 ; ("name", `String meta.name)
-                 ; ( "trace_id",
-                     `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-                 ; ("generation", `Int meta.runtime.generation)
-                 ; ("turn", `Int turn)
-                 ; ("kind", `String (memory_kind_to_wire Long_term))
-                 ; ("horizon", `String (memory_horizon_of_kind Long_term))
-                 ; ("source", `String (memory_row_source_to_string Tool_result))
-                 ; ("schema_version", `Int keeper_memory_schema_version)
-                 ; ( "priority",
-                     `Int (tuned_priority_for_candidate ~kind:Long_term ~text) )
-                 ; ("text", `String text)
-                 ; ("artifact_id", `String artifact_id)
-                 ; ("artifact_kind", `String kind)
-                 ; ("payload_preview", `String payload_preview)
-                 ; ("metadata", tool_result_metadata result)
-                 ]);
-             incr written
-           end
-         | _ -> ())
-      results);
-  !written
+  try
+    with_memory_bank_lock path (fun () ->
+      let seen_artifacts : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+      let existing_rows =
+        if not (Fs_compat.file_exists path)
+        then Ok []
+        else
+          match Safe_ops.read_file_safe path with
+          | Error detail ->
+            Error
+              (Printf.sprintf
+                 "failed to read memory bank before idempotent tool-result append: %s"
+                 detail)
+          | Ok content ->
+            let rows, invalid = parse_memory_bank_content content in
+            if invalid = 0
+            then Ok rows
+            else
+              Error
+                (Printf.sprintf
+                   "refusing idempotent tool-result append with %d malformed memory-bank row(s)"
+                   invalid)
+      in
+      match existing_rows with
+      | Error _ as error -> error
+      | Ok rows ->
+        List.iter
+          (fun (row : keeper_memory_row_raw) ->
+             match row.source, row.json with
+             | Tool_result, `Assoc fields ->
+               (match List.assoc_opt "artifact_id" fields with
+                | Some (`String artifact_id)
+                  when not (String.equal (String.trim artifact_id) "") ->
+                  Hashtbl.replace seen_artifacts artifact_id ()
+                | Some _ | None -> ())
+             | ( Progress_consolidation
+               | Cross_trace_recurrence
+               | Explicit_memory_write
+               | Voice_output
+               | Other _ ), _ -> ()
+             | Tool_result, _ -> ())
+          rows;
+        let written = ref 0 in
+        List.iter
+          (fun result ->
+             match
+               ( Multimodal.Tool_emission.extract_kind_from_result result,
+                 Multimodal.Tool_emission.extract_id_from_result result )
+             with
+             | Some kind_tag, Some artifact_id
+               when String.trim artifact_id <> ""
+                    && not (Hashtbl.mem seen_artifacts artifact_id) ->
+               Hashtbl.replace seen_artifacts artifact_id ();
+               let kind = Multimodal.Artifact.kind_tag_to_string kind_tag in
+               let payload_preview = tool_result_payload_preview result in
+               let text = tool_result_memory_text ~kind ~artifact_id ~payload_preview in
+               if is_meaningful_memory_text text then begin
+                 Keeper_types_support.append_jsonl_line path
+                   (`Assoc
+                     [ ("ts", `String (now_iso ()))
+                     ; ("ts_unix", `Float now_ts)
+                     ; ("name", `String meta.name)
+                     ; ( "trace_id",
+                         `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
+                     ; ("generation", `Int meta.runtime.generation)
+                     ; ("turn", `Int turn)
+                     ; ("kind", `String (memory_kind_to_wire Long_term))
+                     ; ("horizon", `String (memory_horizon_of_kind Long_term))
+                     ; ("source", `String (memory_row_source_to_string Tool_result))
+                     ; ("schema_version", `Int keeper_memory_schema_version)
+                     ; ( "priority",
+                         `Int (tuned_priority_for_candidate ~kind:Long_term ~text) )
+                     ; ("text", `String text)
+                     ; ("artifact_id", `String artifact_id)
+                     ; ("artifact_kind", `String kind)
+                     ; ("payload_preview", `String payload_preview)
+                     ; ("metadata", tool_result_metadata result)
+                     ]);
+                 incr written
+               end
+             | _ -> ())
+          results;
+        Ok !written)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
 
 let append_voice_output
     (config : Workspace.config)

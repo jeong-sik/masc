@@ -209,6 +209,7 @@ let run_result
   ; run_validation
   ; stop_reason
   ; inference_telemetry = None
+  ; post_turn_memory_job = None
   ; tool_surface
   ; pre_dispatch_compacted = false
   ; pre_dispatch_compaction_trigger = None

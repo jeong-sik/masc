@@ -231,7 +231,11 @@ val append_memory_notes_from_tool_results :
   Keeper_meta_contract.keeper_meta ->
   turn:int ->
   results:Yojson.Safe.t list ->
-  int
+  (int, string) result
+(** Idempotently promote tool-result artifacts. Existing [tool_result] rows are
+    keyed by their typed [artifact_id], so replaying a durable post-turn job
+    writes only artifacts that are not already in the bank. Read/write failures
+    are explicit. *)
 
 val append_voice_output :
   Workspace.config ->

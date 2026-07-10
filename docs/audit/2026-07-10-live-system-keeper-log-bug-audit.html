@@ -95,6 +95,17 @@
   <h3>13:11 KST latest recheck — recovery remains partial</h3>
   <p>현재 live executable과 commit은 여전히 <code>61a643565b</code>다. running/healthy Keeper는 9개, <code>base</code>는 recovering, <code>garnet</code>은 <code>phase=dead</code>와 <code>restart_count=5</code>를 유지한다. effective reaction capacity는 9, executable capacity는 10, target은 11이며, durable event queue는 pending 1(<code>verifier</code>, operator-paused)·inflight 5(<code>analyst</code> 3, <code>issue_king</code> 2)·ack 0·stale 6이다. chat waiting은 0이므로 현재 queue 지연을 dashboard chat starvation으로 단정하지 않는다. 이전 snapshot과 수치가 달라졌지만 source worktree 수정이 live에 반영된 것은 아니다.</p>
 
+  <h3>14:52 KST latest recheck — fleet recovered, one paused-lane stimulus remains</h3>
+  <table>
+    <tr><th>항목</th><th>현재 관찰값</th><th>판정</th></tr>
+    <tr><td>실행 파일</td><td>commit <code>61a643565b</code>, uptime 53,419초</td><td>아래 worktree/PR 수정은 여전히 live에 미반영</td></tr>
+    <tr><td>Keeper fleet</td><td>running/healthy/executable 10개, target 10개, failing/recovering 0개</td><td class="oktext">이전 reaction-capacity shortfall은 현재 snapshot에서 회복됨</td></tr>
+    <tr><td>Turn admission</td><td>autonomous in-flight 6개, chat waiting/rejected 0개</td><td><code>mad-improver</code> lane은 약 39분째 in-flight이므로 F-05 장기 turn 관찰은 계속 필요</td></tr>
+    <tr><td>Durable queue</td><td><code>verifier</code> <code>schedule_due</code> pending 1개, inflight 0개, age 약 20,095초</td><td><code>verifier</code>는 <code>operator_paused</code>; 직접 ack·삭제·resume하지 않음</td></tr>
+    <tr><td>Config/paths</td><td>parse error 0, unknown key 0, schema <code>ok</code>, startup degradation false; root <code>/Users/dancer/me/.masc</code></td><td class="oktext">현재 config/bootstrap 오류 증거 없음</td></tr>
+  </table>
+  <p><code>overall_status=degraded</code>의 현재 원인은 reaction ledger의 pending stimulus와 stale durable queue다. fleet recovery는 확인했지만, paused Keeper의 durable event가 5시간 이상 남은 상태와 source 수정 미배포 사실은 별개다.</p>
+
   <h2>확인된 버그 및 장애</h2>
 
   <section class="finding p0">
@@ -123,16 +134,17 @@
   </section>
 
   <section class="finding">
-    <h3>F-03 · P1 · OAS unknown stop reasons become fatal pipeline errors</h3>
+    <h3>F-03 · P1 · Documented MiMo terminal reason falls through to Unknown/fatal</h3>
     <div class="meta">Confidence: High · Owner boundary: OAS provider result semantics, consumed by MASC</div>
     <p>System Log에 <code>Unrecognized stop_reason from API: repetition_truncation</code>이 포함된 레코드가 100개 확인되었다(중복 전파 레코드 포함). 반복적으로 <code>rondo</code>, <code>ramarama</code>, <code>base</code>, <code>mad-improver</code> 등의 cycle이 수백 초 후 실패한다.</p>
     <ul>
-      <li>OAS의 <a href="../../../../../oas/.worktrees/oas-unknown-stop-terminal-20260710/lib/llm_provider/types.ml">stop_reason</a> 타입은 <code>Unknown of string</code>을 보존한다.</li>
-      <li>기존 OAS pipeline은 unknown을 <code>UnrecognizedStopReason</code> fatal error로 승격했다.</li>
-      <li>Provider/model이 바뀌는 시스템에서 raw string을 fatal로 취급하면 fallback catalog가 있어도 cycle이 종료된다.</li>
+      <li>Xiaomi MiMo 공식 <a href="https://mimo.mi.com/docs/en-US/api/chat/openai-api">OpenAI-compatible API</a>와 <a href="https://mimo.mi.com/docs/en-US/api/chat/anthropic-api">Anthropic-compatible API</a> 문서는 모두 <code>content_filter</code>와 <code>repetition_truncation</code>을 terminal reason으로 명시한다.</li>
+      <li>OAS의 기존 <a href="../../../../../oas/.worktrees/oas-unknown-stop-terminal-20260710/lib/llm_provider/types.ml">stop_reason</a> 타입과 OpenAI wire catalog에는 이 두 값이 없어서 <code>Unknown of string</code>으로 강등됐다.</li>
+      <li>임의의 미래 값에 대한 pipeline fail-closed 정책 자체는 맞지만, 공식 catalog 값까지 <code>Unknown</code>으로 분류한 것이 실제 결함이다.</li>
     </ul>
-    <p><strong>수정 경계:</strong> OAS에서 “provider가 보고한 terminal reason”과 “프로토콜이 깨진 malformed response”를 타입으로 분리한다. MASC는 <code>repetition_truncation</code> 같은 신규 terminal reason을 문자열 match하지 말고 OAS의 typed outcome을 받아 retry/fallback/terminal receipt를 결정해야 한다. OAS는 MASC를 몰라야 한다.</p>
-    <p><strong>현재 worktree 수정:</strong> OAS pipeline은 임의의 <code>Unknown _</code> provider terminal reason을 <code>on_stop</code>으로 보존해 <code>Complete</code> 결과를 반환하고, OAS의 <code>UnmatchedToolCalls</code> typed outcome이 tool block 없는 malformed tool-stop만 fail-closed로 거부한다. OAS worktree에서 pipeline 49개, stop-reason SSOT 4개, backend tool-call harness 11개, streaming coverage 42개 테스트가 성공했다. 이 수정은 MASC live binary에 아직 반영되지 않았다.</p>
+    <p><strong>[근거]</strong> Xiaomi MiMo 공식 API 문서 2개, 2026-07-10 14:52 KST 확인, 신뢰도 High. OpenAI 문서는 <code>choices.finish_reason</code>에, Anthropic 문서는 <code>stop_reason</code>에 두 값을 열거한다. <a href="https://ocaml.org/manual/5.4/typedecl.html">OCaml 5.4 variant type definitions</a>와 <a href="https://ocaml.org/manual/5.4/patterns.html">variant patterns</a>를 기준으로 public constructor와 모든 exhaustive match를 함께 갱신했다(2026-07-10 확인, 신뢰도 High).</p>
+    <p><strong>수정 경계:</strong> OAS에서 <code>ContentFilter</code>와 <code>RepetitionTruncation</code>을 first-class constructor로 추가하고 OpenAI/Anthropic wire를 하나의 stop-reason SSOT로 수렴한다. 임의의 <code>Unknown _</code>과 tool block 없는 <code>UnmatchedToolCalls</code>은 계속 fail-closed다. MASC는 raw string을 match하지 않고 OAS의 typed terminal outcome만 소비하며, OAS는 MASC를 모른다.</p>
+    <p><strong>현재 worktree 수정:</strong> OAS type/wire/pipeline 경계에 위 두 constructor를 추가했고, Responses incomplete parser는 자신의 wire enum에서 <code>content_filter</code>만 typed 처리한다. <code>repetition_truncation</code>은 <code>on_stop</code>을 거친 <code>Complete</code>로 보존하지만 임의 <code>Unknown</code>은 <code>UnrecognizedStopReason</code>으로 남는다. focused build와 Types 61개, stop-reason SSOT 4개, OpenAI streaming 40개, pipeline 50개 테스트가 성공했다. full suite/OCaml 5.4·5.5 proof는 PR CI authority로 남고, MASC live binary에는 아직 반영되지 않았다.</p>
   </section>
 
   <section class="finding">
@@ -140,6 +152,7 @@
     <div class="meta">Confidence: High for symptom; Medium for root cause · Owner boundary: MASC acceptance/fallback + provider outcome</div>
     <p><code>keeper cycle FAILED ... no_usable_progress</code>가 193건이다. 최대 발생 Keeper는 <code>mad-improver</code> 106건, <code>idealist</code> 51건, <code>issue_king</code> 18건이다. 예시에는 empty response + <code>max_tokens</code>, thinking-only + <code>end_turn</code>, 208~732초 지연이 포함된다.</p>
     <p>현재 accept guard와 degraded retry log는 존재하지만, 생산적인 tool/text 결과가 없다는 사실을 수백 초를 소비한 뒤에야 cycle 실패로 표면화한다. 이는 단순히 retry 횟수를 늘릴 문제가 아니다. OAS typed result, runtime slot phase, MASC lane receipt가 “진행 없음”을 독립적으로 관측하고, 장기 대기 lane을 다른 reactive 활동과 분리해야 한다.</p>
+    <p><strong>14:40 KST 추가 증거:</strong> <code>idealist</code>는 empty response + <code>max_tokens</code> 한 attempt에 255,051ms, cycle에 267,481ms를 썼다. <code>analyst</code>는 62,601자의 thinking-only + <code>end_turn</code> response에 1,593,268ms를 쓴 뒤 cycle이 1,601,119ms(약 26.7분)에 <code>no_usable_progress</code>로 실패했다. 임의 retry 수치가 아니라 phase receipt와 비동기 continuation이 필요한 증거다.</p>
   </section>
 
   <section class="finding">
@@ -149,6 +162,7 @@
     <p>12:27 KST 재확인에서도 <code>garnet</code>이 <code>idle_turn(11003s)</code> stale timeout 뒤 <code>restart_count=5</code>로 dead가 되었고, <code>idealist</code>는 recovering 상태였다. 8개 Keeper는 healthy였으므로 전체 fleet stop은 아니지만, target 10 대비 effective reaction capacity 8로 낮아진 live 후속 상태다.</p>
     <p>watchdog가 결국 lane을 회수하는 것은 안전장치이지 정상 동작이 아니다. 어떤 provider call, tool call, approval wait, stream read가 시간을 소비했는지 typed phase별로 보이고, 독립 lane이 한 stalled call 때문에 사용자 응답·connector ack를 잃지 않도록 cancellation과 continuation을 분리해야 한다.</p>
     <p><strong>소스 경계 추적:</strong> MASC의 전체 provider/tool 시도에는 누적 wall-clock watchdog을 걸지 않고, OAS의 <code>stream_idle_timeout_s</code>는 stream line 간 정적만 감지한다. OAS Agent-level execution-idle timeout은 지원되지만 MASC Keeper 경로는 active tool 실행과 idle accounting을 분리했다는 증거가 없어 전달하지 않는다. Supervisor의 <code>Idle_turn</code>은 turn observation이 없는 no-turn 정지, <code>Mid_turn_no_progress</code>는 opt-in이며 deliverable progress가 없는 in-turn 상태이고 active tool count는 제외한다. 따라서 현재 증거는 하나의 잘못된 timeout 숫자보다 provider/thinking·tool·approval·continuation phase의 관측/분리 공백을 가리킨다. arbitrary turn/timeout cutoff은 추가하지 않는다.</p>
+    <p><strong>14:52 KST 추가 증거:</strong> <code>sangsu</code>에는 <code>idle_turn(5488s)</code> stale timeout이 기록됐고, 현재 fleet은 10/10으로 회복했지만 <code>mad-improver</code> autonomous lane은 약 39분째 in-flight다. 한 Keeper의 장기 turn과 fleet 전체 liveness를 분리해 관측해야 한다.</p>
   </section>
 
   <section class="finding p2">
@@ -157,6 +171,7 @@
     <p><code>Transition 'release' from status 'cancelled' is not allowed</code>가 320건이다. task FSM은 <a href="../../lib/workspace/workspace_task_classify.ml">workspace_task_classify.ml</a>에서 <code>Cancelled</code>를 terminal로 정의하고 valid actions를 빈 목록으로 돌려준다. 따라서 이 오류는 task FSM 자체가 cancelled를 release로 바꾼다는 증거가 아니라, 호출자가 terminal rejection을 받은 뒤 같은 행동을 반복한다는 증거다.</p>
     <p>tool 결과를 일반 workflow rejection 문자열로만 반환하지 말고 terminal task state와 valid-next-actions를 typed result로 명시하여, Keeper가 다른 일을 하거나 operator에게 명확히 보고하도록 해야 한다. 문자열 기반 “몇 번 실패하면 중단” 휴리스틱은 추가하지 않는다.</p>
     <p><strong>현재 worktree 수정:</strong> task FSM의 <code>recoverable=false</code>를 OAS tool boundary까지 보존하도록 nested workflow payload를 typed merge하고, terminal rejection에는 <code>self_correction_required=false</code>와 <code>workflow_rejection_terminal=true</code>를 반환한다. next-tool 정보가 있으면 그 다음 valid action을 안내하고, 같은 <code>masc_transition</code> 재시도 문구는 만들지 않는다. <code>test_tool_result</code> 25개와 <code>test_keeper_tool_dispatch_runtime</code> 36개가 통과했다. 이 수정은 live binary에 아직 반영되지 않았으므로 live 320건 감소를 주장하지 않는다.</p>
+    <p><strong>14:43 KST live 재현:</strong> old binary의 <code>analyst</code>가 cancelled <code>task-1891</code>에 다시 <code>masc_transition release</code>를 호출했고, 응답 JSON에는 <code>self_correction_required=true</code> 키가 중복으로 들어간 채 retry 지시가 남았다. worktree 수정이 아직 live가 아니라는 직접 증거다.</p>
   </section>
 
   <h2>버그로 확정하지 않은 항목</h2>
@@ -183,8 +198,8 @@
   <div class="note">
     <p><strong>F-01 1차 수정 완료 (worktree only):</strong> unified prompt 경로가 structured world-state user message를 더 이상 token scanner/registry strip에 넣지 않고, system/continuity instruction surfaces만 검사하도록 분리했다. <a href="../../lib/keeper/keeper_unified_prompt.ml">keeper_unified_prompt.ml</a>와 <a href="../../test/test_keeper_unified_verification_surface.ml">verification-surface regression test</a>에 변경이 있다.</p>
     <p><strong>F-02 1차 수정 완료 (worktree only):</strong> <a href="../../lib/keeper/keeper_approval_queue.ml">keeper_approval_queue.ml</a>에 typed blocking/nonblocking queue boundary를 추가하고, <a href="../../lib/governance_pipeline.ml">governance_pipeline.ml</a>과 <a href="../../lib/keeper/keeper_agent_run.ml">keeper_agent_run.ml</a>의 일반 Keeper tool approval을 nonblocking 경로로 연결했다. 명시적 critical continuation gate의 blocking policy는 유지한다.</p>
-    <p><strong>F-03 1차 수정 완료 (OAS worktree only):</strong> <a href="../../../../../oas/.worktrees/oas-unknown-stop-terminal-20260710/lib/pipeline/pipeline.ml">OAS pipeline</a>이 provider가 새 terminal reason을 보고해도 fatal로 승격하지 않고 typed terminal result로 보존한다. tool block 없는 malformed tool-stop은 <code>UnmatchedToolCalls</code> constructor로 fail-closed 한다. <a href="../../../../../oas/.worktrees/oas-unknown-stop-terminal-20260710/test/test_pipeline.ml">OAS pipeline regression tests</a>를 포함해 49/4/11/42 테스트가 성공했다.</p>
-    <p>검증: approval queue 12개, HITL approval 51개, supervisor 87개, unified verification surface 18개, prompt token integrity 15개, F-06 tool-result 25개, Keeper tool-dispatch runtime 36개 테스트가 성공했다. 이 로컬 narrow build의 compiler는 <code>ocamlc 5.5.0</code>였고, OCaml 5.4 공식 manual을 설계 기준으로 삼았으므로 5.4 CI proof는 별도다. Dune full build/CI는 아직 실행하지 않았다. 테스트 실행 시 packaged model catalog 경고가 있었지만 worktree-only test fixture의 catalog discovery 경고이며, 라이브 health의 startup config warning과는 별개다.</p>
+    <p><strong>F-03 1차 수정 구현:</strong> <a href="../../../../../oas/.worktrees/oas-unknown-stop-terminal-20260710/lib/llm_provider/types.ml">OAS stop-reason SSOT</a>에 공식 <code>ContentFilter</code>/<code>RepetitionTruncation</code> constructor를 추가하고 <a href="../../../../../oas/.worktrees/oas-unknown-stop-terminal-20260710/lib/pipeline/pipeline.ml">pipeline</a>은 두 값만 typed terminal result로 보존한다. 임의 <code>Unknown</code>과 tool block 없는 <code>UnmatchedToolCalls</code>은 fail-closed를 유지한다. commit <code>7529dfbfd</code>를 <a href="https://github.com/jeong-sik/oas/pull/2506">OAS draft PR #2506</a>에 게시했다. focused build와 61/4/40/50 테스트가 성공했고 current-head full proof는 PR CI에서 확인한다.</p>
+    <p>검증: MASC approval queue 12개, HITL approval 51개, supervisor 87개, unified verification surface 18개, prompt token integrity 15개, F-06 tool-result 25개, Keeper tool-dispatch runtime 36개 테스트가 성공했다. OAS Types 61개, stop-reason SSOT 4개, OpenAI streaming 40개, pipeline 50개 테스트도 성공했다. 로컬 narrow build의 compiler는 <code>ocamlc 5.5.0</code>였고, OCaml 5.4 공식 manual을 설계 기준으로 삼았으므로 5.4 CI proof는 별도다. Dune full build/CI는 PR에서 수행한다. 테스트 실행 시 packaged model catalog 경고가 있었지만 worktree-only test fixture의 catalog discovery 경고이며, 라이브 health의 startup config warning과는 별개다.</p>
     <p>현재 live executable은 이 worktree 변경을 포함하지 않으므로 live warning 감소나 runtime 개선으로 해석하면 안 된다. 배포/재시작 및 CI green 전에는 remediation을 완료 상태로 주장하지 않는다.</p>
   </div>
 
@@ -192,9 +207,9 @@
   <pre>curl -fsS 'http://127.0.0.1:8935/health?full=1'
 rg 'keeper cycle FAILED.*no_usable_progress' /Users/dancer/me/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl
 rg 'pending HITL approval|Unrecognized stop_reason|stale_turn_timeout|release.*cancelled' /Users/dancer/me/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl</pre>
-  <p class="small">로그 line count는 동일 사건이 structured message/details/supervisor 전파로 여러 번 기록된 경우를 deduplicate하지 않는다. 사건 수를 주장할 때는 위의 패턴과 source flow를 함께 보아야 한다. Durable queue 파일은 read-only evidence로만 확인했으며 삭제·ack 조작은 하지 않았다. 12:35 및 13:11 KST current recheck health evidence는 build commit <code>61a643565b</code> 기준이며, 각 snapshot의 동적 상태 차이를 보존하기 위해 분리했다.</p>
+  <p class="small">로그 line count는 동일 사건이 structured message/details/supervisor 전파로 여러 번 기록된 경우를 deduplicate하지 않는다. 사건 수를 주장할 때는 위의 패턴과 source flow를 함께 보아야 한다. Durable queue 파일은 read-only evidence로만 확인했으며 삭제·ack·resume 조작은 하지 않았다. 12:35, 13:11, 14:52 KST recheck health evidence는 build commit <code>61a643565b</code> 기준이며, 각 snapshot의 동적 상태 차이를 보존하기 위해 분리했다.</p>
 
-  <footer>이 보고서는 MASC worktree <code>codex/live-log-audit-20260710</code>에서 작성되었다. Dune full build는 CI authority로 남기고, 소스 수정 후에는 touched target 중심의 narrow validation만 수행한다.</footer>
+  <footer>이 보고서와 MASC 수정은 <a href="https://github.com/jeong-sik/masc/pull/23923">MASC draft PR #23923</a>, OAS provider-catalog 수정은 <a href="https://github.com/jeong-sik/oas/pull/2506">OAS draft PR #2506</a>에서 추적한다. Dune full build는 CI authority로 남기고, 소스 수정 후에는 touched target 중심의 narrow validation만 수행한다.</footer>
 </main>
 </body>
 </html>

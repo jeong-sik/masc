@@ -167,27 +167,27 @@ let evidence_summary_payload
 let decide ~task_id ~task_opt ~notes ~handoff_context () =
   match (task_opt : Masc_domain.task option) with
   | Some t when Option.is_some t.contract ->
-    (* TASK-1887 HOTFIX: disable Gate 0 (evidence_is_substantive) until the
-       call site is wired (task-1889). PR #23666 added this branch and the
-       contract-aware reject path, but tool_task_handlers.ml still passes
-       `evidence_refs = []` for every task submission, so every keeper_task_done
-       hit the REJECT path and could not close. Always Pass here so the gate
-       does not block legitimate completions; the contract-required evidence
-       check will be re-enabled in the task-1889 follow-up once the call site
-       populates evidence_refs. *)
-    let _evidence_substantive =
-      evidence_is_substantive ~notes ~handoff_context t.contract
-    in
+    (* TASK-1882: re-enable Gate 0 contract-aware REJECT path. The task-1887
+       hotfix (commit 12f93c7f5) disabled this gate because tool_task_handlers.ml
+       passed `evidence_refs = []` for every task submission, creating a true
+       deadlock. The task-1889 follow-up wires the call site to populate
+       evidence_refs from the keeper's handoff_context, so we re-enable the
+       reject path: when a task has a contract but the submission has unsatisfied
+       required_evidence and no substantive notes or handoff evidence_refs,
+       return Reject with rule_id_evidence_incomplete. The hotfix is reverted
+       in the same change. *)
     let unsatisfied =
       unsatisfied_required_evidence ~notes ~handoff_context t.contract
     in
-    Log.Task.info
-      "cdal_evidence_gate PASS_DISABLED task=%s unsatisfied=%d notes_len=%d handoff_refs=%d (task-1887 hotfix; gate disabled until call site wired)"
-      task_id
-      (List.length unsatisfied)
-      (String.length (String.trim notes))
-      (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs);
-    Pass
+    if unsatisfied = [] && evidence_is_substantive ~notes ~handoff_context t.contract
+    then Pass
+    else
+      Reject
+        { reason = reason_evidence_incomplete ~required_evidence:unsatisfied
+        ; rule_id = rule_id_evidence_incomplete
+        ; hint = hint_evidence_incomplete
+        ; payload_json = evidence_summary_payload ~notes ~handoff_context
+        }
   | _ ->
     (* Analysis-only task bypass: a task with no contract has nothing to
        verify, so the gate must not block keeper_task_done. *)

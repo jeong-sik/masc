@@ -1166,6 +1166,8 @@ let add_routes ~sw ~clock router =
                  respond_json_value_with_cors request reqd json
              | Error (Gone _ as err) ->
                  respond_json_value_with_cors ~status:`Not_found request reqd (operator_error_json (approval_resolve_http_error_to_string err))
+             | Error (Unavailable _ as err) ->
+                 respond_json_value_with_cors ~status:`Service_unavailable request reqd (operator_error_json (approval_resolve_http_error_to_string err))
              | Error (Bad_request _ as err) ->
                  respond_json_value_with_cors ~status:`Bad_request request reqd (operator_error_json (approval_resolve_http_error_to_string err))
            with Yojson.Json_error msg ->

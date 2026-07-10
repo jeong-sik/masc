@@ -11,7 +11,7 @@
 \*       compact_memory_bank_if_needed entry point
 \*   lib/keeper/keeper_memory_bank.ml:296
 \*       memory_kind_caps_for_compaction (per-target cap derivation)
-\*   lib/keeper/keeper_memory_policy.ml:806
+\*   lib/keeper/keeper_memory_policy.ml:kind_caps
 \*       kind_caps () : (memory_kind * int) list — closed-variant SSOT
 \*
 \* ── Abstraction note ──

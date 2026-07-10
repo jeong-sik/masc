@@ -238,22 +238,12 @@ let test_blocking_durable_primitives () =
   (match Fs_compat.save_file_atomic_unix target "second" with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "blocking atomic overwrite failed: %s" detail);
-  let ic = open_in_bin target in
-  let content =
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> really_input_string ic (in_channel_length ic))
-  in
+  let content = Fs_compat.load_file_unix target in
   Alcotest.(check string) "blocking atomic content" "second" content;
   let append_target = Filename.concat nested "events.jsonl" in
   Fs_compat.append_file_durable append_target "one\n";
   Fs_compat.append_file_durable append_target "two\n";
-  let append_ic = open_in_bin append_target in
-  let appended =
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr append_ic)
-      (fun () -> really_input_string append_ic (in_channel_length append_ic))
-  in
+  let appended = Fs_compat.load_file_unix append_target in
   Alcotest.(check string) "durable append content" "one\ntwo\n" appended;
   let missing_parent_target =
     Filename.concat base_path "missing-parent/state.json"

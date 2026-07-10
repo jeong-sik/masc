@@ -25,6 +25,10 @@ val has_fs : unit -> bool
 (** Load entire file as string. *)
 val load_file : string -> string
 
+val load_file_unix : string -> string
+(** Blocking Unix implementation of {!load_file}. This is for transactions
+    already offloaded from an Eio domain. *)
+
 (** Load entire file as string, or [None] when the file is missing.
     Option-returning sibling of {!load_file} (which raises on a missing
     path). Other I/O failures of an existing file propagate as

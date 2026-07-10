@@ -57,7 +57,14 @@ runs:
       run: |
         {
           echo "DUNE_CACHE=enabled"
-          echo "DUNE_CACHE_STORAGE_MODE=copy"
+          # hardlink, not copy: `copy` stores every artifact twice (once in
+          # _build, once in ~/.cache/dune). On ubuntu-latest that duplication
+          # exhausted the runner disk — the Build and Test job of run
+          # 29090394322 (main, #23996) died with `collect2: ld returned 1` and
+          # `##[warning]You are running out of disk space. Free space left: 0 MB`
+          # while linking a test executable. Both paths live on `/`, so dune can
+          # hardlink cache entries into _build and keep a single copy on disk.
+          echo "DUNE_CACHE_STORAGE_MODE=hardlink"
         } >> "$GITHUB_ENV"
 
     - name: Bootstrap local opam switch (Linux)

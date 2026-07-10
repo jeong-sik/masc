@@ -616,7 +616,9 @@ let evidence_refs =
     | Masc_domain.Done_action
     | Masc_domain.Cancel
     | Masc_domain.Release
-    | Masc_domain.Submit_for_verification ->
+    | Masc_domain.Submit_for_verification
+    | Masc_domain.Operator_block
+    | Masc_domain.Operator_unblock ->
       None
   in
   let verifier_approve_gate_rejection =

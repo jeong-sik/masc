@@ -1044,8 +1044,9 @@ let librarian_runtime_id () = (runtime_state ()).librarian_runtime_id
    provider-native schema requests. *)
 let structured_judge_runtime_id () = (runtime_state ()).structured_judge_runtime_id
 
-(* [runtime].hitl_summary is the dedicated HITL approval-summary lane. [None]
-   keeps the structured-judge routing chain for backwards compatibility. *)
+(* [runtime].hitl_summary is the dedicated HITL approval-summary lane,
+   consumed by [Keeper_approval_queue.provider_config_for_summary]. [None]
+   falls through to the structured-judge routing chain. *)
 let hitl_summary_runtime_id () = (runtime_state ()).hitl_summary_runtime_id
 
 let runtime_id_for_structured_judge () =

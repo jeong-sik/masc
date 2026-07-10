@@ -36,6 +36,77 @@ let rec yield_until ?(attempts = 50) predicate =
     yield_until ~attempts:(attempts - 1) predicate)
 ;;
 
+let with_temp_runtime_toml content f =
+  let path = Filename.temp_file "runtime" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | _ -> ())
+    (fun () -> f path)
+;;
+
+let summary_routing_runtime_toml ~with_hitl_summary =
+  let base =
+    "[providers.local]\n\
+     display-name = \"Local\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://localhost:11434\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.judge]\n\
+     api-name = \"judge\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.summary]\n\
+     api-name = \"summary\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [local.judge]\n\
+     \n\
+     [local.summary]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n\
+     structured_judge = \"local.judge\"\n"
+  in
+  if with_hitl_summary then base ^ "hitl_summary = \"local.summary\"\n" else base
+;;
+
+(* Proves the HITL summary worker consumes the [runtime].hitl_summary lane
+   (not the structured-judge lane directly): the operator-selected lane must
+   win, and unset deployments must fall back to structured_judge. *)
+let test_provider_config_for_summary_routes_hitl_summary_lane () =
+  let load_and_resolve ~with_hitl_summary =
+    let text = summary_routing_runtime_toml ~with_hitl_summary in
+    with_temp_runtime_toml text (fun path ->
+      match Masc.Runtime.save_config_text ~runtime_config_path:path text with
+      | Error msg -> Alcotest.failf "runtime config should load: %s" msg
+      | Ok () -> AQ.provider_config_for_summary ~keeper_name:"no-such-keeper")
+  in
+  (match load_and_resolve ~with_hitl_summary:true with
+   | None -> Alcotest.fail "expected a provider config for the hitl_summary lane"
+   | Some cfg ->
+     Alcotest.(check string)
+       "hitl_summary lane model is used"
+       "summary"
+       cfg.Llm_provider.Provider_config.model_id);
+  match load_and_resolve ~with_hitl_summary:false with
+  | None -> Alcotest.fail "expected structured_judge fallback config"
+  | Some cfg ->
+    Alcotest.(check string)
+      "structured_judge fallback model is used"
+      "judge"
+      cfg.Llm_provider.Provider_config.model_id
+;;
+
 let pending_id_for_keeper ~keeper_name =
   match AQ.list_pending_json () with
   | `List entries ->
@@ -803,6 +874,10 @@ let () =
         ] )
     ; ( "summary"
       , [ Alcotest.test_case
+            "provider_config_for_summary routes the hitl_summary lane"
+            `Quick
+            test_provider_config_for_summary_routes_hitl_summary_lane
+        ; Alcotest.test_case
             "context summary survives include_input:true JSON paths"
             `Quick
             test_summary_survives_include_input_paths

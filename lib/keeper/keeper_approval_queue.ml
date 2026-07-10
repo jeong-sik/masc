@@ -760,12 +760,12 @@ let record_summary_failure ~id ~reason ~retryable =
 
 let provider_config_for_summary ~keeper_name =
   (* The HITL evaluator is a dedicated judge (mirroring the memory-os librarian's
-     dedicated runtime), not the requesting keeper's own model. Route to
-     [runtime].structured_judge so the evaluation is consistent and can target a
-     structured-output-capable model regardless of which keeper — e.g. a raw
-     OpenAI-compatible endpoint such as mimo, which OAS cannot wire native
-     structured output for — asked for approval. Fall back to the keeper's own
-     runtime only when the judge runtime cannot be resolved. *)
+     dedicated runtime), not the requesting keeper's own model. Route to the
+     [runtime].hitl_summary lane; [Runtime.runtime_id_for_hitl_summary] already
+     encodes the fallback chain hitl_summary -> structured_judge -> librarian ->
+     default, so an operator-selected HITL lane wins and unset deployments keep
+     the judge routing. Fall back to the keeper's own runtime only when the
+     resolved lane id has no runtime entry. *)
   let resolve id =
     Option.map (fun rt -> rt.Runtime.provider_config) (Runtime.get_runtime_by_id id)
   in
@@ -774,7 +774,7 @@ let provider_config_for_summary ~keeper_name =
     | Some id when String.trim id <> "" -> id
     | Some _ | None -> Keeper_config.default_runtime_id ()
   in
-  match resolve (Runtime.runtime_id_for_structured_judge ()) with
+  match resolve (Runtime.runtime_id_for_hitl_summary ()) with
   | Some _ as cfg -> cfg
   | None -> resolve (keeper_runtime_id ())
 ;;

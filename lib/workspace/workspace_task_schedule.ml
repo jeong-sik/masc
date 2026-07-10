@@ -60,7 +60,7 @@ let active_task_assignees_by_task_id backlog =
        match task.task_status with
        | Claimed { assignee; _ } | InProgress { assignee; _ } ->
          Hashtbl.replace table task.id assignee
-       | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ())
+       | Todo | AwaitingVerification _ | Done _ | Cancelled _ | OperatorBlocked _ -> ())
     backlog.tasks;
   table
 ;;

@@ -26,6 +26,10 @@ let done_status ~agent_name ~now ~notes =
 let cancelled_status ~agent_name ~now ~reason =
   Masc_domain.Cancelled
     { cancelled_by = agent_name; cancelled_at = now; reason = option_of_non_empty reason }
+
+let operator_blocked_status ~agent_name ~now ~reason =
+  Masc_domain.OperatorBlocked
+    { blocked_by = agent_name; blocked_at = now; reason = option_of_non_empty reason }
 ;;
 
 let verification_deadline ~now ~timeout_seconds =
@@ -79,6 +83,7 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
        [predecessor_task_id]. *)
     Held_terminal task.task_status
   | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
+  | Masc_domain.OperatorBlocked { blocked_by; _ } -> Held_by_other blocked_by
 ;;
 
 (* RFC-0262: a transition that overrides the assignee guard is permitted when
@@ -144,7 +149,7 @@ let decide
         ~set_current:task_id
         (Masc_domain.bind_verifier
            ~verifier:agent_name ~assignee ~submitted_at ~verification_id)
-  | Masc_domain.Claim, Masc_domain.Cancelled _ ->
+  | Masc_domain.Claim, Masc_domain.Cancelled | Masc_domain.OperatorBlocked _ ->
     Error Invalid_transition
   (* ── Start ────────────────────────────────────── *)
   | Masc_domain.Start, Masc_domain.Claimed { assignee; _ } ->
@@ -158,7 +163,7 @@ let decide
     if same_agent assignee then ok task_status else Error Invalid_transition
   | Masc_domain.Start, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Start
-    , (Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _) )
+    , (Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled | Masc_domain.OperatorBlocked _) )
     -> Error Invalid_transition
   (* ── Done ─────────────────────────────────────── *)
   | Masc_domain.Done_action, Masc_domain.Claimed { assignee; _ } ->
@@ -175,10 +180,10 @@ let decide
     else ok (done_status ~agent_name ~now ~notes)
   | Masc_domain.Done_action, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Done_action
-    , (Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _) )
+    , (Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled | Masc_domain.OperatorBlocked _) )
     -> Error Invalid_transition
   (* ── Cancel ───────────────────────────────────── *)
-  | Masc_domain.Cancel, Masc_domain.Cancelled _ -> ok task_status
+  | Masc_domain.Cancel, Masc_domain.Cancelled | Masc_domain.OperatorBlocked _ -> ok task_status
   | Masc_domain.Cancel, Masc_domain.Todo -> ok (cancelled_status ~agent_name ~now ~reason)
   | ( Masc_domain.Cancel
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }) ) ->
@@ -200,7 +205,7 @@ let decide
     else Error Invalid_transition
   | Masc_domain.Release, Masc_domain.Todo -> ok task_status
   | ( Masc_domain.Release
-    , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _)
+    , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled | Masc_domain.OperatorBlocked _)
     ) -> Error Invalid_transition
   (* ── Submit for verification ──────────────────── *)
   | Masc_domain.Submit_for_verification, Masc_domain.Todo ->
@@ -222,7 +227,7 @@ let decide
            })
     else Error Invalid_transition
   | ( Masc_domain.Submit_for_verification
-    , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _)
+    , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled | Masc_domain.OperatorBlocked _)
     ) ->
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
   (* ── Approve verification ─────────────────────── *)
@@ -250,7 +255,7 @@ let decide
       | Masc_domain.Claimed _
       | Masc_domain.InProgress _
       | Masc_domain.Done _
-      | Masc_domain.Cancelled _ ) ) ->
+      | Masc_domain.Cancelled | Masc_domain.OperatorBlocked _ ) ) ->
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
   (* ── Reject verification ──────────────────────── *)
   | Masc_domain.Reject_verification, Masc_domain.AwaitingVerification { assignee; _ } ->
@@ -264,7 +269,7 @@ let decide
       | Masc_domain.Claimed _
       | Masc_domain.InProgress _
       | Masc_domain.Done _
-      | Masc_domain.Cancelled _ ) ) ->
+      | Masc_domain.Cancelled | Masc_domain.OperatorBlocked _ ) ) ->
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
 ;;
 

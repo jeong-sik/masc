@@ -25,6 +25,7 @@ let run_keeper_cycle
       ~(meta : keeper_meta)
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
+      ~(wake : Keeper_registry.wake_reason)
       ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
       ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
       ?shared_context
@@ -402,7 +403,7 @@ let run_keeper_cycle
          so the composite observer can surface live in-turn states like
          [`Executing`]. The matching [mark_turn_finished] in the finally
          block clears the field, preventing stale state on idle keepers. *)
-               Keeper_registry.mark_turn_started ~base_path:config.base_path meta.name;
+               Keeper_registry.mark_turn_started ~base_path:config.base_path ~wake meta.name;
                let meta =
                  match Keeper_registry.get ~base_path:config.base_path meta.name with
                  | Some entry ->

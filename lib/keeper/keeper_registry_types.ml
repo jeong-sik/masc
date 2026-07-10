@@ -72,6 +72,16 @@ type livelock_attempt_state =
   ; first_started_at : float
   }
 
+(* #16 (38-bug campaign PR-5): see .mli for rationale. *)
+type wake_reason =
+  | Proactive_tick
+  | Woken of Keeper_event_queue.stimulus_payload list
+
+let wake_reason_label = function
+  | Proactive_tick -> "proactive_tick"
+  | Woken _ -> "woken"
+;;
+
 type turn_measurement =
   { tm_captured_at : float
   ; tm_context_actions : Keeper_state_machine.context_actions
@@ -132,6 +142,7 @@ and turn_observation =
   ; measurement : turn_measurement option
   ; measurement_bind_count : int
   ; selected_model : string option
+  ; wake : wake_reason
   }
 
 and completed_turn_observation =
@@ -140,6 +151,7 @@ and completed_turn_observation =
   ; ct_ended_at : float
   ; ct_decision_stage : packed_decision_stage
   ; ct_selected_model : string option
+  ; ct_wake : wake_reason
   }
 
 type done_resolve_result =

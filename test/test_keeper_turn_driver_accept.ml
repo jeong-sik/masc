@@ -2205,6 +2205,7 @@ let test_carrier_only_stream_does_not_suppress_mid_turn_no_progress () =
      ; measurement = None
      ; measurement_bind_count = 0
      ; selected_model = None
+     ; wake = Proactive_tick
      }
       : Masc.Keeper_registry_types.turn_observation)
   in

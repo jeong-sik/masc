@@ -416,6 +416,20 @@ type livelock_attempt_state = {
   first_started_at : float;
 }
 
+(** #16 (38-bug campaign PR-5): what caused a turn to run — an explicit
+    reactive stimulus batch or the proactive cadence tick (no stimulus).
+    Closed sum over {!Keeper_event_queue.stimulus_payload} so a new wake
+    source cannot silently collapse into a generic "running" label on the
+    operator dashboard. *)
+type wake_reason =
+  | Proactive_tick
+  | Woken of Keeper_event_queue.stimulus_payload list
+
+val wake_reason_label : wake_reason -> string
+(** Stable low-cardinality label: ["proactive_tick"] or ["woken"]. Use
+    {!Keeper_event_queue.payload_kind_label} on the carried stimuli (for
+    [Woken]) to surface the finer-grained wake cause. *)
+
 type turn_measurement = {
   tm_captured_at : float;
   tm_context_actions : Keeper_state_machine.context_actions;
@@ -544,6 +558,9 @@ and turn_observation = {
           The composite observer's [event_priority_monotone] invariant
           requires this to stay <= 1. *)
   selected_model : string option;
+  wake : wake_reason;
+      (** What triggered this turn (#16, 38-bug campaign PR-5). Installed
+          once by [mark_turn_started] and frozen for the turn's lifetime. *)
 }
 
 and completed_turn_observation = {
@@ -552,6 +569,10 @@ and completed_turn_observation = {
   ct_ended_at : float;
   ct_decision_stage : packed_decision_stage;
   ct_selected_model : string option;
+  ct_wake : wake_reason;
+      (** Frozen copy of [turn_observation.wake] (#16, 38-bug campaign
+          PR-5), so the "what just finished" surface can show why the
+          last turn ran, not only the live one. *)
 }
 
 type done_resolve_result =

@@ -34,7 +34,10 @@ permissions:
   pull-requests: read
 
 # Rapid label/draft transitions fire one run per event; only the newest
-# verdict matters, so collapse the backlog per PR instead of queueing it.
+# live-state verdict matters, so collapse the backlog per PR instead of
+# queueing it. GitHub does not guarantee concurrency-run ordering; every
+# surviving run therefore reads the current PR state from the API rather than
+# trusting the event snapshot that happened to dispatch it.
 concurrency:
   group: merge-guard-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -47,28 +50,52 @@ jobs:
       - name: Fail on live blocker labels or draft state
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
+          REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          # Event snapshot, logged for forensics only — the verdict below
-          # never uses it.
-          EVENT_DRAFT: ${{ github.event.pull_request.draft }}
-          EVENT_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BLOCKER_LABELS_JSON: '["status:do-not-merge","p0","p1"]'
         run: |
           set -euo pipefail
-          echo "event snapshot: draft=${EVENT_DRAFT} labels=[${EVENT_LABELS}]"
-          live="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" \
-            --jq '{draft: .draft, labels: [.labels[].name]}')"
-          echo "live state: ${live}"
-          draft="$(jq -r '.draft' <<<"${live}")"
-          blockers="$(jq -r '.labels[] | select(. == "status:do-not-merge" or . == "p0" or . == "p1")' <<<"${live}")"
+
+          if ! pr_json="$(
+            gh api \
+              --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${REPOSITORY}/pulls/${PR_NUMBER}"
+          )"; then
+            echo "::error title=Merge guard unavailable::failed to read live PR state"
+            exit 1
+          fi
+
+          if ! jq -e '
+            (.draft | type == "boolean")
+            and (.labels | type == "array")
+            and all(.labels[]; (.name | type == "string"))
+          ' <<< "${pr_json}" >/dev/null; then
+            echo "::error title=Merge guard unavailable::live PR state has an unexpected shape"
+            exit 1
+          fi
+
+          if ! blocked_labels="$(
+            jq -c --argjson blockers "${BLOCKER_LABELS_JSON}" '
+              [.labels[].name as $label
+               | select($blockers | index($label))
+               | $label]
+            ' <<< "${pr_json}"
+          )"; then
+            echo "::error title=Merge guard unavailable::failed to evaluate blocker labels"
+            exit 1
+          fi
+
           blocked=0
-          if [[ -n "${blockers}" ]]; then
+          if [[ "$(jq 'length' <<< "${blocked_labels}")" -gt 0 ]]; then
+            blocked=1
             while IFS= read -r label; do
               echo "::error title=Merge blocked::blocker label present: ${label}"
-            done <<<"${blockers}"
-            blocked=1
+            done < <(jq -r '.[]' <<< "${blocked_labels}")
           fi
-          if [[ "${draft}" == "true" ]]; then
+
+          if [[ "$(jq -r '.draft' <<< "${pr_json}")" == "true" ]]; then
             echo "::error title=Merge blocked::pull request is a draft"
             blocked=1
           fi

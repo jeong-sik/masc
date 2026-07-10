@@ -3,6 +3,18 @@ module AQ = Masc.Keeper_approval_queue
 
 open Repo_manager_types
 
+(* #23956 made nonblocking HITL resolution fail closed when no delivery
+   hook is installed (the durable-lane commit is the acknowledgment
+   point). It installed this no-op hook in the other approval-queue test
+   binaries but missed this one, leaving main's quick suite red with
+   "approval resolution delivery hook is not installed" on every resolve
+   in the repo advisory access group. Mirrors test_hitl_approval.ml. *)
+let () =
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      Ok (fun () -> ()))
+
 let contains_substring s needle =
   let s_len = String.length s in
   let n_len = String.length needle in

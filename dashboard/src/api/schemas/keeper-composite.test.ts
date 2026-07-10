@@ -390,25 +390,19 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(JSON.stringify(result.secret_projection)).not.toContain('ghs_')
   })
 
-  it('parses snapshot with measurement auto_rules', () => {
+  it('parses snapshot with measurement context actions', () => {
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,
       measurement: {
         captured: true,
-        auto_rules: {
-          reflect: true,
-          plan: false,
+        context_actions: {
           compact: true,
           handoff: false,
-          guardrail_stop: false,
-          guardrail_reason: null,
-          goal_drift: 0.1,
         },
       },
     })
-    expect(result.measurement.auto_rules).toBeDefined()
-    expect(result.measurement.auto_rules!.reflect).toBe(true)
-    expect(result.measurement.auto_rules!.goal_drift).toBe(0.1)
+    expect(result.measurement.context_actions).toBeDefined()
+    expect(result.measurement.context_actions!.compact).toBe(true)
   })
 
   it('parses collapsed_from when Stable hides a raw keeper phase', () => {

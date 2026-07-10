@@ -55,19 +55,14 @@ const KeeperCompositeCompactionStageSchema = string()
 // `lib/keeper/keeper_failure_circuit_breaker.mli`.
 const KeeperCompositeCircuitBreakerStateSchema = string()
 
-const KeeperCompositeAutoRulesSchema = object({
-  reflect: boolean(),
-  plan: boolean(),
+const KeeperCompositeContextActionsSchema = object({
   compact: boolean(),
   handoff: boolean(),
-  guardrail_stop: boolean(),
-  guardrail_reason: nullable(string()),
-  goal_drift: number(),
 })
 
 const KeeperCompositeMeasurementSchema = object({
   captured: boolean(),
-  auto_rules: optional(KeeperCompositeAutoRulesSchema),
+  context_actions: optional(KeeperCompositeContextActionsSchema),
 })
 
 const KeeperCompositeInvariantsSchema = object({
@@ -104,7 +99,6 @@ const KeeperPhaseDiagnosisSchema = object({
     stop_requested: boolean(),
     restart_budget_remaining: boolean(),
     backoff_elapsed: boolean(),
-    guardrail_triggered: boolean(),
     drain_complete: boolean(),
     context_overflow: boolean(),
     compact_retry_exhausted: boolean(),

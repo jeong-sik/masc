@@ -137,17 +137,14 @@ let handle_keeper_list ctx args : tool_result =
               in
               empty, note
           in
-            let continuity_reflection_hold_s =
+            let compaction_cooldown_remaining_s =
               let cooldown = Float.of_int m.compaction.cooldown_sec in
-              let last_reflection_ts =
-                max m.runtime.last_continuity_update_ts m.runtime.proactive_rt.last_ts
-              in
               if cooldown <= 0.0 then
                 0.0
-              else if last_reflection_ts <= 0.0 then
-                cooldown
+              else if m.runtime.compaction_rt.last_ts <= 0.0 then
+                0.0
               else
-                let elapsed = now_ts -. last_reflection_ts in
+                let elapsed = now_ts -. m.runtime.compaction_rt.last_ts in
                 max 0.0 (cooldown -. elapsed)
           in
           let context_json =
@@ -270,13 +267,8 @@ let handle_keeper_list ctx args : tool_result =
             ]
             @ runtime_blocker_fields
             @ attention_fields @ [
-              ("continuity_summary",
-                if String.trim m.continuity_summary = ""
-                then `Null
-                else `String m.continuity_summary);
-              ("continuity_compaction_cooldown_sec", `Int m.compaction.cooldown_sec);
-              ("continuity_reflection_hold_s", `Float continuity_reflection_hold_s);
-              ("last_continuity_update_ts", `Float m.runtime.last_continuity_update_ts);
+              ("compaction_cooldown_sec", `Int m.compaction.cooldown_sec);
+              ("compaction_cooldown_remaining_s", `Float compaction_cooldown_remaining_s);
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
               ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);

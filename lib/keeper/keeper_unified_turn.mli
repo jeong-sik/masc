@@ -206,7 +206,7 @@ val run_keeper_cycle
   -> ?turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t
-  -> ?hitl_delivery_channel:Keeper_continuation_channel.t
+  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> unit
   -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
 

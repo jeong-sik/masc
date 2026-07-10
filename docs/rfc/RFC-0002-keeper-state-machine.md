@@ -98,7 +98,6 @@ type conditions = {
   stop_requested : bool;
   restart_budget_remaining : bool;
   backoff_elapsed : bool;
-  guardrail_triggered : bool;
   drain_complete : bool;
 }
 ```

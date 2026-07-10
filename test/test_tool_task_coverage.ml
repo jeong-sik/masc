@@ -599,16 +599,25 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
    [Workspace_metric_hooks.install] — and pins that an empty evidence_refs
    completion is rejected with L1's canonical wording. *)
 let () = test "handle_done_rejects_empty_evidence_refs" (fun () ->
+  let task_title = "Empty evidence refs task" in
+  let completion_contract =
+    Workspace_task_classify.default_completion_contract_text
+      ~title:task_title
+      ~description:""
+  in
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-    (`Assoc [("title", `String "Empty evidence refs task")]) in
+    (`Assoc [("title", `String task_title)]) in
   let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [("task_id", `String "task-001")]) in
   with_task_completion_gate_decide real_task_completion_gate (fun () ->
     let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [
         ("task_id", `String "task-001");
-        ("notes", `String "Task scope satisfied: long enough notes to avoid the length gate, but evidence_refs is empty.");
+        ( "notes"
+        , `String
+            (completion_contract
+             ^ ". The notes satisfy the advisory contract so the test reaches the L1 evidence gate.") );
         ("evidence_refs", `List [])
       ]) in
     assert (not (Tool_result.is_success result));

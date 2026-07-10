@@ -88,8 +88,6 @@ type conditions = {
   (** [restart_count < max_restarts] *)
   backoff_elapsed : bool;
   (** [now - last_restart_ts >= backoff_delay(restart_count)] *)
-  guardrail_triggered : bool;
-  (** [auto_rules.guardrail_stop = true] *)
   drain_complete : bool;
   (** Current turn finished, no pending work *)
   context_overflow : bool;
@@ -123,14 +121,9 @@ val default_conditions : conditions
 (** {1 Events (Det/NonDet Boundary Output)} *)
 
 (** Auto-rule evaluation summary, captured at the boundary. *)
-type auto_rule_summary = {
-  reflect : bool;
-  plan : bool;
+type context_actions = {
   compact : bool;
   handoff : bool;
-  guardrail_stop : bool;
-  guardrail_reason : string option;
-  goal_drift : float;
 }
 
 (** Typed events that trigger condition re-evaluation.
@@ -174,7 +167,7 @@ type event =
       context_ratio : float;
       message_count : int;
       token_count : int;
-      auto_rules : auto_rule_summary;
+      context_actions : context_actions;
     }
   | Compaction_started
     (** Emit only through the registry lifecycle origin guard. See the
@@ -205,7 +198,6 @@ type event =
   | Restart_budget_exhausted
   | Credential_archived
   | Zombie_timeout
-  | Guardrail_stop of { reason : string }
   | Terminal_failure_detected of { reason : string }
     (** Permanent structural error (provider adapter failure, unresumable
         session conflict, etc). Latches [terminal_failure_latched] and
@@ -310,14 +302,13 @@ val transition_error_to_string : transition_error -> string
     4.  Restarting (~fiber_alive + budget + backoff_elapsed)
     5.  Crashed (~fiber_alive + budget remaining)
     6.  Draining (stop_requested) -- in-progress stop
-    7.  Failing (guardrail_triggered)
-    8.  Paused (operator_paused OR context_overflow + compact_retry_exhausted)
-    9.  HandingOff (handoff_active)
-    10. Compacting (compaction_active)
-    11. Overflowed (context_overflow) -- transient, auto-compact pending
-    12. Failing (~heartbeat_healthy OR ~turn_healthy)
-    13. Running (fiber_alive)
-    14. Offline (default fallback for inconsistent zero-state)
+    7.  Paused (operator_paused OR context_overflow + compact_retry_exhausted)
+    8.  HandingOff (handoff_active)
+    9.  Compacting (compaction_active)
+    10. Overflowed (context_overflow) -- transient, auto-compact pending
+    11. Failing (~heartbeat_healthy OR ~turn_healthy)
+    12. Running (fiber_alive)
+    13. Offline (default fallback for inconsistent zero-state)
 
     Drift note: prior to this revision the docstring listed Dead as
     priority 1; the actual implementation has always checked Stopped

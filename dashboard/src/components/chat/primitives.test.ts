@@ -2317,18 +2317,25 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
     const badges = [...container.querySelectorAll('[data-chat-trace-provenance]')]
       .map(node => node.getAttribute('data-chat-trace-provenance'))
-    expect(badges).toContain('OAS #3')
-    expect(badges).toContain('OAS #4')
+    expect(badges).toContain('thinking_delta')
+    expect(badges).toContain('tool_call_id')
     expect(badges).toContain('reply')
 
+    // Bug #11: the visible label stays the stable channel name; the stream
+    // content-block index is provenance detail carried by the hover title and
+    // the data attribute, never the label.
     const think = container.querySelector('[data-chat-trace-step="think"]') as HTMLElement
-    expect(think.getAttribute('data-chat-trace-provenance')).toBe('OAS #3')
+    expect(think.getAttribute('data-chat-trace-provenance')).toBe('thinking_delta')
     expect(think.getAttribute('data-chat-trace-oas-block-index')).toBe('3')
+    expect(think.querySelector('.chat-block-source-badge')?.getAttribute('title'))
+      .toBe('source: KEEPER_THINKING_DELTA, content block 3')
 
     const tool = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
-    expect(tool.getAttribute('data-chat-trace-provenance')).toBe('OAS #4')
+    expect(tool.getAttribute('data-chat-trace-provenance')).toBe('tool_call_id')
     expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-prov')
     expect(tool.getAttribute('data-chat-trace-oas-block-index')).toBe('4')
+    expect(tool.querySelector('.chat-block-source-badge')?.getAttribute('title'))
+      .toBe('source: TOOL_CALL_*, tool_call_id=tc-prov, content block 4')
     expect(tool.getAttribute('data-chat-trace-link-state')).toBe('trace-only')
     expect(tool.getAttribute('data-chat-trace-output-state')).toBe('ok')
     expect(tool.getAttribute('data-chat-trace-entry-id')).toBeNull()

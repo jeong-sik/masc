@@ -176,7 +176,7 @@ const SNIPPETS = [
     <span class="out success">OK</span>
     <div class="body">
       <span class="act">claim · t-4012 · runtime-v3</span>
-      <span class="bel">belief: drift &lt; 0.5 · plan: extend probe</span>
+      <span class="summary">drift &lt; 0.5 · extend probe</span>
       <span class="lat">latency 142ms</span>
     </div>
   </div>
@@ -298,21 +298,6 @@ const SNIPPETS = [
     <span style="font-family:var(--font-mono);font-size:9px;padding:1px 5px;border:1px solid var(--color-accent-fg-dim);color:var(--color-accent-fg);background:rgb(var(--color-accent-glow)/.08);text-transform:uppercase;letter-spacing:.06em">→ keeper-merge</span>
     <span style="font-family:var(--font-mono);font-size:11px;color:var(--color-fg-primary);line-height:1.4">extend probe window to 4s before fallback — see ar-2025-04-11/f-002</span>
     <span style="font-family:var(--font-mono);font-size:9px;color:var(--color-fg-disabled);text-transform:uppercase;letter-spacing:.06em">cooldown 30s</span>
-  </div>
-</div>`,
-  },
-  {
-    id: 'keeper-bdi-row', group: 'phase2', src: 'preview/components.css',
-    title: 'Keeper BDI row',
-    desc: 'Belief / Desire / Intention panel rows for the keeper inspector.',
-    html:
-`<div class="ki-bdi">
-  <div class="row"><span class="lbl">will</span><div class="v">resolve t-4012 by EOD without ceding claim to drift &gt; 0.5</div></div>
-  <div class="row"><span class="lbl">needs</span><div class="v">stable probe latency on runtime-v3 hop 4 · operator approval for window extension</div></div>
-  <div class="row"><span class="lbl">desires</span><div class="v">verified patch in trunk · ep-882 closed · drift monitor re-armed</div></div>
-  <div class="hz">
-    <span class="lbl">horizon</span><span class="v">3 turns</span>
-    <span class="lbl">commit</span><span class="v">soft</span>
   </div>
 </div>`,
   },

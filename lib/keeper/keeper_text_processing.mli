@@ -11,21 +11,13 @@
     input. *)
 val truncate_utf8_prefix : max_bytes:int -> string -> string * bool
 
-(** Remove [[STATE]..[/STATE]] blocks from text. *)
-val strip_state_blocks_text : string -> string
-
 (** Trim whitespace; return [None] for empty strings. *)
 
-(** Extract a fallback reply string from a state snapshot. *)
-val state_snapshot_reply_fallback :
-  Keeper_memory_policy.keeper_state_snapshot option -> string option
-
-(** Strip skill-route lines and state blocks from a reply. *)
+(** Strip skill-route lines from a reply. *)
 val strip_internal_reply_markup : string -> string
 
 (** Return user-visible reply text, stripping internal markup.
-    Falls back through the optional [fallback] string and then
-    the parsed state snapshot. *)
+    Falls back through the optional [fallback] string. *)
 val user_visible_reply_text : ?fallback:string -> string -> string
 
 (** {1 Proactive Text} *)

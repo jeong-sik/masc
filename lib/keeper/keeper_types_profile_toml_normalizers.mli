@@ -12,7 +12,6 @@ val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
 val default_goal_max_chars : int
-val default_drift_max_clauses : int
 val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool
 val bool_of_env_default : string -> default:bool -> bool
@@ -35,13 +34,8 @@ val reject_removed_keeper_input_keys :
 val reject_removed_keeper_msg_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 val utf8_repair_string : string -> string
-val normalize_self_model_text : max_bytes:int -> string -> string
+val normalize_prompt_text : max_bytes:int -> string -> string
 val normalize_goal_text : ?max_len:int -> string -> string
-val split_semicolon_clauses : string -> string list
-val take_last : int -> 'a list -> 'a list
-val compact_self_model_text :
-  ?max_clauses:int -> max_bytes:int -> string -> string
-val parse_self_model_opt : Yojson.Safe.t -> string -> string option
 val default_compaction_profile : string
 val canonical_compaction_profile : string -> string option
 val parse_compaction_profile_opt :
@@ -58,7 +52,7 @@ val resolve_compaction_policy :
 val normalize_compaction_ratio_gate : float -> float
 val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
-val normalize_continuity_compaction_cooldown_sec : int -> int
+val normalize_compaction_cooldown_sec : int -> int
 val default_keep_recent_tool_results : int
 val keep_recent_tool_results_max : int
 val normalize_keep_recent_tool_results : ?keeper_name:string -> int -> int
@@ -67,7 +61,7 @@ val normalize_proactive_cooldown_sec : int -> int
 val keeper_compact_ratio : unit -> float
 val keeper_compact_max_messages : unit -> int
 val keeper_compact_max_tokens : unit -> int
-val keeper_continuity_compaction_cooldown_sec : unit -> int
+val keeper_compaction_cooldown_sec : unit -> int
 val keeper_compaction_policy_from_env : unit -> float * int * int
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
@@ -80,12 +74,6 @@ val keeper_proactive_task_min_cooldown_sec : unit -> int
 val keeper_batch_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_runtime : unit -> string
-val keeper_rule_plan_goal_alignment_threshold : unit -> float
-val keeper_rule_plan_response_alignment_threshold : unit -> float
-val keeper_rule_guardrail_repetition_threshold : unit -> float
-val keeper_rule_guardrail_goal_alignment_threshold : unit -> float
-val keeper_rule_guardrail_response_alignment_threshold : unit -> float
-val keeper_rule_guardrail_context_threshold : unit -> float
 val keeper_unified_temperature : unit -> float
 val keeper_unified_max_tokens : unit -> int
 val keeper_tool_search_top_k : unit -> int

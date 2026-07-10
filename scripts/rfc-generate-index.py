@@ -133,7 +133,8 @@ def update_mode(table: str) -> int:
     end = text.find("\n\n", start)
     if end == -1:
         end = len(text)
-    new_text = text[:start] + table + "\n\n" + text[end:]
+    suffix = text[end:].lstrip("\n")
+    new_text = text[:start] + table + "\n\n" + suffix
     README.write_text(new_text, encoding="utf-8")
     print(f"Updated RFC index table in {README}")
     return 0

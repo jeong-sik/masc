@@ -9,7 +9,6 @@
 
 - `~/me/memory/reference-masc-autoboot-excluded-silent-proactive-death.md` (06-26)
 - `~/me/memory/reference-masc-keeper-orphan-stimulus-persistence-20260627.md` (06-27)
-- RFC-0288 (keeper goal-horizon purge — declarative `autoboot_enabled=false` 도입 맥락)
 - RFC-0250 (keeper idle crash)
 - `lib/server/server_bootstrap_loops.ml`, `lib/keeper_runtime/keeper_runtime_config.ml`, `lib/config/env_config_keeper.ml`, `lib/keeper/keeper_heartbeat_loop.ml`, `lib/keeper/keeper_supervisor.ml`
 
@@ -91,7 +90,7 @@ keeper lifecycle 결정(boot/reactive/proactive/autonomous/pause/resume)을 **cl
 
 - keeper persona/identity 변경.
 - proactive LLM 비용 최적화(backoff cadence) — PR #22588 별도.
-- keeper memory consolidation(RFC-0288 계열).
+- keeper memory consolidation.
 
 ## Phases (구현 순서)
 

@@ -10,5 +10,4 @@ export {
 export {
   filterCheckpointHistory,
   lineageTransitionLabel,
-  lineageVerdictMeta,
 } from './keeper-detail-history'

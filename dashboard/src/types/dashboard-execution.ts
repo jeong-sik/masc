@@ -1,43 +1,7 @@
 import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
-import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
 import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, KeeperApprovalRule, KeeperResolvedApprovalItem, PendingConfirmation, PendingConfirmSummary } from './governance'
 
 // --- Dashboard projection responses ---
-
-export interface DashboardShellMetaCognitionBelief {
-  id: string
-  claim: string
-  status: string
-  confidence?: number | null
-  support_agent_count?: number | null
-  challenge_agent_count?: number | null
-}
-
-export interface DashboardShellMetaCognitionTension {
-  id: string
-  topic: string
-  kind?: string | null
-  severity?: string | null
-  recurrence_count?: number | null
-  needs_operator?: boolean
-}
-
-export interface DashboardShellMetaCognitionDesire {
-  id: string
-  desired_state: string
-  type?: string | null
-  actionability?: string | null
-  strength?: number | null
-}
-
-export interface DashboardShellMetaCognitionSummary {
-  stagnation_score: number
-  belief_count: number
-  contested_belief_count: number
-  dominant_belief?: DashboardShellMetaCognitionBelief | null
-  top_tension?: DashboardShellMetaCognitionTension | null
-  top_desire?: DashboardShellMetaCognitionDesire | null
-}
 
 /**
  * Typed auth error code emitted server-side. SSOT mapping lives in
@@ -327,7 +291,6 @@ export interface DashboardShellResponse {
   }
   configured_keepers?: number
   providers?: Record<string, unknown>
-  meta_cognition?: DashboardShellMetaCognitionSummary | null
   auth?: DashboardShellAuthSummary | null
   config_resolution?: DashboardConfigResolution | null
   runtime_resolution?: DashboardRuntimeResolution | null
@@ -349,37 +312,6 @@ export interface DashboardBootstrapResponse {
   namespace_truth?: DashboardBootstrapSlice<DashboardNamespaceTruthResponse>
   goals?: DashboardBootstrapSlice<DashboardGoalsTreeResponse>
   goal_loop_status?: DashboardBootstrapSlice<Record<string, unknown>>
-}
-
-export interface DashboardNamespaceTruthAttentionSummary {
-  count: number
-  bad_count: number
-  warn_count: number
-  provenance?: string | null
-  top_item?: OperatorAttentionItem | null
-}
-
-export interface DashboardNamespaceTruthRecommendationSummary {
-  count: number
-  provenance?: string | null
-  top_action?: OperatorRecommendedAction | null
-}
-
-export interface DashboardNamespaceTruthMetaCognitionDigest {
-  post_id: string
-  title: string
-  created_at: string
-  updated_at?: string | null
-  hearth?: string | null
-  digest_key?: string | null
-  matches_summary?: boolean
-  provenance?: string | null
-}
-
-interface DashboardNamespaceTruthMetaCognition {
-  summary?: DashboardShellMetaCognitionSummary | null
-  latest_digest?: DashboardNamespaceTruthMetaCognitionDigest | null
-  provenance?: string | null
 }
 
 export interface DashboardNamespaceTruthFocus {
@@ -474,11 +406,7 @@ export interface DashboardNamespaceTruthResponse {
     warn_alerts?: number
     provenance?: string | null
   }
-  meta_cognition?: DashboardNamespaceTruthMetaCognition | null
   operator?: {
-    health?: string | null
-    attention_summary?: DashboardNamespaceTruthAttentionSummary | null
-    recommendation_summary?: DashboardNamespaceTruthRecommendationSummary | null
     pending_confirm_summary?: PendingConfirmSummary | null
     provenance?: string | null
   }
@@ -624,7 +552,6 @@ export interface DashboardExecutionContinuityBrief {
   tool_audit_source?: string | null
   tool_audit_at?: string | null
   last_proactive_preview?: string | null
-  continuity_summary?: string | null
   skill_route_summary?: string | null
 }
 

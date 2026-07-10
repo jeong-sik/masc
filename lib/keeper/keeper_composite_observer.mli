@@ -287,7 +287,7 @@ type snapshot = {
           never [Tripped] because the mutator resets [consecutive_count]
           before snapshots can see it. See
           {!Keeper_failure_circuit_breaker.display_state}. *)
-  shared_measurement : Keeper_state_machine.auto_rule_summary option;
+  shared_measurement : Keeper_state_machine.context_actions option;
   invariants : invariants_check;
   conditions : Keeper_state_machine.conditions;
       (** Raw observable conditions that derive [raw_phase]. Exposed for

@@ -379,7 +379,6 @@ export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
     ?? firstNonEmptyString(
       keeper.runtime_blocker_summary,
       trust?.latest_terminal_reason?.summary,
-      keeper.diagnostic?.continuity_summary,
       keeper.diagnostic?.summary,
     )
     ?? '운영자 일시정지'
@@ -461,11 +460,6 @@ function isHeartbeatAlive(heartbeat: string): boolean {
   const ts = new Date(heartbeat).getTime()
   if (Number.isNaN(ts)) return false
   return (Date.now() - ts) / 1000 < HEARTBEAT_ALIVE_THRESHOLD_S
-}
-
-function socialModelFallbackHint(keeper: Keeper): string | null {
-  if (keeper.social_model_recognized !== false) return null
-  return '대화 런타임 설정 확인 필요'
 }
 
 function continueGateHint(keeper: Keeper): string {
@@ -630,8 +624,6 @@ export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | n
     if (paused && autoRecover) return `자동 재시도 대기 · ${runtimeBlocker}`
     return paused ? `일시정지 원인 · ${runtimeBlocker}` : runtimeBlocker
   }
-  const socialFallback = socialModelFallbackHint(keeper)
-  if (socialFallback) return socialFallback
   const blocker = normalizeKeeperBlockerText(keeper.last_blocker)
   if (paused && autoRecover) return blocker ? `자동 재시도 대기 · ${blocker}` : '자동 재시도 대기'
   if (paused && blocker) return `일시정지 · ${blocker}`

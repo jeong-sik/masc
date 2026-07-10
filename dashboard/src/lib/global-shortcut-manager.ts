@@ -7,7 +7,7 @@
  *     once at mount, binding a single document-level keydown listener that
  *     dispatches every event through the manager.
  *   - Consumer modules (command palette, modal Escape, IDE editor binds,
- *     RFC-0027 multi-keeper pin promote / unpin) migrate their ad-hoc
+ *     multi-keeper pin promote / unpin) migrate their ad-hoc
  *     keydown listeners onto this manager via `useKeyboardShortcut(...)` in
  *     **separate PRs**. The host can be wired with an empty registry
  *     because `dispatch` returns `false` on no-match and the host does not

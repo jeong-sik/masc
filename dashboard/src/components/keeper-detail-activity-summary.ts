@@ -14,7 +14,6 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
   const hasActivitySignal = activity.source !== 'none' && activity.source !== 'created'
   const hasActivity =
     hasActivitySignal ||
-    keeper.last_speech_act ||
     workPreview ||
     keeper.memory_recent_note ||
     (keeper.k2k_count ?? 0) > 0
@@ -31,16 +30,6 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
               : activity.ageSeconds != null
                 ? html`${formatDuration(activity.ageSeconds)} 전`
                 : null}
-          </span>`
-        : null}
-      ${keeper.last_speech_act
-        ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-            최근 <span class="font-mono text-[var(--color-fg-primary)]">${keeper.last_speech_act}</span>
-          </span>`
-        : null}
-      ${keeper.social_model_recognized === false
-        ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-status-warn)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)]">
-            대화 런타임 설정 확인 필요
           </span>`
         : null}
       ${(keeper.k2k_count ?? 0) > 0

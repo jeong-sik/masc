@@ -44,20 +44,43 @@ type load_result =
   | Absent
   | Unreadable of string
 
+(** Reason [f] was cut off before it could reach its own completion. [f] is
+    the sole owner of any terminal signal it emits on its own side channels
+    (e.g. an SSE event stream) while it runs — those channels see nothing if
+    [f] never returns. [worker_abort_reason] is what [on_worker_aborted]
+    receives so such callers can push their own terminal signal instead of
+    waiting forever on a channel [f] never got to finish. *)
+type worker_abort_reason =
+  | Timeout of { timeout_sec : float }
+  | Worker_cancelled of
+      { cancelled_by : string (** ["operator"] or ["runtime"] *)
+      ; reason : string
+      }
+
 (** {1 Submit and poll} *)
 
-(** [submit ?clock ?timeout_sec ~sw ~f ~keeper_name] forks a background daemon fiber on
-    [sw] that runs [f] and stores the result. Returns the fresh
-    [request_id] synchronously. When [clock] is provided, the worker records a
-    terminal timeout error if [f] does not return before the deadline:
-    [timeout_sec] when explicitly supplied, otherwise the runtime-resolved
-    keeper turn timeout. Cancellation of [sw] interrupts the worker and records
-    a terminal [Cancelled] state before stopping, so pollers do not observe an
-    indefinite [Running] request. [Lost] is reserved for persisted non-terminal
-    requests recovered without a live worker. *)
+(** [submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~f ~keeper_name] forks
+    a background daemon fiber on [sw] that runs [f] and stores the result.
+    Returns the fresh [request_id] synchronously. When [clock] is provided,
+    the worker records a terminal timeout error if [f] does not return before
+    the deadline: [timeout_sec] when explicitly supplied, otherwise the
+    runtime-resolved keeper turn timeout. Cancellation of [sw] interrupts the
+    worker and records a terminal [Cancelled] state before stopping, so
+    pollers do not observe an indefinite [Running] request. [Lost] is
+    reserved for persisted non-terminal requests recovered without a live
+    worker.
+
+    [on_worker_aborted], when supplied, is invoked exactly once whenever [f]
+    is cut off by a timeout or cancellation before it completes on its own —
+    never when [f] returns or raises normally, since [f] is expected to have
+    already signaled its own completion on those paths. It runs from a fiber
+    that is not itself under cancellation at the moment of the call (wrapped
+    internally in {!Eio.Cancel.protect}), so it may safely perform blocking
+    Eio operations such as pushing to a caller-owned stream. *)
 val submit
   :  ?clock:_ Eio.Time.clock
   -> ?timeout_sec:float
+  -> ?on_worker_aborted:(worker_abort_reason -> unit)
   -> sw:Eio.Switch.t
   -> base_path:string
   -> f:(unit -> Keeper_types_profile.tool_result)

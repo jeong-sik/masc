@@ -381,8 +381,8 @@ let parse_decision_event ~keeper_name line : decision_event option =
       let raw = str "ts" in
       if raw <> "" then raw else k2_iso8601_of_unix ts_unix
     in
-    (* RFC-0276: the social-model "speech_act" decision-JSON key is no longer
-       emitted; decision_type now derives from the turn outcome. *)
+    (* Decision classification is derived only from the observed turn outcome;
+       model-authored labels are not part of this feed contract. *)
     let decision_type =
       let outcome = str "outcome" in
       if outcome <> "" then outcome else "turn"

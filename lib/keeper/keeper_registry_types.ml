@@ -82,7 +82,7 @@ let wake_reason_label = function
 
 type turn_measurement =
   { tm_captured_at : float
-  ; tm_auto_rules : Keeper_state_machine.auto_rule_summary
+  ; tm_context_actions : Keeper_state_machine.context_actions
   }
 
 type done_resolution = [ `Stopped | `Crashed of string ]
@@ -119,7 +119,7 @@ type registry_entry =
     (** Ephemeral flag: true when keeper is blocked in admission queue.
           Set/cleared around [Admission_queue.with_permit].
           Does not affect state machine phase derivation. *)
-  ; last_auto_rules : (float * Keeper_state_machine.auto_rule_summary) option
+  ; last_context_actions : (float * Keeper_state_machine.context_actions) option
   ; last_event_bus_correlation : string option
   ; pending_turn_measurement : turn_measurement option
   ; current_turn_observation : turn_observation option
@@ -271,8 +271,8 @@ let origin_allows_paired_lifecycle_event origin event =
 
 let pending_measurement_after_event now entry event =
   match event with
-  | Keeper_state_machine.Context_measured { auto_rules; _ } ->
-    Some { tm_captured_at = now; tm_auto_rules = auto_rules }
+  | Keeper_state_machine.Context_measured { context_actions; _ } ->
+    Some { tm_captured_at = now; tm_context_actions = context_actions }
   | _ -> entry.pending_turn_measurement
 ;;
 

@@ -23,7 +23,7 @@ code_refs:
 - `./mode-violations-evidence-v1.schema.json`
 - `./CDAL-PHASE1A-TEAM-START-HERE.md`
 - `./contract-driven-agent-loop-rfc-review.md`
-- `./oas-masc-state-boundary.md`
+- `../OAS-MASC-BOUNDARY.md`
 - `../../../oas/docs/schemas/cdal-proof-bundle-v1.json`
 - `../../../oas/CDAL-ENHANCEMENT-ANALYSIS.md`
 

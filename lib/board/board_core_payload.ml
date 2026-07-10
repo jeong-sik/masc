@@ -15,49 +15,16 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Board_core_payload — State block extraction and post payload normalization.
+(** Board_core_payload — Post payload normalization.
 
-    Handles [STATE]...[/STATE] block parsing from post bodies,
-    title derivation, and content normalization before persistence.
+    Handles title derivation, metadata shape validation, and content
+    normalization before persistence.
 
     @since God file decomposition — extracted from board_core.ml *)
 
-let state_start_marker = "[STATE]"
-let state_end_marker = "[/STATE]"
-
-(* Hoisted to module level to avoid per-call recompilation *)
-let start_re = Re.str state_start_marker |> Re.compile
-let end_re = Re.str state_end_marker |> Re.compile
-
-let extract_state_block (text : string) : string option * string =
-  match Re.exec_opt start_re text with
-  | None -> None, String.trim text
-  | Some g ->
-    let start_idx = Re.Group.start g 0 in
-    let block_body_start = start_idx + String.length state_start_marker in
-    let end_idx =
-      match Re.exec_opt ~pos:block_body_start end_re text with
-      | Some g2 -> Re.Group.start g2 0
-      | None -> String.length text
-    in
-    let block_end =
-      min (String.length text) (end_idx + String.length state_end_marker)
-    in
-    let state_block =
-      String.sub text start_idx (block_end - start_idx) |> String.trim
-    in
-    let before =
-      if start_idx = 0 then "" else String.sub text 0 start_idx
-    in
-    let after =
-      if block_end >= String.length text then ""
-      else String.sub text block_end (String.length text - block_end)
-    in
-    Some state_block, String.trim (before ^ after)
-
 type meta_parse_error = Meta_not_assoc of Yojson.Safe.t
 
-let merge_meta_json ?state_block (meta_json : Yojson.Safe.t option) :
+let normalize_meta_json (meta_json : Yojson.Safe.t option) :
     (Yojson.Safe.t option, meta_parse_error) Stdlib.Result.t =
   (* Parse-don't-validate: a non-[`Assoc] meta payload is a malformed
      submission, not "meta absent". The pre-2026-05-15 implementation
@@ -74,21 +41,8 @@ let merge_meta_json ?state_block (meta_json : Yojson.Safe.t option) :
   in
   match parsed_fields with
   | Stdlib.Result.Error _ as err -> err
-  | Stdlib.Result.Ok fields ->
-      let fields =
-        match state_block with
-        | Some block
-          when (not (String.equal block ""))
-               && not (List.mem_assoc "state_block" fields) ->
-            ("state_block", `String block) :: fields
-        | _ -> fields
-      in
-      let result =
-        match fields with
-        | [] -> None
-        | _ -> Some (`Assoc fields)
-      in
-      Stdlib.Result.Ok result
+  | Stdlib.Result.Ok [] -> Stdlib.Result.Ok None
+  | Stdlib.Result.Ok fields -> Stdlib.Result.Ok (Some (`Assoc fields))
 
 let derive_post_title (body : string) =
   let first_line =
@@ -107,8 +61,7 @@ let derive_post_title (body : string) =
 
 let normalize_post_payload ~content ?title ?body ~post_kind ?meta_json () =
   let raw_body = Option.value body ~default:content in
-  let extracted_state, stripped_body = extract_state_block raw_body in
-  let normalized_body = String.trim stripped_body in
+  let normalized_body = String.trim raw_body in
   let normalized_title =
     match title with
     | Some value ->
@@ -117,7 +70,7 @@ let normalize_post_payload ~content ?title ?body ~post_kind ?meta_json () =
         else derive_post_title normalized_body
     | None -> derive_post_title normalized_body
   in
-  match merge_meta_json ?state_block:extracted_state meta_json with
+  match normalize_meta_json meta_json with
   | Stdlib.Result.Error _ as err -> err
   | Stdlib.Result.Ok merged_meta ->
       Stdlib.Result.Ok

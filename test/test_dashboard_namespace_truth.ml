@@ -103,58 +103,6 @@ let with_runtime_default_for_tests dir f =
       init_runtime_default_for_tests dir;
       f ())
 
-let save_jsonl path entries =
-  let body =
-    entries
-    |> List.map Yojson.Safe.to_string
-    |> String.concat "\n"
-  in
-  Fs_compat.save_file path (if body = "" then "" else body ^ "\n")
-
-let post_json ~id ~author ?(title = "") ?(body = "") ?hearth ?thread_id
-    ?(created_at = 1000.0) () =
-  let fields =
-    [
-      ("id", `String id);
-      ("author", `String author);
-      ("title", `String title);
-      ("body", `String body);
-      ("content", `String body);
-      ("post_kind", `String "automation");
-      ("visibility", `String "internal");
-      ("created_at", `Float created_at);
-      ("updated_at", `Float created_at);
-      ("expires_at", `Float 0.0);
-      ("votes_up", `Int 0);
-      ("votes_down", `Int 0);
-      ("reply_count", `Int 0);
-    ]
-  in
-  let fields =
-    match hearth with
-    | Some value -> ("hearth", `String value) :: fields
-    | None -> fields
-  in
-  let fields =
-    match thread_id with
-    | Some value -> ("thread_id", `String value) :: fields
-    | None -> fields
-  in
-  `Assoc fields
-
-let comment_json ~id ~post_id ~author ~content ?(created_at = 1000.0) () =
-  `Assoc
-    [
-      ("id", `String id);
-      ("post_id", `String post_id);
-      ("author", `String author);
-      ("content", `String content);
-      ("created_at", `Float created_at);
-      ("expires_at", `Float 0.0);
-      ("votes_up", `Int 0);
-      ("votes_down", `Int 0);
-    ]
-
 let request target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
 
@@ -165,17 +113,6 @@ let warm_execution_cache () =
   Server_dashboard_http_cache.mark_cached_surface_success
     Server_dashboard_http.execution_cache
     (`Assoc [("status", `String "ok")])
-
-let warm_meta_cognition_summary (config : Lib.Workspace.config) =
-  let key =
-    Server_dashboard_http.dashboard_cache_key config
-      "meta_cognition_summary" "dashboard_shell"
-  in
-  ignore
-    (Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
-         Lib.Meta_cognition.summary_json config));
-  Dashboard_cache.invalidate_prefix
-    (Printf.sprintf "shell:workspace=%s:" config.base_path)
 
 let expire_execution_warmup () =
   let surface = Server_dashboard_http.execution_cache in
@@ -419,7 +356,7 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
               (String.equal focus_label
                  "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다."))))
 
-let test_operator_digest_shape_matches_namespace_truth () =
+let test_operator_pending_confirm_shape_matches_namespace_truth () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -436,7 +373,7 @@ let test_operator_digest_shape_matches_namespace_truth () =
         in
         let open Yojson.Safe.Util in
         let operator = json |> member "operator" in
-        let expected_keys = ["health"; "attention_summary"; "recommendation_summary"; "pending_confirm_summary"; "provenance"] in
+        let expected_keys = ["pending_confirm_summary"; "provenance"] in
         List.iter (fun key ->
           let value = operator |> member key in
           check bool (Printf.sprintf "operator.%s present" key)
@@ -444,115 +381,6 @@ let test_operator_digest_shape_matches_namespace_truth () =
             (value <> `Null)
         ) expected_keys;
       ))
-
-let test_dashboard_namespace_truth_promotes_meta_cognition_focus () =
-  let dir = test_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let module Mcp_server = Lib.Mcp_server in
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = (Mcp_server.workspace_config state) in
-      ignore (Lib.Workspace.init config ~agent_name:None);
-      let masc_dir = Lib.Workspace.masc_dir config in
-      save_jsonl
-        (Filename.concat masc_dir "board_posts.jsonl")
-        [
-          post_json ~id:"p-root" ~author:"admin-keeper"
-            ~title:"RBAC blockage"
-            ~body:
-              "All masc_* tools tested return unregistered_masc_tool. \
-               Operator intervention needed. keeper_* tools function normally."
-            ~hearth:"ops" ~created_at:1000.0 ();
-        ];
-      save_jsonl
-        (Filename.concat masc_dir "board_comments.jsonl")
-        [
-          comment_json ~id:"c-1" ~post_id:"p-root" ~author:"keeper-a"
-            ~content:
-              "This contradicts the uniform block hypothesis. Access may be per-agent."
-            ~created_at:1010.0 ();
-        ];
-      warm_execution_cache ();
-      Eio.Switch.run (fun sw ->
-        Dashboard_cache.invalidate_all ();
-        Atomic.set Server_dashboard_http.shell_warmed false;
-        Atomic.set Server_dashboard_http.last_good_shell (`Assoc []);
-        warm_meta_cognition_summary config;
-        let json =
-          Server_dashboard_http.dashboard_namespace_truth_http_json
-            ~state ~sw ~clock:(Eio.Stdenv.clock env)
-            (request "/api/v1/dashboard/namespace-truth")
-        in
-        let open Yojson.Safe.Util in
-        check int "meta contested belief count surfaced"
-          1
-          (json |> member "meta_cognition" |> member "summary"
-           |> member "contested_belief_count" |> to_int);
-        check string "meta interpretation primary surfaced"
-          "contested_belief"
-          (json |> member "meta_cognition" |> member "interpretation"
-           |> member "primary_salience" |> to_string);
-        check string "operator attention points at meta cognition"
-          "namespace_meta_cognition"
-          (json |> member "operator" |> member "attention_summary" |> member "top_item"
-           |> member "target_type" |> to_string);
-        check string "focus source becomes meta cognition"
-          "meta_cognition"
-          (json |> member "focus" |> member "source" |> to_string);
-        check string "focus jumps to overview"
-          "overview"
-          (json |> member "focus" |> member "suggested_tab" |> to_string);
-        check bool "focus params stay empty for overview"
-          true
-          (json |> member "focus" |> member "suggested_params" = `Assoc [])))
-
-
-let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
-  let dir = test_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let module Mcp_server = Lib.Mcp_server in
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = (Mcp_server.workspace_config state) in
-      ignore (Lib.Workspace.init config ~agent_name:None);
-      let masc_dir = Lib.Workspace.masc_dir config in
-      save_jsonl
-        (Filename.concat masc_dir "board_posts.jsonl")
-        [
-          post_json ~id:"p-root" ~author:"admin-keeper"
-            ~title:"RBAC blockage"
-            ~body:
-              "All masc_* tools tested return unregistered_masc_tool. \
-               Operator intervention needed. keeper_* tools function normally."
-            ~hearth:"ops" ~created_at:1000.0 ();
-        ];
-      save_jsonl
-        (Filename.concat masc_dir "board_comments.jsonl")
-        [
-          comment_json ~id:"c-1" ~post_id:"p-root" ~author:"keeper-a"
-            ~content:
-              "This contradicts the uniform block hypothesis. Access may be per-agent."
-            ~created_at:1010.0 ();
-        ];
-      warm_execution_cache ();
-      Eio.Switch.run (fun sw ->
-        ignore
-          (Server_dashboard_http.dashboard_namespace_truth_http_json
-             ~state ~sw ~clock:(Eio.Stdenv.clock env)
-             (request "/api/v1/dashboard/namespace-truth"));
-        let posts =
-          Lib.Board_dispatch.list_posts ~hearth:"meta-cognition"
-            ~post_kind_filter:Lib.Board.Automation_post
-            ~sort_by:Lib.Board_dispatch.Recent ~limit:10 ()
-        in
-        check int "namespace-truth leaves meta-cognition board empty" 0
-          (List.length posts)))
 
 let test_namespace_truth_cached_snapshot_matches_http_projection_blocks () =
   let dir = test_dir () in
@@ -582,7 +410,7 @@ let test_namespace_truth_cached_snapshot_matches_http_projection_blocks () =
             (Yojson.Safe.to_string (cached_snapshot |> member key))
         in
         List.iter compare_block
-          [ "namespace"; "execution"; "meta_cognition"; "command"; "operator"; "focus" ];
+          [ "namespace"; "execution"; "command"; "operator"; "focus" ];
       ))
 
 let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
@@ -620,7 +448,6 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
             ( "paths",
               `Assoc [ ("effective_base_path", `String config.base_path) ] );
             ("configured_keepers", `Int 2);
-            ("meta_cognition", `Null);
           ]
       in
       Atomic.set Server_dashboard_http.last_good_shell cached_shell;
@@ -787,11 +614,8 @@ let () =
             test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty;
           test_case "mixed runtimes keep counts aligned" `Quick
             test_dashboard_namespace_truth_mixed_runtime_counts;
-          test_case "operator digest shape matches namespace-truth" `Quick test_operator_digest_shape_matches_namespace_truth;
-          test_case "meta cognition can drive namespace-truth focus" `Quick
-            test_dashboard_namespace_truth_promotes_meta_cognition_focus;
-          test_case "namespace-truth does not auto-post meta digest" `Quick
-            test_dashboard_namespace_truth_does_not_auto_post_meta_digest;
+          test_case "operator pending-confirm shape matches namespace-truth" `Quick
+            test_operator_pending_confirm_shape_matches_namespace_truth;
           test_case "cached snapshot matches HTTP projection blocks" `Quick
             test_namespace_truth_cached_snapshot_matches_http_projection_blocks;
           test_case "warm request uses stale shell while refreshing" `Quick

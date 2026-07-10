@@ -9,7 +9,8 @@
    [Fs_compat.cleanup_atomic_orphans] is a boot-time sweep:
    - zero-byte orphans are deleted;
    - non-zero orphans are MOVED (not deleted) to
-     [<base_path>/.recovered/] so operators can forensically
+     a source-directory bucket below [<base_path>/.recovered/] so operators can
+     forensically
      inspect data-loss events.
 
    These tests pin that contract so a future refactor can't
@@ -96,8 +97,9 @@ let test_nonzero_orphan_preserved_in_recovered () =
   Alcotest.(check int) "1 preserved" 1 preserved;
   Alcotest.(check bool) "original removed" false
     (Sys.file_exists orphan);
-  let recovered_dir = Filename.concat base_path ".recovered" in
-  Alcotest.(check bool) ".recovered/ created" true
+  let recovered_root = Filename.concat base_path ".recovered" in
+  let recovered_dir = Filename.concat recovered_root "root" in
+  Alcotest.(check bool) ".recovered/root created" true
     (Sys.file_exists recovered_dir);
   let entries = Sys.readdir recovered_dir in
   Alcotest.(check int) "1 file in .recovered/" 1 (Array.length entries);
@@ -189,6 +191,77 @@ let test_recovered_dir_skipped_on_rescan () =
   Alcotest.(check bool) ".recovered/ seed file untouched" true
     (Sys.file_exists (Filename.concat recovered ".atomic_seed.tmp"))
 
+let test_direct_recovery_rejects_symlinked_destination () =
+  with_temp_base @@ fun base_path ->
+  let orphan = Filename.concat base_path ".atomic_data.tmp" in
+  let target = Filename.concat base_path "outside" in
+  let recovered = Filename.concat base_path "recovered" in
+  write_file ~path:orphan ~content:"forensic payload";
+  Unix.mkdir target 0o755;
+  Unix.symlink target recovered;
+  (match Fs_compat.recover_atomic_orphan ~path:orphan ~recovered_dir:recovered with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "symlinked recovery destination was accepted");
+  Alcotest.(check bool) "orphan retained" true (Sys.file_exists orphan);
+  Alcotest.(check int)
+    "symlink target untouched"
+    0
+    (Array.length (Sys.readdir target))
+
+let test_direct_recovery_preserves_without_overwrite () =
+  with_temp_base @@ fun base_path ->
+  let orphan = Filename.concat base_path ".atomic_data.tmp" in
+  let recovered = Filename.concat base_path "recovered" in
+  Unix.mkdir recovered 0o755;
+  write_file ~path:orphan ~content:"first";
+  let destination = Filename.concat recovered ".atomic_data.tmp" in
+  (match Fs_compat.recover_atomic_orphan ~path:orphan ~recovered_dir:recovered with
+   | Ok (Fs_compat.Preserved_nonempty actual) ->
+     Alcotest.(check string) "recovery destination" destination actual
+   | Ok Fs_compat.Deleted_zero_length -> Alcotest.fail "nonempty orphan deleted"
+   | Error detail -> Alcotest.failf "direct recovery failed: %s" detail);
+  write_file ~path:orphan ~content:"second";
+  (match Fs_compat.recover_atomic_orphan ~path:orphan ~recovered_dir:recovered with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "existing forensic evidence was overwritten");
+  Alcotest.(check bool) "second orphan retained" true (Sys.file_exists orphan)
+
+let test_blocking_durable_primitives () =
+  with_temp_base @@ fun base_path ->
+  let nested = Filename.concat base_path "one/two/three" in
+  Fs_compat.mkdir_p_durable_unix nested;
+  Alcotest.(check bool) "durable directory tree created" true (Sys.is_directory nested);
+  let target = Filename.concat nested "state.json" in
+  (match Fs_compat.save_file_atomic_unix target "first" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "blocking atomic write failed: %s" detail);
+  (match Fs_compat.save_file_atomic_unix target "second" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "blocking atomic overwrite failed: %s" detail);
+  let ic = open_in_bin target in
+  let content =
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () -> really_input_string ic (in_channel_length ic))
+  in
+  Alcotest.(check string) "blocking atomic content" "second" content;
+  let append_target = Filename.concat nested "events.jsonl" in
+  Fs_compat.append_file_durable append_target "one\n";
+  Fs_compat.append_file_durable append_target "two\n";
+  let append_ic = open_in_bin append_target in
+  let appended =
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr append_ic)
+      (fun () -> really_input_string append_ic (in_channel_length append_ic))
+  in
+  Alcotest.(check string) "durable append content" "one\ntwo\n" appended;
+  let missing_parent_target =
+    Filename.concat base_path "missing-parent/state.json"
+  in
+  (match Fs_compat.save_file_atomic_unix missing_parent_target "value" with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "write with missing parent unexpectedly succeeded")
+
 let () =
   Alcotest.run "fs_atomic_orphan_sweep_10130"
     [
@@ -211,5 +284,12 @@ let () =
             test_mixed_batch;
           Alcotest.test_case ".recovered/ skipped on rescan" `Quick
             test_recovered_dir_skipped_on_rescan;
+          Alcotest.test_case "symlinked recovery rejected" `Quick
+            test_direct_recovery_rejects_symlinked_destination;
+          Alcotest.test_case "direct recovery does not overwrite" `Quick
+            test_direct_recovery_preserves_without_overwrite;
         ] );
+      ( "durable-primitives",
+        [ Alcotest.test_case "blocking durable filesystem boundaries" `Quick
+            test_blocking_durable_primitives ] );
     ]

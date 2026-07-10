@@ -198,6 +198,40 @@ let append_file_unix (path : string) (content : string) : unit =
         (fun () -> Stdlib.output_string oc content))
 ;;
 
+let append_file_durable_unix (path : string) (content : string) : unit =
+  let mu = get_append_path_mutex path in
+  Stdlib.Mutex.lock mu;
+  Stdlib.Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
+    (fun () ->
+      let fd =
+        Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
+      in
+      Stdlib.Fun.protect
+        ~finally:(fun () -> Unix.close fd)
+        (fun () ->
+          let rec write_all offset =
+            if offset < String.length content
+            then
+              match
+                Unix.write_substring
+                  fd
+                  content
+                  offset
+                  (String.length content - offset)
+              with
+              | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_all offset
+              | 0 ->
+                raise (Sys_error (Printf.sprintf "%s: zero-byte append" path))
+              | wrote -> write_all (offset + wrote)
+          in
+          write_all 0;
+          Unix.fsync fd);
+      match Atomic_write.fsync_directory (Filename.dirname path) with
+      | Ok () -> ()
+      | Error detail -> raise (Sys_error detail))
+;;
+
 let mkdir_p_unix (path : string) : unit =
   let rec ensure_dir (p : string) : unit =
     if String.equal p "" || String.equal p "." || String.equal p "/"
@@ -210,6 +244,36 @@ let mkdir_p_unix (path : string) : unit =
       | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
   in
   ensure_dir path
+;;
+
+let mkdir_p_durable_unix path =
+  test_exec_home_guard ~op:"mkdir_p_durable_unix" path;
+  let rec missing_directories current acc =
+    if
+      String.equal current ""
+      || String.equal current "."
+      || String.equal current "/"
+    then acc
+    else
+      match Unix.stat current with
+      | stat when stat.Unix.st_kind = Unix.S_DIR -> acc
+      | _ ->
+        raise
+          (Unix.Unix_error
+             (Unix.ENOTDIR, "mkdir_p_durable_unix", current))
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+        missing_directories
+          (Filename.dirname current)
+          (current :: acc)
+  in
+  let created = missing_directories path [] in
+  mkdir_p_unix path;
+  List.iter
+    (fun created_dir ->
+       match Atomic_write.fsync_directory (Filename.dirname created_dir) with
+       | Ok () -> ()
+       | Error detail -> raise (Sys_error detail))
+    created
 ;;
 
 (** Load entire file contents as string.
@@ -241,7 +305,24 @@ let save_file_atomic path content =
   Atomic_write.save_file_atomic ~save_file path content
 ;;
 
+let save_file_atomic_unix path content =
+  test_exec_home_guard ~op:"save_file_atomic_unix" path;
+  Atomic_write.save_file_atomic ~save_file:save_file_unix path content
+;;
+
+let fsync_directory path = Atomic_write.fsync_directory path
+
 let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
+
+type atomic_orphan_recovery = Atomic_write.atomic_orphan_recovery =
+  | Deleted_zero_length
+  | Preserved_nonempty of string
+
+let recover_atomic_orphan ~path ~recovered_dir =
+  Atomic_write.recover_atomic_orphan
+    ~path
+    ~recovered_dir
+;;
 
 let cleanup_atomic_orphans ~base_path ?recovered_subdir () =
   Atomic_write.cleanup_atomic_orphans ~mkdir_p_unix ~base_path ?recovered_subdir ()
@@ -258,6 +339,13 @@ let append_file (path : string) (content : string) : unit =
     (fun fs ->
        let eio_path = Eio.Path.(fs / path) in
        Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
+;;
+
+let append_file_durable path content =
+  test_exec_home_guard ~op:"append_file_durable" path;
+  match Atomic.get global_fs with
+  | Some _ -> Eio_unix.run_in_systhread (fun () -> append_file_durable_unix path content)
+  | None -> append_file_durable_unix path content
 ;;
 
 (** Check if file exists.

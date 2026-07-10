@@ -150,8 +150,8 @@ let test_run_state_in_turn_reports_woken_wake () =
         Keeper_registry.mark_turn_started ~base_path:base
           ~wake:
             (Keeper_registry.Woken
-               [ Masc.Keeper_event_queue.Bootstrap
-               ; Masc.Keeper_event_queue.No_progress_recovery
+               [ Keeper_event_queue.Bootstrap
+               ; Keeper_event_queue.No_progress_recovery
                ])
           name)
       ()

@@ -152,7 +152,8 @@ let retry_pending_finalization state ~keeper_name =
   match pending_finalization state keeper_name with
   | None -> false
   | Some (lease_id, action) ->
-    ignore (settle_lease state ~keeper_name ~lease_id action : [ `Settled | `Pending ]);
+    (match settle_lease state ~keeper_name ~lease_id action with
+    | `Settled | `Pending -> ());
     true
 
 (* Races [handle_turn] against [dispatch_deadline_sec] so one wedged turn

@@ -147,7 +147,7 @@ let test_defaults_pinned () =
   pin S.Shell_timeout.Git_meta 5.0;
   pin S.Shell_timeout.Gh_min 15.0;
   pin S.Shell_timeout.User_max 180.0;
-  pin S.Shell_timeout.Cleanup_rm 5.0
+  pin S.Shell_timeout.Cleanup_rm 10.0
 
 (* ---------------------------------------------------------------- *)
 (* 2. Env-override                                                  *)

@@ -113,10 +113,16 @@ type atomic_orphan_recovery =
   | Deleted_zero_length
   | Preserved_nonempty of string
 
-let recover_atomic_orphan ~path ~recovered_dir =
+let recover_atomic_orphan ~path ~recovered_root ~bucket =
   let name = Stdlib.Filename.basename path in
   if not (is_atomic_orphan_name name)
   then Error (Printf.sprintf "not an atomic-write orphan: %s" path)
+  else if
+    String.equal bucket ""
+    || String.equal bucket "."
+    || String.equal bucket ".."
+    || not (String.equal (Stdlib.Filename.basename bucket) bucket)
+  then Error (Printf.sprintf "invalid atomic-write recovery bucket: %S" bucket)
   else
     try
       let stat = Unix.lstat path in
@@ -129,6 +135,15 @@ let recover_atomic_orphan ~path ~recovered_dir =
         Ok Deleted_zero_length)
       else (
         fsync_path path;
+        let recovered_root_stat = Unix.lstat recovered_root in
+        if recovered_root_stat.Unix.st_kind <> Unix.S_DIR
+        then
+          Error
+            (Printf.sprintf
+               "atomic-write recovery root is not a real directory: %s"
+               recovered_root)
+        else
+        let recovered_dir = Stdlib.Filename.concat recovered_root bucket in
         let recovered_stat = Unix.lstat recovered_dir in
         if recovered_stat.Unix.st_kind <> Unix.S_DIR
         then
@@ -138,18 +153,43 @@ let recover_atomic_orphan ~path ~recovered_dir =
                recovered_dir)
         else
         let destination = Stdlib.Filename.concat recovered_dir name in
-        if Stdlib.Sys.file_exists destination
+        if String.equal destination path
         then
           Error
             (Printf.sprintf
-               "atomic-write recovery destination already exists: %s"
+               "atomic-write recovery destination equals source: %s"
                destination)
-        else (
-          Stdlib.Sys.rename path destination;
-          fsync_path (Stdlib.Filename.dirname path);
-          if not (String.equal recovered_dir (Stdlib.Filename.dirname path))
-          then fsync_path recovered_dir;
-          Ok (Preserved_nonempty destination)))
+        else
+          let source_dir = Stdlib.Filename.dirname path in
+          let finish_existing_link destination_stat =
+            if
+              stat.Unix.st_dev = destination_stat.Unix.st_dev
+              && stat.Unix.st_ino = destination_stat.Unix.st_ino
+            then (
+              fsync_path recovered_dir;
+              Unix.unlink path;
+              fsync_path source_dir;
+              Ok (Preserved_nonempty destination))
+            else
+              Error
+                (Printf.sprintf
+                   "atomic-write recovery destination already exists: %s"
+                   destination)
+          in
+          (match Unix.lstat destination with
+           | destination_stat -> finish_existing_link destination_stat
+           | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+             (match Unix.link path destination with
+              | () ->
+                fsync_path recovered_dir;
+                Unix.unlink path;
+                fsync_path source_dir;
+                Ok (Preserved_nonempty destination)
+              | exception Unix.Unix_error (Unix.EEXIST, _, _) ->
+                Error
+                  (Printf.sprintf
+                     "atomic-write recovery destination concurrently appeared: %s"
+                     destination))))
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printf.sprintf "%s: %s" path (Printexc.to_string exn))
@@ -210,7 +250,8 @@ let cleanup_atomic_orphans
          (match
             recover_atomic_orphan
               ~path
-              ~recovered_dir:file_recovered_dir
+              ~recovered_root:recovered_dir
+              ~bucket
           with
           | Ok Deleted_zero_length -> incr deleted
           | Ok (Preserved_nonempty _) -> incr preserved

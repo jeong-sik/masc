@@ -199,7 +199,12 @@ let test_direct_recovery_rejects_symlinked_destination () =
   write_file ~path:orphan ~content:"forensic payload";
   Unix.mkdir target 0o755;
   Unix.symlink target recovered;
-  (match Fs_compat.recover_atomic_orphan ~path:orphan ~recovered_dir:recovered with
+  (match
+     Fs_compat.recover_atomic_orphan
+       ~path:orphan
+       ~recovered_root:recovered
+       ~bucket:"root"
+   with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "symlinked recovery destination was accepted");
   Alcotest.(check bool) "orphan retained" true (Sys.file_exists orphan);
@@ -211,20 +216,48 @@ let test_direct_recovery_rejects_symlinked_destination () =
 let test_direct_recovery_preserves_without_overwrite () =
   with_temp_base @@ fun base_path ->
   let orphan = Filename.concat base_path ".atomic_data.tmp" in
-  let recovered = Filename.concat base_path "recovered" in
+  let recovered_root = Filename.concat base_path "recovered" in
+  let recovered = Filename.concat recovered_root "root" in
+  Unix.mkdir recovered_root 0o755;
   Unix.mkdir recovered 0o755;
   write_file ~path:orphan ~content:"first";
   let destination = Filename.concat recovered ".atomic_data.tmp" in
-  (match Fs_compat.recover_atomic_orphan ~path:orphan ~recovered_dir:recovered with
+  (match
+     Fs_compat.recover_atomic_orphan
+       ~path:orphan
+       ~recovered_root
+       ~bucket:"root"
+   with
    | Ok (Fs_compat.Preserved_nonempty actual) ->
      Alcotest.(check string) "recovery destination" destination actual
    | Ok Fs_compat.Deleted_zero_length -> Alcotest.fail "nonempty orphan deleted"
    | Error detail -> Alcotest.failf "direct recovery failed: %s" detail);
   write_file ~path:orphan ~content:"second";
-  (match Fs_compat.recover_atomic_orphan ~path:orphan ~recovered_dir:recovered with
+  (match
+     Fs_compat.recover_atomic_orphan
+       ~path:orphan
+       ~recovered_root
+       ~bucket:"root"
+   with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "existing forensic evidence was overwritten");
-  Alcotest.(check bool) "second orphan retained" true (Sys.file_exists orphan)
+  Alcotest.(check bool) "second orphan retained" true (Sys.file_exists orphan);
+  Unix.unlink destination;
+  Unix.link orphan destination;
+  (match
+     Fs_compat.recover_atomic_orphan
+       ~path:orphan
+       ~recovered_root
+       ~bucket:"root"
+   with
+   | Ok (Fs_compat.Preserved_nonempty actual) ->
+     Alcotest.(check string) "interrupted recovery destination" destination actual
+   | Ok Fs_compat.Deleted_zero_length -> Alcotest.fail "linked orphan deleted"
+   | Error detail -> Alcotest.failf "linked recovery failed: %s" detail);
+  Alcotest.(check bool)
+    "interrupted source acknowledged"
+    false
+    (Sys.file_exists orphan)
 
 let test_blocking_durable_primitives () =
   with_temp_base @@ fun base_path ->
@@ -251,6 +284,19 @@ let test_blocking_durable_primitives () =
   (match Fs_compat.save_file_atomic_unix missing_parent_target "value" with
    | Error _ -> ()
    | Ok () -> Alcotest.fail "write with missing parent unexpectedly succeeded")
+
+let test_durable_append_falls_back_outside_eio () =
+  with_temp_base @@ fun base_path ->
+  Fun.protect
+    ~finally:Fs_compat.clear_fs
+    (fun () ->
+       Eio_main.run (fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env));
+       let path = Filename.concat base_path "outside-eio.jsonl" in
+       Fs_compat.append_file_durable path "row\n";
+       Alcotest.(check string)
+         "fallback durable append"
+         "row\n"
+         (Fs_compat.load_file_unix path))
 
 let () =
   Alcotest.run "fs_atomic_orphan_sweep_10130"
@@ -281,5 +327,8 @@ let () =
         ] );
       ( "durable-primitives",
         [ Alcotest.test_case "blocking durable filesystem boundaries" `Quick
-            test_blocking_durable_primitives ] );
+            test_blocking_durable_primitives;
+          Alcotest.test_case "durable append outside Eio runtime" `Quick
+            test_durable_append_falls_back_outside_eio;
+        ] );
     ]

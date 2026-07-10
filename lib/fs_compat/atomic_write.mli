@@ -47,11 +47,14 @@ type atomic_orphan_recovery =
 
 val recover_atomic_orphan
   :  path:string
-  -> recovered_dir:string
+  -> recovered_root:string
+  -> bucket:string
   -> (atomic_orphan_recovery, string) result
 (** Reconcile one recognized atomic-write orphan. Zero-length files are
-    deleted; non-empty files are fsynced and moved without overwrite into the
-    existing real [recovered_dir] for forensic review. *)
+    deleted; non-empty files are fsynced and linked without overwrite into the
+    existing real [recovered_root]/[bucket], then unlinked from the source. Both
+    path components must be real directories and [bucket] must be one segment.
+    A crash after linking is completed idempotently by inode identity. *)
 
 (** #10130: boot-time sweep for [.atomic_*.tmp] orphans.
 

@@ -12,6 +12,8 @@ open Alcotest
 module G = Server_slack_in_process_gateway
 module State = Channel_gate_slack_state
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 let ps p = Slack_gateway_state.trigger_policy_to_string p
 let default_str = ps G.default_trigger_policy
 
@@ -21,7 +23,7 @@ let with_env key value f =
     ~finally:(fun () ->
       match previous with
       | Some previous -> Unix.putenv key previous
-      | None -> Unix.putenv key "")
+      | None -> unsetenv key)
     (fun () ->
       Unix.putenv key value;
       f ())
@@ -53,6 +55,14 @@ let with_temp_toml content f =
 ;;
 
 let load_error_to_string error = G.trigger_policy_load_error_to_string error
+
+let test_with_env_restores_unset () =
+  let key = "MASC_SLACK_TRIGGER_POLICY_TEST_UNSET" in
+  unsetenv key;
+  with_env key "all" (fun () ->
+    check (option string) "set inside scope" (Some "all") (Sys.getenv_opt key));
+  check (option string) "restored unset" None (Sys.getenv_opt key)
+;;
 
 let test_empty_is_default () =
   check string "empty => default" default_str (ps (G.parse_trigger_policy ""))
@@ -194,7 +204,8 @@ let test_startup_error_is_operator_visible () =
 let () =
   run "server_slack_trigger_policy"
     [ ( "parse_trigger_policy"
-      , [ test_case "empty => default" `Quick test_empty_is_default
+      , [ test_case "with_env restores unset" `Quick test_with_env_restores_unset
+        ; test_case "empty => default" `Quick test_empty_is_default
         ; test_case "whitespace => default" `Quick test_whitespace_is_default
         ; test_case "valid values parse through strict grammar" `Quick
             test_valid_values_parse_through

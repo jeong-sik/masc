@@ -2,9 +2,10 @@
     normalization. *)
 
 (** Keep [text] when non-blank; otherwise synthesize a
-    "Completed without a textual reply. Tools used: ..." line if [tool_names]
-    is non-empty, else error. Hidden reasoning is never user-facing fallback
-    text. *)
+    "No textual reply was produced. Tools invoked: ..." line if [tool_names]
+    is non-empty, else error. The fallback reports only observed invocation;
+    it does not claim that tools succeeded or the turn completed. Hidden
+    reasoning is never user-facing fallback text. *)
 val normalize_response_text
   :  text:string
   -> tool_names:string list

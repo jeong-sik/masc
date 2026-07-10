@@ -13,7 +13,7 @@ let normalize_response_text ~(text : string) ~(tool_names : string list) ()
     | _ ->
       Ok
         (Printf.sprintf
-           "Completed without a textual reply. Tools used: %s."
+           "No textual reply was produced. Tools invoked: %s."
            (String.concat ", " tool_names)))
 ;;
 

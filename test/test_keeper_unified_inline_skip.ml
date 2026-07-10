@@ -76,7 +76,7 @@ let test_normalize_empty_answer_contract () =
   (match KTR.normalize_response_text ~text:"" ~tool_names:[ "tool_execute" ] () with
    | Ok text ->
      check string "generic tool-list fallback retained"
-       "Completed without a textual reply. Tools used: tool_execute."
+       "No textual reply was produced. Tools invoked: tool_execute."
        text
    | Error e -> fail ("unexpected error: " ^ e));
   (* Empty answer without tools still fails instead of inventing a reply. *)

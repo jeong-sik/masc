@@ -427,7 +427,7 @@ let test_finalization_does_not_surface_hidden_reasoning () =
    | Ok text ->
      Alcotest.(check string)
        "hidden reasoning is replaced by the generic tool-list fallback"
-       "Completed without a textual reply. Tools used: masc_schedule_get."
+       "No textual reply was produced. Tools invoked: masc_schedule_get."
        text;
      Alcotest.(check bool)
        "Thinking content is not user-facing"

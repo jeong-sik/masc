@@ -764,10 +764,10 @@ let test_dispatch_create_keeper_wake_payload () =
 ;;
 
 let test_keeper_wake_creation_requires_reminder_only () =
-  (* Projection invariant guarding the tool-handler clamp: a keeper_wake with a
-     side-effecting risk_class is rejected at creation; reminder_only is
-     accepted. This keeps a self-wake out of the human-grant deadlock even for a
-     direct caller that bypasses the handler clamp. *)
+  (* Projection invariant guarding the tool-handler clamp: [keeper_wake] has
+     one intrinsic risk class, [Reminder_only]. Reject both side-effecting
+     classes and the other non-side-effecting class ([Read_only]) so metadata
+     cannot drift away from the typed payload contract. *)
   let payload =
     `Assoc
       [ "kind", `String "masc.keeper_wake"
@@ -783,6 +783,10 @@ let test_keeper_wake_creation_requires_reminder_only () =
     (Result.is_error
        (Schedule_payload_projection.validate_request_payload_for_creation
           ~payload ~risk_class:Schedule_domain.Workspace_write));
+  check bool "read-only keeper_wake rejected" true
+    (Result.is_error
+       (Schedule_payload_projection.validate_request_payload_for_creation
+          ~payload ~risk_class:Schedule_domain.Read_only));
   check bool "reminder_only keeper_wake accepted" true
     (Result.is_ok
        (Schedule_payload_projection.validate_request_payload_for_creation

@@ -7,7 +7,7 @@ type known_kind =
 
 type risk_policy =
   | Requires_side_effecting
-  | Intrinsic_non_side_effecting of Schedule_domain.risk_class
+  | Requires_exact of Schedule_domain.risk_class
 
 type support_status =
   | Supported
@@ -92,7 +92,7 @@ let classify_kind = function
 
 let risk_policy_of_kind = function
   | Board_post -> Requires_side_effecting
-  | Keeper_wake -> Intrinsic_non_side_effecting Schedule_domain.Reminder_only
+  | Keeper_wake -> Requires_exact Schedule_domain.Reminder_only
 ;;
 
 (* The intrinsic risk of a payload kind, when the kind itself determines it
@@ -102,20 +102,19 @@ let risk_policy_of_kind = function
 let intrinsic_risk_class_of_kind kind =
   match risk_policy_of_kind kind with
   | Requires_side_effecting -> None
-  | Intrinsic_non_side_effecting risk_class -> Some risk_class
+  | Requires_exact risk_class -> Some risk_class
 ;;
 
 let risk_class_satisfies_policy kind risk_class =
   match risk_policy_of_kind kind with
   | Requires_side_effecting -> Schedule_domain.is_side_effecting risk_class
-  | Intrinsic_non_side_effecting _ ->
-    not (Schedule_domain.is_side_effecting risk_class)
+  | Requires_exact expected -> risk_class = expected
 ;;
 
 let side_effecting_risk_required kind =
   match risk_policy_of_kind kind with
   | Requires_side_effecting -> true
-  | Intrinsic_non_side_effecting _ -> false
+  | Requires_exact _ -> false
 ;;
 
 let assoc_string key fields =

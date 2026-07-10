@@ -576,6 +576,7 @@ let run_keeper_msg_turn_admitted
       ?on_event
       ?event_bus
       ?continuation_channel
+      ?channel
       ctx
       args
   : tool_result
@@ -1109,6 +1110,7 @@ let run_keeper_msg_turn_admitted
                                 ~is_retry
                                 ?event_bus
                                 ?continuation_channel
+                                ?channel
                                 ())
 		                         ()))
 		            in

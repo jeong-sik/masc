@@ -155,6 +155,14 @@ val approved_action_matches_request :
     This intentionally differs from remembered-rule matching, which has a
     broader persisted-policy contract. *)
 
+(** Resolve the provider config the HITL context-summary worker runs on.
+    Routes through [Runtime.runtime_id_for_hitl_summary] (fallback chain
+    hitl_summary -> structured_judge -> librarian -> default); falls back to
+    the keeper's own runtime when the resolved lane id has no runtime entry.
+    Returns [None] when no runtime resolves at all. *)
+val provider_config_for_summary :
+  keeper_name:string -> Llm_provider.Provider_config.t option
+
 (** {1 Rule store (persisted)} *)
 
 (** List every persisted rule for the given [base_path]. *)

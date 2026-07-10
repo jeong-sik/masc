@@ -333,6 +333,8 @@ let stop_reason_to_string = function
      | None -> Printf.sprintf "mutation_boundary:%d" turns_used)
   | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
     Printf.sprintf "yielded_to_chat_waiting:%d" turns_used
+  | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
+    Printf.sprintf "yielded_to_durable_stimulus:%d" turns_used
 ;;
 
 let enrich_contract_violation_reason (receipt : t) : string =

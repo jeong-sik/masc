@@ -255,21 +255,15 @@ let deterministic_checkpoint_strategies =
     [ PruneToolOutputs; MergeContiguous; SummarizeOld; DropLowImportance ]
 ;;
 
-(* RFC-0313-adjacent W1: strategy selection now reads the per-keeper
-   [compaction_mode]. [Deterministic] returns the extractive OAS chain
-   (unchanged behavior, the fail-closed default).
-
-   [Llm] is the opt-in provider-backed summarizer on the librarian lane.
-   In W1 it has no summarizer wired yet, so it DELEGATES to the same
-   deterministic chain — behavior is identical to today for every keeper.
-   The exhaustive match (no catch-all) forces W2 to replace this arm with
-   the real librarian-lane call site; until then the delegation keeps the
-   [Llm] mode safe rather than silently doing nothing. *)
+(* RFC-0313-adjacent: expose the extractive OAS chain used for checkpoint
+   observability and as the deterministic floor. In [Llm] mode the actual
+   provider-backed plan is selected in [compact_if_needed_typed] when the
+   compaction is not an emergency; unavailable or invalid provider plans
+   fall back to this chain. *)
 let checkpoint_compaction_strategies ~(mode : Keeper_config.compaction_mode) =
   match mode with
   | Keeper_config.Deterministic -> deterministic_checkpoint_strategies
   | Keeper_config.Llm ->
-    (* W2 wires the librarian-lane summarizer here. W1: delegate. *)
     deterministic_checkpoint_strategies
 ;;
 
@@ -399,7 +393,7 @@ let compact_if_needed_typed
       in
       (* RFC-0313-adjacent W2: [Llm] mode asks a librarian-lane summarizer for a
          structured kept/summarized/dropped plan and applies it; any failure
-         (opt-in off, no Eio context, no schema provider, invalid plan) yields
+         (no Eio context, no schema provider, invalid plan) yields
          [None] and falls back to the deterministic chain — the [Deterministic]
          floor is always the guaranteed result. Emergency compaction (a
          near-full context, [emergency] above) never calls the LLM: the reply
@@ -410,21 +404,43 @@ let compact_if_needed_typed
         | Keeper_config.Deterministic -> deterministic_compact ()
         | Keeper_config.Llm ->
           let emergency = ratio >= emergency_compact_ratio_threshold in
-          let runtime_id =
-            try Keeper_meta_contract.runtime_id_of_meta meta with Failure _ -> ""
-          in
-          if emergency || String.equal runtime_id "" then deterministic_compact ()
-          else begin
-            match
-              Keeper_compaction_llm_summarizer.make ~runtime_id ~keeper_name:meta.name ()
-            with
-            | None -> deterministic_compact ()
-            | Some summarizer ->
-              let msgs = messages_of_context ctx in
-              (match summarizer ~messages:msgs with
-               | Some plan -> Keeper_compaction_llm_summarizer.apply plan ~messages:msgs
-               | None -> deterministic_compact ())
-          end
+          if emergency
+          then deterministic_compact ()
+          else
+            let runtime_id =
+              try
+                let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+                if String.trim runtime_id = ""
+                then (
+                  Log.Keeper.warn ~keeper_name:meta.name
+                    "compaction LLM summarizer skipped: runtime identity resolved to an empty \
+                     id; using deterministic fallback";
+                  None)
+                else Some runtime_id
+              with
+              | Failure reason ->
+                Log.Keeper.warn ~keeper_name:meta.name
+                  "compaction LLM summarizer runtime identity failed: %s; using \
+                   deterministic fallback"
+                  reason;
+                None
+            in
+            (match runtime_id with
+             | None -> deterministic_compact ()
+             | Some runtime_id ->
+               (match
+                  Keeper_compaction_llm_summarizer.make
+                    ~runtime_id
+                    ~keeper_name:meta.name
+                    ()
+                with
+                | None -> deterministic_compact ()
+                | Some summarizer ->
+                  let msgs = messages_of_context ctx in
+                  (match summarizer ~messages:msgs with
+                   | Some plan ->
+                     Keeper_compaction_llm_summarizer.apply plan ~messages:msgs
+                   | None -> deterministic_compact ())))
       in
       (* Apply keeper-private fold after standard strategies *)
       let msgs_after_fold =

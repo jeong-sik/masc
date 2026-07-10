@@ -91,6 +91,32 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_sdk.Raw_trace.t
   | Sink_degraded of Agent_sdk.Error.sdk_error
 
+type autonomous_yield_reason =
+  | Chat_waiting
+  | Durable_stimulus_waiting
+
+type autonomous_yield_boundary =
+  | Yield_immediately
+  | Yield_after_current_turn
+
+type autonomous_yield_request =
+  { reason : autonomous_yield_reason
+  ; boundary : autonomous_yield_boundary
+  }
+
+let autonomous_yield_allowed_at_turn ~start_turn ~turn request =
+  match request.boundary with
+  | Yield_immediately -> true
+  | Yield_after_current_turn -> turn > start_turn
+;;
+
+let stop_reason_of_autonomous_yield ~turn request =
+  match request.reason with
+  | Chat_waiting -> Runtime_agent.Yielded_to_chat_waiting { turns_used = turn }
+  | Durable_stimulus_waiting ->
+    Runtime_agent.Yielded_to_durable_stimulus { turns_used = turn }
+;;
+
 let keeper_raw_trace_sink
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -159,6 +185,8 @@ module For_testing = struct
     normalize_response_text_for_finalization
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
+  let autonomous_yield_allowed_at_turn = autonomous_yield_allowed_at_turn
+  let stop_reason_of_autonomous_yield = stop_reason_of_autonomous_yield
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -229,7 +257,7 @@ let run_turn
       ?continuation_channel
       ?hitl_delivery_channel
       ?hitl_approval_grant
-      ?yield_to_chat_waiting
+      ?autonomous_yield_requested
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
@@ -697,31 +725,64 @@ let run_turn
                   ?max_tokens:requested_max_tokens
                   ()
               in
-              (* Autonomous chat-yield: when the caller supplies
-                 [yield_to_chat_waiting], evaluate it at each OAS agent-loop turn
-                 boundary (the [check_loop_guard] point, beside [max_idle_turns],
-                 before the next model dispatch — never mid tool execution). A
-                 [true] result stops the loop; [runtime_agent] converts that stop
-                 into a graceful [Ok] result *only* when [exit_condition_result]
-                 is also present, so both are wired together — otherwise the SDK
-                 [ExitConditionMet] surfaces as an error and the yield would be
-                 recorded as a turn failure/blocker. The rendered stop reason is
-                 [Yielded_to_chat_waiting], whose disposition is a
-                 [Continuation_checkpoint] (like [MutationBoundaryReached]):
-                 "stopped early, checkpoint saved, resume next cycle". *)
-              let chat_yield_exit_condition, chat_yield_exit_condition_result =
-                match yield_to_chat_waiting with
+              (* Autonomous cooperative yield: OAS checks [exit_condition]
+                 before the first provider dispatch as well as between turns.
+                 A scheduled-idle waiting chat may preempt immediately, but a
+                 reactive chat or durable stimulus may stop this run only after
+                 [turn] advances beyond the checkpoint's [start_turn_count];
+                 otherwise the heartbeat would acknowledge the currently leased
+                 stimulus without the model ever observing it. [observed_request]
+                 bridges OAS's split bool / render callbacks and preserves the
+                 exact typed reason and boundary that made the predicate true,
+                 even if the waiting chat is cancelled before
+                 [exit_condition_result] runs. *)
+              let autonomous_yield_exit_condition,
+                  autonomous_yield_exit_condition_result =
+                match autonomous_yield_requested with
                 | None -> None, None
-                | Some pred ->
-                  ( Some (fun (_turn : int) -> pred ())
+                | Some requested ->
+                  let observed_request = ref None in
+                  ( Some
+                      (fun (turn : int) ->
+                         match requested () with
+                         | Some request
+                           when autonomous_yield_allowed_at_turn
+                                  ~start_turn:start_turn_count
+                                  ~turn
+                                  request ->
+                           observed_request := Some request;
+                           true
+                         | Some _ | None -> false)
                   , Some
                       (fun (turn : int) ->
-                        ( Runtime_agent.Yielded_to_chat_waiting { turns_used = turn }
-                        , Some
-                            (Printf.sprintf
-                               "[yielded turn slot at turn %d to a waiting chat \
-                                request; keeper resumes on the next cycle]"
-                               turn) )) )
+                         match !observed_request with
+                         | Some request ->
+                           let stop_reason =
+                             stop_reason_of_autonomous_yield ~turn request
+                           in
+                           let notice =
+                             match request.reason with
+                             | Chat_waiting ->
+                               Printf.sprintf
+                                 "[yielded turn slot at turn %d to a waiting \
+                                  chat request; keeper resumes on the next \
+                                  cycle]"
+                                 turn
+                             | Durable_stimulus_waiting ->
+                               Printf.sprintf
+                                 "[yielded autonomous run at turn %d because a \
+                                  durable stimulus is waiting; checkpoint saved \
+                                  and keeper resumes on the next cycle]"
+                                 turn
+                           in
+                           stop_reason, Some notice
+                         | None ->
+                           let message =
+                             "autonomous yield result requested without a \
+                              preceding typed yield decision"
+                           in
+                           Log.Keeper.error ~keeper_name:meta.name "%s" message;
+                           invalid_arg message) )
               in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* The keeper turn deadline must own the OAS Agent.run switch.
@@ -787,13 +848,13 @@ let run_turn
                          ?hitl_approval_grant
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-                      (* Mutation-boundary is native to OAS now; [exit_condition]
-                         is re-wired here solely for the autonomous chat-yield
-                         (see [chat_yield_exit_condition] above). Both are [None]
-                         on the chat lane, so a chat turn runs to natural
-                         completion (model end_turn) unchanged. *)
-                    ?exit_condition:chat_yield_exit_condition
-                    ?exit_condition_result:chat_yield_exit_condition_result
+                      (* Mutation-boundary is native to OAS now;
+                         [exit_condition] is re-wired here solely for the typed
+                         autonomous cooperative yield above. Both callbacks are
+                         [None] on the chat lane, so chat runs to natural model
+                         completion unchanged. *)
+                    ?exit_condition:autonomous_yield_exit_condition
+                    ?exit_condition_result:autonomous_yield_exit_condition_result
                     ?oas_checkpoint:resume_oas_checkpoint
                     ?event_bus
                     ?trace_link

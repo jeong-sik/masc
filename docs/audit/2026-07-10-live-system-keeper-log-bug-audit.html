@@ -40,18 +40,19 @@
 <body>
 <main>
   <h1>MASC live System/Keeper log adversarial audit</h1>
-  <p class="sub">Capture: 2026-07-10 10:24:43 KST / 2026-07-10T01:24:43Z · Runtime root: <code>&lt;base_path&gt;/.masc</code> · Source window: 2026-07-07 through capture time</p>
+  <p class="sub">Capture: 2026-07-10 10:24:43 KST / 2026-07-10T01:24:43Z · Latest recheck: 2026-07-10 16:30:07 KST · Runtime root: <code>&lt;base_path&gt;/.masc</code> · Source window: 2026-07-07 through latest recheck</p>
 
   <div class="summary">
     <div class="stat"><strong>degraded</strong><span>health overall status</span></div>
-    <div class="stat"><strong>2</strong><span>initial durable queue entries: 1 pending, 1 inflight</span></div>
+    <div class="stat"><strong>7</strong><span>latest durable queue entries: 6 pending, 1 inflight</span></div>
     <div class="stat"><strong>4,700+</strong><span>pending-HITL warning records</span></div>
     <div class="stat"><strong>193</strong><span>keeper-cycle failures with no usable progress</span></div>
     <div class="stat"><strong>320</strong><span>release from cancelled transition failures</span></div>
+    <div class="stat"><strong>677</strong><span>latest prompt metadata drift warnings</span></div>
   </div>
 
   <h2>결론</h2>
-  <p>현재 런타임은 프로세스 자체가 죽은 상태는 아니지만, 독립 Keeper lane의 진행 보장과 관측 데이터 보존을 만족하지 못하는 결함이 확인된다. 가장 명확한 소스 결함은 <strong>구조화된 world observation을 tool-token 문자열로 재해석하고 삭제하는 프롬프트 경계</strong>다. 그 다음은 <strong>pending HITL 하나가 Keeper 전체 cycle admission을 막는 전역 차단</strong>이다. 이 두 MASC 수정은 현재 worktree에서 구현·검증했지만 라이브 실행 파일에는 아직 반영하지 않았다.</p>
+  <p>현재 런타임은 프로세스 자체가 죽은 상태는 아니지만, 독립 Keeper lane의 진행 보장과 관측 데이터 보존을 만족하지 못하는 결함이 확인된다. 가장 명확한 소스 결함은 <strong>구조화된 world observation을 tool-token 문자열로 재해석하고 삭제하는 프롬프트 경계</strong>다. HITL 경계에는 <strong>pending approval과 Keeper lane ownership의 혼동</strong>뿐 아니라, <strong>blocking approval을 확인하기 전에 durable event를 lease하여 같은 이벤트를 매 heartbeat마다 consume/requeue하는 순서 결함</strong>도 있다. 또한 장기 autonomous OAS run은 새 durable stimulus가 쌓여도 turn boundary에서 lane을 양보하지 않아 독립 cycle을 기아시킨다. MASC 수정은 worktree에 구현했지만 라이브 실행 파일에는 아직 반영하지 않았다.</p>
   <p>OAS stop reason 문제와 provider의 empty/thinking-only 응답은 MASC가 문자열 예외를 임의로 해석해서 고칠 영역이 아니다. OAS가 provider terminal outcome을 타입으로 보존하고, MASC는 그 타입을 받아 fallback 또는 cycle 결과를 결정해야 한다. 아래에서 MASC/OAS 경계를 분리했다.</p>
 
   <h2>라이브 상태 — initial snapshot</h2>
@@ -106,6 +107,19 @@
   </table>
   <p><code>overall_status=degraded</code>의 현재 원인은 reaction ledger의 pending stimulus와 stale durable queue다. fleet recovery는 확인했지만, paused Keeper의 durable event가 5시간 이상 남은 상태와 source 수정 미배포 사실은 별개다.</p>
 
+  <h3>16:30 KST latest recheck — durable HITL backlog and intake churn reproduced</h3>
+  <table>
+    <tr><th>항목</th><th>현재 관찰값</th><th>판정</th></tr>
+    <tr><td>실행 파일</td><td>commit <code>61a643565b</code>, uptime 59,279초</td><td>이번 source/worktree 수정은 live에 미반영</td></tr>
+    <tr><td>Durable queue</td><td>pending 6, inflight 1, read error 0. <code>issue_king</code> 6개는 모두 immediate <code>hitl_resolved</code>, <code>verifier</code> 1개는 <code>schedule_due</code></td><td>health의 <code>status=ok</code>와 별개로 durable work가 남아 있다. 직접 ack·삭제·resume하지 않음</td></tr>
+    <tr><td>Keeper turn receipt</td><td><code>issue_king</code> cycle <code>06:49:45Z→07:08:01Z</code>, 1,096,626ms, OAS turn count <code>11453→11570</code></td><td>117 provider/tool turns 동안 이미 도착한 durable wake가 새 cycle을 얻지 못한 직접 증거</td></tr>
+    <tr><td>Intake order</td><td>동일 <code>hitl-approval:appr_ec78ca2d4398</code>를 <code>07:08:34Z</code>, <code>07:09:06Z</code>, <code>07:09:41Z</code>, <code>07:10:07Z</code>에 consume; 사이마다 typed Blocking approval warning</td><td>blocking gate가 intake 뒤에 있어 같은 lease가 반복 requeue된 F-07 재현</td></tr>
+    <tr><td>Turn admission</td><td>autonomous in-flight 4개, chat waiting/rejected 0개</td><td>fleet 전체 정지가 아니라 Keeper별 lane/queue 진행성 결함</td></tr>
+    <tr><td>Config</td><td>parse error 0, unknown key 0, schema <code>ok</code>, startup degradation false</td><td class="oktext">현재 bootstrap/config parser 오류는 없음</td></tr>
+  </table>
+  <p>reaction ledger의 <code>durable_event_queue_stale_after_sec=0</code>는 모든 미처리 항목을 보수적으로 stale로 표시하는 명시적 현재 정책이다. 따라서 stale count 7 자체를 timeout 계산 버그로 세지 않았다. F-07은 stale label이 아니라 실제 event lease·receipt·cycle scheduling 순서로 판정했다.</p>
+  <p><strong>[근거]</strong> live <code>/health?full=1</code>, System Log seq 212720–213084, <code>issue_king</code> execution receipts/raw trace, 2026-07-10 16:30 KST read-only 확인, 신뢰도 High. 런타임 state mutation은 수행하지 않았다.</p>
+
   <h2>확인된 버그 및 장애</h2>
 
   <section class="finding p0">
@@ -130,7 +144,7 @@
       <li><a href="../../lib/keeper/keeper_approval_queue.mli">keeper_approval_queue.mli</a>의 <code>submit_and_await</code>는 호출 fiber를 실제로 기다리게 한다. 별도의 <code>submit_pending</code> callback 경로가 있어도 admission precheck가 전체 lane을 다시 막는다.</li>
     </ul>
     <p><strong>스펙 위반:</strong> HITL은 약한 결합이어야 하며, Keeper는 승인 대기 중에도 busy 응답·무관한 reactive wake·다른 작업을 처리해야 한다. 승인에 종속된 continuation만 durable queue에 남기고, lane 전체를 pause하지 않는 typed continuation 구조가 필요하다.</p>
-    <p><strong>현재 worktree 수정:</strong> queue entry에 <code>lane_policy = Blocking | Nonblocking</code>을 명시했다. 일반 Keeper tool approval은 <code>Nonblocking</code>으로 등록한 뒤 typed rejection을 반환하고, 명시적 <code>submit_and_await</code> 및 persisted lifecycle gate만 <code>Blocking</code>으로 분류한다. resolution wake는 independent-cycle entry에만 발행하고, blocking continuation에는 중복 turn을 만들지 않는다. <code>keeper_world_observation</code>, heartbeat board admission, supervisor recovery가 모두 typed blocking policy만 참조한다.</p>
+    <p><strong>현재 worktree 수정:</strong> queue entry에 <code>lane_policy = Blocking | Nonblocking</code>을 명시했다. 일반 Keeper tool approval은 <code>Nonblocking</code>으로 등록한 뒤 typed rejection을 반환하고, 명시적 <code>submit_and_await</code> 및 persisted lifecycle gate만 <code>Blocking</code>으로 분류한다. resolution wake는 independent-cycle entry에만 발행하고, blocking continuation에는 중복 turn을 만들지 않는다. <code>keeper_world_observation</code>, heartbeat board admission, supervisor recovery가 모두 typed blocking policy만 참조한다. 추가로 heartbeat의 <code>turn_intake_admission</code>이 pressure와 typed Blocking approval을 board collection/event dequeue 전에 한 번 분류하므로, block된 cycle은 durable lease를 만들지 않는다.</p>
   </section>
 
   <section class="finding">
@@ -174,6 +188,24 @@
     <p><strong>14:43 KST live 재현:</strong> old binary의 <code>analyst</code>가 cancelled <code>task-1891</code>에 다시 <code>masc_transition release</code>를 호출했고, 응답 JSON에는 <code>self_correction_required=true</code> 키가 중복으로 들어간 채 retry 지시가 남았다. worktree 수정이 아직 live가 아니라는 직접 증거다.</p>
   </section>
 
+  <section class="finding">
+    <h3>F-07 · P1 · Durable stimulus starvation and blocking-gate dequeue/requeue loop</h3>
+    <div class="meta">Confidence: High · Owner boundary: MASC heartbeat intake and autonomous OAS-run scheduling</div>
+    <p><code>issue_king</code>의 <code>hitl-approval:appr_ec78ca2d4398</code> wake는 <code>06:34:17Z</code>에 durable queue로 들어왔지만, <code>06:49:45Z→07:08:01Z</code>의 1,096,626ms autonomous cycle 동안 독립 cycle을 얻지 못했다. 해당 execution receipt의 OAS turn count는 직전 <code>11453</code>에서 <code>11570</code>으로 117 증가했다. 장기 run에는 dashboard/connector chat만 확인하는 yield hook이 있었고 durable event queue는 확인하지 않았다.</p>
+    <p>장기 cycle이 끝난 뒤에는 같은 event를 93초 동안 네 번 consume했다. 각 시도 사이에 <code>keeper:issue_king blocked on 1 pending HITL approval(s)</code>가 기록되고 같은 ID가 다시 consume되므로, source의 lease finalizer가 이를 requeue한 흐름과 일치한다. 마지막 시점에 별도의 Blocking approval <code>appr_b1719d6044e2</code>가 만료되자 즉시 cycle이 시작됐다. 원인은 typed Blocking approval 판단 자체가 아니라, event intake 뒤에 그 gate를 적용한 순서다.</p>
+    <p><strong>현재 worktree 수정:</strong> (1) pressure/typed Blocking approval을 <code>turn_intake_admission</code> closed variant로 분류한 뒤에만 board/event intake를 허용하고, (2) autonomous OAS loop가 exact chat/durable queue를 turn boundary마다 읽어 typed <code>Chat_waiting | Durable_stimulus_waiting</code> reason으로 checkpoint하도록 했다. Scheduled-idle chat만 첫 dispatch 전에 양보하고, reactive chat과 durable backlog는 현재 leased stimulus를 모델이 최소 한 provider turn 관찰한 뒤에만 양보한다. 시작 turn은 0으로 가정하지 않고 captured <code>start_turn_count</code>와 비교한다.</p>
+    <p>OAS의 <code>Agent.check_loop_guard</code>는 provider call 전에 exit condition을 평가하며 공식 regression test도 turn 0 종료를 검증한다. 따라서 첫 dispatch 전에 durable yield를 허용하면 현재 lease를 관찰 없이 ack할 수 있다. 새 경계는 timeout, queue age/count, payload 문자열, turn cap을 사용하지 않고 queue 존재와 channel/lease 의미만 사용한다. MASC가 OAS의 public exit-condition contract를 소비하며 OAS에는 MASC 의존성을 추가하지 않는다.</p>
+    <p><strong>[근거]</strong> OAS <code>lib/agent/agent.ml</code> 및 <code>test/test_multimodal.ml</code>, MASC System Log/receipt/raw trace, 2026-07-10 16:30 KST 확인, 신뢰도 High. Closed variant와 exhaustive pattern match 설계는 <a href="https://ocaml.org/manual/5.4/typedecl.html">OCaml 5.4 type declarations</a> 기준이다.</p>
+  </section>
+
+  <section class="finding p2">
+    <h3>F-08 · P2 · Unified prompt metadata advertises a deleted template variable</h3>
+    <div class="meta">Confidence: High · Owner boundary: MASC prompt catalog SSOT</div>
+    <p>16:30 KST까지 live build <code>61a643565b</code>의 <code>keeper.unified.system</code> metadata에는 <code>trait_lines</code>가 남아 있지만 effective template에는 없어, 같은 drift warning이 677회 발생했다. startup config parser는 정상이며, 이 문제는 prompt schema metadata와 effective template의 SSOT 불일치다.</p>
+    <p>대규모 legacy purge PR <a href="https://github.com/jeong-sik/masc/pull/23929">#23929</a>이 16:30:12 KST에 merge commit <code>434a7f5a76</code>으로 해당 placeholder를 삭제했다. 따라서 source remediation은 main에 landed됐지만 live build에는 아직 배포되지 않았다. 중복 수정과 충돌을 만들지 않기 위해 이 후속 PR에는 같은 제거를 넣지 않는다.</p>
+    <p><strong>[근거]</strong> System Log exact warning count, live build source, merged PR #23929, 2026-07-10 16:31 KST 확인, 신뢰도 High.</p>
+  </section>
+
   <h2>버그로 확정하지 않은 항목</h2>
   <div class="note">
     <ul>
@@ -181,6 +213,7 @@
       <li><strong>deterministic retry/identical-tool guard:</strong> <code>idle_turns=3</code>, 동일 tool 반복 억제, 3회 실패 경고는 현재 무한루프를 제한하는 관측 가능한 안전장치다. 그 자체를 결함으로 세지 않았다.</li>
       <li><strong>legacy sandbox_profile parse reports:</strong> Keeper chat의 과거 기록에는 오류가 있으나 현재 config parse error는 0이다. 현재 장애로 재분류하지 않았다.</li>
       <li><strong>provider capacity/backpressure:</strong> 외부 capacity 오류는 관측되지만, 이를 MASC 내부 로직 결함으로 단정하지 않았다. 다만 해당 call이 다른 lane을 막지 않는지는 F-04/F-05와 함께 검증해야 한다.</li>
+      <li><strong>durable stale threshold 0:</strong> 현재 health schema가 명시적으로 모든 미처리 queue item을 stale로 표시하는 보수적 정책이다. stale label 자체를 age 계산 결함으로 보지 않았고, F-07은 lease/receipt 순서로 별도 입증했다.</li>
     </ul>
   </div>
 
@@ -189,27 +222,36 @@
     <tr><th>순서</th><th>작업</th><th>완료 조건</th></tr>
     <tr><td>1</td><td>MASC prompt segment type boundary</td><td>observation의 <code>keeper_turn_id</code>/<code>masc_oas_error</code> 원문 보존, instruction의 stale tool 검사는 유지, false-positive warning/strip 0, 회귀 테스트 통과</td></tr>
     <tr><td>2</td><td>MASC HITL continuation redesign</td><td>승인 대기 continuation만 block; 같은 Keeper lane에서 busy ack와 무관한 reactive work가 진행; Keeper 전체 pause 없음</td></tr>
-    <tr><td>3</td><td>OAS typed stop outcome</td><td>새 provider terminal reason을 fatal string match 없이 보존; malformed protocol과 분리; MASC fallback receipt가 원인과 함께 관측됨</td></tr>
-    <tr><td>4</td><td>Long-turn phase receipts</td><td>provider/tool/approval/stream별 elapsed와 cancellation이 기록되고, 한 lane의 stall이 전체 fleet을 막지 않음</td></tr>
-    <tr><td>5</td><td>Terminal task rejection contract</td><td>cancelled task에 대한 release 재호출이 typed terminal result로 끝나고 Keeper가 다른 활동으로 이동</td></tr>
+    <tr><td>3</td><td>Durable cooperative yield + pre-intake gate</td><td>blocking cycle은 lease하지 않고, 장기 autonomous run은 현재 stimulus를 한 turn 관찰한 뒤 queued durable work에 checkpoint; exact typed reason이 receipt에 남음</td></tr>
+    <tr><td>4</td><td>OAS typed stop outcome</td><td>새 provider terminal reason을 fatal string match 없이 보존; malformed protocol과 분리; MASC fallback receipt가 원인과 함께 관측됨</td></tr>
+    <tr><td>5</td><td>Long-turn phase receipts</td><td>provider/tool/approval/stream별 elapsed와 cancellation이 기록되고, 한 lane의 stall이 전체 fleet을 막지 않음</td></tr>
+    <tr><td>6</td><td>Terminal task rejection contract</td><td>cancelled task에 대한 release 재호출이 typed terminal result로 끝나고 Keeper가 다른 활동으로 이동</td></tr>
+    <tr><td>7</td><td>Prompt metadata drift deployment proof</td><td>merged #23929의 <code>trait_lines</code> 제거가 live build에 반영되고 warning이 0; 후속 PR에 중복 source 변경 없음</td></tr>
   </table>
 
   <h2>현재 remediation 상태</h2>
   <div class="note">
-    <p><strong>F-01 1차 수정 완료 (worktree only):</strong> unified prompt 경로가 structured world-state user message를 더 이상 token scanner/registry strip에 넣지 않고, system/continuity instruction surfaces만 검사하도록 분리했다. <a href="../../lib/keeper/keeper_unified_prompt.ml">keeper_unified_prompt.ml</a>와 <a href="../../test/test_keeper_unified_verification_surface.ml">verification-surface regression test</a>에 변경이 있다.</p>
-    <p><strong>F-02 1차 수정 완료 (worktree only):</strong> <a href="../../lib/keeper/keeper_approval_queue.ml">keeper_approval_queue.ml</a>에 typed blocking/nonblocking queue boundary를 추가하고, <a href="../../lib/governance_pipeline.ml">governance_pipeline.ml</a>과 <a href="../../lib/keeper/keeper_agent_run.ml">keeper_agent_run.ml</a>의 일반 Keeper tool approval을 nonblocking 경로로 연결했다. 명시적 critical continuation gate의 blocking policy는 유지한다.</p>
-    <p><strong>F-03 1차 수정 구현:</strong> <a href="../../../../../oas/.worktrees/oas-unknown-stop-terminal-20260710/lib/llm_provider/types.ml">OAS stop-reason SSOT</a>에 공식 <code>ContentFilter</code>/<code>RepetitionTruncation</code> constructor를 추가하고 <a href="../../../../../oas/.worktrees/oas-unknown-stop-terminal-20260710/lib/pipeline/pipeline.ml">pipeline</a>은 두 값만 typed terminal result로 보존한다. 임의 <code>Unknown</code>과 tool block 없는 <code>UnmatchedToolCalls</code>은 fail-closed를 유지한다. commit <code>7529dfbfd</code>를 <a href="https://github.com/jeong-sik/oas/pull/2506">OAS draft PR #2506</a>에 게시했다. focused build와 61/4/40/50 테스트가 성공했고 current-head full proof는 PR CI에서 확인한다.</p>
-    <p>검증: MASC approval queue 12개, HITL approval 51개, supervisor 87개, unified verification surface 18개, prompt token integrity 15개, F-06 tool-result 25개, Keeper tool-dispatch runtime 36개 테스트가 성공했다. OAS Types 61개, stop-reason SSOT 4개, OpenAI streaming 40개, pipeline 50개 테스트도 성공했다. 로컬 narrow build의 compiler는 <code>ocamlc 5.5.0</code>였고, OCaml 5.4 공식 manual을 설계 기준으로 삼았으므로 5.4 CI proof는 별도다. Dune full build/CI는 PR에서 수행한다. 테스트 실행 시 packaged model catalog 경고가 있었지만 worktree-only test fixture의 catalog discovery 경고이며, 라이브 health의 startup config warning과는 별개다.</p>
-    <p>현재 live executable은 이 worktree 변경을 포함하지 않으므로 live warning 감소나 runtime 개선으로 해석하면 안 된다. 배포/재시작 및 CI green 전에는 remediation을 완료 상태로 주장하지 않는다.</p>
+    <p><strong>F-01 1차 수정 landed:</strong> merged PR <a href="https://github.com/jeong-sik/masc/pull/23923">#23923</a>에서 unified prompt 경로가 structured world-state user message를 더 이상 token scanner/registry strip에 넣지 않고, system/continuity instruction surfaces만 검사하도록 분리했다.</p>
+    <p><strong>F-02 1차 수정 landed:</strong> merged PR <a href="https://github.com/jeong-sik/masc/pull/23923">#23923</a>에서 approval queue에 typed blocking/nonblocking boundary를 추가하고 일반 Keeper tool approval을 nonblocking 경로로 연결했다. 명시적 critical continuation gate의 blocking policy는 유지한다.</p>
+    <p><strong>F-03 1차 수정 landed:</strong> OAS stop-reason SSOT에 공식 <code>ContentFilter</code>/<code>RepetitionTruncation</code> constructor를 추가하고 pipeline은 두 값만 typed terminal result로 보존한다. 임의 <code>Unknown</code>과 tool block 없는 <code>UnmatchedToolCalls</code>은 fail-closed를 유지한다. <a href="https://github.com/jeong-sik/oas/pull/2506">OAS PR #2506</a>은 merge됐고, 후속 repair를 포함한 current main <code>c4255efe5</code>의 CI run <a href="https://github.com/jeong-sik/oas/actions/runs/29075791219">29075791219</a>가 성공했다.</p>
+    <p><strong>F-07 수정 구현:</strong> Draft PR <a href="https://github.com/jeong-sik/masc/pull/23950">#23950</a>에서 heartbeat가 typed Blocking approval을 event intake 전에 분류하고, autonomous run은 exact durable queue가 비어 있지 않으면 첫 provider turn 뒤 typed checkpoint를 만든다. 새 <code>Yielded_to_durable_stimulus</code> stop reason은 receipt, outcome, metric, dashboard cancellation surface까지 exhaustive하게 전파한다. global OAS turn count를 0으로 가정하지 않는 boundary regression과 queue/intake regression을 추가했다.</p>
+    <p><strong>F-08 source 수정 landed:</strong> prompt metadata의 obsolete <code>trait_lines</code> 제거는 merged PR <a href="https://github.com/jeong-sik/masc/pull/23929">#23929</a>이 소유한다. 이번 후속 변경은 같은 영역을 중복 수정하지 않으며 live 배포 후 warning 소멸만 확인한다.</p>
+    <p>기존 remediation 검증: MASC approval queue 12개, HITL approval 51개, supervisor 87개, unified verification surface 18개, prompt token integrity 15개, F-06 tool-result 25개, Keeper tool-dispatch runtime 36개 테스트가 성공했다. OAS Types 61개, stop-reason SSOT 4개, OpenAI streaming 40개, pipeline 50개 테스트도 성공했다.</p>
+    <p>F-07 current-head 검증: changed OCaml parser, <code>ocamlformat --check</code>, <code>git diff --check</code>, no-actionable-signal policy lint, HTML parse가 성공했다. focused Dune은 unrelated worktree 두 곳이 repo-local lock에서 build 중이어서 대기 프로세스만 중단했고 lock holder를 kill하거나 우회하지 않았다. OCaml 5.4 full build/test proof는 Draft PR #23950 CI authority로 남긴다.</p>
+    <p><strong>[근거]</strong> OAS current main CI run 29075791219, 2026-07-10 16:30 KST 확인, 신뢰도 High.</p>
+    <p>현재 live executable은 이 worktree 변경을 포함하지 않으므로 live warning 감소나 runtime 개선으로 해석하면 안 된다. 배포/재시작 및 후속 MASC PR CI green 전에는 F-07 remediation을 완료 상태로 주장하지 않는다.</p>
   </div>
 
   <h2>검증 근거</h2>
   <pre>curl -fsS 'http://127.0.0.1:8935/health?full=1'
 rg 'keeper cycle FAILED.*no_usable_progress' &lt;base_path&gt;/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl
-rg 'pending HITL approval|Unrecognized stop_reason|stale_turn_timeout|release.*cancelled' &lt;base_path&gt;/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl</pre>
-  <p class="small">로그 line count는 동일 사건이 structured message/details/supervisor 전파로 여러 번 기록된 경우를 deduplicate하지 않는다. 사건 수를 주장할 때는 위의 패턴과 source flow를 함께 보아야 한다. Durable queue 파일은 read-only evidence로만 확인했으며 삭제·ack·resume 조작은 하지 않았다. 12:35, 13:11, 14:52 KST recheck health evidence는 build commit <code>61a643565b</code> 기준이며, 각 snapshot의 동적 상태 차이를 보존하기 위해 분리했다.</p>
+rg 'pending HITL approval|Unrecognized stop_reason|stale_turn_timeout|release.*cancelled' &lt;base_path&gt;/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl
+rg 'hitl-approval:appr_ec78ca2d4398|latency_ms=1096626|template_variables drift' &lt;base_path&gt;/.masc/logs/system_log_2026-07-10.jsonl
+tail/jq &lt;base_path&gt;/.masc/keepers/issue_king/execution-receipts/2026-07/10.jsonl
+tail/jq &lt;base_path&gt;/.masc/keepers/issue_king/raw-traces/turn-1783665258367-cc61-002882.jsonl</pre>
+  <p class="small">로그 line count는 동일 사건이 structured message/details/supervisor 전파로 여러 번 기록된 경우를 deduplicate하지 않는다. 사건 수를 주장할 때는 위의 패턴과 source flow를 함께 보아야 한다. Durable queue와 Keeper Chat execution receipt/raw trace는 read-only evidence로만 확인했으며 원문 thinking이나 private payload를 보고서에 복제하지 않았다. queue 삭제·ack·resume 및 Keeper restart는 수행하지 않았다. 12:35, 13:11, 14:52, 16:30 KST recheck health evidence는 build commit <code>61a643565b</code> 기준이며, 각 snapshot의 동적 상태 차이를 보존하기 위해 분리했다.</p>
 
-  <footer>이 보고서와 MASC 수정은 <a href="https://github.com/jeong-sik/masc/pull/23923">MASC draft PR #23923</a>, OAS provider-catalog 수정은 <a href="https://github.com/jeong-sik/oas/pull/2506">OAS draft PR #2506</a>에서 추적한다. Dune full build는 CI authority로 남기고, 소스 수정 후에는 touched target 중심의 narrow validation만 수행한다.</footer>
+  <footer>초기 보고서와 F-01/F-02/F-06 MASC 수정은 merged PR <a href="https://github.com/jeong-sik/masc/pull/23923">#23923</a>, OAS provider-catalog 수정은 merged PR <a href="https://github.com/jeong-sik/oas/pull/2506">#2506</a>에서 추적한다. F-07은 최신 main 기반 Draft PR <a href="https://github.com/jeong-sik/masc/pull/23950">#23950</a>, F-08 source 수정은 merged PR <a href="https://github.com/jeong-sik/masc/pull/23929">#23929</a>이 소유한다. Dune full build는 CI authority로 남기고, 소스 수정 후에는 touched target 중심의 narrow validation만 수행한다.</footer>
 </main>
 </body>
 </html>

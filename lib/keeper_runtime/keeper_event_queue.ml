@@ -60,13 +60,13 @@ type stimulus_payload =
          content). Dormant — no producer emits it yet (handle_ambient enqueuer
          lands in P3), same staging as [Bg_completed] above. *)
   | Hitl_resolved of hitl_resolution
-      (* A HITL approval this keeper enqueued — and then skipped cycles on via
-         [has_pending_for_keeper -> Skip Approval_pending] — was resolved. Wakes
-         the keeper so it re-evaluates and proceeds on its next cycle instead of
-         stalling until an unrelated stimulus, no-progress recovery, or the
-         30-minute approval janitor. Mirrors [Fusion_completed]/[Bg_completed]:
-         a HITL decision is an async completion the waiting keeper must be
-         notified of. *)
+      (* A nonblocking HITL approval this keeper enqueued was resolved. Wakes
+         the keeper so it re-evaluates and proceeds on its next independent
+         cycle instead of waiting for unrelated stimulus, no-progress recovery,
+         or the 30-minute approval janitor. Blocking approvals resume their
+         resolver directly and do not emit this duplicate wake. Mirrors
+         [Fusion_completed]/[Bg_completed]: a HITL decision is an async
+         completion the waiting keeper must be notified of. *)
   | Goal_verification_failed of goal_verification_failure
       (* A goal completion verification was rejected for a goal assigned to this
          keeper. Wakes the keeper lane so it resumes the goal after the phase

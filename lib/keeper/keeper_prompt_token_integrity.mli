@@ -29,6 +29,22 @@ val scan_rendered_prompt :
   user_message:string ->
   continuity_summary:string ->
   string list
+(** [scan_rendered_prompt] is the generic all-text scanner used for explicit
+    caller-supplied text. It must not be used for a structured world-state
+    observation, because observation values are data rather than tool
+    instructions. Use {!scan_instruction_surfaces} from the unified prompt
+    builder. *)
+
+(** Scan only prompt surfaces that are owned by the instruction/memory
+    producer. The unified prompt's structured world-state user message is
+    intentionally absent: board/task/connector observations must remain
+    immutable even when a field happens to contain a [keeper_*] or [masc_*]
+    diagnostic name. *)
+val scan_instruction_surfaces :
+  keeper_name:string ->
+  system_prompt:string ->
+  continuity_summary:string ->
+  string list
 
 (** Sanitize keeper_*/masc_* tokens that do not resolve to a live tool via
     [Keeper_tool_resolution]. Registry-driven presentation-layer band-aid for

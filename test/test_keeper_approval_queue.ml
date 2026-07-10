@@ -88,6 +88,10 @@ let test_fresh_critical_entry_phase_is_awaiting_operator () =
          | None -> Alcotest.fail "in-memory entry not found"
        in
        Alcotest.(check bool)
+         "submit_and_await entry owns a blocking lane"
+         true
+         (AQ.has_blocking_pending_for_keeper ~keeper_name);
+       Alcotest.(check bool)
          "fresh Critical entry is Awaiting_operator in-memory"
          true
          (entry.phase = AQ.Awaiting_operator);
@@ -230,6 +234,60 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
             true
             (decision = Keeper_event_queue.Hitl_approved)
         | None -> Alcotest.fail "non-blocking resolve did not fire the keeper wake hook"))
+;;
+
+let test_blocking_callback_policy_owns_lane_without_resolver () =
+  let base_path = temp_dir () in
+  let woke = ref false in
+  let callback_decision = ref None in
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      woke := true);
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.set_approval_resolution_wake_hook
+        (fun
+          ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+          ());
+      cleanup_dir base_path)
+    (fun () ->
+       let keeper_name = "blocking-callback-policy-test" in
+       let id =
+         AQ.submit_pending
+           ~keeper_name
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "lifecycle_gate" ])
+           ~risk_level:AQ.Critical
+           ~base_path
+           ~lane_policy:AQ.Blocking
+           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ()
+       in
+       Alcotest.(check bool)
+         "explicit blocking callback owns the lane"
+         true
+         (AQ.has_blocking_pending_for_keeper ~keeper_name);
+       (match AQ.get_pending_entry ~id with
+        | Some entry ->
+          Alcotest.(check bool) "lane policy is typed as Blocking" true
+            (entry.lane_policy = AQ.Blocking)
+        | None -> Alcotest.fail "blocking callback entry not found");
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+       Alcotest.(check bool) "blocking callback does not emit duplicate wake" false !woke;
+       Alcotest.(check bool)
+         "resolved blocking callback releases the lane"
+         false
+         (AQ.has_blocking_pending_for_keeper ~keeper_name);
+       match !callback_decision with
+       | Some Agent_sdk.Hooks.Approve -> ()
+       | Some decision ->
+         Alcotest.fail
+           ("unexpected callback decision: "
+            ^ AQ.approval_decision_to_string decision)
+       | None -> Alcotest.fail "blocking callback did not run")
 ;;
 
 let test_resolution_wake_carries_originating_continuation_channel () =
@@ -859,6 +917,10 @@ let () =
             "submit_pending resolve fires the keeper wake hook"
             `Quick
             test_submit_pending_resolve_fires_keeper_wake_hook
+        ; Alcotest.test_case
+            "explicit blocking callback owns a lane without resolver"
+            `Quick
+            test_blocking_callback_policy_owns_lane_without_resolver
         ; Alcotest.test_case
             "expire_stale does not fire wake for blocking submit_and_await"
             `Quick

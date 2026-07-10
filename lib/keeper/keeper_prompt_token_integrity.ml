@@ -166,6 +166,18 @@ let scan_rendered_prompt
   in
   system_unknowns @ user_unknowns @ continuity_unknowns |> dedup_strings
 
+let scan_instruction_surfaces
+      ~keeper_name
+      ~system_prompt
+      ~continuity_summary =
+  let system_unknowns =
+    scan_text ~keeper_name ~source:System_prompt system_prompt
+  in
+  let continuity_unknowns =
+    scan_text ~keeper_name ~source:Continuity continuity_summary
+  in
+  system_unknowns @ continuity_unknowns |> dedup_strings
+
 (* ── Registry-driven sanitization ─────────────────────────────────── *)
 
 let stale_tool_token_placeholder = "<stale_tool_token>"

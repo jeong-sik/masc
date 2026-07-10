@@ -33,6 +33,10 @@ type pending_phase =
   | Awaiting_operator
   | Escalated
 
+type lane_policy =
+  | Nonblocking
+  | Blocking
+
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -54,6 +58,7 @@ type pending_approval =
   ; disposition : string option
   ; disposition_reason : string option
   ; phase : pending_phase
+  ; lane_policy : lane_policy
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
@@ -102,6 +107,7 @@ val risk_level_to_int : risk_level -> int
 val risk_level_of_string : string -> risk_level option
 val pending_phase_to_string : pending_phase -> string
 val pending_phase_of_string : string -> pending_phase option
+val lane_policy_to_string : lane_policy -> string
 val approval_decision_to_string : decision -> string
 
 val approval_audit_decision_to_string : approval_audit_decision -> string

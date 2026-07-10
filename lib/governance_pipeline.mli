@@ -144,17 +144,21 @@ val to_oas_approval_callback :
   ?meta:Keeper_meta_contract.keeper_meta ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?nonblocking:bool ->
   unit ->
   Agent_sdk.Hooks.approval_callback
-(** Build an OAS approval callback with genuine HITL fiber suspension.
+(** Build an OAS approval callback with HITL approval handling.
 
     Pre-computes trifecta status from the keeper's active shard tool set.
     When trifecta is active, state-modifying tools get risk escalation.
 
-    When a tool exceeds the governance threshold, the agent fiber
-    suspends via [Keeper_approval_queue.submit_and_await]. An operator
-    resolves the approval via the dashboard approval HTTP handler
-    ([server_dashboard_http.ml]), resuming the fiber.
+    When [nonblocking] is [false] (the compatibility default), a tool that
+    exceeds the governance threshold suspends via
+    [Keeper_approval_queue.submit_and_await]. When [nonblocking] is [true],
+    the approval is registered with [submit_pending], the callback returns a
+    typed-in-protocol rejection, and the resolution wake starts a later
+    independent Keeper cycle. Production Keeper runs use [true] so ordinary
+    tool approval cannot monopolize the Keeper lane.
 
     Tools below the threshold are auto-approved unless auto-approval is
     explicitly forbidden. Critical risk and runtime safety blockers still enter

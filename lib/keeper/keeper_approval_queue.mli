@@ -44,6 +44,10 @@ type pending_phase =
   | Awaiting_operator
   | Escalated
 
+type lane_policy =
+  | Nonblocking
+  | Blocking
+
 (** [Agent_sdk.Hooks.approval_decision] alias used as the resolver type. *)
 type decision = Agent_sdk.Hooks.approval_decision
 
@@ -54,8 +58,8 @@ type approval_audit_decision =
 type approval_audit_disposition =
   | Approval_escalated of string
 
-(** Pending approval entry — the suspended-fiber side of the
-    Eio.Promise rendez-vous. *)
+(** Pending approval entry. [lane_policy] records whether this approval owns
+    the Keeper lane independently of whether it has an Eio promise resolver. *)
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -78,6 +82,7 @@ type pending_approval =
   ; disposition : string option
   ; disposition_reason : string option
   ; phase : pending_phase
+  ; lane_policy : lane_policy
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
@@ -129,6 +134,7 @@ val risk_level_to_int : risk_level -> int
 val risk_level_of_string : string -> risk_level option
 val pending_phase_to_string : pending_phase -> string
 val pending_phase_of_string : string -> pending_phase option
+val lane_policy_to_string : lane_policy -> string
 val approval_decision_to_string : decision -> string
 val approval_audit_decision_to_string : approval_audit_decision -> string
 val hitl_context_summary_to_yojson : hitl_context_summary -> Yojson.Safe.t
@@ -290,8 +296,10 @@ val submit_and_await :
 
 (** Submit a tool call for approval without suspending the caller —
     the supplied [on_resolution] callback is invoked when the
-    operator resolves. Returns the new pending entry's id, or the
-    existing id when an equivalent entry is already pending. *)
+    operator resolves. [lane_policy] defaults to [Nonblocking]; lifecycle
+    gates that deliberately pause a keeper must pass [Blocking] and resume
+    that pause from their callback. Returns the new pending entry's id, or
+    the existing id when an equivalent entry with the same policy is pending. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->
@@ -310,6 +318,7 @@ val submit_pending :
   ?disposition:string ->
   ?disposition_reason:string ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?lane_policy:lane_policy ->
   on_resolution:(Agent_sdk.Hooks.approval_decision -> unit) ->
   unit ->
   string
@@ -321,8 +330,9 @@ val submit_pending :
     [Keeper_keepalive_signal] call) to break a dependency cycle: this module
     sits below [Keeper_keepalive_signal], which depends on
     [Keeper_world_observation], which depends back here for
-    [has_pending_for_keeper]. The default is a no-op; [Server_bootstrap]
-    installs the [Hitl_resolved]-stimulus wake. *)
+    [has_blocking_pending_for_keeper]. The default is a no-op;
+    [Server_bootstrap] installs the [Hitl_resolved]-stimulus wake for
+    nonblocking entries. *)
 val set_approval_resolution_wake_hook :
   (base_path:string ->
    keeper_name:string ->
@@ -370,6 +380,12 @@ val update_pending_entry : id:string -> (pending_approval -> pending_approval) -
 
 val pending_count : unit -> int
 val pending_count_for_keeper : keeper_name:string -> int
+val blocking_pending_count_for_keeper : keeper_name:string -> int
+(** Number of pending approvals with [Blocking] lane policy. *)
+
+val has_blocking_pending_for_keeper : keeper_name:string -> bool
+(** Whether a [Blocking] approval currently owns a live Keeper lane. *)
+
 val has_pending_for_keeper : keeper_name:string -> bool
 
 (** {1 Timeout cleanup} *)

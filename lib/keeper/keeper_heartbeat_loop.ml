@@ -1003,7 +1003,8 @@ let run_heartbeat_loop
           | Keeper_pressure_admission.Blocked _ -> false
         in
         let approval_pending =
-          Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta_current.name
+          Keeper_approval_queue.has_blocking_pending_for_keeper
+            ~keeper_name:meta_current.name
         in
         let keeper_health_blocker =
           if Health.is_healthy ~agent_name:meta_current.name then None else Some "unhealthy"

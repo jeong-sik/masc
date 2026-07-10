@@ -785,6 +785,7 @@ let run_turn
                          ~meta
                          ?clock:(Eio_context.get_clock_opt ())
                          ?continuation_channel
+                         ~nonblocking:true
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       (* Mutation-boundary is native to OAS now; [exit_condition]

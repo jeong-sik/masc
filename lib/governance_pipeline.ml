@@ -383,6 +383,7 @@ let to_oas_approval_callback
       ?meta
       ?clock
       ?continuation_channel
+      ?(nonblocking = false)
       ()
   : Agent_sdk.Hooks.approval_callback
   =
@@ -547,27 +548,63 @@ let to_oas_approval_callback
             let mode = Operator_approval.read_approval_mode_or_manual ~base_path in
             let band = approval_band_of_risk risk in
             let submit_for_operator reason =
-              Keeper_approval_queue.submit_and_await
-                ~keeper_name
-                ~tool_name
-                ~input
-                ~base_path
-                ?turn_id
-                ?task_id
-                ?goal_id
-                ~goal_ids
-                ?sandbox_target
-                ?sandbox_profile
-                ?backend
-                ?runtime_contract
-                ?selected_model
-                ~disposition:"Blocked"
-                ~disposition_reason:
-                  (Operator_approval.approval_mode_queue_reason_to_string reason)
-                ~risk_level
-                ?clock
-                ?continuation_channel
-                ()
+              let disposition_reason =
+                Operator_approval.approval_mode_queue_reason_to_string reason
+              in
+              if nonblocking
+              then
+                let approval_id =
+                  Keeper_approval_queue.submit_pending
+                    ~keeper_name
+                    ~tool_name
+                    ~input
+                    ~base_path
+                    ?turn_id
+                    ?task_id
+                    ?goal_id
+                    ~goal_ids
+                    ?sandbox_target
+                    ?sandbox_profile
+                    ?backend
+                    ?runtime_contract
+                    ?selected_model
+                    ~disposition:"Blocked"
+                    ~disposition_reason
+                    ?continuation_channel
+                    ~risk_level
+                    ~on_resolution:(fun decision ->
+                      Log.Governance.info
+                        "nonblocking HITL approval resolved keeper=%s tool=%s decision=%s"
+                        keeper_name
+                        tool_name
+                        (Keeper_approval_queue.approval_decision_to_string decision))
+                    ()
+                in
+                Agent_sdk.Hooks.Reject
+                  (Printf.sprintf
+                     "HITL approval pending: id=%s; the Keeper will be woken after the operator decision; do not retry this tool call until then"
+                     approval_id)
+              else
+                Keeper_approval_queue.submit_and_await
+                  ~keeper_name
+                  ~tool_name
+                  ~input
+                  ~base_path
+                  ?turn_id
+                  ?task_id
+                  ?goal_id
+                  ~goal_ids
+                  ?sandbox_target
+                  ?sandbox_profile
+                  ?backend
+                  ?runtime_contract
+                  ?selected_model
+                  ~disposition:"Blocked"
+                  ~disposition_reason
+                  ~risk_level
+                  ?clock
+                  ?continuation_channel
+                  ()
             in
             (match Operator_approval.decide_approval_mode ~mode ~band with
              | Operator_approval.Auto_approved { mode; band } ->

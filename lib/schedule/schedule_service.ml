@@ -124,7 +124,16 @@ let revoke_standing config ?revoked_at ~schedule_id ~revoked_by () =
   |> map_store
 ;;
 
-let update config ?updated_at ~schedule_id ~due_at ~expires_at ~payload ~updated_by =
+let update
+      config
+      ?updated_at
+      ~schedule_id
+      ~due_at
+      ~expires_at
+      ~payload
+      ~updated_by
+      ()
+  =
   (* NDT-OK: service mutation boundary timestamp. The deterministic store never
      samples time and records this explicit value in any grant invalidation. *)
   let updated_at = Option.value updated_at ~default:(now ()) in

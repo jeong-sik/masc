@@ -143,7 +143,7 @@ let resolve_http_json ~config ~operator_name ~(args : Yojson.Safe.t)
         let* payload_json = required_payload "payload" args in
         let* payload = Schedule_domain.payload_of_yojson payload_json in
         Schedule_service.update config ~schedule_id ~due_at ~expires_at ~payload
-          ~updated_by:approved_by
+          ~updated_by:approved_by ()
         |> map_service_error
         |> Result.map (fun schedule -> schedule, [])
     in

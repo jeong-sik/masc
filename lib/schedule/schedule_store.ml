@@ -366,9 +366,11 @@ let revoke_active_standing_grants
   List.fold_right
     (fun (grant : execution_grant) (updated, count) ->
        match grant.decision, grant.scope, grant.revocation with
-       | Approve, Grant_standing, None
-         when String.equal grant.schedule_id schedule_id ->
-         { grant with revocation = Some revocation } :: updated, count + 1
+       | Approve, Grant_standing, None ->
+         if String.equal grant.schedule_id schedule_id then
+           { grant with revocation = Some revocation } :: updated, count + 1
+         else
+           grant :: updated, count
        | Approve, Grant_occurrence, _
        | Approve, Grant_standing, Some _
        | Reject _, _, _ ->

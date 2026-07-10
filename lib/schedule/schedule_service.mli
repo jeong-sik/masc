@@ -84,6 +84,7 @@ val update :
   expires_at:float option ->
   payload:Schedule_domain.payload ->
   updated_by:Schedule_domain.actor ->
+  unit ->
   (Schedule_domain.schedule_request, service_error) result
 
 val due_candidates :

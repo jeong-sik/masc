@@ -35,6 +35,27 @@ val parse_trigger_policy : string -> Slack_gateway_state.trigger_policy
     default rather than being silently coerced. Exposed for unit testing the
     config boundary. *)
 
+type trigger_policy_toml_load =
+  | Runtime_toml_missing
+  | Trigger_policy_missing
+  | Trigger_policy_loaded of Slack_gateway_state.trigger_policy
+(** Typed result of reading the optional Slack trigger policy from
+    [runtime.toml]. Missing file/key are deliberate no-config outcomes; a
+    present value has already passed the canonical policy parser. *)
+
+type trigger_policy_load_error =
+  | Runtime_toml_unreadable of { path : string; detail : string }
+  | Runtime_toml_invalid of { path : string; detail : string }
+  | Trigger_policy_invalid of { path : string; detail : string }
+(** Fail-closed configuration errors. They are never converted to the env or
+    default policy. *)
+
+val load_trigger_policy_from_toml :
+  path:string -> (trigger_policy_toml_load, trigger_policy_load_error) result
+(** Read and validate the Slack trigger policy at [path]. *)
+
+val trigger_policy_load_error_to_string : trigger_policy_load_error -> string
+
 val start :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->

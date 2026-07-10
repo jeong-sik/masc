@@ -1652,7 +1652,7 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           [ "id", `String rt.model.id
           ; "api_name", `String rt.model.api_name
           ; "tools_support", `Bool rt.model.tools_support
-          ; "max_context", `Int rt.model.max_context
+          ; "max_context", Json_util.int_opt_to_json rt.model.max_context
           ; "thinking_support", `Bool rt.model.thinking_support
           ; "preserve_thinking", Json_util.bool_opt_to_json rt.model.preserve_thinking
           ; "max_thinking_budget", Json_util.int_opt_to_json rt.model.max_thinking_budget
@@ -1804,7 +1804,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "status", `String "configured"
     ; "available", `Bool true
     ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
-    ; "max_context", `Int rt.model.max_context
+    ; "max_context", `Int (Runtime.max_context_of_runtime rt)
     ; "tools_support", `Bool rt.model.tools_support
     ; "thinking_support", `Bool rt.model.thinking_support
     ; "streaming", `Bool rt.model.streaming

@@ -302,6 +302,25 @@ let () =
       | _ -> Alcotest.fail "Hitl_resolved codec round-trip changed payload shape")
   | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));
 
+  let hitl_stimulus decision =
+    let resolution =
+      { approval_id = "appr-first-commit"
+      ; decision
+      ; channel = Keeper_continuation_channel.unrouted "identity-test"
+      }
+    in
+    { post_id = hitl_resolution_post_id resolution
+    ; urgency = Immediate
+    ; arrived_at = 4.0
+    ; payload = Hitl_resolved resolution
+    }
+  in
+  assert (
+    not
+      (stimulus_identity_equal
+      (hitl_stimulus (Hitl_approved approved_action))
+      (hitl_stimulus Hitl_rejected)));
+
   (* Goal_verification_failed survives the codec round-trip: the goal-loop wake
      must remain replayable from the durable per-keeper queue. *)
   let goal_failure =
@@ -934,6 +953,16 @@ let () =
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
       let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length restored = 1);
+      (match
+         Masc.Keeper_registry_event_queue.dequeue_when
+           ~base_path
+           keeper_name
+           ~ready:(fun _ -> false)
+       with
+       | None -> ()
+       | Some _ -> Alcotest.fail "unready stimulus must remain queued");
+      assert (
+        length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
       let replayed =
         match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
         | Some stim -> stim
@@ -1040,13 +1069,13 @@ let () =
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_registry.clear ();
-      Keeper_chat_queue.clear ~keeper_name:"keeper-event-queue-yield-test";
+      Masc.Keeper_chat_queue.clear ~keeper_name:"keeper-event-queue-yield-test";
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-yield-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-yield-test" in
       Masc.Keeper_registry.clear ();
-      Keeper_chat_queue.clear ~keeper_name;
+      Masc.Keeper_chat_queue.clear ~keeper_name;
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
       (match
          Masc.Keeper_unified_turn_execution.autonomous_yield_request
@@ -1075,6 +1104,122 @@ let () =
         ()
       | None | Some _ ->
         Alcotest.fail "pending durable stimulus must request a typed yield");
+
+  (* --- critical delivery: durable enqueue succeeds before registration and
+     is replayed when that keeper lane appears. --- *)
+  let base_path = temp_dir "keeper-event-queue-durable-unregistered" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-durable-unregistered-test" in
+      let meta = meta_for_keeper keeper_name "trace-durable-unregistered-test" in
+      Masc.Keeper_registry.clear ();
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path
+           keeper_name
+           board_stim
+       with
+       | Ok () -> ()
+       | Error msg -> Alcotest.fail ("durable enqueue failed: " ^ msg));
+      assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+      | Some stimulus -> assert (String.equal stimulus.post_id board_stim.post_id)
+      | None -> Alcotest.fail "durable pre-registration stimulus was not replayed");
+
+  (* --- critical delivery: one approval id cannot commit contradictory
+     decisions across an acknowledgement retry. --- *)
+  let base_path = temp_dir "keeper-event-queue-durable-decision-conflict" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-durable-decision-conflict-test" in
+      let approved = hitl_stimulus (Hitl_approved approved_action) in
+      let rejected = hitl_stimulus Hitl_rejected in
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path
+           keeper_name
+           approved
+       with
+       | Ok () -> ()
+       | Error msg -> Alcotest.fail ("initial durable decision failed: " ^ msg));
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path
+           keeper_name
+           rejected
+       with
+       | Error msg -> assert (String.length msg > 0)
+       | Ok () -> Alcotest.fail "conflicting approval decision was accepted");
+      match
+        Keeper_event_queue_persistence.load ~base_path ~keeper_name
+        |> Keeper_event_queue.to_list
+      with
+      | [ { payload = Hitl_resolved { decision = Hitl_approved _; _ }; _ } ] -> ()
+      | _ -> Alcotest.fail "first committed approval decision was not preserved");
+
+  (* --- critical delivery: a registered but non-running keeper still owns a
+     durable lane; only the wake hint is phase-gated. --- *)
+  let base_path = temp_dir "keeper-event-queue-durable-offline" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-durable-offline-test" in
+      let meta = meta_for_keeper keeper_name "trace-durable-offline-test" in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path
+           keeper_name
+           board_stim
+       with
+       | Ok () -> ()
+       | Error msg -> Alcotest.fail ("offline durable enqueue failed: " ^ msg));
+      assert (
+        length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
+      assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name)));
+
+  (* --- critical delivery: an unwritable path is an explicit error, never an
+     acknowledged in-memory-only stimulus. --- *)
+  let base_path = temp_dir "keeper-event-queue-durable-write-error" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      write_file (Filename.concat base_path ".masc") "directory blocker";
+      match
+        Masc.Keeper_registry_event_queue.enqueue_durable_result
+          ~base_path
+          "keeper-event-queue-durable-write-error-test"
+          board_stim
+      with
+      | Error msg -> assert (String.length msg > 0)
+      | Ok () -> Alcotest.fail "durable enqueue silently accepted an invalid path");
+
+  (* --- critical delivery: a corrupt existing snapshot is preserved for
+     operator repair instead of being silently replaced with a fresh queue. --- *)
+  let base_path = temp_dir "keeper-event-queue-durable-corrupt-snapshot" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-durable-corrupt-snapshot-test" in
+      let path = snapshot_path ~base_path ~keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname path);
+      write_file path "{not-json";
+      match
+        Masc.Keeper_registry_event_queue.enqueue_durable_result
+          ~base_path
+          keeper_name
+          board_stim
+      with
+      | Error msg -> assert (String.length msg > 0)
+      | Ok () -> Alcotest.fail "durable enqueue overwrote a corrupt snapshot");
 
   (* --- crash recovery: consumed stimuli can be put back for replay --- *)
   let base_path = temp_dir "keeper-event-queue-requeue-front" in

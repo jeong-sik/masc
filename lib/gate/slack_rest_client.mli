@@ -18,8 +18,12 @@ type error =
 val pp_error : Format.formatter -> error -> unit
 
 val message_text_limit : int
-(** Slack's per-message text limit (40000). Callers that may overflow must
-    split themselves; this client does not. *)
+(** Slack's native [markdown_text] limit (12000 characters). Callers that may
+    overflow must split themselves; this client does not. *)
+
+val streaming_update_min_interval_sec : float
+(** Minimum interval between [chat.update] calls while projecting a streaming
+    reply. Slack's agent guidance currently requires at least three seconds. *)
 
 val default_http_timeout_sec : float
 (** Default deadline (seconds) for the outbound calls below. Effective only
@@ -35,7 +39,8 @@ val send_message :
   ?thread_ts:string ->
   unit ->
   (string, error) result
-(** [chat.postMessage]. Returns the created message [ts] on success.
+(** [chat.postMessage] using Slack's native [markdown_text] request field.
+    Returns the created message [ts] on success.
     [thread_ts] posts the message as a threaded reply. Bot token is resolved
     by the caller (so a rotation does not require a server restart). With
     [~clock] the request is bounded by [timeout_sec] (default
@@ -49,7 +54,9 @@ val build_post_message_request :
   ?thread_ts:string ->
   unit ->
   string * (string * string) list * string
-(** Pure request builder for [chat.postMessage], exposed for unit tests. *)
+(** Pure request builder for [chat.postMessage], exposed for unit tests. The
+    authored Markdown is sent unchanged as [markdown_text]; [text] and
+    [blocks] are intentionally absent because Slack rejects combining them. *)
 
 val parse_post_response :
   status:int ->
@@ -67,7 +74,8 @@ val edit_message :
   text:string ->
   unit ->
   (unit, error) result
-(** [chat.update]. Patches a prior message identified by [channel] + [ts].
+(** [chat.update] using Slack's native [markdown_text] request field. Patches
+    a prior message identified by [channel] + [ts].
     Used by the in-process gateway to project keeper streaming snapshots
     into one edited reply. Bounded by [timeout_sec] (default
     {!default_http_timeout_sec}) when [~clock] is supplied. *)
@@ -79,7 +87,8 @@ val build_update_request :
   text:string ->
   unit ->
   string * (string * string) list * string
-(** Pure request builder for [chat.update], exposed for unit tests. *)
+(** Pure request builder for [chat.update], exposed for unit tests. The same
+    single-content-field contract as {!build_post_message_request} applies. *)
 
 val parse_update_response :
   status:int ->

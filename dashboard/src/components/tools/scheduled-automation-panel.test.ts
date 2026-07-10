@@ -367,12 +367,64 @@ describe('ScheduledAutomationPanel approval actions', () => {
     expect(approve).not.toBeNull()
     expect(reject).not.toBeNull()
 
+    // one_shot schedule: no standing button, plain approve carries no scope
+    expect(
+      container.querySelector('[data-testid="schedule-approve-standing-sched-1"]'),
+    ).toBeNull()
+
     approve?.click()
     await flush()
 
-    expect(mocks.resolveScheduleApproval).toHaveBeenCalledWith('sched-1', 'approve', undefined)
+    expect(mocks.resolveScheduleApproval).toHaveBeenCalledWith(
+      'sched-1',
+      'approve',
+      undefined,
+      undefined,
+    )
     expect(onResolved).toHaveBeenCalledTimes(1)
     expect(mocks.showToast).toHaveBeenCalledWith('sched-1 approved', 'success')
+  })
+
+  it('offers a standing approval for recurring schedules and sends the scope', async () => {
+    mocks.resolveScheduleApproval.mockResolvedValue({
+      ok: true,
+      schedule_id: 'sched-1',
+      decision: 'approve',
+    })
+    const onResolved = vi.fn()
+    const automation = approvalAutomationFixture()
+    const first = automation.requests[0]
+    if (first == null) throw new Error('fixture has no requests')
+    first.recurrence = { kind: 'interval', interval_sec: 60 }
+    first.recurrence_kind = 'interval'
+
+    render(
+      html`<${ScheduledAutomationPanel}
+        automation=${automation}
+        onResolved=${onResolved}
+      />`,
+      container,
+    )
+
+    const once = container.querySelector(
+      '[data-testid="schedule-approve-sched-1"]',
+    ) as HTMLButtonElement | null
+    const standing = container.querySelector(
+      '[data-testid="schedule-approve-standing-sched-1"]',
+    ) as HTMLButtonElement | null
+    expect(once?.textContent).toContain('Approve once')
+    expect(standing).not.toBeNull()
+
+    standing?.click()
+    await flush()
+
+    expect(mocks.resolveScheduleApproval).toHaveBeenCalledWith(
+      'sched-1',
+      'approve',
+      undefined,
+      'standing',
+    )
+    expect(onResolved).toHaveBeenCalledTimes(1)
   })
 })
 

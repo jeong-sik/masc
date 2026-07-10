@@ -307,8 +307,15 @@ let grant_matches_current_request (request : schedule_request) (grant : executio
   | Approve ->
     String.equal grant.evidence.schedule_id expected.schedule_id
     && String.equal grant.evidence.payload_digest expected.payload_digest
-    && grant.evidence.due_at = expected.due_at
     && grant.evidence.risk_class = expected.risk_class
+    &&
+    (* [Grant_standing] covers every occurrence of the digest-identical
+       action; [Grant_occurrence] stays bound to the single due_at it was
+       approved for. Digest and risk_class are compared for BOTH scopes
+       above, so a payload or risk edit always re-blocks on approval. *)
+    (match grant.scope with
+     | Schedule_domain.Grant_standing -> true
+     | Schedule_domain.Grant_occurrence -> grant.evidence.due_at = expected.due_at)
 ;;
 
 let has_current_approved_grant state (request : schedule_request) =

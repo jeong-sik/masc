@@ -126,6 +126,7 @@ export {
 
 export type {
   DashboardScheduleDecision,
+  DashboardScheduleGrantScope,
   DashboardScheduleResolveResponse,
   SetApprovalModeResponse,
 } from './dashboard-governance'

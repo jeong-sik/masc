@@ -35,11 +35,11 @@ let request
   | Error msg -> fail msg
 ;;
 
-let grant ?decision ?approved_by request =
+let grant ?decision ?approved_by ?(scope = Grant_occurrence) request =
   let decision = Option.value ~default:Approve decision in
   let approved_by = Option.value ~default:(human "approver") approved_by in
   create_execution_grant ~grant_id:"grant-1" ~approved_by ~approved_at:150.0
-    ~decision request
+    ~decision ~scope request
 ;;
 
 let check_status label expected actual =
@@ -342,6 +342,49 @@ let test_grant_roundtrip () =
       decoded.evidence.payload_digest
 ;;
 
+let test_grant_scope_codec () =
+  let req = request () in
+  (match
+     grant ~scope:Grant_standing req
+     |> execution_grant_to_yojson
+     |> execution_grant_of_yojson
+   with
+   | Error msg -> fail msg
+   | Ok decoded ->
+     check string "standing scope roundtrip" "standing"
+       (grant_scope_to_string decoded.scope));
+  (* Grants persisted before the scope field existed were all bound to the
+     single due_at in their evidence: absent must decode as occurrence. *)
+  (match grant ~scope:Grant_occurrence req |> execution_grant_to_yojson with
+   | `Assoc fields ->
+     let without_scope =
+       `Assoc (List.filter (fun (key, _) -> key <> "scope") fields)
+     in
+     (match execution_grant_of_yojson without_scope with
+      | Error msg -> fail msg
+      | Ok decoded ->
+        check string "absent scope decodes as occurrence" "occurrence"
+          (grant_scope_to_string decoded.scope))
+   | _ -> fail "grant json is not an object");
+  (* A present-but-unknown scope is an explicit decode error, never a
+     silent default. *)
+  match grant req |> execution_grant_to_yojson with
+  | `Assoc fields ->
+    let bad_scope =
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if key = "scope" then key, `String "forever" else key, value)
+           fields)
+    in
+    (match execution_grant_of_yojson bad_scope with
+     | Ok _ -> fail "unknown scope must not decode"
+     | Error msg ->
+       check bool "unknown scope is an explicit error" true
+         (String.length msg > 0))
+  | _ -> fail "grant json is not an object"
+;;
+
 let test_execution_record_roundtrip () =
   let req = request ~risk_class:Read_only () in
   let execution =
@@ -425,6 +468,8 @@ let () =
           test_case "missing recurrence defaults one-shot" `Quick
             test_missing_recurrence_defaults_one_shot;
           test_case "grant roundtrip" `Quick test_grant_roundtrip;
+          test_case "grant scope codec: roundtrip, absent, unknown" `Quick
+            test_grant_scope_codec;
           test_case "execution record roundtrip" `Quick
             test_execution_record_roundtrip;
         ] );

@@ -36,10 +36,15 @@ val get :
   schedule_id:string ->
   Schedule_domain.schedule_request option
 
+(** Record an approval grant. [scope] defaults to
+    [Schedule_domain.Grant_occurrence] (this due occurrence only);
+    [Grant_standing] keeps covering future occurrences while the
+    schedule's payload digest and risk class stay unchanged. *)
 val approve :
   Workspace_utils.config ->
   ?grant_id:string ->
   ?approved_at:float ->
+  ?scope:Schedule_domain.grant_scope ->
   schedule_id:string ->
   approved_by:Schedule_domain.actor ->
   unit ->

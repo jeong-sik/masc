@@ -101,12 +101,23 @@ type execution_evidence =
   ; risk_class : risk_class
   }
 
+(** How many due occurrences one approval covers. [Grant_occurrence] is
+    the single [due_at] captured in the grant evidence. [Grant_standing]
+    covers every future occurrence whose [payload_digest] and
+    [risk_class] still match the evidence — the digest is the identity
+    of the approved action, so the grant stops matching exactly when the
+    schedule starts doing something different. *)
+type grant_scope =
+  | Grant_occurrence
+  | Grant_standing
+
 type execution_grant =
   { grant_id : string
   ; schedule_id : string
   ; approved_by : actor
   ; approved_at : float
   ; decision : execution_decision
+  ; scope : grant_scope
   ; evidence : execution_evidence
   }
 
@@ -176,6 +187,7 @@ val create_execution_grant :
   approved_by:actor ->
   approved_at:float ->
   decision:execution_decision ->
+  scope:grant_scope ->
   schedule_request ->
   execution_grant
 
@@ -205,6 +217,8 @@ val recurrence_summary : recurrence -> string
     typed [recurrence] value. *)
 val execution_status_to_string : execution_status -> string
 val execution_status_of_string : string -> (execution_status, string) result
+val grant_scope_to_string : grant_scope -> string
+val grant_scope_of_string : string -> (grant_scope, string) result
 val grant_error_to_string : grant_error -> string
 
 val actor_to_yojson : actor -> Yojson.Safe.t

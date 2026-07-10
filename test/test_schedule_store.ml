@@ -80,9 +80,9 @@ let make_request
   | Error msg -> fail msg
 ;;
 
-let grant ?(approved_by = human "approver") request =
+let grant ?(approved_by = human "approver") ?(scope = Grant_occurrence) request =
   create_execution_grant ~grant_id:"grant-1" ~approved_by ~approved_at:150.0
-    ~decision:Approve request
+    ~decision:Approve ~scope request
 ;;
 
 let insert_ok config request =
@@ -568,13 +568,69 @@ let test_recurring_grant_is_scoped_to_current_due_at () =
     (List.length (due_execution_candidates state));
   let fresh_grant =
     create_execution_grant ~grant_id:"grant-2" ~approved_by:(human "approver-2")
-      ~approved_at:261.0 ~decision:Approve due
+      ~approved_at:261.0 ~decision:Approve ~scope:Grant_occurrence due
   in
   (match record_grant config fresh_grant with
    | Ok stored -> check_status "fresh due grant keeps due" Due stored.status
    | Error err -> fail (store_error_to_string err));
   check int "second occurrence candidate after fresh grant" 1
     (List.length (due_execution_candidates (read_state config)))
+;;
+
+(* The standing counterpart of the test above: one approval covers every
+   later occurrence of the SAME payload digest, and stops covering as soon
+   as the payload (and therefore the digest) changes. This is the fix for
+   the live friction where a recurring workspace_write wake re-blocked on a
+   human click for every single occurrence of an unchanged action. *)
+let test_standing_grant_covers_recurrences_until_payload_changes () =
+  with_workspace
+  @@ fun config ->
+  let req =
+    make_request ~schedule_id:"write-loop-standing" ~risk_class:Workspace_write
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config req);
+  (match record_grant config (grant ~scope:Grant_standing req) with
+   | Ok stored -> check_status "approved with standing scope" Scheduled stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "first due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id with
+   | Ok running -> check_status "running first occurrence" Running running.status
+   | Error err -> fail (store_error_to_string err));
+  (match complete_running config ~now:203.0 ~schedule_id:req.schedule_id () with
+   | Ok stored -> check_status "rescheduled" Scheduled stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match refresh_due config ~now:260.0 with
+   | Ok (_, changed) -> check int "second due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  let state = read_state config in
+  let due =
+    match get_schedule config ~schedule_id:req.schedule_id with
+    | Some due -> due
+    | None -> fail "rescheduled request missing"
+  in
+  check bool "standing grant still current on second occurrence" true
+    (has_current_approved_grant state due);
+  check int "second occurrence dispatches without a fresh grant" 1
+    (List.length (due_execution_candidates state));
+  (* Change the action: digest moves, standing grant must stop matching. *)
+  (match
+     update_request config ~schedule_id:req.schedule_id ~due_at:due.due_at
+       ~expires_at:None ~payload:(updated_payload ())
+   with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let state = read_state config in
+  let updated =
+    match get_schedule config ~schedule_id:req.schedule_id with
+    | Some updated -> updated
+    | None -> fail "updated request missing"
+  in
+  check bool "standing grant dies with the payload digest" false
+    (has_current_approved_grant state updated)
 ;;
 
 let test_load_corrupt_when_both_unparseable () =
@@ -757,6 +813,8 @@ let () =
             test_fail_due_candidate_records_failed_execution;
           test_case "recurring grant is scoped to current due_at" `Quick
             test_recurring_grant_is_scoped_to_current_due_at;
+          test_case "standing grant covers recurrences until payload changes"
+            `Quick test_standing_grant_covers_recurrences_until_payload_changes;
         ] );
     ]
 ;;

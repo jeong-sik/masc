@@ -92,12 +92,24 @@ type execution_evidence =
   ; risk_class : risk_class
   }
 
+(* How many due occurrences one approval covers. [Grant_occurrence] is the
+   single due_at captured in the grant evidence. [Grant_standing] covers
+   every future occurrence whose payload_digest and risk_class still match
+   the evidence: the digest is the identity of the approved action, so the
+   grant dies exactly when the schedule starts doing something different.
+   Without it, a recurring side-effecting schedule re-blocks on a human
+   click for every occurrence of an unchanged action. *)
+type grant_scope =
+  | Grant_occurrence
+  | Grant_standing
+
 type execution_grant =
   { grant_id : string
   ; schedule_id : string
   ; approved_by : actor
   ; approved_at : float
   ; decision : execution_decision
+  ; scope : grant_scope
   ; evidence : execution_evidence
   }
 
@@ -773,6 +785,17 @@ let execution_decision_of_yojson = function
   | _ -> Error "expected execution_decision object"
 ;;
 
+let grant_scope_to_string = function
+  | Grant_occurrence -> "occurrence"
+  | Grant_standing -> "standing"
+;;
+
+let grant_scope_of_string = function
+  | "occurrence" -> Ok Grant_occurrence
+  | "standing" -> Ok Grant_standing
+  | other -> Error ("unknown grant_scope: " ^ other)
+;;
+
 let execution_evidence_to_yojson (evidence : execution_evidence) =
   `Assoc
     [ "schedule_id", `String evidence.schedule_id
@@ -800,6 +823,7 @@ let execution_grant_to_yojson (grant : execution_grant) =
     ; "approved_by", actor_to_yojson grant.approved_by
     ; "approved_at", float_to_yojson grant.approved_at
     ; "decision", execution_decision_to_yojson grant.decision
+    ; "scope", `String (grant_scope_to_string grant.scope)
     ; "evidence", execution_evidence_to_yojson grant.evidence
     ]
 ;;
@@ -813,9 +837,19 @@ let execution_grant_of_yojson = function
     let* approved_at = float_field "approved_at" fields in
     let* decision_json = assoc_field "decision" fields in
     let* decision = execution_decision_of_yojson decision_json in
+    let* scope =
+      (* Grants persisted before [scope] existed were all bound to the
+         single due_at in their evidence, so absent = [Grant_occurrence]
+         is the historically accurate (and narrower) reading, not a
+         permissive default. A present-but-unknown value is an error. *)
+      match List.assoc_opt "scope" fields with
+      | None -> Ok Grant_occurrence
+      | Some (`String name) -> grant_scope_of_string name
+      | Some _ -> Error "expected grant scope string"
+    in
     let* evidence_json = assoc_field "evidence" fields in
     let* evidence = execution_evidence_of_yojson evidence_json in
-    Ok { grant_id; schedule_id; approved_by; approved_at; decision; evidence }
+    Ok { grant_id; schedule_id; approved_by; approved_at; decision; scope; evidence }
   | _ -> Error "expected execution_grant object"
 ;;
 
@@ -979,6 +1013,7 @@ let create_execution_grant
   ~approved_by
   ~approved_at
   ~decision
+  ~scope
   (request : schedule_request)
   =
   { grant_id
@@ -986,6 +1021,7 @@ let create_execution_grant
   ; approved_by
   ; approved_at
   ; decision
+  ; scope
   ; evidence = evidence_of_request request
   }
 ;;

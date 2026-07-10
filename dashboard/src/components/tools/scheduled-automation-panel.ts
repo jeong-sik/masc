@@ -3,6 +3,7 @@ import { useEffect, useState } from 'preact/hooks'
 import {
   resolveScheduleApproval,
   type DashboardScheduleDecision,
+  type DashboardScheduleGrantScope,
   type DashboardScheduledAutomationActor,
   type DashboardScheduledAutomation,
   type DashboardScheduledAutomationDispatchReceipt,
@@ -830,17 +831,27 @@ function ApprovalCell({
   const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
   const actionable = isApprovalActionable(request)
   const busy = pendingDecision !== null
+  // A standing grant only means something for recurring schedules: a
+  // one-shot's single occurrence is already covered by a plain approve.
+  const recurrenceKind = request.recurrence?.kind ?? request.recurrence_kind ?? 'one_shot'
+  const isRecurring = recurrenceKind !== 'one_shot'
 
-  async function decide(decision: DashboardScheduleDecision) {
+  async function decide(
+    decision: DashboardScheduleDecision,
+    scope?: DashboardScheduleGrantScope,
+  ) {
     setPendingDecision(decision)
     try {
       await resolveScheduleApproval(
         request.schedule_id,
         decision,
         decision === 'reject' ? 'rejected from dashboard' : undefined,
+        scope,
       )
       showToast(
-        `${request.schedule_id} ${decision === 'approve' ? 'approved' : 'rejected'}`,
+        decision === 'approve'
+          ? `${request.schedule_id} approved${scope === 'standing' ? ' (standing: covers recurrences until the payload changes)' : ''}`
+          : `${request.schedule_id} rejected`,
         'success',
       )
       await onResolved?.()
@@ -864,7 +875,20 @@ function ApprovalCell({
                 ariaBusy=${pendingDecision === 'approve'}
                 testId=${`schedule-approve-${request.schedule_id}`}
                 onClick=${() => { void decide('approve') }}
-              >Approve<//>
+              >${isRecurring ? 'Approve once' : 'Approve'}<//>
+              ${isRecurring
+                ? html`
+                    <${ActionButton}
+                      variant="ok"
+                      size="sm"
+                      disabled=${busy}
+                      ariaBusy=${pendingDecision === 'approve'}
+                      testId=${`schedule-approve-standing-${request.schedule_id}`}
+                      title="Covers every future occurrence while the payload stays unchanged; a payload edit re-blocks on approval"
+                      onClick=${() => { void decide('approve', 'standing') }}
+                    >Approve recurring<//>
+                  `
+                : null}
               <${ActionButton}
                 variant="danger"
                 size="sm"

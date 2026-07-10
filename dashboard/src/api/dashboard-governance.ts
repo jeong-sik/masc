@@ -242,6 +242,11 @@ export function setApprovalMode(mode: ApprovalMode): Promise<SetApprovalModeResp
 
 export type DashboardScheduleDecision = 'approve' | 'reject'
 
+// Mirror of the server grant_scope: 'occurrence' approves only the current
+// due occurrence; 'standing' keeps covering future occurrences while the
+// schedule's payload digest and risk class stay unchanged.
+export type DashboardScheduleGrantScope = 'occurrence' | 'standing'
+
 export interface DashboardScheduleResolveResponse {
   ok: boolean
   schedule_id: string
@@ -254,11 +259,13 @@ export function resolveScheduleApproval(
   scheduleId: string,
   decision: DashboardScheduleDecision,
   reason?: string,
+  scope?: DashboardScheduleGrantScope,
 ): Promise<DashboardScheduleResolveResponse> {
   return post('/api/v1/dashboard/schedule/resolve', {
     schedule_id: scheduleId,
     decision,
     reason,
+    ...(scope != null && decision === 'approve' ? { scope } : {}),
   })
 }
 

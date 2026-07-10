@@ -54,6 +54,17 @@ let decision_to_string = function
   | Update -> "update"
 ;;
 
+(* Absent means the narrow historical semantics (this occurrence only);
+   an unknown value is a request error, never a silent default. *)
+let grant_scope_of_json json =
+  match string_opt "scope" json with
+  | None -> Ok Schedule_domain.Grant_occurrence
+  | Some raw ->
+    (match Schedule_domain.grant_scope_of_string (String.lowercase_ascii raw) with
+     | Ok scope -> Ok scope
+     | Error _ -> Error "scope must be 'occurrence' or 'standing'")
+;;
+
 let default_rejection_reason ~operator_name =
   "rejected from dashboard by " ^ operator_name
 ;;
@@ -84,7 +95,8 @@ let resolve_http_json ~config ~operator_name ~(args : Yojson.Safe.t)
       in
       match decision with
       | Approve ->
-        Schedule_service.approve config ~schedule_id ~approved_by ()
+        let* scope = grant_scope_of_json args in
+        Schedule_service.approve config ~schedule_id ~approved_by ~scope ()
         |> map_service_error
       | Reject ->
         let reason =

@@ -83,6 +83,7 @@ let decision_grant
   config
   ?grant_id:provided_grant_id
   ?approved_at
+  ?(scope = Schedule_domain.Grant_occurrence)
   ~schedule_id
   ~approved_by
   ~decision
@@ -95,13 +96,13 @@ let decision_grant
     let grant_id = grant_id provided_grant_id in
     let grant =
       Schedule_domain.create_execution_grant ~grant_id ~approved_by
-        ~approved_at ~decision request
+        ~approved_at ~decision ~scope request
     in
     Schedule_store.record_grant config grant |> map_store
 ;;
 
-let approve config ?grant_id ?approved_at ~schedule_id ~approved_by () =
-  decision_grant config ?grant_id ?approved_at ~schedule_id ~approved_by
+let approve config ?grant_id ?approved_at ?scope ~schedule_id ~approved_by () =
+  decision_grant config ?grant_id ?approved_at ?scope ~schedule_id ~approved_by
     ~decision:Schedule_domain.Approve ()
 ;;
 

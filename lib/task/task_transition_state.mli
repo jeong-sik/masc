@@ -80,6 +80,7 @@ type status_kind =
   | InProgress_kind
   | AwaitingVerification_kind
   | Done_kind
+  | Cancelled_kind
   | Operator_blocked_kind
 
 (** Closed-enum mirror of [Types_core.task_action]. Adding a new action

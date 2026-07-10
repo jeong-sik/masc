@@ -90,9 +90,7 @@ let replay_response_text_for_capture ~suppress_visible_response ~response_text =
   else Some response_text
 ;;
 
-type reply_delivery_tool =
-  | Surface_post
-  | Keeper_message
+type reply_delivery_tool = Surface_post
 
 type reply_delivery_effect =
   | Reply_delivered
@@ -101,14 +99,9 @@ type reply_delivery_effect =
 let reply_delivery_tool_of_name tool_name =
   (* Parse exact wire names once into a closed delivery-effect vocabulary. *)
   let canonical_name = Keeper_tool_resolution.canonical_tool_name tool_name in
-  if
-    String.equal
-      canonical_name
-      (Keeper_tool_name.to_string Keeper_tool_name.Surface_post)
-  then Some Surface_post
-  else if String.equal canonical_name "masc_keeper_msg"
-  then Some Keeper_message
-  else None
+  match Keeper_tool_name.of_string canonical_name with
+  | Some Keeper_tool_name.Surface_post -> Some Surface_post
+  | Some _ | None -> None
 ;;
 
 let reply_delivery_effect_of_tool_call

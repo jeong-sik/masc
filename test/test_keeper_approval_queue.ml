@@ -801,11 +801,30 @@ let test_w3c_reply_delivery_effect_requires_success () =
           ~typed_outcome:(Keeper_tool_outcome.Error { reason = "send failed" })
           ~execution_outcome:Tool_result.Ok
           "keeper_surface_post"));
-  Alcotest.(check bool) "successful keeper message has delivery effect" true
+  Alcotest.(check bool) "keeper message is not a surface reply" false
     (is_delivered
        (reply_tool_call
           ~execution_outcome:Tool_result.Ok
           "masc_keeper_msg"));
+  Alcotest.(check bool) "MCP-prefixed keeper message is not a surface reply" false
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Ok
+          "mcp__masc__masc_keeper_msg"));
+  let keeper_message =
+    reply_tool_call ~execution_outcome:Tool_result.Ok "masc_keeper_msg"
+  in
+  let channel = Keeper_continuation_channel.Dashboard { thread_id = "thread-1" } in
+  let module D = Masc.Keeper_continuation_delivery in
+  Alcotest.(check bool) "keeper message leaves continuation fallback enabled" true
+    (match
+       F.For_testing.continuation_delivery_gate
+         ~channel
+         ~tool_calls:[ keeper_message ]
+         ~content:"fallback"
+     with
+     | D.Deliver -> true
+     | D.Skip _ -> false);
   Alcotest.(check bool) "failed keeper message has no delivery effect" false
     (is_delivered
        (reply_tool_call

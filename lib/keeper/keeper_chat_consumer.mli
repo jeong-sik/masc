@@ -36,7 +36,10 @@
     already given up on). [dispatch_deadline_sec] should exceed the turn
     execution timeout [handle_turn] itself enforces, with margin: it exists
     to bound how long a *misbehaving* [handle_turn] can wedge this keeper's
-    queue, not to race the turn's own timeout.
+    queue, not to race the turn's own timeout. If the durable ack/nack rewrite
+    fails, the typed finalization decision is retained for the next poll and
+    retried before another turn starts; a transient persistence error therefore
+    cannot leave this keeper permanently stuck behind [Already_leased].
 
     The fiber runs until [sw] is released.
 

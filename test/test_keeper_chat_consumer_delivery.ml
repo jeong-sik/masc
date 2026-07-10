@@ -103,6 +103,21 @@ let await_or_timeout ~clock ~secs p =
       Eio.Time.sleep clock secs;
       `Timeout)
 
+let await_queue_depth_or_timeout ~clock ~keeper_name ~expected ~secs =
+  Eio.Fiber.first
+    (fun () ->
+      let rec wait () =
+        if Keeper_chat_queue.length ~keeper_name = expected
+        then `Got
+        else (
+          Eio.Time.sleep clock 0.05;
+          wait ())
+      in
+      wait ())
+    (fun () ->
+      Eio.Time.sleep clock secs;
+      `Timeout)
+
 (* [Keeper_chat_consumer.start] forks a non-daemon poll fiber that never returns,
    so a normal [Switch.run] would wait on it forever (in production the
    server-wide switch lives for the process lifetime). Force teardown by raising
@@ -307,12 +322,44 @@ let test_dispatch_stall_calls_on_stalled_and_acks () =
     check "the stalled lease is acked, not requeued"
       (Keeper_chat_queue.length ~keeper_name = 0))
 
+let test_failed_nack_persist_retries_without_wedging_keeper () =
+  Printf.printf
+    "Test: failed nack persistence is retried instead of wedging the keeper\n%!";
+  with_env (fun ~base ~clock ->
+    Keeper_chat_queue.configure_persistence ~base_path:base;
+    ignore
+      (Keeper_chat_queue.enqueue ~keeper_name
+         (discord_msg ~content:"retry after nack persist" ~channel_id:"chan-retry"
+            ~user_id:"u-retry" ~ts:1.0)
+        : string);
+    let never, _never_resolve = Eio.Promise.create () in
+    let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ = Eio.Promise.await never in
+    let stalled, set_stalled = Eio.Promise.create () in
+    let on_stalled ~keeper_name:_ ~queued_message:_ =
+      Keeper_chat_queue.For_testing.fail_next_persist ();
+      Eio.Promise.resolve set_stalled ();
+      failwith "force nack path"
+    in
+    with_consumer_switch (fun sw ->
+      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
+        ~dispatch_deadline_sec:0.2 ~on_stalled ~handle_turn;
+      (match await_or_timeout ~clock ~secs:5.0 stalled with
+       | `Got -> ()
+       | `Timeout -> check "stalled callback fires before nack retry" false);
+      match
+        await_queue_depth_or_timeout ~clock ~keeper_name ~expected:1 ~secs:3.0
+      with
+      | `Got -> check "failed nack persistence is retried and requeues" true
+      | `Timeout ->
+        check "failed nack persistence is retried and requeues" false))
+
 let () =
   test_drains_discord_to_handle_turn ();
   test_coalesces_same_source_run ();
   test_gates_while_turn_in_flight ();
   test_queued_dispatch_is_per_keeper ();
   test_dispatch_stall_calls_on_stalled_and_acks ();
+  test_failed_nack_persist_retries_without_wedging_keeper ();
   if !failures > 0 then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;
     exit 1)

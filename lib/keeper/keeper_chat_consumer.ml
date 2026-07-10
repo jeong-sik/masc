@@ -6,13 +6,21 @@ let poll_interval_sec =
       try float_of_string s with Failure _ -> 1.0)
   | None -> 1.0
 
+type lease_finalization =
+  | Ack
+  | Nack
+
 type dispatch_state = {
   mutex : Eio.Mutex.t;
   running_by_keeper : (string, unit) Hashtbl.t;
+  pending_finalizations : (string, string * lease_finalization) Hashtbl.t;
 }
 
 let create_dispatch_state () =
-  { mutex = Eio.Mutex.create (); running_by_keeper = Hashtbl.create 16 }
+  { mutex = Eio.Mutex.create ()
+  ; running_by_keeper = Hashtbl.create 16
+  ; pending_finalizations = Hashtbl.create 16
+  }
 
 let with_dispatch_state state f =
   Eio.Mutex.use_rw ~protect:true state.mutex f
@@ -34,6 +42,22 @@ let clear_dispatching state keeper_name =
       with_dispatch_state state (fun () ->
           Hashtbl.remove state.running_by_keeper keeper_name))
 
+let pending_finalization state keeper_name =
+  with_dispatch_state state (fun () ->
+      Hashtbl.find_opt state.pending_finalizations keeper_name)
+
+let clear_pending_finalization state ~keeper_name ~lease_id ~action =
+  with_dispatch_state state (fun () ->
+      match Hashtbl.find_opt state.pending_finalizations keeper_name with
+      | Some (pending_lease_id, pending_action)
+        when String.equal pending_lease_id lease_id && pending_action = action ->
+        Hashtbl.remove state.pending_finalizations keeper_name
+      | Some _ | None -> ())
+
+let remember_pending_finalization state ~keeper_name ~lease_id ~action =
+  with_dispatch_state state (fun () ->
+      Hashtbl.replace state.pending_finalizations keeper_name (lease_id, action))
+
 module For_testing = struct
   type nonrec dispatch_state = dispatch_state
 
@@ -53,44 +77,83 @@ let broadcast_queue_changed ~keeper_name =
     ~depth:(Keeper_chat_queue.length ~keeper_name)
     ()
 
-let ack_or_warn ~keeper_name ~lease_id =
-  match Keeper_chat_queue.ack ~keeper_name ~lease_id with
-  | `Acked -> broadcast_queue_changed ~keeper_name
-  | `Unknown_lease ->
-      Log.Keeper.warn
-        "keeper_chat_consumer: ack found no matching lease=%s for keeper=%s \
-         (already acked/nacked?)"
-        lease_id
-        keeper_name
-  | `Persist_failed msg ->
-      Log.Keeper.warn
-        "keeper_chat_consumer: ack persist failed for keeper=%s lease=%s: %s"
-        keeper_name
-        lease_id
-        msg
+(* A finalization persist failure is recoverable: the queue deliberately rolls
+   the lease mutation back, so the same lease remains outstanding in memory.
+   Keep the typed decision and retry it from the next poll; otherwise the
+   consumer would observe [Already_leased] forever and permanently wedge this
+   Keeper lane. The decision is not persisted separately because a process
+   restart requeues the outstanding lease, after which the pending decision is
+   intentionally discarded. *)
+let settle_lease state ~keeper_name ~lease_id action =
+  let result =
+    match action with
+    | Ack ->
+      (match Keeper_chat_queue.ack ~keeper_name ~lease_id with
+       | `Acked ->
+         clear_pending_finalization state ~keeper_name ~lease_id ~action;
+         broadcast_queue_changed ~keeper_name;
+         `Settled
+       | `Unknown_lease ->
+         clear_pending_finalization state ~keeper_name ~lease_id ~action;
+         Log.Keeper.warn
+           "keeper_chat_consumer: ack found no matching lease=%s for keeper=%s \
+            (already acked/nacked?)"
+           lease_id
+           keeper_name;
+         `Settled
+       | `Persist_failed msg ->
+         remember_pending_finalization state ~keeper_name ~lease_id ~action;
+         Log.Keeper.error
+           "keeper_chat_consumer: ack persist failed for keeper=%s lease=%s: %s; \
+            finalization will retry"
+           keeper_name
+           lease_id
+           msg;
+         `Pending)
+    | Nack ->
+      (match Keeper_chat_queue.nack ~keeper_name ~lease_id with
+       | `Requeued ->
+         clear_pending_finalization state ~keeper_name ~lease_id ~action;
+         broadcast_queue_changed ~keeper_name;
+         `Settled
+       | `Unknown_lease ->
+         clear_pending_finalization state ~keeper_name ~lease_id ~action;
+         Log.Keeper.warn
+           "keeper_chat_consumer: nack found no matching lease=%s for keeper=%s \
+            (already acked/nacked?)"
+           lease_id
+           keeper_name;
+         `Settled
+       | `Persist_failed msg ->
+         remember_pending_finalization state ~keeper_name ~lease_id ~action;
+         Log.Keeper.error
+           "keeper_chat_consumer: nack persist failed for keeper=%s lease=%s: %s; \
+            finalization will retry"
+           keeper_name
+           lease_id
+           msg;
+         `Pending)
+  in
+  result
 
-(* Best-effort: called both on a genuine dispatch failure and (via
-   [Eio.Cancel.protect]) while this fiber is itself being cancelled from
-   outside, so a [Persistence_failed]/`Unknown_lease] result here is logged,
-   not retried — retrying I/O under an active cancellation would just raise
-   [Eio.Cancel.Cancelled] again. Worst case the message stays recorded as an
-   outstanding lease in the durable snapshot and is requeued by the next
-   [Keeper_chat_queue.configure_persistence] (process restart). *)
-let nack_or_warn ~keeper_name ~lease_id =
-  match Keeper_chat_queue.nack ~keeper_name ~lease_id with
-  | `Requeued -> broadcast_queue_changed ~keeper_name
-  | `Unknown_lease ->
-      Log.Keeper.warn
-        "keeper_chat_consumer: nack found no matching lease=%s for keeper=%s \
-         (already acked/nacked?)"
-        lease_id
-        keeper_name
-  | `Persist_failed msg ->
-      Log.Keeper.warn
-        "keeper_chat_consumer: nack persist failed for keeper=%s lease=%s: %s"
-        keeper_name
-        lease_id
-        msg
+(* Keep these names at the call sites readable: they now retain the decision
+   when persistence is temporarily unavailable instead of silently giving up. *)
+let ack_or_warn state ~keeper_name ~lease_id =
+  match settle_lease state ~keeper_name ~lease_id Ack with
+  | `Settled | `Pending -> ()
+
+let nack_or_warn state ~keeper_name ~lease_id =
+  match settle_lease state ~keeper_name ~lease_id Nack with
+  | `Settled | `Pending -> ()
+
+(* Kept as a separate helper so the poll loop cannot accidentally start a new
+   turn while an earlier turn's durable ack/nack is still unresolved. *)
+let retry_pending_finalization state ~keeper_name =
+  match pending_finalization state keeper_name with
+  | None -> false
+  | Some (lease_id, action) ->
+    ignore (settle_lease state ~keeper_name ~lease_id action : [ `Settled | `Pending ]);
+    true
 
 (* Races [handle_turn] against [dispatch_deadline_sec] so one wedged turn
    cannot permanently starve this keeper's queue: [handle_turn] normally
@@ -100,8 +163,8 @@ let nack_or_warn ~keeper_name ~lease_id =
    timeout, nothing ever wakes that wait. [dispatch_deadline_sec] is set well
    above that internal timeout (see the .mli) so by the time it fires here,
    the turn's own machinery has already given up. *)
-let run_leased_turn ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled ~keeper_name
-    ~lease_id ~queued =
+let run_leased_turn state ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled
+    ~keeper_name ~lease_id ~queued =
   match
     Eio.Fiber.first
       (fun () ->
@@ -111,10 +174,10 @@ let run_leased_turn ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled ~
         Eio.Time.sleep clock dispatch_deadline_sec;
         `Stalled)
   with
-  | `Completed -> ack_or_warn ~keeper_name ~lease_id
+  | `Completed -> ack_or_warn state ~keeper_name ~lease_id
   | `Stalled -> (
       match on_stalled ~keeper_name ~queued_message:queued with
-      | () -> ack_or_warn ~keeper_name ~lease_id
+      | () -> ack_or_warn state ~keeper_name ~lease_id
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception exn ->
           Log.Keeper.warn
@@ -122,22 +185,22 @@ let run_leased_turn ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled ~
              instead of acking so the batch is retried"
             keeper_name
             (Printexc.to_string exn);
-          nack_or_warn ~keeper_name ~lease_id)
+          nack_or_warn state ~keeper_name ~lease_id)
 
 let dispatch_queued_turn state ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled
     ~keeper_name ~lease_id ~queued =
   Eio.Fiber.fork ~sw (fun () ->
       try
-        run_leased_turn ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled
+        run_leased_turn state ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled
           ~keeper_name ~lease_id ~queued;
         clear_dispatching state keeper_name
       with
       | Eio.Cancel.Cancelled _ as e ->
-          Eio.Cancel.protect (fun () -> nack_or_warn ~keeper_name ~lease_id);
+          Eio.Cancel.protect (fun () -> nack_or_warn state ~keeper_name ~lease_id);
           clear_dispatching state keeper_name;
           raise e
       | exn ->
-          nack_or_warn ~keeper_name ~lease_id;
+          nack_or_warn state ~keeper_name ~lease_id;
           clear_dispatching state keeper_name;
           Log.Keeper.warn
             "keeper_chat_consumer: handle_turn failed for keeper=%s: %s"
@@ -158,9 +221,12 @@ let start ~sw ~clock ~base_path ~dispatch_deadline_sec ~handle_turn ~on_stalled 
          if is_dispatching dispatch_state keeper_name
          then ()
          else
-           match Keeper_turn_admission.in_flight ~base_path ~keeper_name with
-           | Some _ -> ()
-           | None -> (
+           match retry_pending_finalization dispatch_state ~keeper_name with
+           | true -> ()
+           | false -> (
+             match Keeper_turn_admission.in_flight ~base_path ~keeper_name with
+             | Some _ -> ()
+             | None -> (
                if mark_dispatching dispatch_state keeper_name
                then (
                  let leased =
@@ -212,7 +278,7 @@ let start ~sw ~clock ~base_path ~dispatch_deadline_sec ~handle_turn ~on_stalled 
                              zero messages; nacking"
                             lease_id
                             keeper_name;
-                          nack_or_warn ~keeper_name ~lease_id;
+                          nack_or_warn dispatch_state ~keeper_name ~lease_id;
                           clear_dispatching dispatch_state keeper_name
                       | Some queued ->
                           (try
@@ -222,11 +288,11 @@ let start ~sw ~clock ~base_path ~dispatch_deadline_sec ~handle_turn ~on_stalled 
                            with
                            | Eio.Cancel.Cancelled _ as e ->
                                Eio.Cancel.protect (fun () ->
-                                   nack_or_warn ~keeper_name ~lease_id);
+                                   nack_or_warn dispatch_state ~keeper_name ~lease_id);
                                clear_dispatching dispatch_state keeper_name;
                                raise e
                            | exn ->
-                               nack_or_warn ~keeper_name ~lease_id;
+                               nack_or_warn dispatch_state ~keeper_name ~lease_id;
                                clear_dispatching dispatch_state keeper_name;
                                Log.Keeper.warn
                                  "keeper_chat_consumer: dispatch fork failed for \
@@ -237,7 +303,7 @@ let start ~sw ~clock ~base_path ~dispatch_deadline_sec ~handle_turn ~on_stalled 
                  Log.Keeper.warn
                    "keeper_chat_consumer: duplicate dispatch suppressed for \
                     keeper=%s"
-                   keeper_name))
+                   keeper_name)))
       keeper_names;
     Eio.Time.sleep clock poll_interval_sec;
     poll_loop ()

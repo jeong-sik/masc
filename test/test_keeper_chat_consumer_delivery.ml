@@ -53,7 +53,15 @@ let with_env body =
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
-      Keeper_chat_queue.clear ~keeper_name;
+      (* Full registry reset, not just [clear ~keeper_name]: several tests
+         below use derived names ([keeper_name ^ "-a"/"-b"]) that a prior
+         test's dispatch fiber can leave with a message requeued by
+         [Keeper_chat_consumer]'s at-least-once nack-on-cancel path (the
+         switch teardown between tests can race a fiber that was mid-ack).
+         [Keeper_chat_queue.all_keeper_names] is process-global, so the next
+         test's consumer would otherwise pick up and dispatch that leaked
+         entry too. *)
+      Keeper_chat_queue.For_testing.reset ();
       body ~base ~clock)
 
 (* Generously above every [await_or_timeout] window this suite uses (longest

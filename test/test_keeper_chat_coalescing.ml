@@ -486,7 +486,7 @@ let test_lease_ack_nack_lifecycle () =
   Printf.printf
     "Test 13: ack removes a lease permanently, nack requeues it for retry\n%!";
   let ack_keeper = "lease-ack-keeper" in
-  Keeper_chat_queue.clear ~ack_keeper;
+  Keeper_chat_queue.clear ~keeper_name:ack_keeper;
   enqueue_ ~keeper_name:ack_keeper (msg ~content:"answered" ~ts:1.0 Keeper_chat_queue.Dashboard);
   (match Keeper_chat_queue.lease_batch ~keeper_name:ack_keeper with
    | `Leased { lease_id; messages } ->
@@ -501,7 +501,7 @@ let test_lease_ack_nack_lifecycle () =
   check "acked message never returns"
     (Keeper_chat_queue.lease_batch ~keeper_name:ack_keeper = `Empty);
   let nack_keeper = "lease-nack-keeper" in
-  Keeper_chat_queue.clear ~nack_keeper;
+  Keeper_chat_queue.clear ~keeper_name:nack_keeper;
   enqueue_ ~keeper_name:nack_keeper (msg ~content:"retry-me" ~ts:1.0 Keeper_chat_queue.Dashboard);
   (match Keeper_chat_queue.lease_batch ~keeper_name:nack_keeper with
    | `Leased { lease_id; _ } -> (

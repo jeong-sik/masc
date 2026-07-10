@@ -97,6 +97,8 @@ let generate_lease_id ~keeper_name =
   let safe_keeper_name =
     Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
   in
+  (* DET-OK: epoch-ms is a uniqueness salt for an id, not a branch/decision
+     input — same rationale as Keeper_msg_async.generate_request_id. *)
   Printf.sprintf "lease_%s_%d_%d" safe_keeper_name n
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
@@ -105,6 +107,8 @@ let generate_receipt_id ~keeper_name =
   let safe_keeper_name =
     Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
   in
+  (* DET-OK: see generate_lease_id above — epoch-ms is a uniqueness salt,
+     not a branch/decision input. *)
   Printf.sprintf "chatq_%s_%d_%d" safe_keeper_name n
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 

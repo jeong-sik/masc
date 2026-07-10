@@ -34,6 +34,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
       tool_name : string option;
     }
   | Yielded_to_chat_waiting of { turns_used : int }
+  | Yielded_to_durable_stimulus of { turns_used : int }
 (** Why this single OAS call yielded control. [Completed] is the
     model's success path; [TurnBudgetExhausted] means the per-call
     turn budget checkpoint was reached. It is not a completed
@@ -43,9 +44,11 @@ type stop_reason = Runtime_agent_context.stop_reason =
     keeper hit a mutation tool while in read-only mode (the [tool_name]
     surfaces which tool triggered the gate). [Yielded_to_chat_waiting]
     fires when an autonomous-lane run stopped at a turn boundary to hand
-    the keeper's turn slot to a parked dashboard/connector chat request;
-    like [MutationBoundaryReached] it is a continuation checkpoint, not a
-    completed deliverable, and the keeper resumes on the next cycle. *)
+    the keeper's turn slot to a parked dashboard/connector chat request.
+    [Yielded_to_durable_stimulus] fires after at least one provider turn when
+    another durable event is waiting behind the event currently leased by the
+    cycle. Both yields are continuation checkpoints, not completed
+    deliverables, and the keeper resumes on the next cycle. *)
 
 (** {1 Config} *)
 

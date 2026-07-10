@@ -57,7 +57,8 @@ let budget_exhausted_no_progress_threshold_override
     | Runtime_agent.TurnBudgetExhausted _ -> true
     | Runtime_agent.Completed
     | Runtime_agent.MutationBoundaryReached _
-    | Runtime_agent.Yielded_to_chat_waiting _ -> false
+    | Runtime_agent.Yielded_to_chat_waiting _
+    | Runtime_agent.Yielded_to_durable_stimulus _ -> false
   in
   if
     budget_exhausted
@@ -219,7 +220,8 @@ let completion_contract_terminal_failure_reason_code result =
          result.Keeper_agent_run.completion_contract_result
      | Runtime_agent.Completed
      | Runtime_agent.MutationBoundaryReached _
-     | Runtime_agent.Yielded_to_chat_waiting _ -> None)
+     | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_durable_stimulus _ -> None)
   | Some _ -> None
   | None ->
     Some
@@ -235,7 +237,8 @@ let terminal_outcome_of_result result =
      | Runtime_agent.Completed -> Terminal_done
      | Runtime_agent.TurnBudgetExhausted _
      | Runtime_agent.MutationBoundaryReached _
-     | Runtime_agent.Yielded_to_chat_waiting _ ->
+     | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_durable_stimulus _ ->
        Terminal_checkpoint)
 ;;
 
@@ -446,6 +449,8 @@ let emit_usage_metrics_and_log
        | None -> Printf.sprintf "mutation_boundary(%d)" turns_used)
     | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
+    | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
+      Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
   in
   let outcome_label =
     match terminal_outcome with
@@ -456,6 +461,8 @@ let emit_usage_metrics_and_log
        | Runtime_agent.TurnBudgetExhausted _ -> "budget_exhausted"
        | Runtime_agent.MutationBoundaryReached _ -> "mutation_boundary"
        | Runtime_agent.Yielded_to_chat_waiting _ -> "yielded_to_chat_waiting"
+       | Runtime_agent.Yielded_to_durable_stimulus _ ->
+         "yielded_to_durable_stimulus"
        | Runtime_agent.Completed -> "success")
   in
   Otel_metric_store.inc_counter
@@ -575,6 +582,7 @@ let terminal_reason_of_outcome result = function
             { detail = None; used = turns_used; limit })
      | Runtime_agent.MutationBoundaryReached _
      | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Completed ->
        Keeper_turn_terminal.success ())
   | Terminal_failed_completion_contract _ ->
@@ -662,6 +670,12 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Log.Keeper.info ~keeper_name:updated_meta.name
       "yielded turn slot to a waiting chat request after %d turn(s), checkpoint \
        saved — will resume next cycle"
+      turns_used;
+    reset_failure_state ()
+  | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
+    Log.Keeper.info ~keeper_name:updated_meta.name
+      "yielded autonomous run for a pending durable stimulus after %d turn(s), \
+       checkpoint saved — will resume next cycle"
       turns_used;
     reset_failure_state ()
   | Runtime_agent.Completed -> reset_failure_state ()

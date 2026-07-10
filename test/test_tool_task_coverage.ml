@@ -888,6 +888,31 @@ let () = test "handle_transition_rejects_blank_evidence_ref_entries" (fun () ->
   assert (str_contains (Tool_result.message result) "must contain only non-empty strings")
 )
 
+let () = test "handle_transition_entry_action_rejects_blank_evidence_ref_entries" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Entry action blank evidence task") ])
+  in
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "claim");
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "");
+                ("evidence_refs", `List [ `String "  " ]);
+              ] );
+        ])
+  in
+  assert (not (Tool_result.is_success result));
+  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  assert (str_contains (Tool_result.message result) "must contain only non-empty strings")
+)
+
 let () = test "handle_transition_accepts_explicit_empty_evidence_refs" (fun () ->
   let ctx = make_test_ctx () in
   let _ =

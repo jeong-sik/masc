@@ -608,6 +608,43 @@ let () = test "handle_done_rejects_empty_evidence_refs" (fun () ->
   assert (str_contains (Tool_result.message result) "Completion rejected by anti-rationalization gate")
 )
 
+(* RFC-0337 / #23775 rejection-source pin: on an advisory task (default
+   contract, [task_requires_verification] = false), an evidence-less done is
+   rejected by the deterministic L1 gate ([Task_completion_gate.decide],
+   actionable payload naming handoff_context.evidence_refs) — NOT by the L2
+   Anti Gate 0, whose generic "no evidence references supplied" is scoped off
+   by [~requires_evidence] in this PR. The L2 LLM reviewer is stubbed to
+   approve so the flow genuinely reaches L1; the real gate is swapped in
+   because the test default is a permissive Pass stub. *)
+let () = test "advisory_done_without_evidence_rejects_via_l1_not_gate0" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("title", `String "Advisory task, evidence-less done")]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("task_id", `String "task-001")]) in
+  let previous_reviewer = Atomic.get Task.Anti_rationalization.run_llm_reviewer_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer)
+    (fun () ->
+      Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
+        (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+          Ok (Some Task.Anti_rationalization.Approve, "stub-approve"));
+      with_task_completion_gate_decide real_task_completion_gate (fun () ->
+        let result = Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+          (`Assoc [
+            ("task_id", `String "task-001");
+            ("action", `String "done");
+            ("notes", `String "Substantive completion notes that clear the anti-rationalization length gate without any evidence reference.")
+          ]) in
+        assert (not (Tool_result.is_success result));
+        let msg = Tool_result.message result in
+        (* L1's actionable payload names the missing field... *)
+        assert (str_contains msg "handoff_context.evidence_refs");
+        (* ...and the rejection is NOT the L2 Gate 0 generic message. *)
+        assert (not (str_contains msg "no evidence references supplied")))))
+)
+
 let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->
   (* Legacy substring gate (Gate 2.5). When
      MASC_VERIFICATION_FSM_ENABLED=true, the persisted contract is passed to

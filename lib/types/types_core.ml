@@ -313,6 +313,7 @@ type task_status =
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
+  | OperatorBlocked of { blocked_by: string; blocked_at: string; reason: string }
 [@@deriving show]
 
 (** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation

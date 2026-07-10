@@ -13,6 +13,18 @@
     restart/register boundary. *)
 val enqueue : base_path:string -> string -> Keeper_event_queue.stimulus -> unit
 
+val enqueue_durable_result :
+  base_path:string
+  -> string
+  -> Keeper_event_queue.stimulus
+  -> (unit, string) result
+(** Identity-deduplicated enqueue with an explicit durable-commit result.
+    Unlike {!enqueue}, this first commits the pending snapshot and only then
+    updates the live queue. Use it when the stimulus is the sole carrier of an
+    external decision and the caller must not acknowledge delivery on a failed
+    write. An existing identical [post_id] is idempotent; the same [post_id]
+    with a different typed payload is an explicit conflict. *)
+
 (** Read-only snapshot of the keeper's queue. If the keeper is not registered,
     read the durable snapshot so diagnostics still expose pending replay. *)
 val snapshot : base_path:string -> string -> Keeper_event_queue.t
@@ -20,6 +32,16 @@ val snapshot : base_path:string -> string -> Keeper_event_queue.t
 (** Remove and return the head stimulus, or [None] when the queue is
     empty or the keeper is unregistered. *)
 val dequeue : base_path:string -> string -> Keeper_event_queue.stimulus option
+
+val dequeue_when :
+  base_path:string
+  -> string
+  -> ready:(Keeper_event_queue.stimulus -> bool)
+  -> Keeper_event_queue.stimulus option
+(** Remove and return the head stimulus only when [ready head] is [true]. A
+    rejected head remains in the live and durable queue without entering the
+    in-flight lease. This is the exact readiness gate for durable events whose
+    producer has not completed its domain callback yet. *)
 
 (** Put previously drained stimuli back at the front of the queue. This is a
     crash-recovery primitive: if the keepalive cycle dies after dequeue/drain

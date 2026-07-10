@@ -55,6 +55,18 @@ runs:
         restore-keys: |
           dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.job }}-
 
+    # Storage mode is hardlink, not copy. `copy` keeps every artifact twice:
+    # once in _build and once in ~/.cache/dune. On ubuntu-latest that
+    # duplication exhausted the runner disk and the Build and Test job of run
+    # 29090394322 (main, the #23996 merge) died while linking a test
+    # executable, with zero free space reported by the runner. Both paths live
+    # on `/`, so dune can hardlink cache entries into _build and keep a single
+    # copy on disk.
+    #
+    # This explanation stays a YAML comment on purpose. GitHub echoes the whole
+    # `run:` script into the job log, so a shell comment quoting the linker and
+    # disk-space messages would plant those exact strings in every job log —
+    # scripts/ci-run-tests.sh matches them in disk_full_detected().
     - name: Enable dune cache (Linux)
       if: runner.os == 'Linux' && inputs.dune-cache == 'true'
       shell: bash

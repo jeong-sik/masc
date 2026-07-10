@@ -39,17 +39,21 @@ runs:
     # The opam cache above only restores the toolchain/switch; every dune
     # build of masc itself still started cold (~50 min Build and Test).
     # Cache dune's content-addressed artifact store so an unchanged module
-    # graph rebuilds incrementally. Keyed by run id so each run REWRITES the
-    # cache with its newest artifacts (a stable key would freeze the first
-    # upload forever); restore always hits the newest same-prefix entry.
+    # graph rebuilds incrementally. Keyed by job and run id so each job publishes
+    # a new immutable cache with its newest artifacts (a stable key would freeze
+    # the first upload forever). [github.job] is part of both the primary key
+    # and restore namespace: Health/Lint/Build run in parallel and produce
+    # different artifact subsets, while GitHub cache entries are immutable
+    # after the first successful save. A shared run-id key would let the fastest, usually
+    # smallest job permanently win that run's save race.
     - name: Cache dune build artifacts (Linux)
       if: runner.os == 'Linux' && inputs.dune-cache == 'true'
       uses: actions/cache@v5
       with:
         path: ~/.cache/dune
-        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.run_id }}
+        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.job }}-${{ github.run_id }}
         restore-keys: |
-          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
+          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.job }}-
 
     - name: Enable dune cache (Linux)
       if: runner.os == 'Linux' && inputs.dune-cache == 'true'

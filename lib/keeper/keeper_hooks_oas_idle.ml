@@ -2,6 +2,16 @@
 
 open Keeper_hooks_oas_types
 
+let schema_visible_name name =
+  match Keeper_tool_visibility_projection.public_alias_for_internal name with
+  | Some public_name -> public_name
+  | None -> name
+
+let schema_visible_keep_order names =
+  names
+  |> List.map schema_visible_name
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+
 (** Suggest alternative tools from the keeper's allowed set that were
     NOT part of the repeated tool calls. Returns up to [max_suggestions]
     tool names, deterministically selected from the allowed set.
@@ -19,18 +29,9 @@ let suggest_alternatives ~(allowed_tools : string list)
      let len = List.length candidates in
      if len <= max_suggestions then candidates
      else List.filteri (fun i _ -> i < max_suggestions) candidates
+  |> schema_visible_keep_order
 
 let includes_tool name tools = List.exists (String.equal name) tools
-
-let schema_visible_name name =
-  match Keeper_tool_visibility_projection.public_alias_for_internal name with
-  | Some public_name -> public_name
-  | None -> name
-
-let schema_visible_keep_order names =
-  names
-  |> List.map schema_visible_name
-  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 let allowed_visible_candidates candidates ~allowed_tools =
   candidates
@@ -85,9 +86,14 @@ let recovery_hint ~allowed_tools ~tool_names =
        this hint above) — the nudge must name the tool that actually exists. *)
     Some
       (Printf.sprintf
-         "keeper_board_post_get requires post_id; if no post_id is visible, use %s first. \
+         "keeper_board_post_get requires post_id; use %s to discover an exact \
+          post_id from visible board activity before calling keeper_board_post_get. \
           Do not call keeper_board_post_get with {}."
          discovery)
+  else if includes_tool "keeper_tool_search" allowed_tools then
+    Some
+      "Use keeper_tool_search with a keyword to discover available tools. \
+       If the tool you need is not listed, report that it is unavailable."
   else
     None
 
@@ -154,8 +160,12 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     Agent_sdk.Hooks.Nudge
       (append_hint
          (Printf.sprintf
-            "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
-             Use one of these instead: %s."
+            "FINAL WARNING: you repeated %s %d times; the next idle ends the \
+             turn. If you are waiting on an external decision (approval, \
+             another agent, a scheduled event), stop calling tools and reply \
+             with a short text status describing what you are waiting for — \
+             that ends the turn cleanly and is visible to the operator. \
+             Otherwise use a different tool: %s."
             tools_str consecutive_idle_turns alt_str))
   else
     Agent_sdk.Hooks.Nudge

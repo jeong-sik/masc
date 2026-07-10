@@ -381,6 +381,11 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                          then "warn"
                          else "ok"
                        in
+                       let receipt_runtime_summary =
+                         match receipt_runtime_id receipt with
+                         | Some runtime_id -> runtime_id
+                         | None -> "<missing receipt.runtime.name>"
+                       in
                        Some
                          (timeline_event_json ~ts:ended_at ~kind:"keeper_receipt"
                             ~lane:("keeper:" ^ detail.meta.name)
@@ -388,8 +393,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                             ~summary:
                               (Printf.sprintf "%s · %s"
                                  outcome
-                                 (receipt_runtime_id receipt
-                                  |> Option.value ~default:(Keeper_meta_contract.runtime_id_of_meta detail.meta)))
+                                 receipt_runtime_summary)
                             ~severity)))
   in
   let goal_events = List.map goal_event_timeline_json goal_events in

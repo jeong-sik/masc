@@ -30,9 +30,12 @@ let () =
       "Total HITL context-summary worker outcomes classified by [outcome]. \
        Labels: [outcome] (ok_summary | parse_error | provider_error | timeout | \
        no_provider_config | no_net | slot_unavailable | crashed | \
-       degraded_plain_json), [risk_level]. [degraded_plain_json] is emitted \
-       alongside the terminal outcome when the judge endpoint could not serve \
-       native structured output and the plain-text JSON path was used."
+       degraded_plain_json | fallback_summary), [risk_level]. \
+       [degraded_plain_json] is emitted alongside the terminal outcome when \
+       the judge endpoint could not serve native structured output and the \
+       plain-text JSON path was used. [fallback_summary] means the operator \
+       received deterministic request metadata because the advisory LLM summary \
+       was unavailable."
     ()
 ;;
 
@@ -238,6 +241,110 @@ let build_context_bundle ~(entry : pending_approval) : Yojson.Safe.t =
     ]
 ;;
 
+(* ── Deterministic fallback ────────────────────── *)
+
+let fallback_model_run_id = "deterministic-fallback"
+
+let preview_text ~max_bytes text =
+  text
+  |> Observability_redact.redact_preview ~max_len:max_bytes
+  |> String_util.utf8_prefix ~max_bytes
+;;
+
+let fallback_reason_preview reason = preview_text ~max_bytes:180 reason
+
+let input_preview_of_entry (entry : pending_approval) =
+  match Observability_redact.redact_tool_input ~tool_name:entry.tool_name entry.input with
+  | Some preview -> preview_text ~max_bytes:320 preview
+  | None -> "input preview withheld by observability redaction policy"
+;;
+
+let context_bundle_partial context_bundle =
+  match Json_util.assoc_member_opt "partial_context" context_bundle with
+  | Some (`Bool value) -> value
+  | _ -> false
+;;
+
+let id_part label = function
+  | Some value when String.trim value <> "" -> [ Printf.sprintf "%s=%s" label value ]
+  | _ -> []
+;;
+
+let turn_part = function
+  | Some turn_id -> [ Printf.sprintf "turn=%d" turn_id ]
+  | None -> []
+;;
+
+let fallback_relation (entry : pending_approval) =
+  let parts =
+    turn_part entry.turn_id
+    @ id_part "task" entry.task_id
+    @ id_part "goal" entry.goal_id
+    @ List.map (Printf.sprintf "goal=%s") entry.goal_ids
+  in
+  match List.filter (fun value -> String.trim value <> "") parts with
+  | [] -> "no linked turn/task/goal metadata"
+  | values -> String.concat ", " values
+;;
+
+let fallback_summary ~generated_at ~(entry : pending_approval) ~context_bundle ~reason =
+  let reason = fallback_reason_preview reason in
+  let risk = risk_level_to_string entry.risk_level in
+  let partial_context = context_bundle_partial context_bundle in
+  let context_summary =
+    Printf.sprintf
+      "LLM context summary unavailable (%s). Deterministic fallback: keeper %s \
+       requests %s (%s risk) in %s; %s. Raw input preview: %s"
+      reason
+      entry.keeper_name
+      entry.tool_name
+      risk
+      entry.sandbox_target
+      (fallback_relation entry)
+      (input_preview_of_entry entry)
+  in
+  let key_questions =
+    [ "Does the raw input match the current task, goal, and recent keeper context?"
+    ; "Is the requested tool action scoped, reversible, and expected for this keeper?"
+    ; "Could the request be based on stale, deprecated, or unverified information?"
+    ]
+  in
+  let suggested_options =
+    [ { label = "approve"
+      ; rationale =
+          "Approve only if the raw payload is current, scoped, and expected for \
+           the active work."
+      ; estimated_risk_delta = None
+      }
+    ; { label = "reject"
+      ; rationale =
+          "Reject when the payload is stale, too broad, or not tied to the \
+           visible task/goal context."
+      ; estimated_risk_delta = None
+      }
+    ]
+  in
+  { summary_version
+  ; generated_at
+  ; model_run_id = fallback_model_run_id
+  ; context_summary
+  ; key_questions
+  ; suggested_options
+  ; risk_rationale =
+      Some
+        (Printf.sprintf
+           "Deterministic fallback generated after advisory HITL summary LLM \
+            failure: %s. It does not verify external state or keeper claims."
+           reason)
+  ; uncertainty = if partial_context then 0.95 else 0.85
+  }
+;;
+
+let emit_fallback_summary ~generated_at ~entry ~context_bundle ~reason ~on_summary =
+  record_outcome ~risk_level:entry.risk_level "fallback_summary";
+  on_summary (fallback_summary ~generated_at ~entry ~context_bundle ~reason)
+;;
+
 (* ── LLM call ───────────────────────────────────── *)
 
 let message role text = Agent_sdk.Types.text_message role text
@@ -429,7 +536,16 @@ let summary_of_response ~generated_at ~mode (response : Agent_sdk.Types.api_resp
      with
      | Ok json -> parse_json json
      | Error detail ->
-       Error (Printf.sprintf "HITL summary structured response parse failed: %s" detail))
+       (* Dual-path recovery before failing: some native-schema runtimes served
+          over the OpenAI-compatible /v1 transport return the JSON as visible
+          text (optionally fenced) instead of an enforced structured payload.
+          Reuse the [Plain_json_text] extractor on the visible text so those
+          responses parse instead of degrading to the deterministic fallback.
+          Only genuinely empty/non-JSON output falls through to [Error]. *)
+       (match extract_json_object (Agent_sdk_response.text_of_response response) with
+        | Ok json -> parse_json json
+        | Error _ ->
+          Error (Printf.sprintf "HITL summary structured response parse failed: %s" detail)))
   | Plain_json_text ->
     (match extract_json_object (Agent_sdk_response.text_of_response response) with
      | Ok json -> parse_json json
@@ -443,16 +559,24 @@ let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failu
   match provider_config with
   | None ->
     record_outcome ~risk_level:entry.risk_level "no_provider_config";
-    on_failure ~reason:"HITL summary: no provider config available" ~retryable:false
+    emit_fallback_summary
+      ~generated_at
+      ~entry
+      ~context_bundle:(build_context_bundle ~entry)
+      ~reason:"HITL summary: no provider config available"
+      ~on_summary
   | Some provider_config ->
     Eio.Fiber.fork ~sw (fun () ->
       try
         with_summary_slot (fun sw ->
           let context_bundle = build_context_bundle ~entry in
+          let emit_fallback ~reason =
+            emit_fallback_summary ~generated_at ~entry ~context_bundle ~reason ~on_summary
+          in
           match Eio_context.get_net_opt () with
           | None ->
             record_outcome ~risk_level:entry.risk_level "no_net";
-            on_failure ~reason:"HITL summary worker: Eio net unavailable" ~retryable:true
+            emit_fallback ~reason:"HITL summary worker: Eio net unavailable"
           | Some net ->
             (match call_summary_llm ~sw ~net ~provider_config ~context_bundle () with
              | Ok (response, mode) ->
@@ -469,17 +593,17 @@ let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failu
                   on_summary summary
                 | Error reason ->
                   record_outcome ~risk_level:entry.risk_level "parse_error";
-                  on_failure ~reason ~retryable:true)
+                  emit_fallback ~reason)
              | Error { mode; error = (Agent_sdk.Error.Api (Timeout _) as error) } ->
                List.iter
                  (record_outcome ~risk_level:entry.risk_level)
                  (summary_llm_error_outcomes ~mode error);
-               on_failure ~reason:"HITL summary LLM call timed out" ~retryable:true
+               emit_fallback ~reason:"HITL summary LLM call timed out"
              | Error { mode; error } ->
                List.iter
                  (record_outcome ~risk_level:entry.risk_level)
                  (summary_llm_error_outcomes ~mode error);
-               on_failure ~reason:(Agent_sdk.Error.to_string error) ~retryable:true))
+               emit_fallback ~reason:(Agent_sdk.Error.to_string error)))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -497,6 +621,7 @@ module For_testing = struct
     | Plain_json_text
 
   let build_context_bundle = build_context_bundle
+  let fallback_summary = fallback_summary
   let parse_summary = parse_summary
   let summary_of_response = summary_of_response
   let provider_config_for_summary = provider_config_for_summary

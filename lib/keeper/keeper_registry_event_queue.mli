@@ -31,6 +31,12 @@ val ack_consumed :
 (** Acknowledge consumed stimuli after a keepalive turn completes. Until this
     runs, a restart reloads the leased stimuli for at-least-once replay. *)
 
+val ack_consumed_result :
+  base_path:string -> string -> Keeper_event_queue.stimulus list -> (unit, string) result
+(** Result-returning variant of {!ack_consumed}. Callers that publish follow-on
+    evidence must use this so they do not claim an acknowledgement after durable
+    queue persistence failed. *)
+
 val drop_by_post_id :
   base_path:string
   -> string
@@ -41,8 +47,9 @@ val drop_by_post_id :
     when durable removal fails so callers do not clear recovery state while a
     replayable stimulus remains on disk. *)
 
-(** Drain stimuli intended for board reactivity. [window_sec] caps the
-    age of stimuli returned to the caller. *)
+(** Drain every queued board-signal stimulus for the keeper (RFC-0334 W2:
+    turn-keyed digest — one turn consumes everything queued since the
+    keeper's last turn, however it arrived). *)
 val drain_board :
-  ?window_sec:float -> base_path:string -> string
+  base_path:string -> string
   -> Keeper_event_queue.stimulus list

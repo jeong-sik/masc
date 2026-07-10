@@ -24,6 +24,14 @@ librarian = "ollama_cloud_native.minimax-m3-native-structured"
 # dashboard operator/governance judges fail at config load on typo/unsupported
 # routing instead of discovering the mismatch in the daemon loop.
 structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
+# HITL approval context summary (advisory operator display). Unset previously,
+# so it inherited [runtime].structured_judge = minimax-m3, a *reasoning* model:
+# extended thinking consumed the whole keeper.hitl_summary.max_tokens=512 budget,
+# leaving an empty answer that failed structured parse and always fell back to the
+# deterministic summary. Pin a *non-reasoning* structured runtime so the full token
+# budget produces the answer. devstral-2-123b (thinking-support=false,
+# supports-structured-output=true) is the same runtime the Fusion judge uses.
+hitl_summary = "ollama_cloud.ollama-cloud-devstral-2-123b"
 # Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.
@@ -44,6 +52,9 @@ endpoint = "https://ollama.com/v1"
 # `Runtime_schema.connect_timeout_s_key`.
 connect-timeout-s = 600.0
 
+[providers.ollama_cloud.healthcheck]
+path = "/models"
+
 [providers.ollama_cloud.credentials]
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
@@ -56,6 +67,9 @@ endpoint = "https://ollama.com"
 # output, not OpenAI-compatible /v1/chat/completions.
 connect-timeout-s = 600.0
 
+[providers.ollama_cloud_native.healthcheck]
+path = "/api/tags"
+
 [providers.ollama_cloud_native.credentials]
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
@@ -64,6 +78,9 @@ key = "OLLAMA_CLOUD_API_KEY"
 display-name = "DeepSeek API"
 protocol = "openai-compatible-http"
 endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.healthcheck]
+path = "/models"
 
 [providers.deepseek.credentials]
 type = "env"
@@ -74,6 +91,9 @@ display-name = "GLM Coding Plan"
 protocol = "openai-compatible-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
+[providers.glm-coding.healthcheck]
+path = "/models"
+
 [providers.glm-coding.credentials]
 type = "env"
 key = "ZAI_API_KEY_SB"
@@ -82,6 +102,9 @@ key = "ZAI_API_KEY_SB"
 display-name = "Local Ollama"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
+
+[providers.ollama.healthcheck]
+path = "/api/tags"
 
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
@@ -154,6 +177,7 @@ streaming = true
 # choice. Do not re-enable without a serializer path + model-side proof.
 supports-tool-choice = false
 thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
 supports-native-streaming = true
 supports-top-k = true
 supports-seed = true
@@ -175,6 +199,7 @@ streaming = true
 # `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`.
 supports-tool-choice = false
 thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
 supports-native-streaming = true
 supports-top-k = true
 supports-seed = true
@@ -183,12 +208,15 @@ supports-audio-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.deepseek-v4-flash]
+wizard-default = true
 
 [deepseek.deepseek-v4-pro]
 
 [deepseek.deepseek-v4-flash]
+wizard-default = true
 
 [glm-coding.glm-4-7-coding]
+wizard-default = true
 
 [models.glm-5-turbo]
 api-name = "GLM-5-Turbo"
@@ -263,6 +291,7 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud_native.minimax-m3-native-structured]
+wizard-default = true
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
 # is kept separate from Kimi's direct API route; OAS owns provider/model wire
@@ -936,6 +965,7 @@ supports-multimodal-inputs = false
 [ollama_cloud.ollama-cloud-rnj-1-8b]
 
 [ollama.gemma4-26b-a4b-qat]
+wizard-default = true
 max-concurrent = 1
 
 [ollama.gemma4-e2b-it-qat]
@@ -1000,6 +1030,21 @@ recent_restart_window_sec = 300.0
 recent_restart_count_threshold = 2
 tool_failure_count_threshold = 3
 tool_failure_ratio_threshold = 0.7
+
+# ── Pacing (RFC-0313 W3) ────────────────────────────────────────────
+# 실패는 존재(pause/crash/dead)가 아니라 per-runtime revisit 간격만 바꾼다.
+# - mode: "enforce"(기본) = failure-driven pause 경로 생략 + 스케줄러가
+#   revisit due를 소비. "shadow" = W3 이전 레거시 동작으로 되돌리는
+#   kill-switch (1 릴리즈 한정, W4에서 스위치 자체 제거).
+#   알 수 없는 값은 load 단계에서 config parse 실패 (fail-closed).
+# - base_sec / multiplier / cap_sec: 실패 시 revisit 지연 =
+#   min(cap_sec, base_sec * multiplier^(연속실패-1)); provider retry_after
+#   힌트가 있으면 그 값이 우선. 숫자 knob 누락/오타입은 warn + default.
+[pacing]
+mode = "enforce"
+base_sec = 30.0
+multiplier = 2.0
+cap_sec = 3600.0
 
 # ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
 # masc_fusion 도구의 out-of-band 심의 루프 설정. 개인 dev 카나리로 기본 ON.

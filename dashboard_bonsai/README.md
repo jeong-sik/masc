@@ -23,17 +23,17 @@ Jane Street **Bonsai** (OCaml + js_of_ocaml) 기반 masc 대시보드 island.
 
 ## Toolchain
 
-OxCaml 기반 OCaml 5.2 + Jane Street v0.18 preview 패키지.
+OCaml 5.5.0+options + Jane Street v0.18 preview 패키지.
 
-- 컴파일러: `ocaml-variants.5.2.0+ox`
+- 컴파일러: `ocaml-variants.5.5.0+options`
 - Bonsai: `v0.18~preview.130.83+317` (OxCaml repo)
-- stock OCaml 5.3/5.4 + janestreet-bleeding 조합은 macOS 26 SDK(`dispatch/base.h`
-  `fallthrough` 매크로 충돌)와 충돌 — OxCaml만 동작.
+- 이전 stock OCaml 5.3/5.4 + janestreet-bleeding 조합은 macOS 26 SDK(`dispatch/base.h`
+  `fallthrough` 매크로 충돌)와 충돌했으므로 사용하지 않는다.
 
 ### 1회 switch 셋업
 
 ```bash
-opam switch create bonsai-dashboard 5.2.0+ox \
+opam switch create bonsai-dashboard ocaml-variants.5.5.0+options \
     --repos ox=git+https://github.com/oxcaml/opam-repository.git,default \
     --no-install
 opam install --switch=bonsai-dashboard \

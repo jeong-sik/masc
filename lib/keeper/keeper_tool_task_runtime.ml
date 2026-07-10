@@ -3,6 +3,14 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
+(* RFC-0323 G-2: distinct machine identity under which the RFC-0199
+   deterministic probe approves its own submission. The FSM self-approval
+   check compares identity keys (never authority), so the probe cannot
+   approve under the keeper identity it submits with. Single-colon
+   namespacing per [Validation.Agent_id]; follows the [operator:<actor>]
+   precedent of the dashboard verdict route. *)
+let deterministic_probe_verifier = "probe:deterministic"
+
 let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =
   match result with
   | Ok msg ->
@@ -331,6 +339,34 @@ let task_op_of_name name =
   | None -> None
 ;;
 
+let parse_keeper_task_done_evidence_refs args =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt "evidence_refs" fields with
+     | None ->
+       Error
+         "evidence_refs is required. Include at least one locally validated \
+          base-path artifact, local git commit, or .masc trace/turn/receipt \
+          reference."
+     | Some (`List refs) ->
+       let rec collect acc = function
+         | [] ->
+           let refs = List.rev acc in
+           if refs = []
+           then Error "evidence_refs must contain at least one non-empty string."
+           else Ok refs
+         | `String ref_ :: rest ->
+           let ref_ = String.trim ref_ in
+           if ref_ = ""
+           then Error "evidence_refs must contain only non-empty strings."
+           else collect (ref_ :: acc) rest
+         | _ :: _ -> Error "evidence_refs must be an array of non-empty strings."
+       in
+       collect [] refs
+     | Some _ -> Error "evidence_refs must be an array of non-empty strings.")
+  | _ -> Error "keeper_task_done arguments must be an object."
+;;
+
 let handle_keeper_task_tool
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -567,14 +603,17 @@ let handle_keeper_task_tool
          auto_started_ok := Tool_result.is_success start_result
        end else
          auto_started_ok := true;
-       (* RFC-0199 Phase B: deterministic evidence harness. When the claimed
-          task declares typed [evidence_claims] and all are satisfied by a file
-          probe, complete it immediately — no LLM turn. Uses [force_done_task_r]
-          so a deterministic check does not route through the non-deterministic
-          anti-rationalization gate (force_done is the existing keeper-Done
-          path; Done_action is exempt from the legacy substring gate). Guarded to
-          Claimed/InProgress so it never hits the AwaitingVerification
-          Invalid_transition; idempotent if another agent reached Done first. *)
+       (* RFC-0199 Phase B / RFC-0323 G-2: deterministic evidence harness.
+          When the claimed task declares typed [evidence_claims] and all are
+          satisfied by a file probe, complete it without an LLM turn — through
+          the verification lane: submit as the keeper (assignee), approve
+          under the distinct machine identity [deterministic_probe_verifier].
+          Replaces the former [force_done_task_r] bypass so Done stays
+          reachable only via approve; the typed evidence_claims probe remains
+          the real evidence. Guarded to Claimed/InProgress so it never hits
+          the AwaitingVerification Invalid_transition; idempotent if another
+          agent reached Done first. Failures are logged per branch, never
+          swallowed. *)
        (match
           Workspace.get_tasks_raw config
           |> List.find_opt (fun (t : Masc_domain.task) ->
@@ -598,12 +637,54 @@ let handle_keeper_task_tool
                [%s]"
               (List.length claims) summary
           in
+          let approve_notes =
+            Printf.sprintf
+              "RFC-0199 deterministic probe: %d typed evidence claim(s) \
+               machine-verified"
+              (List.length claims)
+          in
           (match
-             Workspace.force_done_task_r config
-               ~agent_name:(keeper_agent_sender ~meta) ~task_id ~notes ()
+             Workspace.submit_and_approve_task_r config
+               ~agent_name:(keeper_agent_sender ~meta)
+               ~verifier_name:deterministic_probe_verifier ~task_id ~notes
+               ~approve_notes
+               ~evidence_refs:(List.map Evidence_claim.to_human_string claims)
+               ()
            with
            | Ok _ -> harness_completed := true
-           | Error _ -> ())
+           | Error (Workspace.Machine_verify_invalid_verifier msg) ->
+             Log.Keeper.error ~keeper_name:meta.name
+               "deterministic probe verifier identity rejected for %s: %s"
+               task_id msg
+           | Error (Workspace.Machine_verify_verifier_not_distinct _) ->
+             Log.Keeper.error ~keeper_name:meta.name
+               "deterministic probe verifier collides with keeper identity \
+                for %s; probe completion skipped"
+               task_id
+           | Error (Workspace.Machine_verify_submit_failed e) ->
+             Log.Keeper.warn ~keeper_name:meta.name
+               "deterministic probe submit failed for %s (falling back to \
+                LLM turn): %s"
+               task_id
+               (Masc_domain.masc_error_to_string e)
+           | Error (Workspace.Machine_verify_approve_failed_compensated e) ->
+             Log.Keeper.warn ~keeper_name:meta.name
+               "deterministic probe approve failed for %s; compensating \
+                reject returned it to in_progress: %s"
+               task_id
+               (Masc_domain.masc_error_to_string e)
+           | Error
+               (Workspace.Machine_verify_approve_failed_stranded
+                  { approve_error; reject_error }) ->
+             Log.Keeper.error ~keeper_name:meta.name
+               "deterministic probe stranded %s in awaiting_verification \
+                (approve: %s; compensating reject: %s); its pending \
+                verification record keeps it inside the verifier wake signal \
+                and the dashboard panel — any other identity can \
+                approve/reject"
+               task_id
+               (Masc_domain.masc_error_to_string approve_error)
+               (Masc_domain.masc_error_to_string reject_error))
         | _ -> ())
      | Workspace.Claim_next_no_unclaimed
      | Workspace.Claim_next_no_eligible _
@@ -787,6 +868,15 @@ let handle_keeper_task_tool
         "result is required. Audit trail: describe what you completed. \
          Example: result='Refactored module X, all tests green, no flake'."
     else (
+      match parse_keeper_task_done_evidence_refs args with
+      | Error message ->
+        workflow_rejection_error_json
+          ~alternatives:[ "keeper_task_done" ]
+          ~typed_outcome:
+            (Keeper_tool_outcome.Error
+               { reason = "keeper_task_done rejected: evidence_refs required" })
+          message
+      | Ok evidence_refs ->
       (* Map keeper vocabulary (`result`) onto MASC domain typed
          handoff_context.summary so the action=done strict-contract
          path can read the completion summary directly from a typed
@@ -797,7 +887,10 @@ let handle_keeper_task_tool
           "action", `String "done";
           "notes", `String result_text;
           ( "handoff_context",
-            `Assoc [ "summary", `String result_text ] );
+            `Assoc
+              [ "summary", `String result_text
+              ; "evidence_refs", Json_util.json_string_list evidence_refs
+              ] );
         ]
       in
       let transition_result =

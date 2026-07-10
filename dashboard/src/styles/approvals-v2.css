@@ -8,6 +8,8 @@
 
    This file therefore carries ONLY what the live approvals surface adds on top
    of that SSOT and surfaces.css does NOT define:
+     - the queue↔history view switch and right HITL state aside (.ap-view*,
+       .ap-hist*, .ap-aside*, .ap-rule*, .ap-recent*)
      - the queue↔detail-rail workspace grid (.ap-workspace, .ap-detail-panel*,
        .ap-dossier*) and the live "상세" toggle (.ap-detail-toggle)
      - the live decision set: disabled state + the "항상 승인" Approve+Always
@@ -26,10 +28,16 @@
    shadowed those values — leaving them dead and divergent from the design SSOT.
    They are removed here so the file no longer redefines surfaces.css-owned
    selectors. The no-overlap invariant is guarded by approvals-css-ownership.test.ts.
-   The prototype's defer / undo / resolved-history rules stay omitted: the live
-   decision model is the closed {approve, reject}(+rule) set with no backing
-   endpoint for those.
+   The prototype's defer / undo controls stay omitted: the live decision model
+   is the closed {approve, reject}(+rule) set with no backing endpoint for those.
    ════════════════════════════════════════════════════════════════ */
+
+.ap-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
+.ap-viewseg { display: inline-flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-sunken); }
+.ap-viewbtn { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-dim); font-size: var(--fs-12); font-family: var(--font-ui); cursor: pointer; }
+.ap-viewbtn:hover { color: var(--text-primary); background: var(--bg-panel); }
+.ap-viewbtn.on { color: var(--text-bright); background: var(--volt-wash); box-shadow: inset 0 0 0 1px var(--volt-dim); }
+.ap-viewbtn-n { min-width: 16px; padding: 1px 5px; border-radius: var(--radius-pill); color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 12%, transparent); }
 
 /* Queue ↔ detail-rail two-column workspace (live surface; not in the prototype,
    which uses a right operations aside instead). */
@@ -92,6 +100,16 @@
 .ap-act.deny:hover:not(:disabled) { background: color-mix(in oklab, var(--status-bad) 12%, transparent); }
 .ap-act.ghost:hover:not(:disabled) { color: var(--volt-strong); }
 
+/* The shared .ov-scroll wrapper is declared overflow-y:auto, but on the
+   approvals surface it grows to its full content height and never scrolls (the
+   page scrolls at .dashboard-main-scroll). That non-scrolling overflow still
+   formed a sticky containing block, pinning .ap-detail-panel-rail's
+   `position: sticky` to the static wrapper so the detail panel scrolled away
+   with the queue. Restoring overflow:visible here (approvals only) lets the
+   rail stick against the page scroller. Scoped to .ap-surface so the other
+   .ov-scroll surfaces are untouched. */
+.ap-surface > .ov-scroll { overflow: visible; }
+
 /* Request-detail rail / inline dossier (live surface). */
 .ap-detail-panel { position: sticky; top: 14px; background: var(--bg-panel); border: 1px solid var(--border-main); border-radius: var(--radius-md); padding: 14px; min-width: 0; }
 .ap-detail-panel-inline { display: none; }
@@ -119,17 +137,76 @@
   .ap-detail-panel-inline { display: block; }
   .ap-h { flex-wrap: wrap; }
   .ap-id { margin-left: 0; }
+  .ap-aside { position: static; }
+  .ap-head-actions { justify-content: flex-start; width: 100%; }
 }
 
-/* Recent resolved approvals history (live surface augmentation). */
+/* Queue/history view, audit list, and HITL aside (live surface augmentation). */
+.ap-hist { display: flex; flex-direction: column; gap: 14px; }
+.ap-hist-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ap-hist-stat { min-width: 0; padding: 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text-dim); font-size: var(--fs-12); }
+.ap-hist-stat b { display: block; margin-bottom: 2px; color: var(--text-bright); font-size: var(--fs-18); }
+.ap-hist-stat b.ok { color: var(--status-ok); }
+.ap-hist-stat b.bad { color: var(--status-bad); }
+.ap-hist-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.ap-hist-f { border: 1px solid var(--border-soft); border-radius: var(--radius-xs); background: var(--bg-sunken); color: var(--text-dim); padding: 6px 9px; font-size: var(--fs-11); cursor: pointer; }
+.ap-hist-f:hover { color: var(--text-primary); border-color: var(--border-main); }
+.ap-hist-f.on { color: var(--text-bright); border-color: var(--volt-dim); background: var(--volt-wash); }
 .ap-history { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-soft); }
 .ap-history-title { font-size: var(--fs-14); font-weight: 600; color: var(--text-dim); margin: 0 0 12px; }
 .ap-history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.ap-history-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg-panel); border: 1px solid var(--border-soft); font-size: var(--fs-12); }
+.ap-hist-list { margin-top: 0; }
+.ap-history-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg-panel); border: 1px solid var(--border-soft); font-size: var(--fs-12); min-width: 0; }
 .ap-history-decision { flex: none; min-width: 48px; text-align: center; padding: 2px 8px; border-radius: var(--radius-xs); font-weight: 600; text-transform: uppercase; font-size: var(--fs-10); }
 .ap-history-decision.decision-approve { color: var(--status-ok); background: color-mix(in oklab, var(--status-ok) 12%, transparent); }
 .ap-history-decision.decision-reject { color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 12%, transparent); }
+.ap-history-decision.decision-edit { color: var(--volt-strong); background: var(--volt-wash); }
+.ap-history-decision.decision-unknown { color: var(--text-dim); background: var(--bg-sunken); }
 .ap-history-tool { flex: 1 1 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-bright); }
 .ap-history-keeper { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
 .ap-history-id { flex: 1 1 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 10.5px; }
+.ap-history-rule { flex: 0 1 130px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--volt-strong); font-size: var(--fs-10); }
 .ap-history-at { flex: none; color: var(--text-dim); font-size: 10.5px; }
+.ap-clear.compact { min-height: 190px; }
+
+.ap-aside { position: sticky; top: 14px; display: flex; flex-direction: column; gap: 12px; align-self: start; min-width: 0; }
+.ap-aside .wka-card { border: 1px solid var(--border-soft); border-radius: var(--radius-md); background: var(--bg-panel); padding: 14px; box-shadow: var(--shadow-1); }
+.ap-aside .wka-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.ap-aside .wka-h h3 { margin: 0; color: var(--text-bright); font-size: var(--fs-13); font-family: var(--font-display); font-weight: 600; }
+.ap-hitl-state { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); border: 1px solid var(--border-soft); border-radius: var(--radius-xs); padding: 2px 7px; }
+.ap-hitl-state.ok { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 38%, transparent); background: color-mix(in oklab, var(--status-ok) 9%, transparent); }
+.ap-hitl-state.bad { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 38%, transparent); background: color-mix(in oklab, var(--status-bad) 9%, transparent); }
+.ap-auto-card .wka-auto { display: flex; flex-direction: column; gap: 8px; }
+.wka-auto-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wka-auto-lbl { display: flex; flex-direction: column; gap: 2px; color: var(--text-dim); font-size: var(--fs-11); }
+.wka-auto-lbl b { color: var(--text-bright); font-size: var(--fs-13); }
+.wka-switch { position: relative; width: 34px; height: 18px; flex: none; border-radius: var(--radius-pill); border: 1px solid var(--border-soft); background: var(--bg-sunken); }
+.wka-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--text-dim); transition: transform 120ms ease, background 120ms ease; }
+.wka-switch.on { border-color: var(--volt-dim); background: var(--volt-wash); }
+.wka-switch.on::after { transform: translateX(15px); background: var(--volt-strong); }
+/* RFC-0319: the switch is an interactive <button role="switch"> — reset the
+   default button chrome so it renders identically to the former display span,
+   and expose keyboard focus + a disabled affordance. */
+button.wka-switch { padding: 0; margin: 0; cursor: pointer; -webkit-appearance: none; appearance: none; }
+button.wka-switch:disabled { cursor: not-allowed; opacity: 0.5; }
+button.wka-switch:focus-visible { outline: 2px solid var(--volt-strong); outline-offset: 2px; }
+.wka-auto-stat { color: var(--text-primary); font-size: var(--fs-12); }
+.wka-auto-note { color: var(--text-dim); font-size: var(--fs-11); line-height: 1.45; }
+.wka-auto-note b { color: var(--text-bright); }
+.ap-env-warn { color: var(--status-bad); font-size: var(--fs-10); }
+.ap-rule-list, .ap-recent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ap-rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 8px; padding: 8px; border: 1px solid var(--border-soft); border-radius: var(--radius-xs); background: var(--bg-sunken); font-size: var(--fs-11); }
+.ap-rule-keeper, .ap-rule-tool { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-rule-tool { color: var(--text-bright); }
+.ap-rule-risk, .ap-rule-match { color: var(--text-dim); font-size: var(--fs-10); }
+.ap-recent-row { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
+.ap-recent-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ap-recent-top { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; color: var(--text-primary); font-size: var(--fs-11); }
+.ap-recent-sub { color: var(--text-dim); font-size: var(--fs-10); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-side-empty { color: var(--text-dim); font-size: var(--fs-12); padding: 8px 0; }
+
+@media (max-width: 720px) {
+  .ap-hist-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ap-history-item { flex-wrap: wrap; }
+  .ap-history-at { flex-basis: 100%; }
+}

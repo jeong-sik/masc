@@ -67,7 +67,11 @@ let test_copilot_surface_is_gate_label () =
   in
   let chat_surface = Stream.For_testing.chat_surface_of_request payload in
   check surface "chat surface"
-    (Masc.Surface_ref.Gate { label = "copilot"; address = [] })
+    (Masc.Surface_ref.Gate
+       {
+         label = "copilot";
+         address = [ ("connector", "copilot"); ("workspace_id", "session-7") ];
+       })
     chat_surface;
   let speaker = Stream.For_testing.chat_speaker_of_request payload in
   check string "authority label" "owner"
@@ -137,7 +141,11 @@ let test_external_connector_still_contextualized () =
     (Stream.For_testing.has_external_speaker payload);
   let chat_surface = Stream.For_testing.chat_surface_of_request payload in
   check surface "surface"
-    (Masc.Surface_ref.Gate { label = "discord"; address = [] })
+    (Masc.Surface_ref.Gate
+       {
+         label = "discord";
+         address = [ ("connector", "discord"); ("workspace_id", "workspace-9") ];
+       })
     chat_surface;
   let speaker = Stream.For_testing.chat_speaker_of_request payload in
   check string "authority" "external"

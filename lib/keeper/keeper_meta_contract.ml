@@ -55,6 +55,10 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
 
 type compaction_policy =
   { profile : string
+  ; mode : Keeper_config.compaction_mode
+    (* HOW the checkpoint is summarized: [Deterministic] extractive chain
+       (fail-closed default) or opt-in [Llm] librarian-lane summarizer (W2).
+       Orthogonal to [profile], which decides WHEN to compact. *)
   ; ratio_gate : float
   ; message_gate : int
   ; token_gate : int

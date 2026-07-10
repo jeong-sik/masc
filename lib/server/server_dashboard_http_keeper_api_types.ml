@@ -14,6 +14,7 @@ let keeper_suffix_clear = "/clear"
 let keeper_suffix_checkpoints = "/checkpoints"
 let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
+let keeper_suffix_catchup_judge = "/catchup-judge"
 
 let cache_key_string_segment value =
   Printf.sprintf "s%d:%s" (String.length value) value
@@ -65,6 +66,7 @@ type keeper_post_route_kind =
   | Keeper_post_clear
   | Keeper_post_checkpoints
   | Keeper_post_directive
+  | Keeper_post_catchup_judge
   | Keeper_post_unknown
 
 let classify_keeper_post_route req_path =
@@ -86,6 +88,7 @@ let classify_keeper_post_route req_path =
     else if ends_with keeper_suffix_clear then Keeper_post_clear
     else if ends_with keeper_suffix_checkpoints then Keeper_post_checkpoints
     else if ends_with keeper_suffix_directive then Keeper_post_directive
+    else if ends_with keeper_suffix_catchup_judge then Keeper_post_catchup_judge
     else Keeper_post_unknown
 
 let keeper_path_ends_with req_path suffix =

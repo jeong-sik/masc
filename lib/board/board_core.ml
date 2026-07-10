@@ -273,7 +273,7 @@ let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post
     in
     (* Cap at Limits.max_posts (default 10_000) as an OOM guard. The
        previous inner cap of 100 was a duplicate of Board_dispatch.list_posts's
-       fetch_limit guard (`max limit 200`) and broke offset-based pagination:
+       fetch_limit guard (`max limit 500`) and broke offset-based pagination:
        when the dashboard requested offset=100 limit=100, Board_dispatch
        passed probe_fetch=201 here but we returned only 100, so fetched_len
        never exceeded window_end and has_more went stale at ~100-200 posts. *)

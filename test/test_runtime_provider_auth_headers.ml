@@ -37,6 +37,7 @@ let runpod_provider =
   ; is_non_interactive = true
   ; credentials = Some (Inline "rp-test-token")
   ; capabilities = None
+  ; healthcheck_path = None
   ; headers = None
   ; connect_timeout_s = None
   }
@@ -62,6 +63,7 @@ let runpod_binding =
   { Runtime_schema.provider_id = "runpod_mtp"
   ; model_id = "qwen"
   ; is_default = true
+  ; wizard_default = false
   ; max_concurrent = None
   ; price_input = None
   ; price_output = None
@@ -656,6 +658,7 @@ streaming = true
 
 [models.gemma4.capabilities]
 thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
 
 [ollama.gemma4]
 max-concurrent = 1
@@ -677,7 +680,8 @@ max-concurrent = 1
        (match model.capabilities with
         | Some caps ->
           check bool "chat template token parsed" true
-            (caps.thinking_control_format = Runtime_schema.Chat_template_token)
+            (caps.thinking_control_format
+             = Runtime_schema.Chat_template_token "<|think|>")
         | None -> fail "expected model capabilities")
      | models -> failf "expected one model, got %d" (List.length models))
 
@@ -734,10 +738,12 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; librarian_runtime_id = None
     ; structured_judge_runtime_id = None
+    ; hitl_summary_runtime_id = None
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
     }
   in
@@ -769,10 +775,12 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; librarian_runtime_id = None
     ; structured_judge_runtime_id = None
+    ; hitl_summary_runtime_id = None
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
     }
   in
@@ -805,10 +813,12 @@ let provider_cfg () =
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; librarian_runtime_id = None
     ; structured_judge_runtime_id = None
+    ; hitl_summary_runtime_id = None
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
     }
   in
@@ -886,10 +896,12 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; librarian_runtime_id = None
     ; structured_judge_runtime_id = None
+    ; hitl_summary_runtime_id = None
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
     }
   in

@@ -16,6 +16,36 @@ open Tool_args
    but for the current sub_board error vocabulary a uniform
    Workflow_rejection matches observed semantics. *)
 
+let owner_arg args =
+  match get_string_opt args "owner" with
+  | None -> Error (Board.Validation_error "owner is required")
+  | Some raw ->
+    let raw = String.trim raw in
+    if String.equal raw ""
+    then Error (Board.Validation_error "owner is required")
+    else Board.Agent_id.of_string raw
+;;
+
+let same_agent_id left right =
+  String.equal (Board.Agent_id.to_string left) (Board.Agent_id.to_string right)
+;;
+
+let require_sub_board_owner ~sub_board_id ~owner =
+  match Board_dispatch.get_sub_board ~sub_board_id with
+  | Error _ as err -> err
+  | Ok sb ->
+    if same_agent_id sb.Board.owner owner
+    then Ok ()
+    else
+      Error
+        (Board.Unauthorized
+           (Printf.sprintf
+              "agent %s cannot mutate sub-board %s owned by %s"
+              (Board.Agent_id.to_string owner)
+              sub_board_id
+              (Board.Agent_id.to_string sb.owner)))
+;;
+
 let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
   let slug = get_string_opt args "slug" |> Option.value ~default:"" in
   let name = get_string_opt args "name" |> Option.value ~default:"" in
@@ -113,6 +143,12 @@ let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
   in
   let members_raw = get_string_list args "members" in
   let members = if members_raw = [] then None else Some members_raw in
+  match owner_arg args with
+  | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+  | Ok owner ->
+  match require_sub_board_owner ~sub_board_id ~owner with
+  | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+  | Ok () ->
   match
     Board_dispatch.update_sub_board
       ~sub_board_id
@@ -136,6 +172,12 @@ let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
 
 let handle_sub_board_delete ~tool_name ~start_time args : Tool_result.result =
   let sub_board_id = get_string_opt args "sub_board_id" |> Option.value ~default:"" in
+  match owner_arg args with
+  | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+  | Ok owner ->
+  match require_sub_board_owner ~sub_board_id ~owner with
+  | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+  | Ok () ->
   match Board_dispatch.delete_sub_board ~sub_board_id with
   | Ok () ->
     Tool_result.make_ok

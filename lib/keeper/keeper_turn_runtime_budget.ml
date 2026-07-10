@@ -655,6 +655,24 @@ let pause_keeper_for_overflow
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(reason : string) : keeper_meta =
+  if Keeper_pacing_shadow.pacing_enforced ()
+  then (
+    (* RFC-0313 W3: unresolved context overflow no longer pauses. The caller
+       fails the turn with the ContextOverflow error, so the routing site in
+       [Keeper_unified_turn] records pacing and enqueues a [Context_overflow]
+       judgment stimulus. Only the failure reason is latched here as
+       evidence. *)
+    Keeper_registry.set_failure_reason
+      ~base_path:config.base_path
+      meta.name
+      (Some Keeper_registry.Turn_overflow_pause);
+    Log.Keeper.warn
+      "%s: unresolved context overflow (%s) recorded without pause \
+       (RFC-0313 W3); judgment stimulus follows from turn failure routing"
+      meta.name
+      reason;
+    meta)
+  else (
   let resume_policy = overflow_pause_resume_policy () in
   match
     Keeper_supervisor_pause_policy.handle_auto_pause_from_meta
@@ -668,6 +686,10 @@ let pause_keeper_for_overflow
       ()
   with
   | Ok paused_meta ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string FailureDrivenPause)
+      ~labels:[ "keeper", meta.name; "site", "turn_overflow" ]
+      ();
     (* Issue #8581: latch the retry-exhausted condition BEFORE the
        Operator_pause that drives the Paused phase.  The SSOT
        function already dispatched [Operator_pause]; we only need
@@ -710,7 +732,7 @@ let pause_keeper_for_overflow
       ~config
       ~keeper_name:meta.name
       Keeper_state_machine.Operator_pause;
-    paused_meta
+    paused_meta)
 
 let sync_keeper_paused_state_impl
     ~(resume_policy : Keeper_supervisor_pause_policy.crash_pause_resume_policy option)
@@ -878,17 +900,32 @@ let make_post_turn_resilience_executor
             ; runtime_id = None
             ; reason = None
             }));
-    match
-      sync_keeper_paused_state_with_resume_policy
-        ~config
-        ~meta:latest_meta
-        ~paused:true
-        ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
-    with
-    | Ok paused_meta ->
-        on_paused paused_meta;
-        Ok ()
-    | Error err -> Error err
+    if Keeper_pacing_shadow.pacing_enforced ()
+    then (
+      (* RFC-0313 W3: post-turn resilience strategies latch the failure
+         reason as evidence but no longer pause. The failed turn already
+         went through failure routing (pacing + judgment stimulus). *)
+      Log.Keeper.warn ~keeper_name:meta.name
+        "%s: post-turn resilience strategy (code=%s) recorded without pause \
+         (RFC-0313 W3): %s"
+        meta.name code detail;
+      Ok ())
+    else
+      match
+        sync_keeper_paused_state_with_resume_policy
+          ~config
+          ~meta:latest_meta
+          ~paused:true
+          ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+      with
+      | Ok paused_meta ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string FailureDrivenPause)
+            ~labels:[ "keeper", meta.name; "site", "post_turn_resilience" ]
+            ();
+          on_paused paused_meta;
+          Ok ()
+      | Error err -> Error err
   in
   let fail_and_pause ~code ~detail =
     let detail = short_resilience_detail detail in

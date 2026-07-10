@@ -247,6 +247,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_update", broadcast_tool);
     ("masc_keeper_list", read_state_tool);
     ("masc_keeper_status", read_state_tool);
+    ("masc_keeper_waiting_inventory", read_state_tool);
     ("masc_keeper_up", broadcast_tool);
     ( "masc_keeper_down",
       with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace
@@ -267,6 +268,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_operator_confirm", actor_broadcast_tool);
     ("masc_surface_audit", read_state_tool);
     ("masc_persona_list", read_state_tool);
+    ("masc_persona_create", broadcast_tool);
+    ("masc_persona_update", broadcast_tool);
     ("masc_runtime_verify", read_state_tool);
     ("masc_runtime_ollama_probe", read_state_tool);
     ("masc_cleanup_zombies", broadcast_tool);
@@ -284,6 +287,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_create", broadcast_tool);
     ("masc_board_sub_board_update", broadcast_tool);
     ("masc_board_sub_board_delete", broadcast_tool);
+    ("masc_board_cleanup", destructive_tool);
     ("masc_board_delete", destructive_tool);
     ("masc_tool_stats", read_state_tool);
     ("masc_pause", broadcast_tool);

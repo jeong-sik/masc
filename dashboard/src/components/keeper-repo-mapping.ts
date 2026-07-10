@@ -1,5 +1,5 @@
-// Keeper-repo mapping -- page/component for mapping keepers to repositories.
-// Fetches keepers list and allows multi-select assignment per keeper.
+// Keeper-repo mapping -- page/component for keeper default repository scope.
+// Fetches keepers list and allows multi-select default assignment per keeper.
 // Save sends POST /api/v1/keeper-repos/:id
 
 import { html } from 'htm/preact'
@@ -25,6 +25,8 @@ export interface KeeperRepoMapping {
   keeper_name: string
   allowed_repos: string[]
   allow_all: boolean
+  policy_mode?: string
+  access_cap?: boolean
 }
 
 // ── State ────────────────────────────────────────────────
@@ -84,6 +86,8 @@ async function fetchKeeperRepoMappings(): Promise<KeeperRepoMapping[]> {
             ? r.repositories.filter((v): v is string => typeof v === 'string')
           : [],
         allow_all: r.allow_all === true,
+        policy_mode: typeof r.policy_mode === 'string' ? r.policy_mode : undefined,
+        access_cap: r.access_cap === true,
       }
     })
   }
@@ -362,7 +366,7 @@ export function KeeperRepoMapping() {
                       onChange=${() => handleToggleAllowAll(keeperId)}
                       class="accent-accent"
                     />
-                    <span class="text-xs font-medium text-text-body">모든 저장소 허용 (*)</span>
+                    <span class="text-xs font-medium text-text-body">모든 저장소 선택 (*)</span>
                   </label>
 
                   ${repos.length === 0 ? html`

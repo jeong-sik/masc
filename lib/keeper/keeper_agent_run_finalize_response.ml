@@ -165,6 +165,7 @@ let canonical_success_replay_checkpoint
       ~(session_id : string)
       ~(response_text : string)
       ~(state_snapshot : Keeper_memory_policy.keeper_state_snapshot option)
+      ~(state_snapshot_source : Keeper_memory_policy.state_snapshot_source)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   if messages_prefix_equal history_messages checkpoint.Agent_sdk.Checkpoint.messages
@@ -208,6 +209,7 @@ let canonical_success_replay_checkpoint
           ~session_id
           ~response_text
           ?snapshot:state_snapshot
+          ~snapshot_source:state_snapshot_source
     in
     Ok
       ( checkpoint
@@ -258,6 +260,7 @@ let checkpoint_for_replay_persistence
       ~session_id
       ~response_text
       ~state_snapshot
+      ~state_snapshot_source
       checkpoint
 ;;
 
@@ -313,6 +316,7 @@ let finalize
     ~pre_dispatch_compaction_after_tokens
     ~raw_response_text
     ~capture_replay_response
+    ?hitl_delivery_channel
     () =
   let budget_exhausted =
     Keeper_agent_run_response_text.stop_reason_is_turn_budget_exhausted
@@ -404,6 +408,7 @@ let finalize
            ~metadata:
              [ ( Keeper_memory_policy.replay_metadata_key
                , Keeper_memory_policy.replay_metadata_of_snapshot
+                   ~state_snapshot_source
                    state_snapshot )
              ]
            [ Agent_sdk.Types.Text replay_response_text ])
@@ -417,6 +422,29 @@ let finalize
        assistant_msg;
      capture_replay_response ~response_text
    | _ -> ());
+  (* RFC-0320 W3c: deterministic HITL continuation delivery. When this turn was
+     opened by a Hitl_resolved wake carrying a routable originating channel, and
+     the keeper did not itself post a reply this turn (the W3b prompt steer is
+     best-effort), deliver the visible response to that channel so the
+     conversation is always answered. Routing is deterministic (the captured
+     channel); [Keeper_continuation_delivery] fails closed on [Unrouted]. *)
+  (match hitl_delivery_channel, replay_response_text with
+   | Some channel, Some content ->
+     let already_replied =
+       List.exists
+         (fun name ->
+           String.equal name "keeper_surface_post"
+           || String.equal name "masc_keeper_msg")
+         actual_keeper_tool_names
+     in
+     let outcome =
+       Keeper_continuation_delivery.maybe_deliver ~config
+         ~keeper_name:meta.name ~channel ~already_replied ~content
+     in
+     Log.Keeper.info ~keeper_name:meta.name
+       "RFC-0320 W3c continuation delivery: %s"
+       (Keeper_continuation_delivery.describe_outcome outcome)
+   | (None, _) | (_, None) -> ());
   let saved_checkpoint_result =
     match result.checkpoint with
     | Some checkpoint ->
@@ -514,7 +542,7 @@ let finalize
   | Error e -> Error e
   | Ok saved_checkpoint ->
     (* Contract-verification proof evaluation / verdict-ledger persistence removed: task/goal
-       completion is verified by [Cdal_evidence_gate] (evidence-substantiveness),
+       completion is verified by [Task_completion_gate] (evidence-substantiveness),
        not by an internal proof/verdict pipeline. *)
     let librarian_messages =
       match saved_checkpoint with

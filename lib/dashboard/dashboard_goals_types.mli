@@ -163,7 +163,7 @@ val goal_health_reason :
   pending_approvals:int ->
   sandbox_risk:bool ->
   runtime_risk:bool ->
-  fsm_risk:bool ->
+  verification_pending:bool ->
   stalled:bool ->
   stagnation_seconds:int ->
   child_at_risk:bool ->
@@ -183,7 +183,7 @@ val tree_badges :
   pending_approvals:int ->
   sandbox_risk:bool ->
   runtime_risk:bool ->
-  fsm_risk:bool ->
+  verification_pending:bool ->
   stalled:bool ->
   activity_unobserved:bool ->
   string list

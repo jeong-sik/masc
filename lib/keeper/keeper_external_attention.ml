@@ -381,50 +381,81 @@ let report_read_drop ~reason ~path ~detail =
         ())
     ~surface:persistence_surface ~reason ~path ~detail
 
-let parse_line ~file_path line =
+let parse_line_result ~file_path ~line_no line =
   try
     match event_of_json (Yojson.Safe.from_string line) with
-    | Ok event -> Some event
+    | Ok event -> Ok event
     | Error detail ->
         report_read_drop
           ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
           ~path:file_path ~detail;
-        None
+        Error
+          (Printf.sprintf
+             "%s:%d external attention decode failed: %s"
+             file_path
+             line_no
+             detail)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Yojson.Json_error detail ->
       report_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
         ~path:file_path ~detail;
+      Error
+        (Printf.sprintf
+           "%s:%d external attention JSON parse failed: %s"
+           file_path
+           line_no
+           detail)
+
+let parse_line ~file_path line =
+  match parse_line_result ~file_path ~line_no:0 line with
+  | Ok event -> Some event
+  | Error msg ->
+      Log.Keeper.warn "keeper_external_attention: %s" msg;
       None
 
-let load_events ~base_path ~keeper_name =
+let load_events_result ~base_path ~keeper_name =
   let path = attention_path ~base_path ~keeper_name in
-  if not (Sys.file_exists path) then []
+  if not (Sys.file_exists path) then Ok []
   else
     try
-      let events_rev, _boundary =
-        Fs_compat.fold_appended_lines ~path ~from:0 ~init:[]
-          ~f:(fun acc line ->
+      let (events_rev, _line_no), _boundary =
+        Fs_compat.fold_appended_lines ~path ~from:0 ~init:(Ok [], 0)
+          ~f:(fun (events, line_no) line ->
+            let line_no = line_no + 1 in
             let line = String.trim line in
-            if line = "" then acc
+            if line = "" then events, line_no
             else
-              match parse_line ~file_path:path line with
-              | Some event -> event :: acc
-              | None -> acc)
+              match events with
+              | Error _ -> events, line_no
+              | Ok acc -> (
+                  match parse_line_result ~file_path:path ~line_no line with
+                  | Ok event -> Ok (event :: acc), line_no
+                  | Error _ as error -> error, line_no))
       in
-      List.rev events_rev
+      Result.map List.rev events_rev
     with
     | Sys_error detail ->
         report_read_drop
           ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
           ~path ~detail;
-        []
+        Error (Printf.sprintf "%s external attention read failed: %s" path detail)
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        Log.Keeper.warn "keeper_external_attention: load failed for %s: %s"
-          (sanitize_name keeper_name) (Printexc.to_string exn);
-        []
+        Error
+          (Printf.sprintf
+             "%s external attention load failed for %s: %s"
+             path
+             (sanitize_name keeper_name)
+             (Printexc.to_string exn))
+
+let load_events ~base_path ~keeper_name =
+  match load_events_result ~base_path ~keeper_name with
+  | Ok events -> events
+  | Error msg ->
+      Log.Keeper.warn "keeper_external_attention: %s" msg;
+      []
 
 let append_event ~base_path ~keeper_name event =
   try
@@ -573,15 +604,22 @@ let take limit items =
   in
   loop limit [] items
 
-let pending_for_keeper ~base_path ~keeper_name ?now ?claim_stale_after ~limit () =
+let pending_for_keeper_result ~base_path ~keeper_name ?now ?claim_stale_after ~limit () =
   let now = now_or_default now in
   let claim_stale_after =
     match claim_stale_after with
     | Some seconds -> seconds
     | None -> default_claim_stale_after_s
   in
-  let pending =
-    load_events ~base_path ~keeper_name
-    |> project_pending ~now ~claim_stale_after
-  in
-  take (max 0 limit) pending
+  let* events = load_events_result ~base_path ~keeper_name in
+  Ok (events |> project_pending ~now ~claim_stale_after |> take (max 0 limit))
+
+let pending_for_keeper ~base_path ~keeper_name ?now ?claim_stale_after ~limit () =
+  match
+    pending_for_keeper_result ~base_path ~keeper_name ?now ?claim_stale_after
+      ~limit ()
+  with
+  | Ok pending -> pending
+  | Error msg ->
+      Log.Keeper.warn "keeper_external_attention: %s" msg;
+      []

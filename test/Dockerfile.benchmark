@@ -7,7 +7,7 @@
 # Run:
 #   docker run --rm masc-bench
 
-FROM ocaml/opam:ubuntu-24.04-ocaml-5.2 AS builder
+FROM ocaml/opam:ubuntu-24.04-ocaml-5.5 AS builder
 
 # Install system dependencies
 USER root
@@ -75,7 +75,7 @@ RUN echo '#!/bin/bash' > /home/opam/run_benchmarks.sh && \
     chmod +x /home/opam/run_benchmarks.sh
 
 # Runtime stage
-FROM ocaml/opam:ubuntu-24.04-ocaml-5.2
+FROM ocaml/opam:ubuntu-24.04-ocaml-5.5
 
 USER root
 RUN apt-get update && apt-get install -y \

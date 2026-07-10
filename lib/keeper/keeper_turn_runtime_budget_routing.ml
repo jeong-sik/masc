@@ -33,6 +33,7 @@ let next_fail_open_runtime_for_turn
   =
   EC.degraded_rotation_after_recoverable_error
     ~credential_pool_of_runtime_id
+    ~pacing_enforced:(Keeper_pacing_shadow.pacing_enforced ())
     ~base_runtime
     ~effective_runtime
     ~attempted_runtimes

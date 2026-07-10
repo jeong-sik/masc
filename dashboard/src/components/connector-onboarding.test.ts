@@ -28,32 +28,32 @@ describe('ConnectorOnboardingGrid', () => {
 
     expect(container.querySelector('.v2-connector-onboarding')).not.toBeNull()
     const text = container.textContent ?? ''
-    // Discord is in-process (RFC-0203 §Phase 3) — no onboarding card.
+    // Discord (RFC-0203) and Slack (RFC-0317) are in-process — no onboarding card.
     expect(text).not.toContain('Discord')
+    expect(text).not.toContain('Slack')
     expect(text).toContain('iMessage')
-    expect(text).toContain('Slack')
     expect(text).toContain('Telegram')
 
-    // 3 brand-coloured cards now (discord filtered out).
+    // 2 brand-coloured cards now (discord + slack filtered out).
     const cards = container.querySelectorAll('[style*="linear-gradient"]')
-    expect(cards.length).toBe(3)
+    expect(cards.length).toBe(2)
   })
 
   it('exposes the start command for each external sidecar (run.sh per bridge)', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
     const text = container.textContent ?? ''
-    // Discord card is omitted from onboarding — no run.sh to expose.
+    // Discord + Slack cards are omitted from onboarding (in-process) — no run.sh.
     expect(text).not.toContain('cd sidecars/discord-bot && ./run.sh')
+    expect(text).not.toContain('cd sidecars/slack-bot && ./run.sh')
     expect(text).toContain('cd sidecars/imessage-bot && ./run.sh')
-    expect(text).toContain('cd sidecars/slack-bot && ./run.sh')
     expect(text).toContain('cd sidecars/telegram-bot && ./run.sh')
   })
 
   // Pin the sidecarCommands() shape so a future refactor can't re-introduce
-  // the per-bridge pkill fork we just deleted. Iterate the 3 remaining
-  // external sidecars only — discord no longer has a sidecar (RFC-0203 §Phase 3).
+  // the per-bridge pkill fork we just deleted. Iterate the 2 remaining external
+  // sidecars only — discord (RFC-0203) and slack (RFC-0317) are in-process.
   it('uses ./run.sh stop for every external bridge (no pkill)', () => {
-    for (const id of ['imessage', 'slack', 'telegram']) {
+    for (const id of ['imessage', 'telegram']) {
       const { stop } = sidecarCommands(id)
       expect(stop).toBe(`cd sidecars/${id}-bot && ./run.sh stop`)
       expect(stop).not.toContain('pkill')
@@ -62,10 +62,10 @@ describe('ConnectorOnboardingGrid', () => {
 
   it('embeds a collapsed SetupGuideCard per external onboarding card', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
-    // 3 setup-guide toggle buttons (one per remaining onboarding card),
+    // 2 setup-guide toggle buttons (one per remaining onboarding card),
     // all collapsed.
     const toggles = container.querySelectorAll('button[aria-expanded]')
-    expect(toggles.length).toBe(3)
+    expect(toggles.length).toBe(2)
     toggles.forEach(btn => {
       expect(btn.getAttribute('aria-expanded')).toBe('false')
     })
@@ -90,25 +90,25 @@ describe('ConnectorOnboardingGrid', () => {
   it('renders a per-card Start button with testId for each external sidecar', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
     const buttons = container.querySelectorAll('[data-testid^="onboarding-start-"]')
-    expect(buttons.length).toBe(3)
+    expect(buttons.length).toBe(2)
     const ids = Array.from(buttons)
       .map(b => b.getAttribute('data-testid')!.replace('onboarding-start-', ''))
-    // Discord omitted — KNOWN_CONNECTOR_IDS order with in-process filtered out.
-    expect(ids).toEqual(['imessage', 'slack', 'telegram'])
+    // Discord + Slack omitted — KNOWN_CONNECTOR_IDS order with in-process filtered out.
+    expect(ids).toEqual(['imessage', 'telegram'])
   })
 
   it('per-card Start button starts in the idle "Start" label, not inflight', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
-    // Discord is no longer in the onboarding grid; use slack as the
-    // representative external sidecar.
-    const slackBtn = container.querySelector('[data-testid="onboarding-start-slack"]') as HTMLButtonElement
-    expect(slackBtn.textContent).toContain('Start')
-    expect(slackBtn.textContent).not.toContain('Starting')
+    // Discord and slack are in-process; use telegram as the representative
+    // external sidecar.
+    const telegramBtn = container.querySelector('[data-testid="onboarding-start-telegram"]') as HTMLButtonElement
+    expect(telegramBtn.textContent).toContain('Start')
+    expect(telegramBtn.textContent).not.toContain('Starting')
     // ActionButton omits aria-busy when ariaBusy=false (ARIA default is
     // already "false" — no need to render it). When the inflight state
     // flips, ariaBusy=true would render aria-busy="true" instead.
-    expect(slackBtn.getAttribute('aria-busy')).toBeNull()
-    expect(slackBtn.disabled).toBe(false)
+    expect(telegramBtn.getAttribute('aria-busy')).toBeNull()
+    expect(telegramBtn.disabled).toBe(false)
   })
 })
 

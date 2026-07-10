@@ -27,6 +27,23 @@ let contains_substring text needle =
   in
   loop 0
 
+let json_string_field key = function
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`String value) -> Some value
+       | _ -> None)
+  | _ -> None
+
+let json_bool_field key = function
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`Bool value) -> Some value
+       | _ -> None)
+  | _ -> None
+
+let replay_metadata_of_message (msg : Agent_sdk.Types.message) =
+  List.assoc_opt KMP.replay_metadata_key msg.metadata
+
 (* ── Round-trip tests ────────────────────────────────────────────── *)
 
 let make_snapshot
@@ -123,6 +140,48 @@ let test_envelope_empty_snapshot_returns_none () =
   ] in
   let restored = KMP.snapshot_of_structured_working_context json in
   Alcotest.(check bool) "empty snapshot in envelope -> None" true (restored = None)
+
+let test_replay_metadata_marks_synthesized_snapshot_non_live () =
+  let snapshot =
+    make_snapshot
+      ~goal:(Some "Recover scheduler state")
+      ~progress:None
+      ~done_summary:None
+      ~next_summary:None
+      ~next_items:[]
+      ~decisions:[]
+      ~open_questions:[]
+      ~constraints:[]
+      ()
+  in
+  let metadata =
+    KMP.replay_metadata_of_snapshot
+      ~state_snapshot_source:KMP.Synthesized
+      snapshot
+  in
+  Alcotest.(check (option string))
+    "source"
+    (Some "synthesized")
+    (json_string_field "state_snapshot_source" metadata);
+  Alcotest.(check (option bool))
+    "synthetic"
+    (Some true)
+    (json_bool_field "state_snapshot_synthetic" metadata);
+  Alcotest.(check (option bool))
+    "live observation"
+    (Some false)
+    (json_bool_field "state_snapshot_live_observation" metadata);
+  Alcotest.(check (option bool))
+    "model authored"
+    (Some false)
+    (json_bool_field "state_snapshot_model_authored" metadata);
+  match KMP.snapshot_of_replay_metadata metadata with
+  | None -> Alcotest.fail "metadata payload no longer hydrates"
+  | Some hydrated ->
+      Alcotest.(check (option string))
+        "payload still hydrates"
+        snapshot.goal
+        hydrated.goal
 
 let test_structured_state_schema_parse_raw_snapshot_json () =
   let json =
@@ -373,6 +432,25 @@ let test_patch_stores_replay_metadata_and_clears_working_context () =
   match List.rev patched.messages with
   | [] -> Alcotest.fail "patched checkpoint has no messages"
   | last :: _ ->
+      (match replay_metadata_of_message last with
+       | None -> Alcotest.fail "assistant message missing raw replay metadata"
+       | Some metadata ->
+           Alcotest.(check (option string))
+             "metadata source"
+             (Some "model_state_block")
+             (json_string_field "state_snapshot_source" metadata);
+           Alcotest.(check (option bool))
+             "metadata synthetic"
+             (Some false)
+             (json_bool_field "state_snapshot_synthetic" metadata);
+           Alcotest.(check (option bool))
+             "metadata live observation"
+             (Some true)
+             (json_bool_field "state_snapshot_live_observation" metadata);
+           Alcotest.(check (option bool))
+             "metadata model authored"
+             (Some true)
+             (json_bool_field "state_snapshot_model_authored" metadata));
       (match KMP.snapshot_of_message_metadata last with
        | None -> Alcotest.fail "assistant message metadata missing replay snapshot"
        | Some snap ->
@@ -620,7 +698,7 @@ let test_attention_checkpoint_prunes_current_turn_suffix () =
     .checkpoint_for_replay_persistence
       ~history_messages:[ old_user; old_assistant ]
       ~pre_turn_working_context
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Contract_violated
       ~session_id:"new-session"
       ~response_text:"synthetic no-progress"
       ~state_snapshot_source:KMP.State_block
@@ -657,7 +735,7 @@ let test_attention_checkpoint_refuses_mismatched_history_prefix () =
     .checkpoint_for_replay_persistence
       ~history_messages:[ expected_old_user; old_assistant ]
       ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Contract_violated
       ~session_id:"new-session"
       ~response_text:"synthetic no-progress"
       ~state_snapshot_source:KMP.State_block
@@ -941,7 +1019,7 @@ let test_attention_contract_does_not_resume_working_state_digest () =
       ~pre_dispatch_compacted:false
       ~state_snapshot_source:KMP.Synthesized
       ~stop_reason:Runtime_agent.Completed
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Contract_violated
   in
   Alcotest.(check bool)
     "attention contract does not restore prior prompt-digest loops"
@@ -958,6 +1036,19 @@ let test_attention_contract_does_not_resume_working_state_digest () =
     "budget checkpoint still resumes prior prompt-digest loops"
     true
     budget_resume
+
+let test_passive_only_contract_resumes_working_state_digest () =
+  let passive_resume =
+    Finalize.should_resume_merge
+      ~pre_dispatch_compacted:false
+      ~state_snapshot_source:KMP.Synthesized
+      ~stop_reason:Runtime_agent.Completed
+      ~completion_contract_result:Receipt.Contract_passive_only
+  in
+  Alcotest.(check bool)
+    "passive-only does not block working-state resume"
+    true
+    passive_resume
 
 let test_synthetic_finalizer_preserves_generated_response_text () =
   let raw_response_text =
@@ -1011,7 +1102,7 @@ let test_contract_attention_finalizer_drops_raw_response_text () =
       ~keeper_name:"albini"
       ~goal:"PM flow"
       ~actual_keeper_tool_names:["keeper_context_status"]
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Contract_violated
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text
       ()
@@ -1296,6 +1387,10 @@ let () =
             `Quick
             test_structured_state_schema_parse_raw_snapshot_json;
           Alcotest.test_case
+            "replay metadata marks synthesized non-live"
+            `Quick
+            test_replay_metadata_marks_synthesized_snapshot_non_live;
+          Alcotest.test_case
             "reply parser accepts fenced envelope"
             `Quick
             test_parse_structured_reply_accepts_envelope_json_fence;
@@ -1369,6 +1464,10 @@ let () =
             "attention result does not resume working-state digest"
             `Quick
             test_attention_contract_does_not_resume_working_state_digest;
+          Alcotest.test_case
+            "passive-only result resumes working-state digest"
+            `Quick
+            test_passive_only_contract_resumes_working_state_digest;
           Alcotest.test_case
             "synthetic finalizer preserves generated response text"
             `Quick

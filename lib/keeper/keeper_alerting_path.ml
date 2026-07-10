@@ -247,20 +247,52 @@ let raw_looks_like_playground_subdir (raw : string) : bool =
   || raw = "mind"
 ;;
 
-(** Detect paths that reference .masc/ internal state files.
-    These are workspace-level directories that should not be accessed
-    directly from a keeper's cwd (which is inside repos/<name>/).
-    Keepers should use keeper_tasks_list / keeper_context_status instead. *)
+(** Detect paths that reference .masc/ internal state files (workspace-level
+    state a keeper must reach via [keeper_tasks_list] / [keeper_context_status],
+    not by probing the files: backlog.json, tasks/, etc.). This preserves the
+    #23807 traversal/symlink write-bypass defence.
+
+    The keeper's own working area — [Playground_paths] [.masc/playground/<keeper>/{mind,repos}]
+    — is EXEMPT: it is where keepers clone repos and write drafts, so blocking
+    it (as the pre-#23843 raw match did, catching every [.masc/] prefix) breaks
+    keeper work. [#23843] removed the whole arm to unblock the playground, but
+    that also dropped the internal-state defence. The fix is to keep the arm
+    and narrow the match so only workspace-level state is blocked. *)
 let is_masc_internal_state_path (raw : string) : bool =
   (* Match ".masc/", "./.masc/", ".masc" at end, "*/backlog.json" *)
-  (String.starts_with ~prefix:".masc/" raw)
-  || (String.starts_with ~prefix:"./.masc/" raw)
-  || (String.equal raw ".masc")
-  || (String.equal raw "./.masc")
-  || (let len = String.length raw in
-      len >= 12
-      && String.sub raw (len - 12) 12 = "backlog.json"
-      && (len = 12 || raw.[len - 13] = '/'))
+  let masc_state =
+    (String.starts_with ~prefix:".masc/" raw)
+    || (String.starts_with ~prefix:"./.masc/" raw)
+    || (String.equal raw ".masc")
+    || (String.equal raw "./.masc")
+    || (let len = String.length raw in
+        len >= 12
+        && String.sub raw (len - 12) 12 = "backlog.json"
+        && (len = 12 || raw.[len - 13] = '/'))
+  in
+  let under_playground =
+    String.starts_with ~prefix:".masc/playground" raw
+    || String.starts_with ~prefix:"./.masc/playground" raw
+  in
+  masc_state && not under_playground
+;;
+
+let is_masc_internal_state_norm ~(root_norm : string) ~(target_norm : string) : bool =
+  let root_norm = strip_trailing_slashes root_norm in
+  let target_norm = strip_trailing_slashes target_norm in
+  let masc_root = Filename.concat root_norm Common.masc_dirname in
+  let playground_root = Filename.concat masc_root "playground" in
+  let under_masc =
+    target_norm = masc_root
+    || String.starts_with ~prefix:(masc_root ^ "/") target_norm
+  in
+  let under_playground =
+    target_norm = playground_root
+    || String.starts_with ~prefix:(playground_root ^ "/") target_norm
+  in
+  (* Exempt the keeper playground (Playground_paths SSOT); keep the internal-
+     state traversal/symlink defence for everything else under .masc/. *)
+  under_masc && not under_playground
 ;;
 
 let resolve_keeper_target_path
@@ -293,6 +325,11 @@ let resolve_keeper_target_path
          input. The "outside_project_root" label is enough for the
          caller to course-correct without enumerating the host. *)
       Error (Outside_project_root { raw })
+    else if is_masc_internal_state_norm ~root_norm ~target_norm
+    then (
+      let rej = Task_state_file_path_blocked { raw } in
+      rejection_to_telemetry rej;
+      Error rej)
     else if allowed_paths = []
     then Ok candidate
     else (
@@ -425,6 +462,11 @@ let resolve_keeper_read_path
          input. The "outside_project_root" label is enough for the
          caller to course-correct without enumerating the host. *)
       Error (Outside_project_root { raw })
+    else if is_masc_internal_state_norm ~root_norm ~target_norm
+    then (
+      let rej = Task_state_file_path_blocked { raw } in
+      rejection_to_telemetry rej;
+      Error rej)
     else (
       let allowed_norms =
         if allowed_paths = []

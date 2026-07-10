@@ -837,40 +837,50 @@ let remove_external_subscribers ids =
     Dead subscribers (where [is_alive] returns [false]) are automatically
     removed during iteration, preventing resource leaks. *)
 let notify_external_subscribers event =
-  (* [Atomic.get] returns an immutable [SMap.t] snapshot — concurrent
-     subscribe/unsubscribe builds a new map via [Lockfree_atomic.update_with_commit]
-     and never mutates the one we hold here. So we can iterate the map
-     directly without first materializing it as a list, saving one [cons]
-     per subscriber per broadcast. At fleet sizes (14 keepers × dashboard
-     subs ≈ 30-50) and high event rates this trims sustained allocation
-     pressure on the hot fanout path. *)
-  let subscribers = (Atomic.get external_subscribers).subscribers in
-  let dead = ref [] in
-  SMap.iter (fun _ (sub : external_subscriber) ->
-    if not (sub.is_alive ()) then
-      dead := sub.sub_id :: !dead
-    else begin
-      try sub.callback event
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        (* P1 silent-failure fix: previously only logged.  Increment a
-           counter so dashboards distinguish "all subscribers healthy"
-           from "subscribers exist but every callback throws." *)
-        Transport_metrics.inc_external_subscriber_callback_failure ();
-        Log.Misc.warn "External subscriber %s failed: %s"
-          sub.sub_id (Printexc.to_string exn)
-    end
-  ) subscribers;
-  (* Remove dead subscribers *)
-  if !dead <> [] then begin
-    let removed_ids, count = remove_external_subscribers !dead in
-    List.iter
-      (fun id -> Log.Misc.info "Auto-removed dead external subscriber: %s" id)
-      removed_ids;
-    if removed_ids <> [] then
-      Transport_metrics.set_sse_external_subscribers count
-  end
+  let t0 = Time_compat.now () in
+  let record_duration () =
+    Transport_metrics.observe_external_subscriber_fanout_duration
+      (Time_compat.now () -. t0)
+  in
+  try
+    (* [Atomic.get] returns an immutable [SMap.t] snapshot — concurrent
+       subscribe/unsubscribe builds a new map via [Lockfree_atomic.update_with_commit]
+       and never mutates the one we hold here. So we can iterate the map
+       directly without first materializing it as a list, saving one [cons]
+       per subscriber per broadcast. At fleet sizes (14 keepers × dashboard
+       subs ≈ 30-50) and high event rates this trims sustained allocation
+       pressure on the hot fanout path. *)
+    let subscribers = (Atomic.get external_subscribers).subscribers in
+    let dead = ref [] in
+    SMap.iter
+      (fun _ (sub : external_subscriber) ->
+        if not (sub.is_alive ())
+        then dead := sub.sub_id :: !dead
+        else
+          try sub.callback event with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              (* P1 silent-failure fix: previously only logged.  Increment a
+                 counter so dashboards distinguish "all subscribers healthy"
+                 from "subscribers exist but every callback throws." *)
+              Transport_metrics.inc_external_subscriber_callback_failure ();
+              Log.Misc.warn "External subscriber %s failed: %s" sub.sub_id
+                (Printexc.to_string exn))
+      subscribers;
+    (* Remove dead subscribers *)
+    if !dead <> [] then begin
+      let removed_ids, count = remove_external_subscribers !dead in
+      List.iter
+        (fun id -> Log.Misc.info "Auto-removed dead external subscriber: %s" id)
+        removed_ids;
+      if removed_ids <> [] then
+        Transport_metrics.set_sse_external_subscribers count
+    end;
+    record_duration ()
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+      record_duration ();
+      raise e
 
 (** Actively reap dead external subscribers.
     Unlike [notify_external_subscribers] which only checks [is_alive] during

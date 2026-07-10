@@ -6,6 +6,7 @@
 
 type t =
   | Gh_pr_create of { title : string; base : string; draft : bool }
+  | Gh_pr_search of { query : string; state : string option }
   | Gh_pr_merge of { pr_number : int; squash : bool }
   | Gh_pr_comment of { pr_number : int; body : string }
   | Gh_pr_close of { pr_number : int }
@@ -26,6 +27,7 @@ type pr_action_surface =
 
 type pr_action =
   | Create
+  | Search
   | Merge
   | Comment
   | Close

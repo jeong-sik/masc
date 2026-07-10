@@ -16,6 +16,7 @@ import {
   getStoredTokenMeta,
   isRemoteAccess,
   jsonHeaders,
+  post,
   runOperatorAction,
   fetchWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
@@ -704,6 +705,47 @@ export async function fetchKeeperCatchupDigest(
   return digest
 }
 
+export interface KeeperCatchupJudgmentResponse {
+  ok: true
+  status: 'fusion_started'
+  runId: string
+  ownerKeeper: string
+  fusionRoute: string
+  digest: KeeperCatchupDigest
+}
+
+export async function runKeeperCatchupJudgment(
+  keeperName: string,
+  sinceUnix: number,
+): Promise<KeeperCatchupJudgmentResponse> {
+  const raw = await post<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/catchup-judge`,
+    { since_unix: sinceUnix },
+  )
+  if (!isRecord(raw) || raw.ok !== true) {
+    throw new Error('runKeeperCatchupJudgment: invalid response envelope')
+  }
+  const runId = asString(raw.run_id)
+  const ownerKeeper = asString(raw.owner_keeper)
+  const fusionRoute = asString(raw.fusion_route)
+  if (!runId || !ownerKeeper || !fusionRoute) {
+    throw new Error('runKeeperCatchupJudgment: missing run metadata')
+  }
+  const { parseKeeperCatchupDigest } = await import('./schemas/keeper-catchup-digest')
+  const digest = parseKeeperCatchupDigest(raw.digest)
+  if (!digest) {
+    throw new Error('runKeeperCatchupJudgment: invalid digest payload')
+  }
+  return {
+    ok: true,
+    status: 'fusion_started',
+    runId,
+    ownerKeeper,
+    fusionRoute,
+    digest,
+  }
+}
+
 // --- Keeper observability API ---
 
 export interface MemoryKindUsageEntry {
@@ -727,6 +769,8 @@ export interface KeeperStateDiagramResponse {
   recovery_floor_count?: number
   runtime_models?: string[]
   last_provider_result?: string | null
+  runtime_models_source?: string
+  last_provider_result_source?: string
   memory_kind_usage?: MemoryKindUsageEntry[]
   /** RFC-0149 §3.1 — sibling field carrying the typed memory-bank
    *  read failure class (`yojson_parse_error | io_error | type_error
@@ -752,6 +796,10 @@ export async function fetchKeeperTransitions(
 }
 
 // --- Keeper lifecycle timeline (#12798) ---
+
+// Detail views need enough recent lifecycle entries to avoid silently truncating
+// active keepers, while compact surfaces can still pass an explicit lower limit.
+export const KEEPER_LIFECYCLE_DEFAULT_LIMIT = 200
 
 export interface KeeperLifecycleEvent {
   ts: number
@@ -788,7 +836,7 @@ export function parseKeeperLifecycleResponse(raw: unknown): KeeperLifecycleTimel
 
 export async function fetchKeeperLifecycle(
   name: string,
-  limit = 50,
+  limit = KEEPER_LIFECYCLE_DEFAULT_LIMIT,
   opts?: { signal?: AbortSignal },
 ): Promise<KeeperLifecycleTimelineResponse> {
   const resp = await fetchWithTimeout(

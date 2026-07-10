@@ -32,6 +32,7 @@ val turn_intent_board_post_guidance : string
 val turn_intent_board_curation_guidance : string
 val turn_intent_broadcast_guidance : string
 val turn_intent_task_create_guidance : string
+val turn_intent_pr_duplicate_search_guidance : string
 
 (** User-prompt "Claimable Work" section template key. *)
 val immediate_task_move : string

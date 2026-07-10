@@ -217,7 +217,12 @@ let snapshot_read_error_kind_to_string = function
   | Parse_failed -> "parse_failed"
 ;;
 
-let load_from_path_with_errors ~keeper_name path =
+(* [log_restore] gates the "restored N pending" info line. It is a genuine
+   restore signal only on the live hydration path ([load]); the operator
+   health surfaces ([load_snapshot_pair*]) call this on every dashboard poll,
+   where the same line is pure read-on-log noise (~1000 lines / 5000 in the
+   2026-07-07 fleet log). Default off so only [load] announces a restore. *)
+let load_from_path_with_errors ?(log_restore = false) ~keeper_name path =
   if not (Sys.file_exists path)
   then Keeper_event_queue.empty, []
   else (
@@ -252,7 +257,7 @@ let load_from_path_with_errors ~keeper_name path =
              dropped
              keeper_name
              path;
-         if not (Keeper_event_queue.is_empty deduped)
+         if log_restore && not (Keeper_event_queue.is_empty deduped)
          then
            Log.Keeper.info
              "event_queue_snapshot: restored %s for keeper=%s"
@@ -261,8 +266,8 @@ let load_from_path_with_errors ~keeper_name path =
          deduped, []))
 ;;
 
-let load_from_path ~keeper_name path =
-  let queue, _read_errors = load_from_path_with_errors ~keeper_name path in
+let load_from_path ?(log_restore = false) ~keeper_name path =
+  let queue, _read_errors = load_from_path_with_errors ~log_restore ~keeper_name path in
   queue
 ;;
 
@@ -282,14 +287,14 @@ let empty_snapshot_pair_with_errors =
   }
 ;;
 
-let load_snapshot_pair_unlocked ~base_path ~keeper_name =
+let load_snapshot_pair_unlocked ~log_restore ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
   | Error msg, _ | _, Error msg ->
     Log.Keeper.warn "event_queue_snapshot: %s" msg;
     empty_snapshot_pair
   | Ok pending_path, Ok inflight_path ->
-    let pending = load_from_path ~keeper_name pending_path in
-    let inflight = load_from_path ~keeper_name inflight_path in
+    let pending = load_from_path ~log_restore ~keeper_name pending_path in
+    let inflight = load_from_path ~log_restore ~keeper_name inflight_path in
     { pending; inflight }
 ;;
 
@@ -307,12 +312,14 @@ let load_snapshot_pair_with_errors_unlocked ~base_path ~keeper_name =
 ;;
 
 let load_unlocked ~base_path ~keeper_name =
-  let pair = load_snapshot_pair_unlocked ~base_path ~keeper_name in
+  (* The live hydration path: announce the restore once. *)
+  let pair = load_snapshot_pair_unlocked ~log_restore:true ~base_path ~keeper_name in
   prepend_missing pair.pending (Keeper_event_queue.to_list pair.inflight)
 ;;
 
 let load_snapshot_pair ~base_path ~keeper_name =
-  with_write_lock (fun () -> load_snapshot_pair_unlocked ~base_path ~keeper_name)
+  with_write_lock (fun () ->
+    load_snapshot_pair_unlocked ~log_restore:false ~base_path ~keeper_name)
 ;;
 
 let load_snapshot_pair_with_errors ~base_path ~keeper_name =
@@ -441,26 +448,14 @@ let queue_count_by_keeper_json ~now kind summary =
     ; "oldest_age_seconds", age_seconds_json ~now oldest_arrived_at
     ]
 
-let sorted_keeper_dir_names keepers_dir =
-  Sys.readdir keepers_dir
-  |> Array.to_list
-  |> List.filter (fun name ->
-       let path = Filename.concat keepers_dir name in
-       valid_keeper_name name && Sys.file_exists path && Sys.is_directory path)
-  |> List.sort String.compare
-
 let fleet_summary_json ~now ~base_path =
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-  let keeper_names, scan_errors =
-    if not (Sys.file_exists keepers_dir)
-    then [], []
-    else if not (Sys.is_directory keepers_dir)
-    then [], [ Printf.sprintf "keepers runtime path is not a directory: %s" keepers_dir ]
-    else
-      try sorted_keeper_dir_names keepers_dir, [] with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        [], [ Printf.sprintf "failed to list keepers runtime dir %s: %s" keepers_dir (Printexc.to_string exn) ]
+  let discovery = discover_keeper_names_with_snapshots ~base_path in
+  let keeper_names = discovery.keeper_names in
+  let scan_errors =
+    match discovery.read_error with
+    | None -> []
+    | Some msg -> [ msg ]
   in
   let keepers =
     List.map (fun keeper_name -> keeper_queue_summary ~base_path ~keeper_name) keeper_names

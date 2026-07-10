@@ -337,6 +337,16 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
     |> Option.value ~default:""
   in
   let notes = str_field "notes" in
+  let evidence_refs =
+    Yojson.Safe.Util.(
+      match args |> member "handoff_context" |> member "evidence_refs" with
+      | `List lst -> Some lst
+      | _ -> None
+    )
+    |> Option.value ~default:[]
+    |> List.filter_map (fun j ->
+        try Some (Yojson.Safe.Util.to_string j) with _ -> None)
+  in
   let task_id = match str_field "task_id" with "" -> scenario.EH.id | s -> s in
   let req : AR.review_request =
     {
@@ -345,6 +355,7 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
       completion_notes = notes;
       agent_name = eval_agent_name;
       task_id;
+      evidence_refs = evidence_refs;
     }
   in
   let on_verdict (result : AR.review_result) =
@@ -357,7 +368,13 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
   ()
 ;;
 
-let run_one (scenario : EH.scenario) ~runtime_id ~base_path ~run_index ~sw ~record_verdicts
+let run_one
+  (scenario : EH.scenario)
+  ~runtime_id
+  ~base_path
+  ~run_index
+  ~(sw : Eio.Switch.t option)
+  ~record_verdicts
     ~(evaluator_runtime : string option) : EH.eval_run =
   let calls = ref [] in
   let dispatch ~name ~args =
@@ -391,7 +408,13 @@ let run_one (scenario : EH.scenario) ~runtime_id ~base_path ~run_index ~sw ~reco
   build_eval_run scenario ~run_index ~res ~calls ~duration_ms
 ;;
 
-let run_scenario (scenario : EH.scenario) ~runtime_id ~base_path ~k ~sw ~record_verdicts
+let run_scenario
+  (scenario : EH.scenario)
+  ~runtime_id
+  ~base_path
+  ~k
+  ~(sw : Eio.Switch.t option)
+  ~record_verdicts
     ~(evaluator_runtime : string option) : EH.eval_result =
   Printf.eprintf "running scenario %s (k=%d)...\n%!" scenario.EH.id k;
   let runs =
@@ -591,7 +614,7 @@ let () =
     let results =
       List.map
         (fun s ->
-          run_scenario s ~runtime_id:cfg.runtime_id ~base_path ~k:cfg.k ~sw
+          run_scenario s ~runtime_id:cfg.runtime_id ~base_path ~k:cfg.k ~sw:(Some sw)
             ~record_verdicts:cfg.record_verdicts
             ~evaluator_runtime)
         scenarios

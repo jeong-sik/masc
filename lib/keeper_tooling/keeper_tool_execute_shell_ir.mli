@@ -32,12 +32,22 @@ val simple_bin :
 val pipeline : Masc_exec.Shell_ir.t list -> Masc_exec.Shell_ir.t
 (** Build an explicit Shell IR pipeline from already-lowered stages. *)
 
+type approval_required_kind =
+  | Gh_capability_requires_approval
+  | Privileged_program_floor
+
+val approval_required_kind_to_string : approval_required_kind -> string
+
 type dispatch_error =
   | Gate_reject of string
   | Cannot_parse
   | Too_complex
   | Path_reject of string
-  | Approval_required of { summary : string; bin : string }
+  | Approval_required of {
+      summary : string;
+      bin : string;
+      kind : approval_required_kind;
+    }
   | Policy_denied of { reason : string }
 
 val validate_paths :
@@ -74,10 +84,9 @@ val dispatch_classified :
     typed gate -> path validation -> dispatch_decided. [redirect_allowed]
     defaults to [true] for the historical tool execute path; legacy code-shell
     callers pass [false].  Catastrophic operations are policy-denied, and
-    privileged programs are [Approval_required] until a Shell IR approval
-    resolver is wired; this also applies to the approval-gate kill-switch path.
-    [?on_output_chunk] is forwarded to the host dispatch path for live output
-    streaming. *)
+    typed gh capability asks and privileged programs are [Approval_required];
+    both also apply to the approval-gate kill-switch path. [?on_output_chunk] is
+    forwarded to the host dispatch path for live output streaming. *)
 
 val dispatch_classified_with_approval :
   ?allow_pipes:bool ->
@@ -94,9 +103,11 @@ val dispatch_classified_with_approval :
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
 (** Same pipeline as {!dispatch_classified}, but runs the capability-based
     approval policy gate {i before} the typed gate and path validation.
-    [Ask] produces [Approval_required] carrying the blocked binary (the
-    summary notes the audited/privileged risk class); [Deny] produces
-    [Policy_denied] carrying the rendered typed [Verdict.deny_reason].
+    [Ask] produces [Approval_required] carrying the blocked binary and a typed
+    [approval_required_kind], so the keeper runtime can route gh capability
+    approval to non-blocking HITL without reopening the privileged-program
+    floor. [Deny] produces [Policy_denied] carrying the rendered typed
+    [Verdict.deny_reason].
     [Allow] and [Suggest_confirm] proceed to {!dispatch_classified}, which
     still applies the privileged fail-closed floor before process dispatch.
     A nested pipeline whose last stage is itself a pipeline yields

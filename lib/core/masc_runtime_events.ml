@@ -29,4 +29,8 @@ let with_turn_span f =
   emit_turn_start ();
   Eio_guard.protect ~finally:emit_turn_end f
 
-let start_listener () = Runtime_events.start ()
+let runtime_events_enabled () =
+  Safe_ops.get_env_bool_logged "MASC_RUNTIME_EVENTS" ~default:true
+
+let start_listener () =
+  if runtime_events_enabled () then Runtime_events.start ()

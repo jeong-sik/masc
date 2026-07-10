@@ -581,6 +581,39 @@ describe('PostDetail', () => {
     expect(screen.getByLabelText('기여자 품질 42점 · 관찰')).toHaveTextContent('품질 42')
   })
 
+  it('renders claim evidence when it is the only detail badge', () => {
+    const post = {
+      id: 'post-claim-evidence',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      moderation_status: 'none',
+      claim_evidence: {
+        state: 'artifact_missing',
+        label: 'Artifact missing',
+        total_count: 1,
+        allowed_count: 1,
+        rejected_count: 0,
+        artifact_missing_count: 1,
+        artifact_unknown_count: 0,
+        missing_source_snapshot_count: 0,
+        stale_source_snapshot_count: 0,
+        artifact_not_verified_count: 0,
+      },
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByLabelText(/Artifact missing/)).toHaveTextContent('Artifact missing')
+  })
+
   it('marks the current post vote as pressed', async () => {
     const post = {
       id: 'post-1',

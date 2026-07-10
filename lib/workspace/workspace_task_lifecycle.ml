@@ -53,11 +53,14 @@ type claim_resolution =
           submitted the obligation (own [AwaitingVerification]); claiming is a
           no-op, never a self-verification. *)
   | Held_by_other of string
-      (** Held by another actor, or terminal ([Done]/[Cancelled]); the string
-          names the current holder for the caller's error message. *)
+      (** Held by another actor, or unreclaimable terminal [Cancelled]; the
+          string names the current holder for the caller's error message. *)
+  | Held_terminal of Masc_domain.task_status
+      (** Terminal [Done] — completed work is never re-claimed (RFC-0323);
+          re-running it takes a NEW task linked via [predecessor_task_id]. *)
 
-let resolve_claim ~same_actor ~agent_name ~now (status : Masc_domain.task_status) =
-  match status with
+let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
+  match task.task_status with
   | Masc_domain.Todo ->
     Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
   | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; _ } ->
@@ -69,7 +72,12 @@ let resolve_claim ~same_actor ~agent_name ~now (status : Masc_domain.task_status
            ~verifier:agent_name ~assignee ~submitted_at ~verification_id)
   | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
     if same_actor assignee then Self_owned else Held_by_other assignee
-  | Masc_domain.Done { assignee; _ } -> Held_by_other assignee
+  | Masc_domain.Done _ ->
+    (* RFC-0323: a completed task is terminal for every actor — the #23632
+       Done-reclaim mechanism (and its interim same-actor guard) retires
+       here. Re-running completed work creates a NEW task linked via
+       [predecessor_task_id]. *)
+    Held_terminal task.task_status
   | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
 ;;
 
@@ -88,6 +96,7 @@ let owner_authorized ~authority ~same_agent assignee =
 
 let decide
       ~verification_enabled
+      ~requires_verification
       ~verification_timeout_seconds
       ~new_verification_id
       ~same_agent
@@ -99,7 +108,16 @@ let decide
       ~authority
       ~notes
       ~reason
+      ~system_gate_exempt
   =
+  (* RFC-0323 W1 / RFC-0308: a verification-required task cannot reach Done
+     through Done_action — submit -> approve is the completion lane. Gated on
+     [verification_enabled] so a disabled verification FSM cannot deadlock
+     completion (submit would error Verification_disabled). Authority-blind
+     by design: the approve arm never reads authority either, and the only
+     production force_done caller (the RFC-0199 probe) already moved to the
+     verification lane in G-2. *)
+  let done_blocked_by_verification = requires_verification && verification_enabled in
   match action, task_status with
   (* ── Claim ────────────────────────────────────── *)
   | Masc_domain.Claim, Masc_domain.Todo ->
@@ -144,13 +162,17 @@ let decide
     -> Error Invalid_transition
   (* ── Done ─────────────────────────────────────── *)
   | Masc_domain.Done_action, Masc_domain.Claimed { assignee; _ } ->
-    if owner_authorized ~authority ~same_agent assignee
-    then ok ~drift:Claimed_to_done_skip (done_status ~agent_name ~now ~notes)
-    else Error Invalid_transition
+    if not (owner_authorized ~authority ~same_agent assignee)
+    then Error Invalid_transition
+    else if done_blocked_by_verification
+    then Error Verification_required_use_submit
+    else ok ~drift:Claimed_to_done_skip (done_status ~agent_name ~now ~notes)
   | Masc_domain.Done_action, Masc_domain.InProgress { assignee; _ } ->
-    if owner_authorized ~authority ~same_agent assignee
-    then ok (done_status ~agent_name ~now ~notes)
-    else Error Invalid_transition
+    if not (owner_authorized ~authority ~same_agent assignee)
+    then Error Invalid_transition
+    else if done_blocked_by_verification
+    then Error Verification_required_use_submit
+    else ok (done_status ~agent_name ~now ~notes)
   | Masc_domain.Done_action, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Done_action
     , (Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _) )
@@ -206,7 +228,7 @@ let decide
   (* ── Approve verification ─────────────────────── *)
   | ( Masc_domain.Approve_verification
     , Masc_domain.AwaitingVerification { assignee; verification_id; _ } ) ->
-    if same_agent assignee
+    if same_agent assignee && not system_gate_exempt
     then Error Self_approval
     else if verification_enabled
     then
@@ -232,7 +254,7 @@ let decide
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
   (* ── Reject verification ──────────────────────── *)
   | Masc_domain.Reject_verification, Masc_domain.AwaitingVerification { assignee; _ } ->
-    if same_agent assignee
+    if same_agent assignee && not system_gate_exempt
     then Error Self_rejection
     else if verification_enabled
     then ok (Masc_domain.InProgress { assignee; started_at = now })
@@ -256,6 +278,7 @@ let decide
    [Submit_for_verification]). *)
 let valid_next_actions
       ~verification_enabled
+      ~requires_verification
       ~same_agent
       ~authority
       ~task_status
@@ -265,6 +288,7 @@ let valid_next_actions
     match
       decide
         ~verification_enabled
+        ~requires_verification
         ~verification_timeout_seconds:0.0
         ~new_verification_id:(fun () -> "")
         ~same_agent:same_agent_pred
@@ -276,6 +300,7 @@ let valid_next_actions
         ~authority
         ~notes:""
         ~reason:""
+        ~system_gate_exempt:false
     with
     | Ok _ -> true
     | Error _ -> false

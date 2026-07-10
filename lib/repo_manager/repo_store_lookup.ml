@@ -35,6 +35,20 @@ let longest_local_path = function
              else best)
            first rest)
 
+let repository_identity_tokens (repo : repository) =
+  repo.id :: repo.name :: repo.aliases
+  |> List.map String.trim
+  |> List.filter (fun token -> not (String.equal token ""))
+  |> List.sort_uniq String.compare
+
+let repository_matches_identity token repo =
+  List.exists (String.equal token) (repository_identity_tokens repo)
+
+let unique_repository_by_identity token repos =
+  match List.filter (repository_matches_identity token) repos with
+  | [ repo ] -> Some repo
+  | [] | _ :: _ :: _ -> None
+
 module Make (Store : Store) = struct
   let find_url_by_id ~base_path id =
     match Store.load_all ~base_path with
@@ -45,6 +59,14 @@ module Make (Store : Store) = struct
             (fun (repo : repository) -> String.equal repo.id id)
             repos
         with
+        | Some repo when not (String.equal repo.url "") -> Some repo.url
+        | Some _ | None -> None)
+
+  let find_url_by_identity ~base_path token =
+    match Store.load_all ~base_path with
+    | Error _ -> None
+    | Ok repos -> (
+        match unique_repository_by_identity (String.trim token) repos with
         | Some repo when not (String.equal repo.url "") -> Some repo.url
         | Some _ | None -> None)
 

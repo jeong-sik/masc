@@ -1,14 +1,6 @@
-import { html } from 'htm/preact'
-import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { parseFusionRunsResponse } from '../../api/dashboard'
-import { fusionRuns, fusionRunsLoading } from '../../store'
-import {
-  FusionRunsPanel,
-  fusionRunPipelineSegments,
-  fusionRunStatusText,
-  fusionRunStatusTone,
-} from './fusion-runs-panel'
+import { fusionRunStatusText, fusionRunStatusTone } from './fusion-runs-panel'
 
 describe('parseFusionRunsResponse', () => {
   it('maps snake_case rows to FusionRunRecord and falls back count to length', () => {
@@ -76,6 +68,8 @@ describe('parseFusionRunsResponse', () => {
   })
 })
 
+// The FusionRunsPanel component was merged into the FusionSurface master list, so
+// only the pure status helpers remain here. Their SSOT mapping stays tested.
 describe('fusion run status helpers', () => {
   it('maps status to the reused chip tone', () => {
     expect(fusionRunStatusTone('running')).toBe('warn')
@@ -87,120 +81,5 @@ describe('fusion run status helpers', () => {
     expect(fusionRunStatusText('running')).toBe('running')
     expect(fusionRunStatusText('completed')).toBe('completed')
     expect(fusionRunStatusText('failed')).toBe('failed')
-  })
-
-  it('maps registry status to a conservative backed pipeline', () => {
-    expect(fusionRunPipelineSegments('running').map(segment => [segment.key, segment.state])).toEqual([
-      ['keeper', 'done'],
-      ['registry', 'done'],
-      ['deliberation', 'active'],
-      ['sink', 'pending'],
-    ])
-    expect(fusionRunPipelineSegments('completed').map(segment => segment.state)).toEqual([
-      'done',
-      'done',
-      'done',
-      'done',
-    ])
-    expect(fusionRunPipelineSegments('failed').map(segment => [segment.key, segment.state])).toEqual([
-      ['keeper', 'done'],
-      ['registry', 'done'],
-      ['deliberation', 'failed'],
-      ['sink', 'failed'],
-    ])
-  })
-})
-
-describe('FusionRunsPanel', () => {
-  let container: HTMLDivElement
-
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    fusionRuns.value = []
-    fusionRunsLoading.value = false
-  })
-
-  afterEach(() => {
-    render(null, container)
-    container.remove()
-    fusionRuns.value = []
-    fusionRunsLoading.value = false
-  })
-
-  it('shows the empty state when there are no runs', () => {
-    render(html`<${FusionRunsPanel} />`, container)
-    expect(container.querySelector('[data-testid="fusion-runs-empty"]')).not.toBeNull()
-    expect(container.textContent).toContain('No active or recent fusion runs')
-  })
-
-  it('shows a loading hint while empty and loading', () => {
-    fusionRunsLoading.value = true
-    render(html`<${FusionRunsPanel} />`, container)
-    expect(container.textContent).toContain('Loading fusion runs')
-  })
-
-  it('renders one card per run with its status and a running indicator', () => {
-    fusionRuns.value = [
-      { runId: 'r-run', keeper: 'k1', preset: 'balanced', startedAt: 300, status: 'running' },
-      { runId: 'r-done', keeper: 'k2', preset: 'deep', startedAt: 100, status: 'completed' },
-      { runId: 'r-fail', keeper: 'k3', preset: 'deep', startedAt: 200, status: 'failed' },
-    ]
-    render(html`<${FusionRunsPanel} />`, container)
-
-    const cards = container.querySelectorAll('[data-testid="fusion-run-status-card"]')
-    expect(cards).toHaveLength(3)
-
-    const byRun = (id: string) =>
-      Array.from(cards).find(card => card.getAttribute('data-run-id') === id)
-    expect(byRun('r-run')?.getAttribute('data-status')).toBe('running')
-    expect(byRun('r-done')?.getAttribute('data-status')).toBe('completed')
-    expect(byRun('r-fail')?.getAttribute('data-status')).toBe('failed')
-
-    const runningPipeline = byRun('r-run')?.querySelector('[data-testid="fusion-run-pipeline"]')
-    expect(runningPipeline?.querySelector('[data-stage="deliberation"]')?.getAttribute('data-state')).toBe('active')
-    expect(runningPipeline?.querySelector('[data-stage="sink"]')?.getAttribute('data-state')).toBe('pending')
-    expect(byRun('r-done')?.querySelector('[data-stage="sink"]')?.getAttribute('data-state')).toBe('done')
-    expect(byRun('r-fail')?.querySelector('[data-stage="sink"]')?.getAttribute('data-state')).toBe('failed')
-
-    // the running indicator counts only in-progress runs
-    expect(container.textContent).toContain('1 running')
-    expect(container.textContent).toContain('r-run')
-    expect(container.textContent).toContain('k1')
-  })
-
-  it('omits the running indicator when nothing is in progress', () => {
-    fusionRuns.value = [
-      { runId: 'r-done', keeper: 'k2', preset: 'deep', startedAt: 100, status: 'completed' },
-    ]
-    render(html`<${FusionRunsPanel} />`, container)
-    expect(container.querySelector('.fus-runs-live')).toBeNull()
-  })
-
-  it('surfaces the failure code and error on a failed run card', () => {
-    fusionRuns.value = [
-      {
-        runId: 'r-fail',
-        keeper: 'k3',
-        preset: 'deep',
-        startedAt: 200,
-        status: 'failed',
-        error: 'judge timed out after 30s',
-        failureCode: 'timeout',
-      },
-    ]
-    render(html`<${FusionRunsPanel} />`, container)
-    const reason = container.querySelector('[data-testid="fusion-run-reason"]')
-    expect(reason).not.toBeNull()
-    expect(reason?.querySelector('.fus-runs-code')?.textContent).toBe('timeout')
-    expect(reason?.textContent).toContain('judge timed out after 30s')
-  })
-
-  it('omits the reason line for a completed run', () => {
-    fusionRuns.value = [
-      { runId: 'r-done', keeper: 'k2', preset: 'deep', startedAt: 100, status: 'completed' },
-    ]
-    render(html`<${FusionRunsPanel} />`, container)
-    expect(container.querySelector('[data-testid="fusion-run-reason"]')).toBeNull()
   })
 })

@@ -8,6 +8,7 @@ import { route } from '../router'
 import { AgentRoster } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { KeeperDetailPage } from './keeper-detail-page'
+import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { FsmHub } from './fsm-hub'
 import { FleetFsmMatrix } from './fleet-fsm-matrix'
 import { CompositeFsmFlowchart } from './composite-fsm-flowchart'
@@ -41,11 +42,14 @@ export function AgentsUnified() {
     <div class="v2-monitoring-surface flex flex-col gap-4">
       ${currentView === 'fsm'
         ? html`<${FleetAndFsmHubPanel} />`
-        : html`<${AgentRoster}
-            keeperFilter=${currentView === 'keepers' ? 'keeper-only'
-              : currentView === 'agents' ? 'agent-only'
-              : 'all'}
-          />`}
+        : html`
+            ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
+            <${AgentRoster}
+              keeperFilter=${currentView === 'keepers' ? 'keeper-only'
+                : currentView === 'agents' ? 'agent-only'
+                : 'all'}
+            />
+          `}
     </div>
   `
 }

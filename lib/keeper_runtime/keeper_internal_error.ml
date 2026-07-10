@@ -49,6 +49,56 @@ type capacity_retry_after =
   | Synthetic_default of float
   | No_retry_hint
 
+(** The failure that armed the provider-health cooldown blocking a turn before
+    dispatch.  Mirrors {!Keeper_binding_health.outcome_kind} across the
+    keeper_runtime -> keeper module boundary (keeper_runtime cannot depend on
+    keeper_binding_health).  Carried on {!Capacity_backpressure} so the
+    pre-dispatch cooldown gate reports WHY the provider is cooling instead of
+    unconditionally claiming provider capacity.  #23438. *)
+type provider_cooldown_cause =
+  | Cooldown_provider_capacity
+  | Cooldown_soft_rate_limited
+  | Cooldown_server_error
+  | Cooldown_hard_quota
+  | Cooldown_terminal_failure
+  | Cooldown_provider_error
+  | Cooldown_rejected
+
+let provider_cooldown_cause_to_string = function
+  | Cooldown_provider_capacity -> "provider_capacity"
+  | Cooldown_soft_rate_limited -> "soft_rate_limited"
+  | Cooldown_server_error -> "server_error"
+  | Cooldown_hard_quota -> "hard_quota"
+  | Cooldown_terminal_failure -> "terminal_failure"
+  | Cooldown_provider_error -> "provider_error"
+  | Cooldown_rejected -> "rejected"
+
+let provider_cooldown_cause_of_string = function
+  | "provider_capacity" -> Some Cooldown_provider_capacity
+  | "soft_rate_limited" -> Some Cooldown_soft_rate_limited
+  | "server_error" -> Some Cooldown_server_error
+  | "hard_quota" -> Some Cooldown_hard_quota
+  | "terminal_failure" -> Some Cooldown_terminal_failure
+  | "provider_error" -> Some Cooldown_provider_error
+  | "rejected" -> Some Cooldown_rejected
+  | _ -> None
+
+(** [true] when waiting out the cooldown cannot resolve the cause: the next
+    attempt hits the same deterministic condition (config/build error, depleted
+    balance, structural provider failure, rejected output).  Transient causes
+    (provider capacity, HTTP 429, HTTP 5xx) are expected to recover, so a
+    cooldown block armed by them stays auto-recoverable.  A deterministic cause
+    must instead flow into the crash/pause escalation path so the keeper stops
+    oscillating.  #23438. *)
+let provider_cooldown_cause_is_deterministic = function
+  | Cooldown_hard_quota
+  | Cooldown_terminal_failure
+  | Cooldown_provider_error
+  | Cooldown_rejected -> true
+  | Cooldown_provider_capacity
+  | Cooldown_soft_rate_limited
+  | Cooldown_server_error -> false
+
 type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -215,6 +265,10 @@ type masc_internal_error =
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
+      cooldown_cause : provider_cooldown_cause option;
+      (* [Some cause] iff this is a pre-dispatch provider-health cooldown block
+         (the arming failure's cause).  [None] for genuine capacity backpressure
+         surfaced from an upstream capacity-exhaustion signal.  #23438. *)
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -226,6 +280,14 @@ type masc_internal_error =
       model : string option;
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
+      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+         [MaxTokens] on an empty/thinking_only shape marks a truncation (the
+         shared output budget was exhausted, most often by thinking) and must be
+         distinguished from a clean [EndTurn] no-progress terminal — OAS gates
+         its own [ended_without_deliverable_content] on [EndTurn] for exactly
+         this reason. Groundwork only in this slice: threaded and serialized,
+         not yet consumed by classification (§4.5 slices 2-3). *)
+      stop_reason : Agent_sdk.Types.stop_reason option;
       last_tool_effect : tool_progress_effect option;
       any_mutating_tool : bool option;
       tool_effects_seen : tool_progress_effect list;
@@ -266,6 +328,7 @@ type masc_internal_error =
   | Internal_unhandled_exception of {
       site : string;
       exn_repr : string;
+      transport_error_kind : Llm_provider.Http_client.network_error_kind option;
     }
   | Internal_bridge_exception of {
       caller : string;
@@ -276,6 +339,7 @@ type masc_internal_error =
     }
 
 let masc_internal_error_prefix = "[masc_oas_error] "
+let runtime_runner_execute_site = "runtime_runner.execute"
 
 (* #9933: a keeper [blocker_info] detail string may carry a structured
    [masc_oas_error] JSON payload — [masc_internal_error_prefix] above,
@@ -357,6 +421,33 @@ let string_opt_of_assoc key json =
   Json_field.string json key |> Json_field.to_option
 ;;
 
+let network_error_kind_to_string = function
+  | Llm_provider.Http_client.Connection_refused -> "connection_refused"
+  | Llm_provider.Http_client.Dns_failure -> "dns_failure"
+  | Llm_provider.Http_client.Tls_error -> "tls_error"
+  | Llm_provider.Http_client.Timeout -> "timeout"
+  | Llm_provider.Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
+  | Llm_provider.Http_client.End_of_file -> "end_of_file"
+  | Llm_provider.Http_client.Unknown -> "unknown"
+;;
+
+let network_error_kind_of_string = function
+  | "connection_refused" -> Some Llm_provider.Http_client.Connection_refused
+  | "dns_failure" -> Some Llm_provider.Http_client.Dns_failure
+  | "tls_error" -> Some Llm_provider.Http_client.Tls_error
+  | "timeout" -> Some Llm_provider.Http_client.Timeout
+  | "local_resource_exhaustion" ->
+    Some Llm_provider.Http_client.Local_resource_exhaustion
+  | "end_of_file" -> Some Llm_provider.Http_client.End_of_file
+  | "unknown" -> Some Llm_provider.Http_client.Unknown
+  | _ -> None
+;;
+
+let transport_error_kind_json_fields = function
+  | None -> []
+  | Some kind -> [ "transport_error_kind", `String (network_error_kind_to_string kind) ]
+;;
+
 let bool_opt_of_assoc key = function
   | `Assoc fields -> (
     match List.assoc_opt key fields with
@@ -386,7 +477,7 @@ let masc_internal_error_to_json = function
         ("runtime_id", `String runtime_id);
         ("reason", runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
+  | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
     let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
       match retry_after with
@@ -396,6 +487,12 @@ let masc_internal_error_to_json = function
         [ ("retry_after_sec", `Float s); ("retry_after_synthetic", `Bool true) ]
       | No_retry_hint -> [ ("retry_after_sec", `Null) ]
     in
+    let cooldown_cause_fields =
+      match cooldown_cause with
+      | Some cause ->
+        [ ("cooldown_cause", `String (provider_cooldown_cause_to_string cause)) ]
+      | None -> []
+    in
     `Assoc
       ([
          ("kind", `String "capacity_backpressure");
@@ -403,7 +500,8 @@ let masc_internal_error_to_json = function
          ("source", `String (capacity_backpressure_source_to_string source));
          ("detail", `String detail);
        ]
-      @ retry_after_fields)
+      @ retry_after_fields
+      @ cooldown_cause_fields)
   | Resumable_cli_session { runtime_id; detail; exit_code } ->
     let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
@@ -419,6 +517,7 @@ let masc_internal_error_to_json = function
         model;
         reason_kind;
         response_shape;
+        stop_reason;
         last_tool_effect;
         any_mutating_tool;
         tool_effects_seen;
@@ -435,6 +534,9 @@ let masc_internal_error_to_json = function
         ( "response_shape",
           Json_util.string_opt_to_json
             (Option.map accept_response_shape_to_string response_shape) );
+        ( "stop_reason",
+          Json_util.string_opt_to_json
+            (Option.map Agent_sdk.Types.stop_reason_to_string stop_reason) );
         ( "last_tool_effect",
           Json_util.string_opt_to_json
             (Option.map tool_progress_effect_to_string last_tool_effect) );
@@ -508,13 +610,13 @@ let masc_internal_error_to_json = function
         ("tools", Json_util.json_string_list tools);
         ("original_error", `String original_error);
       ]
-  | Internal_unhandled_exception { site; exn_repr } ->
+  | Internal_unhandled_exception { site; exn_repr; transport_error_kind } ->
     `Assoc
-      [
-        ("kind", `String "internal_unhandled_exception");
-        ("site", `String site);
-        ("exn_repr", `String exn_repr);
-      ]
+      ([ ("kind", `String "internal_unhandled_exception")
+       ; ("site", `String site)
+       ; ("exn_repr", `String exn_repr)
+       ]
+       @ transport_error_kind_json_fields transport_error_kind)
   | Internal_bridge_exception { caller; exn_repr } ->
     `Assoc
       [
@@ -594,7 +696,7 @@ let accept_rejection_is_read_only_no_progress
   && tool_effects_seen <> []
 
 let summary_of_masc_internal_error = function
-  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
+  | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
       let retry_after_suffix =
         match retry_after with
         | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
@@ -602,13 +704,21 @@ let summary_of_masc_internal_error = function
           Printf.sprintf "; retry_after=%.1fs (synthetic)" value
         | No_retry_hint -> ""
       in
+      let cooldown_cause_suffix =
+        match cooldown_cause with
+        | Some cause ->
+          Printf.sprintf "; cooldown_cause=%s"
+            (provider_cooldown_cause_to_string cause)
+        | None -> ""
+      in
       Some
         (Printf.sprintf
-           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s"
+           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s%s"
            (runtime_id_to_string runtime_id)
            (capacity_backpressure_source_to_string source)
            detail
-           retry_after_suffix)
+           retry_after_suffix
+           cooldown_cause_suffix)
   | Provider_timeout
       {
         budget_sec;
@@ -921,9 +1031,14 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                  | Some s when retry_after_synthetic -> Synthetic_default s
                  | Some s -> Explicit s
                in
+               let cooldown_cause =
+                 match string_opt_of_assoc "cooldown_cause" json with
+                 | Some raw -> provider_cooldown_cause_of_string raw
+                 | None -> None
+               in
                Some
                  (Capacity_backpressure
-                    { runtime_id; source; detail; retry_after })
+                    { runtime_id; source; detail; retry_after; cooldown_cause })
              | None -> None)
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (
@@ -953,6 +1068,10 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                      Option.bind
                        (string_opt_of_assoc "response_shape" json)
                        accept_response_shape_of_string;
+                   stop_reason =
+                     Option.map
+                       Agent_sdk.Types.stop_reason_of_string
+                       (string_opt_of_assoc "stop_reason" json);
                    last_tool_effect =
                      Option.bind
                        (string_opt_of_assoc "last_tool_effect" json)
@@ -1070,11 +1189,20 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
             Some (Ambiguous_post_commit { is_timeout; tools; original_error })
           | _ -> None)
       | Some (`String "internal_unhandled_exception") -> (
-          match string_opt_of_assoc "site" json,
-                string_opt_of_assoc "exn_repr" json
-          with
+          match string_opt_of_assoc "site" json, string_opt_of_assoc "exn_repr" json with
           | Some site, Some exn_repr ->
-            Some (Internal_unhandled_exception { site; exn_repr })
+            (match string_opt_of_assoc "transport_error_kind" json with
+             | None ->
+               Some
+                 (Internal_unhandled_exception
+                    { site; exn_repr; transport_error_kind = None })
+             | Some raw_kind ->
+               (match network_error_kind_of_string raw_kind with
+                | Some transport_error_kind ->
+                  Some
+                    (Internal_unhandled_exception
+                       { site; exn_repr; transport_error_kind = Some transport_error_kind })
+                | None -> None))
           | _ -> None)
       | Some (`String "internal_bridge_exception") -> (
           match string_opt_of_assoc "caller" json,

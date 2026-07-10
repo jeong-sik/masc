@@ -26,6 +26,15 @@ val resolve_claim_goal_scope :
   unit ->
   claim_goal_scope
 
+val resolve_claim_goal_scope_for_tasks :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  tasks:Masc_domain.task list ->
+  unit ->
+  claim_goal_scope
+(** Backlog-aware claim scope for callers that already loaded tasks. This
+    avoids re-reading the backlog while preserving the empty-scope fallback. *)
+
 val resolve_observation_claim_goal_scope :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

@@ -53,6 +53,7 @@ import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
+import { KeeperGithubAppConfigPanel } from './keeper-github-app-config'
 import { FsmHub } from './fsm-hub'
 import { currentDashboardActor } from '../api'
 import type { Keeper } from '../types'
@@ -80,6 +81,9 @@ export interface KeeperDetailBodyProps {
   onPreserveToggle: (preserve: boolean) => void
   onClearSubmit: () => void
   onSocialSweep: () => void
+  // Deep-link the read-only runtime card to the 설정(.kcf) 런타임 tab (the single
+  // write path for runtime_id). Optional so isolated renders degrade gracefully.
+  onOpenRuntimeConfig?: () => void
 }
 
 export function KeeperDetailBody({
@@ -100,6 +104,7 @@ export function KeeperDetailBody({
   onPreserveToggle,
   onClearSubmit,
   onSocialSweep,
+  onOpenRuntimeConfig,
 }: KeeperDetailBodyProps) {
   return html`
     <div class="kw-detail-body mx-auto flex w-full max-w-[1180px] flex-col gap-5 v2-monitoring-surface">
@@ -190,10 +195,11 @@ export function KeeperDetailBody({
           title="진단 / 운영"
           defaultCollapsed=${true}
         >
-          ${'' /* ── 런타임 model 편집 (RFC-0207 persona runtime_id) — surfaced here so it is one expand away, not buried under 설정 → Keeper 설정 → 소스 ── */}
-          <${KeeperRuntimeModelEditor} keeperName=${keeper.name} />
+          ${'' /* ── 런타임 model (RFC-0207 persona runtime_id) — read-only card surfaced here one expand away; edits deep-link to the 설정(.kcf) 런타임 tab, the single write path ── */}
+          <${KeeperRuntimeModelEditor} keeperName=${keeper.name} onOpenRuntimeConfig=${onOpenRuntimeConfig} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperSecretProjectionPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
+          <${KeeperGithubAppConfigPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
           <${CollapsibleSection} title="Live Truth (composite/runtime 합성)" open=${false}>
             <${KeeperLiveTruthPanel}

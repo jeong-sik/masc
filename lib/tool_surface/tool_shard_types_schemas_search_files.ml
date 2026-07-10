@@ -20,7 +20,7 @@ let tool_search_files_schema : Masc_domain.tool_schema =
                 [ ( "pattern"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Regular expression to search file contents for. Must be a syntactically valid regex."
+                      ; "description", `String "Regular expression in Rust regex syntax (ripgrep). No lookaround (?!...) (?<=...) and no backreferences; alternation is a plain | (never \\|); a literal double quote needs no backslash. PCRE/BRE-dialect patterns are rejected with a regex parse error."
                       ] )
                 ; ( "path"
                   , `Assoc

@@ -88,12 +88,14 @@ let required_int args key =
   | None -> Error (Printf.sprintf "%s is required" key)
 ;;
 
+let validate_recurrence_arg recurrence = Schedule_domain.validate_recurrence recurrence
+
 let recurrence_of_arg args =
   match string_opt args "recurrence_kind" with
-  | None | Some "one_shot" -> Ok Schedule_domain.One_shot
+  | None | Some "one_shot" -> validate_recurrence_arg Schedule_domain.One_shot
   | Some "interval" ->
     let* interval_sec = required_int args "recurrence_interval_sec" in
-    Ok (Schedule_domain.Interval { interval_sec })
+    validate_recurrence_arg (Schedule_domain.Interval { interval_sec })
   | Some "daily" ->
     let* hour = required_int args "recurrence_hour" in
     let* minute = required_int args "recurrence_minute" in
@@ -105,11 +107,11 @@ let recurrence_of_arg args =
       | Some second -> second
     in
     let* timezone = required_string args "recurrence_timezone" in
-    Ok (Schedule_domain.Daily { hour; minute; second; timezone })
+    validate_recurrence_arg (Schedule_domain.Daily { hour; minute; second; timezone })
   | Some "cron" ->
     let* expression = required_string args "recurrence_cron" in
     let* timezone = required_string args "recurrence_timezone" in
-    Ok (Schedule_domain.Cron { expression; timezone })
+    validate_recurrence_arg (Schedule_domain.Cron { expression; timezone })
   | Some other -> Error ("unknown recurrence_kind: " ^ other)
 ;;
 
@@ -173,7 +175,7 @@ let board_post_payload_from_args args =
   let* content = required_string args "board_content" in
   let schema_version =
     (* DET-OK: board_* is a stable convenience projection for the existing
-       masc.board_post v1 consumer. *)
+       board-post v1 consumer. *)
     optional_int args "payload_schema_version" |> Option.value ~default:1
   in
   if schema_version <> 1
@@ -192,7 +194,7 @@ let board_post_payload_from_args args =
     let* fields = optional_body_object args ~arg:"board_meta" ~field:"meta" fields in
     Ok
       (`Assoc
-        [ "kind", `String "masc.board_post"
+        [ "kind", `String Schedule_supported_kinds.board_post
         ; "schema_version", `Int schema_version
         ; "body", `Assoc (List.rev fields)
         ])
@@ -235,93 +237,40 @@ let payload_from_args args =
            board_post_payload_from_args args
          | Some kind ->
            Error
-             ("board_* convenience fields require payload_kind omitted or masc.board_post, got "
+             ("board_* convenience fields require payload_kind omitted or "
+              ^ Schedule_supported_kinds.board_post
+              ^ ", got "
               ^ kind))
     else generic_payload_from_args args
 ;;
 
-let assoc_string_opt key fields =
-  match List.assoc_opt key fields with
-  | Some (`String value) -> trim_nonempty value
-  | _ -> None
+let schedule_payload_unsupported_labels ~phase ~risk_class =
+  [ "phase", phase
+  ; "risk_class", Schedule_domain.risk_class_to_string risk_class
+  ]
 ;;
 
-let validate_payload_schema_version ~kind fields =
-  match List.assoc_opt "schema_version" fields with
-  | Some (`Int 1) -> Ok ()
-  | Some (`Int _) -> Error (kind ^ " only supports payload_schema_version=1")
-  | Some _ -> Error (kind ^ " payload.schema_version must be an integer")
-  | None -> Error (kind ^ " payload requires schema_version=1")
-;;
-
-let body_object ~kind fields =
-  match List.assoc_opt "body" fields with
-  | Some (`Assoc body) -> Ok body
-  | Some _ -> Error (kind ^ " payload.body must be an object")
-  | None -> Error (kind ^ " payload requires object body")
-;;
-
-let validate_keeper_wake_body body =
-  match assoc_string_opt "keeper_name" body, assoc_string_opt "message" body with
-  | None, _ -> Error "masc.keeper_wake payload requires non-empty body.keeper_name"
-  | _, None -> Error "masc.keeper_wake payload requires non-empty body.message"
-  | Some keeper_name, Some _
-    when not (Schedule_supported_kinds.valid_keeper_wake_target_name keeper_name) ->
-    Error
-      (Schedule_supported_kinds.keeper_wake_target_name_error
-         ~field:"masc.keeper_wake payload body.keeper_name")
-  | Some _, Some _ ->
-    (match assoc_string_opt "urgency" body with
-     | None -> Ok ()
-     | Some raw ->
-       (match Schedule_supported_kinds.keeper_wake_urgency_of_string raw with
-        | Ok _ -> Ok ()
-        | Error msg -> Error msg))
+let record_unsupported_payload_creation ~risk_class rejection =
+  match rejection with
+  | Schedule_payload_projection.Creation_unsupported_side_effecting_kind _ ->
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_schedule_payload_unsupported_total
+      ~labels:(schedule_payload_unsupported_labels ~phase:"creation" ~risk_class)
+      ()
+  | Schedule_payload_projection.Creation_invalid_payload _
+  | Schedule_payload_projection.Creation_invalid_supported_payload _ -> ()
 ;;
 
 let validate_known_payload_request ~payload ~risk_class =
-  match payload with
-  | `Assoc fields ->
-    (match assoc_string_opt "kind" fields with
-     | Some kind when String.equal kind Schedule_supported_kinds.board_post ->
-       let* () =
-         validate_payload_schema_version ~kind:Schedule_supported_kinds.board_post fields
-       in
-       if not (Schedule_domain.is_side_effecting risk_class)
-       then Error "masc.board_post requires a side-effecting risk_class such as workspace_write"
-       else (
-         match body_object ~kind:Schedule_supported_kinds.board_post fields with
-         | Ok body ->
-           (match assoc_string_opt "content" body with
-            | Some _ -> Ok ()
-            | None ->
-              Error
-                "masc.board_post payload requires non-empty body.content; use board_content for board schedules")
-         | Error _ ->
-           Error
-             "masc.board_post payload requires object body with non-empty content; use board_content for board schedules")
-     | Some kind when String.equal kind Schedule_supported_kinds.keeper_wake ->
-       let* () =
-         validate_payload_schema_version ~kind:Schedule_supported_kinds.keeper_wake fields
-       in
-       if not (Schedule_domain.is_side_effecting risk_class)
-       then
-         Error
-           "masc.keeper_wake requires a side-effecting risk_class such as workspace_write"
-       else
-         let* body = body_object ~kind:Schedule_supported_kinds.keeper_wake fields in
-         validate_keeper_wake_body body
-     | Some kind when Schedule_domain.is_side_effecting risk_class ->
-       (* Only side-effecting work needs a consumer adapter that can dispatch
-          it. Reject kinds the consumer cannot run so the queue is not filled
-          with work that dies at dispatch. Read-only/reminder kinds carry no
-          side effect, so their kind stays opaque to the schedule domain — a
-          consumer that does not recognize one records a visible failed
-          execution (fail_due_candidate), not a silent accept-then-die. *)
-       Error (Schedule_supported_kinds.unsupported_error kind)
-     | Some _ -> Ok ()
-     | None -> Error "payload.kind is required")
-  | _ -> Error "payload must be a JSON object"
+  match
+    Schedule_payload_projection.validate_request_payload_for_creation_detailed
+      ~payload
+      ~risk_class
+  with
+  | Ok () -> Ok ()
+  | Error rejection ->
+    record_unsupported_payload_creation ~risk_class rejection;
+    Error (Schedule_payload_projection.creation_rejection_message rejection)
 ;;
 
 let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
@@ -364,6 +313,18 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
            , match Schedule_payload_projection.kind request with
              | None -> `Null
              | Some kind -> `String kind )
+         ; ( "payload_support"
+           , `String
+               (request
+                |> Schedule_payload_projection.support_status
+                |> Schedule_payload_projection.support_status_to_string) )
+         ; ( "payload_dispatch_tool"
+             (* Display getter: non-logging result variant (see
+                server_dashboard_http_runtime_info). Avoids a per-poll WARN on
+                terminal unsupported-kind rows. *)
+           , match Schedule_payload_projection.dispatch_tool_for_request_result request with
+             | Ok tool_name -> `String tool_name
+             | Error _ -> `Null )
          ; ( "payload_target"
            , match payload_target with
              | None -> `Null
@@ -403,6 +364,13 @@ let runtime_error ~tool_name ~start_time message =
     message
 ;;
 
+let schedule_read_runtime_error ~tool_name ~start_time err =
+  runtime_error
+    ~tool_name
+    ~start_time
+    ("schedule store read failed: " ^ Schedule_store.read_error_to_string err)
+;;
+
 let request_result ~tool_name ~start_time = function
   | Ok request -> ok ~tool_name ~start_time (schedule_request_json request)
   | Error msg -> workflow_error ~tool_name ~start_time msg
@@ -415,7 +383,17 @@ let request_result ~tool_name ~start_time = function
 let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
-    let* risk_class = risk_class_of_arg args in
+    let* requested_risk_class = risk_class_of_arg args in
+    (* Clamp the caller-supplied risk_class to the payload kind's intrinsic risk
+       when the kind mandates one. A keeper_wake is intrinsically reminder_only;
+       without this a keeper can request a side-effecting risk_class, forcing its
+       own wake into Pending_approval and then deadlocking as it polls a status
+       no self-waking keeper can advance. *)
+    let risk_class =
+      match Schedule_payload_projection.intrinsic_risk_class_of_payload payload with
+      | Some intrinsic -> intrinsic
+      | None -> requested_risk_class
+    in
     let* () = validate_known_payload_request ~payload ~risk_class in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in
@@ -469,37 +447,52 @@ let handle_list ~tool_name ~start_time ctx args =
       optional_int args "limit" |> Option.value ~default:50
     in
     let limit = min 200 (max 1 raw_limit) in
-    let state = Schedule_store.read_state ctx.config in
-    let schedules =
-      (match status with
-       | None -> state.Schedule_store.schedules
-       | Some expected ->
-         List.filter
-           (fun (request : Schedule_domain.schedule_request) ->
-             request.status = expected)
-           state.schedules)
-      |> take limit
-      |> List.map (fun (request : Schedule_domain.schedule_request) ->
-        let last_execution =
-          Schedule_store.last_execution_for_schedule state
-            ~schedule_id:request.Schedule_domain.schedule_id
-        in
-        schedule_request_json ?last_execution request)
-    in
-    ok ~tool_name ~start_time
-      (`Assoc
-        [ "status", `String "ok"
-        ; "limit", `Int limit
-        ; "schedules", `List schedules
-        ])
+    (match Schedule_store.read_state_result ctx.config with
+     | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
+     | Ok state ->
+       let request_rows =
+         (match status with
+          | None -> state.Schedule_store.schedules
+          | Some expected ->
+            List.filter
+              (fun (request : Schedule_domain.schedule_request) ->
+                 request.status = expected)
+              state.schedules)
+         |> take limit
+       in
+       let schedules =
+         request_rows
+         |> List.map (fun (request : Schedule_domain.schedule_request) ->
+           let last_execution =
+             Schedule_store.last_execution_for_schedule
+               state
+               ~schedule_id:request.Schedule_domain.schedule_id
+           in
+           schedule_request_json ?last_execution request)
+       in
+       ok ~tool_name ~start_time
+         (`Assoc
+           [ "status", `String "ok"
+           ; "limit", `Int limit
+           ; "payload_support"
+             , Schedule_payload_projection.support_summary_to_yojson request_rows
+           ; "schedules", `List schedules
+           ]))
 ;;
 
 let handle_get ~tool_name ~start_time ctx args =
   match required_string args "schedule_id" with
   | Error msg -> workflow_error ~tool_name ~start_time msg
   | Ok schedule_id ->
-    let state = Schedule_store.read_state ctx.config in
-    (match Schedule_service.get ctx.config ~schedule_id with
+    (match Schedule_store.read_state_result ctx.config with
+     | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
+     | Ok state ->
+       match
+         List.find_opt
+           (fun (request : Schedule_domain.schedule_request) ->
+              String.equal request.schedule_id schedule_id)
+           state.schedules
+       with
      | None -> workflow_error ~tool_name ~start_time "schedule not found"
      | Some request ->
        let last_execution =

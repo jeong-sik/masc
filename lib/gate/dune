@@ -20,6 +20,10 @@
   discord_gateway_state
   discord_rest_client
   discord_wss_connection
+  slack_gateway_state
+  slack_socket_client
+  slack_rest_client
+  slack_observability
   gate_protocol
   gate_surface
   gate_time_util)

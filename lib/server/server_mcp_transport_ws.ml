@@ -272,13 +272,14 @@ let record_pong session =
   Atomic.set session.last_pong_at (Unix.gettimeofday ())
 (* NDT-OK: wall-clock used only for liveness, not deterministic output. *)
 
-(** Send a pre-allocated frame to a WebSocket client.
+(** Send a pre-encoded text payload to a WebSocket client.
 
-    The caller owns the [bytes] buffer; this function only reads it.  In
-    server mode ws-direct does not mask (RFC 6455 §5.3), and the payload is
-    copied into the faraday writer synchronously, so the same [bytes] value can
-    safely be passed to multiple sessions in one broadcast. *)
-let send_frame_bytes session bytes ~len =
+    The caller owns the [payload] bigstring and must treat it as immutable after
+    passing it here.  ws-direct owns RFC 6455 framing and role-specific masking;
+    server-mode fanout can therefore reuse one immutable payload across
+    sessions without allocating a per-session payload string. *)
+let send_text_bigstring session payload =
+  let len = Bigstringaf.length payload in
   if is_session_closed session then begin
     Atomic.set session.closed true;
     false
@@ -287,7 +288,7 @@ let send_frame_bytes session bytes ~len =
       if is_session_closed session then false
       else begin
         try
-          Ws_wsd.send_text session.wsd (Bytes.sub_string bytes 0 len);
+          Ws_wsd.send_text session.wsd (Bigstringaf.to_string payload);
           Transport_metrics.inc_ws_bytes_sent ~bytes:len;
           Transport_metrics.observe_ws_message_bytes_sent len;
           true
@@ -308,42 +309,50 @@ let websocket_text_payload text =
   Inference_utils.sanitize_text_utf8 text
 
 (** Send a text frame to a WebSocket client.
-    Allocates [Bytes.t] per call — fine for single-destination sends.
+    Allocates a [Bigstringaf.t] per call — fine for single-destination sends.
     Multicast paths should go through [send_text_shared] instead so the
-    bytes allocation is paid once per broadcast, not once per session. *)
+    payload allocation is paid once per broadcast, not once per session. *)
 let send_text session text =
-  let bytes = Bytes.of_string (websocket_text_payload text) in
-  send_frame_bytes session bytes ~len:(Bytes.length bytes)
+  let payload_text = websocket_text_payload text in
+  let payload =
+    Bigstringaf.of_string payload_text ~off:0 ~len:(String.length payload_text)
+  in
+  send_text_bigstring session payload
 
-(** Module-local cache of the last [Bytes.of_string sse_event] result.
+(** Module-local cache of the last [Bigstringaf.of_string sse_event] result.
 
     [Sse.notify_external_subscribers] delivers the same [event: string]
     reference to every subscribed WS session in sequence.  Before this
-    cache, every session ran [Bytes.of_string] independently in the
-    raw-SSE-forward path, producing O(sessions) identical allocations.
+    cache, every session encoded the same payload independently in the
+    raw-SSE-forward path, producing O(sessions) identical allocations and
+    copies at the WebSocket API boundary.
     Keyed by physical equality so a fresh broadcast invalidates it. *)
-let bytes_cache : (string * Bytes.t) Atomic.t =
-  Atomic.make ("", Bytes.empty)
+let bigstring_cache : (string * Bigstringaf.t) Atomic.t =
+  Atomic.make ("", Bigstringaf.empty)
 
-let bytes_of_shared_text text =
-  let cached_str, cached_bytes = Atomic.get bytes_cache in
+let bigstring_of_shared_text text =
+  let cached_str, cached_payload = Atomic.get bigstring_cache in
   if cached_str == text then begin
     Transport_metrics.inc_ws_bytes_cache_hit ();
-    cached_bytes
+    cached_payload
   end
   else begin
     Transport_metrics.inc_ws_bytes_cache_miss ();
-    let bytes = Bytes.of_string (websocket_text_payload text) in
-    Atomic.set bytes_cache (text, bytes);
-    bytes
+    let payload_text = websocket_text_payload text in
+    let payload =
+      Bigstringaf.of_string payload_text ~off:0
+        ~len:(String.length payload_text)
+    in
+    Atomic.set bigstring_cache (text, payload);
+    payload
   end
 
 (** Send a text frame that will also be sent to other sessions in this
-    broadcast.  Allocates [Bytes.of_string text] once per unique string
-    reference; subsequent sessions in the same fanout reuse the bytes. *)
+    broadcast.  Encodes [text] to [Bigstringaf.t] once per unique string
+    reference; subsequent sessions in the same fanout reuse that payload. *)
 let send_text_shared session text =
-  let bytes = bytes_of_shared_text text in
-  send_frame_bytes session bytes ~len:(Bytes.length bytes)
+  let payload = bigstring_of_shared_text text in
+  send_text_bigstring session payload
 
 let send_text_checked ~context session text =
   let sent = send_text session text in
@@ -980,7 +989,7 @@ let send_dashboard_or_raw_sse session sse_event =
         else
           (* Same event string is forwarded verbatim to every session that
              does not match a subscribed dashboard slice; the shared cache
-             collapses N identical [Bytes.of_string] allocations into 1. *)
+             collapses N identical payload encodings into 1. *)
           send_text_shared_checked ~context:"sse-forward" session sse_event
   end
   else begin

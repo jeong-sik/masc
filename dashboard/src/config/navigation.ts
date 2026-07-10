@@ -110,23 +110,25 @@ export interface DashboardSectionNavItem {
   hidden?: boolean
 }
 
+// Order mirrors the 2026-07 keeper-v2 standalone export's rail: 개요 · Keepers ·
+// Monitor · 작업 · 승인 · 예약 · 보드 · Fusion · 로그 · IDE · 커넥터 · 설정.
+// That export restored Monitor to the primary rail and moved Logs before IDE,
+// so the earlier #21525 operator-restored-Logs deviation is now the design
+// itself. Settings stays pinned in the rail footer, so it renders outside the
+// main list even though it closes this set.
 const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'overview',
-  'workspace',
   'keepers',
-  'board',
-  'schedule',
+  'monitoring',
+  'workspace',
   'approvals',
+  'schedule',
+  'board',
   'fusion',
+  'logs',
   'code',
   'connectors',
   'settings',
-  // 'logs' is kept in the primary surface set by operator request. #21525 dropped it
-  // from the desktop side rail (reachable only via Settings/command palette); operators
-  // still want the standalone Logs surface in the rail, so this deviates from the codex
-  // v2 prototype set on purpose. Settings is pinned in the rail footer, so logs renders
-  // as the last regular surface in the main list.
-  'logs',
 ]
 
 export function isPrimaryDashboardSurface(tabId: TabId): boolean {

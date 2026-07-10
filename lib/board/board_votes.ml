@@ -415,13 +415,10 @@ let quarantine_enabled () =
      in legitimate production traffic, so default the quarantine ON.
      Operators who intentionally want fixture votes loaded (e.g. a
      benchmark replay against a live ledger) can set the env to [0],
-     [false], or [off].  #9921 still tracks the root-cause write path;
-     this change keeps downstream stats honest in the meantime. *)
-  match Sys.getenv_opt "MASC_BOARD_VOTE_QUARANTINE" with
-  | Some v ->
-      let norm = String.lowercase_ascii (String.trim v) in
-      not (String.equal norm "0" || String.equal norm "false" || String.equal norm "off" || String.equal norm "")
-  | None -> true
+     [false], [off], or an empty string.  #9921 still tracks the
+     root-cause write path; this change keeps downstream stats honest
+     in the meantime. *)
+  Safe_ops.get_env_bool_logged "MASC_BOARD_VOTE_QUARANTINE" ~default:true
 
 let load_persisted_votes store =
   let path = vote_log_path () in

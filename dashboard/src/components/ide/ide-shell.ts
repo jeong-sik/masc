@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { ConnectionStatus } from '../dashboard-shell'
 import { useSignalValue, useSubscribedSnapshot, useSubscribedValue } from './use-signal-value'
 import {
   activeIdeFile,
@@ -13,6 +12,7 @@ import { getIdeDataWorkspaceStore } from './ide-workspace-singleton'
 import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
+import { IdeAnnotationComposer } from './ide-annotation-composer'
 import { IdeConversationRail } from './ide-conversation-rail'
 import { IdeActivityPanel } from './ide-activity-panel'
 import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
@@ -40,7 +40,9 @@ import {
   type KeeperCursorOverlay,
   type KeeperCursorStreamState,
 } from './keeper-cursor-overlay'
-import { lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
+import { lspStatusSnapshot, type LspStatusSnapshot, type SelectedAnnotation } from './ide-lsp-client'
+import { deleteIdeAnnotation, type IdeAnnotationDeleteOutcome } from '../../api/ide'
+import { showToast } from '../common/toast'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -64,6 +66,12 @@ type IdeFocus = 'review'
 type IdeRightRailTab = 'context' | 'activity' | 'cursors'
 type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok' | 'warn'
 type IdeConnectionTone = 'ok' | 'warn'
+
+interface IdeRightRailTabDescriptor {
+  readonly id: IdeRightRailTab
+  readonly label: string
+  readonly title: string
+}
 
 export interface IdeStatusbarChip {
   readonly id: string
@@ -104,10 +112,22 @@ const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
   'split-diff': 'SPLIT DIFF',
   blame: 'BLAME',
 }
-const IDE_RIGHT_RAIL_TABS: ReadonlyArray<{ readonly id: IdeRightRailTab; readonly label: string }> = [
-  { id: 'context', label: 'Context' },
-  { id: 'activity', label: 'Activity' },
-  { id: 'cursors', label: 'Cursors' },
+const IDE_RIGHT_RAIL_TABS: ReadonlyArray<IdeRightRailTabDescriptor> = [
+  {
+    id: 'context',
+    label: 'Work Context',
+    title: 'Keeper work, persistence, memory, and chat scoped to the active IDE context',
+  },
+  {
+    id: 'activity',
+    label: 'Run Activity',
+    title: 'Workspace and keeper activity linked to the active file and repository',
+  },
+  {
+    id: 'cursors',
+    label: 'Keeper Cursors',
+    title: 'Live keeper file focus and cursor stream status',
+  },
 ]
 
 export function normalizeIdeTreeWidth(value: unknown): number {
@@ -325,18 +345,18 @@ function disconnectionReasonLabel(): string {
   const bootstrap = devTokenBootstrapStatus.value
 
   if (!hasToken && bootstrap === 'no_endpoint') {
-    return 'runtime · auth required'
+    return 'dashboard · auth required'
   }
   if (!hasToken && bootstrap === 'network') {
-    return 'runtime · server unreachable'
+    return 'dashboard · server unreachable'
   }
   if (!hasToken && bootstrap === 'fetching') {
-    return 'runtime · bootstrapping...'
+    return 'dashboard · bootstrapping...'
   }
   if (!hasToken) {
-    return 'runtime · no token'
+    return 'dashboard · no token'
   }
-  return 'runtime · reconnecting'
+  return 'dashboard · reconnecting'
 }
 
 function statusbarLayerLabel(activeLayers: ReadonlySet<string>): string | null {
@@ -548,10 +568,30 @@ export function deriveIdeStatusbarModel({
     workspaceBasePath,
     chips,
     connectionLabel: dashboardConnected
-      ? 'runtime · live'
+      ? 'dashboard · live'
       : disconnectionReasonLabel(),
     connectionTone: dashboardConnected ? 'ok' : 'warn',
   }
+}
+
+function IdeDashboardConnectionChip({
+  label,
+  tone,
+}: {
+  readonly label: string
+  readonly tone: IdeConnectionTone
+}) {
+  const title = tone === 'ok'
+    ? 'Dashboard event transport is live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
+    : 'Dashboard event transport is not live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
+  return html`
+    <span
+      class=${`chip sm is-${tone}`}
+      data-testid="ide-dashboard-connection"
+      title=${title}
+      aria-label=${`${label}; ${title}`}
+    >${label}</span>
+  `
 }
 
 function paramsWithLayers(
@@ -1053,6 +1093,41 @@ export function IdeShell() {
     navigate('code', nextParams)
   }
 
+  // Annotation deletion (#23471 FE follow-up). Mirrors the composer's
+  // contract: mutations need a repo scope (keeper_lane is read-only) and
+  // ownership is decided server-side from the token identity, so the
+  // handler translates each outcome into a toast instead of pre-judging
+  // deletability in the FE.
+  const handleAnnotationDelete = async (
+    annotation: SelectedAnnotation,
+  ): Promise<IdeAnnotationDeleteOutcome> => {
+    const repoId = workspaceStore.activeRepositoryId()
+    if (repoId === null) {
+      showToast('주석 삭제에는 repo 선택이 필요합니다 (keeper_lane scope는 read-only)', 'error')
+      return 'error'
+    }
+    const outcome = await deleteIdeAnnotation(annotation.id, { repoId })
+    switch (outcome) {
+      case 'deleted':
+        showToast(`주석 삭제됨: ${annotation.file_path}:${annotation.line_start}`, 'success')
+        workspaceStore.refresh()
+        break
+      case 'rejected':
+        showToast('주석 삭제 거부 — 본인이 작성한 주석이 아니거나 이미 삭제된 주석입니다', 'error')
+        break
+      case 'forbidden':
+        showToast('주석 삭제 권한 없음 — 토큰에 쓰기 권한(CanBroadcast tier)이 필요합니다', 'error')
+        break
+      case 'unauthorized':
+        showToast('인증 실패 — 대시보드 토큰이 없거나 만료되었습니다', 'error')
+        break
+      case 'error':
+        showToast('주석 삭제 실패 — 서버/네트워크 오류', 'error')
+        break
+    }
+    return outcome
+  }
+
   const handleFindOpen = () => {
     navigate('code', {
       ...route.value.params,
@@ -1162,7 +1237,10 @@ export function IdeShell() {
             `)}
           </div>
           <${IdePresenceStrip} />
-          <${ConnectionStatus} />
+          <${IdeDashboardConnectionChip}
+            label=${statusbar.connectionLabel}
+            tone=${statusbar.connectionTone}
+          />
         </header>
         <${IdeToolbar}
           activeView=${activeView}
@@ -1210,6 +1288,12 @@ export function IdeShell() {
         <div
           class="ide-plane-editor ide-v2-editor v2-ide-panel"
         >
+          <${IdeAnnotationComposer}
+            documentStore=${workspaceStore.documentStore}
+            activeRepositoryId=${workspaceStore.activeRepositoryId}
+            subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
+            refresh=${workspaceStore.refresh}
+          />
           <${IdeEditor}
             activeView=${activeView}
             activeLayers=${activeLayers}
@@ -1221,6 +1305,7 @@ export function IdeShell() {
             onFindClose=${handleFindClose}
             onKeeperLineSelect=${pinKeeper}
             annotations=${annotations}
+            onAnnotationDelete=${handleAnnotationDelete}
           />
           <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
         </div>
@@ -1238,6 +1323,8 @@ export function IdeShell() {
                     type="button"
                     role="tab"
                     aria-selected=${rightRailTab === tab.id ? 'true' : 'false'}
+                    aria-label=${tab.title}
+                    title=${tab.title}
                     class=${`ide-v2-rail-tab ide-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
                     onClick=${() => setRightRailTab(tab.id)}
                   >${tab.label}</button>
@@ -1265,6 +1352,7 @@ export function IdeShell() {
                     <${IdeActivityPanel}
                       activeFile=${activeFilePath}
                       repoId=${activeRepositoryId}
+                      keeperLane=${terminalKeeper}
                       annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}

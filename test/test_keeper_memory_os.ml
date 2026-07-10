@@ -2340,7 +2340,7 @@ let test_gc_waits_for_fact_writer_lock () =
           Memory_io.merge_and_cap_facts
             ~now
             ~keeper_id
-            ~merge:(Policy.reobserve_fact ~now)
+            ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
             ~incoming:[ fresh ]
             ~keep:Policy.fact_recall_window
             ~trigger:fact_store_trigger
@@ -2658,7 +2658,7 @@ let test_recall_scans_whole_bounded_store () =
           Memory_io.merge_and_cap_facts
             ~now
             ~keeper_id
-            ~merge:(Policy.reobserve_fact ~now)
+            ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
             ~incoming:(head :: cap_fillers)
             ~keep:Policy.fact_recall_window
             ~trigger:Policy.fact_store_max
@@ -3057,6 +3057,54 @@ let test_partition_expired_splits_on_valid_until () =
     (List.map (fun f -> f.Types.claim) gone)
 ;;
 
+let test_gc_ttl_expired_uses_external_state_effective_horizon () =
+  let now = 1_000_000.0 in
+  let base = fact_fixture ~now () in
+  let expired_external =
+    { base with
+      Types.claim = "legacy external state expired"
+    ; Types.claim_kind = Some Types.External_state
+    ; Types.first_seen = now -. Types.external_state_ttl_seconds -. 1.0
+    ; Types.valid_until = None
+    }
+  in
+  let current_external =
+    { expired_external with
+      Types.claim = "legacy external state current"
+    ; Types.first_seen = now -. Types.external_state_ttl_seconds +. 1.0
+    }
+  in
+  let durable =
+    { expired_external with
+      Types.claim = "durable legacy row"
+    ; Types.claim_kind = None
+    }
+  in
+  Alcotest.(check bool)
+    "GC expires legacy external_state via effective horizon"
+    true
+    (GC.ttl_expired ~now expired_external);
+  Alcotest.(check bool)
+    "GC keeps current legacy external_state"
+    false
+    (GC.ttl_expired ~now current_external);
+  Alcotest.(check bool)
+    "GC keeps durable no-horizon fact"
+    false
+    (GC.ttl_expired ~now durable);
+  let live, gone =
+    Types.partition_expired ~now [ expired_external; current_external; durable ]
+  in
+  Alcotest.(check (list string))
+    "partition_expired shares GC effective horizon"
+    [ "legacy external state expired" ]
+    (List.map (fun f -> f.Types.claim) gone);
+  Alcotest.(check (list string))
+    "live keeps current external + durable"
+    [ "legacy external state current"; "durable legacy row" ]
+    (List.map (fun f -> f.Types.claim) live)
+;;
+
 (* RFC-0259 §3.6 (P5): cap_facts evicts an expired row even when the store is far
    below [trigger] (the disk-leak the off-by-default GC sweep would otherwise
    miss), and never evicts a durable row. Re-running is a no-op once clean. *)
@@ -3117,7 +3165,7 @@ let test_merge_and_cap_drops_expired_no_incoming () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[]
         ~keep:Policy.fact_recall_window
         ~trigger:Policy.fact_store_max
@@ -3441,7 +3489,7 @@ let test_reobserve_fact_refreshes_truth_anchor () =
     }
   in
   let incoming = { existing with Types.last_verified_at = Some now } in
-  let merged = Policy.reobserve_fact ~now ~existing ~incoming in
+  let merged = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (option (float 1e-9)))
     "last_verified_at refreshed to now"
     (Some now)
@@ -3477,7 +3525,7 @@ let test_merge_and_cap_upserts_reobserved_claim () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ reobserved ]
         ~keep:Policy.fact_recall_window
         ~trigger:Policy.fact_store_max
@@ -3514,7 +3562,7 @@ let test_merge_and_cap_appends_distinct_and_caps () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ mk 1; mk 2; mk 3 ]
         ~keep:2
         ~trigger:2
@@ -3765,6 +3813,38 @@ let test_consolidator_stale_peer_does_not_satisfy_min_keepers () =
     "one current keeper plus one stale peer is still below min_keepers"
     0
     (List.length shared)
+;;
+
+(* A fact with no valid_until but an old last_verified_at is stale and must be
+   excluded from the representative and observed_by set. *)
+let test_consolidator_filters_stale_without_valid_until () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "no-valid-until-stale" in
+  let stale =
+    { (mk_shared_fixture ~now ~category:"lesson" "stale no valid_until") with
+      Types.first_seen = 1.0
+    ; Types.last_verified_at = Some (now -. (Policy.max_consensus_staleness +. 1.0))
+    ; Types.claim_id = claim_id
+    }
+  in
+  let fresh =
+    { (mk_shared_fixture ~now ~category:"lesson" "fresh no valid_until") with
+      Types.first_seen = now -. 1.0
+    ; Types.last_verified_at = Some (now -. 1.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let promoted =
+    promote_one ~now [ "stale", [ stale ]; "fresh", [ fresh ] ]
+  in
+  Alcotest.(check string)
+    "representative excludes stale contributor without valid_until"
+    "fresh no valid_until"
+    promoted.Types.claim;
+  Alcotest.(check (list string))
+    "observed_by excludes stale contributor without valid_until"
+    [ "fresh" ]
+    promoted.Types.observed_by
 ;;
 
 (* A claim held by a single keeper is never shared (below min_keepers). *)
@@ -4433,7 +4513,7 @@ let test_self_observation_horizon_and_remint () =
      row entirely, so the horizon is not pushed past the original anchor. *)
   let later = now +. 1_800.0 in
   let incoming = mk_self ~first_seen:later () in
-  let merged = Policy.reobserve_fact ~now:later ~existing ~incoming in
+  let merged = Policy.reobserve_fact ~now:later ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (option (float 0.001)))
     "re-mint does not extend the self-observation horizon past the first anchor"
     existing.Types.valid_until
@@ -4840,7 +4920,7 @@ let test_merge_and_cap_upserts_same_claim_id () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ reworded ]
         ~keep:Policy.fact_recall_window
         ~trigger:Policy.fact_store_max
@@ -4890,7 +4970,7 @@ let test_merge_and_cap_no_over_merge_distinct_conclusions () =
       Memory_io.merge_and_cap_facts
         ~now
         ~keeper_id
-        ~merge:(Policy.reobserve_fact ~now)
+        ~merge:(Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation)
         ~incoming:[ merged ]
         ~keep:Policy.fact_recall_window
         ~trigger:Policy.fact_store_max
@@ -4915,7 +4995,7 @@ let test_reobserve_advances_durable_anchor () =
     }
   in
   let incoming = { existing with Types.last_verified_at = Some now } in
-  let reobserved = Policy.reobserve_fact ~now ~existing ~incoming in
+  let reobserved = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (option (float 1e-9)))
     "durable claim's last_verified_at advances to now"
     (Some now)
@@ -4956,7 +5036,7 @@ let test_reobserve_external_ref_refreshes_like_context () =
   in
   (* incoming is a reworded re-extraction of the same referent claim *)
   let incoming = { existing with Types.claim = "pull request #42 remains open" } in
-  let reobserved = Policy.reobserve_fact ~now ~existing ~incoming in
+  let reobserved = Policy.reobserve_fact ~now ~provenance:Policy.Independent_observation ~existing ~incoming in
   Alcotest.(check (float 0.001))
     "first_seen inherited (not advanced to now)"
     older
@@ -5304,6 +5384,7 @@ let expected_compaction_snapshot_event_class = function
   | Runtime_manifest.Turn_started
   | Runtime_manifest.Phase_gate_decided
   | Runtime_manifest.Runtime_routed
+  | Runtime_manifest.Runtime_execution_built
   | Runtime_manifest.Runtime_completed
   | Runtime_manifest.Runtime_failed
   | Runtime_manifest.Pre_dispatch_blocked
@@ -5988,6 +6069,10 @@ let () =
             `Quick
             test_partition_expired_splits_on_valid_until
         ; Alcotest.test_case
+            "GC ttl_expired uses external_state effective horizon"
+            `Quick
+            test_gc_ttl_expired_uses_external_state_effective_horizon
+        ; Alcotest.test_case
             "cap_facts drops expired below trigger (RFC-0259 P5)"
             `Quick
             test_cap_drops_expired_below_trigger
@@ -6049,6 +6134,10 @@ let () =
             "stale peer does not satisfy min_keepers"
             `Quick
             test_consolidator_stale_peer_does_not_satisfy_min_keepers
+        ; Alcotest.test_case
+            "stale fact without valid_until is filtered"
+            `Quick
+            test_consolidator_filters_stale_without_valid_until
         ; Alcotest.test_case
             "solo claim not promoted"
             `Quick

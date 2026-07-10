@@ -99,7 +99,23 @@ let keeper_registered_repo_path_allowed ?keeper_id ?base_path path =
       | Keeper_repo_mapping.Repository_identity_mismatch _
       | Keeper_repo_mapping.Repository_store_error _ ->
           false
-      | Keeper_repo_mapping.Repository repository_id -> (
+      | Keeper_repo_mapping.Repository
+          { repository_id = _; repo_root = Some repo_root } ->
+          (* RFC-0324 B-2': inside a keeper playground [repos/<segment>] lane
+             the filesystem is the repo truth — the Execute gate asks whether
+             the clone actually exists, not whether its segment is in the
+             repositories.toml catalog (catalog ids and clone directory names
+             have no invariant linking them, so catalog membership blocked
+             real clones; 379 path errors/24h in the 2026-07-08 audit). The
+             playground boundary is unchanged: [repo_root] is a prefix of the
+             already symlink-resolved candidate path, so paths outside the
+             playground never reach this arm. Fail-closed: a missing or
+             unstatable directory rejects. *)
+          (try Sys.is_directory repo_root with Sys_error _ -> false)
+      | Keeper_repo_mapping.Repository { repository_id; repo_root = None } -> (
+          (* Non-playground path that resolved via a catalog repo's
+             local_path prefix — the catalog stays the authority there
+             (RFC-0324 keeps catalog authz for non-playground consumers). *)
           match
             Keeper_repo_mapping.validate_access ~keeper_id ~repository_id
               ~base_path

@@ -114,7 +114,7 @@ let clean_evidence_refs refs =
 (* Typed concat for the verifier request output (observability only).
    Phase E (RFC-0109 closeout) replaced the substring-classifier filter
    with placeholder-only filtering. Gating decisions belong to
-   [Cdal_evidence_gate]. *)
+   [Task_completion_gate]. *)
 let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
     ?submitted_evidence_refs
     (task : Masc_domain.task) =

@@ -19,6 +19,7 @@ type slot_snapshot =
   ; snapshot_slot_created : bool
   ; snapshot_in_flight : in_flight_info option
   ; snapshot_waiting : int
+  ; snapshot_waiting_since : float option
   ; snapshot_waiting_cap : int
   ; snapshot_waiting_full : bool
   ; snapshot_rejected_chat_count : int
@@ -59,6 +60,8 @@ type slot =
        non-cooperative mutex is the right choice here. *)
   ; mutable info : in_flight_info option
   ; mutable waiting : int
+  ; mutable waiting_entries : (int * float) list
+  ; mutable next_waiter_id : int
   ; mutable rejected_chat_count : int
   }
 
@@ -82,6 +85,8 @@ let slot_for ~base_path ~keeper_name =
         ; state_mu = Stdlib.Mutex.create ()
         ; info = None
         ; waiting = 0
+        ; waiting_entries = []
+        ; next_waiter_id = 0
         ; rejected_chat_count = 0
         }
       in
@@ -112,6 +117,16 @@ let run_locked slot ~lane f =
 
 let waiting_count slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting)
 
+let oldest_waiting_since entries =
+  List.fold_left
+    (fun oldest (_waiter_id, since) ->
+       match oldest with
+       | None -> Some since
+       | Some current -> Some (min current since))
+    None
+    entries
+;;
+
 let rejected_snapshot slot =
   Stdlib.Mutex.protect slot.state_mu (fun () ->
     slot.rejected_chat_count <- slot.rejected_chat_count + 1;
@@ -120,12 +135,22 @@ let rejected_snapshot slot =
 
 let run_if_free ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
-  (* Yield to a parked chat before touching the lock. [waiting > 0] implies
+  (* Yield to deferred work before touching the lock. [waiting > 0] implies
      the slot is held (a waiter only parks because a turn is in flight), so
      [try_lock] would fail here anyway; the explicit check keeps the
-     autonomous lane from competing for a slot a dashboard/connector message
-     is already queued on and documents the intent at the entry point. *)
+     autonomous lane from competing for a slot a parked chat is already
+     queued on. A non-empty [Keeper_chat_queue] means a busy connector
+     (Slack/Discord) or dashboard message is deferred for this keeper but
+     has not parked on the slot; the autonomous lane must yield for it too,
+     otherwise a long or back-to-back autonomous turn starves that queue
+     indefinitely (the busy-ACK loop). Reading the queue length is a
+     lock-only, non-suspending peek and is the SSOT signal that closes the
+     gap: the autonomous lane cooperates on the same backlog the consumer
+     drains, so the consumer's [in_flight = None] window opens
+     deterministically instead of racing the next autonomous cycle. *)
   if waiting_count slot > 0
+  then `Busy (peek_info slot)
+  else if Keeper_chat_queue.length ~keeper_name > 0
   then `Busy (peek_info slot)
   else if Eio.Mutex.try_lock slot.turn_mu
   then run_locked slot ~lane:Autonomous f
@@ -134,17 +159,21 @@ let run_if_free ~base_path ~keeper_name f =
 
 let run_serialized ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
-  let may_wait =
+  let waiter_id =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
       if slot.waiting >= max_waiting_chat_requests
-      then false
+      then None
       else (
+        let waiter_id = slot.next_waiter_id in
+        slot.next_waiter_id <- slot.next_waiter_id + 1;
+        (* NDT-OK: waiter age timestamp for observability only. *)
+        slot.waiting_entries <- (waiter_id, Unix.gettimeofday ()) :: slot.waiting_entries;
         slot.waiting <- slot.waiting + 1;
-        true))
+        Some waiter_id))
   in
-  if not may_wait
-  then `Rejected (rejected_snapshot slot)
-  else (
+  match waiter_id with
+  | None -> `Rejected (rejected_snapshot slot)
+  | Some waiter_id ->
     (* [Fun.protect] rather than [Switch.on_release]: there is no ambient
        switch here, the finally never raises and never yields, and the only
        suspension point it covers is the cancellable [Eio.Mutex.lock] wait
@@ -152,9 +181,14 @@ let run_serialized ~base_path ~keeper_name f =
        counting as waiting once it holds the slot. *)
     Fun.protect
       ~finally:(fun () ->
-        Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting <- slot.waiting - 1))
+        Stdlib.Mutex.protect slot.state_mu (fun () ->
+          slot.waiting <- max 0 (slot.waiting - 1);
+          slot.waiting_entries
+          <- List.filter
+               (fun (entry_waiter_id, _since) -> entry_waiter_id <> waiter_id)
+               slot.waiting_entries))
       (fun () -> Eio.Mutex.lock slot.turn_mu);
-    run_locked slot ~lane:Chat f)
+    run_locked slot ~lane:Chat f
 ;;
 
 let rejection_snapshot slot =
@@ -185,11 +219,21 @@ let chat_waiting ~base_path ~keeper_name =
   | Some slot -> waiting_count slot > 0
 ;;
 
+let chat_waiting_since ~base_path ~keeper_name =
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
+  | None -> None
+  | Some slot ->
+    Stdlib.Mutex.protect slot.state_mu (fun () ->
+      oldest_waiting_since slot.waiting_entries)
+;;
+
 let zero_snapshot ~keeper_name =
   { snapshot_keeper_name = keeper_name
   ; snapshot_slot_created = false
   ; snapshot_in_flight = None
   ; snapshot_waiting = 0
+  ; snapshot_waiting_since = None
   ; snapshot_waiting_cap = max_waiting_chat_requests
   ; snapshot_waiting_full = false
   ; snapshot_rejected_chat_count = 0
@@ -202,6 +246,7 @@ let snapshot_of_slot slot =
     ; snapshot_slot_created = true
     ; snapshot_in_flight = slot.info
     ; snapshot_waiting = slot.waiting
+    ; snapshot_waiting_since = oldest_waiting_since slot.waiting_entries
     ; snapshot_waiting_cap = max_waiting_chat_requests
     ; snapshot_waiting_full = slot.waiting >= max_waiting_chat_requests
     ; snapshot_rejected_chat_count = slot.rejected_chat_count

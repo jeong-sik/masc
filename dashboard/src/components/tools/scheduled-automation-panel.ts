@@ -5,7 +5,11 @@ import {
   type DashboardScheduleDecision,
   type DashboardScheduledAutomationActor,
   type DashboardScheduledAutomation,
+  type DashboardScheduledAutomationDispatchReceipt,
+  type DashboardScheduledAutomationKeeperReactionEvidence,
+  type DashboardScheduledAutomationKeeperQueueEvidence,
   type DashboardScheduledAutomationExecution,
+  type DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
   type DashboardScheduledAutomationRequest,
   type DashboardScheduledAutomationSignal,
 } from '../../api'
@@ -73,7 +77,7 @@ export function scheduledPendingApprovalCount(
   return Math.max(fromCounts, fromRequests)
 }
 
-function automationTone(status: string | null | undefined): StatusChipTone {
+export function automationTone(status: string | null | undefined): StatusChipTone {
   switch (normalized(status)) {
     case 'running':
     case 'scheduled':
@@ -161,7 +165,7 @@ function CountChip({ name, count }: { name: string; count: number }) {
   `
 }
 
-function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
+export function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
   if (request.recurrence_summary?.trim()) return request.recurrence_summary
   const recurrence = request.recurrence
   const kind = recurrence?.kind ?? request.recurrence_kind ?? 'one_shot'
@@ -393,6 +397,322 @@ function executionDetailRows(detail: unknown): Array<{ label: string; value: str
     }))
     .filter((row): row is { label: string; value: string } => Boolean(row.label && row.value))
     .slice(0, 6)
+}
+
+function dispatchReceiptTone(
+  receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined,
+): StatusChipTone {
+  if (!receipt) return 'neutral'
+  return receipt.projection_status === 'recognized' ? 'ok' : 'warn'
+}
+
+function dispatchReceiptRows(
+  receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!receipt) return []
+  const rows: Array<{ label: string; value: string | null | undefined }> = [
+    { label: 'kind', value: receipt.kind },
+    { label: 'queue', value: receipt.queue },
+    { label: 'stimulus', value: receipt.stimulus },
+    { label: 'stimulus_id', value: receipt.stimulus_id },
+    { label: 'reaction_ledger_status', value: receipt.reaction_ledger_status },
+    { label: 'reaction_ledger_error', value: receipt.reaction_ledger_error },
+    { label: 'keeper', value: receipt.keeper_name },
+    { label: 'schedule', value: receipt.schedule_id },
+    { label: 'urgency', value: receipt.urgency },
+    { label: 'post_id', value: receipt.post_id },
+    { label: 'author', value: receipt.author },
+    { label: 'hearth', value: receipt.hearth },
+    { label: 'reason', value: receipt.reason },
+  ]
+  return rows.filter((row): row is { label: string; value: string } => {
+    return typeof row.value === 'string' && row.value.trim() !== ''
+  })
+}
+
+function DispatchReceiptBlock({
+  receipt,
+  compact = false,
+}: {
+  receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
+  compact?: boolean
+}) {
+  if (!receipt) return null
+  const rows = dispatchReceiptRows(receipt)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-dispatch-receipt=${receipt.projection_status}
+      data-schedule-dispatch-receipt-kind=${receipt.kind ?? ''}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">dispatch_receipt</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">dispatch receipt</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${dispatchReceiptTone(receipt)} uppercase=${false}>
+            ${enumLabel(receipt.projection_status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2'} data-dispatch-receipt-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function queueEvidenceTone(
+  evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined,
+): StatusChipTone {
+  if (!evidence) return 'neutral'
+  if (evidence.projection_status === 'matched_pending' || evidence.projection_status === 'matched_inflight') return 'ok'
+  if (evidence.projection_status === 'not_found' || evidence.projection_status === 'read_error') return 'warn'
+  return 'bad'
+}
+
+function queueEvidenceRows(
+  evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!evidence) return []
+  const readErrors = (evidence.read_errors ?? [])
+    .map(error => [error.kind, error.path, error.message].filter(Boolean).join(': '))
+    .filter(value => value.trim() !== '')
+    .join(' | ')
+  const rows: Array<{ label: string; value: string | number | null | undefined }> = [
+    { label: 'source', value: evidence.source },
+    { label: 'queue', value: evidence.queue },
+    { label: 'stimulus', value: evidence.stimulus },
+    { label: 'keeper', value: evidence.keeper_name },
+    { label: 'schedule', value: evidence.schedule_id },
+    { label: 'post_id', value: evidence.post_id },
+    { label: 'pending_count', value: evidence.pending_count },
+    { label: 'inflight_count', value: evidence.inflight_count },
+    { label: 'matched_bucket', value: evidence.matched_bucket },
+    { label: 'matched_payload_kind', value: evidence.matched_payload_kind },
+    { label: 'matched_post_id', value: evidence.matched_post_id },
+    { label: 'matched_schedule_id', value: evidence.matched_schedule_id },
+    { label: 'matched_arrived_at', value: evidence.matched_arrived_at_iso },
+    { label: 'matched_age_seconds', value: evidence.matched_age_seconds },
+    { label: 'read_errors', value: readErrors },
+    { label: 'reason', value: evidence.reason },
+  ]
+  return rows
+    .map(row => ({ label: row.label, value: row.value == null ? '' : String(row.value) }))
+    .filter(row => row.value.trim() !== '')
+}
+
+function QueueEvidenceBlock({
+  evidence,
+  compact = false,
+}: {
+  evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+  compact?: boolean
+}) {
+  if (!evidence) return null
+  const rows = queueEvidenceRows(evidence)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-keeper-queue-evidence=${evidence.projection_status}
+      data-schedule-keeper-queue-evidence-source=${evidence.source ?? ''}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">keeper_queue_evidence</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">keeper queue evidence</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${queueEvidenceTone(evidence)} uppercase=${false}>
+            ${enumLabel(evidence.projection_status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2'} data-keeper-queue-evidence-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function reactionEvidenceTone(
+  evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
+): StatusChipTone {
+  if (!evidence) return 'neutral'
+  if (
+    evidence.projection_status === 'matched_consumed_ack' ||
+    evidence.projection_status === 'matched_turn_started'
+  ) return 'ok'
+  if (
+    evidence.projection_status === 'matched_stimulus' ||
+    evidence.projection_status === 'not_found' ||
+    evidence.projection_status === 'missing_stimulus_id'
+  ) return 'warn'
+  return 'bad'
+}
+
+function reactionEvidenceRows(
+  evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!evidence) return []
+  const rows: Array<{ label: string; value: string | number | boolean | null | undefined }> = [
+    { label: 'source', value: evidence.source },
+    { label: 'keeper', value: evidence.keeper_name },
+    { label: 'schedule', value: evidence.schedule_id },
+    { label: 'post_id', value: evidence.post_id },
+    { label: 'stimulus', value: evidence.stimulus },
+    { label: 'stimulus_id', value: evidence.stimulus_id },
+    { label: 'stimulus_kind', value: evidence.stimulus_kind },
+    { label: 'reaction_kind', value: evidence.reaction_kind },
+    { label: 'stimulus_seen', value: evidence.stimulus_seen },
+    { label: 'turn_started_seen', value: evidence.turn_started_seen },
+    { label: 'event_queue_ack_seen', value: evidence.event_queue_ack_seen },
+    { label: 'matched_record_count', value: evidence.matched_record_count },
+    { label: 'stimulus_recorded_at', value: evidence.stimulus_recorded_at_iso },
+    { label: 'turn_started_recorded_at', value: evidence.turn_started_recorded_at_iso },
+    { label: 'event_queue_ack_recorded_at', value: evidence.event_queue_ack_recorded_at_iso },
+    { label: 'latest_recorded_at', value: evidence.latest_recorded_at_iso },
+    { label: 'reason', value: evidence.reason },
+  ]
+  return rows
+    .map(row => ({ label: row.label, value: row.value == null ? '' : String(row.value) }))
+    .filter(row => row.value.trim() !== '')
+}
+
+function ReactionEvidenceBlock({
+  evidence,
+  compact = false,
+}: {
+  evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
+  compact?: boolean
+}) {
+  if (!evidence) return null
+  const rows = reactionEvidenceRows(evidence)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-keeper-reaction-evidence=${evidence.projection_status}
+      data-schedule-keeper-reaction-evidence-source=${evidence.source ?? ''}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">keeper_reaction_evidence</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">keeper reaction evidence</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${reactionEvidenceTone(evidence)} uppercase=${false}>
+            ${enumLabel(evidence.projection_status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[8.5rem_minmax(0,1fr)] gap-2'} data-keeper-reaction-evidence-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function wakeEvidenceStatus(value: { projection_status?: string | null } | null | undefined): string {
+  const status = value?.projection_status?.trim()
+  return status && status.length > 0 ? status : 'missing'
+}
+
+function wakeEvidenceTone(
+  value: { projection_status?: string | null } | null | undefined,
+  tone: StatusChipTone,
+): StatusChipTone {
+  return value ? tone : 'warn'
+}
+
+function isKeeperWakePayload(request: DashboardScheduledAutomationRequest): boolean {
+  return request.payload_kind === 'masc.keeper_wake'
+}
+
+function hasWakeEvidenceSummary(request: DashboardScheduledAutomationRequest): boolean {
+  return isKeeperWakePayload(request) ||
+    request.dispatch_receipt != null ||
+    request.keeper_queue_evidence != null ||
+    request.keeper_reaction_evidence != null
+}
+
+function wakeEvidenceJoinKey(request: DashboardScheduledAutomationRequest): string | null {
+  const candidates = [
+    request.dispatch_receipt?.post_id,
+    request.keeper_queue_evidence?.post_id,
+    request.keeper_reaction_evidence?.post_id,
+    request.dispatch_receipt?.stimulus_id,
+    request.keeper_reaction_evidence?.stimulus_id,
+  ]
+  for (const candidate of candidates) {
+    const value = candidate?.trim()
+    if (value) return value
+  }
+  return null
+}
+
+function WakeEvidenceSummary({ request }: { request: DashboardScheduledAutomationRequest }) {
+  if (!hasWakeEvidenceSummary(request)) return null
+  const receiptStatus = wakeEvidenceStatus(request.dispatch_receipt)
+  const queueStatus = wakeEvidenceStatus(request.keeper_queue_evidence)
+  const reactionStatus = wakeEvidenceStatus(request.keeper_reaction_evidence)
+  const joinKey = wakeEvidenceJoinKey(request)
+  const items: ReadonlyArray<{
+    key: string
+    label: string
+    status: string
+    tone: StatusChipTone
+  }> = [
+    {
+      key: 'receipt',
+      label: 'receipt',
+      status: receiptStatus,
+      tone: wakeEvidenceTone(request.dispatch_receipt, dispatchReceiptTone(request.dispatch_receipt)),
+    },
+    {
+      key: 'queue',
+      label: 'queue',
+      status: queueStatus,
+      tone: wakeEvidenceTone(request.keeper_queue_evidence, queueEvidenceTone(request.keeper_queue_evidence)),
+    },
+    {
+      key: 'reaction',
+      label: 'reaction',
+      status: reactionStatus,
+      tone: wakeEvidenceTone(request.keeper_reaction_evidence, reactionEvidenceTone(request.keeper_reaction_evidence)),
+    },
+  ]
+  return html`
+    <div
+      class="sch-wake-evidence"
+      data-schedule-wake-evidence-summary=${request.schedule_id}
+      data-schedule-wake-evidence-receipt=${receiptStatus}
+      data-schedule-wake-evidence-queue=${queueStatus}
+      data-schedule-wake-evidence-reaction=${reactionStatus}
+    >
+      <span class="sch-wake-title">wake evidence</span>
+      ${items.map(item => html`
+        <span class="sch-wake-item" data-schedule-wake-evidence-item=${item.key}>
+          ${item.label} <${StatusChip} tone=${item.tone} uppercase=${false}>${enumLabel(item.status)}<//>
+        </span>
+      `)}
+      ${joinKey
+        ? html`<span class="sch-wake-join mono" title=${joinKey}>post ${joinKey}</span>`
+        : null}
+    </div>
+  `
 }
 
 function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest }) {
@@ -654,7 +974,17 @@ function ScheduleCard({
   `
 }
 
-function LastExecutionBlock({ execution }: { execution: DashboardScheduledAutomationExecution | null | undefined }) {
+function LastExecutionBlock({
+  execution,
+  dispatchReceipt,
+  queueEvidence,
+  reactionEvidence,
+}: {
+  execution: DashboardScheduledAutomationExecution | null | undefined
+  dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
+  queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+  reactionEvidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
+}) {
   if (!execution) {
     return html`<div class="mt-1 text-xs text-[var(--color-fg-muted)]">-</div>`
   }
@@ -693,6 +1023,9 @@ function LastExecutionBlock({ execution }: { execution: DashboardScheduledAutoma
             </div>
           `
         : null}
+      <${DispatchReceiptBlock} receipt=${dispatchReceipt} />
+      <${QueueEvidenceBlock} evidence=${queueEvidence} />
+      <${ReactionEvidenceBlock} evidence=${reactionEvidence} />
     </div>
   `
 }
@@ -781,7 +1114,12 @@ function ScheduleDetailPanel({
         </div>
         <div>
           <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">최근 실행</div>
-          <${LastExecutionBlock} execution=${execution} />
+          <${LastExecutionBlock}
+            execution=${execution}
+            dispatchReceipt=${request.dispatch_receipt ?? null}
+            queueEvidence=${request.keeper_queue_evidence ?? null}
+            reactionEvidence=${request.keeper_reaction_evidence ?? null}
+          />
         </div>
       </div>
     </section>
@@ -1110,6 +1448,211 @@ function SchPayloadSupportBanner({
   `
 }
 
+type LiveSupportedEvidenceStatus =
+  DashboardScheduledAutomationLiveSupportedNonTerminalEvidence['projection_status']
+
+function liveSupportedEvidenceLabel(status: LiveSupportedEvidenceStatus): string {
+  switch (status) {
+    case 'matched_supported_non_terminal':
+      return 'matched supported non-terminal'
+    case 'no_supported_payload_rows':
+      return 'no supported payload rows'
+    case 'no_supported_non_terminal':
+      return 'no supported non-terminal'
+    default:
+      return assertNever(status)
+  }
+}
+
+function liveSupportedEvidenceBannerClass(status: LiveSupportedEvidenceStatus): string {
+  switch (status) {
+    case 'matched_supported_non_terminal':
+      return 'approve'
+    case 'no_supported_payload_rows':
+      return 'payload bad'
+    case 'no_supported_non_terminal':
+      return 'payload warn'
+    default:
+      return assertNever(status)
+  }
+}
+
+type LiveSupportedMatchedRowIntegrity =
+  | { status: 'not_applicable' }
+  | { status: 'matched_rows_verified'; matchedCount: number }
+  | {
+      status: 'matched_row_mismatch'
+      mismatches: Array<{ scheduleId: string; reason: string }>
+    }
+
+function liveSupportedReadinessIsTerminalOrExpired(readiness: string | null | undefined): boolean {
+  return readiness === 'terminal' || readiness === 'expired'
+}
+
+function liveSupportedMatchedRowIntegrity(
+  evidence: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
+  requests: DashboardScheduledAutomationRequest[],
+): LiveSupportedMatchedRowIntegrity {
+  if (evidence.projection_status !== 'matched_supported_non_terminal') {
+    return { status: 'not_applicable' }
+  }
+
+  const rowByScheduleId = new Map(requests.map(request => [request.schedule_id, request]))
+  const matchedIds = evidence.matched_schedule_ids ?? []
+  const mismatches =
+    matchedIds.length === 0
+      ? [{ scheduleId: '(none)', reason: 'missing_matched_schedule_ids' }]
+      : matchedIds.flatMap(scheduleId => {
+          const row = rowByScheduleId.get(scheduleId)
+          if (!row) {
+            return [{ scheduleId, reason: 'missing_request_row' }]
+          }
+          if (row.payload_support !== 'supported') {
+            return [{ scheduleId, reason: 'payload_support_not_supported' }]
+          }
+          if (liveSupportedReadinessIsTerminalOrExpired(row.execution_readiness)) {
+            return [{ scheduleId, reason: 'execution_readiness_terminal_or_expired' }]
+          }
+          return []
+        })
+
+  if (mismatches.length > 0) {
+    return { status: 'matched_row_mismatch', mismatches }
+  }
+  return { status: 'matched_rows_verified', matchedCount: matchedIds.length }
+}
+
+function SchLiveSupportedEvidence({
+  automation,
+  evidence,
+  onOpen,
+}: {
+  automation: DashboardScheduledAutomation
+  evidence: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence | null | undefined
+  onOpen: (scheduleId: string) => void
+}) {
+  if (!evidence) {
+    const requestCount = automation.request_count ?? automation.requests?.length ?? 0
+    return html`
+      <section
+        class="sch-banner payload warn"
+        data-schedule-live-supported-evidence="projection_contract_missing"
+        data-schedule-live-supported-count="0"
+        data-schedule-live-supported-source=${automation.source ?? 'dashboard_response'}
+        data-schedule-live-supported-schema="missing"
+      >
+        <span class="sch-banner-ico">!</span>
+        <div class="sch-banner-txt">
+          <div>
+            <b>live supported scheduler evidence</b>
+            <span class="mono"> projection contract missing</span>
+          </div>
+          <div class="sch-banner-sub">
+            <span class="mono">live_supported_non_terminal_evidence</span>
+            was absent from the dashboard response; production-base
+            <span class="mono">matched_supported_non_terminal</span> is unproven.
+          </div>
+          <div class="sch-evidence-counts" aria-label="Live supported scheduler contract gap counts">
+            <span class="sch-evidence-count">
+              <span>requests</span>
+              <span class="mono">${requestCount.toLocaleString()}</span>
+            </span>
+            <span class="sch-evidence-count">
+              <span>contract</span>
+              <span class="mono">missing</span>
+            </span>
+          </div>
+        </div>
+      </section>
+    `
+  }
+  const matchedIds = evidence.matched_schedule_ids ?? []
+  const status = evidence.projection_status
+  const rowIntegrity = liveSupportedMatchedRowIntegrity(evidence, automation.requests ?? [])
+  return html`
+    <section
+      class=${`sch-banner ${liveSupportedEvidenceBannerClass(status)}`}
+      data-schedule-live-supported-evidence=${status}
+      data-schedule-live-supported-count=${evidence.supported_live_count ?? 0}
+      data-schedule-live-supported-source=${evidence.source ?? ''}
+    >
+      <span class="sch-banner-ico">${status === 'matched_supported_non_terminal' ? '✓' : '!'}</span>
+      <div class="sch-banner-txt">
+        <div>
+          <b>live supported scheduler evidence</b>
+          <span class="mono"> ${liveSupportedEvidenceLabel(status)}</span>
+        </div>
+        <div class="sch-banner-sub">
+          <span class="mono">${evidence.criteria ?? 'payload_support=supported && non-terminal'}</span>
+        </div>
+        <div class="sch-evidence-counts" aria-label="Live supported scheduler counts">
+          <span class="sch-evidence-count">
+            <span>requests</span>
+            <span class="mono">${(evidence.request_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>supported</span>
+            <span class="mono">${(evidence.supported_request_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>live</span>
+            <span class="mono">${(evidence.supported_live_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>terminal/expired</span>
+            <span class="mono">${(evidence.terminal_or_expired_count ?? 0).toLocaleString()}</span>
+          </span>
+          <span class="sch-evidence-count">
+            <span>unsupported/unknown</span>
+            <span class="mono">${((evidence.unsupported_request_count ?? 0) + (evidence.unknown_request_count ?? 0)).toLocaleString()}</span>
+          </span>
+        </div>
+        ${evidence.reason
+          ? html`<div class="sch-banner-sub">${evidence.reason}</div>`
+          : null}
+        ${rowIntegrity.status === 'matched_rows_verified'
+          ? html`
+              <div
+                class="sch-banner-sub"
+                data-schedule-live-supported-row-integrity="matched_rows_verified"
+                data-schedule-live-supported-row-integrity-count=${rowIntegrity.matchedCount}
+              >
+                matched schedule rows satisfy endpoint criteria in this response
+              </div>
+            `
+          : rowIntegrity.status === 'matched_row_mismatch'
+            ? html`
+                <div
+                  class="sch-banner-sub"
+                  data-schedule-live-supported-row-integrity="matched_row_mismatch"
+                  data-schedule-live-supported-row-integrity-count=${rowIntegrity.mismatches.length}
+                >
+                  matched row mismatch:
+                  <span class="mono">
+                    ${rowIntegrity.mismatches.map(item => `${item.scheduleId}:${item.reason}`).join(', ')}
+                  </span>
+                </div>
+              `
+            : null}
+        ${matchedIds.length > 0
+          ? html`
+              <div class="sch-payload-rows" aria-label="Live supported schedule ids">
+                ${matchedIds.map(scheduleId => html`
+                  <button
+                    type="button"
+                    class="sch-payload-row mono"
+                    data-schedule-live-supported-open=${scheduleId}
+                    onClick=${() => { onOpen(scheduleId) }}
+                  >${scheduleId}</button>
+                `)}
+              </div>
+            `
+          : null}
+      </div>
+    </section>
+  `
+}
+
 // Card rail tone class. SCHED_STATUS specs only ever yield warn/info/ok/bad/dim
 // for statuses; .sch-card.st-volt is not defined, so clamp anything else to dim.
 const CARD_RAIL_TONES: ReadonlySet<string> = new Set(['ok', 'warn', 'bad', 'info', 'dim'])
@@ -1119,23 +1662,178 @@ function cardRailTone(cls: string): string {
 
 // Prototype filter tabs (audit P0 #3): 5 tabs, prototype labels/ordering.
 type SchTabKey = 'pending' | 'scheduled' | 'active' | 'done' | 'all'
+type SchCadenceKey = 'oneshot' | 'interval' | 'daily' | 'cron' | 'unknown'
 interface SchTabDef {
   readonly key: SchTabKey
   readonly label: string
   // Effective-status values (live, normalized) this tab includes; null = all.
   readonly statuses: readonly string[] | null
 }
+interface SchCadenceDef {
+  readonly key: SchCadenceKey
+  readonly label: string
+  readonly shortLabel: string
+  readonly glyph: string
+  readonly cls: string
+}
+const SCH_TERMINAL_STATUSES = ['succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired'] as const
 const SCH_TABS: readonly SchTabDef[] = [
   { key: 'pending', label: '승인 대기', statuses: ['pending_approval', 'awaiting_approval', 'blocked_approval'] },
   { key: 'scheduled', label: '예약됨', statuses: ['scheduled'] },
   { key: 'active', label: 'due · 실행', statuses: ['due', 'due_pending_refresh', 'running'] },
-  { key: 'done', label: '완료 · 종료', statuses: ['succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired'] },
+  { key: 'done', label: '완료 · 종료', statuses: SCH_TERMINAL_STATUSES },
   { key: 'all', label: '전체', statuses: null },
+]
+const SCH_TERMINAL_STATUS_SET: ReadonlySet<string> = new Set(SCH_TERMINAL_STATUSES)
+const SCH_CADENCES: readonly SchCadenceDef[] = [
+  { key: 'daily', label: '정기 · 매일', shortLabel: '정기', glyph: '◈', cls: 'ok' },
+  { key: 'interval', label: '폴링 · 주기', shortLabel: '폴링', glyph: '↻', cls: 'volt' },
+  { key: 'oneshot', label: '1회 · ad-hoc', shortLabel: '1회', glyph: '•', cls: 'info' },
+  { key: 'cron', label: 'cron', shortLabel: 'cron', glyph: '⌁', cls: 'warn' },
+  { key: 'unknown', label: 'unknown', shortLabel: 'unknown', glyph: '?', cls: 'dim' },
 ]
 
 function schTabMatches(tab: SchTabDef, request: DashboardScheduledAutomationRequest): boolean {
   if (tab.statuses === null) return true
   return tab.statuses.includes(normalized(effectiveStatus(request)))
+}
+
+function recurrenceKind(request: DashboardScheduledAutomationRequest): string | null {
+  const kind = request.recurrence?.kind ?? request.recurrence_kind ?? null
+  const value = normalized(kind)
+  return value === '' ? null : value
+}
+
+function scheduleCadence(request: DashboardScheduledAutomationRequest): SchCadenceKey {
+  switch (recurrenceKind(request)) {
+    case 'one_shot':
+    case 'oneshot':
+      return 'oneshot'
+    case 'interval':
+      return 'interval'
+    case 'daily':
+      return 'daily'
+    case 'cron':
+      return 'cron'
+    case null:
+    default:
+      return 'unknown'
+  }
+}
+
+function schCadenceDef(key: SchCadenceKey): SchCadenceDef {
+  return SCH_CADENCES.find(definition => definition.key === key) ?? SCH_CADENCES[SCH_CADENCES.length - 1]!
+}
+
+function SchCadenceTag({ request }: { request: DashboardScheduledAutomationRequest }) {
+  const cadence = scheduleCadence(request)
+  const definition = schCadenceDef(cadence)
+  return html`
+    <span
+      class=${`sch-cad ${definition.cls}`}
+      data-schedule-cadence-card=${request.schedule_id}
+      data-schedule-cadence=${cadence}
+      title=${`recurrence.kind = ${recurrenceKind(request) ?? 'missing'}`}
+    >${definition.glyph} ${definition.shortLabel}</span>
+  `
+}
+
+function SchCadenceSummary({
+  requests,
+  active,
+  onSelect,
+}: {
+  requests: readonly DashboardScheduledAutomationRequest[]
+  active: SchCadenceKey | null
+  onSelect: (key: SchCadenceKey | null) => void
+}) {
+  const counts = new Map<SchCadenceKey, number>(SCH_CADENCES.map(definition => [definition.key, 0]))
+  for (const request of requests) {
+    const cadence = scheduleCadence(request)
+    counts.set(cadence, (counts.get(cadence) ?? 0) + 1)
+  }
+  return html`
+    <div
+      class="sch-cadsum"
+      data-schedule-cadence-summary
+      data-schedule-cadence-active=${active ?? 'all'}
+    >
+      ${SCH_CADENCES.map(definition => {
+        const selected = active === definition.key
+        const count = counts.get(definition.key) ?? 0
+        return html`
+          <button
+            type="button"
+            class=${`sch-cadsum-i ${definition.cls} ${selected ? 'on' : ''} ${active && !selected ? 'off' : ''}`}
+            aria-pressed=${selected ? 'true' : 'false'}
+            data-schedule-cadence-filter=${definition.key}
+            data-schedule-cadence-count=${count}
+            onClick=${() => { onSelect(selected ? null : definition.key) }}
+          >
+            <span class="sch-cadsum-gl">${definition.glyph}</span>
+            <span class="sch-cadsum-n mono">${count.toLocaleString()}</span>
+            <span class="sch-cadsum-l">${definition.label}</span>
+          </button>
+        `
+      })}
+    </div>
+  `
+}
+
+function isTerminalSchedule(request: DashboardScheduledAutomationRequest): boolean {
+  return SCH_TERMINAL_STATUS_SET.has(normalized(effectiveStatus(request)))
+}
+
+function SchPollingStrip({
+  requests,
+  onOpen,
+}: {
+  requests: readonly DashboardScheduledAutomationRequest[]
+  onOpen: (request: DashboardScheduledAutomationRequest) => void
+}) {
+  const polls = requests.filter(request => scheduleCadence(request) === 'interval' && !isTerminalSchedule(request))
+  return html`
+    <section
+      class="sch-poll"
+      data-schedule-polling-strip
+      data-schedule-polling-count=${polls.length}
+    >
+      <div class="sch-poll-h">
+        <span class="sch-cad volt">↻ 상시 폴링</span>
+        <span class="sch-poll-sub">recurrence.kind=interval · terminal 상태 제외</span>
+      </div>
+      ${polls.length === 0
+        ? html`<div class="sch-day-empty mono">활성 폴링 없음</div>`
+        : html`
+            <div class="sch-poll-list">
+              ${polls.map(request => {
+                const payload = schedPayloadSpec(request.payload_kind)
+                const status = statusSpecForLive(effectiveStatus(request))
+                const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
+                return html`
+                  <button
+                    type="button"
+                    class=${`sch-poll-card st-${cardRailTone(status.cls)}`}
+                    data-schedule-polling-card=${request.schedule_id}
+                    onClick=${() => { onOpen(request) }}
+                  >
+                    <div class="sch-poll-top">
+                      <span class="sch-poll-int mono">↻ ${recurrenceText(request)}</span>
+                      <${SchStatusPill} status=${effectiveStatus(request)} />
+                    </div>
+                    <div class="sch-poll-title">${payload.glyph} ${request.payload_summary?.trim() || request.payload_kind || request.schedule_id}</div>
+                    <div class="sch-poll-foot">
+                      <${SchKeeperMeta} actor=${request.scheduled_by} />
+                      <${SchRiskChip} risk=${request.risk_class} />
+                      <span class="sch-poll-next mono" title="next_due_at">${formatDateTimeKo(dueIso)}</span>
+                    </div>
+                  </button>
+                `
+              })}
+            </div>
+          `}
+    </section>
+  `
 }
 
 function recurrenceText(request: DashboardScheduledAutomationRequest): string {
@@ -1195,6 +1893,7 @@ function SchCard({
         >
           <span class="sch-kind">${payload.glyph} ${payload.lbl}</span>
           <span class="sch-id mono">${request.schedule_id}</span>
+          <${SchCadenceTag} request=${request} />
           <${SchRiskChip} risk=${request.risk_class} />
           ${request.payload_support && request.payload_support !== 'supported'
             ? html`<${SchPayloadSupportChip} support=${request.payload_support} />`
@@ -1213,13 +1912,14 @@ function SchCard({
             ? html`<span class="sch-need mono" title="별도 사람(operator) 승인 필요">⊙ 승인 필요</span>`
             : null}
         </div>
+        <${WakeEvidenceSummary} request=${request} />
       </div>
     </article>
   `
 }
 
 /** Detail overlay `.turn-overlay > .turn-drawer.sch-drawer` (audit P0 #4). */
-function SchDetail({
+export function SchDetail({
   request,
   onClose,
   onResolved,
@@ -1341,7 +2041,12 @@ function SchDetail({
 
           <div class="turn-sec">
             <h4>최근 실행 기록</h4>
-            <${SchExecution} execution=${execution} />
+            <${SchExecution}
+              execution=${execution}
+              dispatchReceipt=${request.dispatch_receipt ?? null}
+              queueEvidence=${request.keeper_queue_evidence ?? null}
+              reactionEvidence=${request.keeper_reaction_evidence ?? null}
+            />
           </div>
 
           <${SchDetailActions} request=${request} onResolved=${onResolved} onClose=${onClose} />
@@ -1351,7 +2056,17 @@ function SchDetail({
   `
 }
 
-function SchExecution({ execution }: { execution: DashboardScheduledAutomationExecution | null | undefined }) {
+function SchExecution({
+  execution,
+  dispatchReceipt,
+  queueEvidence,
+  reactionEvidence,
+}: {
+  execution: DashboardScheduledAutomationExecution | null | undefined
+  dispatchReceipt: DashboardScheduledAutomationDispatchReceipt | null | undefined
+  queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined
+  reactionEvidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined
+}) {
   if (!execution) {
     return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-stub="no last_execution">실행 기록 없음</span></div></div>`
   }
@@ -1365,6 +2080,9 @@ function SchExecution({ execution }: { execution: DashboardScheduledAutomationEx
         <div class="sch-kv" data-execution-detail-row=${row.label}><span class="k">${row.label}</span><span class="v mono">${row.value}</span></div>
       `)}
     </div>
+    <${DispatchReceiptBlock} receipt=${dispatchReceipt} compact=${true} />
+    <${QueueEvidenceBlock} evidence=${queueEvidence} compact=${true} />
+    <${ReactionEvidenceBlock} evidence=${reactionEvidence} compact=${true} />
     ${execution.error ? html`<div class="sch-exec bad">${execution.error}</div>` : null}
   `
 }
@@ -1442,13 +2160,17 @@ function SchedulePrototypeSurface({
   onSelectSchedule?: (scheduleId: string | null) => void
 }) {
   const [tab, setTab] = useState<SchTabKey>('pending')
+  const [cadenceFilter, setCadenceFilter] = useState<SchCadenceKey | null>(null)
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null)
   const selectedScheduleId = controlledSelectedId !== undefined ? controlledSelectedId : internalSelectedId
   const setSelectedScheduleId = onSelectSchedule ?? setInternalSelectedId
 
   const rows = automation.requests ?? []
   const tabDef = SCH_TABS.find(definition => definition.key === tab) ?? SCH_TABS[0]!
-  const filtered = rows.filter(request => schTabMatches(tabDef, request))
+  const cadenceRows = cadenceFilter
+    ? rows.filter(request => scheduleCadence(request) === cadenceFilter)
+    : rows
+  const filtered = cadenceRows.filter(request => schTabMatches(tabDef, request))
   // Durable runner signals (real source). Keep one feed (audit P0/P1 #9).
   const durableSignalContract = durableWakeSignalContract(automation)
   const durableSignals = durableSignalContract.visibleSignals
@@ -1463,12 +2185,32 @@ function SchedulePrototypeSurface({
         summary=${payloadSummary}
         onOpen=${setSelectedScheduleId}
       />
+      <${SchLiveSupportedEvidence}
+        automation=${automation}
+        evidence=${automation.live_supported_non_terminal_evidence ?? null}
+        onOpen=${setSelectedScheduleId}
+      />
+
+      <${SchCadenceSummary}
+        requests=${rows}
+        active=${cadenceFilter}
+        onSelect=${setCadenceFilter}
+      />
+
+      ${cadenceFilter === null || cadenceFilter === 'interval'
+        ? html`
+            <${SchPollingStrip}
+              requests=${rows}
+              onOpen=${(next: DashboardScheduledAutomationRequest) => { setSelectedScheduleId(next.schedule_id) }}
+            />
+          `
+        : null}
 
       <div class="sch-tabs" role="tablist" aria-label="예약 필터">
         ${SCH_TABS.map(definition => {
           const count = definition.statuses === null
-            ? rows.length
-            : rows.filter(request => schTabMatches(definition, request)).length
+            ? cadenceRows.length
+            : cadenceRows.filter(request => schTabMatches(definition, request)).length
           const active = definition.key === tab
           return html`
             <button
@@ -1813,6 +2555,12 @@ export function ScheduledAutomationPanel({
             </div>
           `
         : null}
+
+      <${SchLiveSupportedEvidence}
+        automation=${automation}
+        evidence=${automation.live_supported_non_terminal_evidence ?? null}
+        onOpen=${setSelectedScheduleId}
+      />
 
       <div class="flex flex-wrap gap-2">
         ${nonzeroCounts.length > 0

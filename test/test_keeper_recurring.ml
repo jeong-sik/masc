@@ -2,12 +2,28 @@
 
 open Alcotest
 module Rec = Masc.Keeper_recurring
+module Rec_tool = Masc.Keeper_recurring_tool
 module Metrics = Masc.Otel_metric_store
+module J = Yojson.Safe.Util
 
 let check = Alcotest.check
 
 let task_by_label label =
   List.find (fun (task : Rec.recurring_task) -> String.equal task.label label)
+;;
+
+let dispatch_tool ~agent_name ~name ~args =
+  match Rec_tool.dispatch ~agent_name ~name ~args with
+  | Some result -> result
+  | None -> fail (Printf.sprintf "%s returned None" name)
+;;
+
+let check_tool_success label result =
+  check bool label true (Tool_result.is_success result)
+;;
+
+let check_tool_failure label result =
+  check bool label false (Tool_result.is_success result)
 ;;
 
 let recurring_failure_value ~task ~phase =
@@ -46,6 +62,84 @@ let test_remove () =
   check bool "remove existing" true (Rec.remove ~id:t.id);
   check bool "remove again" false (Rec.remove ~id:t.id);
   check int "empty" 0 (List.length (Rec.list ~keeper_name:"k1"))
+;;
+
+let test_tool_dispatch_contract () =
+  Rec.clear ();
+  let add_result =
+    dispatch_tool
+      ~agent_name:"keeper-a"
+      ~name:"masc_recurring_add"
+      ~args:(`Assoc [ "label", `String "heartbeat"; "interval_sec", `Int 30 ])
+  in
+  check_tool_success "add succeeds" add_result;
+  let add_data = Tool_result.data add_result in
+  let task_id = add_data |> J.member "id" |> J.to_string in
+  check string "add label" "heartbeat" (add_data |> J.member "label" |> J.to_string);
+  check int "add interval" 30 (add_data |> J.member "interval_sec" |> J.to_int);
+  check int "registered one task" 1 (List.length (Rec.list ~keeper_name:"keeper-a"));
+  let duplicate_result =
+    dispatch_tool
+      ~agent_name:"keeper-a"
+      ~name:"masc_recurring_add"
+      ~args:(`Assoc [ "label", `String "heartbeat"; "interval_sec", `Int 30 ])
+  in
+  check_tool_failure "duplicate fails" duplicate_result;
+  check int "duplicate not added" 1 (List.length (Rec.list ~keeper_name:"keeper-a"));
+  let list_result =
+    dispatch_tool
+      ~agent_name:"keeper-a"
+      ~name:"masc_recurring_list"
+      ~args:(`Assoc [])
+  in
+  check_tool_success "list succeeds" list_result;
+  let tasks = list_result |> Tool_result.data |> J.member "tasks" |> J.to_list in
+  check int "list returns one task" 1 (List.length tasks);
+  let foreign_add =
+    dispatch_tool
+      ~agent_name:"keeper-a"
+      ~name:"masc_recurring_add"
+      ~args:
+        (`Assoc
+          [
+            "keeper_name", `String "keeper-b";
+            "label", `String "foreign-write";
+            "interval_sec", `Int 30;
+          ])
+  in
+  check_tool_failure "foreign add override fails" foreign_add;
+  check int "foreign add writes no caller task" 1 (List.length (Rec.list ~keeper_name:"keeper-a"));
+  check int "foreign add writes no target task" 0 (List.length (Rec.list ~keeper_name:"keeper-b"));
+  let other_task =
+    Rec.add
+      ~keeper_name:"keeper-b"
+      ~label:"foreign"
+      ~interval_sec:60
+      (Rec.Broadcast "foreign")
+  in
+  let foreign_list =
+    dispatch_tool
+      ~agent_name:"keeper-a"
+      ~name:"masc_recurring_list"
+      ~args:(`Assoc [ "keeper_name", `String "keeper-b" ])
+  in
+  check_tool_failure "foreign list override fails" foreign_list;
+  let foreign_remove =
+    dispatch_tool
+      ~agent_name:"keeper-a"
+      ~name:"masc_recurring_remove"
+      ~args:(`Assoc [ "id", `String other_task.id ])
+  in
+  check_tool_failure "foreign remove fails" foreign_remove;
+  check int "foreign task kept" 1 (List.length (Rec.list ~keeper_name:"keeper-b"));
+  let remove_result =
+    dispatch_tool
+      ~agent_name:"keeper-a"
+      ~name:"masc_recurring_remove"
+      ~args:(`Assoc [ "id", `String task_id ])
+  in
+  check_tool_success "remove succeeds" remove_result;
+  check int "own task removed" 0 (List.length (Rec.list ~keeper_name:"keeper-a"))
 ;;
 
 let test_dispatch_due () =
@@ -296,10 +390,11 @@ let () =
   run
     "keeper_recurring"
     [ ( "crud"
-      , [ test_case "add and list" `Quick test_add_and_list
-        ; test_case "filter by keeper" `Quick test_list_filters_by_keeper
-        ; test_case "remove" `Quick test_remove
-        ] )
+	      , [ test_case "add and list" `Quick test_add_and_list
+	        ; test_case "filter by keeper" `Quick test_list_filters_by_keeper
+	        ; test_case "remove" `Quick test_remove
+	        ; test_case "tool dispatch contract" `Quick test_tool_dispatch_contract
+	        ] )
     ; ( "dispatch"
       , [ test_case "due tasks" `Quick test_dispatch_due
         ; test_case "failure auto-disable" `Quick test_failure_auto_disable

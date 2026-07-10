@@ -39,6 +39,8 @@ let crash_scan_max = 500
 let audit_dirname = "audit" (* Audit_log store *)
 let activity_events_dirname = "activity-events" (* Activity_graph store *)
 let transition_audit_dirname = "transition-audit" (* Keeper_transition_audit durable store *)
+let tasks_dirname = "tasks" (* Workspace_utils_paths_backend.tasks_dir *)
+let backlog_filename = "backlog.json" (* Workspace_utils_paths_backend.backlog_path basename *)
 
 (* keeper.* activity-event kinds are still raw strings pending the #8455
    Event_kind migration; the board.* kinds below come from the typed
@@ -54,10 +56,24 @@ let operator_resume_event = "operator_resume"
 
 (* ── Types (mirror the .mli) ─────────────────────────────────────── *)
 
+type task_snapshot =
+  { title : string
+  ; status : string
+  ; assignee : string option
+  ; phase : string option
+  ; verifier : string option
+  ; submitted_at : string option
+  ; verification_id : string option
+  ; handoff_summary : string option
+  ; handoff_next_step : string option
+  ; handoff_evidence_refs : string list
+  }
+
 type task_item =
   { task_id : string
   ; transition : string
   ; ts : float
+  ; current_task : task_snapshot option
   }
 
 type lifecycle_item =
@@ -163,11 +179,92 @@ let json_num_field name json =
   | _ -> None
 ;;
 
+let string_opt_to_json = function
+  | Some s -> `String s
+  | None -> `Null
+;;
+
 (* ── Fail-visible day-partitioned reader ─────────────────────────── *)
 
 (* A parse or IO failure is appended to [errs] (fail-visible), never
    silently dropped. The list is bounded by {!read_errors_cap}. *)
 let bounded_add errs msg = if List.length !errs < read_errors_cap then errs := msg :: !errs
+
+let non_empty_string_opt value =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then None else Some trimmed
+;;
+
+let non_empty_opt = function
+  | Some value -> non_empty_string_opt value
+  | None -> None
+;;
+
+let task_status_snapshot_fields (status : Masc_domain.task_status) =
+  match status with
+  | Masc_domain.Todo -> None, None, None, None, None
+  | Masc_domain.Claimed { assignee; _ }
+  | Masc_domain.InProgress { assignee; _ } ->
+    Some assignee, None, None, None, None
+  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; phase } ->
+    let phase, verifier =
+      match phase with
+      | Masc_domain.Awaiting_verifier -> Some "awaiting_verifier", None
+      | Masc_domain.Verifier_assigned { verifier } -> Some "verifier_assigned", Some verifier
+    in
+    Some assignee, phase, verifier, Some submitted_at, Some verification_id
+  | Masc_domain.Done { assignee; _ } -> Some assignee, None, None, None, None
+  | Masc_domain.Cancelled { cancelled_by; _ } -> Some cancelled_by, None, None, None, None
+;;
+
+let task_snapshot_of_task (task : Masc_domain.task) =
+  let assignee, phase, verifier, submitted_at, verification_id =
+    task_status_snapshot_fields task.task_status
+  in
+  let handoff_summary, handoff_next_step, handoff_evidence_refs =
+    match task.handoff_context with
+    | None -> None, None, []
+    | Some ({ summary; next_step; evidence_refs; _ } : Masc_domain.task_handoff_context) ->
+      non_empty_string_opt summary, non_empty_opt next_step, evidence_refs
+  in
+  { title = task.title
+  ; status = Masc_domain.task_status_to_string task.task_status
+  ; assignee
+  ; phase
+  ; verifier
+  ; submitted_at
+  ; verification_id
+  ; handoff_summary
+  ; handoff_next_step
+  ; handoff_evidence_refs
+  }
+;;
+
+let read_task_snapshot_index ~errs ~masc_dir =
+  let table : (string, task_snapshot) Hashtbl.t = Hashtbl.create 64 in
+  let backlog_path =
+    Filename.concat (Filename.concat masc_dir tasks_dirname) backlog_filename
+  in
+  if Sys.file_exists backlog_path
+  then (
+    match Safe_ops.read_json_file_safe backlog_path with
+    | Error msg ->
+      bounded_add errs (Printf.sprintf "backlog: %s: %s" backlog_path msg)
+    | Ok json ->
+      (match Masc_domain.backlog_of_yojson json with
+       | Error msg ->
+         bounded_add errs (Printf.sprintf "backlog: %s: %s" backlog_path msg)
+       | Ok backlog ->
+         List.iter
+           (fun (task : Masc_domain.task) ->
+             Hashtbl.replace table task.id (task_snapshot_of_task task))
+           backlog.tasks));
+  table
+;;
+
+let attach_current_task task_snapshot_by_id (item : task_item) =
+  { item with current_task = Hashtbl.find_opt task_snapshot_by_id item.task_id }
+;;
 
 let task_id_of_audit_details ~errs details =
   match Safe_ops.json_string_opt "task_id" details with
@@ -435,7 +532,9 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
             let record transition =
               match task_id_of_audit_details ~errs details with
               | Some task_id ->
-                task_items := { task_id; transition; ts = timestamp } :: !task_items
+                task_items
+                  := { task_id; transition; ts = timestamp; current_task = None }
+                     :: !task_items
               | None -> ()
             in
             match action with
@@ -512,6 +611,10 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       bounded_add errs (Printf.sprintf "keeper-meta: %s: %s" meta_path e);
       false
   in
+  let task_snapshot_by_id = read_task_snapshot_index ~errs ~masc_dir in
+  let task_items_with_current =
+    !task_items |> List.map (attach_current_task task_snapshot_by_id)
+  in
   let coverage =
     let source causes = { lower_bound = causes <> []; causes } in
     { chat =
@@ -540,7 +643,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       ; done_ = !done_
       ; released = !released
       ; cancelled = !cancelled
-      ; items = cap_task_items !task_items
+      ; items = cap_task_items task_items_with_current
       }
   ; board = { posted = !posted; commented = !commented; voted = !voted }
   ; lifecycle =
@@ -561,11 +664,30 @@ let float_opt_to_json = function
   | None -> `Null
 ;;
 
+let task_snapshot_to_json (s : task_snapshot) =
+  `Assoc
+    [ "title", `String s.title
+    ; "status", `String s.status
+    ; "assignee", string_opt_to_json s.assignee
+    ; "phase", string_opt_to_json s.phase
+    ; "verifier", string_opt_to_json s.verifier
+    ; "submitted_at", string_opt_to_json s.submitted_at
+    ; "verification_id", string_opt_to_json s.verification_id
+    ; "handoff_summary", string_opt_to_json s.handoff_summary
+    ; "handoff_next_step", string_opt_to_json s.handoff_next_step
+    ; "handoff_evidence_refs", `List (List.map (fun ref_ -> `String ref_) s.handoff_evidence_refs)
+    ]
+;;
+
 let task_item_to_json (i : task_item) =
   `Assoc
     [ "task_id", `String i.task_id
     ; "transition", `String i.transition
     ; "ts", `Float i.ts
+    ; ( "current_task"
+      , match i.current_task with
+        | Some current_task -> task_snapshot_to_json current_task
+        | None -> `Null )
     ]
 ;;
 

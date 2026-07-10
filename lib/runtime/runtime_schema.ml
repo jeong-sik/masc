@@ -42,10 +42,10 @@ type capabilities =
 [@@deriving show, eq]
 
 (** [providers.<id>] — connection + behavior. The deleted
-    [runtime_provider]'s [log]/[healthcheck] sub-records are dropped from v1:
-    no live Runtime consumer reads them, and the TOML parser parses-and-ignores
-    those sub-tables (RFC-0206 §3). [headers] is retained for per-provider HTTP
-    header injection. *)
+    [runtime_provider]'s [log] sub-record is still ignored. [healthcheck.path]
+    is retained as provider-owned metadata for install/setup probes; runtime
+    startup does not use it for admission. [headers] is retained for
+    per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
 
 type provider =
@@ -57,6 +57,7 @@ type provider =
   ; is_non_interactive : bool
   ; credentials : credential option
   ; capabilities : capabilities option
+  ; healthcheck_path : string option
   ; headers : (string * string) list option
   ; connect_timeout_s : float option
     (** Per-provider override for the OAS connect + initial-response-headers
@@ -83,7 +84,7 @@ type thinking_control_format =
   | Thinking_object_adaptive
   | Thinking_object_only
   | Chat_template_kwargs
-  | Chat_template_token
+  | Chat_template_token of string
   | Ollama_think
   | Reasoning_effort
   | Enable_thinking
@@ -198,6 +199,7 @@ type binding =
   { provider_id : string
   ; model_id : string
   ; is_default : bool
+  ; wizard_default : bool
   ; max_concurrent : int option
   ; price_input : float option
   ; price_output : float option
@@ -229,6 +231,40 @@ let pause_threshold_default =
   ; recent_restart_count_threshold = 2
   ; tool_failure_count_threshold = 3
   ; tool_failure_ratio_threshold = 0.7
+  }
+;;
+
+(** {1 Pacing (RFC-0313 W3)}
+
+    Typed record mirroring the [\[pacing\]] runtime.toml section. Failure
+    outcomes modulate per-runtime revisit pacing instead of keeper existence
+    (pause / crash / dead); this record carries the pacing policy knobs and
+    the W3 behavior switch. *)
+
+type pacing_mode =
+  | Pacing_shadow
+    (** Pacing is computed and logged but the legacy failure-driven pause
+        paths and the cycle-cap matrix stay live. Kill-switch position for
+        one release (RFC-0313 W3); the switch is removed in W4. *)
+  | Pacing_enforce
+    (** Failure-driven pause paths are skipped and the scheduler delays the
+        keeper's next turn until the earliest per-runtime revisit becomes
+        eligible. *)
+[@@deriving show, eq]
+
+type pacing =
+  { pacing_mode : pacing_mode
+  ; pacing_base_sec : float
+  ; pacing_multiplier : float
+  ; pacing_cap_sec : float
+  }
+[@@deriving show, eq]
+
+let pacing_default =
+  { pacing_mode = Pacing_enforce
+  ; pacing_base_sec = 30.0
+  ; pacing_multiplier = 2.0
+  ; pacing_cap_sec = 3600.0
   }
 ;;
 
@@ -272,6 +308,12 @@ type config =
         judges. When set, it must resolve to a model declaring
         [supports-structured-output]. [None] lets callers use their documented
         migration fallback, but no caller may silently discard a schema request. *)
+  ; hitl_summary_runtime_id : string option
+    (** [\[runtime\].hitl_summary] — runtime id for HITL approval context
+        summaries. When set, it must resolve to a configured runtime. The HITL
+        worker decides native structured vs plain JSON mode at call time, so
+        load-time validation only rejects unknown ids. [None] keeps the legacy
+        structured-judge routing fallback. *)
   ; cross_verifier_runtime_id : string option
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
         evaluator. It requests JSON mode and must run on a model declaring
@@ -301,6 +343,14 @@ type config =
         [Pause_threshold.default]. Wrong-type value → load-time warn + fallback
         to default (fail-soft: wrong value is not catastrophic at boot).
         Operational callers read this through [Runtime.pause_threshold]. *)
+  ; pacing : pacing
+    (** [\[pacing\]] (RFC-0313 W3) — per-runtime failure revisit pacing policy
+        plus the shadow/enforce behavior switch. Missing section →
+        [pacing_default]. Numeric knobs fail soft like [\[pause\]]; [mode]
+        fails closed at load (an unknown value aborts config parse) because a
+        typo silently reverting the behavior flip is the permissive-default
+        failure the flip removes. Operational callers read this through
+        [Runtime.pacing]. *)
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

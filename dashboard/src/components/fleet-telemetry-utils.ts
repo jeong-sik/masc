@@ -119,6 +119,8 @@ export function normalizeText(value: string | null | undefined): string | null {
 }
 
 const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a', 'null', 'undefined', 'default', 'auto'])
+const REDACTED_RUNTIME_MODEL_LABEL = 'runtime'
+const UNKNOWN_MODEL_LABEL = 'unknown'
 
 export function isPlaceholderModel(value: string): boolean {
   return MODEL_PLACEHOLDERS.has(value.toLowerCase())
@@ -141,8 +143,22 @@ export function uniqueStrings(values: Array<string | null | undefined>): string[
   return items
 }
 
-function keeperModel(_keeper: Keeper): string {
-  return 'runtime'
+function keeperModel(keeper: Keeper): string {
+  const latest = latestRuntimeMetric(keeper)
+  const evidence = [
+    keeper.active_model_label,
+    keeper.last_model_used_label,
+    keeper.active_model,
+    keeper.last_model_used,
+    keeper.primary_model,
+    keeper.model,
+    keeper.trust?.execution_summary?.provider_selected_model,
+    latest?.runtime_selected_model,
+    latest?.model_used,
+  ]
+  return evidence.some(value => normalizeModelText(value) != null)
+    ? REDACTED_RUNTIME_MODEL_LABEL
+    : UNKNOWN_MODEL_LABEL
 }
 
 function latestRuntimeMetric(keeper: Keeper) {

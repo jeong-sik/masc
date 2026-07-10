@@ -316,6 +316,13 @@ let otel_health_json () =
     ]
 ;;
 
+let schedule_runner_status_json () =
+  Schedule_runner_status.snapshot ()
+  |> Schedule_runner_status.snapshot_to_yojson
+       ~now:(Time_compat.now ())
+       ~stale_after_sec:Server_schedule_runner_policy.stale_after_sec
+;;
+
 let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
     ?(health_detail = "probe") request =
   let uptime_secs = health_uptime_secs () in
@@ -345,6 +352,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("uptime", `String (health_uptime_string uptime_secs));
       ("sse_clients", `Int (Sse.client_count ()));
       ("startup", Server_startup_state.to_yojson ());
+      ("schedule_runner", schedule_runner_status_json ());
       ("runtime_startup_degradation",
        Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()));
       ("subsystems", Subsystem_health.to_yojson ());
@@ -807,7 +815,6 @@ let full_health_cached_field_names =
     "keeper_board_event_collection";
     "keeper_event_queue";
     "paused_keepers";
-    "cdal";
     "keeper_config_parse_error_count";
     "keeper_config_parse_errors";
     "keeper_config_unknown_key_count";
@@ -898,9 +905,6 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("names", `List []);
           ("component_timed_out", `Bool component_timed_out);
         ] );
-    ( "cdal",
-      full_health_component_placeholder ?error ~component_timed_out ~status
-        "cdal" );
     ("keeper_config_parse_error_count", `Int 0);
     ("keeper_config_parse_errors", `List []);
     ("keeper_config_unknown_key_count", `Int 0);
@@ -1366,9 +1370,10 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
       let contributor_quality =
         board_contributor_quality_lookup ?config () author
       in
+      let claim_evidence = board_claim_evidence_lookup () post_id in
       let post_json =
         board_post_dashboard_json ~include_moderation ~blind_votes ?current_vote
-          ?contributor_quality ~reactions ~author_karma post
+          ?contributor_quality ?claim_evidence ~reactions ~author_karma post
       in
       let comments_json =
         `List (List.map (fun (comment : Board.comment) ->

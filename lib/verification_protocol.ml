@@ -34,30 +34,13 @@ type submit_request_spec =
          contract's demanded artifacts apart from what the agent submitted. *)
   }
 
-let first_line text =
-  match String.index_opt text '\n' with
-  | Some i -> String.sub text 0 i
-  | None -> text
-
-let deliverable_claims_completion ~task_id deliverable =
-  let normalized =
-    deliverable
-    |> String.trim
-    |> String.lowercase_ascii
-    |> first_line
-  in
-  normalized <> ""
-  && (String.starts_with
-        ~prefix:(String.lowercase_ascii task_id ^ " completed")
-        normalized
-      || String.starts_with ~prefix:"completed" normalized)
-
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
   let request_kind, request_summary, next_action, board_type, board_title, board_content =
     match Masc_task_handlers.Planning_eio.load config ~task_id:task.id with
     | Ok plan_ctx
-      when deliverable_claims_completion ~task_id:task.id plan_ctx.deliverable ->
+      when Task_completion_claim.deliverable_claims_completion ~task_id:task.id
+             plan_ctx.deliverable ->
         ( "conflict_triage",
           "Conflict verification required: board / planning / mutation path disagree.",
           "Reconcile board / planning / mutation surfaces before ordinary approval.",
@@ -381,14 +364,8 @@ let awaiting_verification_deadline
    With the verification sub-state folded into [task_status] (RFC-0220 §3.1),
    the illegal Todo+Pending drift is unrepresentable, an AwaitingVerification
    obligation stays claimable by a verifier, and a keeper never idles on an
-   empty pool — so the per-obligation wall-clock deadline this enforced (the
-   I2-forbidden heuristic) is unnecessary, and its destructive force-cancel
-   discarded work rather than rescheduling the obligation. Long-waiting
-   obligations are surfaced from the activity-event stream, not a poll-timer.
-   Neutered here in PR-1 (forced by dropping [deadline] from the type); the
-   [verification_timeout] fork and these knobs are deleted in a follow-up
-   (RFC-0220 §11 PR-3). *)
-let check_timeouts ~(config : Workspace.config) =
-  let _ = config in
-  ()
-;;
+   empty pool. Long-waiting obligations are surfaced from the activity-event
+   stream, not a poll-timer. PR-1 neutered [check_timeouts] to a no-op;
+   RFC-0220 §11 PR-3 (this change) deleted the no-op, the
+   [verification_timeout] server fork that spun on it, its interval knob,
+   and the caller-less [Workspace.force_cancel_task_r]. *)

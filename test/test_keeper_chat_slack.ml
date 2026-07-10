@@ -155,6 +155,18 @@ let test_content_blocks_detects_link () =
   check bool "type section" true (contains s "\"type\":\"section\"");
   check bool "link syntax" true (contains s "*<https://example.com/page|example.com>*")
 
+let test_content_blocks_detects_code () =
+  let blocks = S.content_blocks_of_text "```ocaml\nlet x = 1 + 2\n```" in
+  check int "one code block" 1 (List.length blocks);
+  let s = json_string (List.hd blocks) in
+  check bool "code block text" true (contains s "```ocaml")
+
+let test_content_blocks_detects_mermaid () =
+  let blocks = S.content_blocks_of_text "```mermaid\nflowchart TD\nA-->B\n```" in
+  check int "one mermaid block" 1 (List.length blocks);
+  let s = json_string (List.hd blocks) in
+  check bool "mermaid block text" true (contains s "```mermaid")
+
 let test_content_blocks_mixed_content () =
   let blocks =
     S.content_blocks_of_text
@@ -231,6 +243,10 @@ let () =
             test_content_blocks_empty_for_plain_text
         ; test_case "detects markdown image" `Quick
             test_content_blocks_detects_markdown_image
+        ; test_case "detects code fences" `Quick
+            test_content_blocks_detects_code
+        ; test_case "detects mermaid blocks" `Quick
+            test_content_blocks_detects_mermaid
         ; test_case "detects bare image URL" `Quick
             test_content_blocks_detects_bare_image_url
         ; test_case "detects link" `Quick test_content_blocks_detects_link

@@ -552,6 +552,15 @@ let extract_descriptor_from_output (output_text : string) : Ide_event_types.comm
          let base = Yojson.Safe.Util.member "base" descriptor_json |> Yojson.Safe.Util.to_string in
          let draft = Yojson.Safe.Util.member "draft" descriptor_json |> Yojson.Safe.Util.to_bool in
          Some (Ide_event_types.Gh_pr_create { title; base; draft })
+       | "gh_pr_search" ->
+         let query = Yojson.Safe.Util.member "query" descriptor_json |> Yojson.Safe.Util.to_string in
+         let state =
+           match Yojson.Safe.Util.member "state" descriptor_json with
+           | `String value -> Some value
+           | `Null -> None
+           | _ -> None
+         in
+         Some (Ide_event_types.Gh_pr_search { query; state })
        | "gh_pr_merge" ->
          let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
          let squash = Yojson.Safe.Util.member "squash" descriptor_json |> Yojson.Safe.Util.to_bool in
@@ -971,7 +980,7 @@ let ingest_pr_event_from_descriptor
         ~pr_state:"open" ~repo ~keeper_id ~turn_id
         ~comment_count:1 ~review_status:None
         ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
+    | Some (Ide_event_types.Gh_pr_search _ | Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
     | None -> ()
 
 (** Ingest PR creation/update events from descriptor-backed tool output.
@@ -993,6 +1002,14 @@ let ingest_pr_event_from_hook
     ~output_text
     ~tool_name
     ~success:(explicit_tool_success_from_output output_text)
+
+let observation_snapshot_json ~take =
+  let snapshot =
+    if take then Agent_observation.take_snapshot ()
+    else Agent_observation.peek_snapshot ()
+  in
+  Agent_observation.snapshot_to_json snapshot
+;;
 
 let install_agent_observation_sinks () =
   (* tool/pr/turn sinks fire on the keeper turn fiber (main Eio domain). Their

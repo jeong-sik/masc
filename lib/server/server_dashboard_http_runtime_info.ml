@@ -1441,7 +1441,7 @@ let thinking_control_format_wire : Runtime_schema.thinking_control_format -> str
   | Runtime_schema.Thinking_object_adaptive -> "thinking-object-adaptive"
   | Runtime_schema.Thinking_object_only -> "thinking-object-only"
   | Runtime_schema.Chat_template_kwargs -> "chat-template-kwargs"
-  | Runtime_schema.Chat_template_token -> "chat-template-token"
+  | Runtime_schema.Chat_template_token _ -> "chat-template-token"
   | Runtime_schema.Ollama_think -> "ollama-think"
   | Runtime_schema.Reasoning_effort -> "reasoning-effort"
   | Runtime_schema.Enable_thinking -> "enable-thinking"
@@ -1970,6 +1970,51 @@ let governance_hitl_json () =
     ]
 ;;
 
+let shell_ir_approval_json () =
+  let gate_enabled = Env_config_runtime.Shell_ir_approval_gate.enabled () in
+  let raw_overlay = Env_config_runtime.Shell_ir_approval.raw_overlay () in
+  let parsed_overlay =
+    match raw_overlay with
+    | Some raw -> Masc_exec.Approval_config.shell_ir_approval_overlay_of_string raw
+    | None -> None
+  in
+  let effective_overlay =
+    Option.value parsed_overlay ~default:Masc_exec.Approval_config.autonomous
+  in
+  let source =
+    match raw_overlay with
+    | None -> `String "default_autonomous"
+    | Some _ when Option.is_some parsed_overlay -> `String "raw_overlay"
+    | Some _ -> `String "invalid_overlay_fallback_autonomous"
+  in
+  let reason =
+    match gate_enabled, raw_overlay, parsed_overlay with
+    | false, _, _ ->
+      `String "shell-ir approval gate disabled via MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
+    | true, None, _ ->
+      `String "using fallback overlay: Masc_exec.Approval_config.autonomous"
+    | true, Some raw, Some _ ->
+      `String ("using parsed MASC_SHELL_IR_APPROVAL value: " ^ raw)
+    | true, Some raw, None ->
+      `String
+        ("invalid MASC_SHELL_IR_APPROVAL value; fallback to autonomous: " ^ raw)
+  in
+  `Assoc
+    [ "schema", `String "masc.shell_ir_approval.v1"
+    ; "enabled", `Bool gate_enabled
+    ; "env_key", `String "MASC_SHELL_IR_APPROVAL"
+    ; "raw_overlay", Json_util.string_opt_to_json raw_overlay
+    ; ( "trust"
+      , `Assoc
+          [ "safe", `String (Masc_exec.Approval_config.trust_level_to_string effective_overlay.safe_trust)
+          ; "audited", `String (Masc_exec.Approval_config.trust_level_to_string effective_overlay.audited_trust)
+          ; "privileged", `String (Masc_exec.Approval_config.trust_level_to_string effective_overlay.privileged_trust)
+          ] )
+    ; "source", source
+    ; "reason", reason
+    ]
+;;
+
 let runtime_inventory_json () =
   let runtimes = Runtime.get_runtimes () in
   let default_id = runtime_default_runtime_id () in
@@ -2255,6 +2300,7 @@ let runtime_resolution_json (config : Workspace.config) =
         , deployment_state_json ~build ~server_repo_commit ~workspace_commit
             ~resolved_base_commit ~upstream_status ~source_mismatch )
       ; "governance_hitl", governance_hitl_json ()
+      ; "shell_ir_approval", shell_ir_approval_json ()
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;
@@ -2334,6 +2380,7 @@ let light_runtime_resolution_json (config : Workspace.config) =
       ; "diagnostics", `List []
       ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
       ; "build", Build_identity.to_yojson build
+      ; "shell_ir_approval", shell_ir_approval_json ()
       ]
       @ fleet_fields )
 ;;
@@ -2411,58 +2458,30 @@ let schedule_counts_json schedules =
        Schedule_domain.all_schedule_statuses)
 ;;
 
-let schedule_supported_payload_kinds =
-  List.sort_uniq String.compare Server_schedule_consumers.supported_payload_kinds
+type schedule_payload_support =
+  | Supported
+  | Unsupported
+  | Unknown
+
+let schedule_payload_support (request : Schedule_domain.schedule_request) =
+  match Schedule_payload_projection.support_status request with
+  | Schedule_payload_projection.Supported -> Supported
+  | Schedule_payload_projection.Unsupported -> Unsupported
+  | Schedule_payload_projection.Unknown -> Unknown
 ;;
 
-let schedule_payload_kind_supported kind =
-  List.exists (String.equal kind) schedule_supported_payload_kinds
+let schedule_payload_support_to_string = function
+  | Supported -> "supported"
+  | Unsupported -> "unsupported"
+  | Unknown -> "unknown"
 ;;
 
-let schedule_payload_support_status (request : Schedule_domain.schedule_request) =
-  match Schedule_payload_projection.kind request with
-  | Some kind when schedule_payload_kind_supported kind -> "supported"
-  | Some _ -> "unsupported"
-  | None -> "unknown"
+let schedule_payload_support_status request =
+  schedule_payload_support request |> schedule_payload_support_to_string
 ;;
 
 let schedule_payload_support_json schedules =
-  let bump kind counts =
-    let rec loop acc = function
-      | [] -> List.rev ((kind, 1) :: acc)
-      | (existing, count) :: rest when String.equal existing kind ->
-        List.rev_append acc ((existing, count + 1) :: rest)
-      | item :: rest -> loop (item :: acc) rest
-    in
-    loop [] counts
-  in
-  let unsupported_request_count, unknown_request_count, unsupported_kinds =
-    List.fold_left
-      (fun (unsupported_count, unknown_count, kind_counts)
-        (request : Schedule_domain.schedule_request) ->
-         match Schedule_payload_projection.kind request with
-         | Some kind when schedule_payload_kind_supported kind ->
-           unsupported_count, unknown_count, kind_counts
-         | Some kind -> unsupported_count + 1, unknown_count, bump kind kind_counts
-         | None -> unsupported_count, unknown_count + 1, kind_counts)
-      (0, 0, []) schedules
-  in
-  let unsupported_kinds =
-    unsupported_kinds
-    |> List.sort (fun (left_kind, left_count) (right_kind, right_count) ->
-      match compare right_count left_count with
-      | 0 -> String.compare left_kind right_kind
-      | order -> order)
-    |> List.map (fun (kind, count) ->
-      `Assoc [ "kind", `String kind; "count", `Int count ])
-  in
-  `Assoc
-    [ ( "supported_kinds"
-      , `List (List.map (fun kind -> `String kind) schedule_supported_payload_kinds) )
-    ; "unsupported_request_count", `Int unsupported_request_count
-    ; "unsupported_kinds", `List unsupported_kinds
-    ; "unknown_request_count", `Int unknown_request_count
-    ]
+  Schedule_payload_projection.support_summary_to_yojson schedules
 ;;
 
 let schedule_request_active (request : Schedule_domain.schedule_request) =
@@ -2478,6 +2497,18 @@ let schedule_effectively_expired ~now (request : Schedule_domain.schedule_reques
 
 let schedule_request_effectively_active ~now request =
   schedule_request_active request && not (schedule_effectively_expired ~now request)
+;;
+
+let schedule_readiness_counts_as_live_supported = function
+  | Schedule_projection.Blocked_approval
+  | Schedule_projection.Awaiting_approval
+  | Schedule_projection.Due_pending_refresh
+  | Schedule_projection.Ready
+  | Schedule_projection.Approved
+  | Schedule_projection.Scheduled
+  | Schedule_projection.Running ->
+    true
+  | Schedule_projection.Expired | Schedule_projection.Terminal -> false
 ;;
 
 let schedule_effectively_due ~now (request : Schedule_domain.schedule_request) =
@@ -2700,6 +2731,273 @@ let execution_record_dashboard_json (execution : Schedule_domain.execution_recor
   | other -> other
 ;;
 
+let schedule_dispatch_receipt_dashboard_json
+  (execution : Schedule_domain.execution_record option)
+  =
+  match execution with
+  | None -> `Null
+  | Some execution ->
+    (match execution.Schedule_domain.detail with
+     | None -> `Null
+     | Some detail ->
+    (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+     | Ok receipt ->
+       (match Server_schedule_consumers.dispatch_receipt_to_yojson receipt with
+        | `Assoc fields -> `Assoc (("projection_status", `String "recognized") :: fields)
+        | other -> other)
+     | Error reason ->
+       `Assoc
+         [ "projection_status", `String "unrecognized_detail"
+         ; "reason", `String reason
+         ]))
+;;
+
+let schedule_queue_read_error_dashboard_json
+  (error : Keeper_event_queue_persistence.snapshot_read_error)
+  =
+  `Assoc
+    [ "kind", `String (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string error.kind)
+    ; ( "path"
+      , match error.path with
+        | None -> `Null
+        | Some path -> `String path )
+    ; "message", `String error.message
+    ]
+;;
+
+let schedule_queue_match
+  ~(schedule_id : string)
+  ~(due_at : float)
+  ~(payload_digest : string)
+  ~(post_id : string)
+  ~(stimulus_label : string)
+  (queue : Keeper_event_queue.t)
+  =
+  queue
+  |> Keeper_event_queue.to_list
+  |> List.find_opt (fun (stimulus : Keeper_event_queue.stimulus) ->
+    String.equal stimulus.post_id post_id
+    && String.equal (Keeper_event_queue.payload_kind_label stimulus.payload) stimulus_label
+    &&
+    match stimulus.payload with
+    | Keeper_event_queue.Schedule_due wake ->
+      String.equal wake.schedule_id schedule_id
+      && Float.equal wake.due_at due_at
+      && String.equal wake.payload_digest payload_digest
+    | _ -> false)
+;;
+
+let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimulus) =
+  let scheduled_wake =
+    match stimulus.payload with
+    | Keeper_event_queue.Schedule_due wake -> Some wake
+    | _ -> None
+  in
+  [ "matched_bucket", `String bucket
+  ; "matched_post_id", `String stimulus.post_id
+  ; "matched_payload_kind", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+  ; "matched_arrived_at", `Float stimulus.arrived_at
+  ; "matched_arrived_at_iso", unix_iso_json stimulus.arrived_at
+  ; ( "matched_schedule_id"
+    , match scheduled_wake with
+      | Some wake -> `String wake.schedule_id
+      | None -> `Null )
+  ; ( "matched_due_at"
+    , match scheduled_wake with
+      | Some wake -> `Float wake.due_at
+      | None -> `Null )
+  ; ( "matched_due_at_iso"
+    , match scheduled_wake with
+      | Some wake -> unix_iso_json wake.due_at
+      | None -> `Null )
+  ; ( "matched_payload_digest"
+    , match scheduled_wake with
+      | Some wake -> `String wake.payload_digest
+      | None -> `Null )
+  ; "matched_age_seconds", `Float (Float.max 0.0 (now -. stimulus.arrived_at))
+  ]
+;;
+
+let schedule_keeper_queue_evidence_dashboard_json
+  ~now
+  (config : Workspace.config)
+  (execution : Schedule_domain.execution_record option)
+  =
+  match execution with
+  | None -> `Null
+  | Some execution ->
+    (match execution.Schedule_domain.detail with
+     | None -> `Null
+     | Some detail ->
+       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+        | Error reason ->
+          `Assoc
+            [ "projection_status", `String "unrecognized_receipt"
+            ; "reason", `String reason
+            ]
+        | Ok Server_schedule_consumers.Board_post_created _ -> `Null
+        | Ok
+            (Server_schedule_consumers.Keeper_wake_enqueued
+              { keeper_name
+              ; schedule_id
+              ; urgency = _
+              ; post_id
+              ; queue
+              ; stimulus
+              ; stimulus_id = _
+              ; reaction_ledger_status = _
+              }) ->
+          let due_at = execution.Schedule_domain.due_at in
+          let payload_digest = execution.Schedule_domain.payload_digest in
+          let snapshot =
+            Keeper_event_queue_persistence.load_snapshot_pair_with_errors
+              ~base_path:config.Workspace_utils.base_path
+              ~keeper_name
+          in
+          let pending_match =
+            schedule_queue_match ~schedule_id ~due_at ~payload_digest ~post_id
+              ~stimulus_label:stimulus snapshot.pending
+          in
+          let inflight_match =
+            schedule_queue_match ~schedule_id ~due_at ~payload_digest ~post_id
+              ~stimulus_label:stimulus snapshot.inflight
+          in
+          let read_errors =
+            List.map schedule_queue_read_error_dashboard_json snapshot.read_errors
+          in
+          let base_fields =
+            [ "source", `String "durable_event_queue_snapshot"
+            ; "queue", `String queue
+            ; "stimulus", `String stimulus
+            ; "keeper_name", `String keeper_name
+            ; "schedule_id", `String schedule_id
+            ; "post_id", `String post_id
+            ; "execution_due_at", `Float due_at
+            ; "execution_due_at_iso", unix_iso_json due_at
+            ; "execution_payload_digest", `String payload_digest
+            ; "pending_count", `Int (Keeper_event_queue.length snapshot.pending)
+            ; "inflight_count", `Int (Keeper_event_queue.length snapshot.inflight)
+            ; "read_errors", `List read_errors
+            ]
+          in
+          (match pending_match, inflight_match, snapshot.read_errors with
+           | Some match_, _, _ ->
+             `Assoc
+               (("projection_status", `String "matched_pending")
+                :: base_fields
+                @ schedule_queue_match_fields ~now "pending" match_)
+           | None, Some match_, _ ->
+             `Assoc
+               (("projection_status", `String "matched_inflight")
+                :: base_fields
+                @ schedule_queue_match_fields ~now "inflight" match_)
+           | None, None, _ :: _ ->
+             `Assoc (("projection_status", `String "read_error") :: base_fields)
+           | None, None, [] ->
+             `Assoc (("projection_status", `String "not_found") :: base_fields))))
+;;
+
+let schedule_keeper_reaction_evidence_dashboard_json
+  (config : Workspace.config)
+  (execution : Schedule_domain.execution_record option)
+  =
+  match execution with
+  | None -> `Null
+  | Some execution ->
+    (match execution.Schedule_domain.detail with
+     | None -> `Null
+     | Some detail ->
+       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+        | Error reason ->
+          `Assoc
+            [ "projection_status", `String "unrecognized_receipt"
+            ; "reason", `String reason
+            ]
+        | Ok Server_schedule_consumers.Board_post_created _ -> `Null
+        | Ok
+            (Server_schedule_consumers.Keeper_wake_enqueued
+              { keeper_name
+              ; schedule_id
+              ; urgency = _
+              ; post_id
+              ; queue = _
+              ; stimulus
+              ; stimulus_id
+              ; reaction_ledger_status = _
+              }) ->
+          let base_fields =
+            [ "source", `String "keeper_reaction_ledger"
+            ; "keeper_name", `String keeper_name
+            ; "schedule_id", `String schedule_id
+            ; "post_id", `String post_id
+            ; "stimulus", `String stimulus
+            ; ( "reaction_kind"
+              , `String
+                  (Keeper_reaction_ledger.reaction_kind_to_string
+                     Keeper_reaction_ledger.Turn_started) )
+            ; ( "stimulus_kind"
+              , `String
+                  (Keeper_reaction_ledger.stimulus_kind_to_string
+                     Keeper_reaction_ledger.Schedule_due) )
+            ]
+          in
+          (match stimulus_id with
+           | None ->
+             `Assoc
+               (("projection_status", `String "missing_stimulus_id")
+                :: ("reason", `String "dispatch receipt predates stimulus_id projection")
+                :: base_fields)
+           | Some stimulus_id ->
+             let evidence =
+               Keeper_reaction_ledger.event_queue_reaction_evidence
+                 ~base_path:config.Workspace_utils.base_path
+                 ~keeper_name
+                 ~stimulus_id
+             in
+             let projection_status =
+               if evidence.event_queue_ack_seen
+               then "matched_consumed_ack"
+               else if evidence.turn_started_seen
+               then "matched_turn_started"
+               else if evidence.stimulus_seen
+               then "matched_stimulus"
+               else "not_found"
+             in
+             `Assoc
+               (("projection_status", `String projection_status)
+                :: base_fields
+                @ [ "stimulus_id", `String stimulus_id
+                  ; "stimulus_seen", `Bool evidence.stimulus_seen
+                  ; "turn_started_seen", `Bool evidence.turn_started_seen
+                  ; "event_queue_ack_seen", `Bool evidence.event_queue_ack_seen
+                  ; "matched_record_count", `Int evidence.matched_record_count
+                  ; ( "stimulus_recorded_at"
+                    , match evidence.stimulus_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "stimulus_recorded_at_iso"
+                    , unix_iso_option_json evidence.stimulus_recorded_at )
+                  ; ( "turn_started_recorded_at"
+                    , match evidence.turn_started_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "turn_started_recorded_at_iso"
+                    , unix_iso_option_json evidence.turn_started_recorded_at )
+                  ; ( "event_queue_ack_recorded_at"
+                    , match evidence.event_queue_ack_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "event_queue_ack_recorded_at_iso"
+                    , unix_iso_option_json evidence.event_queue_ack_recorded_at )
+                  ; ( "latest_recorded_at"
+                    , match evidence.latest_recorded_at with
+                      | None -> `Null
+                      | Some ts -> `Float ts )
+                  ; ( "latest_recorded_at_iso"
+                    , unix_iso_option_json evidence.latest_recorded_at )
+                  ]))))
+;;
+
 let schedule_signal_projection_limit = 20
 
 let schedule_signal_payload_kind_json (signal : Schedule_runner.wake_signal) =
@@ -2728,8 +3026,37 @@ let schedule_signal_dashboard_json (signal : Schedule_runner.wake_signal) =
     ]
 ;;
 
+type schedule_signal_projection_entry =
+  | Decoded_schedule_signal of Schedule_runner.wake_signal
+  | Schedule_signal_decode_error of int * string
+
+let schedule_signal_decode_error_dashboard_json ordinal error =
+  `Assoc [ "ordinal", `Int ordinal; "error", `String error ]
+;;
+
+let schedule_signal_rows_and_errors config limit =
+  let entries =
+    Dated_jsonl.read_recent
+      (Dated_jsonl.create ~base_dir:(Schedule_runner.signals_dir config) ())
+      limit
+    |> List.mapi (fun ordinal json ->
+      match Schedule_runner.wake_signal_of_yojson json with
+      | Ok signal -> Decoded_schedule_signal signal
+      | Error error -> Schedule_signal_decode_error (ordinal, error))
+  in
+  List.fold_right
+    (fun entry (signals, errors) ->
+       match entry with
+       | Decoded_schedule_signal signal -> signal :: signals, errors
+       | Schedule_signal_decode_error (ordinal, error) ->
+         signals, schedule_signal_decode_error_dashboard_json ordinal error :: errors)
+    entries
+    ([], [])
+;;
+
 let schedule_request_dashboard_json
   ~now
+  ~config
   ~state
   ?last_execution
   (request : Schedule_domain.schedule_request)
@@ -2789,6 +3116,15 @@ let schedule_request_dashboard_json
         | None -> `Null
         | Some kind -> `String kind )
     ; "payload_support", `String (schedule_payload_support_status request)
+    ; ( "payload_dispatch_tool"
+        (* Display getter: use the non-logging result variant. The logging
+           [dispatch_tool_for_request] emits a WARN per unsupported row on every
+           dashboard poll (terminal accept-then-die rows → ~600 WARN/5000 log
+           lines); the genuine dispatch failure is logged once by the scheduler
+           runner, not here. *)
+      , match Schedule_payload_projection.dispatch_tool_for_request_result request with
+        | Ok tool_name -> `String tool_name
+        | Error _ -> `Null )
     ; ( "payload_target"
       , match payload_target with
         | None -> `Null
@@ -2801,6 +3137,131 @@ let schedule_request_dashboard_json
       , match last_execution with
         | None -> `Null
         | Some execution -> execution_record_dashboard_json execution )
+    ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_execution
+    ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_execution
+    ; ( "keeper_reaction_evidence"
+      , schedule_keeper_reaction_evidence_dashboard_json config last_execution )
+    ]
+;;
+
+let live_supported_evidence_ids_limit = 8
+
+let schedule_live_supported_non_terminal_evidence_json ~now ~state schedules =
+  let
+    ( supported_request_count
+    , supported_non_terminal_count
+    , supported_live_count
+    , supported_terminal_or_expired_count
+    , unsupported_request_count
+    , unknown_request_count
+    , terminal_or_expired_count
+    , matched_ids )
+    =
+    List.fold_left
+      (fun
+        ( supported_count
+        , supported_non_terminal
+        , supported_live
+        , supported_terminal_or_expired
+        , unsupported_count
+        , unknown_count
+        , terminal_or_expired
+        , ids )
+        (request : Schedule_domain.schedule_request)
+       ->
+         let readiness = schedule_execution_readiness ~now state request in
+         let live_readiness =
+           schedule_readiness_counts_as_live_supported readiness
+         in
+         let terminal_or_expired_row = not live_readiness in
+         let terminal_or_expired =
+           if terminal_or_expired_row then terminal_or_expired + 1 else terminal_or_expired
+         in
+         match schedule_payload_support request with
+         | Supported ->
+           let non_terminal = not (Schedule_domain.is_terminal request.status) in
+           let supported_non_terminal =
+             if non_terminal then supported_non_terminal + 1 else supported_non_terminal
+           in
+           if live_readiness
+           then (
+             let ids =
+               if List.length ids < live_supported_evidence_ids_limit
+               then request.schedule_id :: ids
+               else ids
+             in
+             ( supported_count + 1
+             , supported_non_terminal
+             , supported_live + 1
+             , supported_terminal_or_expired
+             , unsupported_count
+             , unknown_count
+             , terminal_or_expired
+             , ids ))
+           else
+             ( supported_count + 1
+             , supported_non_terminal
+             , supported_live
+             , supported_terminal_or_expired + 1
+             , unsupported_count
+             , unknown_count
+             , terminal_or_expired
+             , ids )
+         | Unsupported ->
+           ( supported_count
+           , supported_non_terminal
+           , supported_live
+           , supported_terminal_or_expired
+           , unsupported_count + 1
+           , unknown_count
+           , terminal_or_expired
+           , ids )
+         | Unknown ->
+           ( supported_count
+           , supported_non_terminal
+           , supported_live
+           , supported_terminal_or_expired
+           , unsupported_count
+           , unknown_count + 1
+           , terminal_or_expired
+           , ids ))
+      (0, 0, 0, 0, 0, 0, 0, [])
+      schedules
+  in
+  let request_count = List.length schedules in
+  let projection_status =
+    if supported_live_count > 0
+    then "matched_supported_non_terminal"
+    else if supported_request_count = 0 && request_count > 0
+    then "no_supported_payload_rows"
+    else "no_supported_non_terminal"
+  in
+  let reason =
+    if supported_live_count > 0
+    then "live schedule_store contains supported rows whose readiness is not terminal or expired"
+    else if supported_request_count = 0 && request_count > 0
+    then "current live schedule_store has no rows with a supported payload kind"
+    else "supported rows are currently terminal or effectively expired"
+  in
+  `Assoc
+    [ "schema", `String "masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1"
+    ; "source", `String "schedule_store"
+    ; "projection_status", `String projection_status
+    ; ( "criteria"
+      , `String
+          "payload_support=supported && execution_readiness not in {terminal,expired}" )
+    ; "reason", `String reason
+    ; "request_count", `Int request_count
+    ; "supported_request_count", `Int supported_request_count
+    ; "supported_non_terminal_count", `Int supported_non_terminal_count
+    ; "supported_live_count", `Int supported_live_count
+    ; "supported_terminal_or_expired_count", `Int supported_terminal_or_expired_count
+    ; "unsupported_request_count", `Int unsupported_request_count
+    ; "unknown_request_count", `Int unknown_request_count
+    ; "terminal_or_expired_count", `Int terminal_or_expired_count
+    ; ( "matched_schedule_ids"
+      , `List (List.map (fun schedule_id -> `String schedule_id) (List.rev matched_ids)) )
+    ; "matched_schedule_id_limit", `Int live_supported_evidence_ids_limit
     ]
 ;;
 
@@ -2808,111 +3269,163 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
   (* NDT-OK: dashboard read-model freshness clock; it derives display-only
      effective-due state and never mutates the schedule store or runs work. *)
   let now = Unix.gettimeofday () in
-  let state = Schedule_store.read_state config in
-  let schedules = state.schedules in
-  let active_count =
-    List.fold_left
-      (fun count request ->
-         if schedule_request_effectively_active ~now request then count + 1 else count)
-      0 schedules
+  let signal_rows, signal_errors =
+    schedule_signal_rows_and_errors config schedule_signal_projection_limit
   in
-  let terminal_count = List.length schedules - active_count in
-  let expired_effective_count =
-    List.fold_left
-      (fun count request ->
-         if schedule_effectively_expired ~now request then count + 1 else count)
-      0 schedules
-  in
-  let due_effective_count =
-    List.fold_left
-      (fun count request -> if schedule_effectively_due ~now request then count + 1 else count)
-      0 schedules
-  in
-  let blocked_approval_count =
-    List.fold_left
-      (fun count request ->
-         if schedule_blocked_approval ~now state request then count + 1 else count)
-      0 schedules
-  in
-  let due_execution_ready_count =
-    state
-    |> Schedule_store.due_execution_candidates
-    |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
-    |> List.length
-  in
-  let payload_support = schedule_payload_support_json schedules in
-  let unsupported_payload_kind_count, unknown_payload_kind_count =
-    match payload_support with
-    | `Assoc fields ->
-      ( (match List.assoc_opt "unsupported_request_count" fields with
-         | Some (`Int count) -> count
-         | _ -> 0)
-      , (match List.assoc_opt "unknown_request_count" fields with
-         | Some (`Int count) -> count
-         | _ -> 0) )
-    | _ -> 0, 0
-  in
-  let sorted =
-    schedules
-    |> List.sort (fun left right ->
-      match
-        ( schedule_request_active left
-        , schedule_request_active right
-        , schedule_request_effectively_active ~now left
-        , schedule_request_effectively_active ~now right
-        , compare left.due_at right.due_at )
-      with
-      | _, _, true, false, _ -> -1
-      | _, _, false, true, _ -> 1
-      | true, false, _, _, _ -> -1
-      | false, true, _, _, _ -> 1
-      | _, _, _, _, due_cmp when due_cmp <> 0 -> due_cmp
-      | _ -> String.compare left.schedule_id right.schedule_id)
-  in
-  let request_rows = take schedule_projection_request_limit sorted in
-  let signal_rows =
-    Schedule_runner.read_recent_signals config schedule_signal_projection_limit
-  in
-  `Assoc
+  let base_fields =
     [ "schema", `String "masc.dashboard.scheduled_automation.v1"
     ; "source", `String "schedule_store"
     ; "generated_at", `String (Masc_domain.now_iso ())
-    ; "request_count", `Int (List.length schedules)
-    ; "request_limit", `Int schedule_projection_request_limit
-    ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
     ; "signal_source", `String "schedule_runner_signals"
     ; "signal_count", `Int (List.length signal_rows)
+    ; "signal_error_count", `Int (List.length signal_errors)
     ; "signal_limit", `Int schedule_signal_projection_limit
     ; "signals", `List (List.map schedule_signal_dashboard_json signal_rows)
-    ; "counts", schedule_counts_json schedules
-    ; ( "derived_counts"
-      , `Assoc
-          [ "due_effective", `Int due_effective_count
-          ; "blocked_approval", `Int blocked_approval_count
-          ; "due_execution_ready", `Int due_execution_ready_count
-          ; "expired_effective", `Int expired_effective_count
-          ; "unsupported_payload_kind", `Int unsupported_payload_kind_count
-          ; "unknown_payload_kind", `Int unknown_payload_kind_count
-          ] )
-    ; "payload_support", payload_support
-    ; ( "fsm"
-      , `Assoc
-          [ "state", `String (schedule_fsm_state ~now state schedules)
-          ; "active_count", `Int active_count
-          ; "terminal_count", `Int terminal_count
-          ; "next_due_at", unix_iso_option_json (schedule_next_due_at ~now schedules)
-          ] )
-    ; ( "requests"
-      , `List
-          (List.map
-             (fun (request : Schedule_domain.schedule_request) ->
-                let last_execution =
-                  Schedule_store.last_execution_for_schedule state
-                    ~schedule_id:request.Schedule_domain.schedule_id
-                in
-                schedule_request_dashboard_json ~now ~state ?last_execution request)
-             request_rows) )
+    ; "signal_errors", `List signal_errors
     ]
+  in
+  match Schedule_store.read_state_result config with
+  | Error err ->
+    let read_error =
+      "schedule store read failed: " ^ Schedule_store.read_error_to_string err
+    in
+    `Assoc
+      (base_fields
+       @ [ "status", `String "unknown"
+         ; "schedule_store_known", `Bool false
+         ; "schedule_store_read_error", `String read_error
+         ; "request_count", `Null
+         ; "request_limit", `Int schedule_projection_request_limit
+         ; "truncated", `Bool false
+         ; "counts", `Null
+         ; "derived_counts", `Null
+         ; "payload_support", `Null
+         ; "live_supported_non_terminal_evidence", `Null
+         ; ( "fsm"
+           , `Assoc
+               [ "state", `String "unknown"
+               ; "active_count", `Null
+               ; "terminal_count", `Null
+               ; "next_due_at", `Null
+               ] )
+         ; "requests", `List []
+         ])
+  | Ok state ->
+    let schedules = state.schedules in
+    let active_count =
+      List.fold_left
+        (fun count request ->
+           if schedule_request_effectively_active ~now request then count + 1 else count)
+        0 schedules
+    in
+    let terminal_count = List.length schedules - active_count in
+    let expired_effective_count =
+      List.fold_left
+        (fun count request ->
+           if schedule_effectively_expired ~now request then count + 1 else count)
+        0 schedules
+    in
+    let due_effective_count =
+      List.fold_left
+        (fun count request -> if schedule_effectively_due ~now request then count + 1 else count)
+        0 schedules
+    in
+    let blocked_approval_count =
+      List.fold_left
+        (fun count request ->
+           if schedule_blocked_approval ~now state request then count + 1 else count)
+        0 schedules
+    in
+    let approval_wait_seconds =
+      List.fold_left
+        (fun oldest_wait request ->
+           if schedule_blocked_approval ~now state request
+           then max oldest_wait (max 0.0 (now -. request.due_at))
+           else oldest_wait)
+        0.0
+        schedules
+    in
+    let due_execution_ready_count =
+      state
+      |> Schedule_store.due_execution_candidates
+      |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
+      |> List.length
+    in
+    let payload_support = schedule_payload_support_json schedules in
+    let unsupported_payload_kind_count, unknown_payload_kind_count =
+      match payload_support with
+      | `Assoc fields ->
+        ( (match List.assoc_opt "unsupported_request_count" fields with
+           | Some (`Int count) -> count
+           | _ -> 0)
+        , (match List.assoc_opt "unknown_request_count" fields with
+           | Some (`Int count) -> count
+           | _ -> 0) )
+      | _ -> 0, 0
+    in
+    Otel_metric_store.set_gauge
+      Otel_metric_store.metric_schedule_approval_blocked_count
+      (Float.of_int blocked_approval_count);
+    Otel_metric_store.set_gauge
+      Otel_metric_store.metric_schedule_approval_wait_seconds
+      approval_wait_seconds;
+    let sorted =
+      schedules
+      |> List.sort (fun left right ->
+        match
+          ( schedule_request_active left
+          , schedule_request_active right
+          , schedule_request_effectively_active ~now left
+          , schedule_request_effectively_active ~now right
+          , compare left.due_at right.due_at )
+        with
+        | _, _, true, false, _ -> -1
+        | _, _, false, true, _ -> 1
+        | true, false, _, _, _ -> -1
+        | false, true, _, _, _ -> 1
+        | _, _, _, _, due_cmp when due_cmp <> 0 -> due_cmp
+        | _ -> String.compare left.schedule_id right.schedule_id)
+    in
+    let request_rows = take schedule_projection_request_limit sorted in
+    `Assoc
+      (base_fields
+       @ [ "status", `String "ok"
+         ; "schedule_store_known", `Bool true
+         ; "schedule_store_read_error", `Null
+         ; "request_count", `Int (List.length schedules)
+         ; "request_limit", `Int schedule_projection_request_limit
+         ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
+         ; "counts", schedule_counts_json schedules
+         ; ( "derived_counts"
+           , `Assoc
+               [ "due_effective", `Int due_effective_count
+               ; "blocked_approval", `Int blocked_approval_count
+               ; "due_execution_ready", `Int due_execution_ready_count
+               ; "expired_effective", `Int expired_effective_count
+               ; "unsupported_payload_kind", `Int unsupported_payload_kind_count
+               ; "unknown_payload_kind", `Int unknown_payload_kind_count
+               ] )
+         ; "payload_support", payload_support
+         ; ( "live_supported_non_terminal_evidence"
+           , schedule_live_supported_non_terminal_evidence_json ~now ~state schedules )
+         ; ( "fsm"
+           , `Assoc
+               [ "state", `String (schedule_fsm_state ~now state schedules)
+               ; "active_count", `Int active_count
+               ; "terminal_count", `Int terminal_count
+               ; "next_due_at", unix_iso_option_json (schedule_next_due_at ~now schedules)
+               ] )
+         ; ( "requests"
+           , `List
+               (List.map
+                  (fun (request : Schedule_domain.schedule_request) ->
+                     let last_execution =
+                       Schedule_store.last_execution_for_schedule state
+                         ~schedule_id:request.Schedule_domain.schedule_id
+                     in
+                     schedule_request_dashboard_json ~now ~config ~state ?last_execution request)
+                  request_rows) )
+         ])
 ;;
 
 let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
@@ -2959,12 +3472,24 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
       ; "tool_usage", usage
       ]
   in
-  let attach_scheduled_automation json =
+  let attach_live_tools_projections json =
     let scheduled_automation =
       run Tools_compute (fun () -> scheduled_automation_dashboard_json config)
     in
+    let keeper_waiting_inventory =
+      run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
+    in
+    let keeper_background =
+      run Tools_compute (fun () -> Server_keeper_background.dashboard_json config)
+    in
     match json with
-    | `Assoc fields -> `Assoc (fields @ [ "scheduled_automation", scheduled_automation ])
+    | `Assoc fields ->
+      `Assoc
+        (fields
+         @ [ "scheduled_automation", scheduled_automation
+           ; "keeper_waiting_inventory", keeper_waiting_inventory
+           ; "keeper_background", keeper_background
+           ])
     | other -> other
   in
   let cached =
@@ -2977,7 +3502,7 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
         Dashboard_cache.get_or_compute cache_key
           ~ttl:dashboard_tools_cache_ttl_sec compute)
   in
-  attach_scheduled_automation cached
+  attach_live_tools_projections cached
 ;;
 
 let dashboard_perf_http_json = Server_dashboard_http_perf.dashboard_perf_http_json

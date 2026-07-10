@@ -37,9 +37,37 @@ let create ~binding_store_path ~binding_store_read_path ~binding_audit_path
     guild_id_field;
   }
 
+let unix_error_message path fn arg code =
+  let callsite =
+    if String.equal arg "" then fn else Printf.sprintf "%s(%s)" fn arg
+  in
+  Printf.sprintf "%s: %s failed: %s" path callsite (Unix.error_message code)
+
+let read_json_file_result path =
+  match
+    try Ok (Unix.openfile path [ Unix.O_RDONLY ] 0) with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error `Missing
+    | Unix.Unix_error (code, fn, arg) ->
+      Error (`Message (unix_error_message path fn arg code))
+  with
+  | Error `Missing -> Ok None
+  | Error (`Message msg) -> Error msg
+  | Ok fd ->
+    let ic = Unix.in_channel_of_descr fd in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        try Ok (Some (Yojson.Safe.from_channel ic)) with
+        | Yojson.Json_error msg ->
+          Error (Printf.sprintf "%s: invalid JSON: %s" path msg)
+        | Sys_error msg -> Error (Printf.sprintf "%s: %s" path msg)
+        | Unix.Unix_error (code, fn, arg) ->
+          Error (unix_error_message path fn arg code))
+
 let read_json_file_opt path =
-  try Some (Yojson.Safe.from_file path) with
-  | Sys_error _ | Yojson.Json_error _ -> None
+  match read_json_file_result path with
+  | Ok json -> json
+  | Error _ -> None
 
 let normalize_bindings_json (json : Yojson.Safe.t) : binding list =
   match json with
@@ -58,10 +86,21 @@ let normalize_bindings_json (json : Yojson.Safe.t) : binding list =
              String.compare a.channel_id b.channel_id)
   | _ -> []
 
+let read_bindings_result store : (binding list, string) result =
+  let path = store.binding_store_read_path () in
+  match read_json_file_result path with
+  | Error msg -> Error msg
+  | Ok None -> Ok []
+  | Ok (Some (`Assoc _ as json)) -> Ok (normalize_bindings_json json)
+  | Ok (Some _) ->
+    Error
+      (Printf.sprintf
+         "%s: expected JSON object mapping channel ids to keeper names" path)
+
 let read_bindings store : binding list =
-  match read_json_file_opt (store.binding_store_read_path ()) with
-  | Some json -> normalize_bindings_json json
-  | None -> []
+  match read_bindings_result store with
+  | Ok bindings -> bindings
+  | Error _ -> []
 
 let binding_json (binding : binding) =
   `Assoc

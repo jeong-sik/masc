@@ -112,6 +112,23 @@ let board_tool_agent_name_from_request request =
              the sibling board REST bridges already use this dashboard actor fallback. *)
           "dashboard")
 
+let board_tool_owner_from_request request =
+  board_tool_agent_name_from_request request |> board_actor_author_for_write
+
+let sub_board_owner_matches ~owner (sb : Board.sub_board) =
+  String.equal (Board.Agent_id.to_string sb.Board.owner) owner
+
+let sub_board_owner_error ~owner ~sub_board_id (sb : Board.sub_board) =
+  `Assoc
+    [ ( "error"
+      , `String
+          (Printf.sprintf
+             "agent %s cannot mutate sub-board %s owned by %s"
+             owner
+             sub_board_id
+             (Board.Agent_id.to_string sb.Board.owner)) )
+    ]
+
 let governance_surface_for_param_key param_key =
   Governance_registry.surfaces
   |> List.find_opt (fun (surface : Governance_registry.surface) ->
@@ -589,6 +606,7 @@ let add_routes ~sw ~clock router =
                   let contributor_quality_for =
                     board_contributor_quality_lookup ~config ()
                   in
+                  let claim_evidence_for = board_claim_evidence_lookup () in
                   let posts_json =
                     List.map
                       (fun (p : Board.post) ->
@@ -597,8 +615,9 @@ let add_routes ~sw ~clock router =
                          let current_vote = board_current_vote_for_post ~voter ~post_id in
                          let reactions = reactions_for (Board.Reaction_post, post_id) in
                          let contributor_quality = contributor_quality_for author in
+                         let claim_evidence = claim_evidence_for post_id in
                          board_post_dashboard_json ~include_moderation ~blind_votes
-                           ?contributor_quality ~reactions
+                           ?contributor_quality ?claim_evidence ~reactions
                            ?current_vote
                            ~author_karma:(get_karma author) p)
                       paged
@@ -674,20 +693,14 @@ let add_routes ~sw ~clock router =
                Safe_ops.json_string_opt "description" args |> Option.value ~default:""
              in
              let members = Safe_ops.json_string_list "members" args in
-             let agent_name =
-               (let hdr k = Option.bind
-                 (Httpun.Headers.get request.Httpun.Request.headers k)
-                 (fun s -> if s = "" then None else Some s) in
-               match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent")
-               |> Option.value ~default:"dashboard"
-             in
+             let owner = board_tool_owner_from_request request in
              let access =
                match Safe_ops.json_string_opt "access" args with
                | Some s -> Board.sub_board_access_of_string_opt s
                | None -> None
              in
              (match Board_dispatch.create_sub_board ~slug ~name ~description
-                      ~owner:agent_name ~members ?access () with
+                      ~owner ~members ?access () with
               | Ok sb ->
                   Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
               | Error e ->
@@ -725,7 +738,18 @@ let add_routes ~sw ~clock router =
               Http.Response.json_value ~status:`Bad_request
                 (`Assoc [("error", `String "sub_board_id is required")])
                 reqd
-          | Some sub_board_id ->
+         | Some sub_board_id ->
+              let owner = board_tool_owner_from_request request in
+              (match Board_dispatch.get_sub_board ~sub_board_id with
+               | Error e ->
+                   Http.Response.json_value ~status:`Not_found
+                     (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                     reqd
+               | Ok sb when not (sub_board_owner_matches ~owner sb) ->
+                   Http.Response.json_value ~status:`Forbidden
+                     (sub_board_owner_error ~owner ~sub_board_id sb)
+                     reqd
+               | Ok _ ->
               (match Board_dispatch.delete_sub_board ~sub_board_id with
                | Ok () ->
                    Http.Response.json_value (`Assoc [("deleted", `Bool true)]) reqd
@@ -733,6 +757,7 @@ let add_routes ~sw ~clock router =
                    Http.Response.json_value ~status:`Not_found
                      (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                      reqd)))
+         )
          request reqd)
 
   |> Http.Router.prefix_put "/api/v1/board/sub-boards/" (fun request reqd ->
@@ -757,13 +782,24 @@ let add_routes ~sw ~clock router =
                     (`Assoc [("error", `String "sub_board_id is required")])
                     reqd
               | Some sub_board_id ->
+                  let owner = board_tool_owner_from_request request in
+                  (match Board_dispatch.get_sub_board ~sub_board_id with
+                   | Error e ->
+                       Http.Response.json_value ~status:`Not_found
+                         (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                         reqd
+                   | Ok sb when not (sub_board_owner_matches ~owner sb) ->
+                       Http.Response.json_value ~status:`Forbidden
+                         (sub_board_owner_error ~owner ~sub_board_id sb)
+                         reqd
+                   | Ok _ ->
                   (match Board_dispatch.update_sub_board ~sub_board_id ?name ?description ?members:members_arg ?access () with
                    | Ok sb ->
                        Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
                    | Error e ->
                        Http.Response.json_value ~status:`Bad_request
                          (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
-                         reqd))
+                         reqd)))
            with Yojson.Json_error msg ->
              Http.Response.json_value ~status:`Bad_request
                (`Assoc [("error", `String ("invalid JSON: " ^ msg))])
@@ -860,7 +896,11 @@ let add_routes ~sw ~clock router =
              let* args = json_upsert_string_field "author" author args in
              let* args =
                if String.equal author (String.trim agent_name) then Ok args
-               else json_ensure_meta_string_field "author_raw_agent_name" agent_name args
+               else
+                 json_ensure_meta_string_field
+                   Board_tool.author_raw_agent_name_meta_key
+                   agent_name
+                   args
              in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
              let result = Board_tool.handle_tool "masc_board_post" args in

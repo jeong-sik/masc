@@ -909,6 +909,45 @@ let test_keeper_health_backpressure_uses_keeper_name () =
      check string "keeper health reason" "keeper_health_unhealthy" reason
    | Obs.Runtime_admitted -> fail "keeper health should reject turn")
 
+let test_pacing_block_delays_requested_turn () =
+  (* RFC-0313 W3: with pacing enforced, the caller wires
+     [Keeper_pacing_shadow.next_due_remaining] as [pacing_block_of_name];
+     a positive remaining delay gates the requested turn without touching
+     keeper existence. *)
+  let meta = make_meta "pacing-gate" in
+  let obs =
+    { base_observation with pending_mentions = [ "operator", "please run" ] }
+  in
+  let consulted = ref [] in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~runtime_id_of_meta:(fun _ -> "runtime-test")
+      ~pacing_block_of_name:(fun keeper_name ->
+        consulted := keeper_name :: !consulted;
+        Some 42.0)
+      ~stop:(Atomic.make false)
+      ~meta
+      obs
+  in
+  check (list string) "pacing consulted by keeper name" [ meta.name ] !consulted;
+  check bool "world observation requested a turn" true
+    decision.requested_should_run_turn;
+  check bool "pacing block delays admission" false decision.should_run_turn;
+  (match decision.pacing_block with
+   | Some remaining ->
+     check (float 1e-6) "remaining seconds surfaced" 42.0 remaining
+   | None -> fail "pacing_block should carry the remaining delay");
+  check bool "verdict reasons include pacing_pending" true
+    (List.mem "pacing_pending" decision.verdict_reasons);
+  let admitted =
+    KHL.decide_keepalive_scheduling
+      ~runtime_id_of_meta:(fun _ -> "runtime-test")
+      ~stop:(Atomic.make false)
+      ~meta
+      obs
+  in
+  check bool "default pacing closure never blocks" true admitted.should_run_turn
+
 let test_crashed_cycle_records_health_failure () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -990,6 +1029,8 @@ let () =
         test_runtime_backpressure_blocks_requested_turn;
       test_case "keeper health blocks by keeper name" `Quick
         test_keeper_health_backpressure_uses_keeper_name;
+      test_case "pacing block delays requested turn (RFC-0313 W3)" `Quick
+        test_pacing_block_delays_requested_turn;
       test_case "crashed cycles feed agent health breaker" `Quick
         test_crashed_cycle_records_health_failure;
     ];

@@ -63,7 +63,7 @@ let is_keeper_meta_file f =
             keeper_sidecar_stem_suffixes))
 ;;
 
-let persisted_keeper_names config =
+let persisted_keeper_names_result config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with
   | Error e ->
@@ -71,14 +71,22 @@ let persisted_keeper_names config =
       Keeper_metrics.(to_string MetaReadFailures)
       ~labels:[("keeper", "aggregate"); ("site", "persisted_listdir")]
       ();
-    Log.Keeper.warn "persisted_keeper_names: failed to list directory %s: %s" dir e;
-    []
+    Error (Printf.sprintf "failed to list keeper directory %s: %s" dir e)
   | Ok files ->
-    files
-    |> List.filter is_keeper_meta_file
-    |> List.map Filename.remove_extension
-    |> List.filter validate_name
-    |> List.sort String.compare
+    Ok
+      (files
+       |> List.filter is_keeper_meta_file
+       |> List.map Filename.remove_extension
+       |> List.filter validate_name
+       |> List.sort String.compare)
+;;
+
+let persisted_keeper_names config =
+  match persisted_keeper_names_result config with
+  | Ok names -> names
+  | Error msg ->
+    Log.Keeper.warn "persisted_keeper_names: %s" msg;
+    []
 ;;
 
 let configured_keeper_names config =
@@ -89,13 +97,21 @@ let configured_keeper_names config =
   |> dedupe_keep_order
 ;;
 
+let keeper_names_result config =
+  persisted_keeper_names_result config
+;;
+
 let keeper_names config =
   (* Discovery uses persisted JSON (.masc/keepers/*.json) as primary source.
      JSON files are scoped to the server's base_path, so test isolation works.
      Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
      JSON at boot by load_or_materialize_boot_meta, so they appear here too.
      Sidecar files (.dataset) are filtered by is_keeper_meta_file. *)
-  persisted_keeper_names config
+  match keeper_names_result config with
+  | Ok names -> names
+  | Error msg ->
+    Log.Keeper.warn "keeper_names: %s" msg;
+    []
 ;;
 
 let declarative_autoboot_enabled_by_default config name =

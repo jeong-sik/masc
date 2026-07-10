@@ -166,6 +166,87 @@ let rec skip_gh_global_options = function
   | parts -> parts
 ;;
 
+let shell_arg_literal = function
+  | Shell_ir.Lit (s, _) -> Some s
+  | Shell_ir.Var _ | Shell_ir.Concat _ -> None
+;;
+
+let gh_global_value_option = function
+  | "--repo" | "-R" | "--hostname" | "--config" | "--git-protocol" -> true
+  | _ -> false
+;;
+
+let gh_global_bool_option = function
+  | "--help" | "-h" | "--version" | "--debug" | "--verbose" | "--no-color"
+  | "--paginate" ->
+    true
+  | _ -> false
+;;
+
+let gh_global_eq_value_option opt =
+  String.length opt > 1
+  && opt.[0] = '-'
+  && (String.starts_with ~prefix:"--repo=" opt
+      || String.starts_with ~prefix:"-R=" opt
+      || String.starts_with ~prefix:"--hostname=" opt
+      || String.starts_with ~prefix:"--config=" opt
+      || String.starts_with ~prefix:"--git-protocol=" opt)
+;;
+
+let gh_floor_words_of_simple (simple : Shell_ir.simple) =
+  match Exec_program.known simple.bin with
+  | Some Exec_program.Gh ->
+    let rec collect acc = function
+      | [] -> Some (Exec_program.to_string simple.bin :: List.rev acc)
+      | arg :: rest ->
+        (match shell_arg_literal arg with
+         | Some opt when gh_global_value_option opt ->
+           let rest =
+             match rest with
+             | [] -> []
+             | _value :: rest -> rest
+           in
+           collect acc rest
+         | Some opt when gh_global_bool_option opt || gh_global_eq_value_option opt ->
+           collect acc rest
+         | Some word -> collect (word :: acc) rest
+         | None -> collect ("" :: acc) rest)
+    in
+    collect [] simple.args
+  | Some
+      ( Exec_program.Ls | Exec_program.Cat | Exec_program.Pwd | Exec_program.Echo
+      | Exec_program.Head | Exec_program.Tail | Exec_program.Rg | Exec_program.Grep
+      | Exec_program.Find | Exec_program.Which | Exec_program.Test
+      | Exec_program.Basename | Exec_program.Dirname | Exec_program.Stat
+      | Exec_program.Du | Exec_program.Df | Exec_program.Sort | Exec_program.Uniq
+      | Exec_program.Wc | Exec_program.Cut | Exec_program.Tr | Exec_program.File
+      | Exec_program.Printf | Exec_program.Date | Exec_program.Env
+      | Exec_program.Printenv | Exec_program.Hostname | Exec_program.Whoami
+      | Exec_program.Uname | Exec_program.Ps | Exec_program.Tty | Exec_program.Cp
+      | Exec_program.Mv | Exec_program.Ln | Exec_program.Touch | Exec_program.Tee
+      | Exec_program.Awk | Exec_program.Xargs | Exec_program.Git
+      | Exec_program.Docker | Exec_program.Curl | Exec_program.Wget | Exec_program.Ssh
+      | Exec_program.Scp | Exec_program.Tar | Exec_program.Rsync | Exec_program.Make
+      | Exec_program.Cmake | Exec_program.Dune_local_sh | Exec_program.Diff
+      | Exec_program.Patch | Exec_program.Mkdir | Exec_program.Npm | Exec_program.Node
+      | Exec_program.Npx | Exec_program.Yarn | Exec_program.Pnpm | Exec_program.Pip
+      | Exec_program.Python | Exec_program.Python3 | Exec_program.Pytest
+      | Exec_program.Pyright | Exec_program.Ruff | Exec_program.Opam
+      | Exec_program.Ocamlfind | Exec_program.Tsc | Exec_program.Cargo
+      | Exec_program.Rustc | Exec_program.Go | Exec_program.Gofmt | Exec_program.Gradle
+      | Exec_program.Java | Exec_program.Javac | Exec_program.Mvn | Exec_program.Ninja
+      | Exec_program.Sed | Exec_program.Uv | Exec_program.Glab
+      | Exec_program.Terminal_notifier | Exec_program.Osascript | Exec_program.Play
+      | Exec_program.Rec | Exec_program.Ffplay | Exec_program.Mpg123 | Exec_program.Open
+      | Exec_program.Psql | Exec_program.Mysql | Exec_program.Mariadb
+      | Exec_program.Cockroach | Exec_program.Sudo | Exec_program.Su
+      | Exec_program.Chmod | Exec_program.Chown | Exec_program.Rm | Exec_program.Dd
+      | Exec_program.Mkfs | Exec_program.Shutdown | Exec_program.Reboot
+      | Exec_program.Halt | Exec_program.Poweroff ) ->
+    None
+  | None -> None
+;;
+
 let normalize_command_words words =
   match strip_env_prefix words with
   | "git" :: rest -> "git" :: skip_git_global_options rest
@@ -283,8 +364,28 @@ let classify_write_detail (words : string list) : risk_class option =
 
 let repo_hosting_cli_irreversible_ops =
   [
-    ("pr", [ "merge"; "ready" ]);
+    (* RFC-0309 W4/G-9 + follow-up: [pr] has NO irreversible action. [ready] is
+       reversible ([--undo]); [merge] is reversible too — [git revert] restores
+       the base-branch tree, exactly as a created repo can be deleted. What made
+       [merge] feel R2 ("it writes the base branch / triggers deploys") is a
+       durable-remote externality — a CAPABILITY concern, not a reversibility
+       fact. So [merge] moves to the reversible table and the "keeper may not
+       merge unsupervised" decision lives on the capability axis
+       ([Gh_capability_policy.creates_durable_remote_surface] -> Requires_approval,
+       i.e. non-blocking human approval), mirroring [gh repo create]. Same
+       policy-as-risk correction W4/G-9 applied to repo create/fork/discussion.
+       Operator decision 2026-07-08: gh pr merge -> Ask, not Deny. *)
+    (* RFC-0309 W4/G-9: repo create/fork are factually REVERSIBLE (a created or
+       forked repo can be deleted), so they move to the reversible table below.
+       Only the genuinely irreversible repo ops stay here. This restores the
+       risk axis to state a fact; the "keeper may not create repos
+       unsupervised" decision now lives on the capability axis
+       ([Gh_capability_policy]) as [Requires_approval], superseding #23362's
+       policy-as-risk encoding. *)
     ("repo", [ "delete"; "archive"; "transfer"; "rename" ]);
+    (* Only [delete] is irreversible; create/comment/edit/close/reopen/lock/
+       unlock/answer/unanswer are reversible discussion mutations (W4/G-9). *)
+    ("discussion", [ "delete" ]);
     ("release", [ "delete" ]);
     ("secret", [ "delete"; "remove" ]);
     ("ssh-key", [ "delete" ]);
@@ -299,7 +400,7 @@ let repo_hosting_cli_reversible_mutations =
   [
     ("pr",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "review"; "lock"; "checkout";
-       "unlock" ]);
+       "unlock"; "ready"; "merge" ]);
     ("issue",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "lock"; "unlock";
        "develop"; "pin"; "unpin" ]);
@@ -308,8 +409,18 @@ let repo_hosting_cli_reversible_mutations =
     ("run", [ "cancel"; "rerun"; "watch" ]);
     ("cache", [ "delete" ]);
     ("gist", [ "create"; "edit"; "clone"; "rename" ]);
+    (* RFC-0309 W4/G-9: create/fork are reversible remote mutations. The
+       capability axis ([Gh_capability_policy]) routes create/fork/edit/sync to
+       [Requires_approval] because they touch a durable remote surface; the
+       risk axis only states they are reversible (R1). *)
     ("repo",
-     [ "create"; "clone"; "fork"; "edit"; "sync"; "set-default" ]);
+     [ "clone"; "create"; "fork"; "edit"; "sync"; "set-default" ]);
+    (* RFC-0309 W4/G-9: reversible discussion mutations (delete stays R2 in the
+       irreversible table). The capability axis routes these to
+       [Requires_approval] via the Discussion durable-remote family. *)
+    ("discussion",
+     [ "create"; "comment"; "edit"; "close"; "reopen"; "lock"; "unlock";
+       "answer"; "unanswer" ]);
     ("project",
      [ "create"; "edit"; "close"; "copy"; "link"; "unlink"; "field-create";
        "field-delete"; "item-add"; "item-archive"; "item-delete"; "item-edit" ]);
@@ -369,6 +480,12 @@ let repo_hosting_graphql_r2_fragments =
     "deleteproject"; "deletebranchprotectionrule";
     "removeouterfromorganization"; "transferrepository";
     "archiverepository";
+    (* RFC-0309 W4/G-9: only irreversible discussion graphql mutations stay R2.
+       createDiscussion/addDiscussionComment/closeDiscussion/updateDiscussion/
+       etc. are reversible and are gated by the capability axis, not the risk
+       floor (they were added to R2 by #23362's policy-as-risk encoding).
+       createRepository/cloneTemplateRepository are likewise reversible. *)
+    "deletediscussion"; "deletediscussioncomment";
     (* Forward-looking verb prefixes for mutations GitHub may introduce.
        Over-block here is acceptable — under-block (silent miss) is not. *)
     "purgerepository" ]
@@ -385,12 +502,15 @@ let strip_graphql_comments s =
     s;
   Buffer.contents buf
 
-let body_contains_r2_mutation words =
-  let body =
-    String.concat " " words
-    |> String.lowercase_ascii
-    |> strip_graphql_comments
-  in
+let graphql_body_lower words =
+  String.concat " " words |> String.lowercase_ascii |> strip_graphql_comments
+
+(* Substring-scan the (comment-stripped, lowercased) graphql body for any of
+   [fragments]. Shared by the R2 deny-list and the durable-remote capability
+   list so both use one parser-owned body reader. *)
+let body_contains_fragment (fragments : string list) (words : string list) : bool
+  =
+  let body = graphql_body_lower words in
   let m = String.length body in
   List.exists
     (fun frag ->
@@ -403,7 +523,34 @@ let body_contains_r2_mutation words =
            else scan (i + 1)
          in
          scan 0)
-    repo_hosting_graphql_r2_fragments
+    fragments
+
+let body_contains_r2_mutation words =
+  body_contains_fragment repo_hosting_graphql_r2_fragments words
+
+(* GraphQL mutation fragments that establish or modify a durable REMOTE
+   repository/discussion surface and are reversible (R1). W4/G-9 moved these out
+   of [repo_hosting_graphql_r2_fragments] (they are reversible, so the risk floor
+   no longer denies them). The capability axis escalates them to Ask, mirroring
+   the typed [gh repo create] / [gh discussion create] path — without this the
+   string-borne graphql form would auto-run under the autonomous overlay while
+   the typed form asks (an axis-asymmetry bypass). Irreversible graphql mutations
+   (delete*/transfer/archive/purge) stay in [repo_hosting_graphql_r2_fragments]
+   and are denied by the floor, so they are deliberately absent here.
+   Over-inclusion only adds an approval prompt (safe); under-inclusion silently
+   auto-runs a durable-remote write (unsafe). *)
+let repo_hosting_graphql_durable_remote_fragments =
+  [ "createrepository"; "clonetemplaterepository"; "updaterepository";
+    "creatediscussion"; "updatediscussion"; "adddiscussioncomment";
+    "updatediscussioncomment"; "adddiscussionpollvote"; "closediscussion";
+    "reopendiscussion"; "markdiscussioncommentasanswer";
+    "unmarkdiscussioncommentasanswer" ]
+
+let gh_api_graphql_creates_durable_remote (words : string list) : bool =
+  (* Guard on the [graphql] endpoint token: a REST [gh api /path] call whose
+     path merely contains a mutation name must not be over-flagged. *)
+  List.mem "graphql" (List.map String.lowercase_ascii words)
+  && body_contains_fragment repo_hosting_graphql_durable_remote_fragments words
 
 let classify_repo_hosting_cli (words : string list) : risk_class =
   match words with
@@ -448,7 +595,17 @@ let classify_repo_hosting_cli (words : string list) : risk_class =
     if in_table repo_hosting_cli_irreversible_ops command sub
        || positional_dangerous_hit
     then R2_Irreversible
-    else if command = "api" then
+      (* [command = "api"] locates the subcommand at [words[1]]; [sub = "api"]
+         additionally catches a method flag placed BEFORE the subcommand
+         ([gh -XDELETE api /repos/o/r]), which gh's Cobra parser accepts as a
+         leading flag. Without [sub], the method token sits in the command slot
+         ([command = "-xdelete"]), the api branch is skipped, and the literal
+         DELETE (extracted from the full word list below) never fires the floor
+         — an autonomous DELETE bypass (#23451 form 1). Same leading-flag
+         positional class as #23390 (global flags). A spurious [sub = "api"]
+         without a real method stays [R0_Read] (no [-X] -> GET), so reads are
+         not over-blocked. *)
+    else if command = "api" || sub = "api" then
       let method_ =
         match extract_method_from_parts words with
         | Some m -> m
@@ -469,6 +626,141 @@ let classify_repo_hosting_cli (words : string list) : risk_class =
       else R0_Read
     else if in_table repo_hosting_cli_reversible_mutations command sub then R1_Reversible_mutation
     else R0_Read
+
+(* Subcommand-table risk for a known gh family. Shared by [risk_of_gh_verb]
+   (typed opinion) and [repo_hosting_cli_floor_risk] (enforcement floor) so the
+   subcommand tables are the single risk source. A table-absent action is a
+   read (R0): most such actions in a known family are reads (view/list/status)
+   and we cannot distinguish them from a genuinely unknown action without a
+   reads table. *)
+let table_risk_of_gh_family (command : string) (action : string) : risk_class =
+  if in_table repo_hosting_cli_irreversible_ops command action then R2_Irreversible
+  else if in_table repo_hosting_cli_reversible_mutations command action then
+    R1_Reversible_mutation
+  else R0_Read
+
+(* Well-known gh read actions shared across families ([gh pr view], [gh repo
+   list], [gh run view], [gh pr diff], [gh pr checks], ...). Kept deliberately
+   TIGHT: an action wrongly omitted here is only over-gated to non-blocking
+   approval (safe), whereas an action wrongly included would let an unrecognized
+   mutation auto-run as a read. *)
+let gh_read_actions =
+  [ "view"; "list"; "status"; "diff"; "checks"; "browse"; "download" ]
+;;
+
+let gh_action_is_known_read (action : string) : bool =
+  List.mem (String.lowercase_ascii action) gh_read_actions
+;;
+
+(* Typed classification of a gh verb, shared by [risk_of_gh_verb] (risk axis)
+   and [Gh_capability_policy.disposition_of] (capability axis) so both read one
+   source. This closes the known-family-unknown-action gap: an action on a
+   mutating-capable family that is neither a table mutation nor a known read is
+   [Gh_unrecognized_action] — the risk axis keeps it R0 (its reversibility is
+   genuinely unknown; fabricating R1/R2 would be the #23362 policy-as-risk
+   mistake), while the capability axis routes it to non-blocking approval rather
+   than auto-running it as a read. *)
+type gh_verb_class =
+  | Gh_read (* known read action, or a bare family invocation *)
+  | Gh_reversible_mutation (* action in the reversible table *)
+  | Gh_irreversible_mutation (* action in the irreversible table *)
+  | Gh_unrecognized_action
+      (* known mutating-capable family, action neither a mutation nor a read *)
+  | Gh_string_borne (* [gh api]: risk is the -X method / graphql body (floor) *)
+  | Gh_unrecognized_family (* [Gh_verb.Other] *)
+
+let classify_gh_verb (v : Gh_verb.t) : gh_verb_class =
+  match v.Gh_verb.family with
+  | Gh_verb.Api -> Gh_string_borne
+  | Gh_verb.Other _ -> Gh_unrecognized_family
+  | ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
+    | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
+    | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
+    | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project ) as fam ->
+    (match v.Gh_verb.action with
+     | None -> Gh_read (* bare family: a read *)
+     | Some action ->
+       let command = Gh_verb.family_token fam in
+       if in_table repo_hosting_cli_irreversible_ops command action then
+         Gh_irreversible_mutation
+       else if in_table repo_hosting_cli_reversible_mutations command action then
+         Gh_reversible_mutation
+       else if gh_action_is_known_read action then Gh_read
+       else Gh_unrecognized_action)
+
+(* RFC-0309 §3.1 (W1): the typed-family risk opinion for a gh command.
+
+   [risk_of_gh_verb] is the closed-sum lens over [classify_repo_hosting_cli]:
+   it reads the SAME subcommand tables (the risk SSOT) for known families, so
+   its opinion equals the word-list floor for every recognized [family/action]
+   pair. It differs in exactly one place — a wholly-unrecognized top-level gh
+   area ([Gh_verb.Other]) opines [R2_Irreversible] (fail-closed) instead of the
+   floor's [R0_Read] fall-through. That is the whole delta this function adds:
+   an unrecognized gh command carries a non-read typed opinion rather than
+   silently reading as R0.
+
+   Deliberately NOT fail-closed here:
+   - [Api]: the risk of [gh api] is the HTTP method / graphql body, which are
+     string-borne. [risk_of_gh_verb] returns [R0_Read] and lets the word-list
+     floor ([classify]'s [max_risk] with [classify_repo_hosting_cli]) own it,
+     exactly as RFC-0208 requires.
+   - a known family with a table-absent action ([gh pr view], [gh repo list]):
+     a KNOWN read stays [R0_Read]. An UNRECOGNIZED action
+     ([Gh_unrecognized_action], e.g. [gh repo upsert-magic]) also stays
+     [R0_Read] on the RISK axis — its reversibility is genuinely unknown, and
+     fabricating R1/R2 here would repeat #23362's policy-as-risk mistake. The
+     gating of unrecognized actions is a CAPABILITY decision
+     ([Gh_capability_policy.disposition_of] -> [Requires_approval]), not a risk
+     claim; both read [classify_gh_verb] so they cannot disagree.
+
+   This function is the capability-identity substrate for W2 (per-keeper policy)
+   and W3 (approval routing). It never returns [Destructive_protected]: gh ops
+   are R0/R1/R2 only, and [Destructive_protected] is the one class the dispatch
+   layer special-cases. *)
+let risk_of_gh_verb (v : Gh_verb.t) : risk_class =
+  match classify_gh_verb v with
+  (* string-borne: -X METHOD / graphql body owned by the word-list floor. *)
+  | Gh_string_borne -> R0_Read
+  (* fail-closed: unrecognized gh area is not a known read shape. *)
+  | Gh_unrecognized_family -> R2_Irreversible
+  | Gh_read -> R0_Read
+  | Gh_reversible_mutation -> R1_Reversible_mutation
+  | Gh_irreversible_mutation -> R2_Irreversible
+  (* Risk genuinely unknown; capability axis gates it. Not fabricated to R1/R2. *)
+  | Gh_unrecognized_action -> R0_Read
+
+(* Human-readable label for the gh verb classification, for surfacing the
+   gating rationale on operator approval prompts (why this gh command needs
+   approval). *)
+let gh_verb_class_to_string = function
+  | Gh_read -> "read"
+  | Gh_reversible_mutation -> "reversible mutation"
+  | Gh_irreversible_mutation -> "irreversible mutation"
+  | Gh_unrecognized_action -> "unrecognized action (capability-gated)"
+  | Gh_string_borne -> "string-borne (word-list floor)"
+  | Gh_unrecognized_family -> "unrecognized family (fail-closed)"
+
+(* Flag-robust gh verb identity for the capability axis (RFC-0309 W3, #23599).
+   The word-list [Gh_verb.classify] reads a leading value-taking global flag's
+   value as the subcommand ([gh --repo O/R pr view] -> [Gh_verb.Other "O/R"]),
+   which routes reversible reads/mutations to [Requires_approval]. The typed
+   lowering ([Shell_ir_typed.of_simple], whose gh parser consumes gh global
+   value-flags exactly like gh) locates the real subcommand/action, so this is
+   the same source the enforcement floor ([repo_hosting_cli_floor_risk]) already
+   trusts — the risk and capability axes cannot disagree on the subcommand.
+
+   [None] when the command does not lower to a typed [Gh] (the [Generic] escape
+   hatch for non-literal argv, e.g. [gh $CMD]); the caller then keeps its
+   word-list fallback, preserving today's behavior for that case. The [Api]
+   family is preserved by the typed parser ([gh api graphql] lowers to
+   [subcommand="api"; action="graphql"], including the leading-flag form), so the
+   caller's [gh api graphql] opacity fail-closed (RFC-0208) is not weakened. *)
+let gh_verb_of_simple (simple : Shell_ir.simple) : Gh_verb.t option =
+  match Shell_ir_typed.of_simple simple with
+  | Shell_ir_typed.W (Shell_ir_typed_types.Gh { subcommand; action; _ }) ->
+    Some (Gh_verb.of_fields ~subcommand ~action)
+  | Shell_ir_typed.W _ -> None
+[@@warning "-4"]
 
 (* --- Stage-word extraction (local copy; dependency direction prevents
     reference to Exec_policy_mutation_classifier in the top-level lib). --- *)
@@ -840,20 +1132,29 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
      "rm"/"git push" arms never fired (silent R0). Privilege escalation
      always requires approval. *)
   | W (Sudo _) -> Destructive_protected
-  (* RFC-0208: gh risk is irreducibly string-borne. The HTTP method
-     (-X DELETE), -f/--field key=values, the graphql mutation body, and a
-     large, evolving set of subcommands all live in argv strings, not in
-     the command's typed shape. Unlike [rm -rf] / [git reset] / [sudo],
-     whose risk IS structural and typeable, gh has no risk-bearing typed
-     shape for [risk_of_typed] to read, so it returns R0 and [classify]'s
-     word-list floor ([classify_words] -> [classify_repo_hosting_cli] on
-     the original, un-round-tripped words) owns gh risk by design. This is
-     the honest boundary: an earlier version round-tripped the IR back to
-     words here to fake a typed opinion, but the round-trip mis-parsed
-     `-X DELETE` and silently under-classified it to R0 — strictly worse
-     than the floor it duplicated. gh stays floor-owned; P7 floor
-     retirement is scoped to structurally-typed classes only. *)
-  | W (Gh _) -> R0_Read
+  (* RFC-0208 + RFC-0309 §2/§3.1 (W1): gh's string-borne risk stays
+     floor-owned, but its top-level *area* is now a closed typed family.
+
+     The HTTP method (-X DELETE), -f/--field values, and the graphql body
+     remain in argv strings; [classify]'s [max_risk] with the word-list floor
+     ([classify_repo_hosting_cli] on the original, un-round-tripped words) owns
+     that risk, so gh api / -X DELETE / graphql mutations classify exactly as
+     before. This arm does NOT re-parse those words (the round-trip that an
+     earlier version tried mis-parsed `-X DELETE` to R0 — strictly worse than
+     the floor).
+
+     What changed: instead of a blanket [R0_Read] abstention, we read the
+     already-parsed [subcommand]/[action] fields (no re-tokenization) into a
+     [Gh_verb.t] and take [risk_of_gh_verb]. For every recognized family that
+     opinion equals the floor (same tables), so [max_risk] is unchanged for
+     known gh. It differs only for an unrecognized top-level area
+     ([Gh_verb.Other]): the typed opinion is [R2_Irreversible] (fail-closed)
+     while the floor stays [R0_Read], so [max_risk] lifts an unknown gh command
+     to R2. That composed value is observability for W1 (the keeper approval
+     gate reads the word-list floor, not this opinion); it becomes enforcement
+     in W3 when unknown gh routes to non-blocking approval. *)
+  | W (Gh { subcommand; action; _ }) ->
+    risk_of_gh_verb (Gh_verb.of_fields ~subcommand ~action)
   | W (Docker _) -> R0_Read
   (* File operations — cp/mv/ln/touch are reversible or low-risk mutations *)
   | W (Cp _) -> R1_Reversible_mutation
@@ -878,6 +1179,62 @@ let risk_rank = function
 ;;
 
 let max_risk a b = if risk_rank a >= risk_rank b then a else b
+
+(* Enforcement-floor risk for a gh command, robust to leading global flags.
+
+   [classify_repo_hosting_cli] locates the subcommand as the first non-flag
+   token after "gh", so a leading value-taking global flag ([gh --repo o/r pr
+   merge]) shifts the flag's value ("o/r") into the subcommand slot and the
+   destructive verb ("merge") is missed — the command classifies R0 and the
+   approval catastrophic floor never fires (issue #23390: gh accepts flags
+   before the subcommand via Cobra, so the op executes). This is the floor's
+   SSOT for gh risk, so the miss is an autonomous-keeper bypass.
+
+   Fix: combine three views with [max_risk].
+   - [words]: the existing word-list classifier — retains the string-borne
+     risk it alone sees ([gh api -X DELETE], graphql mutation bodies,
+     positional-token scans) when argv is all literal.
+   - [simple] arg words: an enforcement-only view that consumes known gh global
+     value flags directly from [Shell_ir.arg], so dynamic flag values cannot
+     shadow the real family/action slot.
+   - [simple]: the typed lowering ([Shell_ir_typed.of_simple], whose gh parser
+     consumes value-flags exactly like gh) yields the correctly-located
+     subcommand; [table_risk_of_gh_family] then reads the same subcommand
+     tables. [Api]/[Other]/bare family stay R0 here — this fix restores correct
+     subcommand location WITHOUT changing the historical "unknown gh subcommand
+     is R0" floor semantics (fail-closing unknown gh is RFC-0309 W3, not this
+     bug fix). *)
+let repo_hosting_cli_floor_risk (words : string list) (simple : Shell_ir.simple)
+  : risk_class
+  =
+  let word_risk = classify_repo_hosting_cli words in
+  let arg_word_risk =
+    match gh_floor_words_of_simple simple with
+    | Some words -> classify_repo_hosting_cli words
+    | None -> R0_Read
+  in
+  let typed_risk =
+    (* [@warning "-4"]: only the [Gh] constructor is of interest; every other
+       typed command (and the [Generic] escape hatch for non-literal argv) is
+       not a repo-hosting op, so it floors nothing here and the word-list path
+       above already covers it. Same find-first rationale as
+       [Approval_policy.find_destructive_repo_hosting_cli]. *)
+    match Shell_ir_typed.of_simple simple with
+    | Shell_ir_typed.W (Shell_ir_typed_types.Gh { subcommand; action; _ }) -> (
+      let v = Gh_verb.of_fields ~subcommand ~action in
+      match v.Gh_verb.family, v.Gh_verb.action with
+      | (Gh_verb.Api | Gh_verb.Other _), _ | _, None -> R0_Read
+      | ( ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
+          | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key
+          | Gh_verb.Workflow | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset
+          | Gh_verb.Label | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project ) as
+        fam )
+      , Some action ->
+        table_risk_of_gh_family (Gh_verb.family_token fam) action)
+    | Shell_ir_typed.W _ -> R0_Read
+  in
+  max_risk word_risk (max_risk arg_word_risk typed_risk)
+[@@warning "-4"]
 
 let redirect_risk = function
   | Redirect_scope.File { mode = (Redirect_scope.Write | Redirect_scope.Append); _ } ->

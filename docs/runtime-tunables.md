@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 369 unique knobs across 9 modules.
+**Total**: 369 unique knobs across 10 modules.
 
-**Typed getter classification**: 54/225 tagged (`operator`: 54, `algorithm`: 0, `unclassified`: 171).
+**Typed getter classification**: 54/224 tagged (`operator`: 54, `algorithm`: 0, `unclassified`: 170).
 
 ## Env_config_core (27 knobs; typed classification 3/8)
 
@@ -216,7 +216,7 @@ the categorization roadmap. Newly-added typed getters in
 |---|---|---|---|---|---|
 | `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 69 |  |
 
-## Env_config_runtime (101 knobs; typed classification 5/81)
+## Env_config_runtime (100 knobs; typed classification 5/80)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -304,8 +304,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_TEMPO_MIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 53 | Minimum polling interval (seconds) - for urgent tempo |
 | `MASC_TOOL_READONLY_RETRY_LIMIT` | typed:int | unclassified | unclassified | 475 | Read-only tool retry limit. Default: 2. |
 | `MASC_USE_H2` | string_literal | n/a | n/a | 273 | HTTP mode: typed variant for "auto", "h2_only", "h1_only". |
-| `MASC_VERIFICATION_FSM_ENABLED` | feature_flag | n/a | n/a | 302 | Enable AwaitingVerification state and cross-agent approval. Default: false. |
-| `MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC` | typed:float | unclassified | unclassified | 312 | Interval for verification timeout check fiber (seconds). Default: 60. Issue #7549. |
+| `MASC_VERIFICATION_FSM_ENABLED` | feature_flag | n/a | n/a | 302 | Enable AwaitingVerification state and cross-agent approval. Default: true (SSOT: [Feature_flag_registry.all_flags]). |
 | `MASC_VERIFICATION_TIMEOUT_DEADLINE_SEC` | typed:float | unclassified | unclassified | 307 | Maximum time a task may remain AwaitingVerification before surfacing an operator-visible timeout. Default: 24h. |
 | `MASC_WEBRTC_ENABLED` | feature_flag | n/a | n/a | 269 | Whether WebRTC transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at boot. |
 | `MASC_WEB_SEARCH_CACHE_TTL_SEC` | typed:float | unclassified | unclassified | 495 |  |
@@ -344,6 +343,12 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SANDBOX_SECCOMP_PROFILE` | typed:string | unclassified | unclassified | 44 |  |
 | `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 30 |  |
 | `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 190 |  |
+
+## Env_config_slack (1 knobs; typed classification 0/0)
+
+| Env var | Kind | Category | Ops class | Line | Doc |
+|---|---|---|---|---|---|
+| `MASC_SLACK_TRIGGER_POLICY` | string_literal | n/a | n/a | 20 |  |
 
 ## Env_config_snapshot (82 knobs; typed classification 0/0)
 

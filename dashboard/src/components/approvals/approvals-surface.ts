@@ -8,21 +8,23 @@
 // Data source: governanceData.value?.approval_queue (KeeperApprovalQueueItem[]).
 // Actions: respondToKeeperApproval(id, 'approve' | 'reject', rememberRule).
 // The live decision model is the closed set {approve, reject} (+ rememberRule);
-// there is no defer/undo endpoint, so the prototype's 보류/되돌리기/처리이력 are
-// intentionally not rendered. Visual layout ports the keeper-v2 .ap-* design.
+// there is no defer/undo endpoint, so the prototype's 보류/되돌리기 controls are
+// intentionally not rendered. History is read-only from recent_resolved.
+// Visual layout ports the keeper-v2 .ap-* design.
 
 import { html } from 'htm/preact'
 import { Fragment } from 'preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type {
   KeeperApprovalQueueItem,
+  KeeperApprovalRule,
   KeeperResolvedApprovalItem,
   HitlContextSummary,
   HitlSummaryStatus,
 } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
-import { formatDateTimeKo } from '../../lib/format-time'
+import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
 import {
   keeperApprovalRiskLabel,
   keeperApprovalRiskVisualBand,
@@ -31,6 +33,7 @@ import {
 import {
   keeperResolvedApprovalDecisionClass,
   keeperResolvedApprovalDecisionLabel,
+  type KeeperResolvedApprovalDecision,
 } from '../../lib/keeper-approval-decision'
 import { navigate } from '../../router'
 import { AgentAvatar } from '../overview/agent-avatar'
@@ -42,7 +45,33 @@ import {
   governanceApprovalActing,
   refreshGovernance,
   respondToKeeperApproval,
+  setKeeperApprovalMode,
 } from '../governance-store'
+
+type ApprovalsView = 'queue' | 'history'
+type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision | 'rule'
+
+const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
+  id: ApprovalHistoryFilter
+  label: string
+  predicate: (item: KeeperResolvedApprovalItem) => boolean
+}> = [
+  { id: 'all', label: '전체', predicate: () => true },
+  { id: 'approve', label: '승인', predicate: item => item.decision === 'approve' },
+  { id: 'reject', label: '거부', predicate: item => item.decision === 'reject' },
+  { id: 'edit', label: '수정됨', predicate: item => item.decision === 'edit' },
+  { id: 'unknown', label: '처리됨', predicate: item => item.decision === 'unknown' },
+  { id: 'rule', label: 'Always 규칙', predicate: item => item.rule_match != null },
+]
+const DEFAULT_APPROVAL_HISTORY_FILTER = APPROVAL_HISTORY_FILTERS[0]!
+
+// Aside preview caps. The recent list is a preview of recent_resolved — the full
+// set lives in the 이력 (history) tab, so its overflow is expected. The Always
+// Rules list has NO other view, so when it overflows we make the hidden count
+// explicit (auto-approve rules bypass HITL; the operator must know the full set
+// exists even if it is not all shown here).
+const ASIDE_RECENT_LIMIT = 5
+const ASIDE_RULES_LIMIT = 6
 
 function apSev(riskLevel: string | null | undefined): KeeperApprovalRiskVisualBand {
   return keeperApprovalRiskVisualBand(riskLevel)
@@ -66,12 +95,14 @@ function apSevGlyph(band: KeeperApprovalRiskVisualBand): string {
   }
 }
 
-// seconds-waited → "N분 N초 대기" (prototype apAge).
+// seconds-waited → compound elapsed + "대기" suffix ("2시간 5분 대기").
+// Delegates to the shared formatDurationCompound so long HITL waits render with
+// an hour tier; the prior bespoke minute-only formatter broke down at scale
+// ("150분 0초 대기" for 2.5h). Non-finite / negative input clamps to 0 so the
+// queue never surfaces an "확인 필요" label in the age slot.
 function apAge(sec: number | null | undefined): string {
-  const s = Math.max(0, Math.round(sec ?? 0))
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return m ? `${m}분 ${r}초 대기` : `${r}초 대기`
+  const s = typeof sec === 'number' && Number.isFinite(sec) ? Math.max(0, Math.round(sec)) : 0
+  return `${formatDurationCompound(s)} 대기`
 }
 
 function compactText(value: string | null | undefined): string | null {
@@ -133,10 +164,70 @@ function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
       <span class="ap-history-tool mono">${item.tool_name}</span>
       <span class="ap-history-keeper">${item.keeper_name}</span>
       <span class="ap-history-id mono">${item.id}</span>
+      ${item.rule_match?.rule_id
+        ? html`<span class="ap-history-rule mono" title=${item.rule_match.matched_by ?? ''}>rule ${item.rule_match.rule_id}</span>`
+        : null}
       ${item.resolved_at
         ? html`<span class="ap-history-at">${formatDateTimeKo(item.resolved_at)}</span>`
         : null}
     </li>
+  `
+}
+
+function resolvedAtMs(item: KeeperResolvedApprovalItem): number {
+  const parsed = item.resolved_at ? Date.parse(item.resolved_at) : Number.NaN
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function ApHistory({ items }: { items: KeeperResolvedApprovalItem[] }) {
+  const [filter, setFilter] = useState<ApprovalHistoryFilter>('all')
+  const sorted = useMemo(
+    () => [...items].sort((a, b) => resolvedAtMs(b) - resolvedAtMs(a)),
+    [items],
+  )
+  const activeFilter = APPROVAL_HISTORY_FILTERS.find(item => item.id === filter)
+    ?? DEFAULT_APPROVAL_HISTORY_FILTER
+  const shown = sorted.filter(activeFilter.predicate)
+  const counts = useMemo(() => ({
+    approve: sorted.filter(item => item.decision === 'approve').length,
+    reject: sorted.filter(item => item.decision === 'reject').length,
+    rule: sorted.filter(item => item.rule_match != null).length,
+    keepers: new Set(sorted.map(item => item.keeper_name)).size,
+  }), [sorted])
+
+  return html`
+    <section class="ap-hist" data-testid="approvals-history-view">
+      <div class="ap-hist-summary" aria-label="승인 이력 요약">
+        <div class="ap-hist-stat"><b class="mono ok">${counts.approve}</b> 승인</div>
+        <div class="ap-hist-stat"><b class="mono bad">${counts.reject}</b> 거부</div>
+        <div class="ap-hist-stat"><b class="mono">${counts.rule}</b> Rule</div>
+        <div class="ap-hist-stat"><b class="mono">${counts.keepers}</b> 관련 키퍼</div>
+      </div>
+      <div class="ap-hist-filters" role="tablist" aria-label="승인 이력 필터">
+        ${APPROVAL_HISTORY_FILTERS.map(option => html`
+          <button
+            key=${option.id}
+            type="button"
+            class=${`ap-hist-f ${filter === option.id ? 'on' : ''}`}
+            aria-pressed=${filter === option.id}
+            onClick=${() => setFilter(option.id)}
+          >${option.label}</button>
+        `)}
+      </div>
+      ${shown.length > 0
+        ? html`
+            <ul class="ap-history-list ap-hist-list">
+              ${shown.map(item => html`<${ResolvedApprovalItem} key=${item.id} item=${item} />`)}
+            </ul>
+          `
+        : html`
+            <div class="ap-clear compact" data-testid="approvals-history-empty">
+              <div class="ico">${'✓'}</div>
+              <h3>해당 필터의 처리 이력이 없습니다</h3>
+              <div class="ap-clear-sub">최근 처리 projection에 일치하는 항목이 없습니다.</div>
+            </div>
+          `}
+    </section>
   `
 }
 
@@ -363,6 +454,135 @@ function ApprovalDetailPanel({
   `
 }
 
+function ApprovalRuleRow({ rule }: { rule: KeeperApprovalRule }) {
+  return html`
+    <li class="ap-rule-row" data-testid="approval-rule-row">
+      <span class="ap-rule-keeper mono">${rule.keeper_name}</span>
+      <span class="ap-rule-tool mono">${rule.tool_name}</span>
+      ${rule.max_risk ? html`<span class="ap-rule-risk">${keeperApprovalRiskLabel(rule.max_risk)}</span>` : null}
+      ${typeof rule.match_count === 'number' ? html`<span class="ap-rule-match mono">match ${rule.match_count}</span>` : null}
+    </li>
+  `
+}
+
+function ApAside({
+  openCount,
+  resolvedItems,
+  rules,
+}: {
+  openCount: number
+  resolvedItems: KeeperResolvedApprovalItem[]
+  rules: KeeperApprovalRule[]
+}) {
+  const hitl = governanceData.value?.hitl
+  const enabled = hitl?.enabled ?? null
+  const recent = [...resolvedItems]
+    .sort((a, b) => resolvedAtMs(b) - resolvedAtMs(a))
+    .slice(0, ASIDE_RECENT_LIMIT)
+  // RFC-0319 operator approval mode. Bound to the real backend posture
+  // (hitl.approval_mode), NOT to rules.length. The separation-of-duties floor
+  // — critical/high/medium never auto-approve — is enforced backend-side; this
+  // toggle only flips manual ↔ auto_low_risk.
+  const approvalMode = hitl?.approval_mode
+  const autoOn = approvalMode?.mode === 'auto_low_risk'
+  const hitlDisabledByEnv = hitl?.disabled_by_env ?? false
+  const acting = governanceApprovalActing.value
+  // The toggle is meaningless while HITL is env-disabled (nothing gates), and
+  // must not race a decision already in flight.
+  const toggleDisabled = acting !== null || hitlDisabledByEnv
+  const eligibleBands = approvalMode?.auto_eligible_bands ?? []
+  const hiddenRules = Math.max(0, rules.length - ASIDE_RULES_LIMIT)
+  return html`
+    <aside class="ap-aside" data-testid="approvals-aside">
+      <section class="wka-card ap-auto-card">
+        <div class="wka-h">
+          <h3>HITL 상태</h3>
+          <span class=${`ap-hitl-state ${enabled === false ? 'bad' : enabled === true ? 'ok' : ''}`}>
+            ${enabled === null ? 'unknown' : enabled ? 'enabled' : 'disabled'}
+          </span>
+        </div>
+        <div class="wka-auto">
+          <div class="wka-auto-top">
+            <span class="wka-auto-lbl">
+              자동 승인 모드
+              <b>${autoOn ? '자동 승인 (low-risk)' : '수동 결재'}</b>
+            </span>
+            <button
+              type="button"
+              class=${`wka-switch ${autoOn ? 'on' : ''}`}
+              role="switch"
+              aria-checked=${autoOn ? 'true' : 'false'}
+              aria-label="자동 승인 모드 전환"
+              data-testid="approval-mode-toggle"
+              title=${hitlDisabledByEnv
+                ? 'HITL이 비활성화되어 있어 자동 승인 모드를 변경할 수 없습니다'
+                : autoOn
+                  ? '수동 결재로 전환합니다'
+                  : 'low-risk 요청만 자동 승인하도록 전환합니다'}
+              onClick=${() => void setKeeperApprovalMode(autoOn ? 'manual' : 'auto_low_risk')}
+              disabled=${toggleDisabled}
+            ></button>
+          </div>
+          <div class="wka-auto-stat">${rules.length.toLocaleString()}개 Always 규칙 · 열린 승인 ${openCount.toLocaleString()}건</div>
+          <div class="wka-auto-note">
+            <b>비가역·파괴적·high-risk 요청은 항상 수동 결재</b>${eligibleBands.length > 0
+              ? ` · 자동 승인 대상: ${eligibleBands.join(', ')}`
+              : ''} · 직무분리 원칙(RFC-0319)
+          </div>
+          ${approvalMode?.fail_closed
+            ? html`<div class="ap-env-warn mono">approval-mode 상태를 읽지 못해 수동 결재로 처리 중</div>`
+            : null}
+          ${hitlDisabledByEnv
+            ? html`<div class="ap-env-warn mono">${hitl?.env_name ?? 'MASC_DISABLE_HITL'} disables HITL</div>`
+            : null}
+        </div>
+      </section>
+
+      <section class="wka-card">
+        <div class="wka-h">
+          <h3>Always Rules</h3>
+          <span class="mono">${rules.length}</span>
+        </div>
+        ${rules.length > 0
+          ? html`
+              <ul class="ap-rule-list">${rules.slice(0, ASIDE_RULES_LIMIT).map(rule => html`<${ApprovalRuleRow} key=${rule.id} rule=${rule} />`)}</ul>
+              ${hiddenRules > 0
+                ? html`<div class="ap-side-empty mono" data-testid="approvals-rules-overflow">외 ${hiddenRules.toLocaleString()}건 더</div>`
+                : null}
+            `
+          : html`<div class="ap-side-empty">저장된 Always 규칙 없음</div>`}
+      </section>
+
+      <section class="wka-card">
+        <div class="wka-h">
+          <h3>최근 처리</h3>
+          <span class="mono">${resolvedItems.length}</span>
+        </div>
+        ${recent.length > 0
+          ? html`
+              <ul class="ap-recent-list">
+                ${recent.map(item => html`
+                  <li class="ap-recent-row" key=${item.id}>
+                    <span class=${`ap-history-decision ${keeperResolvedApprovalDecisionClass(item.decision)}`}>
+                      ${keeperResolvedApprovalDecisionLabel(item.decision)}
+                    </span>
+                    <span class="ap-recent-body">
+                      <span class="ap-recent-top">
+                        <span class="mono">${item.tool_name}</span>
+                        <span>${item.keeper_name}</span>
+                      </span>
+                      <span class="ap-recent-sub mono">${item.id}</span>
+                    </span>
+                  </li>
+                `)}
+              </ul>
+            `
+          : html`<div class="ap-side-empty">최근 처리 projection 없음</div>`}
+      </section>
+    </aside>
+  `
+}
+
 export function ApprovalsSurface() {
   useEffect(() => {
     void refreshGovernance()
@@ -374,12 +594,14 @@ export function ApprovalsSurface() {
 
   const items = governanceData.value?.approval_queue ?? []
   const resolvedItems = governanceData.value?.recent_resolved ?? []
+  const rules = governanceData.value?.approval_rules ?? []
   const error = governanceError.value
   // First load only: governanceResource is stale-while-revalidate, so a refetch
   // keeps the previous data — governanceData is null ONLY before the first load
   // resolves. Show a loading state then, instead of asserting the empty queue.
   const firstLoad = governanceLoading.value && governanceData.value === null
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [view, setView] = useState<ApprovalsView>('queue')
   const selectedItem = items.find(item => item.id === selectedId) ?? items[0] ?? null
 
   const stats = useMemo(() => {
@@ -395,7 +617,7 @@ export function ApprovalsSurface() {
   }, [items])
 
   return html`
-    <main class="ov ss-surface bg-surface-page text-text-primary" data-screen-label="승인 큐" data-testid="approvals-surface">
+    <main class="ov ov-2col ss-surface ap-surface bg-surface-page text-text-primary" data-screen-label="승인 큐" data-testid="approvals-surface">
       <div class="ov-scroll">
         <header class="ov-head">
           <div>
@@ -406,15 +628,35 @@ export function ApprovalsSurface() {
               <span title="감독자가 보는 단일 결재 지점">operator가 직접 승인·거부</span>
             </p>
           </div>
-          ${items.length > 0
-            ? html`<span class="ap-sla mono" title="가장 오래 대기 중인 건">최장 대기 ${apAge(stats.longest)}</span>`
-            : null}
+          <div class="ap-head-actions">
+            <div class="ap-viewseg" role="tablist" aria-label="승인 큐 보기">
+              <button
+                type="button"
+                class=${`ap-viewbtn ${view === 'queue' ? 'on' : ''}`}
+                aria-selected=${view === 'queue'}
+                onClick=${() => setView('queue')}
+              >
+                큐${items.length > 0 ? html`<span class="ap-viewbtn-n mono">${items.length}</span>` : null}
+              </button>
+              <button
+                type="button"
+                class=${`ap-viewbtn ${view === 'history' ? 'on' : ''}`}
+                aria-selected=${view === 'history'}
+                onClick=${() => setView('history')}
+              >이력</button>
+            </div>
+            ${view === 'queue' && items.length > 0
+              ? html`<span class="ap-sla mono" title="가장 오래 대기 중인 건">최장 대기 ${apAge(stats.longest)}</span>`
+              : null}
+          </div>
         </header>
 
         ${error ? html`<div class="ap-error" role="alert" data-testid="approvals-error">${error}</div>` : null}
 
         ${firstLoad
           ? html`<${LoadingState}>승인 큐 불러오는 중...<//>`
+          : view === 'history'
+            ? html`<${ApHistory} items=${resolvedItems} />`
           : html`
         <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
           <div class="ov-kpi">
@@ -426,12 +668,12 @@ export function ApprovalsSurface() {
             <div class=${`ov-kpi-v ${stats.irreversible ? 'bad' : ''}`} data-testid="approvals-kpi-irreversible">${stats.irreversible}</div>
           </div>
           <div class="ov-kpi">
-            <div class="ov-kpi-k">최장 대기</div>
-            <div class="ov-kpi-v">${items.length ? apAge(stats.longest) : '—'}</div>
+            <div class="ov-kpi-k">Always 규칙</div>
+            <div class="ov-kpi-v">${rules.length}</div>
           </div>
           <div class="ov-kpi">
-            <div class="ov-kpi-k">관련 키퍼</div>
-            <div class="ov-kpi-v volt">${stats.keepers}</div>
+            <div class="ov-kpi-k">처리 완료</div>
+            <div class="ov-kpi-v volt">${resolvedItems.length}</div>
           </div>
         </section>
 
@@ -465,20 +707,15 @@ export function ApprovalsSurface() {
               </div>
             `
           : null}
-        ${resolvedItems.length > 0
-          ? html`
-              <section class="ap-history" data-testid="approvals-history">
-                <h2 class="ap-history-title">최근 처리 (${resolvedItems.length})</h2>
-                <ul class="ap-history-list">
-                  ${resolvedItems.map(item => html`
-                    <${ResolvedApprovalItem} key=${item.id} item=${item} />
-                  `)}
-                </ul>
-              </section>
-            `
-          : null}
       `}
       </div>
+      ${!firstLoad ? html`
+        <${ApAside}
+          openCount=${items.length}
+          resolvedItems=${resolvedItems}
+          rules=${rules}
+        />
+      ` : null}
     </main>
   `
 }

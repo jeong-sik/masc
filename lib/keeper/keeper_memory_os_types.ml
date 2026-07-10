@@ -393,13 +393,15 @@ let fact_prompt_recallable (fact : fact) =
 ;;
 
 (* RFC-0259 §3.6 (P5): split a fact list into (live, expired-at-[now]) on the
-   typed [valid_until] boundary. The cap path ([Keeper_memory_os_io.cap_facts] /
-   [merge_and_cap_facts]) calls this so it drops expired rows on the SAME
+   effective-horizon boundary ([fact_is_current], i.e.
+   [fact_effective_valid_until]). The cap path ([Keeper_memory_os_io.cap_facts]
+   / [merge_and_cap_facts]) calls this so it drops expired rows on the SAME
    boundary the GC sweep uses ([Keeper_memory_os_gc.ttl_expired]), instead of
    leaving them on disk until the off-by-default 600s sweep happens to run.
-   Durable facts ([valid_until = None]) are always live, so this never evicts
-   durable knowledge. This is retention-path determinism (cap and GC agree on
-   what [valid_until] means), not a new read-side filter — recall already drops
+   Facts with no effective horizon ([valid_until = None] and not a legacy
+   [External_state] claim, RFC-0259 P7) are always live, so durable knowledge
+   is never evicted here. This is retention-path determinism (cap and GC agree
+   on the expiry boundary), not a new read-side filter — recall already drops
    expired rows via [fact_is_current]. *)
 let partition_expired ~now (facts : fact list) =
   List.partition (fact_is_current ~now) facts

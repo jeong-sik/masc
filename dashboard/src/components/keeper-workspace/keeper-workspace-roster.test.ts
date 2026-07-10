@@ -7,7 +7,10 @@ vi.mock('../../router', async (orig) => ({
   ...(await orig<typeof import('../../router')>()),
   navigate: vi.fn(),
 }))
-vi.mock('../keeper-action-panel', () => ({
+vi.mock('../keeper-action-panel', async (importOriginal) => ({
+  // Keep the real KEEPER_ACTION_LABELS (label/icon/title SSOT); only the
+  // side-effecting action runner is stubbed.
+  ...(await importOriginal<typeof import('../keeper-action-panel')>()),
   runKeeperAction: vi.fn(async () => undefined),
 }))
 vi.mock('../keeper-detail-helpers', () => ({
@@ -18,7 +21,7 @@ import { navigate } from '../../router'
 import { keepers } from '../../store'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { runKeeperAction } from '../keeper-action-panel'
-import { KeeperWorkspaceRoster, rosterFleetSummary } from './keeper-workspace-roster'
+import { KeeperWorkspaceRoster, rosterFilterPref, rosterFleetSummary, rosterSortPref } from './keeper-workspace-roster'
 import type { Keeper } from '../../types'
 
 function mk(partial: Partial<Keeper>): Keeper {
@@ -35,6 +38,10 @@ let host: HTMLElement
 
 beforeEach(() => {
   keepers.value = FIXTURE
+  // View prefs are module-level persistent signals — reset to defaults so
+  // sort/filter choices made by one test never leak into the next.
+  rosterFilterPref.value = 'all'
+  rosterSortPref.value = 'recent'
   vi.mocked(navigate).mockClear()
   vi.mocked(runKeeperAction).mockClear()
   host = document.createElement('div')
@@ -140,8 +147,13 @@ describe('KeeperWorkspaceRoster', () => {
     const rows = Array.from(host.querySelectorAll('.kp-row')) as HTMLElement[]
     const recent = rows.find(row => row.textContent?.includes('recent-turn')) as HTMLElement
     const createdOnly = rows.find(row => row.textContent?.includes('created-only')) as HTMLElement
-    expect(recent.textContent).toContain('마지막 턴')
-    expect(recent.textContent).toContain('3분 전')
+    // Visible time chip is the compact mock form ("3분", no label/전); the full
+    // "마지막 턴 3분 전" description moves to the hover title so the name column
+    // keeps its width.
+    const recentTime = recent.querySelector('.kw-kp-time') as HTMLElement
+    expect(recentTime.textContent).toBe('3분')
+    expect(recentTime.getAttribute('title')).toContain('마지막 턴')
+    expect(recentTime.getAttribute('title')).toContain('3분 전')
     expect(createdOnly.textContent).not.toContain('생성')
   })
 

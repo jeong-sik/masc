@@ -1,0 +1,545 @@
+type access_result =
+  | Access_allowed
+  | Access_denied of string
+  | Access_denied_hitl_pending of { detail : string; approval_id : string }
+
+let repository_registration_tool_name = "keeper_repository_registration"
+let repository_registration_kind = "repository_registration"
+let repository_registration_disposition = "operator_action_required"
+let repository_registration_reason = "repository_unregistered"
+let repository_registration_next_action = "wait_for_operator_approval"
+
+type registration_candidate =
+  { repository_id : Repo_manager_types.repository_id
+  ; repo_root : string
+  ; expected_repo_root : string option
+  ; origin_url : string
+  ; default_branch : string
+  }
+
+type registration_operation =
+  | Register_new of registration_candidate
+  | Add_alias_to_existing of
+      { existing_repository_id : Repo_manager_types.repository_id
+      ; alias : string
+      ; candidate : registration_candidate
+      }
+  | Manual_catalog_review of
+      { reason : string
+      ; candidate : registration_candidate
+      }
+
+let repository_record_of_candidate ~keeper_id candidate =
+  { Repo_manager_types.id = candidate.repository_id
+  ; name = candidate.repository_id
+  ; url = candidate.origin_url
+  ; local_path = candidate.repo_root
+  ; aliases = []
+  ; default_branch = candidate.default_branch
+  ; keepers = [ keeper_id ]
+  ; status = Repo_manager_types.Active
+  ; auto_sync = false
+  ; sync_interval = 0
+  ; created_at = Int64.zero
+  ; updated_at = Int64.zero
+  }
+;;
+
+let candidate_identity_is_valid ~keeper_id candidate =
+  let repo = repository_record_of_candidate ~keeper_id candidate in
+  Keeper_repo_mapping.repository_url_basename_matches_identity repo
+;;
+
+let add_string_once value values =
+  if List.exists (String.equal value) values then values else values @ [ value ]
+;;
+
+let canonical_url_equal left right =
+  match
+    ( Agent_observation.canonical_url_of_remote left
+    , Agent_observation.canonical_url_of_remote right )
+  with
+  | Some left, Some right -> String.equal left right
+  | _ -> false
+;;
+
+let origin_url_matches left right = String.equal left right || canonical_url_equal left right
+
+let normalized_root_for_compare path =
+  let trimmed = String.trim path in
+  let trimmed =
+    if String.ends_with ~suffix:"/" trimmed
+    then String.sub trimmed 0 (String.length trimmed - 1)
+    else trimmed
+  in
+  try Unix.realpath trimmed with
+  | Unix.Unix_error _ | Sys_error _ -> trimmed
+;;
+
+let candidate_expected_repo_root_mismatch candidate =
+  match candidate.expected_repo_root with
+  | None -> None
+  | Some expected_repo_root ->
+    if
+      String.equal
+        (normalized_root_for_compare candidate.repo_root)
+        (normalized_root_for_compare expected_repo_root)
+    then None
+    else
+      Some
+        (Printf.sprintf
+           "git worktree root %s does not match expected playground repository root %s"
+           candidate.repo_root
+           expected_repo_root)
+;;
+
+let revalidate_registration_candidate candidate =
+  match Repo_git.worktree_root ~local_path:candidate.repo_root with
+  | Error reason -> Error ("worktree root recheck failed: " ^ reason)
+  | Ok repo_root ->
+    if not (String.equal repo_root candidate.repo_root)
+    then
+      Error
+        (Printf.sprintf
+           "worktree root changed from %s to %s"
+           candidate.repo_root
+           repo_root)
+    else (
+      match candidate_expected_repo_root_mismatch { candidate with repo_root } with
+      | Some reason -> Error reason
+      | None ->
+      match Repo_git.get_origin_url ~local_path:repo_root with
+      | Error reason -> Error ("origin recheck failed: " ^ reason)
+      | Ok origin_url ->
+        if not (origin_url_matches candidate.origin_url origin_url)
+        then
+          Error
+            (Printf.sprintf
+               "origin changed from %s to %s"
+               candidate.origin_url
+               origin_url)
+        else (
+          match Repo_git.origin_head_branch ~local_path:repo_root with
+          | Error reason -> Error ("origin HEAD recheck failed: " ^ reason)
+          | Ok default_branch ->
+            if not (String.equal default_branch candidate.default_branch)
+            then
+              Error
+                (Printf.sprintf
+                   "default branch changed from %s to %s"
+                   candidate.default_branch
+                   default_branch)
+            else Ok { candidate with repo_root; origin_url; default_branch }))
+;;
+
+let find_existing_repository_by_origin ~base_path origin_url =
+  match Repo_store.load_all ~base_path with
+  | Error detail -> Error detail
+  | Ok repos ->
+    Ok
+      (List.find_opt
+         (fun (repo : Repo_manager_types.repository) ->
+            canonical_url_equal repo.url origin_url)
+         repos)
+;;
+
+let log_stale_approved_candidate ~keeper_id candidate detail =
+  Log.Keeper.warn
+    "keeper repo registration approved but git metadata recheck failed; \
+     skipping catalog mutation keeper=%s repository=%s repo_root=%s \
+     source=%s error=%s"
+    keeper_id
+    candidate.repository_id
+    candidate.repo_root
+    Config_dir_resolver.repositories_toml_basename
+    detail
+;;
+
+let registration_operation ~keeper_id ~base_path candidate =
+  match candidate_expected_repo_root_mismatch candidate with
+  | Some reason -> Manual_catalog_review { reason; candidate }
+  | None -> (
+  match find_existing_repository_by_origin ~base_path candidate.origin_url with
+  | Error reason -> Manual_catalog_review { reason; candidate }
+  | Ok (Some existing) ->
+    Add_alias_to_existing
+      { existing_repository_id = existing.id; alias = candidate.repository_id; candidate }
+  | Ok None ->
+    if candidate_identity_is_valid ~keeper_id candidate then Register_new candidate
+    else
+      Manual_catalog_review
+        { reason = "origin URL basename does not match requested repository id"
+        ; candidate
+        })
+;;
+
+let operation_candidate = function
+  | Register_new candidate
+  | Add_alias_to_existing { candidate; _ }
+  | Manual_catalog_review { candidate; _ } -> candidate
+;;
+
+let operation_name = function
+  | Register_new _ -> "register_repository"
+  | Add_alias_to_existing _ -> "add_repository_alias"
+  | Manual_catalog_review _ -> "review_repository_catalog"
+;;
+
+let persist_alias ~keeper_id ~base_path ~(existing : Repo_manager_types.repository) ~alias =
+  let updated =
+    { existing with
+      aliases = add_string_once alias existing.aliases
+    ; keepers = add_string_once keeper_id existing.keepers
+    }
+  in
+  match Repo_store.update ~base_path existing.id updated with
+  | Ok _ ->
+    Log.Keeper.info
+      "keeper repo alias approved keeper=%s repository=%s alias=%s source=%s"
+      keeper_id
+      existing.id
+      alias
+      Config_dir_resolver.repositories_toml_basename
+  | Error detail ->
+    Log.Keeper.warn
+      "keeper repo alias approved but catalog update failed keeper=%s \
+       repository=%s alias=%s source=%s error=%s"
+      keeper_id
+      existing.id
+      alias
+      Config_dir_resolver.repositories_toml_basename
+      detail
+;;
+
+let approve_alias ~keeper_id ~base_path ~existing_repository_id ~alias ~candidate =
+  match revalidate_registration_candidate candidate with
+  | Error detail -> log_stale_approved_candidate ~keeper_id candidate detail
+  | Ok current_candidate -> (
+    match Repo_store.find ~base_path existing_repository_id with
+  | Error detail ->
+    Log.Keeper.warn
+      "keeper repo alias approved but catalog read failed keeper=%s \
+       repository=%s alias=%s source=%s error=%s"
+      keeper_id
+      existing_repository_id
+      alias
+      Config_dir_resolver.repositories_toml_basename
+      detail
+  | Ok existing ->
+    if not (origin_url_matches existing.url current_candidate.origin_url)
+    then
+      Log.Keeper.warn
+        "keeper repo alias approved but current clone origin does not match \
+         target repository; skipping catalog mutation keeper=%s repository=%s \
+         alias=%s source=%s target_origin=%s current_origin=%s"
+        keeper_id
+        existing.id
+        alias
+        Config_dir_resolver.repositories_toml_basename
+        existing.url
+        current_candidate.origin_url
+    else persist_alias ~keeper_id ~base_path ~existing ~alias)
+;;
+
+let approve_new_registration ~keeper_id ~base_path candidate =
+  match revalidate_registration_candidate candidate with
+  | Error detail -> log_stale_approved_candidate ~keeper_id candidate detail
+  | Ok candidate -> (
+  match find_existing_repository_by_origin ~base_path candidate.origin_url with
+  | Error detail ->
+    Log.Keeper.warn
+      "keeper repo registration approved but catalog recheck failed keeper=%s \
+       repository=%s source=%s error=%s"
+      keeper_id
+      candidate.repository_id
+      Config_dir_resolver.repositories_toml_basename
+      detail
+  | Ok (Some existing) ->
+    persist_alias ~keeper_id ~base_path ~existing ~alias:candidate.repository_id
+  | Ok None ->
+    if candidate_identity_is_valid ~keeper_id candidate then (
+      let repo = repository_record_of_candidate ~keeper_id candidate in
+      match Repo_store.add ~base_path repo with
+      | Ok _ ->
+        Log.Keeper.info
+          "keeper repo registration approved keeper=%s repository=%s source=%s"
+          keeper_id
+          candidate.repository_id
+          Config_dir_resolver.repositories_toml_basename
+      | Error detail ->
+        Log.Keeper.warn
+          "keeper repo registration approved but catalog update failed keeper=%s \
+           repository=%s source=%s error=%s"
+          keeper_id
+          candidate.repository_id
+          Config_dir_resolver.repositories_toml_basename
+          detail)
+    else
+      Log.Keeper.warn
+        "keeper repo registration approved but identity check failed keeper=%s \
+         repository=%s url=%s"
+        keeper_id
+        candidate.repository_id
+        candidate.origin_url)
+;;
+
+let apply_approved_operation ~keeper_id ~base_path = function
+  | Register_new candidate -> approve_new_registration ~keeper_id ~base_path candidate
+  | Add_alias_to_existing { existing_repository_id; alias; candidate } ->
+    approve_alias ~keeper_id ~base_path ~existing_repository_id ~alias ~candidate
+  | Manual_catalog_review { reason; candidate } ->
+    Log.Keeper.warn
+      "keeper repo catalog review approved but no automatic mutation is safe \
+       keeper=%s repository=%s reason=%s"
+      keeper_id
+      candidate.repository_id
+      reason
+;;
+
+let register_candidate_on_approval ~keeper_id ~base_path operation decision =
+  let candidate = operation_candidate operation in
+  match decision with
+  | Agent_sdk.Hooks.Approve ->
+    apply_approved_operation ~keeper_id ~base_path operation
+  | Agent_sdk.Hooks.Reject reason ->
+    Log.Keeper.info
+      "keeper repo registration rejected keeper=%s repository=%s reason=%s"
+      keeper_id
+      candidate.repository_id
+      reason
+  | Agent_sdk.Hooks.Edit _ ->
+    Log.Keeper.warn
+      "keeper repo registration edit decision ignored keeper=%s repository=%s; \
+       dashboard approval resolver supports approve/reject only"
+      keeper_id
+      candidate.repository_id
+;;
+
+let registration_operation_input ~keeper_id ~base_path operation =
+  let candidate = operation_candidate operation in
+  let operation_fields =
+    match operation with
+    | Register_new _ -> []
+    | Add_alias_to_existing { existing_repository_id; alias; _ } ->
+      [ "target_repository_id", `String existing_repository_id; "alias", `String alias ]
+    | Manual_catalog_review { reason; _ } -> [ "manual_review_reason", `String reason ]
+  in
+  `Assoc
+    ([ "kind", `String repository_registration_kind
+     ; "keeper_id", `String keeper_id
+     ; "repository_id", `String candidate.repository_id
+     ; "policy_source", `String Config_dir_resolver.repositories_toml_basename
+     ; "requested_action", `String (operation_name operation)
+	     ; "base_path", `String base_path
+	     ; "repo_root", `String candidate.repo_root
+     ; ( "expected_repo_root"
+       , match candidate.expected_repo_root with
+         | None -> `Null
+         | Some expected_repo_root -> `String expected_repo_root )
+	     ; "origin_url", `String candidate.origin_url
+	     ; "default_branch", `String candidate.default_branch
+	     ; "identity_valid", `Bool (candidate_identity_is_valid ~keeper_id candidate)
+     ]
+     @ operation_fields)
+;;
+
+let submit_registration_hitl ~keeper_id ~base_path operation =
+  Keeper_approval_queue.submit_pending
+    ~keeper_name:keeper_id
+    ~tool_name:repository_registration_tool_name
+    ~input:(registration_operation_input ~keeper_id ~base_path operation)
+    ~risk_level:Keeper_approval_queue.High
+    ~base_path
+    ~sandbox_target:"repository_catalog"
+    ~disposition:repository_registration_disposition
+    ~disposition_reason:repository_registration_reason
+    ~on_resolution:(register_candidate_on_approval ~keeper_id ~base_path operation)
+    ()
+;;
+
+let path_for_git_probe path =
+  try if Sys.file_exists path && Sys.is_directory path then path else Filename.dirname path with
+  | Sys_error _ -> Filename.dirname path
+;;
+
+let registration_candidate_of_path ~repository_id ~expected_repo_root ~path =
+  let probe_path = path_for_git_probe path in
+  match Repo_git.worktree_root ~local_path:probe_path with
+  | Error reason -> Error reason
+  | Ok repo_root -> (
+    match Repo_git.get_origin_url ~local_path:repo_root with
+    | Error reason -> Error reason
+    | Ok origin_url -> (
+      match Repo_git.origin_head_branch ~local_path:repo_root with
+      | Error reason -> Error reason
+      | Ok default_branch ->
+        Ok { repository_id; repo_root; expected_repo_root; origin_url; default_branch }))
+;;
+
+type candidate_path_state =
+  | Candidate_path_absent
+  | Candidate_path_directory
+  | Candidate_path_invalid of string
+
+let candidate_path_state path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Candidate_path_absent
+  | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> Candidate_path_absent
+  | exception Unix.Unix_error (err, fn, arg) ->
+    Candidate_path_invalid
+      (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+  | _ -> (
+    match Sys.is_directory path with
+    | true -> Candidate_path_directory
+    | false -> Candidate_path_invalid "candidate path exists but is not a directory"
+    | exception Sys_error reason ->
+      Candidate_path_invalid
+        (Printf.sprintf "candidate path could not be inspected as directory: %s" reason))
+;;
+
+type repository_id_clone_probe =
+  | No_clone_candidate
+  | Clone_candidate of registration_candidate
+  | Invalid_clone_candidate of string
+
+let registration_candidate_of_repository_id ~keeper_id ~base_path ~repository_id =
+  let candidate_roots =
+    Keeper_sandbox_repo_path.candidate_repo_roots_no_create
+      ~base_path
+      ~keeper_id
+      ~repository_id
+  in
+  let rec loop invalid = function
+    | [] ->
+      (match invalid with
+       | [] -> No_clone_candidate
+       | errors ->
+         Invalid_clone_candidate
+           (errors
+            |> List.rev
+            |> List.map (fun (path, reason) -> Printf.sprintf "%s: %s" path reason)
+            |> String.concat "; "))
+    | repo_root :: rest ->
+      (match candidate_path_state repo_root with
+       | Candidate_path_absent -> loop invalid rest
+       | Candidate_path_invalid reason -> loop ((repo_root, reason) :: invalid) rest
+       | Candidate_path_directory -> (
+        match
+          registration_candidate_of_path
+            ~repository_id
+            ~expected_repo_root:(Some repo_root)
+            ~path:repo_root
+        with
+        | Ok candidate -> Clone_candidate candidate
+        | Error reason -> loop ((repo_root, reason) :: invalid) rest))
+  in
+  loop [] candidate_roots
+;;
+
+let pending_operator_action_message detail =
+  Printf.sprintf
+    "%s; operator approval pending for %s"
+    detail
+    repository_registration_kind
+;;
+
+let deterministic_policy_blocked_fields =
+  Keeper_tool_deterministic_error.(deterministic_retry_fields Policy_blocked)
+;;
+
+let repository_registration_action_fields =
+  [ "operator_action_required", `Bool true
+  ; "operator_action_kind", `String repository_registration_kind
+  ; "operator_action_reason", `String repository_registration_reason
+  ; "recoverability", `String repository_registration_disposition
+  ; "next_action", `String repository_registration_next_action
+  ]
+;;
+
+let approval_pending_json approval_id =
+  `Assoc
+    [ "id", `String approval_id
+    ; "kind", `String repository_registration_kind
+    ; "reason", `String repository_registration_reason
+    ; "non_blocking", `Bool true
+    ]
+;;
+
+let request_repository_access ~keeper_id ~base_path ~repository_id =
+  match Keeper_repo_mapping.access_decision ~keeper_id ~repository_id ~base_path with
+  | Keeper_repo_mapping.Access_allowed -> Access_allowed
+  | Keeper_repo_mapping.Access_denied denial ->
+    let detail = Keeper_repo_mapping.access_denial_to_string denial in
+    (match denial with
+     | Keeper_repo_mapping.Access_denied_unregistered_repository repository_id ->
+       (match
+          registration_candidate_of_repository_id ~keeper_id ~base_path ~repository_id
+        with
+        | Clone_candidate candidate ->
+          let operation = registration_operation ~keeper_id ~base_path candidate in
+          let approval_id = submit_registration_hitl ~keeper_id ~base_path operation in
+          Access_denied_hitl_pending { detail; approval_id }
+        | No_clone_candidate -> Access_denied detail
+        | Invalid_clone_candidate reason ->
+          Access_denied
+            (Printf.sprintf
+               "%s; playground clone candidate could not be verified: %s"
+               detail
+               reason))
+     | Access_denied_load_error _ | Access_denied_repository_store_error _ ->
+       Access_denied detail)
+;;
+
+let request_path_access ~keeper_id ~base_path ~path =
+  match Keeper_repo_mapping.repository_resolution_of_path ~base_path ~path with
+  | Keeper_repo_mapping.No_repository -> Access_allowed
+  | Keeper_repo_mapping.Repository { repository_id; repo_root = expected_repo_root } ->
+    (match request_repository_access ~keeper_id ~base_path ~repository_id with
+     | Access_denied detail ->
+       (match registration_candidate_of_path ~repository_id ~expected_repo_root ~path with
+        | Ok candidate ->
+          let operation = registration_operation ~keeper_id ~base_path candidate in
+          let approval_id = submit_registration_hitl ~keeper_id ~base_path operation in
+          Access_denied_hitl_pending { detail; approval_id }
+        | Error reason ->
+          Log.Keeper.warn
+            "keeper repo registration candidate unavailable keeper=%s repository=%s \
+             path=%s error=%s"
+            keeper_id
+            repository_id
+            path
+            reason;
+          Access_denied detail)
+     | (Access_allowed | Access_denied_hitl_pending _) as result -> result)
+  | Keeper_repo_mapping.Repository_identity_mismatch mismatch ->
+    Access_denied (Keeper_repo_mapping.repository_identity_mismatch_message mismatch)
+  | Keeper_repo_mapping.Repository_store_error detail ->
+    Access_denied
+      (Printf.sprintf
+         "Repository store load failed while validating keeper %s path %s: %s"
+         keeper_id
+         path
+         detail)
+;;
+
+let tool_response_json ~path = function
+  | Access_allowed ->
+    `Assoc [ "ok", `Bool true; "path", `String path ]
+  | Access_denied detail ->
+    `Assoc
+      ([ "ok", `Bool false
+       ; "error", `String detail
+       ; "path", `String path
+       ]
+       @ deterministic_policy_blocked_fields)
+  | Access_denied_hitl_pending { detail; approval_id } ->
+    `Assoc
+      ([ "ok", `Bool false
+       ; "error", `String (pending_operator_action_message detail)
+       ; "policy_error", `String detail
+       ; "path", `String path
+       ; "approval_pending", approval_pending_json approval_id
+       ]
+       @ repository_registration_action_fields
+       @ deterministic_policy_blocked_fields)
+;;

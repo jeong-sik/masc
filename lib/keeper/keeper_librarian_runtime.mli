@@ -83,11 +83,6 @@ val cadence_counter_entries : unit -> int
     Uses [Eio_guard.with_mutex_ro] so runtime fibers take a cooperative mutex
     while focused pre-Eio tests keep a direct single-threaded path. *)
 
-val memory_os_librarian_provider_slot_site : string
-(** OTel [site] label used when the fleet-wide librarian provider slot is busy.
-    The producer and dashboard health reader share this value so label drift
-    cannot silently hide provider-slot-busy alerts. *)
-
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The
     effective prompt window is this value scaled by [cadence_turns] so skipped

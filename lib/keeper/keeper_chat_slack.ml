@@ -130,6 +130,24 @@ let tool_context_block_json ~name ~args_summary ~result_summary =
     ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
     ]
 
+let code_block_json ~source ~caption =
+  let language = Option.value caption ~default:"code" in
+  let body =
+    Printf.sprintf "```%s\n%s\n```" (redact language) (redact source)
+    |> truncate_block_text
+  in
+  `Assoc
+    [ ("type", `String "section")
+    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String body) ])
+    ]
+
+let mermaid_block_json ~source =
+  let body = Printf.sprintf "```mermaid\n%s\n```" (redact source) |> truncate_block_text in
+  `Assoc
+    [ ("type", `String "section")
+    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String body) ])
+    ]
+
 (* ── Content → Slack blocks ──────────────────────────────────────── *)
 
 let slack_block_of_chat_block = function
@@ -141,13 +159,19 @@ let slack_block_of_chat_block = function
       Option.map
         (fun url -> link_block_json ~url ~title ~description:None)
         (redacted_http_url_opt url)
+  | Keeper_chat_blocks.Code { cap; html; source } ->
+    let source =
+      match source with
+      | Some source -> source
+      | None -> html
+    in
+    if String.trim source = "" then None else Some (code_block_json ~source ~caption:cap)
+  | Keeper_chat_blocks.Mermaid { source; caption = _ } -> Some (mermaid_block_json ~source)
   | Keeper_chat_blocks.Text _
   | Keeper_chat_blocks.Heading _
   | Keeper_chat_blocks.Unordered_list _
   | Keeper_chat_blocks.Callout _
   | Keeper_chat_blocks.Table _
-  | Keeper_chat_blocks.Code _
-  | Keeper_chat_blocks.Mermaid _
   | Keeper_chat_blocks.Svg _
   | Keeper_chat_blocks.Voice _
   | Keeper_chat_blocks.Attach _
@@ -249,7 +273,8 @@ let send_message ~token ~channel ~content =
 
 let add_block acc block = block :: acc
 
-let adapter_loop ~token ~channel ~events ?base_url () =
+let adapter_loop ~token ~channel ~events ?base_url
+    ?(on_send_result = fun _ -> ()) () =
   let rec loop ~acc_text ~acc_blocks ~run_id_opt =
     match Keeper_chat_events.subscribe events with
     | Text_delta text ->
@@ -262,14 +287,12 @@ let adapter_loop ~token ~channel ~events ?base_url () =
             ~event_blocks:(List.rev acc_blocks)
         in
         if String.length acc_text > 0 || List.length blocks > 0 then
-          ignore
-            (send_message_with_blocks ~token ~channel ~content:acc_text ~blocks
-              : (unit, error) result);
+          on_send_result
+            (send_message_with_blocks ~token ~channel ~content:acc_text ~blocks);
         ()
     | Event_error { message } ->
-        ignore
-          (send_message ~token ~channel ~content:("Keeper error: " ^ message)
-            : (unit, error) result);
+        on_send_result
+          (send_message ~token ~channel ~content:("Keeper error: " ^ message));
         ()
     | Run_started { run_id; thread_id = _ } ->
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
@@ -290,12 +313,11 @@ let adapter_loop ~token ~channel ~events ?base_url () =
     | Oas_media_delta _ ->
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Oas_stream_protocol_error error ->
-        ignore
+        on_send_result
           (send_message ~token ~channel
              ~content:
                ("Keeper stream protocol: "
-                ^ Keeper_chat_events.stream_protocol_error_summary error)
-            : (unit, error) result);
+                ^ Keeper_chat_events.stream_protocol_error_summary error));
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Tool_call_start _ | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _ ->
         loop ~acc_text ~acc_blocks ~run_id_opt

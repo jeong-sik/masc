@@ -21,6 +21,8 @@ import {
   replaceTrailingMentionDraft,
 } from '../../lib/mention-utils'
 import { useOperatorMentionContext } from '../common/use-operator-mention-context'
+import { stableAttachmentId } from '../chat/attachments'
+import { useVoiceInput } from '../chat/voice-input'
 
 export type ComposerV2Mode = 'broadcast' | 'dm' | 'state-block'
 
@@ -40,6 +42,7 @@ export interface ComposerAttachmentDraft {
   kind: 'image' | 'file'
   name: string
   size: string
+  sizeBytes?: number | null
   mime?: string | null
   dims?: string | null
 }
@@ -89,16 +92,33 @@ function composeBodyText(body: ComposerV2Request['compose']['body']): string {
   return typeof body === 'string' ? body : body.raw
 }
 
-function attachmentTransportMeta(attachment: ComposerAttachmentDraft): string {
-  return [attachment.size, attachment.kind, attachment.dims].filter(Boolean).join(' · ')
-}
-
-function attachmentTrayMeta(attachment: ComposerAttachmentDraft): string {
+export function composerAttachmentTrayMeta(attachment: ComposerAttachmentDraft): string {
   return [attachment.size, attachment.mime, attachment.kind, attachment.dims].filter(Boolean).join(' · ')
 }
 
 function plural(count: number, singular: string, pluralLabel: string): string {
   return `${count} ${count === 1 ? singular : pluralLabel}`
+}
+
+export function composerAttachmentTransportUnavailable(attachments: ComposerAttachmentDraft[]): boolean {
+  return attachments.length > 0
+}
+
+export function composerAttachmentDeliveryReason(attachments: ComposerAttachmentDraft[]): string | null {
+  return composerAttachmentTransportUnavailable(attachments) ? 'attachment transport unavailable' : null
+}
+
+export function uniqueComposerAttachmentId(
+  baseId: string,
+  existing: ComposerAttachmentDraft[],
+  pending: ComposerAttachmentDraft[],
+): string {
+  const used = new Set([...existing, ...pending].map(attachment => attachment.id))
+  if (!used.has(baseId)) return baseId
+
+  let suffix = 2
+  while (used.has(`${baseId}-${suffix}`)) suffix += 1
+  return `${baseId}-${suffix}`
 }
 
 export function buildComposerV2Request(input: {
@@ -134,18 +154,12 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function formatClock(seconds: number): string {
-  const whole = Math.max(0, Math.round(seconds))
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
-}
 
-export function createComposerVoiceDraft(): ComposerVoiceDraft {
-  return {
-    secs: 12,
-    size: formatFileSize(12 * 3400),
-    wave: [0.35, 0.72, 0.48, 0.9, 0.42, 0.66, 0.58, 0.8, 0.5, 0.7, 0.38, 0.62],
-    transcript: '스케줄러 p99 스파이크와 compact 타이밍을 비교해서 결과만 알려줘.',
-  }
+export function appendVoiceTranscriptDraft(current: string, transcript: string): string {
+  const text = transcript.trim()
+  if (!text) return current
+  const body = current.trim()
+  return body ? `${body}\n\n${text}` : text
 }
 
 export function serializeComposerBody(input: {
@@ -153,25 +167,18 @@ export function serializeComposerBody(input: {
   attachments: ComposerAttachmentDraft[]
   voice: ComposerVoiceDraft | null
 }): string {
-  const blocks: string[] = []
   if (input.attachments.length > 0) {
-    blocks.push([
-      'Attachments:',
-      ...input.attachments.map(attachment => {
-        const meta = attachmentTransportMeta(attachment)
-        return `- ${attachment.name}${meta ? ` (${meta})` : ''}`
-      }),
-    ].join('\n'))
+    throw new Error('Composer attachments require block transport and must not be serialized into text body')
   }
   if (input.voice) {
-    blocks.push([
-      `Voice memo ${formatClock(input.voice.secs)} (${input.voice.size})`,
-      input.voice.transcript,
-    ].join('\n'))
+    // G02 (multimodal parity) — voice must travel as a block, not be folded into
+    // the text body. Chat and board share the ComposerBlocks transport; the text
+    // path must refuse voice rather than silently serializing its transcript and
+    // dropping the audio metadata. All current callers pass voice: null, so this
+    // removes the dead serialization branch.
+    throw new Error('Composer voice requires block transport and must not be serialized into text body')
   }
-  const text = input.text.trim()
-  if (text) blocks.push(text)
-  return blocks.join('\n\n')
+  return input.text.trim()
 }
 
 interface ComposerV2Props {
@@ -200,13 +207,20 @@ export function ComposerV2({
   const [draft, setDraft] = useState('')
   const [keeperTarget, setKeeperTarget] = useState('')
   const [attachments, setAttachments] = useState<ComposerAttachmentDraft[]>([])
-  const [voiceDraft, setVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
-  const [recording, setRecording] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const workspace = normalizeWorkspaceId(workspaceId)
   const busy = submitting || operatorActionBusy.value
+  const voice = useVoiceInput({
+    onTranscribed: (text) => {
+      setDraft(current => appendVoiceTranscriptDraft(current, text))
+      showToast('Voice transcribed.', 'success')
+    },
+    onError: (message) => {
+      showToast(message, 'error')
+    },
+  })
   const mention = useOperatorMentionContext({
     message: draft,
     target: keeperTarget,
@@ -232,9 +246,12 @@ export function ComposerV2({
     setDismissedMentionQuery,
   } = mention
   const stateKeys = mode === 'state-block' ? stateBlockKeys(draft) : []
-  const hasDraftContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
+  const attachmentDeliveryReason = composerAttachmentDeliveryReason(attachments)
+  const hasDraftContent = draft.trim() !== '' || attachments.length > 0
   const sendDisabled = busy
+    || voice.state !== 'idle'
     || !hasDraftContent
+    || attachmentDeliveryReason !== null
     || (mode === 'dm' && (!effectiveKeeperOnline || unresolvedTrailingMention))
     || (mode === 'state-block' && stateKeys.length === 0)
   const targetLabel = mode === 'dm'
@@ -244,26 +261,32 @@ export function ComposerV2({
     : `#${workspace}`
   const mediaLabel = [
     attachments.length > 0 ? plural(attachments.length, 'file', 'files') : 'no files',
-    voiceDraft ? 'voice' : null,
+    voice.state !== 'idle' ? voice.state : null,
   ].filter(Boolean).join(' · ')
   const deliveryState = busy
     ? 'sending'
-    : sendDisabled
+    : voice.state !== 'idle' || sendDisabled
       ? 'blocked'
       : 'ready'
   const deliveryReason = busy
     ? 'transport busy'
-    : !hasDraftContent
-      ? 'draft empty'
-      : mode === 'dm' && unresolvedTrailingMention
-        ? 'resolve mention'
-        : mode === 'dm' && !effectiveKeeperOnline
-          ? 'keeper unavailable'
-          : mode === 'state-block' && stateKeys.length === 0
-            ? 'state block required'
-            : mode === 'dm'
-              ? 'keeper message'
-              : 'workspace broadcast'
+    : voice.state === 'recording'
+      ? 'recording voice'
+      : voice.state === 'transcribing'
+        ? 'transcribing voice'
+        : !hasDraftContent
+          ? 'draft empty'
+          : attachmentDeliveryReason
+            ? attachmentDeliveryReason
+            : mode === 'dm' && unresolvedTrailingMention
+              ? 'resolve mention'
+              : mode === 'dm' && !effectiveKeeperOnline
+                ? 'keeper unavailable'
+                : mode === 'state-block' && stateKeys.length === 0
+                  ? 'state block required'
+                  : mode === 'dm'
+                    ? 'keeper message'
+                    : 'workspace broadcast'
   const deliveryToneClass = deliveryState === 'ready'
     ? 'border-[var(--color-status-ok)] text-[var(--color-status-ok)]'
     : deliveryState === 'sending'
@@ -299,33 +322,38 @@ export function ComposerV2({
   function attachFiles(files: FileList | File[]): void {
     const nextFiles = Array.from(files).slice(0, 6)
     if (nextFiles.length === 0) return
-    setAttachments(current => [
-      ...current,
-      ...nextFiles.map((file, index): ComposerAttachmentDraft => ({
-        id: `${Date.now()}-${index}-${file.name}`,
-        kind: file.type.startsWith('image/') ? 'image' : 'file',
-        name: file.name,
-        size: formatFileSize(file.size),
-        mime: file.type || null,
-      })),
-    ].slice(0, 6))
-  }
-
-  function stopVoiceDraft(): void {
-    setRecording(false)
-    setVoiceDraft(createComposerVoiceDraft())
+    setAttachments(current => {
+      const pending: ComposerAttachmentDraft[] = []
+      for (const file of nextFiles) {
+        const kind = file.type.startsWith('image/') ? 'image' : 'file'
+        const baseId = stableAttachmentId({
+          name: file.name,
+          type: kind,
+          mimeType: file.type || null,
+          size: file.size,
+        })
+        pending.push({
+          id: uniqueComposerAttachmentId(baseId, current, pending),
+          kind,
+          name: file.name,
+          size: formatFileSize(file.size),
+          sizeBytes: file.size,
+          mime: file.type || null,
+        })
+      }
+      return [...current, ...pending].slice(0, 6)
+    })
   }
 
   function resetDraft(): void {
     setDraft('')
     setAttachments([])
-    setVoiceDraft(null)
-    setRecording(false)
   }
 
   async function submit(): Promise<void> {
-    const message = serializeComposerBody({ text: draft, attachments, voice: voiceDraft })
-    if (!message || sendDisabled) return
+    if (sendDisabled) return
+    const message = serializeComposerBody({ text: draft, attachments: [], voice: null })
+    if (!message) return
     const keeperId = mode === 'dm'
       ? trailingMentionTarget ?? keeperNameFromTarget(keeperTarget)
       : null
@@ -421,7 +449,7 @@ export function ComposerV2({
           </div>
         </div>
 
-        ${attachments.length > 0 || voiceDraft
+        ${attachments.length > 0
           ? html`
               <div class="composer-tray" data-testid="composer-v2-tray">
                 ${attachments.map(attachment => html`
@@ -431,7 +459,7 @@ export function ComposerV2({
                     </div>
                     <div class="cdraft-meta">
                       <span class="cdraft-name mono">${attachment.name}</span>
-                      <span class="cdraft-sub mono">${attachmentTrayMeta(attachment)}</span>
+                      <span class="cdraft-sub mono">${composerAttachmentTrayMeta(attachment)} · transport unavailable</span>
                     </div>
                     <button
                       type="button"
@@ -445,31 +473,6 @@ export function ComposerV2({
                     </button>
                   </div>
                 `)}
-                ${voiceDraft
-                  ? html`
-                      <div class="cdraft voice">
-                        <span class="cdraft-glyph mic">◌</span>
-                        <div class="cdraft-wave" aria-hidden="true">
-                          ${voiceDraft.wave.map((height, index) => html`<span class="vbar" key=${index} style=${{ height: `${Math.round(4 + height * 18)}px` }} />`)}
-                        </div>
-                        <span class="cdraft-dur mono">${formatClock(voiceDraft.secs)}</span>
-                        <div class="cdraft-tx">
-                          <span class="cdraft-tx-k">받아쓰기</span>
-                          <span class="cdraft-tx-v">${voiceDraft.transcript}</span>
-                        </div>
-                        <button
-                          type="button"
-                          class="cdraft-x"
-                          title="음성 제거"
-                          aria-label="Remove voice draft"
-                          onClick=${() => { setVoiceDraft(null) }}
-                          disabled=${busy}
-                        >
-                          <${X} size=${10} aria-hidden="true" />
-                        </button>
-                      </div>
-                    `
-                  : null}
               </div>
             `
           : null}
@@ -523,17 +526,15 @@ export function ComposerV2({
             `
           : null}
 
-        ${recording
+        ${voice.state !== 'idle'
           ? html`
               <div class="rec-bar" data-testid="composer-v2-recorder">
                 <span class="rec-dot" aria-hidden="true"></span>
-                <span class="rec-lbl">녹음 중</span>
-                <span class="rec-clock mono">0:12</span>
+                <span class="rec-lbl">${voice.state === 'recording' ? '녹음 중' : '전사 중'}</span>
                 <div class="rec-wave" aria-hidden="true">
                   ${[0.4, 0.8, 0.5, 0.9, 0.45, 0.75, 0.52, 0.84, 0.48, 0.7].map((height, index) => html`<span class="rbar" key=${index} style=${{ height: `${Math.round(3 + height * 20)}px` }} />`)}
                 </div>
-                <button type="button" class="rec-btn cancel" onClick=${() => { setRecording(false) }} disabled=${busy}>취소</button>
-                <button type="button" class="rec-btn stop" onClick=${stopVoiceDraft} disabled=${busy}>
+                <button type="button" class="rec-btn stop" onClick=${voice.stop} disabled=${busy || voice.state !== 'recording'}>
                   <${Square} size=${11} aria-hidden="true" />
                   완료
                 </button>
@@ -619,9 +620,9 @@ export function ComposerV2({
               type="button"
               class="ctool"
               title="음성 입력"
-              aria-label="Start voice draft"
-              onClick=${() => { setRecording(true) }}
-              disabled=${busy || recording}
+              aria-label="Start voice input"
+              onClick=${() => { void voice.start() }}
+              disabled=${busy || voice.state !== 'idle' || !voice.supported}
               data-testid="composer-v2-voice"
             >
               <${Mic} size=${15} aria-hidden="true" />

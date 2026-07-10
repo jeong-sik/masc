@@ -3,7 +3,7 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { DashboardKeeperWaitingInventory } from '../../api'
-import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+import { KeeperLaneInventoryPanel, KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
 
 function inventoryFixture(): DashboardKeeperWaitingInventory {
   return {
@@ -166,5 +166,65 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('keepersunknown')
     expect(container.textContent).toContain('keeper_meta_store')
     expect(container.textContent).toContain('repair keeper meta store')
+  })
+})
+
+describe('KeeperLaneInventoryPanel', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('renders one lane card per projected keeper, including idle lanes', () => {
+    render(html`<${KeeperLaneInventoryPanel} inventory=${inventoryFixture()} />`, container)
+
+    const cards = container.querySelectorAll('[data-testid="keeper-lane-card"]')
+    expect(cards).toHaveLength(3)
+    expect(container.querySelector('[data-keeper-lane="sangsu"]')?.textContent).toContain('event queue pending')
+    expect(container.querySelector('[data-keeper-lane="busy-one"]')?.textContent).toContain('turn admission waiting')
+    expect(container.querySelector('[data-keeper-lane="idle-one"]')?.textContent).toContain('no keeper-specific waiting rows')
+    expect(container.textContent).toContain('Global lane evidence')
+    expect(container.textContent).toContain('producer schedule runner')
+  })
+
+  it('surfaces missing wake producer and next action evidence explicitly', () => {
+    const inventory = inventoryFixture()
+    inventory.keepers = [
+      {
+        keeper_name: 'partial-lane',
+        state: 'waiting',
+        waiting_count: 1,
+        waiting_on: [
+          {
+            keeper_name: 'partial-lane',
+            source: 'external_message',
+            waiting_on: 'discord:ops',
+            wake_producer: null,
+            next_action: '',
+          },
+        ],
+      },
+    ]
+
+    render(html`<${KeeperLaneInventoryPanel} inventory=${inventory} />`, container)
+
+    expect(container.textContent).toContain('partial-lane')
+    expect(container.textContent).toContain('discord:ops')
+    expect(container.textContent).toContain('producer wake producer missing')
+    expect(container.textContent).toContain('next action missing')
+  })
+
+  it('renders unavailable lane evidence without inventing fallback rows', () => {
+    render(html`<${KeeperLaneInventoryPanel} inventory=${null} />`, container)
+
+    expect(container.textContent).toContain('keeper lane evidence unavailable')
+    expect(container.querySelector('[data-testid="keeper-lane-card"]')).toBeNull()
   })
 })

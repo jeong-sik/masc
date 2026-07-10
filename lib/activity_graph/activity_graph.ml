@@ -642,6 +642,8 @@ let span_start_kind = function
     compile time (Parse, don't validate). *)
 let span_end_classification = function
   | "task.done"                 -> Some ("task",      Span_completed)
+  (* RFC-0323 G-3: approve-produced Done completes the task span too. *)
+  | "task.approved"             -> Some ("task",      Span_completed)
   | "task.released"             -> Some ("task",      Span_released)
   | "task.cancelled"            -> Some ("task",      Span_cancelled)
   | "agent.left"                -> Some ("presence",  Span_left)
@@ -693,12 +695,26 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
          | None -> ());
         (match span_end_classification e.kind with
          | Some (ek, status) ->
-             let key = (aid, subject_id) in
+             (* RFC-0323 G-3: on approve-produced completion the event actor
+                is the VERIFIER, but the span was opened by the ASSIGNEE, who
+                rides the payload (emitted since G-3). Close the assignee's
+                span and attribute it to them; fall back to the actor for
+                pre-G-3 events — mirrors the works_on-edge routing in
+                [Activity_graph_reducer]. *)
+             let closing_aid =
+               match e.kind with
+               | "task.approved" ->
+                   (match Json_util.assoc_member_opt "assignee" e.payload with
+                    | Some (`String name) when String.trim name <> "" -> name
+                    | Some _ | None -> aid)
+               | _ -> aid
+             in
+             let key = (closing_aid, subject_id) in
              (match Hashtbl.find_opt open_spans key with
               | Some (start_ms, sk, label) when String.equal sk ek ->
                   Hashtbl.remove open_spans key;
                   closed_spans := {
-                    agent = aid;
+                    agent = closing_aid;
                     start_ms;
                     end_ms = e.ts_ms;
                     span_kind = sk;

@@ -1004,7 +1004,13 @@ let () =
   (* rm is Privileged; permissive_default sets privileged_trust = Enforced,
      so the policy yields Verdict.Ask -> Approval_required deterministically.
      A flip to Policy_denied (e.g. risk-class regression) must fail the test. *)
-  | Error (Keeper_tool_execute_shell_ir.Approval_required _) -> ()
+  | Error
+      (Keeper_tool_execute_shell_ir.Approval_required
+         { summary; kind = Keeper_tool_execute_shell_ir.Privileged_program_floor; _ }) ->
+    assert (
+      String.equal
+        summary
+        "command 'rm' requires approval (audited/privileged risk class)")
   | Error _ -> assert false
 
 let () =
@@ -1035,9 +1041,175 @@ let () =
   with
   | Ok _ -> assert false
   | Error
-      (Keeper_tool_execute_shell_ir.Approval_required { summary = _; bin }) ->
-    assert (String.equal bin "chmod")
+      (Keeper_tool_execute_shell_ir.Approval_required { summary = _; bin; kind }) ->
+    assert (String.equal bin "chmod");
+    assert (kind = Keeper_tool_execute_shell_ir.Privileged_program_floor)
   | Error _ -> assert false
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "gh" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args =
+        [ Lit ("repo", default_meta)
+        ; Lit ("create", default_meta)
+        ; Lit ("masc-test/new-repo", default_meta)
+        ; Lit ("--public", default_meta)
+        ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify
+      (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  (* The bare [dispatch_classified] path is the
+     [MASC_SHELL_IR_APPROVAL_GATE_ENABLED]=off route in
+     keeper_tool_execute_runtime.ml. Durable-remote gh mutations must still ask
+     for non-blocking HITL there, not execute. *)
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok _ -> assert false
+  | Error
+      (Keeper_tool_execute_shell_ir.Approval_required { summary; bin; kind }) ->
+    assert (String.equal bin "gh");
+    assert (
+      String.equal
+        summary
+        "command 'gh' requires approval — gh repo create: reversible mutation \
+         (audited/privileged risk class)");
+    assert (kind = Keeper_tool_execute_shell_ir.Gh_capability_requires_approval)
+  | Error _ -> assert false
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "gh" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args =
+        [ Lit ("repo", default_meta)
+        ; Lit ("create", default_meta)
+        ; Lit ("masc-test/new-repo", default_meta)
+        ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify
+      (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  (* G-10: a repo-create request missing required contract metadata is denied
+     before approval routing, including on the flag-off dispatch path. *)
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok _ -> assert false
+  | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason }) ->
+    assert (
+      String.equal
+        reason
+        "policy rule denied: gh_repo_create_contract:missing_visibility")
+  | Error _ -> assert false
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "gh" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args =
+        [ Lit ("repo", default_meta)
+        ; Lit ("new", default_meta)
+        ; Lit ("masc-test/new-repo", default_meta)
+        ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify
+      (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  (* G-10 alias: `gh repo new` is an official alias of `gh repo create` and
+     must hit the same contract deny. Before [is_repo_create_action] it fell
+     through [repo_create_tail] to Ask with no metadata, defeating the
+     contract via the alias. *)
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok _ -> assert false
+  | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason }) ->
+    assert (
+      String.equal
+        reason
+        "policy rule denied: gh_repo_create_contract:missing_visibility")
+  | Error _ -> assert false
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "gh" |> Result.get_ok in
+  let lit s = Lit (s, default_meta) in
+  let quoted s = Lit (s, { default_meta with quoted = true }) in
+  let assert_repo_create_contract_denied label args expected_reason =
+    let ir =
+      { bin
+      ; args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+    in
+    let envelope =
+      Masc_exec.Shell_ir_risk.classify
+        (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+    in
+    match
+      Keeper_tool_execute_shell_ir.dispatch_classified
+        ~workdir:"/tmp"
+        ~sandbox:(Masc_exec.Sandbox_target.host ())
+        envelope
+    with
+    | Ok _ -> assert false
+    | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason }) ->
+      assert (String.equal reason expected_reason)
+    | Error _ -> failwith label
+  in
+  List.iter
+    (fun (label, args, expected_reason) ->
+       assert_repo_create_contract_denied label args expected_reason)
+    [ ( "repo family uppercase alias"
+      , [ lit "REPO"; lit "new"; lit "masc-test/new-repo" ]
+      , "policy rule denied: gh_repo_create_contract:missing_visibility" )
+    ; ( "quoted alias"
+      , [ lit "repo"; quoted "new"; lit "masc-test/new-repo" ]
+      , "policy rule denied: gh_repo_create_contract:missing_visibility" )
+    ; ( "alias without repo name"
+      , [ lit "repo"; lit "new"; lit "--private" ]
+      , "policy rule denied: gh_repo_create_contract:missing_name,missing_owner" )
+    ]
 
 (* --- Keeper_tool_execute_shell_ir.dispatch_classified: catastrophic floor is
    flag-independent (RFC-0254 §5.3.1) --- *)

@@ -635,6 +635,7 @@ let install () =
       ());
 
   let decide_hook
+        ~(base_path : string)
         ~(task_id : string)
         ~(task_opt : Masc_domain.task option)
         ~(notes : string)
@@ -642,11 +643,11 @@ let install () =
         ()
       : Workspace_hooks.evidence_gate_verdict
     =
-    match Cdal_evidence_gate.decide ~task_id ~task_opt ~notes ~handoff_context:handoff () with
-    | Cdal_evidence_gate.Pass -> Workspace_hooks.Pass
-    | Cdal_evidence_gate.Reject { reason; rule_id; hint; payload_json } ->
+    match Task_completion_gate.decide ~base_path ~task_id ~task_opt ~notes ~handoff_context:handoff () with
+    | Task_completion_gate.Pass -> Workspace_hooks.Pass
+    | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->
       Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
   in
-  Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide_hook;
+  Atomic.set Workspace_hooks.task_completion_gate_decide_fn decide_hook;
   ()
 ;;

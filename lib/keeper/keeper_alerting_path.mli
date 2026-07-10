@@ -91,6 +91,12 @@ val raw_looks_like_playground_subdir : string -> bool
     keeper_tasks_list / keeper_context_status, not direct file access. *)
 val is_masc_internal_state_path : string -> bool
 
+(** Detect normalized targets that resolve under the workspace-level
+    MASC internal state directory.  Call this after resolving traversal
+    and symlinks, so raw paths such as [lib/../.masc/config/keepers/x.toml]
+    cannot bypass the internal-state guard. *)
+val is_masc_internal_state_norm : root_norm:string -> target_norm:string -> bool
+
 (** Resolve a write target path under [allowed_paths] within the
     project root. *)
 val resolve_keeper_target_path :

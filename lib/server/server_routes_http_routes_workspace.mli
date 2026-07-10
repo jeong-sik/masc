@@ -161,3 +161,23 @@ module For_testing : sig
     safe_workspace_file ->
     (string, workspace_file_read_error) result
 end
+
+module For_testing_blame : sig
+  (** White-box helpers for [git blame --porcelain] parsing regression
+      tests. Not part of the stable/public workspace API. *)
+
+  type entry = { bl_line : int; bl_author : string; bl_time : int64 }
+
+  (** [parse_blame_header line] returns [(sha, final_line, group_size)] when
+      [line] is a porcelain group header
+      ["<40-hex sha> <orig> <final>[ <count>]"]. *)
+  val parse_blame_header : string -> (string * int * int) option
+
+  (** [parse_blame_porcelain lines] joins per-line headers with each sha's
+      metadata block (which git emits only on the sha's first group). Lines
+      whose sha has incomplete metadata are omitted instead of being assigned
+      fabricated authors or timestamps. *)
+  val parse_blame_porcelain : string list -> entry list
+
+  val group_blame_entries : string -> entry list -> Yojson.Safe.t list
+end

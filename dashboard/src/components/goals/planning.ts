@@ -15,7 +15,9 @@ import {
 } from '../../store'
 import { navigate } from '../../router'
 import {
+  effectiveTaskPriority,
   goalProgressFor,
+  HIGH_TASK_PRIORITY_MAX,
   TaskProgressBar,
   goalPhaseLabel,
 } from './goal-helpers'
@@ -200,7 +202,7 @@ function KeeperToolActivity() {
 export function Planning() {
   const { todo, inProgress, done } = tasksByStatus.value
   const totalTasks = todo.length + inProgress.length + done.length
-  const highPriority = [...todo, ...inProgress].filter(t => (t.priority ?? 4) <= 2).length
+  const highPriority = [...todo, ...inProgress].filter(t => effectiveTaskPriority(t) <= HIGH_TASK_PRIORITY_MAX).length
 
   const hasGoals = goals.value.length > 0
   const onlyBacklogActive = totalTasks > 0 && !hasGoals

@@ -23,6 +23,32 @@ type queued_message = {
   source : message_source;
 }
 
+let dashboard_queue_default_thread_id = "dashboard"
+
+let dashboard_thread_id_or_default = function
+  | Some thread_id -> thread_id
+  | None ->
+    (* DET-OK: queued dashboard messages without AG-UI thread metadata are routed
+       to the documented singleton dashboard lane, not inferred from runtime
+       state. *)
+    dashboard_queue_default_thread_id
+
+let continuation_channel_of_message_source ?dashboard_thread_id = function
+  | Dashboard ->
+    let thread_id = dashboard_thread_id_or_default dashboard_thread_id in
+    Keeper_continuation_channel.Dashboard { thread_id }
+  | Discord { channel_id; user_id } ->
+    Keeper_continuation_channel.Discord
+      { guild_id = None
+      ; channel_id
+      ; parent_channel_id = None
+      ; thread_id = None
+      ; user_id
+      }
+  | Slack { channel; user_id } ->
+    Keeper_continuation_channel.Slack
+      { team_id = None; channel_id = channel; thread_ts = None; user_id }
+
 type queue_entry = {
   mutex : Eio.Mutex.t;
   q : queued_message Queue.t;

@@ -62,7 +62,7 @@ import { goalTreeData } from '../goal-tree-state'
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
-import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
+import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary, GoalVerificationRequest } from '../types'
 
 const GOAL_FIXTURE_OK_COLOR = '#4ade80'
 
@@ -173,6 +173,24 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     blocking_reason: '',
     created_at: '2026-01-01',
     updated_at: '2026-01-02',
+    ...overrides,
+  }
+}
+
+function goalVerificationRequest(overrides: Partial<GoalVerificationRequest> = {}): GoalVerificationRequest {
+  return {
+    id: 'VR-1',
+    goal_id: 'G-1',
+    target_phase: 'awaiting_approval',
+    requested_by: { id: 'operator' },
+    policy_snapshot: {
+      principals: [{ id: 'keeper-reviewer' }, { id: 'operator' }],
+      eligible_principals: [{ id: 'keeper-reviewer' }, { id: 'operator' }],
+      required_verdicts: 2,
+    },
+    votes: [],
+    status: 'open',
+    created_at: '2026-01-03',
     ...overrides,
   }
 }
@@ -289,8 +307,48 @@ describe('Work', () => {
       expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
       // Five KPI summary cells
       expect(screen.getByTestId('work-kpis').children.length).toBe(5)
-      expect(screen.getByText(/미배정 task 는 claim/).textContent).toContain('claim')
+      expect(screen.getByText(/미배정 task는 백로그에서 claim/).textContent).toContain('claim')
       expect(screen.getByTestId('work-goal-list')).toBeTruthy()
+    })
+
+    it('avoids repeating Task scope labels across the KPI row and kanban columns', () => {
+      goals.value = [
+        { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        { id: 'T-todo', title: 'Todo item', goal_id: 'G-1', status: 'todo' },
+        { id: 'T-claim', title: 'Claimed item', goal_id: 'G-1', status: 'claimed', assignee: 'keeper-x' },
+      ]
+
+      render(html`<${Work} />`)
+
+      const kpis = screen.getByTestId('work-kpis')
+      expect(kpis.textContent).toContain('활성 목표')
+      expect(kpis.textContent).toContain('전체 작업')
+      expect(kpis.textContent).toContain('백로그')
+      expect(kpis.textContent).not.toContain('목표 TASK')
+      expect(kpis.textContent).not.toContain('Task')
+      expect(kpis.textContent).not.toContain('TASK')
+
+      fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+      const section = screen.getByTestId('work-board-section')
+      expect(section.textContent).toContain('칸반 · 상태별')
+      expect(section.textContent).toContain('todo → claimed → in_progress → verify → blocked/paused/unknown → done')
+
+      const todoCol = screen.getByTestId('kanban-col-todo')
+      const claimedCol = screen.getByTestId('kanban-col-claimed')
+      expect(todoCol.querySelector('.wk-kcol-dot.todo')).toBeTruthy()
+      expect(todoCol.querySelector('.wk-kcol-title')?.textContent).toBe('백로그')
+      expect(todoCol.querySelector('.wk-kcol-n')?.textContent).toBe('1')
+      expect(todoCol.textContent).not.toContain('TASK')
+      expect(claimedCol.querySelector('.wk-kcol-dot.claimed')).toBeTruthy()
+      expect(claimedCol.querySelector('.wk-kcol-title')?.textContent).toBe('클레임')
+      expect(claimedCol.querySelector('.wk-kcol-n')?.textContent).toBe('1')
+      expect(claimedCol.textContent).not.toContain('TASK')
+
+      fireEvent.click(screen.getByTestId('work-view-list'))
+      expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(true)
     })
 
     it('renders the new-goal button as enabled and opens the form on click', () => {
@@ -409,7 +467,7 @@ describe('Work', () => {
 
       const backlog = screen.getByTestId('work-backlog')
       expect(backlog).toBeTruthy()
-      expect(backlog.textContent).toContain('클\uB808\uC784 가능 미배정')
+      expect(backlog.textContent).toContain('클레임 가능 백로그')
       expect(backlog.textContent).toContain('2')
       expect(backlog.querySelectorAll('.wk-task-claim').length).toBe(2)
       expect(screen.getByText('Orphan job')).toBeTruthy()
@@ -453,6 +511,58 @@ describe('Work', () => {
       expect(detail?.textContent).toContain('unit tests pass')
       expect(detail?.textContent).toContain('Handoff summary text')
       expect(detail?.textContent).toContain('Deploy to staging')
+    })
+
+    it('expands inline task detail for execution links and contract evidence without synthetic lineage', () => {
+      goals.value = [
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        {
+          id: 'J-ledger',
+          title: 'Ledger job',
+          goal_id: 'G-1',
+          status: 'in_progress',
+          created_at: '2026-01-02T00:00:00Z',
+          updated_at: '2026-01-02T01:00:00Z',
+          execution_links: {
+            session_id: 'sess-ledger',
+            operation_id: 'op-ledger',
+          },
+          contract: {
+            strict: true,
+            completion_contract: ['merge-ready proof'],
+            required_evidence: ['typed test evidence'],
+            links: {
+              session_id: null,
+              operation_id: 'op-contract',
+            },
+          },
+          handoff_context: {
+            summary: '',
+            evidence_refs: ['receipt-1'],
+            updated_by: 'sangsu',
+            updated_at: '2026-01-02T02:00:00Z',
+          },
+        },
+      ]
+
+      const { container } = render(html`<${Work} />`)
+
+      fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+      fireEvent.click(container.querySelector('[data-job-id="J-ledger"] .wk-task-main')!)
+
+      const ledger = within(screen.getByTestId('job-row')).getByTestId('task-evidence-ledger')
+      expect(ledger.textContent).toContain('sess-ledger')
+      expect(ledger.textContent).toContain('op-ledger')
+      expect(ledger.textContent).toContain('strict')
+      expect(ledger.textContent).toContain('op-contract')
+      expect(ledger.textContent).toContain('merge-ready proof')
+      expect(ledger.textContent).toContain('typed test evidence')
+      expect(ledger.textContent).toContain('receipt-1')
+      expect(ledger.textContent).toContain('sangsu')
+      expect(ledger.textContent).toContain('2026-01-02T00:00:00Z')
+      expect(ledger.textContent).not.toContain('활동 흐름')
     })
 
     it('renders all defined gate evaluations including verify_to_review', () => {
@@ -685,6 +795,7 @@ describe('Work', () => {
         render(html`<${Work} />`)
 
         const aside = screen.getByTestId('work-aside')
+        expect(aside.querySelector('.wka-hud')?.textContent).toContain('백로그')
         // "지금 상황" calm state
         expect(aside.querySelector('[data-testid="wka-flagged-calm"]')?.textContent).toContain('주의 목표 없음')
         // "해야 할 일" calm state
@@ -752,6 +863,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const approvalItems = aside.querySelectorAll('[data-testid="wka-approval-item"]')
         expect(approvalItems.length).toBe(1)
+        expect(approvalItems[0]?.classList.contains('approve')).toBe(true)
         expect(approvalItems[0]?.textContent).toContain('Approval Goal')
         expect(approvalItems[0]?.textContent).toContain('lead-keeper')
       })
@@ -778,6 +890,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const verifyItems = aside.querySelectorAll('[data-testid="wka-verify-item"]')
         expect(verifyItems.length).toBe(1)
+        expect(verifyItems[0]?.classList.contains('verify')).toBe(true)
         expect(verifyItems[0]?.textContent).toContain('Verify Me')
         // 1 unsatisfied gate (done=blocked, inspect=ready → 1 open)
         expect(verifyItems[0]?.textContent).toContain('1 미충족')
@@ -802,6 +915,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const blockerItems = aside.querySelectorAll('[data-testid="wka-blocker-item"]')
         expect(blockerItems.length).toBe(1)
+        expect(blockerItems[0]?.classList.contains('block')).toBe(true)
         expect(blockerItems[0]?.textContent).toContain('Blocked Task')
         expect(blockerItems[0]?.textContent).toContain('dependency unavailable')
       })
@@ -821,6 +935,7 @@ describe('Work', () => {
         const aside = screen.getByTestId('work-aside')
         const backlogItem = aside.querySelector('[data-testid="wka-backlog-item"]')
         expect(backlogItem).toBeTruthy()
+        expect(backlogItem?.classList.contains('claim')).toBe(true)
         expect(backlogItem?.textContent).toContain('미배정 task 2건')
       })
 
@@ -941,6 +1056,7 @@ describe('Work', () => {
         fireEvent.click(screen.getByTestId('work-view-kanban'))
 
         // Kanban board present; list view gone
+        expect(screen.getByTestId('work-board-section').textContent).toContain('칸반 · 상태별')
         const board = screen.getByTestId('work-kanban')
         expect(board).toBeTruthy()
         expect(screen.queryByTestId('work-goal-list')).toBeNull()
@@ -960,6 +1076,10 @@ describe('Work', () => {
         const todoCol = screen.getByTestId('kanban-col-todo')
         const wipCol  = screen.getByTestId('kanban-col-in_progress')
         const doneCol = screen.getByTestId('kanban-col-done')
+        expect(todoCol.querySelector('.wk-kcol-dot.todo')).toBeTruthy()
+        expect(wipCol.querySelector('.wk-kcol-dot.wip')).toBeTruthy()
+        expect(doneCol.querySelector('.wk-kcol-dot.done')).toBeTruthy()
+        expect(todoCol.querySelector('.wk-kcol-n')?.textContent).toBe('1')
         expect(todoCol.textContent).toContain('Todo task')
         expect(wipCol.textContent).toContain('In progress')
         expect(doneCol.textContent).toContain('Done task')
@@ -1228,8 +1348,144 @@ describe('Work', () => {
         expect(screen.getByTestId('work-backlog').textContent).toContain('Tree Only Goal')
       })
 
-      it('maps unknown Goal Store task statuses to a fallback instead of dropping them', () => {
+      it('renders Goal Store projection dossier evidence on matching goal cards', () => {
+        const openRequest = goalVerificationRequest()
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, status: 'active', phase: 'awaiting_approval', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              title: 'Goal One',
+              priority: 5,
+              phase: 'awaiting_approval',
+              goal_fsm: {
+                state: 'awaiting_approval',
+                source: 'goal.phase',
+                next_actions: ['request operator approval'],
+                activity_observation: 'approval',
+                stagnation_status: 'stalled',
+              },
+              verification_summary: {
+                effective_policy: openRequest.policy_snapshot,
+                open_request: openRequest,
+                latest_request: null,
+                approve_count: 1,
+                reject_count: 0,
+                remaining_possible: 1,
+              },
+              effective_verifier_policy: openRequest.policy_snapshot,
+              active_verification_request: openRequest,
+              pending_verification_count: 1,
+              completion_summary: {
+                state: 'awaiting_approval',
+                pct: 75,
+                pct_source: 'goal_store',
+                attainment_state: 'in_progress',
+                attainment_basis: 'linked_tasks',
+                metric_evaluation: 'absent',
+                task_total: 4,
+                task_done: 3,
+                task_open: 1,
+                is_complete: false,
+                is_terminal: false,
+                ready_to_request_completion: false,
+                gate: 'approval',
+                requires_verifier: true,
+                requires_completion_approval: true,
+                active_verification_request: true,
+                blocking_source: 'approval',
+                blocking_reason: 'awaiting human approval',
+              },
+              timeline_events: [{ kind: 'turn' }],
+              last_activity_at: '2026-01-04T10:00:00Z',
+              stagnation_seconds: 3600,
+              linked_keeper_names: ['sangsu'],
+              pending_approval_count: 2,
+              infra_risk_count: 1,
+              blocking_source: 'approval',
+              blocking_reason: 'awaiting human approval',
+              latest_keeper_ref: 'sangsu',
+              latest_turn_ref: 42,
+              stalled_since: '2026-01-04T09:00:00Z',
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+
+        const goalCard = screen.getByTestId('goal-card')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+
+        const dossier = within(goalCard).getByTestId('goal-dossier')
+        expect(dossier).toHaveAttribute('data-goal-dossier', 'G-1')
+        expect(dossier).toHaveAttribute('data-goal-dossier-fsm-state', 'awaiting_approval')
+        expect(dossier).toHaveAttribute('data-goal-dossier-verification', 'open_request')
+        expect(dossier).toHaveAttribute('data-goal-dossier-blocking-source', 'approval')
+        expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
+        expect(dossier.textContent).toContain('state awaiting_approval')
+        expect(dossier.textContent).toContain('request operator approval')
+        expect(dossier.textContent).toContain('open_request VR-1')
+        expect(dossier.textContent).toContain('approve 1')
+        expect(dossier.textContent).toContain('remaining 1')
+        expect(dossier.textContent).toContain('state awaiting_approval')
+        expect(dossier.textContent).toContain('gate approval')
+        expect(dossier.textContent).toContain('tasks 3/4')
+        expect(dossier.textContent).toContain('keeper sangsu')
+        expect(dossier.textContent).toContain('turn 42')
+        expect(dossier.textContent).toContain('infra risk 1')
+        expect(dossier.textContent).toContain('awaiting human approval')
+      })
+
+      it('renders tree-only Goal Store goals in the list without an execution goal mirror', () => {
         goals.value = []
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-tree',
+              title: 'Tree Only Goal',
+              priority: 4,
+              status: 'active',
+              phase: 'blocked',
+              goal_fsm: {
+                state: 'blocked',
+                source: 'goal.phase',
+                next_actions: ['unblock linked task'],
+                activity_observation: 'task',
+                stagnation_status: 'stalled',
+              },
+              tasks: [goalTreeTask({ id: 'T-tree', goal_id: 'G-tree', status: 'todo' })],
+              blocking_source: 'task_fsm',
+              blocking_reason: 'linked task blocked',
+              stalled_since: '2026-01-05T09:00:00Z',
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1, total_tasks: 1 }),
+        }
+
+        render(html`<${Work} />`)
+
+        const goalCard = screen.getByTestId('goal-card')
+        expect(goalCard).toHaveAttribute('data-goal-id', 'G-tree')
+        expect(goalCard.textContent).toContain('Tree Only Goal')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+
+        const dossier = within(goalCard).getByTestId('goal-dossier')
+        expect(dossier).toHaveAttribute('data-goal-dossier-fsm-state', 'blocked')
+        expect(dossier).toHaveAttribute('data-goal-dossier-blocking-source', 'task_fsm')
+        expect(dossier.textContent).toContain('unblock linked task')
+        expect(dossier.textContent).toContain('linked task blocked')
+        expect(screen.getByTestId('work-backlog').textContent).toContain('Tree Only Goal')
+      })
+
+      it('preserves blocked and unknown Goal Store task statuses instead of remapping them', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
         tasks.value = []
         goalTreeData.value = {
           tree: [
@@ -1246,8 +1502,12 @@ describe('Work', () => {
 
         render(html`<${Work} />`)
 
-        expect(screen.getByTestId('kpi-wip')).toHaveTextContent('1')
-        expect(screen.getByTestId('kpi-backlog')).toHaveTextContent('1')
+        expect(screen.getByTestId('kpi-wip')).toHaveTextContent('0')
+        expect(screen.getByTestId('kpi-backlog')).toHaveTextContent('0')
+        const goalCard = screen.getByTestId('goal-card')
+        expect(within(goalCard).getByText('차단')).toBeTruthy()
+        expect(within(goalCard).getByText('상태 미확인')).toBeTruthy()
+        expect(goalCard.textContent).toContain('unknown status: weird_status')
       })
 
       it('falls back to Goal Store fields when execution fields are empty strings', () => {

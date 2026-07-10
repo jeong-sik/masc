@@ -156,6 +156,12 @@ val data_dir : base_path:string -> string
 
 (** {2 Config-rooted file accessors} *)
 
+val repositories_toml_basename : string
+(** ["repositories.toml"]. SSOT basename of the repository catalog file, so
+    callers that surface *which* config file gated a decision (e.g. the
+    playground repo [policy_source] field) label it from one constant instead
+    of a scattered literal. [repositories_toml_path] derives from this. *)
+
 val repositories_toml_path : base_path:string -> string
 (** [<base_path>/.masc/config/repositories.toml]. Backwards-compatible
     direct derivation from [base_path]. A future RFC may extend this to

@@ -59,11 +59,13 @@ type pending_approval =
   ; disposition : string option
   ; disposition_reason : string option
   ; phase : pending_phase
+  ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   ; context_summary : hitl_context_summary option
   ; summary_status : summary_status
+  ; channel : Keeper_continuation_channel.t option
   }
 
 type decision = Agent_sdk.Hooks.approval_decision

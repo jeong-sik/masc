@@ -57,6 +57,15 @@ type pending_board_event_kind =
   | Schedule_due
   | External_attention
   | Goal_verification_failed
+  | Failure_judgment
+      (** RFC-0313 W2: deterministic turn failure escalated for an
+          LLM-boundary verdict on the keeper's next turn. *)
+  | Goal_assigned
+      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
+          the assignment edge surfaces as actionable turn input. *)
+  | Goal_stagnation
+      (** RFC-0310 §3.3: a live goal went stale past the threshold; the
+          stagnation edge surfaces as a resume-or-hand-off prompt. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;
@@ -177,6 +186,7 @@ type event_queue_trigger =
   | No_progress_recovery_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
+  | Hitl_resolved_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
@@ -187,6 +197,7 @@ type turn_reason =
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
+  | Hitl_resolved_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }

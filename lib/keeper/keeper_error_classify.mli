@@ -1,3 +1,17 @@
+(** {1 Static ADT Classification}
+    RFC-0314 / task-1854: Replace heuristic string-matching predicates with
+    a static ADT that the compiler can exhaustively match. *)
+type error_classification =
+  | Transient_network
+  | Transient_internal_runner
+  | Transient_oas_timeout
+  | Transient_rate_limit
+  | Transient_capacity
+  | Non_transient
+  | Unclassified
+
+val classify_error : Agent_sdk.Error.sdk_error -> error_classification
+
 (** Keeper_error_classify — Error classification, side-effect safety,
     and retry constants for the unified keeper cycle.
 
@@ -10,7 +24,9 @@
 val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when a typed internal runner exception preserves a transient
-    transport failure that was raised inside [runtime_runner.execute]. *)
+    transport failure raised inside {!Keeper_turn_driver.runtime_runner_execute_site}.
+    Legacy internal exception envelopes without [transport_error_kind] are
+    diagnostic-only and are not parsed heuristically. *)
 val is_transient_internal_runner_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when an OAS timeout message describes an execution budget expiry,
@@ -189,10 +205,18 @@ val degraded_retry_after_recoverable_error :
     futile and previously looped forever (2026-05-21, 2026-07-06, #23373).
     Contract violations, read-only no-progress accept rejections, and
     quota/rate-limit classes cap rotation after the candidate set is exhausted.
+
+    RFC-0313 W3: with [pacing_enforced:true] the class-based cycle cap is
+    bypassed — every recoverable class may re-cycle the (pool-filtered)
+    candidate set within the turn's cycle budget, because revisit pacing now
+    spaces the retries the cap used to suppress. [pacing_enforced:false]
+    keeps the legacy cap (kill-switch; the cap and this parameter go away in
+    W4). Contract violations never cycle in either mode.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?credential_pool_of_runtime_id:(string -> string option) ->
   ?fallback_hint:string ->
+  pacing_enforced:bool ->
   base_runtime:string ->
   effective_runtime:string ->
   attempted_runtimes:string list ->

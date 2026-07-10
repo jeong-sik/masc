@@ -39,6 +39,7 @@
   masc.dated_jsonl
   masc.masc_process
   masc.otel_spans
-  masc.otel_metric_store)
+  masc.otel_metric_store
+  tls-eio)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

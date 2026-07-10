@@ -35,6 +35,12 @@ type event_queue_trigger =
           recorded as Keeper_external_attention. Edge-triggered (dequeued once),
           carries an event_id pointer (not content). Dormant until a producer
           enqueues it (P3). *)
+  | Hitl_resolved_stimulus
+      (** RFC-0320 W3b: an operator resolved a gated-tool approval this keeper
+          was waiting on. When the original turn already ended (the approval
+          outlived it), the wake arrives with no live tool call to resume, so
+          the keeper must be steered back to the originating conversation
+          instead of proceeding on its own state. *)
 
 type turn_reason =
   | Mention_pending
@@ -43,6 +49,7 @@ type turn_reason =
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
+  | Hitl_resolved_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of
@@ -82,6 +89,7 @@ let turn_reason_to_string = function
   | Bootstrap_stimulus_pending -> "bootstrap_stimulus_pending"
   | No_progress_recovery_stimulus_pending -> "no_progress_recovery_stimulus_pending"
   | Connector_attention_pending -> "connector_attention_pending"
+  | Hitl_resolved_pending -> "hitl_resolved_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
   | Idle_cooldown_elapsed _ -> "idle_cooldown_elapsed"
@@ -97,6 +105,7 @@ let turn_reason_of_event_queue_trigger = function
   | No_progress_recovery_stimulus -> No_progress_recovery_stimulus_pending
   | Scheduled_automation_stimulus -> Scheduled_automation_due
   | Connector_attention_stimulus -> Connector_attention_pending
+  | Hitl_resolved_stimulus -> Hitl_resolved_pending
 ;;
 
 let skip_reason_to_string = function

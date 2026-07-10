@@ -229,10 +229,43 @@ price-output = 0.28
 [ollama_cloud.flash-nojson]
 `
 
-function mountSection(container: HTMLElement, section: 'models' | 'routing' | 'bindings') {
+const sourceWithUnknownLaneCapabilities = `[runtime]
+default = "ollama_cloud.minimax-m3"
+librarian = "ollama_cloud.flash-unknown"
+cross_verifier = "ollama_cloud.missing-binding"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.minimax-m3]
+api-name = "minimax-m3"
+max-context = 524288
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.flash-unknown]
+api-name = "flash-unknown"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama_cloud.minimax-m3]
+
+[ollama_cloud.flash-unknown]
+`
+
+function mountSection(
+  container: HTMLElement,
+  section: 'models' | 'routing' | 'bindings',
+  sourceText = sourceWithCapabilities,
+) {
   render(
     html`<${RuntimeEnvironmentEditor}
-      sourceText=${sourceWithCapabilities}
+      sourceText=${sourceText}
       section=${section}
       onRoutingChange=${() => {}}
       onAssignmentChange=${() => {}}
@@ -259,6 +292,26 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     render(null, container)
   })
 
+  it('renders supported capability state for a JSON-required lane with declared support', () => {
+    const container = document.createElement('div')
+    mountSection(
+      container,
+      'routing',
+      sourceWithCapabilities.replace(
+        'librarian = "ollama_cloud.flash-nojson"',
+        'librarian = "ollama_cloud.minimax-m3"',
+      ),
+    )
+
+    const badge = container.querySelector('[data-testid="runtime-lane-librarian-capability"]')
+    expect(badge?.getAttribute('data-runtime-lane-capability')).toBe('supported')
+    expect(badge?.classList.contains('rt-ok')).toBe(true)
+    expect(badge?.textContent).toContain('JSON 모드 필요')
+    expect(badge?.textContent).toContain('minimax-m3 지원')
+
+    render(null, container)
+  })
+
   it('warns when a JSON-required lane targets a model without response-format-json', () => {
     const container = document.createElement('div')
     mountSection(container, 'routing')
@@ -279,6 +332,44 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     expect(warnings.some(w => w.includes('structured output 필요') && w.includes('deepseek-v4-flash 미지원'))).toBe(true)
     // and it does not mislabel the structured requirement as a JSON-mode one
     expect(warnings.every(w => !(w.includes('structured output 필요') && w.includes('JSON 모드')))).toBe(true)
+
+    render(null, container)
+  })
+
+  it('renders unknown capability state without green OK styling when required capability is not declared', () => {
+    const container = document.createElement('div')
+    mountSection(container, 'routing', sourceWithUnknownLaneCapabilities)
+
+    const librarian = container.querySelector('[data-testid="runtime-lane-librarian-capability"]')
+    expect(librarian?.getAttribute('data-runtime-lane-capability')).toBe('unknown')
+    expect(librarian?.classList.contains('rt-unknown')).toBe(true)
+    expect(librarian?.classList.contains('rt-ok')).toBe(false)
+    expect(librarian?.textContent).toContain('JSON 모드 필요')
+    expect(librarian?.textContent).toContain('flash-unknown capability 미확인')
+
+    const crossVerifier = container.querySelector('[data-testid="runtime-lane-cross_verifier-capability"]')
+    expect(crossVerifier?.getAttribute('data-runtime-lane-capability')).toBe('unknown')
+    expect(crossVerifier?.classList.contains('rt-unknown')).toBe(true)
+    expect(crossVerifier?.textContent).toContain('runtime binding 없음: ollama_cloud.missing-binding')
+
+    render(null, container)
+  })
+
+  it('renders unconfigured capability state for an unset optional required-capability lane', () => {
+    const container = document.createElement('div')
+    mountSection(
+      container,
+      'routing',
+      sourceWithUnknownLaneCapabilities.replace(
+        'librarian = "ollama_cloud.flash-unknown"\n',
+        '',
+      ),
+    )
+
+    const badge = container.querySelector('[data-testid="runtime-lane-librarian-capability"]')
+    expect(badge?.getAttribute('data-runtime-lane-capability')).toBe('unconfigured')
+    expect(badge?.classList.contains('rt-unknown')).toBe(true)
+    expect(badge?.textContent).toContain('lane 미설정')
 
     render(null, container)
   })

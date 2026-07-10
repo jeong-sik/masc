@@ -132,6 +132,32 @@ let test_normalize_path_for_check_stripped_removes_trailing_slash () =
     (KAP.normalize_path_for_check cwd)
     (KAP.normalize_path_for_check_stripped raw)
 
+(* ── is_masc_internal_state_norm ────────────────────────────── *)
+
+let test_normalized_masc_root_blocked () =
+  check_bool "normalized .masc root → internal" true
+    (KAP.is_masc_internal_state_norm
+       ~root_norm:"/workspace/project"
+       ~target_norm:"/workspace/project/.masc")
+
+let test_normalized_masc_config_keeper_blocked () =
+  check_bool "normalized .masc/config/keepers target → internal" true
+    (KAP.is_masc_internal_state_norm
+       ~root_norm:"/workspace/project"
+       ~target_norm:"/workspace/project/.masc/config/keepers/evil.toml")
+
+let test_normalized_masc_sibling_allowed () =
+  check_bool "sibling .masc-tools directory → not internal" false
+    (KAP.is_masc_internal_state_norm
+       ~root_norm:"/workspace/project"
+       ~target_norm:"/workspace/project/.masc-tools/notes.md")
+
+let test_normalized_project_file_allowed () =
+  check_bool "ordinary project file → not internal" false
+    (KAP.is_masc_internal_state_norm
+       ~root_norm:"/workspace/project"
+       ~target_norm:"/workspace/project/lib/file.ml")
+
 (* ── runner ──────────────────────────────────────────────────── *)
 
 let () =
@@ -180,5 +206,16 @@ let () =
         [
           Alcotest.test_case "removes trailing slash" `Quick
             test_normalize_path_for_check_stripped_removes_trailing_slash;
+        ] );
+      ( "is_masc_internal_state_norm",
+        [
+          Alcotest.test_case "blocks .masc root" `Quick
+            test_normalized_masc_root_blocked;
+          Alcotest.test_case "blocks .masc keeper config" `Quick
+            test_normalized_masc_config_keeper_blocked;
+          Alcotest.test_case "allows .masc sibling" `Quick
+            test_normalized_masc_sibling_allowed;
+          Alcotest.test_case "allows project file" `Quick
+            test_normalized_project_file_allowed;
         ] );
     ]

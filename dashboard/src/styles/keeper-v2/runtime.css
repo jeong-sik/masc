@@ -37,14 +37,15 @@
 /* routing lanes */
 .rt-lane { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 14px 0; border-top: 1px solid var(--border-soft); }
 .rt-lane:first-of-type { border-top: 0; }
-.rt-lane-l { flex: 1 1 140px; min-width: 0; }
+.rt-lane-l { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
 .rt-lane-lbl { font-size: var(--fs-13); color: var(--text-primary); }
-.rt-lane-hint { font-size: var(--fs-11); color: var(--text-dim); margin-top: 3px; }
+.rt-lane-hint { font-size: var(--fs-11); color: var(--text-dim); margin-top: 3px; overflow-wrap: anywhere; }
 .rt-lane-c { display: flex; align-items: center; gap: 10px; flex: 1 1 200px; min-width: 0; }
-.rt-select { background: var(--bg-sunken); border: 1px solid var(--border-main); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text-bright); font-size: var(--fs-12); cursor: pointer; min-width: 0; width: 100%; max-width: 320px; }
+.rt-select { background: var(--bg-sunken); border: 1px solid var(--border-main); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text-bright); font-size: var(--fs-12); cursor: pointer; min-width: 0; width: 100%; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rt-select:focus { outline: none; border-color: var(--volt-dim); }
-.rt-warn { font-size: var(--fs-11); color: var(--status-bad); white-space: nowrap; }
-.rt-ok { font-size: var(--fs-11); color: var(--status-ok); white-space: nowrap; }
+.rt-warn { font-size: var(--fs-11); color: var(--status-bad); overflow-wrap: anywhere; }
+.rt-ok { font-size: var(--fs-11); color: var(--status-ok); overflow-wrap: anywhere; }
+.rt-unknown { font-size: var(--fs-11); color: var(--status-warn); overflow-wrap: anywhere; }
 
 /* provider cards */
 .rt-cards { display: flex; flex-direction: column; gap: 12px; }
@@ -159,6 +160,27 @@
 .rtc-flag { font-family: var(--font-mono); font-size: var(--fs-10); padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
 .rtc-flag.on { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 32%, transparent); }
 .rtc-flag.off { color: var(--text-dim); }
+/* Undeclared capability: distinct from a declared "off" — dashed border reads
+   as "unknown" next to the em-dash glyph. */
+.rtc-flag.na { color: var(--text-dim); border-style: dashed; }
+/* Disclosure for the raw catalog projection rows (params/request/declared/
+   caps). Collapsed by default; state persists via runtimeRawSpecOpen. */
+.rtc-raw-toggle {
+  margin-top: 10px;
+  padding: 3px 9px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-9);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: 0.14s;
+}
+.rtc-raw-toggle:hover { color: var(--text-mid); border-color: var(--border-main); }
+.rtc-raw-toggle[aria-expanded="true"] { color: var(--text-mid); }
 .rtc-effort { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border-soft); }
 .rtc-effort-k { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
 .rtc-eff-seg { display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-sm); overflow: hidden; }

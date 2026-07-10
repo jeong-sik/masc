@@ -125,6 +125,7 @@ let dashboard_board_json
       let total_json : Yojson.Safe.t = if has_more then `Null else `Int fetched_len in
       let paged = posts |> drop offset |> take limit in
       let contributor_quality_for = board_contributor_quality_lookup ?config () in
+      let claim_evidence_for = board_claim_evidence_lookup () in
       let posts_json =
         List.map
           (fun (post : Board.post) ->
@@ -132,10 +133,12 @@ let dashboard_board_json
              let post_id = Board.Post_id.to_string post.id in
              let current_vote = board_current_vote_for_post ~voter ~post_id in
              let contributor_quality = contributor_quality_for author in
+             let claim_evidence = claim_evidence_for post_id in
              board_post_dashboard_json
                ~blind_votes
                ?current_vote
                ?contributor_quality
+               ?claim_evidence
                ~author_karma:(get_karma author)
                post)
           paged
@@ -446,6 +449,16 @@ let dashboard_schedule_resolve_http_json
     ~config
     ~operator_name
     ~args
+;;
+
+let dashboard_schedule_prune_http_json
+      ~config
+      ~operator_name
+  : (Yojson.Safe.t, string) result
+  =
+  Server_dashboard_http_schedule_actions.prune_http_json
+    ~config
+    ~operator_name
 ;;
 
 (* Dashboard-initiated verification verdict. Mirrors the tool_task path for

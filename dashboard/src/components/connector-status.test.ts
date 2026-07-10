@@ -121,6 +121,13 @@ function sampleConnectorsResponse(overrides?: Partial<Record<string, unknown>>) 
         binding_source: 'persisted',
         runtime_bindings_count: 1,
         pid: 4242,
+        source_health: {
+          storage_paths: 'fallback',
+          runtime_summary: 'fallback',
+          binding_summary: 'fallback',
+          names: 'fallback',
+          observed_channel: 'missing',
+        },
         configured_bindings: [
           {
             channel_id: '123456',
@@ -307,6 +314,10 @@ describe('ConnectorStatusPanel', () => {
     const detailPanels = container.querySelectorAll('[data-testid="connector-detail-panel"]')
     expect(detailPanels.length).toBe(1)
     expect(detailPanels[0]?.textContent).toContain('Discord')
+    const sourceHealth = detailPanels[0]?.querySelector('[data-testid="connector-source-health"]')
+    expect(sourceHealth?.textContent).toContain('source health')
+    expect(sourceHealth?.querySelector('[data-connector-source-health="storage_paths"]')?.getAttribute('data-connector-source-health-state')).toBe('fallback')
+    expect(sourceHealth?.querySelector('[data-connector-source-health="observed_channel"]')?.getAttribute('data-connector-source-health-state')).toBe('missing')
     expect(container.querySelectorAll('button[aria-label="toggle header details"]').length).toBe(1)
   })
 
@@ -808,26 +819,25 @@ describe('ConnectorStatusPanel', () => {
   })
 
   it('shows sidecar-off empty state when no bindings and sidecar offline', async () => {
-    // RFC-0203 §Phase 3 — Discord is in-process and does not render
-    // the sidecar-off panel anymore; use Slack as the representative
-    // external sidecar for this assertion. The in-process hint case
-    // (Discord with !available) is covered by the follow-up test
-    // below.
-    const slackConnector = {
+    // Discord (RFC-0203) and Slack (RFC-0317) are in-process and do not
+    // render the sidecar-off panel anymore; use Telegram as the
+    // representative external sidecar for this assertion. The in-process
+    // hint case is covered by the follow-up test below.
+    const telegramConnector = {
       ...sampleConnectorsResponse().connectors[0],
-      connector_id: 'slack',
-      display_name: 'Slack',
-      channel: 'slack',
+      connector_id: 'telegram',
+      display_name: 'Telegram',
+      channel: 'telegram',
       available: false,
       connected: false,
       stale: false,
       status: 'offline',
-      status_path: '/tmp/slack_status.json',
+      status_path: '/tmp/telegram_status.json',
       configured_bindings: [],
     }
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
-      connectors: [slackConnector],
+      connectors: [telegramConnector],
     }))
     const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
 
@@ -843,9 +853,9 @@ describe('ConnectorStatusPanel', () => {
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('사이드카 미시작')
-    expect(text).toContain('cd sidecars/slack-bot && ./run.sh')
+    expect(text).toContain('cd sidecars/telegram-bot && ./run.sh')
     expect(text).toContain('사이드카 status 파일이')
-    expect(text).toContain('/tmp/slack_status.json')
+    expect(text).toContain('/tmp/telegram_status.json')
     expect(text).toContain('관찰되지 않았습니다')
     expect(text).toContain('Start')
     expect(text).toContain('status')
@@ -871,10 +881,10 @@ describe('ConnectorStatusPanel', () => {
     const copyLabels = Array.from(panel!.querySelectorAll<HTMLButtonElement>('[data-copy-button]'))
       .map(button => button.getAttribute('aria-label'))
     expect(copyLabels).toEqual([
-      'Copy Slack sidecar start command',
-      'Copy Slack sidecar tail logs command',
-      'Copy Slack sidecar status command',
-      'Copy Slack sidecar stop command',
+      'Copy Telegram sidecar start command',
+      'Copy Telegram sidecar tail logs command',
+      'Copy Telegram sidecar status command',
+      'Copy Telegram sidecar stop command',
     ])
   })
 

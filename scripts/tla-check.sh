@@ -91,14 +91,15 @@ run_tlc_cfg() {
 run_tlc_buggy() {
   local spec_dir="$1"
   local tla_file="$2"
-  local cfg_file="${tla_file%.tla}-buggy.cfg"
+  local cfg_file="${3:-${tla_file%.tla}-buggy.cfg}"
+  local label="${4:-buggy}"
 
   if [ ! -f "$spec_dir/$cfg_file" ]; then
-    echo "SKIP $tla_file buggy (no -buggy.cfg file)"
+    echo "SKIP $tla_file $label (no $cfg_file file)"
     return 0
   fi
 
-  echo "=== Checking $spec_dir/$tla_file (buggy, expect violation) ==="
+  echo "=== Checking $spec_dir/$tla_file ($label, expect violation) ==="
   local rc=0
   "$JAVA" -XX:+UseParallelGC -Xmx4g \
     -cp "$TLC_JAR" tlc2.TLC \
@@ -177,6 +178,8 @@ run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperReactionLiveness.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperReactionLiveness.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperApprovalQueue.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperApprovalQueue.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "OperatorApprovalMode.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "OperatorApprovalMode.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperEventQueue.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperEventQueue.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperPostTurnOrchestration.tla"
@@ -193,6 +196,9 @@ run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDwellMonotone.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDwellMonotone.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperMemoryLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperMemoryLifecycle.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperPacing.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperPacing.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperPacing.tla" "KeeperPacing-buggy-unbounded.cfg" "buggy-unbounded"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOutcomesConservation.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperOutcomesConservation.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperReconcileLiveness.tla"

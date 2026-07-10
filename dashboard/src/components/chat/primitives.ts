@@ -177,37 +177,98 @@ export function ChatSuggestionChip({
   return html`<${SuggestionChip} pre=${pre} ...${rest}>${children}<//>`
 }
 
-function surfaceLink(surface?: SurfaceRef | null): { url: string; label: string; icon: string } | null {
+type ChatMetaInfo = {
+  url?: string
+  label: string
+  icon: string
+  title: string
+  tone?: 'accent' | 'default'
+}
+
+function compactIdentifier(value?: string | null, head = 6, tail = 4): string | null {
+  const normalized = value?.trim()
+  if (!normalized) return null
+  if (normalized.length <= head + tail + 1) return normalized
+  return `${normalized.slice(0, head)}…${normalized.slice(-tail)}`
+}
+
+function compactKeyValues(fields: Array<[string, string | null | undefined]>): string {
+  return fields
+    .map(([key, value]) => {
+      const normalized = value?.trim()
+      return normalized ? `${key}=${normalized}` : null
+    })
+    .filter((value): value is string => value !== null)
+    .join(' · ')
+}
+
+function gateAddressValue(surface: SurfaceRef, ...keys: string[]): string | null {
+  const address = surface.address
+  if (!address) return null
+  for (const key of keys) {
+    const value = address[key]?.trim()
+    if (value) return value
+  }
+  return null
+}
+
+function surfaceLink(surface?: SurfaceRef | null): ChatMetaInfo | null {
   if (!surface || !surface.kind) return null
   switch (surface.kind) {
     case 'discord':
       if (surface.channel_id) {
         const targetId = surface.thread_id || surface.channel_id
         const guild = surface.guild_id || '@me'
+        const labelTarget = compactIdentifier(targetId) ?? targetId
+        const title = compactKeyValues([
+          ['surface', surface.thread_id ? 'discord_thread' : 'discord_channel'],
+          ['guild_id', surface.guild_id || '@me'],
+          ['channel_id', surface.channel_id],
+          ['parent_channel_id', surface.parent_channel_id],
+          ['thread_id', surface.thread_id],
+        ])
         return {
           url: `https://discord.com/channels/${guild}/${targetId}`,
-          label: surface.thread_id ? 'Discord Thread' : 'Discord Channel',
+          label: `${surface.thread_id ? 'Discord Thread' : 'Discord Channel'} ${labelTarget}`,
           icon: '🎮',
+          title,
+          tone: 'accent',
         }
       }
       break
     case 'slack':
       if (surface.channel_id) {
         const team = surface.team_id ? `&team=${surface.team_id}` : ''
+        const labelTarget = compactIdentifier(surface.channel_id) ?? surface.channel_id
+        const title = compactKeyValues([
+          ['surface', 'slack_channel'],
+          ['team_id', surface.team_id],
+          ['channel_id', surface.channel_id],
+          ['thread_ts', surface.thread_ts],
+        ])
         return {
           url: `https://slack.com/app_redirect?channel=${surface.channel_id}${team}`,
-          label: 'Slack Channel',
+          label: `Slack Channel ${labelTarget}`,
           icon: '💬',
+          title,
+          tone: 'accent',
         }
       }
       break
     case 'github':
       if (surface.repo) {
         const path = surface.notification_id ? `/notifications/${surface.notification_id}` : ''
+        const title = compactKeyValues([
+          ['surface', 'github'],
+          ['repo', surface.repo],
+          ['notification_id', surface.notification_id],
+        ])
         return {
           url: `https://github.com/${surface.repo}${path}`,
           label: `GitHub: ${surface.repo}`,
           icon: '🐙',
+          title,
+          tone: 'accent',
         }
       }
       break
@@ -216,21 +277,106 @@ function surfaceLink(surface?: SurfaceRef | null): { url: string; label: string;
         url: '#',
         label: 'Dashboard',
         icon: '💻',
+        title: compactKeyValues([
+          ['surface', 'dashboard'],
+          ['session_id', surface.session_id],
+        ]),
       }
     case 'agent':
       return {
         url: '#',
         label: 'Agent (Self)',
         icon: '🤖',
+        title: 'surface=agent',
       }
     case 'gate':
-      return {
-        url: '#',
-        label: `Gate: ${surface.label || 'connector'}`,
-        icon: '⚡',
+      {
+        const label = surface.label || 'connector'
+        const workspace = gateAddressValue(surface, 'workspace_id', 'channel_workspace_id')
+        const labelSuffix = compactIdentifier(workspace)
+        const titleFields: Array<[string, string | null | undefined]> = [
+          ['surface', 'gate'],
+          ['label', label],
+        ]
+        if (surface.address) {
+          for (const [key, value] of Object.entries(surface.address)) {
+            titleFields.push([key, value])
+          }
+        }
+        return {
+          url: '#',
+          label: `Gate: ${label}${labelSuffix ? ` · ${labelSuffix}` : ''}`,
+          icon: '⚡',
+          title: compactKeyValues(titleFields),
+        }
       }
   }
   return null
+}
+
+function speakerMeta(entry: KeeperConversationEntry): ChatMetaInfo | null {
+  const speakerId = entry.speakerId?.trim()
+  const speakerName = entry.speakerName?.trim()
+  const authority = entry.speakerAuthority?.trim()
+  if (!speakerId && !speakerName && !authority) return null
+  const label = speakerName || compactIdentifier(speakerId) || authority || 'speaker'
+  return {
+    label,
+    icon: '👤',
+    title: compactKeyValues([
+      ['speaker_name', speakerName],
+      ['speaker_id', speakerId],
+      ['speaker_authority', authority],
+    ]),
+  }
+}
+
+function routeMeta(entry: KeeperConversationEntry): ChatMetaInfo | null {
+  const conversationId = entry.conversationId?.trim()
+  const externalMessageId = entry.externalMessageId?.trim()
+  if (!conversationId && !externalMessageId) return null
+  const labelId = compactIdentifier(externalMessageId || conversationId)
+  return {
+    label: labelId ? `ctx ${labelId}` : 'ctx',
+    icon: '⌁',
+    title: compactKeyValues([
+      ['conversation_id', conversationId],
+      ['external_message_id', externalMessageId],
+    ]),
+  }
+}
+
+function ChatMetaChip({ info, compact }: { info: ChatMetaInfo | null; compact: boolean }) {
+  if (!info) return null
+  const paddingClass = compact ? 'px-2 py-0.5' : 'px-2.5 py-1'
+  const toneClass = info.tone === 'accent'
+    ? `border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]`
+    : `border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)]`
+  if (info.url && info.url !== '#') {
+    return html`
+      <a
+        href=${info.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        class=${`inline-flex items-center gap-1 rounded-[var(--r-0)] border ${toneClass} ${paddingClass} text-2xs font-semibold hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING}`}
+        title=${info.title}
+        data-chat-meta-chip=${info.label}
+      >
+        <span>${info.icon}</span>
+        <span>${info.label}</span>
+      </a>
+    `
+  }
+  return html`
+    <span
+      class=${`inline-flex items-center gap-1 rounded-[var(--r-0)] border ${toneClass} ${paddingClass} text-2xs font-medium`}
+      title=${info.title}
+      data-chat-meta-chip=${info.label}
+    >
+      <span>${info.icon}</span>
+      <span>${info.label}</span>
+    </span>
+  `
 }
 
 type ChatTranscriptVariant = 'default' | 'messenger'
@@ -336,12 +482,20 @@ type StreamContractBadgeInfo = {
 function streamContractBadgeInfo(entry: KeeperConversationEntry): StreamContractBadgeInfo | null {
   const contract = entry.streamContract
   if (!contract) return null
+  const sourceContext = compactKeyValues([
+    ['surface_kind', entry.surface?.kind],
+    ['conversation_id', entry.conversationId],
+    ['external_message_id', entry.externalMessageId],
+    ['speaker_id', entry.speakerId],
+    ['speaker_name', entry.speakerName],
+  ])
   const title = [
     `source=${contract.source}`,
     `status=${contract.status}`,
     contract.eventName ? `event=${contract.eventName}` : null,
     contract.deliveryReceipt ? `receipt=${contract.deliveryReceipt}` : null,
     contract.reason ?? null,
+    sourceContext || null,
   ].filter((value): value is string => Boolean(value)).join(' · ')
   switch (contract.deliveryReceipt) {
     case 'server_lifecycle_replay_only':
@@ -2224,6 +2378,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
     attachBlocks.length > 0 ? 'server_block' : null,
   ].filter((value): value is string => value !== null)
   const surfaceInfo = surfaceLink(entry.surface)
+  const speakerInfo = speakerMeta(entry)
+  const routeInfo = routeMeta(entry)
 
   return html`
     <article
@@ -2252,6 +2408,12 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-queue-seq=${entry.queueSeq ?? undefined}
       data-chat-queue-client-action-id=${entry.queueClientActionId ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
+      data-chat-surface-address=${entry.surface?.address ? JSON.stringify(entry.surface.address) : undefined}
+      data-chat-conversation-id=${entry.conversationId ?? undefined}
+      data-chat-external-message-id=${entry.externalMessageId ?? undefined}
+      data-chat-speaker-id=${entry.speakerId ?? undefined}
+      data-chat-speaker-name=${entry.speakerName ?? undefined}
+      data-chat-speaker-authority=${entry.speakerAuthority ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-attachment-count=${attachments.length}
       data-chat-server-attach-block-count=${attachBlocks.length}
@@ -2291,30 +2453,9 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                         `
                       : null}
                     <${StreamContractBadge} badge=${streamContractBadge} compact=${true} />
-                    ${surfaceInfo && surfaceInfo.url !== '#'
-                      ? html`
-                          <a
-                            href=${surfaceInfo.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING}"
-                            title=${surfaceInfo.label}
-                          >
-                            <span>${surfaceInfo.icon}</span>
-                            <span>${surfaceInfo.label}</span>
-                          </a>
-                        `
-                      : surfaceInfo
-                      ? html`
-                          <span
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]"
-                            title=${surfaceInfo.label}
-                          >
-                            <span>${surfaceInfo.icon}</span>
-                            <span>${surfaceInfo.label}</span>
-                          </span>
-                        `
-                      : null}
+                    <${ChatMetaChip} info=${surfaceInfo} compact=${true} />
+                    <${ChatMetaChip} info=${speakerInfo} compact=${true} />
+                    <${ChatMetaChip} info=${routeInfo} compact=${true} />
                   </div>
                 `
               : html`
@@ -2342,30 +2483,9 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                         `
                       : null}
                     <${StreamContractBadge} badge=${streamContractBadge} compact=${false} />
-                    ${surfaceInfo && surfaceInfo.url !== '#'
-                      ? html`
-                          <a
-                            href=${surfaceInfo.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING}"
-                            title=${surfaceInfo.label}
-                          >
-                            <span>${surfaceInfo.icon}</span>
-                            <span>${surfaceInfo.label}</span>
-                          </a>
-                        `
-                      : surfaceInfo
-                      ? html`
-                          <span
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]"
-                            title=${surfaceInfo.label}
-                          >
-                            <span>${surfaceInfo.icon}</span>
-                            <span>${surfaceInfo.label}</span>
-                          </span>
-                        `
-                      : null}
+                    <${ChatMetaChip} info=${surfaceInfo} compact=${false} />
+                    <${ChatMetaChip} info=${speakerInfo} compact=${false} />
+                    <${ChatMetaChip} info=${routeInfo} compact=${false} />
                   </div>
                   <div class="mt-2 truncate text-sm font-bold text-[var(--color-fg-primary)]">
                     ${avatarLabel(entry)}

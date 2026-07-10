@@ -144,7 +144,7 @@ let test_inbound_of_json_normalizes_channel_label () =
 (* ── Mock dispatch for handle_inbound tests ──────────────────── *)
 
 let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_ ~content:_ =
+    ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
   Gate_protocol.Reply {
     content = "mock reply";
     structured = None;
@@ -153,11 +153,11 @@ let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~channel_user_name:_
   }
 
 let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_ ~content:_ =
+    ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
   Gate_protocol.Keeper_error_result "mock keeper error"
 
 let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_ ~content:_ =
+    ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
   Gate_protocol.Unavailable_result
 
 let queued_request : Gate_protocol.message_request =
@@ -174,7 +174,7 @@ let queued_request : Gate_protocol.message_request =
   }
 
 let mock_dispatch_queued ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_ ~content:_ =
+    ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
   Gate_protocol.Reply
     { content = "luna is busy; your message is queued (request_id=req-queued)."
     ; structured = None
@@ -239,11 +239,11 @@ let test_handle_inbound_passes_channel_context_to_dispatch () =
   reset_dedup ();
   let seen = ref None in
   let dispatch ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-      ~keeper_name:_ ~metadata ~content:_ =
+      ~keeper_name:_ ~idempotency_key ~metadata ~content:_ =
     seen :=
       Some
         (channel, channel_user_id, channel_user_name, channel_workspace_id,
-         metadata);
+         idempotency_key, metadata);
     Gate_protocol.Reply {
       content = "ok";
       structured = None;
@@ -262,11 +262,12 @@ let test_handle_inbound_passes_channel_context_to_dispatch () =
   match Channel_gate.handle_inbound ~dispatch msg with
   | Ok _ -> (
       match !seen with
-      | Some (channel, user_id, user_name, workspace_id, metadata) ->
+      | Some (channel, user_id, user_name, workspace_id, idempotency_key, metadata) ->
           check string "channel" "discord" channel;
           check string "user id" "user-1" user_id;
           check string "user name" "Alice" user_name;
           check string "workspace id" "thread-7" workspace_id;
+          check string "idempotency key" msg.idempotency_key idempotency_key;
           check string "metadata" "guild-1"
             (List.assoc "discord.guild_id" metadata)
       | None -> fail "dispatch should receive connector context" )
@@ -276,7 +277,7 @@ let test_handle_inbound_passes_metadata_to_dispatch () =
   reset_dedup ();
   let seen = ref None in
   let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-      ~channel_workspace_id:_ ~keeper_name:_ ~metadata ~content:_ =
+      ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata ~content:_ =
     seen := Some metadata;
     Gate_protocol.Reply
       { content = "ok"
@@ -310,8 +311,8 @@ let test_handle_inbound_streaming_forwards_snapshot_callback () =
   reset_dedup ();
   let snapshots = ref [] in
   let dispatch ~on_text_snapshot ~channel:_ ~channel_user_id:_
-      ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_
-      ~content:_ =
+      ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
+      ~idempotency_key:_ ~metadata:_ ~content:_ =
     on_text_snapshot "partial";
     Gate_protocol.Reply
       { content = "ok"
@@ -338,8 +339,8 @@ let test_handle_inbound_streaming_validation_blocks_callback () =
   let dispatch_called = ref false in
   let snapshot_called = ref false in
   let dispatch ~on_text_snapshot:_ ~channel:_ ~channel_user_id:_
-      ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_
-      ~content:_ =
+      ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
+      ~idempotency_key:_ ~metadata:_ ~content:_ =
     dispatch_called := true;
     Gate_protocol.Reply
       { content = "ok"

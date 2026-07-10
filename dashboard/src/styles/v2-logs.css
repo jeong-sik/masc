@@ -29,7 +29,12 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  /* overflow must stay visible: the panel grows to its full content height and
+     the page scrolls at .dashboard-main-scroll, so it never actually clips. An
+     `overflow: hidden` here only created a sticky containing block that pinned
+     .v2-logs-table-header's `position: sticky` to a non-scrolling ancestor,
+     making the column header scroll away with the rows. */
+  overflow: visible;
   background: transparent;
   box-shadow: inset 0 1px 0 var(--v2-logs-top-glow);
 }
@@ -272,6 +277,12 @@
   display: grid;
   grid-template-columns: var(--v2-logs-cols);
   flex: none;
+  /* Sticky column header: the event stream can be thousands of rows tall, so the
+     시각/keeper/유형/이벤트 labels stay pinned to the top of the scroll while the
+     rows move under them (opaque --bg-panel below covers the scrolled rows). */
+  position: sticky;
+  top: 0;
+  z-index: 3;
   align-items: center;
   gap: 14px;
   padding: 10px 26px;

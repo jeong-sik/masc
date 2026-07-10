@@ -443,6 +443,57 @@ let test_execute_descriptor_spells_out_argv_and_filesystem_basis () =
     argv_description
 ;;
 
+let test_grep_descriptor_documents_multiline () =
+  (* Keepers passed a literal newline in `pattern` (11 rejects); the runtime
+     error referenced a --multiline flag Grep does not expose. Document single-
+     line matching and route cross-line matches to the working Execute rg -U. *)
+  let descriptor = required_public_descriptor "Grep" in
+  check_contains
+    "Grep description says patterns match within a single line"
+    ~sub:"match within a single line"
+    descriptor.description;
+  check_contains
+    "Grep description routes cross-line matches to rg -U"
+    ~sub:"rg -U"
+    descriptor.description
+;;
+
+let test_edit_descriptor_requires_read_first () =
+  (* old_string mismatch (31 rejects): keepers edited without Read or blind-
+     retried a non-matching string. Document byte-sensitivity + re-Read. *)
+  let descriptor = required_public_descriptor "Edit" in
+  check_contains
+    "Edit description says the match is byte-sensitive"
+    ~sub:"byte-sensitive"
+    descriptor.description;
+  check_contains
+    "Edit description directs re-Read on a missed match"
+    ~sub:"re-Read the file"
+    descriptor.description
+;;
+
+let test_board_descriptors_steer_concise_content () =
+  (* board_post/comment content-length rejects (53/day): keepers pasted full
+     logs/analyses (up to 8186 chars) past the max_content_length limit. The
+     descriptors now steer concise summaries + links. No hardcoded number —
+     the limit is env-configurable (Board_types.Limits.max_content_length),
+     and the rejection error already reports the actual count. *)
+  let post = required_internal_descriptor "keeper_board_post" in
+  let comment = required_internal_descriptor "keeper_board_comment" in
+  check_contains
+    "board_post description names the length limit"
+    ~sub:"maximum length"
+    post.description;
+  check_contains
+    "board_post description steers summary + link"
+    ~sub:"reference a file path, PR, or issue link"
+    post.description;
+  check_contains
+    "board_comment description names the length limit"
+    ~sub:"maximum length"
+    comment.description
+;;
+
 let test_board_descriptions_disambiguate_post_id_flow () =
   let get_descriptor = required_internal_descriptor "keeper_board_post_get" in
   let get_schema = required_board_schema "keeper_board_post_get" in
@@ -1045,26 +1096,48 @@ let test_effective_core_tools_is_subset_of_discovery () =
     effective
 ;;
 
-let test_effective_core_tools_without_universe_has_no_descriptor_publics () =
-  (* Establish the empty-universe precondition explicitly: descriptor public
-     names must NOT appear in effective_core_tools when their internal_name is
-     absent from the universe. Mcp_server_eio's module-load bootstrap injects
-     the full schema universe when it is linked into this executable, so the
-     universe cannot be assumed to start empty.
+let test_effective_core_tools_without_universe_keeps_only_native_executor_publics () =
+  (* With an empty masc universe, effective_core_tools must still expose the
+     native-executor code tools (Execute/Grep/Read/Edit/Write): they run through
+     the in-process execution gates and do not depend on masc schema injection.
+     Regression guard for #23440 (the shadowed universe-only definition
+     structurally excluded them from the per-turn core surface). In_process
+     descriptors (WebSearch/WebFetch) are masc-backed and must be pruned when
+     their backend schema is not injected, preserving #20455 universe-awareness.
 
-     Earlier tests may also mutate the schema universe, so bracket this
-     assertion with a save/reset to keep following tests isolated. *)
+     Partition by the typed [executor] variant so the assertion mirrors the
+     production discriminator rather than a hardcoded name list.
+
+     Mcp_server_eio's module-load bootstrap can inject the full schema universe
+     when linked into this executable, and earlier tests may mutate it, so
+     bracket the assertion with a save/reset to keep following tests isolated. *)
   with_masc_schemas [] (fun () ->
     let effective = Registry.effective_core_tools () in
-    let descriptor_publics = Descriptor.public_names () in
     List.iter
-      (fun name ->
-         if List.mem name effective
-         then
-           Alcotest.failf
-             "effective_core_tools contains descriptor public %S when universe is empty"
-             name)
-      descriptor_publics)
+      (fun (d : Descriptor.t) ->
+         let public_names = Descriptor.public_names_of_descriptor d in
+         match d.Descriptor.executor with
+         | Descriptor.Shell_ir | Descriptor.Filesystem ->
+           List.iter
+             (fun name ->
+                if not (List.mem name effective)
+                then
+                  Alcotest.failf
+                    "native-executor public %S missing from effective_core_tools \
+                     with empty universe"
+                    name)
+             public_names
+         | Descriptor.In_process ->
+           List.iter
+             (fun name ->
+                if List.mem name effective
+                then
+                  Alcotest.failf
+                    "in-process (masc-backed) public %S present in \
+                     effective_core_tools when universe is empty"
+                    name)
+             public_names)
+      Descriptor.public_descriptors)
 ;;
 
 let test_effective_core_tools_with_full_universe_matches_discovery () =
@@ -1124,6 +1197,18 @@ let () =
             "Execute argv/filesystem basis is explicit"
             `Quick
             test_execute_descriptor_spells_out_argv_and_filesystem_basis
+        ; test_case
+            "Grep documents single-line match and rg -U"
+            `Quick
+            test_grep_descriptor_documents_multiline
+        ; test_case
+            "Edit requires Read-first and byte-exact old_string"
+            `Quick
+            test_edit_descriptor_requires_read_first
+        ; test_case
+            "Board post/comment steer concise content"
+            `Quick
+            test_board_descriptors_steer_concise_content
         ; test_case
             "Board get/list descriptions disambiguate post_id flow"
             `Quick
@@ -1209,9 +1294,9 @@ let () =
             `Quick
             test_effective_core_tools_is_subset_of_discovery
         ; test_case
-            "effective_core_tools without universe has no descriptor publics"
+            "effective_core_tools without universe keeps only native-executor publics"
             `Quick
-            test_effective_core_tools_without_universe_has_no_descriptor_publics
+            test_effective_core_tools_without_universe_keeps_only_native_executor_publics
         ; test_case
             "effective_core_tools with full universe matches discovery"
             `Quick

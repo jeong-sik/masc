@@ -189,6 +189,30 @@ let test_done_missing_task_id_emits_typed_error () =
             | Some (Outcome.No_progress _) -> "No_progress"
             | Some (Outcome.Error _) -> "Error"))
 
+let test_done_missing_evidence_refs_emits_typed_error () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = meta_with_active_goals [] in
+       match
+         rejected_done_typed_outcome ~base_path config meta
+           (`Assoc
+             [ "task_id", `String "task-001"
+             ; "result", `String "implemented and opened PR#123"
+             ])
+       with
+       | Some (Outcome.Error _) -> ()
+       | other ->
+         failf "expected typed_outcome = Error, got %s"
+           (match other with
+            | None -> "None"
+            | Some Outcome.Progress -> "Progress"
+            | Some (Outcome.No_progress _) -> "No_progress"
+            | Some (Outcome.Error _) -> "Error"))
+
 let test_done_failed_transition_emits_typed_error () =
   let base_path = temp_dir () in
   Fun.protect
@@ -204,6 +228,7 @@ let test_done_failed_transition_emits_typed_error () =
            (`Assoc
              [ "task_id", `String "task-does-not-exist"
              ; "result", `String "completed"
+             ; "evidence_refs", `List [ `String "PR#404" ]
              ])
        with
        | Some (Outcome.Error _) -> ()
@@ -232,6 +257,8 @@ let () =
             test_state_block_reply_returns_state_snapshot
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"
             `Quick test_done_missing_task_id_emits_typed_error
+        ; test_case "rejected done (missing evidence_refs) emits typed Error (D1)"
+            `Quick test_done_missing_evidence_refs_emits_typed_error
         ; test_case "rejected done (failed transition) emits typed Error (D1)"
             `Quick test_done_failed_transition_emits_typed_error
         ] )

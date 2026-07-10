@@ -97,10 +97,11 @@ let decision_kind (d : Agent_sdk.Hooks.hook_decision) : string =
   | ElicitInput _ -> "ElicitInput"
   | Nudge _ -> "Nudge"
   | HookFailed _ -> "HookFailed"
+  | Block _ -> "Block"
 
 let override_text (d : Agent_sdk.Hooks.hook_decision) : string =
   match d with
-  | Override s -> s
+  | Override s | Block s -> s
   | _ -> failwith ("expected Override, got " ^ decision_kind d)
 
 let no_gate_observer = KG.ignore_gate_decision
@@ -257,7 +258,7 @@ let test_deny_guard_blocks () =
       ~denied:["dangerous_tool"]
   in
   let d = invoke hook (pre_tool_use_event ~tool_name:"dangerous_tool" ()) in
-  check string "denied tool -> Override" "Override" (decision_kind d);
+  check string "denied tool -> Block" "Block" (decision_kind d);
   let text = override_text d in
   check bool "override mentions deny list" true
     (contains_substring text "code=keeper_deny");
@@ -279,7 +280,7 @@ let test_deny_guard_notifies_gate_observer () =
          ~input:(`Assoc [ ("path", `String "/tmp/secret") ])
          ~turn:4 ())
   in
-  check string "denied tool -> Override" "Override" (decision_kind d);
+  check string "denied tool -> Block" "Block" (decision_kind d);
   match !observed with
   | [ event ] ->
     check string "stage" "keeper_deny" event.KG.stage;
@@ -317,7 +318,7 @@ let test_gate_observer_failure_counts_actual_keeper () =
     KG.deny_guard ~meta_ref ~on_gate_decision ~denied:["dangerous_tool"]
   in
   let d = invoke hook (pre_tool_use_event ~tool_name:"dangerous_tool" ()) in
-  check string "denied tool still overrides" "Override" (decision_kind d);
+  check string "denied tool still blocks" "Block" (decision_kind d);
   let after =
     P.metric_value_or_zero Keeper_metrics.(to_string GuardsFailures) ~labels ()
   in
@@ -726,7 +727,7 @@ let test_readonly_observation_duplicate_does_not_reset_on_denied_non_read_tool (
          ())
   in
   check string "denied non-read tool is blocked"
-    "Override" (decision_kind denied);
+    "Block" (decision_kind denied);
   let repeated =
     invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
   in
@@ -810,8 +811,8 @@ let test_governance_approval_hard_forbidden_blocks_without_hitl () =
            ~input:(`Assoc [ ("target", `String "workspace") ])
            ())
     in
-    check string "critical hard-forbidden tool -> Override"
-      "Override" (decision_kind d);
+    check string "critical hard-forbidden tool -> Block"
+      "Block" (decision_kind d);
     check bool "override carries hard-forbidden reason" true
       (contains_substring (override_text d) "code=hard_forbidden");
     match !observed with
@@ -848,8 +849,8 @@ let test_governance_approval_serious_blocker_overrides () =
            ~input:(`Assoc [ ("title", `String "follow up") ])
            ())
     in
-    check string "serious last_blocker -> Override"
-      "Override" (decision_kind d);
+    check string "serious last_blocker -> Block"
+      "Block" (decision_kind d);
     check bool "override carries hard-forbidden reason" true
       (contains_substring (override_text d) "code=hard_forbidden")))
 
@@ -912,7 +913,7 @@ let test_compose_all_short_circuits_at_first_override () =
     (pre_tool_use_event ~tool_name:"blocked_tool"
        ~accumulated_cost_usd:999.0 ())
   in
-  check string "first Override wins" "Override" (decision_kind d);
+  check string "first Block wins" "Block" (decision_kind d);
   let text = override_text d in
   (* The reason should be from deny_guard. Cost telemetry never overrides. *)
   check bool "short-circuit preserves first reason" true

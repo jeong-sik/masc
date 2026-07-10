@@ -143,6 +143,7 @@ val to_oas_approval_callback :
   keeper_name:string ->
   ?meta:Keeper_meta_contract.keeper_meta ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   Agent_sdk.Hooks.approval_callback
 (** Build an OAS approval callback with genuine HITL fiber suspension.

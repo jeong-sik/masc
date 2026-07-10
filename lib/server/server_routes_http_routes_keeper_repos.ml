@@ -33,6 +33,8 @@ let mapping_json (m : Repo_manager_types.keeper_repo_mapping) : Yojson.Safe.t =
       ("repositories", `List (List.map (fun s -> `String s) m.repository_ids));
       ("allowed_repos", `List (List.map (fun s -> `String s) m.repository_ids));
       ("allow_all", `Bool allow_all);
+      ("policy_mode", `String "advisory");
+      ("access_cap", `Bool false);
     ]
 
 let mapping_of_json keeper_id (json : Yojson.Safe.t) :

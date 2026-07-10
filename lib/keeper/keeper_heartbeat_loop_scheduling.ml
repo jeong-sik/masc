@@ -19,6 +19,7 @@ type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
   runtime_backpressure : runtime_backpressure_decision;
+  pacing_block : float option;
   should_run_turn : bool;
   verdict_reasons : string list;
   channel : string;
@@ -28,6 +29,7 @@ let decide_keepalive_scheduling
       ?(runtime_id_of_meta = Keeper_meta_contract.runtime_id_of_meta)
       ?(runtime_resilience_of_name = fun _ -> None)
       ?(keeper_resilience_of_name = fun _ -> None)
+      ?(pacing_block_of_name = fun (_ : string) -> None)
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
       ~stop
@@ -65,13 +67,28 @@ let decide_keepalive_scheduling
         ~should_run_turn:requested_should_run_turn
         ~runtime_id
   in
+  (* RFC-0313 W3: failure revisit pacing gates when the next turn runs.
+     Consulted only for a turn that would otherwise start — a keeper that is
+     stopped, unrequested, or runtime-backpressured is not additionally
+     stamped as pacing-blocked. *)
+  let pacing_block =
+    match runtime_backpressure with
+    | Runtime_backpressured _ -> None
+    | Runtime_admitted ->
+      if requested_should_run_turn then pacing_block_of_name meta.name else None
+  in
   let should_run_turn =
     match runtime_backpressure with
-    | Runtime_admitted -> requested_should_run_turn
+    | Runtime_admitted -> requested_should_run_turn && Option.is_none pacing_block
     | Runtime_backpressured _ -> false
   in
   let verdict_reasons =
     let base = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
+    let base =
+      match pacing_block with
+      | Some _ -> "pacing_pending" :: base
+      | None -> base
+    in
     match runtime_backpressure with
     | Runtime_backpressured _ -> "runtime_backpressure" :: base
     | Runtime_admitted -> base
@@ -80,6 +97,7 @@ let decide_keepalive_scheduling
   { turn_decision
   ; requested_should_run_turn
   ; runtime_backpressure
+  ; pacing_block
   ; should_run_turn
   ; verdict_reasons
   ; channel

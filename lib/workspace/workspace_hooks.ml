@@ -424,16 +424,18 @@ type evidence_gate_verdict =
   | Pass
   | Reject of { reason : string; rule_id : string; hint : string; payload_json : Yojson.Safe.t }
 
-let cdal_evidence_gate_decide_fn
-  : (task_id:string ->
+let task_completion_gate_decide_fn
+  : (base_path:string ->
+     task_id:string ->
      task_opt:Masc_domain.task option ->
      notes:string ->
      handoff:Masc_domain.task_handoff_context option ->
      unit ->
      evidence_gate_verdict)
     Atomic.t
-  = (Atomic.make (fun ~task_id:_ ~task_opt:_ ~notes:_ ~handoff:_ () -> Pass)
-     : (task_id:string ->
+  = (Atomic.make (fun ~base_path:_ ~task_id:_ ~task_opt:_ ~notes:_ ~handoff:_ () -> Pass)
+     : (base_path:string ->
+        task_id:string ->
         task_opt:Masc_domain.task option ->
         notes:string ->
         handoff:Masc_domain.task_handoff_context option ->

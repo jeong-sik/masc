@@ -208,16 +208,15 @@ let test_self_scoped_chat_reader_blocks_cross_keeper () =
       check (list string) "other keeper chat is hidden" []
         (chat_field "content" (build_for "otherkeeper")))
 
-(* Regression for the per-source take-oldest bug (task-1647): each activity
-   collector ([tool_call_events], [keeper_cdal_events], [turn_completed_events])
-   fetched the source's newest window in seq-ascending order (oldest first) and
-   then front-truncated to the per-source cap. Once a keeper produced more
-   matching events than the cap, the front-take discarded the NEWEST matches —
-   the opposite of the tool contract (period.to = now) and of build_timeline's
-   own tail-keep on the merged list. These tests emit more than the cap and
-   assert the newest event survives while the oldest is dropped. *)
+(* Regression for the per-source take-oldest bug (task-1647): each active
+   timeline collector fetches the source's newest window in seq-ascending order
+   (oldest first) and then front-truncates to the per-source cap. Once a keeper
+   produces more matching events than the cap, the front-take can discard the
+   NEWEST matches — the opposite of the tool contract (period.to = now) and of
+   build_timeline's own tail-keep on the merged list. These tests emit more than
+   the cap and assert the newest event survives while the oldest is dropped. *)
 
-(* Per-source cap pinned in build_timeline (message/tool/cdal/turn = 200). *)
+(* Per-source cap pinned in build_timeline (message/tool/turn = 200). *)
 let source_cap = 200
 let overflow = 60
 
@@ -276,12 +275,6 @@ let test_tool_call_keeps_newest () =
         ~payload_of:(fun s -> `Assoc [ ("tool_name", `String s) ]);
       check_keeps_newest ~label:"tool_call" config)
 
-let test_cdal_keeps_newest () =
-  with_config (fun config ->
-      emit_capacity_series config ~kind:"keeper.contract_verdict"
-        ~payload_of:(fun s -> `Assoc [ ("verdict", `String s) ]);
-      check_keeps_newest ~label:"cdal" config)
-
 let test_turn_completed_keeps_newest () =
   with_config (fun config ->
       emit_capacity_series config ~kind:"keeper.turn_completed"
@@ -314,7 +307,6 @@ let () =
       ( "per-source-cap-keeps-newest",
         [
           test_case "tool_call keeps newest" `Quick test_tool_call_keeps_newest;
-          test_case "cdal keeps newest" `Quick test_cdal_keeps_newest;
           test_case "turn_completed keeps newest" `Quick
             test_turn_completed_keeps_newest;
         ] );

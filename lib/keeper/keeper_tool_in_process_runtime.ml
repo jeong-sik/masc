@@ -152,12 +152,10 @@ let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
   end
 ;;
 
-let slack_token_opt () =
-  match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
-  | None -> None
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if String.equal trimmed "" then None else Some trimmed
+(* Slack bot token, resolved through the config boundary ({!Env_config_slack})
+   so [SLACK_BOT_TOKEN] is read from one place — shared with the in-process
+   gateway and the chat-queue consumer — rather than a direct env lookup here. *)
+let slack_token_opt = Env_config_slack.bot_token_opt
 
 let handle_surface_post ~config ~(meta : keeper_meta) ~args =
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
@@ -239,7 +237,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
         match slack_token_opt () with
         | None ->
             Keeper_surface_post.error_json
-              "MASC_SLACK_BOT_TOKEN is unset or empty"
+              "SLACK_BOT_TOKEN is unset or empty"
         | Some token ->
             match
               Keeper_chat_slack.send_message_with_blocks ~token
@@ -266,10 +264,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
-  Keeper_tool_ide_runtime.handle_ide_annotate
-    ~config
-    ~keeper_name:meta.name
-    ~args
+  Keeper_tool_ide_runtime.handle_ide_annotate ~config ~meta ~args
 ;;
 
 let handle_voice ~config ~(meta : keeper_meta) ~name ~args () =

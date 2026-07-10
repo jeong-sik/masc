@@ -517,7 +517,7 @@ type task_execution_links = {
 (** Task contract - persisted deterministic gate inputs.
 
     [required_evidence : string list] is the live source of truth: the contract
-    evidence gate ([Cdal_evidence_gate]) substring-matches each entry against
+    evidence gate ([Task_completion_gate]) substring-matches each entry against
     task-completion notes / handoff refs to decide whether a contracted task
     may complete.
 
@@ -593,6 +593,11 @@ type task = {
   files: string list; [@default []]
   created_at: string;
   created_by: string option; [@default None]
+  (* RFC-0323 W2: write-once lineage pointer to the terminal task this one
+     re-runs. Set only at creation (masc_add_task); every transition carries
+     it through unchanged. Distinct from RFC-0267 goal linkage (many-to-many
+     side registry). *)
+  predecessor_task_id: string option; [@default None]
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
@@ -600,32 +605,30 @@ type task = {
   do_not_reclaim_reason: string option; [@default None]
 } [@@deriving show]
 
-type task_reclaim_gate =
-  | Reclaim_gate_open
-  | Reclaim_gate_blocked_by_policy of string
+(* RFC-0323 W1 Phase A (implements RFC-0308): completion must route through
+   submit -> approve when the contract opts into strict verification.
+   Contract *presence* is deliberately NOT the trigger: task creation
+   auto-fills an advisory contract for every task
+   (ensure_task_contract_for_verification), so presence is vacuously true
+   fleet-wide and would flip Phase B semantics on unannounced. [strict] is
+   the explicit, persisted opt-in — it already gates release-handoff the
+   same way. Phase B replaces this predicate with a default-on one. *)
+let task_requires_verification (t : task) =
+  match t.contract with
+  | Some contract -> contract.strict
+  | None -> false
 
-let task_reclaim_gate (t : task) =
-  match t.reclaim_policy with
-  | Some Block_reclaim ->
-    Reclaim_gate_blocked_by_policy
-      (Option.value
-         t.do_not_reclaim_reason
-         ~default:"reclaim blocked by typed policy")
-  | Some Allow_reclaim | None -> Reclaim_gate_open
-;;
-
-let task_reclaim_gate_block_reason t =
-  match task_reclaim_gate t with
-  | Reclaim_gate_open -> None
-  | Reclaim_gate_blocked_by_policy reason -> Some reason
-;;
+(* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
+   Todo producer; this change removes the Done producer, so nothing can be
+   blocked-by-reclaim at claim time anymore. [reclaim_policy] survives as
+   release/cancel data plumbing only (its full retirement is a recorded
+   follow-up decision, RFC-0323 Radius Map). *)
 
 type task_claim_readiness =
   | Claim_ready
 
 type task_claim_block =
   | Claim_block_not_todo of task_status
-  | Claim_block_reclaim_policy of string
 
 type task_claim_decision =
   | Claim_available of task_claim_readiness
@@ -637,20 +640,25 @@ let task_claim_readiness (_task : task) = Claim_ready
 let task_claim_decision (task : task) =
   match task.task_status with
   | Todo ->
-    (match task_reclaim_gate task with
-     | Reclaim_gate_open ->
-       Claim_available (task_claim_readiness task)
-     | Reclaim_gate_blocked_by_policy reason ->
-       Claim_unavailable (Claim_block_reclaim_policy reason))
+    (* Todo tasks are always claimable regardless of reclaim_policy.
+       reclaim_policy only gates Done -> re-claim, not Todo -> first claim.
+       task-1869: 6 TaskError fingerprints show coordination-role tasks
+       with Block_reclaim policy were blocked from claiming. *)
+    Claim_available (task_claim_readiness task)
   | AwaitingVerification { verification_id; _ } ->
     (* Verification tasks with a valid verification_id can be claimed by
        other agents for cross-agent verification dispatch. The actual
        cross-agent check (self-verification block) happens in claim_task_r.
        Issue #19314. verification_id is a non-empty string — always claimable. *)
     Claim_available (task_claim_readiness task)
+  | Done _
+  (* RFC-0323: a verified Done is terminal for every actor, regardless of
+     reclaim_policy — re-running completed work creates a NEW task linked via
+     predecessor_task_id. Retires the #23632 Done-reclaim mechanism (which
+     was production-unreachable: creation defaults the policy to None and
+     claiming wipes it). *)
   | Claimed _
   | InProgress _
-  | Done _
   | Cancelled _ ->
     Claim_unavailable (Claim_block_not_todo task.task_status)
 ;;
@@ -692,10 +700,15 @@ let task_to_yojson t =
     | None -> base
     | Some created_by -> base @ [("created_by", `String created_by)]
   in
-  let with_contract = match t.contract with
+  (* Omitted when None (created_by pattern): old readers never see the key. *)
+  let with_predecessor = match t.predecessor_task_id with
     | None -> with_created_by
+    | Some p -> with_created_by @ [("predecessor_task_id", `String p)]
+  in
+  let with_contract = match t.contract with
+    | None -> with_predecessor
     | Some contract ->
-        with_created_by @ [ ("contract", task_contract_to_yojson contract) ]
+        with_predecessor @ [ ("contract", task_contract_to_yojson contract) ]
   in
   let with_handoff_context = match t.handoff_context with
     | None -> with_contract
@@ -738,6 +751,9 @@ let task_of_yojson json =
     let files = Json_util.get_string_list json "files" in
     let created_at = req "created_at" in
     let created_by = opt "created_by" in
+    (* Absent or non-string value degrades to None — a decode Error here would
+       make backlog_of_yojson silently drop the whole task. *)
+    let predecessor_task_id = opt "predecessor_task_id" in
     let contract = match m "contract" with
       | `Null -> None
       | contract_json ->
@@ -774,6 +790,7 @@ let task_of_yojson json =
             files;
             created_at;
             created_by;
+            predecessor_task_id;
             contract;
             handoff_context;
             cycle_count;

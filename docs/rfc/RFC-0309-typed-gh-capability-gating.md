@@ -41,7 +41,8 @@ the three axes that #23362 conflated:
 
 The absolute constraint, set by the operator: **the tool gate must never block
 a keeper turn.** An `Ask` verdict enqueues to the existing non-blocking
-approval queue and the keeper yields; `Hitl_resolved` wakes it to execute.
+approval queue and the keeper yields. `Hitl_resolved` only wakes the keeper to
+observe resolution state; it does not execute the command or install a grant.
 Block-time p99 must be 0 ms (G-11/G-13) and the property is model-checked
 (G-12).
 
@@ -201,18 +202,16 @@ gh_unknown          | Requires_approval | Requires_approval | Suggest_confirm
 
 ### 3.4 Approval disposition (G-6..G-8) — the core
 
-**Correction (W3 implementation, verified against source).** An earlier draft
-described the mechanism as "enqueue and resume in a later turn." Reading the
-runtime, the existing HITL mechanism is different and already correct:
-`Keeper_approval_queue` is **Eio-promise based** — the tool-invocation fiber
-awaits a promise; the dashboard approval handler resolves it and the *same*
-fiber resumes (`keeper_approval_queue.mli` header **(verified)**). Because the
-keeper runs on Eio, awaiting a promise **suspends the fiber, not the domain**:
-other fibers (accept loop, other keepers, HTTP/WS) keep running. "Non-blocking"
-here means *domain-non-blocking*, not *turn-returns-immediately*. The RFC does
-not need a new queue or a `Pending_approval` return type.
+**Correction (W3/W4 implementation, verified against source).** The current
+Shell IR gh capability path is intentionally enqueue-only. For
+`Requires_approval`, the keeper-tool layer calls
+`Keeper_approval_queue.submit_pending`, returns a typed pending/error payload to
+the turn, and records block time as 0 ms. `on_resolution` records lifecycle
+metrics/logs when an operator resolves the entry, and `Hitl_resolved` wakes the
+keeper to observe the resolution. There is no same-turn wait, no stored
+execution continuation, and no one-shot grant installed for a later retry.
 
-W3 delivers the **decision layer** only:
+W3/W4 deliver the **decision and enqueue layer**:
 
 - `Gh_capability_policy.disposition_of` gives each gh verb a capability
   disposition (`Allowed | Requires_approval | Denied`), computed from the
@@ -222,30 +221,49 @@ W3 delivers the **decision layer** only:
   `Verdict.Ask` **even under the autonomous (all-`Observe`) overlay**. This is
   additive — the layer only *adds* an approval requirement for gh, never
   removes one, and never touches non-gh commands.
+- The keeper-tool runtime turns a gh capability `Ask` into a pending approval
+  entry and returns immediately with structured pending state instead of
+  auto-running or synchronously waiting.
 - This makes the autonomous overlay's all-`Observe` rationale ("no resolver to
-  answer an Ask") no longer a reason to auto-run gated gh: the verb now asks.
+  answer an Ask") no longer a reason to auto-run gated gh: the verb now asks and
+  stops at pending.
 
-What W3 does **not** yet do (deliberately, pending CI/runtime verification):
-wire the resulting `Ask` at the keeper-tool layer to the OAS Agent HITL
-approval hook so an operator resolution actually resumes execution. Today the
-keeper surface still renders `Ask` as an `Approval_required` typed error
-(`keeper_tool_execute_shell_ir.ml`), i.e. the gated op does not auto-run and is
-reported to the operator, but operator-resolve-to-execute is a follow-up
-(requires runtime/integration tests, which need the CI runner restored).
+What this does **not** yet do (deliberately, pending a separate runtime
+contract): approval resolution does not execute the stored command, install a
+grant, or cause a retry to bypass policy. A future operator-resolve-to-execute
+flow must add an explicit grant/continuation contract and tests before docs may
+say approval enables the action.
 
 - **Invariant (absolute):** no code path may *synchronously spin* on approval
-  inside a domain. The promise-await suspends the fiber only. Enforcement
+  inside a domain. The current path returns immediately after enqueue; any future
+  continuation path must preserve domain-non-blocking behavior. Enforcement
   targets (future waves): G-11 block-time metric (domain-occupancy p99 = 0 ms),
   G-12 TLA+ `NonBlockingApproval` invariant (clean + buggy cfg pair), G-13
   gated-op observability.
 
 ### 3.5 What #23362 got right and keeps
 
-The genuine irreversibles stay floored exactly as before: `pr merge/ready`,
+The genuine irreversibles stay floored exactly as before:
 `repo delete/archive/transfer/rename`, `release delete`, `secret delete`,
 `gh api -X DELETE`, `delete*` graphql mutations, `discussion delete`. The
-catastrophic floor (`Deny`) remains trust-independent. This RFC widens the
-space *between* Allow and Deny; it does not soften Deny.
+catastrophic floor (`Deny`) remains trust-independent for these. This RFC widens
+the space *between* Allow and Deny; for these ops it does not soften Deny.
+
+> **W4/G-9 follow-up — `pr ready` and `pr merge` reclassified:** both were
+> originally floored here. `pr ready` toggles a PR between draft and
+> ready-for-review and is reversible via `gh pr ready --undo`; `pr merge` writes
+> the base branch but is reversible via `git revert` (the tree is restored,
+> exactly as a created repo can be deleted). Their high-stakes nature —
+> CI/notifications for `ready`, base-branch/deploy effects for `merge` — is a
+> durable-remote *externality* on the capability axis, not a reversibility fact
+> (the same policy-as-risk conflation W4/G-9 closed for repo
+> create/fork/discussion). Both now classify R1 in
+> `repo_hosting_cli_reversible_mutations`. On the capability axis `pr ready` (not
+> a durable-remote surface) stays `Allowed`, while `pr merge` (writes the shared
+> base branch, `creates_durable_remote_surface`) is `Requires_approval` — routed
+> to non-blocking human approval, mirroring `gh repo create` (2026-07-08 operator
+> decision: merge asks, not denies). The baseline corpus, `test_gh_capability_policy`
+> dispositions, and the destructive-floor regression tests were updated to match.
 
 ---
 
@@ -262,8 +280,8 @@ space *between* Allow and Deny; it does not soften Deny.
 | W3 | G-6 | `Requires_approval` disposition ≠ Deny | disposition round-trips through receipts |
 | W3 | G-7 | exec gate `Ask` → HITL queue wiring | keeper-turn block time on gated op = 0 ms |
 | W3 | G-8 | autonomous overlay: gated families → `Requires_approval` | overlay no longer all-`Observe` for gh mutations |
-| W4 | G-9 | re-enable repo-create/discussion surfaces (supersede #23362 behavior; design doc marked superseded) | `gh repo create` reaches `Pending_approval`, not `Deny` |
-| W4 | G-10 | repo-create capability contract (naming/ownership/lifecycle) | contract doc + typed args |
+| W4 | G-9 | re-enable repo-create/discussion surfaces to request approval (supersede #23362 behavior; design doc marked superseded) | contract-valid `gh repo create OWNER/NAME --public\|--private\|--internal` reaches `Pending_approval`, not `Deny` |
+| W4 | G-10 | repo-create capability contract (naming/ownership/lifecycle) | missing `OWNER/NAME`, missing/ambiguous visibility, or opaque repo target denies before HITL; valid requests carry structured contract metadata in the approval input |
 | W4 | G-11 | prompts + `KEEPER-CAPABILITY-MATRIX.md` update; block-time metric | docs match behavior; p99 block-time 0 ms |
 | W5 | G-12 | TLA+ `CatastrophicNeverAllowed` + `NonBlockingApproval` + `UnknownGhVerbNeverAutoRun` | clean cfg passes AND buggy cfg violates (both required) |
 | W5 | G-13 | gated-op observability | 100% gated ops emit enqueue/resolve/wake events |
@@ -271,7 +289,8 @@ space *between* Allow and Deny; it does not soften Deny.
 Wave order is dependency order: measurement (W0) → typed identity (W1) →
 axes (W2) → disposition wiring (W3) → capability enable (W4) → formal +
 observability closure (W5). G-9 must not land before G-7: enabling the
-surfaces while `Ask` is unwired would reproduce #23362's original dilemma.
+surfaces to request approval while `Ask` is unwired would reproduce #23362's
+original dilemma.
 
 ---
 

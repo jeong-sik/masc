@@ -366,9 +366,12 @@ describe('FusionSurface', () => {
     // 3 first-tier nodes become cards (meta is not a card); the failed one is isolated
     expect(grid?.querySelectorAll('.fus-jnode')).toHaveLength(3)
 
-    // decision badges are mapped from the free-form wire decision via the shared spec
-    expect(grid?.textContent).toContain('권고') // skeptic -> Recommend
-    expect(grid?.textContent).toContain('심의 무효') // literalist -> Insufficient
+    // Free-form wire decisions are not substring-promoted into semantic badges.
+    // They stay raw/neutral so protocol drift remains visible.
+    expect(grid?.textContent).toContain('recommend — patch first')
+    expect(grid?.textContent).toContain('insufficient — missing: benchmarks')
+    expect(grid?.textContent).not.toContain('권고')
+    expect(grid?.textContent).not.toContain('심의 무효')
     // resolved-answer gist as the card summary
     expect(grid?.textContent).toContain('Skeptic: patch the isolation first')
 
@@ -667,7 +670,7 @@ describe('FusionSurface', () => {
     render(html`<${FusionSurface} />`, container)
 
     expect(container.querySelector('[data-testid="fusion-empty"]')).not.toBeNull()
-    expect(container.textContent).toContain('No board-sink fusion posts yet')
+    expect(container.textContent).toContain('아직 기록된 보드 심의가 없습니다')
     expect(container.textContent).toContain('/api/v1/dashboard/fusion-runs')
   })
 
@@ -684,9 +687,9 @@ describe('FusionSurface', () => {
     expect(error?.textContent).toContain('Board sink load failed')
     expect(error?.textContent).toContain('HTTP 502 board sink unavailable')
     const empty = container.querySelector('[data-testid="fusion-empty"]')
-    expect(empty?.textContent).toContain('Board-sink fusion posts are unverified')
+    expect(empty?.textContent).toContain('보드 심의 기록을 확인하지 못했습니다')
     expect(empty?.textContent).toContain('/api/v1/dashboard/board?sort_by=recent&limit=500')
-    expect(empty?.textContent).not.toContain('No board-sink fusion posts yet')
+    expect(empty?.textContent).not.toContain('아직 기록된 보드 심의가 없습니다')
   })
 
   it('keeps cached board-sink detail visible while showing a refresh failure', () => {
@@ -714,7 +717,7 @@ describe('FusionSurface', () => {
     expect(container.querySelector('[data-testid="fusion-empty"]')).toBeNull()
   })
 
-  it('keeps registry-only running rows visible without claiming no fusion runs exist', () => {
+  it('merges a registry-only running run into the master list instead of a separate top panel', () => {
     fusionRuns.value = [
       {
         runId: 'fus-running',
@@ -727,12 +730,19 @@ describe('FusionSurface', () => {
 
     render(html`<${FusionSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="fusion-run-status-card"]')?.textContent).toContain('fus-running')
-    expect(container.querySelector('[data-testid="fusion-empty"]')?.textContent).toContain('No board-sink fusion posts yet')
-    expect(container.textContent).toContain('board runs')
-    expect(container.textContent).toContain('registry')
-    expect(container.textContent).toContain('1 running')
-    expect(container.textContent).not.toContain('No fusion runs found')
+    // Registry-only run now lives in the sidebar master list (2-pane layout),
+    // not the removed top "Run status" panel.
+    expect(container.querySelector('[data-testid="fusion-run-status-card"]')).toBeNull()
+    const row = container.querySelector('[data-testid="fusion-registry-row"]')
+    expect(row?.textContent).toContain('fus-running')
+    // A real run exists, so there is no board-sink empty placeholder — the
+    // registry run is selected by default and shows its own detail.
+    expect(container.querySelector('[data-testid="fusion-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="fusion-registry-detail"]')?.textContent).toContain('fus-running')
+    expect(container.textContent).toContain('보드 런')
+    expect(container.textContent).toContain('레지스트리')
+    // The running count now surfaces as the sidebar live badge, not the removed panel.
+    expect(container.textContent).toContain('1 진행')
   })
 
   it('renders preset from registry when board meta does not carry it', () => {
@@ -816,6 +826,29 @@ describe('FusionSurface', () => {
     expect(cards[0]?.classList.contains('answered')).toBe(true)
     expect(cards[0]?.classList.contains('failed')).toBe(false)
     expect(cards[1]?.classList.contains('failed')).toBe(true)
+  })
+
+  it('does not derive judge run status from status substrings', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-judge-status-substring',
+        title: 'Fusion deliberation (run fus-judge-status-substring): pending',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-judge-status-substring',
+          question: 'Judge status edge cases?',
+          panel: [{ model: 'm1', status: 'answered', answer: 'Panel answer.' }],
+          judge: { status: 'failover' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    expect(detail?.textContent).toContain('running')
+    expect(container.querySelector('.fus-rdot.run')).not.toBeNull()
+    expect(container.querySelector('.fus-rdot.deny')).toBeNull()
   })
 
   it('renders the panel reason_code as a category chip on a failed panel card', () => {

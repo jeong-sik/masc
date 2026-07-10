@@ -181,6 +181,7 @@ let make_in_progress_task ~id ~assignee : Types.task =
     files = [];
     created_at = "2026-06-26T00:00:00Z";
     created_by = Some "test";
+    predecessor_task_id = None;
     contract = None;
     handoff_context = None;
     cycle_count = 0;
@@ -409,7 +410,7 @@ let test_board_auto_resume_allows_auto_paused_keeper () =
     (KKS.paused_meta_allows_board_auto_resume meta)
 
 let test_board_wakeup_selection_keeps_explicit_mentions () =
-  let selected, dropped =
+  let selected, deferred =
     KKS.select_board_wakeup_candidates
       [
         "a", Some KWOBS.Thread_reply_after_self_comment;
@@ -417,15 +418,17 @@ let test_board_wakeup_selection_keeps_explicit_mentions () =
         "c", Some KWOBS.Explicit_mention;
       ]
   in
-  (* Explicit mentions short-circuit: they wake unconditionally, the
-     non-explicit candidate is excluded, and there are no cap drops. *)
+  (* Explicit mentions short-circuit the WAKE; the shadowed followup is
+     deferred to its mailbox, not discarded (RFC-0334 W1). *)
   check (list (pair string string)) "selected explicit wakeups"
     [ "b", "explicit_mention"; "c", "explicit_mention" ]
     (labeled selected);
-  check int "no drops when explicit present" 0 dropped
+  check (list (pair string string)) "shadowed followup deferred, not dropped"
+    [ "a", "thread_reply_after_self_comment" ]
+    (labeled deferred)
 
 let test_board_wakeup_selection_drops_none_reasons () =
-  let selected, dropped =
+  let selected, deferred =
     KKS.select_board_wakeup_candidates
       [
         "a", Some KWOBS.Thread_reply_after_self_comment;
@@ -433,15 +436,17 @@ let test_board_wakeup_selection_drops_none_reasons () =
         "c", None;
       ]
   in
-  (* [None] reasons (no deterministic address) are dropped; structural
-     followup reasons survive in candidate order. *)
+  (* [None] reasons (no deterministic address) receive nothing — neither a
+     wake nor a mailbox delivery; structural followup reasons survive in
+     candidate order. *)
   check (list (pair string string)) "None dropped, real reasons kept"
     [ "a", "thread_reply_after_self_comment" ]
     (labeled selected);
-  check int "no cap drops under total limit" 0 dropped
+  check (list (pair string string)) "nothing deferred under the limit" []
+    (labeled deferred)
 
 let test_board_wakeup_selection_caps_thread_followups () =
-  let selected, dropped =
+  let selected, deferred =
     KKS.select_board_wakeup_candidates
       ~total_limit:2
       [
@@ -451,12 +456,15 @@ let test_board_wakeup_selection_caps_thread_followups () =
         "d", Some KWOBS.Thread_reply_after_self_comment;
       ]
   in
-  (* Thread followups compete for [total_limit] slots in candidate order; the
-     overflow is dropped. *)
+  (* Thread followups compete for [total_limit] immediate-wake slots in
+     candidate order; the overflow is deferred to mailboxes with its reasons
+     intact (RFC-0334 W1: the cap bounds wakes, not delivery). *)
   check (list (pair string string)) "first two non-explicit kept in order"
     [ "a", "thread_reply_after_self_comment"; "b", "thread_reply_after_self_comment" ]
     (labeled selected);
-  check int "overflow dropped" 2 dropped
+  check (list (pair string string)) "overflow deferred in order with reasons"
+    [ "c", "thread_reply_after_self_comment"; "d", "thread_reply_after_self_comment" ]
+    (labeled deferred)
 
 let test_board_goal_keyword_overlap_is_not_wake_reason () =
   let meta = make_board_resume_meta "keyword-overlap" in

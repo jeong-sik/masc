@@ -149,8 +149,11 @@ end
 
 module Verification : sig
   val fsm_enabled : unit -> bool
+  (** RFC-0323 G-5 Phase B default-on flip. Default: false. When true, the
+      done guard treats every task as verification-required. Flip only when
+      readiness gate S5 holds (identity>=2 anti-starvation). *)
+  val default_on : unit -> bool
   val timeout_deadline_seconds : unit -> float
-  val timeout_check_interval_seconds : float
 end
 
 (** {1 Approval janitor} *)
@@ -343,4 +346,14 @@ module Shell_ir_approval_gate : sig
       gate so safe commands can be auto-allowed while audited/privileged
       operations require explicit approval. Default: [true] (the autonomous
       policy is a strict safety improvement over the no-gate path). *)
+end
+
+(** {1 Shell IR approval policy config (RFC-0254)} *)
+
+module Shell_ir_approval : sig
+  val raw_overlay : unit -> string option
+  (** Single env spec for Shell IR approval trust overlay.
+      See {!Masc_exec.Approval_config.shell_ir_approval_overlay_of_string} for
+      supported values and validation semantics.
+      Returns [None] when unset/blank. *)
 end

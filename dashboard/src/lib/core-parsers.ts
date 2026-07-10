@@ -27,6 +27,9 @@ export const TASK_STATUS_VALUES = [
   'awaiting_verification',
   'done',
   'cancelled',
+  'blocked',
+  'paused',
+  'unknown',
 ] as const satisfies ReadonlyArray<TaskStatus>
 export type _TaskStatusComplete = NoMissingVariant<
   Exclude<TaskStatus, (typeof TASK_STATUS_VALUES)[number]>

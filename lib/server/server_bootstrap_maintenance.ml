@@ -639,7 +639,24 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                Log.Server.info
                  "periodic JSONL prune: pruned %d day-files (retention=%dd)"
                  total
-                 days
+                 days;
+             (* Schedule terminal-row GC on the same 24h cadence: terminal
+                rows (Succeeded/Failed/Rejected/Cancelled/Expired) otherwise
+                accumulate unbounded — the only pruner was the manual
+                dashboard action (Server_dashboard_http_schedule_actions).
+                Same operation as that button, so operator semantics are
+                unchanged; the cadence bounds how long terminal history
+                lingers, mirroring the dated-JSONL retention above. *)
+             (match Schedule_service.prune (Mcp_server.workspace_config state) with
+              | Ok (_, pruned) when pruned > 0 ->
+                Log.Server.info
+                  "periodic schedule prune: removed %d terminal rows"
+                  pruned
+              | Ok (_, _) -> ()
+              | Error err ->
+                Log.Server.warn
+                  "periodic schedule prune failed: %s"
+                  (Schedule_service.service_error_to_string err))
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
@@ -663,9 +680,33 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       try
         let now = Int64.of_float (Eio.Time.now clock) in
         match Repo_sync.sync_all ~base_path:(Mcp_server.workspace_config state).base_path ~now with
-        | Ok repos ->
-          if repos <> []
-          then Log.Server.info "repo_sync: synced %d repositories" (List.length repos)
+        | Ok synced ->
+          List.iter
+            (fun ((repo : Repo_manager_types.repository), outcome) ->
+              match outcome with
+              | Repo_sync.Already_current -> ()
+              | Repo_sync.Advanced { behind } ->
+                Log.Server.info
+                  "repo_sync: %s advanced %d commit(s) to origin/%s"
+                  repo.id behind repo.default_branch
+              | Repo_sync.Skipped_dirty { staged; unstaged; conflicted } ->
+                Log.Server.warn
+                  "repo_sync: %s not advanced (dirty tree: staged=%d unstaged=%d conflicted=%d)"
+                  repo.id staged unstaged conflicted
+              | Repo_sync.Skipped_not_on_default_branch { current } ->
+                Log.Server.warn
+                  "repo_sync: %s not advanced (checked out %s, default %s)"
+                  repo.id current repo.default_branch
+              | Repo_sync.Fast_forward_refused { behind; reason } ->
+                Log.Server.warn
+                  "repo_sync: %s is %d commit(s) behind but fast-forward was refused: %s"
+                  repo.id behind reason
+              | Repo_sync.Advance_inspect_failed { reason } ->
+                Log.Server.warn
+                  "repo_sync: %s advance inspection failed: %s" repo.id reason)
+            synced;
+          if synced <> []
+          then Log.Server.info "repo_sync: synced %d repositories" (List.length synced)
         | Error msg -> Log.Server.warn "repo_sync: sync_all failed: %s" msg
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

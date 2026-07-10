@@ -52,6 +52,7 @@ type dispatch_fn =
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  idempotency_key:string ->
   metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
@@ -63,6 +64,7 @@ type streaming_dispatch_fn =
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  idempotency_key:string ->
   metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
@@ -199,6 +201,7 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
           ~channel_user_name:msg.channel_user_name
           ~channel_workspace_id:msg.channel_workspace_id
           ~keeper_name:keeper
+          ~idempotency_key:msg.idempotency_key
           ~metadata:msg.metadata
           ~content:(String.trim msg.content)
       in

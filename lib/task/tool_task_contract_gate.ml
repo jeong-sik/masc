@@ -23,10 +23,14 @@ let contract_requires_verification (contract : Masc_domain.task_contract) =
   || Stdlib.List.length contract.required_evidence > 0
   || Stdlib.List.length contract.verify_gate_evidence > 0
 
+(* RFC-0323 G-1: delegates to the FSM-layer predicate now wired into
+   [Workspace_task_lifecycle.decide]. NOT [contract_requires_verification]:
+   creation auto-fills an advisory contract for every task, so
+   contract-presence is vacuously true fleet-wide — [strict] is the
+   explicit opt-in (Phase A). *)
 let task_requires_verification = function
-  | Some ({ contract = Some contract; _ } : Masc_domain.task) ->
-    contract_requires_verification contract
-  | _ -> false
+  | Some (task : Masc_domain.task) -> Masc_domain.task_requires_verification task
+  | None -> false
 
 let strict_release_requires_handoff = function
   | Some ({ contract = Some contract; _ } : Masc_domain.task) -> contract.strict
@@ -63,7 +67,7 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
               "task %s is awaiting verification by %s; approve or reject before marking done"
               task_id assignee)))
 
-(* Verification is owned solely by [Cdal_evidence_gate], applied upstream in
+(* Verification is owned solely by [Task_completion_gate], applied upstream in
    [Tool_task.handle_transition]. This per-action layer formerly ran a second
    gate against the contract-verdict ledger; that ledger no longer exists, so this
    layer never rejects. Kept as a typed seam so the transition control flow is

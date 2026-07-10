@@ -21,6 +21,10 @@ export type KeeperActivitySource =
 export interface KeeperActivityDisplay {
   source: KeeperActivitySource
   label: string
+  /** Concrete subject of the activity when the server identified one —
+   *  currently the tool name behind a tool_call / approval_pending signal.
+   *  null when the activity has no finer identity (heartbeat, keeper_meta). */
+  detail: string | null
   timestamp: string | null
   ageSeconds: number | null
 }
@@ -72,11 +76,13 @@ type KeeperActivityDisplaySource = {
   last_activity_ago_s?: number | null
   last_turn_ago_s?: number | null
   created_at?: string | null
+  live_activity?: Keeper['live_activity']
 }
 
 type ActivityCandidate = {
   source: KeeperActivitySource
   label: string
+  detail: string | null
   timestamp: string | null
   ageSeconds: number
 }
@@ -130,6 +136,7 @@ function timestampCandidate(
   source: KeeperActivitySource,
   label: string,
   timestamp: string | null | undefined,
+  detail: string | null = null,
 ): ActivityCandidate | null {
   const value = trimmed(timestamp)
   if (!value) return null
@@ -138,6 +145,7 @@ function timestampCandidate(
   return {
     source,
     label,
+    detail,
     timestamp: value,
     ageSeconds: Math.max(0, Math.round((Date.now() - ms) / 1000)),
   }
@@ -147,13 +155,34 @@ function ageCandidate(
   source: KeeperActivitySource,
   label: string,
   ageSeconds: number | null | undefined,
+  detail: string | null = null,
 ): ActivityCandidate | null {
   if (typeof ageSeconds !== 'number' || !Number.isFinite(ageSeconds) || ageSeconds < 0) return null
   return {
     source,
     label,
+    detail,
     timestamp: null,
     ageSeconds: Math.round(ageSeconds),
+  }
+}
+
+/** Tool name behind the last-activity signal, when the server identified one.
+ *  Only trusted when live_activity agrees with last_activity_source — the two
+ *  fields are emitted together but can drift across partial refreshes. */
+function liveActivityDetail(
+  source: Keeper['last_activity_source'] | null | undefined,
+  live: Keeper['live_activity'] | undefined,
+): string | null {
+  if (!live) return null
+  const liveSource = live.source ?? null
+  if (liveSource === null || liveSource !== (source ?? null)) return null
+  switch (liveSource) {
+    case 'tool_call':
+    case 'approval_pending':
+      return trimmed(live.tool)
+    case 'keeper_meta':
+      return null
   }
 }
 
@@ -191,15 +220,25 @@ export function keeperActivityDisplay(
   options: KeeperActivityDisplayOptions = {},
 ): KeeperActivityDisplay {
   const includeCreated = options.includeCreated !== false
+  const activityDetail = liveActivityDetail(keeper?.last_activity_source, keeper?.live_activity)
   const candidates = [
     timestampCandidate(
       activityDisplaySource(keeper?.last_activity_source),
       activitySourceLabel(keeper?.last_activity_source),
       keeper?.last_activity_at,
+      activityDetail,
     ),
     timestampCandidate('autonomous_action', '마지막 행동', keeper?.last_autonomous_action_at),
     timestampCandidate('heartbeat', '하트비트', keeper?.last_heartbeat),
-    ageCandidate('last_activity', '최근 활동', keeper?.last_activity_ago_s),
+    // The ago_s fallback describes the same underlying activity as
+    // last_activity_at — keep the source-derived label/detail instead of
+    // collapsing to a generic '최근 활동'.
+    ageCandidate(
+      'last_activity',
+      activitySourceLabel(keeper?.last_activity_source),
+      keeper?.last_activity_ago_s,
+      activityDetail,
+    ),
     ageCandidate('last_turn', '마지막 턴', keeper?.last_turn_ago_s),
   ].filter((candidate): candidate is ActivityCandidate => candidate != null)
 
@@ -218,6 +257,7 @@ export function keeperActivityDisplay(
   return {
     source: 'none',
     label: '최근 활동',
+    detail: null,
     timestamp: null,
     ageSeconds: null,
   }

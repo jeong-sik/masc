@@ -61,13 +61,19 @@ let persist_raw_token ~base_path ~agent_name raw_token =
   Auth.save_private_text_file path raw_token;
   path
 
-let ensure_required_bearer_auth ~base_path ~agent_name =
+let ensure_required_bearer_auth ~base_path ~agent_name ~role =
   let cfg = Auth.load_auth_config base_path in
   if cfg.enabled && cfg.require_token then
     Ok Auth_already_required
   else if not cfg.enabled then
     let _workspace_secret, _bootstrap_token =
-      Auth.enable_auth base_path ~require_token:true ~agent_name
+      let bootstrap_agent_name =
+        match role with
+        | Admin -> agent_name
+        | Worker -> ""
+      in
+      Auth.enable_auth base_path ~require_token:true
+        ~agent_name:bootstrap_agent_name
     in
     Ok Auth_enabled
   else (
@@ -82,7 +88,7 @@ let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
     ~token_lifetime () =
   ensure_rng_initialized ();
   let base_path = normalize_base_path base_path in
-  match ensure_required_bearer_auth ~base_path ~agent_name with
+  match ensure_required_bearer_auth ~base_path ~agent_name ~role with
   | Error err -> Error err
   | Ok auth_change -> (
       let create_token = create_token_for_lifetime token_lifetime in

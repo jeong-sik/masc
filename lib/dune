@@ -25,6 +25,8 @@
   mirage-crypto-ec
   mirage-crypto-rng
   mirage-crypto-rng.unix
+  mirage-crypto-pk
+  x509
   cstruct
   digestif
   ocaml-protoc-plugin

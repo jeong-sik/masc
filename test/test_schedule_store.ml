@@ -47,6 +47,22 @@ let payload_json () =
     ]
 ;;
 
+let updated_payload_json () =
+  `Assoc
+    [ "kind", `String "consumer.note"
+    ; "schema_version", `Int 1
+    ; "body", `Assoc [ "text", `String "ship now" ]
+    ]
+;;
+
+let payload_exn json =
+  match payload_of_yojson json with
+  | Ok payload -> payload
+  | Error msg -> fail msg
+;;
+
+let updated_payload () = payload_exn (updated_payload_json ())
+
 let make_request
   ?(schedule_id = "sched-1")
   ?(risk_class = Workspace_write)
@@ -149,6 +165,78 @@ let test_cancel_request_marks_cancelled () =
   | None -> fail "schedule missing"
 ;;
 
+let test_update_request_updates_pending_and_scheduled () =
+  with_workspace
+  @@ fun config ->
+  let pending = make_request ~schedule_id:"update-pending" () in
+  let scheduled =
+    make_request ~schedule_id:"update-scheduled" ~risk_class:Read_only ()
+  in
+  ignore (insert_ok config pending);
+  ignore (insert_ok config scheduled);
+  let payload_json = updated_payload_json () in
+  let payload = payload_exn payload_json in
+  (match
+     update_request config ~schedule_id:pending.schedule_id ~due_at:250.0
+       ~expires_at:(Some 300.0) ~payload
+   with
+   | Ok updated ->
+     check_status "pending stays pending" Pending_approval updated.status;
+     check (float 0.001) "pending due_at" 250.0 updated.due_at;
+     check (option (float 0.001)) "pending expires_at" (Some 300.0)
+       updated.expires_at;
+     check string "pending payload" (Yojson.Safe.to_string payload_json)
+       (Yojson.Safe.to_string (payload_to_yojson updated.payload))
+   | Error err -> fail (store_error_to_string err));
+  (match
+     update_request config ~schedule_id:scheduled.schedule_id ~due_at:260.0
+       ~expires_at:None ~payload
+   with
+   | Ok updated ->
+     check_status "scheduled stays scheduled" Scheduled updated.status;
+     check (float 0.001) "scheduled due_at" 260.0 updated.due_at;
+     check (option (float 0.001)) "scheduled expires_at" None updated.expires_at;
+     check string "scheduled payload" (Yojson.Safe.to_string payload_json)
+       (Yojson.Safe.to_string (payload_to_yojson updated.payload))
+   | Error err -> fail (store_error_to_string err))
+;;
+
+let update_not_allowed_error =
+  Invalid_status_transition "only pending or scheduled requests can be updated"
+;;
+
+let test_update_request_rejects_running_and_terminal () =
+  with_workspace
+  @@ fun config ->
+  let running = make_request ~schedule_id:"update-running" ~risk_class:Read_only () in
+  ignore (insert_ok config running);
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:running.schedule_id with
+   | Ok stored -> check_status "running" Running stored.status
+   | Error err -> fail (store_error_to_string err));
+  let before_running = read_state config in
+  check_error "running update" update_not_allowed_error
+    (update_request config ~schedule_id:running.schedule_id ~due_at:250.0
+       ~expires_at:None ~payload:(updated_payload ()));
+  let after_running = read_state config in
+  check int "running version unchanged" before_running.version after_running.version;
+  let terminal =
+    make_request ~schedule_id:"update-terminal" ~risk_class:Read_only ()
+  in
+  ignore (insert_ok config terminal);
+  (match cancel_request config ~schedule_id:terminal.schedule_id with
+   | Ok stored -> check_status "cancelled" Cancelled stored.status
+   | Error err -> fail (store_error_to_string err));
+  let before_terminal = read_state config in
+  check_error "terminal update" update_not_allowed_error
+    (update_request config ~schedule_id:terminal.schedule_id ~due_at:250.0
+       ~expires_at:None ~payload:(updated_payload ()));
+  let after_terminal = read_state config in
+  check int "terminal version unchanged" before_terminal.version after_terminal.version
+;;
+
 let test_requester_grant_rejected_without_bump () =
   with_workspace
   @@ fun config ->
@@ -194,6 +282,48 @@ let test_read_only_due_candidate_does_not_need_grant () =
    | Error err -> fail (store_error_to_string err));
   check int "read-only candidate" 1
     (List.length (due_execution_candidates (read_state config)))
+;;
+
+let test_update_request_rejects_due_without_orphaning_grant () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"update-due-granted" () in
+  ignore (insert_ok config req);
+  (match record_grant config (grant req) with
+   | Ok stored -> check_status "approved status" Scheduled stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "became due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  let before = read_state config in
+  let due =
+    match get_schedule config ~schedule_id:req.schedule_id with
+    | Some due -> due
+    | None -> fail "due request missing"
+  in
+  check_status "stored due" Due due.status;
+  check bool "approved grant is current before update" true
+    (has_current_approved_grant before due);
+  check int "candidate before update" 1
+    (List.length (due_execution_candidates before));
+  check_error "due update" update_not_allowed_error
+    (update_request config ~schedule_id:req.schedule_id ~due_at:250.0
+       ~expires_at:None ~payload:(updated_payload ()));
+  let after = read_state config in
+  let stored =
+    match get_schedule config ~schedule_id:req.schedule_id with
+    | Some stored -> stored
+    | None -> fail "stored due request missing"
+  in
+  check int "version unchanged" before.version after.version;
+  check_status "still due" Due stored.status;
+  check (float 0.001) "due_at unchanged" 200.0 stored.due_at;
+  check string "payload unchanged" (Yojson.Safe.to_string (payload_json ()))
+    (Yojson.Safe.to_string (payload_to_yojson stored.payload));
+  check bool "approved grant remains current" true
+    (has_current_approved_grant after stored);
+  check int "candidate preserved after rejected update" 1
+    (List.length (due_execution_candidates after))
 ;;
 
 let test_refresh_due_expires_pending_scheduled_and_due () =
@@ -600,6 +730,10 @@ let () =
             test_grant_records_and_schedules_request;
           test_case "cancel request marks cancelled" `Quick
             test_cancel_request_marks_cancelled;
+          test_case "update request updates pending and scheduled" `Quick
+            test_update_request_updates_pending_and_scheduled;
+          test_case "update request rejects running and terminal" `Quick
+            test_update_request_rejects_running_and_terminal;
           test_case "requester grant rejected without bump" `Quick
             test_requester_grant_rejected_without_bump;
         ] );
@@ -609,6 +743,8 @@ let () =
             test_due_candidates_require_approval_grant;
           test_case "read-only due candidate does not need grant" `Quick
             test_read_only_due_candidate_does_not_need_grant;
+          test_case "update request rejects due without orphaning grant" `Quick
+            test_update_request_rejects_due_without_orphaning_grant;
           test_case "refresh_due expires pending scheduled and due" `Quick
             test_refresh_due_expires_pending_scheduled_and_due;
           test_case "reschedule due recurring rows" `Quick

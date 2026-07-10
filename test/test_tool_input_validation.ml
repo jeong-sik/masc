@@ -1608,6 +1608,14 @@ let test_high_risk_tool_contract_rejection_corpus () =
       , keeper_task_done_schema
       , `Assoc [ "notes", `String "evidence" ]
       , [ "task_id"; "result" ] )
+    ; ( "keeper_task_done requires evidence refs"
+      , "keeper_task_done"
+      , keeper_task_done_schema
+      , `Assoc
+          [ "task_id", `String "task-123"
+          ; "result", `String "implemented and opened PR#123"
+          ]
+      , [ "evidence_refs" ] )
     ; ( "keeper_board_post_get missing post_id"
       , "keeper_board_post_get"
       , keeper_board_post_get_schema
@@ -1649,6 +1657,7 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
        (Yojson.Safe.to_string (Tool_result.data result)));
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "task_id";
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "result";
+  assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "evidence_refs";
   assert_schema_requires
     "keeper_board_post_get schema"
     keeper_board_post_get_schema
@@ -1690,7 +1699,7 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
   assert_contains
     "keeper_task_done hint names evidence"
     capabilities
-    "include the PR URL or artifact reference in `result`";
+    "evidence_refs=[...]";
   assert_not_contains
     "keeper_task_done hint does not regress to notes-only"
     capabilities
@@ -1730,13 +1739,17 @@ let test_task_lifecycle_guidance_is_externalized () =
     read_source_file "config/prompts/tool_contract.task_lifecycle_workflow.md"
   in
   assert_contains
-    "external rule pins start before done"
+    "external rule pins the verification completion path (RFC-0323 G-4)"
     rule
-    "action='start' before action='done'";
+    "a verifier (not the assignee) then approves it to done";
   assert_contains
     "external workflow includes start transition"
     workflow
     "masc_transition(start)";
+  assert_contains
+    "external workflow routes completion through submit (RFC-0323 G-4)"
+    workflow
+    "masc_transition(submit_for_verification)";
   assert_contains
     "external workflow keeps branch-work guidance"
     workflow

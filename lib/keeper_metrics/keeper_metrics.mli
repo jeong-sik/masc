@@ -10,6 +10,10 @@ type t =
   | TotalCostUsd
   | TurnScheduled
   | TurnCompleted
+  | PacingShadowEvents
+  | PacingShadowNextDueSec
+  | FailureRoute
+  | FailureDrivenPause
   | IdleSeconds
   | ContractViolations
   | MetricEmitDropped
@@ -111,7 +115,9 @@ type t =
   | SelfPreservationUniversal
   | StaleStormPaused
   | ProviderTimeoutLoopPaused
+  | TurnFailureStreakPaused
   | CycleExceptions
+  | SnapshotReadFailures
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
   | StateSnapshotInvalidGoal
@@ -223,6 +229,7 @@ type t =
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
+  | MemoryOsReobserveEchoSuppressed
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
@@ -235,9 +242,11 @@ type t =
   | AttemptWatchdogFired
   | ShellIrEffectTotal
   | ToolExecutePrActionTotal
+  | GhClassificationTotal
+  | GatedGhLifecycleTotal
+  | GatedGhBlockTimeSeconds
   | KeeperRepoMappingDefaultScopeAllowed
   | KeeperRepoMappingDeniedUnregistered
-  | KeeperRepoMappingDeniedNotInMapping
   | KeeperRepoMappingLoadError
   | KeeperRepoMappingRepositoryIdentityMismatch
   | KeeperRepoMappingRepositoryStoreError

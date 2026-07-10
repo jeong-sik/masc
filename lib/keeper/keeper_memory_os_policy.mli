@@ -40,18 +40,44 @@ val recall_default_max_shared_facts : int
 (** Episode tail scan used before current/prompt-recallable filtering. *)
 val recall_episode_tail_scan : int
 
+(** Maximum age (seconds) before a Durable_knowledge fact with no explicit
+    [valid_until] is considered too stale for consensus promotion.
+    Only enforced when [fact_effective_valid_until] returns [None]. *)
+val max_consensus_staleness : float
+
 (** Structural retention rank for the bounded store cap (RFC-0247 §-1). NOT a
     relevance score: a deterministic two-tier order — durable categories outrank
     Ephemeral, then most-recently-verified (else first-seen) wins. Used only to
     decide which rows the size cap drops, never to rank recall. *)
 val retention_rank : now:float -> fact -> float
 
-(** Fold a re-observation of an existing fact into that fact: the only effect is
-    to refresh [last_verified_at] to [now] (re-extraction is fresh evidence the
-    claim still holds). Identity and first-seen provenance are preserved. The
-    prior confidence-blend and access-count bump fed the deleted score and are
-    gone — there is no numeric strength to move. *)
-val reobserve_fact : now:float -> existing:fact -> incoming:fact -> fact
+(** Provenance of a re-observation reaching {!reobserve_fact} (RFC-0285 §8).
+    [Recalled_echo] means the incoming claim's identity was recall-injected
+    into the conversation window the librarian summarized — the model restated
+    its own prompt, which is not fresh evidence. The write boundary decides
+    this once (the production caller joins against
+    {!Keeper_recall_injection_window.recently_injected}); tests exercising the
+    legacy semantics pass [Independent_observation]. A closed sum rather than
+    an optional flag so no call site can skip the judgment. *)
+type reobservation_provenance =
+  | Independent_observation
+  | Recalled_echo
+
+(** Fold a re-observation of an existing fact into that fact: for an
+    [Independent_observation] the only effect is to refresh [last_verified_at]
+    to [now] (re-extraction is fresh evidence the claim still holds). For a
+    [Recalled_echo] the row is inherited whole — an echo must never advance the
+    truth anchor that recall's recency ranking reads, or a fact can sustain its
+    own recall slot indefinitely (the RFC-0285 §8 flywheel). Identity and
+    first-seen provenance are preserved in both cases. The prior
+    confidence-blend and access-count bump fed the deleted score and are gone —
+    there is no numeric strength to move. *)
+val reobserve_fact
+  :  now:float
+  -> provenance:reobservation_provenance
+  -> existing:fact
+  -> incoming:fact
+  -> fact
 
 (** Diagnostic attention threshold for the dashboard's events:fact byte ratio.
     This is not a pruning or recall-ranking policy; it only marks stores whose

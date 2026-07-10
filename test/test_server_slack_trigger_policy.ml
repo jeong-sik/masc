@@ -100,6 +100,21 @@ let test_missing_runtime_toml_is_typed_missing () =
     failf "expected typed missing, got %s" (load_error_to_string error)
 ;;
 
+let test_dangling_runtime_toml_symlink_is_unreadable () =
+  let link_path = Filename.temp_file "masc-slack-trigger-policy-link-" ".toml" in
+  Sys.remove link_path;
+  let missing_target = link_path ^ ".missing" in
+  Unix.symlink missing_target link_path;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove link_path with Sys_error _ -> ())
+    (fun () ->
+       match G.load_trigger_policy_from_toml ~path:link_path with
+       | Error (G.Runtime_toml_unreadable _) -> ()
+       | Error error ->
+         failf "expected unreadable dangling symlink, got %s" (load_error_to_string error)
+       | Ok _ -> fail "dangling runtime.toml symlink must not enable fallback")
+;;
+
 let test_missing_key_is_deliberate_no_config () =
   with_temp_toml "[server]\nport = 8935\n" (fun path ->
     match G.load_trigger_policy_from_toml ~path with
@@ -140,6 +155,15 @@ let test_wrong_type_runtime_toml_is_error () =
     | Ok _ -> fail "wrong trigger-policy type must fail closed")
 ;;
 
+let test_wrong_type_slack_parent_is_error () =
+  with_temp_toml "slack = \"not-a-table\"\n" (fun path ->
+    match G.load_trigger_policy_from_toml ~path with
+    | Error (G.Trigger_policy_invalid _) -> ()
+    | Error error ->
+      failf "expected invalid Slack table, got %s" (load_error_to_string error)
+    | Ok _ -> fail "wrong Slack parent type must fail closed")
+;;
+
 let test_invalid_runtime_toml_policy_is_error () =
   with_temp_toml "[slack]\ntrigger_policy = \"mention_ony\"\n" (fun path ->
     match G.load_trigger_policy_from_toml ~path with
@@ -150,16 +174,21 @@ let test_invalid_runtime_toml_policy_is_error () =
 ;;
 
 let test_startup_error_is_operator_visible () =
-  with_temp_base (fun () ->
-    State.record_startup_error "invalid Slack trigger policy";
-    Fun.protect
-      ~finally:State.clear_startup_error
-      (fun () ->
-         let status = State.status_json () in
-         check string "status" "unhealthy"
-           Yojson.Safe.Util.(status |> member "status" |> to_string);
-         check string "error" "invalid Slack trigger policy"
-           Yojson.Safe.Util.(status |> member "error" |> to_string)))
+  with_env "SLACK_APP_TOKEN" "xapp-test" (fun () ->
+    with_temp_base (fun () ->
+      State.record_startup_error "invalid Slack trigger policy";
+      Fun.protect
+        ~finally:State.clear_startup_error
+        (fun () ->
+           let status = State.status_json () in
+           check bool "not available despite app token" false
+             Yojson.Safe.Util.(status |> member "available" |> to_bool);
+           check bool "not connected" false
+             Yojson.Safe.Util.(status |> member "connected" |> to_bool);
+           check string "status uses connector vocabulary" "offline"
+             Yojson.Safe.Util.(status |> member "status" |> to_string);
+           check string "error" "invalid Slack trigger policy"
+             Yojson.Safe.Util.(status |> member "error" |> to_string))))
 ;;
 
 let () =
@@ -177,6 +206,8 @@ let () =
     ; ( "runtime.toml loading"
       , [ test_case "missing file => typed missing" `Quick
             test_missing_runtime_toml_is_typed_missing
+        ; test_case "dangling symlink => unreadable" `Quick
+            test_dangling_runtime_toml_symlink_is_unreadable
         ; test_case "missing key => deliberate no-config" `Quick
             test_missing_key_is_deliberate_no_config
         ; test_case "malformed file => error" `Quick
@@ -185,9 +216,11 @@ let () =
             test_valid_runtime_toml_loads_policy
         ; test_case "wrong field type => error" `Quick
             test_wrong_type_runtime_toml_is_error
+        ; test_case "wrong Slack table type => error" `Quick
+            test_wrong_type_slack_parent_is_error
         ; test_case "invalid policy value => error" `Quick
             test_invalid_runtime_toml_policy_is_error
-        ; test_case "startup error => unhealthy status" `Quick
+        ; test_case "startup error => offline with error" `Quick
             test_startup_error_is_operator_visible
         ] )
     ]

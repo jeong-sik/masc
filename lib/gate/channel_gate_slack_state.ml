@@ -120,11 +120,13 @@ let status_json ?(audit_limit = 10) () =
   let bot_present = Option.is_some (bot_token_opt ()) in
   let app_present = Option.is_some (app_token_opt ()) in
   (* Socket Mode needs the app token; without it the gateway never starts. *)
-  let available = app_present in
+  let startup_ok = Option.is_none startup_error in
+  let available = app_present && startup_ok in
   let connected =
-    match gateway_state with
-    | Connected -> true
-    | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
+    startup_ok
+    && match gateway_state with
+       | Connected -> true
+       | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
   in
   let stale = false in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
@@ -149,11 +151,7 @@ let status_json ?(audit_limit = 10) () =
     ; ("connected", `Bool connected)
     ; ("stale", `Bool stale)
     ; ("stale_after_sec", `Int (stale_after_sec ()))
-    ; ( "status"
-      , `String
-          (match startup_error with
-           | Some _ -> "unhealthy"
-           | None -> connector_state_label ~available ~connected ~stale) )
+    ; ("status", `String (connector_state_label ~available ~connected ~stale))
     ; ("error", `String error)
     ; ("status_source", `String "in_process_gateway")
     ; ("gateway_state", `String (gateway_state_label gateway_state))

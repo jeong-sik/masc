@@ -72,7 +72,7 @@ let trigger_policy_load_error_to_string = function
 ;;
 
 let load_trigger_policy_from_toml ~path =
-  match Unix.stat path with
+  match Unix.lstat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Runtime_toml_missing
   | exception Unix.Unix_error (code, _, _) ->
     Error

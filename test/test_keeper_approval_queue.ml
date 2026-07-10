@@ -9,6 +9,15 @@
 module AQ = Masc.Keeper_approval_queue
 module Chat_queue = Masc.Keeper_chat_queue
 
+let install_noop_resolution_delivery_hook () =
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      Ok (fun () -> ()))
+;;
+
+let () = install_noop_resolution_delivery_hook ()
+
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_" "" in
   Unix.unlink dir;
@@ -34,6 +43,79 @@ let rec yield_until ?(attempts = 50) predicate =
   else (
     Eio.Fiber.yield ();
     yield_until ~attempts:(attempts - 1) predicate)
+;;
+
+let with_temp_runtime_toml content f =
+  let path = Filename.temp_file "runtime" ".toml" in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () -> f path)
+;;
+
+let summary_routing_runtime_toml ~with_hitl_summary =
+  let base =
+    "[providers.local]\n\
+     display-name = \"Local\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://localhost:11434\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.judge]\n\
+     api-name = \"judge\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.summary]\n\
+     api-name = \"summary\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [local.judge]\n\
+     \n\
+     [local.summary]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n\
+     structured_judge = \"local.judge\"\n"
+  in
+  if with_hitl_summary then base ^ "hitl_summary = \"local.summary\"\n" else base
+;;
+
+(* Proves the HITL summary worker consumes the [runtime].hitl_summary lane
+   (not the structured-judge lane directly): the operator-selected lane must
+   win, and unset deployments must fall back to structured_judge. *)
+let test_provider_config_for_summary_routes_hitl_summary_lane () =
+  let load_and_resolve ~with_hitl_summary =
+    let text = summary_routing_runtime_toml ~with_hitl_summary in
+    with_temp_runtime_toml text (fun path ->
+      match Runtime.save_config_text ~runtime_config_path:path text with
+      | Error msg -> Alcotest.failf "runtime config should load: %s" msg
+      | Ok () -> AQ.provider_config_for_summary ~keeper_name:"no-such-keeper")
+  in
+  (match load_and_resolve ~with_hitl_summary:true with
+   | None -> Alcotest.fail "expected a provider config for the hitl_summary lane"
+   | Some cfg ->
+     Alcotest.(check string)
+       "hitl_summary lane model is used"
+       "summary"
+       cfg.Llm_provider.Provider_config.model_id);
+  match load_and_resolve ~with_hitl_summary:false with
+  | None -> Alcotest.fail "expected structured_judge fallback config"
+  | Some cfg ->
+    Alcotest.(check string)
+      "structured_judge fallback model is used"
+      "judge"
+      cfg.Llm_provider.Provider_config.model_id
 ;;
 
 let pending_id_for_keeper ~keeper_name =
@@ -134,19 +216,10 @@ let test_resolve_with_live_resolver_does_not_fire_keeper_wake_hook () =
       ~approval_id
       ~decision
       ~channel:_ ->
-      woke := Some (keeper_name, approval_id, decision));
+      Ok (fun () -> woke := Some (keeper_name, approval_id, decision)));
   Fun.protect
     ~finally:(fun () ->
-      (* Reset to the default no-op so the recording closure does not leak into
-         later tests that share this module-level hook. *)
-      AQ.set_approval_resolution_wake_hook
-        (fun
-          ~base_path:_
-          ~keeper_name:_
-          ~approval_id:_
-          ~decision:_
-          ~channel:_ ->
-          ());
+      install_noop_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        Eio.Switch.run
@@ -185,6 +258,8 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
   @@ fun _env ->
   let base_path = temp_dir () in
   let woke = ref None in
+  let completion_order = ref [] in
+  let callback_saw_pending = ref false in
   AQ.set_approval_resolution_wake_hook
     (fun
       ~base_path:_
@@ -192,17 +267,13 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
       ~approval_id
       ~decision
       ~channel:_ ->
-      woke := Some (keeper_name, approval_id, decision));
+      Ok
+        (fun () ->
+           completion_order := "signal" :: !completion_order;
+           woke := Some (keeper_name, approval_id, decision)));
   Fun.protect
     ~finally:(fun () ->
-      AQ.set_approval_resolution_wake_hook
-        (fun
-          ~base_path:_
-          ~keeper_name:_
-          ~approval_id:_
-          ~decision:_
-          ~channel:_ ->
-          ());
+      install_noop_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let keeper_name = "pending-resolve-wake-test" in
@@ -215,7 +286,10 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
            ~input
            ~risk_level:AQ.Critical
            ~base_path
-           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ~on_resolution:(fun decision ->
+             callback_saw_pending := AQ.has_pending_for_keeper ~keeper_name;
+             completion_order := "callback" :: !completion_order;
+             callback_decision := Some decision)
            ()
        in
        (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
@@ -226,6 +300,14 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
          "on_resolution callback ran"
          true
          (Option.is_some !callback_decision);
+       Alcotest.(check (list string))
+         "domain callback completes before wake signal"
+         [ "callback"; "signal" ]
+         (List.rev !completion_order);
+       Alcotest.(check bool)
+         "pending id remains visible throughout domain callback"
+         true
+         !callback_saw_pending;
        (match !woke with
         | Some (kn, aid, decision) ->
           Alcotest.(check string) "wake targets the waiting keeper" keeper_name kn;
@@ -245,6 +327,48 @@ let test_submit_pending_resolve_fires_keeper_wake_hook () =
         | None -> Alcotest.fail "non-blocking resolve did not fire the keeper wake hook"))
 ;;
 
+let test_delivery_failure_keeps_nonblocking_approval_pending () =
+  let base_path = temp_dir () in
+  let callback_decision = ref None in
+  AQ.For_testing.clear_approval_resolution_wake_hook ();
+  Fun.protect
+    ~finally:(fun () ->
+      install_noop_resolution_delivery_hook ();
+      cleanup_dir base_path)
+    (fun () ->
+       let id =
+         AQ.submit_pending
+           ~keeper_name:"delivery-failure-pending-test"
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "medium_gate" ])
+           ~risk_level:AQ.Medium
+           ~base_path
+           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ()
+       in
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Error (AQ.Delivery_failed { approval_id; reason }) ->
+          Alcotest.(check string) "failure identifies approval" id approval_id;
+          Alcotest.(check bool) "failure reason is explicit" true
+            (String.length reason > 0)
+        | Error err ->
+          Alcotest.fail
+            ("expected Delivery_failed, got " ^ AQ.resolve_error_to_string err)
+        | Ok () -> Alcotest.fail "resolve must fail without a delivery hook");
+       Alcotest.(check bool) "failed delivery keeps pending entry" true
+         (Option.is_some (AQ.get_pending_entry ~id));
+       Alcotest.(check bool) "failed delivery does not run callback" true
+         (Option.is_none !callback_decision);
+       install_noop_resolution_delivery_hook ();
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+       Alcotest.(check bool) "successful retry removes pending entry" true
+         (Option.is_none (AQ.get_pending_entry ~id));
+       Alcotest.(check bool) "successful retry runs callback" true
+         (Option.is_some !callback_decision))
+;;
+
 let test_blocking_callback_policy_owns_lane_without_resolver () =
   let base_path = temp_dir () in
   let woke = ref false in
@@ -252,13 +376,10 @@ let test_blocking_callback_policy_owns_lane_without_resolver () =
   AQ.set_approval_resolution_wake_hook
     (fun
       ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-      woke := true);
+      Ok (fun () -> woke := true));
   Fun.protect
     ~finally:(fun () ->
-      AQ.set_approval_resolution_wake_hook
-        (fun
-          ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-          ());
+      install_noop_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let keeper_name = "blocking-callback-policy-test" in
@@ -309,24 +430,14 @@ let test_resolution_wake_carries_originating_continuation_channel () =
       ~approval_id
       ~decision
       ~channel ->
-      captured :=
-        Some
-          Keeper_event_queue.
-            { approval_id;
-              decision;
-              channel =
-                Option.value channel
-                  ~default:(Keeper_continuation_channel.unrouted "test: no channel") });
-  let reset_hook () =
-    AQ.set_approval_resolution_wake_hook
-        (fun
-          ~base_path:_
-          ~keeper_name:_
-          ~approval_id:_
-          ~decision:_
-          ~channel:_ ->
-          ())
-  in
+      Ok
+        (fun () ->
+           captured :=
+             Some
+               Keeper_event_queue.
+                 { approval_id;
+                   decision;
+                   channel }));
   let submit_resolve_capture ?continuation_channel ~keeper_name () =
     captured := None;
     let id =
@@ -349,7 +460,7 @@ let test_resolution_wake_carries_originating_continuation_channel () =
   in
   Fun.protect
     ~finally:(fun () ->
-      reset_hook ();
+      install_noop_resolution_delivery_hook ();
       cleanup_dir base_path)
     (fun () ->
        let dashboard_channel =
@@ -407,18 +518,11 @@ let test_expire_stale_submit_and_await_does_not_fire_wake_hook () =
   AQ.set_approval_resolution_wake_hook
     (fun
       ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-      woke := true);
+      Ok (fun () -> woke := true));
   Fun.protect
     ~finally:(fun () ->
-      AQ.set_approval_resolution_wake_hook
-        (fun
-          ~base_path:_
-          ~keeper_name:_
-          ~approval_id:_
-          ~decision:_
-          ~channel:_ ->
-          ())
-      ; cleanup_dir base_path)
+      install_noop_resolution_delivery_hook ();
+      cleanup_dir base_path)
     (fun () ->
        let keeper_name = "expire-stale-await-no-wake-test" in
        let result = ref None in
@@ -464,18 +568,11 @@ let test_expire_stale_submit_pending_fires_wake_hook () =
       ~approval_id
       ~decision
       ~channel ->
-      woke := Some (keeper_name, approval_id, decision, channel));
+      Ok (fun () -> woke := Some (keeper_name, approval_id, decision, channel)));
   Fun.protect
     ~finally:(fun () ->
-      AQ.set_approval_resolution_wake_hook
-        (fun
-          ~base_path:_
-          ~keeper_name:_
-          ~approval_id:_
-          ~decision:_
-          ~channel:_ ->
-          ())
-      ; cleanup_dir base_path)
+      install_noop_resolution_delivery_hook ();
+      cleanup_dir base_path)
     (fun () ->
        let keeper_name = "expire-stale-pending-wake-test" in
        let id =
@@ -512,11 +609,45 @@ let test_expire_stale_submit_pending_fires_wake_hook () =
             true
             (Keeper_continuation_channel.same_route
                continuation_channel
-               (Option.value wake_channel
-                  ~default:
-                    (Keeper_continuation_channel.unrouted "test: no wake channel")))
+               wake_channel)
         | None -> Alcotest.fail "submit_pending stale expiry must fire wake hook")
        )
+;;
+
+let test_expire_stale_retries_after_delivery_failure () =
+  let base_path = temp_dir () in
+  let callback_decision = ref None in
+  AQ.For_testing.clear_approval_resolution_wake_hook ();
+  Fun.protect
+    ~finally:(fun () ->
+      install_noop_resolution_delivery_hook ();
+      cleanup_dir base_path)
+    (fun () ->
+       let id =
+         AQ.submit_pending
+           ~keeper_name:"expire-delivery-failure-test"
+           ~tool_name:"keeper_continue_after_reconcile"
+           ~input:(`Assoc [ "kind", `String "medium_gate" ])
+           ~risk_level:AQ.Medium
+           ~base_path
+           ~on_resolution:(fun decision -> callback_decision := Some decision)
+           ()
+       in
+       AQ.expire_stale ~max_wait_s:0.0;
+       Alcotest.(check bool) "failed expiry delivery keeps pending entry" true
+         (Option.is_some (AQ.get_pending_entry ~id));
+       Alcotest.(check bool) "failed expiry delivery does not run callback" true
+         (Option.is_none !callback_decision);
+       install_noop_resolution_delivery_hook ();
+       AQ.expire_stale ~max_wait_s:0.0;
+       Alcotest.(check bool) "retry removes expired entry" true
+         (Option.is_none (AQ.get_pending_entry ~id));
+       match !callback_decision with
+       | Some (Agent_sdk.Hooks.Reject _) -> ()
+       | Some decision ->
+         Alcotest.fail
+           ("expected Reject, got " ^ AQ.approval_decision_to_string decision)
+       | None -> Alcotest.fail "successful expiry retry did not run callback")
 ;;
 
 let test_critical_entry_phase_becomes_escalated_after_timer () =
@@ -927,6 +1058,10 @@ let () =
             `Quick
             test_submit_pending_resolve_fires_keeper_wake_hook
         ; Alcotest.test_case
+            "delivery failure keeps nonblocking approval pending"
+            `Quick
+            test_delivery_failure_keeps_nonblocking_approval_pending
+        ; Alcotest.test_case
             "explicit blocking callback owns a lane without resolver"
             `Quick
             test_blocking_callback_policy_owns_lane_without_resolver
@@ -938,6 +1073,10 @@ let () =
             "expire_stale fires wake for non-blocking submit_pending"
             `Quick
             test_expire_stale_submit_pending_fires_wake_hook
+        ; Alcotest.test_case
+            "expire_stale retries after delivery failure"
+            `Quick
+            test_expire_stale_retries_after_delivery_failure
         ; Alcotest.test_case
             "resolution wake carries originating continuation channel"
             `Quick
@@ -953,6 +1092,10 @@ let () =
         ] )
     ; ( "summary"
       , [ Alcotest.test_case
+            "provider_config_for_summary routes the hitl_summary lane"
+            `Quick
+            test_provider_config_for_summary_routes_hitl_summary_lane
+        ; Alcotest.test_case
             "context summary survives include_input:true JSON paths"
             `Quick
             test_summary_survives_include_input_paths

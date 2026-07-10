@@ -276,10 +276,33 @@ val is_local_runtime_id : string -> bool option
 (** Locality classification for a configured runtime id, or [None] when the
     runtime id is not currently materialized. *)
 
+type max_context_source =
+  | Override (** runtime.toml [model.max-context] override applies as-is. *)
+  | Capability (** no override configured; the OAS capability catalog cap applies. *)
+  | Override_clamped_by_capability
+      (** an override is configured but exceeds the OAS capability catalog
+          cap, so the cap wins. *)
+
+val max_context_source_to_string : max_context_source -> string
+(** ["override"] / ["capability"] / ["override_clamped_by_capability"] — wire
+    label for the [/api/v1/runtime/resolved] document. *)
+
+val resolve_max_context_of_runtime : t -> (int * max_context_source) option
+(** Effective input context window and the source that produced it. [None]
+    when neither the runtime.toml [model.max-context] override nor the OAS
+    capability catalog declares a positive context window for this binding;
+    [materialize_config] rejects such a runtime at load (fail-closed), so a
+    materialized [t] obtained from {!get_runtimes}/{!get_runtime_by_id} never
+    observes [None] here in practice. *)
+
 val max_context_of_runtime : t -> int
 (** Effective input context window for a materialized runtime.  This applies the
     same provider-cap clamp as [max_context_of_runtime_id] without re-resolving
-    the runtime id. *)
+    the runtime id. Derived from {!resolve_max_context_of_runtime}.
+    @raise Failure if that resolves to [None] — unreachable for any [t]
+    produced by {!materialize_config}, which rejects a runtime whose max
+    context cannot be resolved at load time (no silent default —
+    RFC-0206 §2.1). *)
 
 val max_context_of_runtime_id : string -> int option
 (** Effective input context window for the materialized runtime [id], or [None]

@@ -325,11 +325,6 @@ html[data-skin="v2"] .rt-cap.on {
   color: var(--status-ok);
   border-color: color-mix(in oklab, var(--status-ok) 32%, transparent);
 }
-html[data-skin="v2"] .rt-cap.tcf {
-  /* runtime.css:65 */
-  color: var(--info);
-  border-color: color-mix(in oklab, var(--info) 28%, transparent);
-}
 
 /* models — runtime.css:68 */
 html[data-skin="v2"] .rt-search {

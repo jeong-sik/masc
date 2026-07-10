@@ -171,9 +171,8 @@ function RuntimeSection({
   const ctxK = formatContextTokens(entry?.max_context ?? contextMax(keeper))
   const capabilitiesDeclared = entry?.capabilities_declared !== false
   // Read-only capability readout (audit P7-4). multimodal = accepts non-text
-  // input; effort adjustability mirrors the runtime editor's rtCaps derivation
-  // (reasoning-effort mode or a reasoning-budget knob). Both come from the
-  // /api/v1/providers projection — no per-keeper mutation here (deferred).
+  // input, gated on the runtime.toml declared-capabilities flag — no
+  // per-keeper mutation here (deferred).
   const multimodal = capabilitiesDeclared
     ? Boolean(
         entry?.supports_multimodal_inputs
@@ -182,9 +181,20 @@ function RuntimeSection({
         || entry?.supports_video_input,
       )
     : null
-  const effortMode = entry?.thinking_control_format ?? null
+  // Effort mode/adjustability read entry.effective_capabilities (OAS-catalog
+  // derived, the value OAS request-building actually uses) — NOT the
+  // top-level entry.thinking_control_format/supports_reasoning_budget. Those
+  // top-level fields mirror runtime.toml's hand-maintained
+  // [models.<id>.capabilities] block, which OAS request-building never reads
+  // (masc #21521 / oas models.toml). They drifted from the OAS catalog on
+  // every reasoning model audited. effective_capabilities absence means "no
+  // OAS catalog entry for this model", independent of capabilitiesDeclared
+  // above (that flag is about the unrelated runtime.toml block).
+  const effectiveCaps = entry?.effective_capabilities ?? null
+  const effortMode = effectiveCaps?.thinking_control_format ?? null
   const effortControlled = effortMode !== null && effortMode !== 'none'
-  const effortAdjustable = effortMode === 'reasoning-effort' || Boolean(entry?.supports_reasoning_budget)
+  const acceptedEfforts = effectiveCaps?.accepted_reasoning_efforts ?? null
+  const effortAdjustable = Boolean(effectiveCaps?.supports_reasoning_budget) || Boolean(acceptedEfforts?.length)
   // The raw rows are only materialized while the disclosure is open — closed
   // state renders the curated block alone.
   const rawOpen = runtimeRawSpecOpen.value
@@ -237,14 +247,14 @@ function RuntimeSection({
           : html`<div class="rtc-na" data-missing="runtime-capabilities">능력 정보 미수신</div>`}
         <div class="rtc-effort">
           <span class="rtc-effort-k">effort</span>
-          ${/* Undeclared capabilities mean the effort mode is unknown, not a
-               definitive "no control" — the default-filled thinking_control_format
-               ('none') is not authoritative. Mirror the multimodal flag's unknown
-               handling instead of asserting a value the config never declared. */ ''}
-          ${!entry || !capabilitiesDeclared
-            ? html`<span class="rtc-eff-na" data-missing="runtime-effort">조정 정보 미수신</span>`
+          ${/* No OAS catalog entry means the effort mode is unknown, not a
+               definitive "no control" claim. Mirror the multimodal flag's
+               unknown handling instead of asserting a value the catalog never
+               reported. */ ''}
+          ${!entry || !effectiveCaps
+            ? html`<span class="rtc-eff-na" data-missing="runtime-effort">카탈로그 미등재</span>`
             : effortControlled
-              ? html`<span class="rtc-eff-na" data-effort-mode=${effortMode}>${effortMode} · ${effortAdjustable ? '조정 가능' : '고정'}</span>`
+              ? html`<span class="rtc-eff-na" data-effort-mode=${effortMode}>${effortMode} · ${effortAdjustable ? '조정 가능' : '고정'}${acceptedEfforts?.length ? ` (${acceptedEfforts.join(', ')})` : ''}</span>`
               : html`<span class="rtc-eff-na" data-effort-mode="none">effort 제어 없음</span>`}
         </div>
         ${rawSpecAvailable

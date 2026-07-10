@@ -121,7 +121,11 @@ function RuntimeCatalogSummary({
         <${RuntimeCapabilityPill} label="json" value=${entry.supports_response_format_json} />
         <${RuntimeCapabilityPill} label="schema" value=${entry.supports_structured_output} />
         <${RuntimeCapabilityPill} label="multimodal" value=${entry.supports_multimodal_inputs} />
-        <${RuntimeCapabilityPill} label="reasoning-budget" value=${entry.supports_reasoning_budget} />
+        ${/* reasoning-budget reads effective_capabilities (OAS-catalog derived),
+             not entry.supports_reasoning_budget — that top-level field mirrors
+             runtime.toml's hand-maintained [models.<id>.capabilities] block,
+             which OAS request-building never reads (masc #21521). */ ''}
+        <${RuntimeCapabilityPill} label="reasoning-budget" value=${entry.effective_capabilities?.supports_reasoning_budget} />
       </div>
       ${snapshotFacts || effectiveCapabilities || declaredSpec || parameterPolicy || requestConfig
         ? html`

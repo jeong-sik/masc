@@ -57,6 +57,17 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))
 
+let startup_canonicalize_keeper_metas (state : Mcp_server.server_state) =
+  (try
+     Keeper_meta_store.canonicalize_persisted_meta_files
+       (Mcp_server.workspace_config state)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Misc.warn
+       "startup keeper meta canonicalize failed: %s (next boot retries; stale keys keep warning on read)"
+       (Printexc.to_string exn))
+
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
   (try
      let traces_dir =

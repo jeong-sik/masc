@@ -554,6 +554,7 @@ let lazy_startup_plan () =
             "reconcile_active_agents";
             "prompt_bootstrap";
             "keeper_history_migration";
+            "keeper_meta_canonicalize";
           ];
       };
       {
@@ -994,6 +995,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "prompt_bootstrap" -> fun () -> bootstrap_prompt_state state
         | "keeper_history_migration" -> fun () ->
             startup_migrate_keeper_histories state
+        | "keeper_meta_canonicalize" -> fun () ->
+            startup_canonicalize_keeper_metas state
         | "telemetry_warmup" -> fun () ->
             warm_tool_registry_from_telemetry state
         | "tool_metrics_restore" -> fun () ->

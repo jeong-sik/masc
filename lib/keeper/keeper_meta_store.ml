@@ -377,6 +377,45 @@ let is_version_conflict_error msg =
   | Not_found -> false
 ;;
 
+(* ── Boot-time canonicalization ─────────────────────────── *)
+
+let canonicalize_persisted_meta_files config =
+  persisted_keeper_names config
+  |> List.iter (fun name ->
+    let path = keeper_meta_path config name in
+    match Safe_ops.read_json_file_safe path with
+    | Error msg ->
+      Log.Keeper.warn "keeper meta canonicalize: unreadable %s: %s" path msg
+    | Ok json ->
+      (match unknown_keeper_meta_keys json with
+       | [] -> ()
+       | unknown ->
+         (match meta_of_json json with
+          | Error msg ->
+            (* A file we cannot fully represent is preserved untouched for
+               operator repair; re-serializing it would destroy the canonical
+               fields alongside the unknown ones. *)
+            Log.Keeper.warn
+              "keeper meta canonicalize: parse failed for %s, leaving file untouched: %s"
+              path
+              msg
+          | Ok meta ->
+            (match write_meta config meta with
+             | Ok () ->
+               Log.Keeper.info
+                 "canonicalized keeper meta %s: dropped retired keys: %s"
+                 path
+                 (String.concat ", " unknown)
+             | Error msg ->
+               (* A CAS conflict means a concurrent writer re-serialized the
+                  file first; write_meta always emits the canonical key set,
+                  so both outcomes converge on a clean file. *)
+               Log.Keeper.info
+                 "keeper meta canonicalize: skipped %s (concurrent writer wins): %s"
+                 path
+                 msg))))
+;;
+
 (* #9769 root fix: CAS retry with explicit field ownership. The
    turn-failure/cycle path uses [Keeper_meta_merge.heartbeat_fields_from_disk]
    now only carries the disk meta_version forward. *)

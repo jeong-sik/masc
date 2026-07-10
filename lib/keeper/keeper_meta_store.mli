@@ -125,6 +125,20 @@ val write_meta :
 (** [true] iff [msg] matches [version_conflict_re]. *)
 val is_version_conflict_error : string -> bool
 
+(** Rewrite persisted keeper meta files whose raw JSON carries top-level
+    keys outside the canonical serializer key set — retired fields left
+    behind by schema removals (e.g. the #23929 continuity purge left
+    [last_continuity_update_ts]/[continuity_summary] in [.masc/keepers/],
+    re-warning on every read until the next save). The canonical key set
+    ([Keeper_meta_json.canonical_keeper_meta_key_names], derived from the
+    serializer) is the single source of truth, so there is no per-key
+    retirement list to forget. Rewrites go through {!write_meta} (CAS): a
+    version conflict means a concurrent writer already re-serialized the
+    file canonically, so the conflict is logged and skipped — both
+    outcomes converge. Unreadable or unparsable files are logged and
+    preserved untouched. Intended as a boot-time pass. *)
+val canonicalize_persisted_meta_files : Workspace.config -> unit
+
 (** Retry [write_meta] on CAS version conflicts using caller-declared
     field ownership via [merge]. Use [Keeper_meta_merge.caller_wins]
     for payload-wins writes, or a narrower merge such as

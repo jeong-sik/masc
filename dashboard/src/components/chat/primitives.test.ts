@@ -1544,6 +1544,24 @@ describe('Keeper v2 chat blocks', () => {
     expect(container.textContent).toContain('unsafe URL')
   })
 
+  it('renders a server-provided attachment failure without claiming it is an image', () => {
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'generated media unavailable: storage write failed',
+        ph: 'Generated media is unavailable.',
+        mimeType: 'audio/mpeg',
+        size: '128 wire-carrier bytes observed',
+        sizeBytes: 128,
+      },
+    ])
+
+    const attach = container.querySelector('[data-chat-block="attach"]')
+    expect(attach?.textContent).toContain('Generated media is unavailable.')
+    expect(attach?.querySelector('.chat-block-attach-cap')?.textContent)
+      .toBe('첨부 · 128 wire-carrier bytes observed')
+  })
+
   it('renders a voice memo with waveform bars and transcript', () => {
     renderBlocks([
       {

@@ -331,8 +331,10 @@ type tool_schema =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
-  ; effect_class : effect_class
+  ; effect_class : effect_class option  (** RFC-0331 §A4: None defaults to Mutating (fail-closed). *)
   }
+
+val effect_class_of_opt : effect_class option -> effect_class
 
 type claim_next_result =
   | Claim_next_claimed of

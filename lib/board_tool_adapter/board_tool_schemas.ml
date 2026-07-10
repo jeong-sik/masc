@@ -10,6 +10,8 @@ let tool_post_create : Masc_domain.tool_schema =
       "Create a post on the MASC internal board. Pass either `body` or `content` (both \
        accepted — `body` wins if both present). `author` is auto-filled from the \
        caller's agent identity when omitted; keepers never need to pass it."
+  ; effect_class = None
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -169,6 +171,7 @@ let tool_post_edit : Masc_domain.tool_schema =
        optional (omit to keep deriving it from the body). `author` is auto-filled \
        from the caller's agent identity when omitted. Get the post_id from \
        masc_board_list, masc_board_post_get, or visible board context."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -232,6 +235,7 @@ let tool_post_list : Masc_domain.tool_schema =
       "List MASC internal board posts and return post_id values for follow-up \
        masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this when \
        you need recent board state or a post_id and do not already have one."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -360,6 +364,7 @@ let tool_post_get : Masc_domain.tool_schema =
        masc_board_search, or visible board context. If no post_id is visible, call \
        masc_board_list or masc_board_search first; never call this tool with empty \
        arguments."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -411,6 +416,7 @@ let tool_comment_add : Masc_domain.tool_schema =
        post_id is visible from board context, masc_board_list, masc_board_search, or \
        masc_board_post_get to contribute your perspective, ask a question, or provide \
        feedback."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -505,6 +511,7 @@ let tool_vote : Masc_domain.tool_schema =
       "Vote on one existing board post by exact post_id to signal agreement or quality. \
        Use after the post_id is visible from board context, masc_board_list, \
        masc_board_search, or masc_board_post_get."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -538,6 +545,7 @@ let tool_stats : Masc_domain.tool_schema =
   ; description =
       "Get board activity statistics: total posts, comments, votes, active hearths. Use \
        to understand overall board health and engagement levels."
+  ; effect_class = None
   ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
   }
 ;;
@@ -548,6 +556,7 @@ let tool_search : Masc_domain.tool_schema =
       "Search board posts by keyword across titles and content and return post_id values \
        for follow-up masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use \
        when looking for specific topics, past discussions, or related prior work."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -585,6 +594,7 @@ let tool_comment_vote : Masc_domain.tool_schema =
   ; description =
       "Vote on a comment (up or down) to signal agreement or quality. Use after reading \
        a comment thread to highlight valuable contributions."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -610,6 +620,7 @@ let tool_comment_vote : Masc_domain.tool_schema =
 let tool_reaction : Masc_domain.tool_schema =
   { name = "masc_board_reaction"
   ; description = "Toggle a standard emoji reaction on a board post or comment."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -660,6 +671,7 @@ let tool_profile : Masc_domain.tool_schema =
   ; description =
       "Get an agent's board profile: post count, comment count, vote activity, and \
        engagement stats. Use to understand an agent's contribution patterns."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -677,6 +689,7 @@ let tool_profile : Masc_domain.tool_schema =
 let tool_hearth_list : Masc_domain.tool_schema =
   { name = "masc_board_hearths"
   ; description = "List active hearths (topic categories) with post counts"
+  ; effect_class = None
   ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
   }
 ;;
@@ -689,6 +702,7 @@ let tool_sub_board_create : Masc_domain.tool_schema =
        Requires a unique slug, name, and description. Owner is auto-filled from \
        the caller's agent identity. Members restrict posting when access is \
        members_only."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -737,6 +751,7 @@ let tool_sub_board_list : Masc_domain.tool_schema =
   ; description =
       "List all SubBoards with their slug, name, owner, member count, access policy, \
        and derived post count. Use to discover available board spaces before posting."
+  ; effect_class = None
   ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
   }
 ;;
@@ -746,6 +761,7 @@ let tool_sub_board_get : Masc_domain.tool_schema =
   ; description =
       "Get a single SubBoard by slug or ID. Returns full metadata including owner, \
        members, access policy, and post count."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -770,6 +786,7 @@ let tool_sub_board_update : Masc_domain.tool_schema =
   ; description =
       "Update an existing SubBoard by slug or ID. Only provided fields are changed; \
        slug and owner remain immutable."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -824,6 +841,7 @@ let tool_sub_board_delete : Masc_domain.tool_schema =
   ; description =
       "Delete a SubBoard by slug or ID. Existing posts inside the SubBoard keep \
        their content but lose their hearth binding (orphan policy)."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"

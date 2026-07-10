@@ -979,8 +979,13 @@ type tool_schema = {
   name: string;
   description: string;
   input_schema: Yojson.Safe.t;
-  effect_class: effect_class;
+  effect_class: effect_class option;  (** RFC-0331 §A4: None defaults to Mutating (fail-closed). *)
 }
+
+(** Resolve effect_class: None → Mutating (fail-closed per RFC-0331 §A4). *)
+let effect_class_of_opt = function
+  | Some ec -> ec
+  | None -> Mutating
 
 (** Structured result for claim_next scheduling (avoids brittle string parsing).
     Defined here so that both Workspace_task_schedule (producer) and consumers

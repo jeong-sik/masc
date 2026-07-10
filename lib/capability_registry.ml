@@ -129,6 +129,7 @@ let projection_to_schema (projection : projection) : Masc_domain.tool_schema =
   {
     Masc_domain.name = projection.tool_name;
     description = projection.description;
+    effect_class = None;
     input_schema = projection.input_schema;
   }
 
@@ -150,7 +151,8 @@ let make_seed ?capability_id ?(risk_class = Safe)
         surface;
         tool_name = schema.name;
         description = schema.description;
-        input_schema = schema.input_schema;
+        effect_class = None;
+    input_schema = schema.input_schema;
         backend_tool_name;
       };
   }

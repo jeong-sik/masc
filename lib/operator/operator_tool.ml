@@ -89,6 +89,7 @@ let snapshot_schema ~remote =
         "Read the unified operator control-plane state. Use this when you need current namespace, keeper, message, and pending-confirm data before taking action."
       else
         "Read unified operator state for the default namespace, keepers, recent messages, and pending confirmations. Use this before issuing control-plane actions.";
+    effect_class = None;
     input_schema =
       `Assoc
         [
@@ -124,6 +125,7 @@ let digest_schema ~remote =
         "Read an intervention-oriented operator digest. Use this when you need namespace health, attention items, command-plane search or microarch signals, worker summaries, and recommended next actions before deciding how to intervene."
       else
         "Read a high-signal operator digest with intervention recommendations for the default namespace. Use this when raw snapshot data is too low-level for fast supervision and you want translated command-plane search or microarch signals.";
+    effect_class = None;
     input_schema =
       `Assoc
         [
@@ -152,6 +154,7 @@ let surface_audit_schema ~remote =
         "Read dashboard surface readiness, exposure policy, and evidence references. Use this before pointing operators to an experimental surface."
       else
         "Read dashboard surface readiness, exposure policy, and evidence references. Use this to decide whether a surface belongs in main navigation, Lab, or should stay hidden.";
+    effect_class = None;
     input_schema =
       `Assoc
         [
@@ -170,6 +173,7 @@ let action_schema ~remote =
         "Preview or run a structured operator action. Use this when you need to broadcast, pause a namespace, or message a keeper through the remote operator surface. Use social_sweep for immediate public-square social processing."
       else
         "Run a structured operator action against the namespace or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions. Use social_sweep for immediate public-square social processing.";
+    effect_class = None;
     input_schema =
       `Assoc
         [
@@ -202,6 +206,7 @@ let confirm_schema =
     name = "masc_operator_confirm";
     description =
       "Confirm and execute a previously previewed operator action. Use this only after masc_operator_action returns confirm_required=true.";
+    effect_class = None;
     input_schema =
       `Assoc
         [
@@ -227,6 +232,7 @@ let judgment_write_schema =
     name = "masc_operator_judgment_write";
     description =
       "Internal operator-judge write path. Use this to store a durable operator judgment for namespace supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
+    effect_class = None;
     input_schema =
       `Assoc
         [

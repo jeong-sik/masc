@@ -15,6 +15,7 @@ let tool_delete : Masc_domain.tool_schema =
   ; description =
       "Delete a board post and its associated comments and votes. Use for cleanup of \
        stale, test, or expired posts."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -45,6 +46,7 @@ let board_tool_cleanup : Masc_domain.tool_schema =
       "Scan board posts matching filter criteria and delete or report them. Defaults to \
        dry_run=true (report only). Set dry_run=false to delete. Safety: never deletes \
        posts with comments or votes unless filters are overridden."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -106,6 +108,7 @@ let board_tool_curation_read : Masc_domain.tool_schema =
        highlights, tag suggestions, answer matches, rationale, and operator-auditable \
        provenance. Returns null when no snapshot has been submitted \
        yet."
+  ; effect_class = None
   ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
   }
 ;;
@@ -116,6 +119,7 @@ let board_tool_curation_submit : Masc_domain.tool_schema =
       "Submit an AI curation snapshot for the board. This records summary, recommended \
        ordering, highlights, tag suggestions, answer matches, rationale, and provenance \
        without mutating board posts/comments/votes."
+  ; effect_class = None
   ; input_schema =
       `Assoc
         [ "type", `String "object"

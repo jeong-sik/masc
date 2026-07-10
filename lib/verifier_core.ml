@@ -164,6 +164,7 @@ let report_verdict_schema : Masc_domain.tool_schema =
     description =
       "Report your verification verdict. You MUST call this tool \
        with your assessment. verdict must be exactly PASS, WARN, or FAIL.";
+    effect_class = None;
     input_schema = `Assoc [
       "type", `String "object";
       "properties", `Assoc [

@@ -336,6 +336,7 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
 type approval_resolve_http_error =
   | Bad_request of string
   | Gone of Keeper_approval_queue.resolve_error
+  | Unavailable of Keeper_approval_queue.resolve_error
 
 let approval_resolve_decision_field = "decision"
 let approval_resolve_reason_field = "reason"
@@ -378,6 +379,7 @@ let approval_resolve_decision_of_json args =
 let approval_resolve_http_error_to_string = function
   | Bad_request msg -> msg
   | Gone err -> Keeper_approval_queue.resolve_error_to_string err
+  | Unavailable err -> Keeper_approval_queue.resolve_error_to_string err
 ;;
 
 let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.Safe.t)
@@ -420,7 +422,12 @@ let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.S
                     | Some rule -> `String rule.id
                     | None -> `Null )
                 ])
-        | Error err -> Error (Gone err)))
+        | Error (Keeper_approval_queue.Delivery_failed _ as err) ->
+          Error (Unavailable err)
+        | Error
+            (( Keeper_approval_queue.Not_found _
+             | Keeper_approval_queue.Already_resolved _ ) as err) ->
+          Error (Gone err)))
 ;;
 
 let dashboard_governance_approval_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)

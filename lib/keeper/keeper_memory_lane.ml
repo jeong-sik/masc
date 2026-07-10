@@ -207,8 +207,12 @@ let abandon_queued ~keeper_name entry ~worker_id ~reason =
     Log.Keeper.warn ~keeper_name
       "memory lane worker abandoned queued units count=%d reason=%s"
       abandoned
-      (abandonment_reason_label reason));
-  abandoned
+      (abandonment_reason_label reason))
+;;
+
+let disarm_switch_hook hook =
+  (* RFC-0257: hook cleanup is idempotent; an already-run hook needs no retry. *)
+  ignore (Eio.Switch.try_remove_hook hook)
 ;;
 
 let run_job ~keeper_name entry ~sw job =
@@ -243,32 +247,29 @@ let rec drain_worker ~keeper_name entry ~worker_id ~sw =
 
 let start_worker ~keeper_name entry ~worker_id sw =
   let release_from_switch () =
-    ignore
-      (abandon_queued
-         ~keeper_name
-         entry
-         ~worker_id
-         ~reason:Executor_switch_released)
+    abandon_queued
+      ~keeper_name
+      entry
+      ~worker_id
+      ~reason:Executor_switch_released
   in
   match Eio.Switch.get_error sw with
   | Some _ ->
-    ignore
-      (abandon_queued
-         ~keeper_name
-         entry
-         ~worker_id
-         ~reason:Executor_switch_unavailable);
+    abandon_queued
+      ~keeper_name
+      entry
+      ~worker_id
+      ~reason:Executor_switch_unavailable;
     false
   | None ->
     let hook =
       try Some (Eio.Switch.on_release_cancellable sw release_from_switch) with
       | exn ->
-        ignore
-          (abandon_queued
-             ~keeper_name
-             entry
-             ~worker_id
-             ~reason:Hook_registration_failed);
+        abandon_queued
+          ~keeper_name
+          entry
+          ~worker_id
+          ~reason:Hook_registration_failed;
         Log.Keeper.warn ~keeper_name
           "memory lane worker release hook registration failed: %s"
           (Printexc.to_string exn);
@@ -279,13 +280,13 @@ let start_worker ~keeper_name entry ~worker_id sw =
      | Some hook ->
        if not (worker_is_active entry ~worker_id)
        then (
-         ignore (Eio.Switch.try_remove_hook hook);
+         disarm_switch_hook hook;
          false)
        else (
          try
            Eio.Fiber.fork ~sw (fun () ->
              Fun.protect
-               ~finally:(fun () -> ignore (Eio.Switch.try_remove_hook hook))
+               ~finally:(fun () -> disarm_switch_hook hook)
                (fun () ->
                  try
                    (* [Fiber.fork] runs the child immediately. Yield once so
@@ -295,20 +296,18 @@ let start_worker ~keeper_name entry ~worker_id sw =
                    drain_worker ~keeper_name entry ~worker_id ~sw
                  with
                  | Eio.Cancel.Cancelled _ as exn ->
-                   ignore
-                     (abandon_queued
-                        ~keeper_name
-                        entry
-                        ~worker_id
-                        ~reason:Worker_cancelled);
+                   abandon_queued
+                     ~keeper_name
+                     entry
+                     ~worker_id
+                     ~reason:Worker_cancelled;
                    raise exn
                  | exn ->
-                   ignore
-                     (abandon_queued
-                        ~keeper_name
-                        entry
-                        ~worker_id
-                        ~reason:Worker_failed);
+                   abandon_queued
+                     ~keeper_name
+                     entry
+                     ~worker_id
+                     ~reason:Worker_failed;
                    record_counter ~keeper_name MemoryLaneUnitFailures;
                    Log.Keeper.error ~keeper_name
                      "memory lane worker failed: %s"
@@ -316,22 +315,20 @@ let start_worker ~keeper_name entry ~worker_id sw =
            true
          with
          | Eio.Cancel.Cancelled _ as exn ->
-           ignore (Eio.Switch.try_remove_hook hook);
-           ignore
-             (abandon_queued
-                ~keeper_name
-                entry
-                ~worker_id
-                ~reason:Worker_cancelled);
+           disarm_switch_hook hook;
+           abandon_queued
+             ~keeper_name
+             entry
+             ~worker_id
+             ~reason:Worker_cancelled;
            raise exn
          | exn ->
-           ignore (Eio.Switch.try_remove_hook hook);
-           ignore
-             (abandon_queued
-                ~keeper_name
-                entry
-                ~worker_id
-                ~reason:Fork_failed);
+           disarm_switch_hook hook;
+           abandon_queued
+             ~keeper_name
+             entry
+             ~worker_id
+             ~reason:Fork_failed;
            Log.Keeper.error ~keeper_name
              "memory lane worker fork failed: %s"
              (Printexc.to_string exn);

@@ -17,6 +17,16 @@ let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
+let respond_board_reaction_result request reqd = function
+  | Ok json -> respond_json_value_with_cors request reqd json
+  | Error error ->
+    respond_json_value_with_cors
+      ~status:(Server_board_reaction_http.error_status error)
+      request
+      reqd
+      (Server_board_reaction_http.error_json error)
+;;
+
 let include_moderation_projection ~base_path request =
   match auth_token_from_request request with
   | None -> false
@@ -632,6 +642,50 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value json reqd
        ) request reqd)
+
+  |> Http.Router.get "/api/v1/board/reactions/catalog" (fun request reqd ->
+       with_public_read
+         (fun _state _request reqd ->
+            Http.Response.json_value
+              (Server_board_reaction_http.catalog_json ())
+              reqd)
+         request
+         reqd)
+
+  |> Http.Router.get "/api/v1/board/reactions" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Masc_domain.CanReadState
+         (fun _state actor req reqd ->
+            let result =
+              Result.bind
+                (Server_board_reaction_http.target_of_strings
+                   ~target_type:(query_param req "target_type")
+                   ~target_id:(query_param req "target_id"))
+                (Server_board_reaction_http.list_json ~actor)
+            in
+            respond_board_reaction_result request reqd result)
+         request
+         reqd)
+
+  |> Http.Router.post "/api/v1/board/reactions" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Masc_domain.CanVote
+         (fun _state actor _req reqd ->
+            Http.Request.read_body_async reqd (fun body ->
+              let parsed =
+                match Yojson.Safe.from_string body with
+                | json -> Server_board_reaction_http.toggle_request_of_json json
+                | exception Yojson.Json_error message ->
+                  Error (Server_board_reaction_http.malformed_json message)
+              in
+              let result =
+                Result.bind
+                  parsed
+                  (Server_board_reaction_http.toggle_json ~actor)
+              in
+              respond_board_reaction_result request reqd result))
+         request
+         reqd)
 
   |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
        with_public_read (fun state _req reqd ->

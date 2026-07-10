@@ -9,7 +9,7 @@ import {
   fetchBoardHearths,
   fetchBoardKarmaLedger,
   fetchBoardPost,
-  fetchBoardReactions,
+  fetchBoardReactionState,
   normalizeBoardContextInferenceSubmission,
   normalizeBoardKarmaLedger,
   requestBoardContextInference,
@@ -556,6 +556,7 @@ describe('fetchBoard', () => {
               recent_user_ids: ['analyst', 'reviewer'],
             },
           ],
+          supported_reaction_emojis: ['🔥', '👍'],
           claim_evidence: {
             source: 'board_claim_evidence.jsonl',
             target_post_id: 'post-1',
@@ -626,6 +627,7 @@ describe('fetchBoard', () => {
           recent_user_ids: ['analyst', 'reviewer'],
         },
       ],
+      supported_reaction_emojis: ['🔥', '👍'],
     })
     expect(result.posts[0]?.author_identity).toMatchObject({
       kind: 'keeper',
@@ -934,6 +936,7 @@ describe('fetchBoardPost', () => {
             recent_user_ids: ['reader-a'],
           },
         ],
+        supported_reaction_emojis: ['👍', '🚀'],
       },
       comments: [
         {
@@ -957,6 +960,7 @@ describe('fetchBoardPost', () => {
               recent_user_ids: ['reviewer'],
             },
           ],
+          supported_reaction_emojis: ['👍', '🚀'],
         },
       ],
     }
@@ -989,6 +993,7 @@ describe('fetchBoardPost', () => {
           recent_user_ids: ['reviewer'],
         },
       ],
+      supported_reaction_emojis: ['👍', '🚀'],
     })
     expect(result.current_vote).toBe('down')
     expect(result.reactions).toEqual([
@@ -1000,6 +1005,7 @@ describe('fetchBoardPost', () => {
         recent_user_ids: ['reader-a'],
       },
     ])
+    expect(result.supported_reaction_emojis).toEqual(['👍', '🚀'])
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('format=flat')
     expect(url).toContain('voter=')
@@ -1222,7 +1228,7 @@ describe('voteComment', () => {
 })
 
 describe('board reactions', () => {
-  it('fetches reaction summaries with the dashboard voter', async () => {
+  it('fetches reaction state without sending a forgeable user id', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
     vi.spyOn(performance, 'now')
       .mockReturnValueOnce(0)
@@ -1235,6 +1241,7 @@ describe('board reactions', () => {
           has_reacted: true,
           recent_user_ids: ['agent-b', 'agent-a'],
         }],
+        supported_emojis: ['👍', '🚀'],
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1242,20 +1249,23 @@ describe('board reactions', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchBoardReactions('post', 'post-1')
+    const result = await fetchBoardReactionState('post', 'post-1')
 
-    expect(result).toEqual([{
-      emoji: '👍',
-      count: 2,
-      reacted: true,
-      has_reacted: true,
-      recent_user_ids: ['agent-b', 'agent-a'],
-    }])
+    expect(result).toEqual({
+      summaries: [{
+        emoji: '👍',
+        count: 2,
+        reacted: true,
+        has_reacted: true,
+        recent_user_ids: ['agent-b', 'agent-a'],
+      }],
+      supportedEmojis: ['👍', '🚀'],
+    })
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/v1/board/reactions?')
     expect(url).toContain('target_type=post')
     expect(url).toContain('target_id=post-1')
-    expect(url).toContain('user_id=dashboard-reviewer')
+    expect(url).not.toContain('user_id=')
     expect(boardLatencyMetrics.value.reaction_summary).toMatchObject({
       last_latency_ms: 18,
       last_ok: true,
@@ -1302,14 +1312,27 @@ describe('board reactions', () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       target_type: 'comment',
       target_id: 'comment-1',
-      user_id: 'dashboard-reviewer',
       emoji: '🚀',
     })
+    expect(JSON.parse(String(init.body))).not.toHaveProperty('user_id')
     expect(boardLatencyMetrics.value.reaction_toggle).toMatchObject({
       last_latency_ms: 21,
       last_ok: true,
       sample_count: 1,
     })
+  })
+
+  it('rejects a reaction state without the server-owned emoji catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ reactions: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchBoardReactionState('post', 'post-1')).rejects.toThrow(
+      'supported_emojis is required',
+    )
   })
 })
 

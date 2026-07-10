@@ -5,7 +5,7 @@ import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
-  BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
+  BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
   BoardClaimEvidenceProjection, BoardClaimEvidenceState,
   BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
@@ -580,6 +580,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
         .map(normalizeBoardReactionSummary)
         .filter((row): row is BoardReactionSummary => row !== null)
     : undefined
+  const supportedReactionEmojis = normalizeSupportedReactionEmojis(raw.supported_reaction_emojis)
 
   return {
     id,
@@ -622,6 +623,9 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     contributor_quality: normalizeBoardContributorQuality(raw.contributor_quality),
     claim_evidence: normalizeBoardClaimEvidence(raw.claim_evidence),
     ...(reactions !== undefined ? { reactions } : {}),
+    ...(supportedReactionEmojis !== undefined
+      ? { supported_reaction_emojis: supportedReactionEmojis }
+      : {}),
     origin: normalizeBoardPostOrigin(raw.origin),
   }
 }
@@ -680,6 +684,7 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
         .map(normalizeBoardReactionSummary)
         .filter((row): row is BoardReactionSummary => row !== null)
     : undefined
+  const supportedReactionEmojis = normalizeSupportedReactionEmojis(raw.supported_reaction_emojis)
   return {
     id,
     post_id: postId,
@@ -699,6 +704,9 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
     moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     ...(reactions !== undefined ? { reactions } : {}),
+    ...(supportedReactionEmojis !== undefined
+      ? { supported_reaction_emojis: supportedReactionEmojis }
+      : {}),
   }
 }
 
@@ -872,6 +880,20 @@ function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | nul
   }
 }
 
+function normalizeSupportedReactionEmojis(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const values: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (typeof item !== 'string') return undefined
+    const emoji = item.trim()
+    if (!emoji || seen.has(emoji)) return undefined
+    seen.add(emoji)
+    values.push(emoji)
+  }
+  return values.length > 0 ? values : undefined
+}
+
 function normalizeBoardReactionToggleResult(raw: unknown): BoardReactionToggleResult | null {
   if (!isRecord(raw)) return null
   const targetType = asString(raw.target_type, '').trim()
@@ -986,20 +1008,31 @@ export async function fetchBoardKarmaLedger(options: { agent?: string; limit?: n
   })
 }
 
-export async function fetchBoardReactions(
+export async function fetchBoardReactionState(
   targetType: BoardReactionTargetType,
   targetId: string,
-): Promise<BoardReactionSummary[]> {
-  return timeBoardRequest('reaction_summary', () => withRetries('fetchBoardReactions', async () => {
+): Promise<BoardReactionState> {
+  return timeBoardRequest('reaction_summary', () => withRetries('fetchBoardReactionState', async () => {
     const params = new URLSearchParams({
       target_type: targetType,
       target_id: targetId,
-      user_id: defaultBoardVoter(),
     })
-    const raw = await get<{ reactions?: unknown[] }>(`/api/v1/board/reactions?${params}`)
-    return Array.isArray(raw.reactions)
-      ? raw.reactions.map(normalizeBoardReactionSummary).filter((row): row is BoardReactionSummary => row !== null)
-      : []
+    const raw = await get<unknown>(`/api/v1/board/reactions?${params}`)
+    if (!isRecord(raw) || !Array.isArray(raw.reactions)) {
+      throw new Error('Malformed board reaction state: reactions must be an array')
+    }
+    const summaries = raw.reactions.map(normalizeBoardReactionSummary)
+    if (summaries.some(row => row === null)) {
+      throw new Error('Malformed board reaction state: invalid reaction summary')
+    }
+    const supportedEmojis = normalizeSupportedReactionEmojis(raw.supported_emojis)
+    if (!supportedEmojis || supportedEmojis.length === 0) {
+      throw new Error('Malformed board reaction state: supported_emojis is required')
+    }
+    return {
+      summaries: summaries as BoardReactionSummary[],
+      supportedEmojis,
+    }
   }))
 }
 
@@ -1065,7 +1098,6 @@ export async function toggleReaction(
     const raw = await post<unknown>('/api/v1/board/reactions', {
       target_type: targetType,
       target_id: targetId,
-      user_id: defaultBoardVoter(),
       emoji,
     })
     const normalized = normalizeBoardReactionToggleResult(raw)

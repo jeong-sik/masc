@@ -227,6 +227,7 @@ export interface BoardPost {
   contributor_quality?: BoardContributorQuality | null
   claim_evidence?: BoardClaimEvidenceProjection | null
   reactions?: BoardReactionSummary[]
+  supported_reaction_emojis?: string[]
   origin?: BoardPostOrigin | null
 }
 
@@ -249,6 +250,7 @@ export interface BoardComment {
   report_count?: number
   moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
+  supported_reaction_emojis?: string[]
 }
 
 export type BoardReactionTargetType = 'post' | 'comment'
@@ -268,6 +270,11 @@ export interface BoardReactionToggleResult {
   emoji: string
   reacted: boolean
   summary: BoardReactionSummary[]
+}
+
+export interface BoardReactionState {
+  summaries: BoardReactionSummary[]
+  supportedEmojis: string[]
 }
 
 export interface BoardCurationSnapshot {

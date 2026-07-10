@@ -30,6 +30,12 @@ let dashboard_board_tool_routes =
   ; "/api/v1/tools/masc_board_comment_vote"
   ]
 
+let dashboard_board_reaction_routes =
+  [ `GET, "/api/v1/board/reactions/catalog"
+  ; `GET, "/api/v1/board/reactions"
+  ; `POST, "/api/v1/board/reactions"
+  ]
+
 (* [add_routes] only registers closures — no fiber is spawned — so the
    [Eio_main.run] just supplies the switch + clock the handlers capture. *)
 let with_router f =
@@ -84,6 +90,33 @@ let test_no_tools_route_drift () =
       expected
       registered)
 
+let test_dashboard_board_reaction_routes_registered () =
+  with_router (fun router ->
+    List.iter
+      (fun (meth, path) ->
+         let request = Httpun.Request.create meth path in
+         match Http.Router.resolve router request with
+         | `Matched { Http.Router.handler = Plain _; _ } -> ()
+         | `Matched { Http.Router.handler = Ws _; _ } ->
+           fail (Printf.sprintf "%s must be a plain HTTP route" path)
+         | `Method_not_allowed ->
+           fail (Printf.sprintf "%s rejects its dashboard HTTP method" path)
+         | `Not_found ->
+           fail (Printf.sprintf "%s is not registered" path))
+      dashboard_board_reaction_routes)
+
+let test_board_reaction_catalog_uses_board_ssot () =
+  match Server_board_reaction_http.catalog_json () with
+  | `Assoc fields ->
+    let actual =
+      match List.assoc_opt "supported_emojis" fields with
+      | Some (`List values) ->
+        List.filter_map (function `String value -> Some value | _ -> None) values
+      | Some _ | None -> fail "supported_emojis must be a JSON array"
+    in
+    check (list string) "catalog" Board.board_reaction_emojis actual
+  | _ -> fail "reaction catalog must be a JSON object"
+
 let () =
   run
     "board_rest_routes"
@@ -96,5 +129,13 @@ let () =
             "no /api/v1/tools/* route drift"
             `Quick
             test_no_tools_route_drift
+        ; test_case
+            "dashboard board reaction routes registered"
+            `Quick
+            test_dashboard_board_reaction_routes_registered
+        ; test_case
+            "reaction catalog uses Board SSOT"
+            `Quick
+            test_board_reaction_catalog_uses_board_ssot
         ] )
     ]

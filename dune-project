@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.20.0)
+(version 0.20.1)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -55,13 +55,12 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.208.22 (oas#2492, masc pin #23697). Beyond v0.208.19 it
-  ;; adds the RFC-0321 Block variant (oas#2487), typed Chat_template_token
-  ;; fail-close (oas#2484), openai-compat thinking + empty-completion fail-close
-  ;; (oas#2488), and streaming empty-completion fail-close (oas#2491).
+  ;; Pinned to OAS v0.209.1 (tag v0.209.1, #2510). The patch repairs the
+  ;; oas#2499 library build while preserving the catalog-driven capability,
+  ;; typed empty-completion, and Hooks.Block 0.209 public boundary.
   ;; Exact pin sha lives
   ;; in scripts/oas-agent-sdk-pin.sh (SSOT); see check-oas-pin.sh.
-  (agent_sdk (>= 0.208.22))
+  (agent_sdk (>= 0.209.1))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

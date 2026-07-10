@@ -136,7 +136,7 @@ P3 가 핵심 — 첫 L 의 spec 정합성 보장. P6 는 L1-L5 위반이 *opera
 
 ## §4 Open questions
 
-1. **Q1**: L1–L5 의 timeout 정의가 spec 에 *unbounded eventually* 으로만 표현됨. Runtime 에서는 어떤 cap 사용? **잠정**: P3 의 L1 wiring 에서 `MASC_KRL_L1_TIMEOUT_SEC` env (default 300 = 5 min) — *Cap 시그니처 잠재* 지만 spec 에 명시되지 않은 boundary 가 reality 에 필요. RFC-0094 cap semantic split 와 같은 family 로 follow-up.
+1. **Q1**: L1–L5 의 timeout 정의가 spec 에 *unbounded eventually* 으로만 표현됨. Runtime 에서는 어떤 cap 사용? **잠정**: P3 의 L1 wiring 에서 `MASC_KRL_L1_TIMEOUT_SEC` env (default 300 = 5 min) — *Cap 시그니처 잠재* 지만 spec 에 명시되지 않은 boundary 가 reality 에 필요. Timeout 의미와 owner를 별도 follow-up에서 분리한다.
 
 2. **Q2**: spec citation 의 missing 3 path (`lib/keeper/goal_store.ml` 등) 정정 vs alias? `lib/goal/goal_store.ml` 가 실재 — spec 본문 수정 가능. **잠정**: spec 본문 수정 — `lib/keeper/` → `lib/goal/` (P4 의 spec update commit 으로).
 

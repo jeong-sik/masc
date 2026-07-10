@@ -292,7 +292,6 @@ let test_fusion_completion_is_actionable () =
   (* the stimulus path yields Some (not None like Bootstrap/No_progress_recovery) *)
   match
     Keeper_world_observation.pending_board_event_of_stimulus
-      ~continuity_summary:""
       ~meta
       (fusion_stimulus ~resolved_answer:"ANSWER-TOKEN-xyz" ())
   with
@@ -338,7 +337,6 @@ let test_bg_completion_is_actionable () =
      | _ -> false);
   match
     Keeper_world_observation.pending_board_event_of_stimulus
-      ~continuity_summary:""
       ~meta
       (bg_stimulus ~bg_outcome:(Keeper_event_queue.Bg_ok "BG-ANSWER-TOKEN") ())
   with
@@ -393,7 +391,6 @@ let test_scheduled_wake_is_actionable () =
      | _ -> false);
   match
     Keeper_world_observation.pending_board_event_of_stimulus
-      ~continuity_summary:""
       ~meta
       (schedule_stimulus ~message:"SCHEDULE-ANSWER-TOKEN" ())
   with

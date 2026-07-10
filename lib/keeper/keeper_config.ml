@@ -117,14 +117,14 @@ let keeper_compact_max_tokens () : int =
 (** Cooldown between compaction attempts.  Previous default (90s) exceeded
     the proactive heartbeat interval (30s), permanently blocking compaction
     for proactive keepers.  15s allows compaction to fire every other cycle. *)
-let keeper_continuity_compaction_cooldown_sec_rp =
+let keeper_compaction_cooldown_sec_rp =
   _rp_int ~key:"keeper.compaction.cooldown_sec"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_CONTINUITY_COMPACTION_COOLDOWN_SEC"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_COMPACTION_COOLDOWN_SEC"
                           ~default:15 ~min_v:0 ~max_v:two_days_seconds_int)
     ~min_v:0 ~max_v:two_days_seconds_int
     ~description:"Compaction cooldown (seconds)" ()
-let keeper_continuity_compaction_cooldown_sec () : int =
-  Runtime_params.get keeper_continuity_compaction_cooldown_sec_rp
+let keeper_compaction_cooldown_sec () : int =
+  Runtime_params.get keeper_compaction_cooldown_sec_rp
 
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
@@ -246,7 +246,7 @@ let normalize_compaction_message_gate (v : int) : int =
 let normalize_compaction_token_gate (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:5000000
 
-let normalize_continuity_compaction_cooldown_sec (v : int) : int =
+let normalize_compaction_cooldown_sec (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:two_days_seconds_int
 
 (** Default number of recent tool results to keep verbatim during
@@ -441,8 +441,6 @@ let keeper_llm_rerank_runtime () : string =
   match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_RUNTIME" with
   | Some v when String.trim v <> "" -> String.trim v
   | _ -> default_runtime_id ()
-
-include Keeper_config_rule_thresholds
 
 (* ================================================================ *)
 (* Keeper execution — previously hardcoded magic numbers             *)

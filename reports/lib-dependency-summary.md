@@ -60,7 +60,6 @@
 | tool_board | 10 | 0.650 | 7 | 13 |
 | runtime_transport | 13 | 0.600 | 8 | 12 |
 | tool_shard | 18 | 0.583 | 5 | 7 |
-| meta_cognition | 7 | 0.583 | 5 | 7 |
 | runtime_config | 9 | 0.500 | 11 | 11 |
 | runtime_catalog | 8 | 0.500 | 11 | 11 |
 

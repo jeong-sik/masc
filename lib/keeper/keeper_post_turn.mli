@@ -1,9 +1,8 @@
 (** Keeper_post_turn — post-turn lifecycle: compaction, handoff
-    rollover, continuity summary, and overflow retry recovery.
+    rollover, and overflow retry recovery.
 
     Orchestrates the end-of-turn pipeline that decides whether to
-    compact the context, roll over to a new generation, and update
-    the continuity summary from the latest state snapshot.
+    compact the context and roll over to a new generation.
 
     This module owns only the checkpoint/lineage tail of a keeper
     turn. Memory bank append, episode flush, and Hebbian learning
@@ -32,8 +31,8 @@ type compaction_event =
   ; saved_tokens : int
   }
 
-(** Combined post-turn outcome — compaction + rollover + continuity
-    summary update + per-turn context metrics. *)
+(** Combined post-turn outcome — compaction + rollover + per-turn context
+    metrics. *)
 type post_turn_lifecycle =
   { updated_meta : Keeper_meta_contract.keeper_meta
   ; checkpoint : Agent_sdk.Checkpoint.t option
@@ -61,9 +60,8 @@ type overflow_retry_recovery =
   } [@@warning "-69"]
 
 (** End-of-turn pipeline. Decides compaction, rolls over generations
-    when the handoff gate fires, refreshes the continuity summary
-    from the latest state snapshot, and persists the result to the
-    keeper meta + dashboard surface.
+    when the handoff gate fires, and persists the result to the keeper meta
+    and dashboard surface.
 
     {b Tier A5} (Cycle 22): when the [MASC_AUTONOMOUS] environment
     variable is on (see {!Autonomous.Wirein_helpers.masc_autonomous_enabled}),
@@ -128,34 +126,3 @@ val recover_latest_checkpoint_for_overflow_retry :
   model:string ->
   primary_model_max_tokens:int ->
   overflow_retry_recovery option
-
-val no_state_interruption_note : string
-(** Open-question text recorded by
-    {!augment_progress_with_interruption_note}. Constant so repeated
-    no-[STATE] turns dedupe by membership instead of stacking. *)
-
-val augment_progress_with_interruption_note :
-  progress_path:string ->
-  generation:int ->
-  updated_at:string ->
-  keeper_name:string ->
-  unit
-(** RFC-0315 P2a. Called on a turn that produced no [STATE] snapshot (the
-    same turns whose checkpoint replay suffix is pruned and whose memory
-    writes are suppressed): preserves the existing forward-looking
-    progress.md snapshot and adds {!no_state_interruption_note} to its
-    open questions, so the next turn's Continuity layer states that the
-    previous turn left no persisted state instead of rendering nothing.
-    Write failures are logged and counted, never raised. *)
-
-module For_testing : sig
-  val invalid_snapshot_goal_fingerprint : string -> string
-
-  val invalid_snapshot_goal_warning_message :
-    keeper_name:string -> goal_id:string -> string
-
-  val should_log_invalid_snapshot_goal :
-    keeper_name:string -> goal_id:string -> bool
-
-  val reset_invalid_snapshot_goal_log_dedupe : unit -> unit
-end

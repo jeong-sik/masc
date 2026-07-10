@@ -85,7 +85,7 @@ val handle_keeper_catchup_judge_post :
 include module type of Server_dashboard_http_keeper_api_types
 
 (** Trajectory preview helpers (trim_to_opt / truncate_text /
-    latest_preview_of_messages / continuity_summary_of_messages)
+    latest_preview_of_messages)
     moved to Server_dashboard_http_keeper_api_types — re-exported via
     [include module type of] above. *)
 

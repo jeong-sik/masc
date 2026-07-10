@@ -23,7 +23,7 @@ No code or spec change in this iteration. Audit-only.
 | 5 | `¬fiber_alive ∧ restart_budget_remaining ∧ backoff_elapsed` | identical | Restarting | ✅ |
 | 6 | `¬fiber_alive ∧ restart_budget_remaining` | identical | Crashed | ✅ |
 | 7 | `stop_requested` | identical | Draining | ✅ |
-| 8 | `guardrail_triggered` | identical | Failing | ✅ |
+| 8 | typed heartbeat/turn health | identical | Failing | ✅ |
 | 9 | `operator_paused ∨ (context_overflow ∧ compact_retry_exhausted)` | identical | Paused | ✅ |
 | 10 | `handoff_active` | identical | HandingOff | ✅ |
 | 11 | `compaction_active` | identical | Compacting | ✅ |

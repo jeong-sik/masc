@@ -1,12 +1,11 @@
-(** Overview view — project vitals + stagnation.
+(** Overview view — project vitals.
 
     Phase 2.C 다섯 번째 탭. design_v2 IA의 "overview · at a glance"
-    섹션. shell endpoint의 부분집합을 4 블록으로 배치:
+    섹션. shell endpoint의 부분집합을 3 블록으로 배치:
 
     1. Hero: project · cluster · base_path
     2. Build strip: version + commit + uptime
     3. Fleet counts: agents / tasks / keepers (+configured)
-    4. Meta-cognition: stagnation score + dominant belief
 
     [`/api/v1/dashboard/shell`] 5s 폴링. *)
 
@@ -72,7 +71,6 @@ stylesheet
   .v_brass { color: var(--color-accent-fg); }
   .v_ok { color: var(--color-status-ok); }
   .v_warn { color: var(--color-status-warn); }
-  .v_bad { color: var(--accent-blood); }
 
   .counts {
     display: grid;
@@ -103,46 +101,6 @@ stylesheet
     font-variant-numeric: tabular-nums;
   }
 
-  .stag_bar {
-    height: 6px;
-    background: color-mix(in oklab, var(--color-accent-fg) 15%, transparent);
-    position: relative;
-    margin-top: 6px;
-  }
-  .stag_fill {
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    background: var(--color-accent-fg);
-  }
-  .stag_fill_warn { background: var(--color-status-warn); }
-  .stag_fill_bad { background: var(--accent-blood); }
-
-  .belief {
-    padding: 12px 14px;
-    border: 1px dashed var(--color-border-default);
-    font-family: 'EB Garamond', serif;
-    font-size: 14px;
-    color: var(--color-fg-primary);
-    font-style: italic;
-  }
-  .belief_tag {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--color-accent-fg);
-    margin-right: 10px;
-  }
-
-  .empty {
-    padding: 32px 16px;
-    text-align: center;
-    font-family: 'EB Garamond', serif;
-    font-style: italic;
-    color: var(--color-fg-muted);
-    border: 1px dashed var(--color-border-default);
-  }
-
   @media (max-width: 920px) {
     .grid { grid-template-columns: 1fr; }
     .panel { min-width: 0; }
@@ -158,18 +116,11 @@ stylesheet
     .k { color: var(--text-bright); }
     .count_k { color: var(--text-bright); }
     .count_cell { border-width: 2px; border-color: var(--text-bright); }
-    .belief { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--color-fg-primary); }
-    .empty { border-width: 2px; border-style: solid; border-color: var(--text-bright); color: var(--color-fg-primary); }
-    .stag_bar { outline: 1px solid var(--text-bright); }
   }
 
   @media (forced-colors: active) {
-    .stag_fill     { background: Highlight; }
-    .stag_fill_warn { background: Mark; }
-    .stag_fill_bad { background: MarkText; }
     .v_ok  { color: Highlight; }
     .v_warn { color: Mark; }
-    .v_bad { color: MarkText; }
   }
 |}]
 
@@ -184,12 +135,6 @@ let hms_of_seconds total =
 
 let short_commit c =
   if String.length c > 9 then String.sub c ~pos:0 ~len:9 else c
-;;
-
-let stag_color (score : float) =
-  if Float.(score >= 0.75) then Style.stag_fill_bad
-  else if Float.(score >= 0.5) then Style.stag_fill_warn
-  else Style.stag_fill
 ;;
 
 let paused_pill ~(paused : bool) =
@@ -328,70 +273,6 @@ let view_counts_panel (r : Overview_types.response) =
     ]
 ;;
 
-let view_meta_panel (r : Overview_types.response) =
-  let m = r.meta_cognition in
-  let pct = Int.of_float (Float.round_nearest (m.stagnation_score *. 100.0)) in
-  let bar_style =
-    Attr.create
-      "style"
-      (Printf.sprintf "width:%d%%" (Int.clamp_exn pct ~min:0 ~max:100))
-  in
-  let belief_node =
-    match m.dominant_belief with
-    | Some b ->
-      Node.div
-        ~attrs:[ Style.belief; Attr.role "status"; Attr.create "aria-label" ("dominant belief: " ^ b.status) ]
-        [ Node.span
-            ~attrs:[ Style.belief_tag ]
-            [ Node.text b.status ]
-        ; Node.text (if String.is_empty b.claim then "—" else b.claim)
-        ]
-    | None ->
-      Node.div
-        ~attrs:[ Style.empty; Attr.role "status"; Attr.create "aria-label" "No dominant belief" ]
-        [ Node.text "no dominant belief recorded." ]
-  in
-  Node.div
-    ~attrs:[ Style.panel; Attr.role "group"; Attr.create "aria-label" "Meta cognition panel" ]
-    [ Node.h2
-        ~attrs:[ Style.panel_title ]
-        [ Node.text "meta · cognition" ]
-    ; Node.div
-        ~attrs:[ Style.kv_row; Attr.role "list"; Attr.create "aria-label" "Meta and cognition" ]
-        [ Node.div
-            ~attrs:[ Style.kv; Attr.role "listitem" ]
-            [ Node.div ~attrs:[ Style.k ] [ Node.text "stagnation" ]
-            ; Node.div
-                ~attrs:[ Style.v ]
-                [ Node.text (Printf.sprintf "%d%%" pct)
-                ; Node.div
-                    ~attrs:[ Style.stag_bar; Attr.role "progressbar"; Attr.create "aria-label" "Stagnation score"
-                           ; Attr.create "aria-valuenow" (Int.to_string pct)
-                           ; Attr.create "aria-valuemin" "0"
-                           ; Attr.create "aria-valuemax" "100" ]
-                    [ Node.div
-                        ~attrs:[ Style.stag_fill; stag_color m.stagnation_score; bar_style ]
-                        []
-                    ]
-                ]
-            ]
-        ; Node.div
-            ~attrs:[ Style.kv; Attr.role "listitem" ]
-            [ Node.div ~attrs:[ Style.k ] [ Node.text "beliefs" ]
-            ; Node.div
-                ~attrs:[ Style.v ]
-                [ Node.text
-                    (Printf.sprintf
-                       "%d total · %d contested"
-                       m.belief_count
-                       m.contested_belief_count)
-                ]
-            ]
-        ]
-    ; belief_node
-    ]
-;;
-
 let render (r : Overview_types.response) : Node.t =
   Shell_view.view
     ~shell:r
@@ -401,8 +282,8 @@ let render (r : Overview_types.response) : Node.t =
         ~title:"overview"
         ~tail:(Printf.sprintf "· %s" r.status.cluster, `Brass)
         ~sub:
-          "runtime snapshot — identity, build, fleet counts, \
-           meta-cognition. shell endpoint의 압축 projection으로, \
+          "runtime snapshot — identity, build, fleet counts. \
+           shell endpoint의 압축 projection으로, \
            깊은 진단은 각 tab에서 확인."
         ~sub_lang:"ko"
         ()
@@ -411,7 +292,6 @@ let render (r : Overview_types.response) : Node.t =
         [ view_hero_panel r
         ; view_build_panel r
         ; view_counts_panel r
-        ; view_meta_panel r
         ]
     ]
 ;;

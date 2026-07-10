@@ -64,6 +64,19 @@ val cleanup_agent_setup :
 
 val run_with_setup_cleanup : cleanup:(unit -> unit) -> (unit -> 'a) -> 'a
 
+type append_manifest_fn =
+  ?elapsed_ms:int ->
+  ?logical_seq:int ->
+  ?status:string ->
+  ?decision:Yojson.Safe.t ->
+  ?keeper_turn_id:int ->
+  ?oas_turn_count:int ->
+  ?checkpoint_path:string ->
+  ?compaction_source:string ->
+  site:string ->
+  Keeper_runtime_manifest.event_kind ->
+  unit
+
 val make_append_manifest :
   config:Workspace.config ->
   keeper_name:string ->
@@ -73,7 +86,7 @@ val make_append_manifest :
   runtime_id:string ->
   turn_start:Mtime.t ->
   seq_ref:int Atomic.t ->
-  Keeper_agent_run_sidecar.append_manifest_fn
+  append_manifest_fn
 
 val turn_progress_callbacks :
   config:Workspace.config ->

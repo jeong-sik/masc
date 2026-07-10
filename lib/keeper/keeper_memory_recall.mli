@@ -1,4 +1,4 @@
-(** Keeper_memory_recall — recall scoring, auto-rules, and memory evaluation.
+(** Keeper_memory_recall — memory recall and memory evaluation.
 
     Pure memory bank operations are provided by [Keeper_memory_bank]
     (included below). This module adds recall-specific logic on top. *)
@@ -102,108 +102,6 @@ val read_recent_memory_texts_result :
 
 val is_memory_recall_query : string -> bool
 val expected_topic_hint : string -> string option
-
-(** {1 Similarity and Normalization} *)
-
-val clean_for_similarity : string -> string
-val normalize_for_similarity : string -> string list
-val char_ngrams : n:int -> string -> string list
-val jaccard_similarity : string -> string -> float
-
-(** {1 Message Extraction} *)
-
-val latest_message_content_by_role :
-  role:Agent_sdk.Types.role ->
-  Agent_sdk.Types.message list ->
-  string option
-
-val previous_assistant_message_content :
-  Agent_sdk.Types.message list -> string option
-
-(** {1 Goal Alignment} *)
-
-val goal_horizon_candidates : keeper_meta -> string list
-
-val best_goal_similarity :
-  text:string -> goals:string list -> float
-
-val goal_alignment_score :
-  meta:keeper_meta ->
-  user_message:string option ->
-  assistant_reply:string option ->
-  float
-
-(** {1 Repetition Risk} *)
-
-val repetition_risk_score :
-  messages:Agent_sdk.Types.message list ->
-  candidate_reply:string option ->
-  float
-
-(** {1 Auto-Rule Evaluation} *)
-
-type keeper_auto_rule_eval = {
-  repetition_risk : float;
-  goal_alignment : float;
-  response_alignment : float;
-  goal_drift : float;
-  reflect : bool;
-  plan : bool;
-  compact : bool;
-  handoff : bool;
-  guardrail_stop : bool;
-  guardrail_reason : string option;
-  reasons : string list;
-}
-
-val keeper_auto_rule_eval_to_json : keeper_auto_rule_eval -> Yojson.Safe.t
-
-val keeper_reflection_payload_of_auto_rules :
-  keeper_auto_rule_eval -> Yojson.Safe.t
-
-val keeper_auto_rule_eval_of_measurement :
-  ?events:Keeper_state_machine.event list ->
-  Keeper_measurement.measurement_snapshot ->
-  keeper_auto_rule_eval
-
-(** {1 Runtime-Neutral Threshold Evaluation} *)
-
-val evaluate_keeper_auto_rules :
-  meta:keeper_meta ->
-  context_ratio:float ->
-  message_count:int ->
-  token_count:int ->
-  repetition_risk:float ->
-  goal_alignment:float ->
-  response_alignment:float ->
-  unit ->
-  keeper_auto_rule_eval
-
-(** {1 Prioritized Action} *)
-
-type prioritized_action =
-  | Act_guardrail_stop of string
-  | Act_reflect
-  | Act_plan
-  | Act_compact
-  | Act_handoff
-  | Act_none
-
-val prioritized_action : keeper_auto_rule_eval -> prioritized_action
-val prioritized_action_to_string : prioritized_action -> string
-
-(** {1 Learned Policy Auto-Rules} *)
-
-val learned_policy_auto_rules :
-  meta:keeper_meta ->
-  context_ratio:float ->
-  message_count:int ->
-  token_count:int ->
-  repetition_risk:float ->
-  goal_alignment:float ->
-  response_alignment:float ->
-  unit ->
-  keeper_auto_rule_eval
 
 (** {1 User Message Extraction} *)
 

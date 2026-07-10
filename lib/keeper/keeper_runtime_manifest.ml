@@ -220,8 +220,6 @@ let clock_lane_of_event = function
   | Provider_attempt_finished ->
     "provider"
   | Checkpoint_loaded
-  | State_snapshot_sidecar_saved
-  | Working_state_sidecar_saved
   | Checkpoint_saved ->
     "oas_agent"
   | Context_injected
@@ -266,8 +264,6 @@ let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
   let checkpoint_id =
     match event with
     | Checkpoint_loaded
-    | State_snapshot_sidecar_saved
-    | Working_state_sidecar_saved
     | Checkpoint_saved ->
       Some (context_checkpoint_id ctx ?oas_turn_count ())
     | _ -> None
@@ -380,7 +376,7 @@ let decision_public_allowlist =
     ; "attempt_timeout_s"; "attempt_timeout_source"; "attempt_watchdog_source"
     ; "liveness_mode"; "liveness_budget_source"
     ; "context_compact_started_count"; "context_compacted_count"
-    ; "last_compaction"; "active_open_loop_count"
+    ; "last_compaction"
     ; "routing_action"; "routing_reason"; "degraded_runtime_id"
     ; "runtime_execution_built"
     ; "media_dropped_total"; "media_dropped_counts"

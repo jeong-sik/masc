@@ -43,6 +43,17 @@ type load_result =
   | Absent
   | Unreadable of string
 
+(* [Worker_cancelled], not [Cancelled]: [request_status] above already binds
+   an unqualified [Cancelled] constructor with the same field names in this
+   module. A same-named constructor here would shadow it for every
+   unqualified use below and risk silently constructing the wrong type. *)
+type worker_abort_reason =
+  | Timeout of { timeout_sec : float }
+  | Worker_cancelled of
+      { cancelled_by : string
+      ; reason : string
+      }
+
 let mu = Eio.Mutex.create ()
 let pending : (string, entry) Hashtbl.t = Hashtbl.create 16
 let active_switches : (string, Eio.Switch.t) Hashtbl.t = Hashtbl.create 16
@@ -453,8 +464,8 @@ let timeout_done_status ~request_id ~keeper_name ~timeout_sec =
     }
 ;;
 
-let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
-    ~keeper_name () : string =
+let submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~base_path
+    ~(f : unit -> tool_result) ~keeper_name () : string =
   gc_stale ();
   ignore (gc_stale_disk ~base_path);
   let request_id = generate_request_id ~keeper_name in
@@ -472,6 +483,27 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
   Eio.Fiber.fork_daemon ~sw (fun () ->
     set_status_protected ~preserve_terminal:true request_id Running;
     let worker_timeout_sec = effective_timeout_sec ?timeout_sec () in
+    (* [f] owns any terminal signal it emits on its own side channels while
+       it runs (e.g. push_worker_event in server_routes_http_keeper_stream's
+       process_single_turn). Every catch arm below fires exactly when [f] was
+       cut off before reaching that code, so the caller's channel would
+       otherwise see nothing — see masc#23924. Eio.Cancel.protect matches
+       set_status_protected above: at these catch sites the ambient switch
+       may still be tearing down, so an unprotected call could itself be
+       cancelled before the callback runs. *)
+    let notify_aborted reason =
+      match on_worker_aborted with
+      | None -> ()
+      | Some cb ->
+        Eio.Cancel.protect (fun () ->
+          try cb reason with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Keeper.warn
+              "keeper_msg_async: on_worker_aborted callback failed request_id=%s error=%s"
+              request_id
+              (Printexc.to_string exn))
+    in
     let run_worker_with_timeout () =
       match clock with
       | Some clock ->
@@ -481,6 +513,7 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
              timeout_done_status ~request_id ~keeper_name ~timeout_sec:worker_timeout_sec
            in
            set_status_protected ~preserve_terminal:true request_id status;
+           notify_aborted (Timeout { timeout_sec = worker_timeout_sec });
            raise (Worker_timeout worker_timeout_sec))
       | None -> f ()
     in
@@ -500,9 +533,21 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
       with
       | Worker_timeout timeout_sec ->
         timeout_done_status ~request_id ~keeper_name ~timeout_sec
-      | CancelledByOperator -> operator_cancelled_status ()
+      | CancelledByOperator ->
+        notify_aborted
+          (Worker_cancelled
+             { cancelled_by = "operator"
+             ; reason = "keeper_msg request was cancelled by operator"
+             });
+        operator_cancelled_status ()
       | Eio.Cancel.Cancelled _ as e ->
         set_status_protected ~preserve_terminal:true request_id (runtime_cancelled_status ());
+        notify_aborted
+          (Worker_cancelled
+             { cancelled_by = "runtime"
+             ; reason =
+                 "keeper_msg worker was cancelled by runtime before terminal result"
+             });
         clear_active_switch request_id;
         raise e
       | exn ->

@@ -82,13 +82,6 @@ let operator_signal_of_transition (r : transition_record) =
       ~requires_operator_decision:true
       ~next_human_action:"inspect_or_restart_keeper"
       "restart budget exhausted; operator must choose recovery"
-  | Guardrail_stop { reason } ->
-    operator_signal
-      ~signal_class:"runtime_alert"
-      ~severity:"bad"
-      ~requires_operator_decision:true
-      ~next_human_action:"inspect_guardrail_and_resume"
-      (Printf.sprintf "guardrail stopped keeper: %s" reason)
   | Compact_retry_exhausted ->
     operator_signal
       ~signal_class:"context_management"

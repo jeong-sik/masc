@@ -39,7 +39,7 @@ VARIABLES
     context_within_budget, context_handoff_needed,
     compaction_active, handoff_active, operator_paused,
     stop_requested, restart_budget_remaining, backoff_elapsed,
-    guardrail_triggered, drain_complete,
+    drain_complete,
     context_overflow, compact_retry_exhausted,
     restart_count, recorded_phase,
     trace_idx
@@ -50,7 +50,7 @@ vars == <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
           context_within_budget, context_handoff_needed,
           compaction_active, handoff_active, operator_paused,
           stop_requested, restart_budget_remaining, backoff_elapsed,
-          guardrail_triggered, drain_complete,
+          drain_complete,
           context_overflow, compact_retry_exhausted,
           restart_count,
           recorded_phase, trace_idx>>
@@ -66,7 +66,6 @@ DerivePhase ==
     ELSE IF ~fiber_alive /\ restart_budget_remaining /\ backoff_elapsed THEN "Restarting"
     ELSE IF ~fiber_alive /\ restart_budget_remaining THEN "Crashed"
     ELSE IF stop_requested THEN "Draining"
-    ELSE IF guardrail_triggered THEN "Failing"
     ELSE IF operator_paused \/ (context_overflow /\ compact_retry_exhausted) THEN "Paused"
     ELSE IF handoff_active THEN "HandingOff"
     ELSE IF compaction_active THEN "Compacting"
@@ -91,7 +90,6 @@ TraceInit ==
     /\ stop_requested = Trace[1].stop_requested
     /\ restart_budget_remaining = Trace[1].restart_budget_remaining
     /\ backoff_elapsed = Trace[1].backoff_elapsed
-    /\ guardrail_triggered = Trace[1].guardrail_triggered
     /\ drain_complete = Trace[1].drain_complete
     /\ context_overflow = Trace[1].context_overflow
     /\ compact_retry_exhausted = Trace[1].compact_retry_exhausted
@@ -115,7 +113,6 @@ TraceNext ==
     /\ stop_requested' = Trace[trace_idx + 1].stop_requested
     /\ restart_budget_remaining' = Trace[trace_idx + 1].restart_budget_remaining
     /\ backoff_elapsed' = Trace[trace_idx + 1].backoff_elapsed
-    /\ guardrail_triggered' = Trace[trace_idx + 1].guardrail_triggered
     /\ drain_complete' = Trace[trace_idx + 1].drain_complete
     /\ context_overflow' = Trace[trace_idx + 1].context_overflow
     /\ compact_retry_exhausted' = Trace[trace_idx + 1].compact_retry_exhausted
@@ -142,7 +139,7 @@ BugDerivePhaseMismatch ==
                     context_within_budget, context_handoff_needed,
                     compaction_active, handoff_active, operator_paused,
                     stop_requested, restart_budget_remaining, backoff_elapsed,
-                    guardrail_triggered, drain_complete,
+                    drain_complete,
                     context_overflow, compact_retry_exhausted,
                     restart_count>>
 
@@ -152,8 +149,6 @@ TraceStepBuggy ==
     \/ BugDerivePhaseMismatch
 
 TraceSpecBuggy == TraceInit /\ [][TraceStepBuggy]_vars
-
-DerivePhaseAgreementMustHold == DerivePhaseAgreement
 
 TraceSpec == TraceInit /\ [][TraceStep]_vars
 
@@ -172,7 +167,6 @@ TypeOK ==
     /\ stop_requested \in BOOLEAN
     /\ restart_budget_remaining \in BOOLEAN
     /\ backoff_elapsed \in BOOLEAN
-    /\ guardrail_triggered \in BOOLEAN
     /\ drain_complete \in BOOLEAN
     /\ context_overflow \in BOOLEAN
     /\ compact_retry_exhausted \in BOOLEAN

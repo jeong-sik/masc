@@ -179,7 +179,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   board-sink metadata is not rendered as raw backend internals in chat.
 - Board was audited against the standalone `BoardSurface`. The current backed
   route already has hearth/sub-board rail, feed filters, post/thread detail,
-  mention inbox, state blocks, reactions/votes, comments, and composer modes.
+  mention inbox, reactions/votes, comments, and composer modes.
   `dashboard/src/components/board/board-surface.ts` now also fixes the desktop
   mention queue badge to count explicit mention messages from the live
   `messages` store instead of reusing `boardPosts.length`; this matches the
@@ -2083,20 +2083,20 @@ Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/su
 
 ## v2 (26) Keeper Config Goal List Follow-up - 2026-06-25
 
-Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-goals-list`, `.kcf-goal`, `.kcf-goal-body`, `.kcf-goal-title`, `.kcf-goal-id`, and `.kcf-goal-hz` rules plus runtime `dashboard/src/components/keeper-config-panel.ts` active-goal picker.
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-goals-list`, `.kcf-goal`, `.kcf-goal-body`, `.kcf-goal-title`, and `.kcf-goal-id` rules plus runtime `dashboard/src/components/keeper-config-panel.ts` active-goal picker.
 
 ### Implemented In Current Worktree
 
-- Added semantic `kw-config-goals-list`, `kw-config-goal`, `kw-config-goal-check`, `kw-config-goal-body`, `kw-config-goal-title`, `kw-config-goal-id`, and `kw-config-goal-hz` hooks to the live active-goal picker.
-- Reorganized each live goal row around the same checkbox state into v2-style check/body/horizon columns without changing selection behavior.
+- Added semantic `kw-config-goals-list`, `kw-config-goal`, `kw-config-goal-check`, `kw-config-goal-body`, `kw-config-goal-title`, and `kw-config-goal-id` hooks to the live active-goal picker.
+- Reorganized each live goal row around the same checkbox state into v2-style check/body columns without changing selection behavior.
 - Matched v2 goal-list container density with flex-column rows, `gap: 1px`, bordered muted background, `max-height: 460px`, and contained vertical scroll.
-- Matched v2 goal-row geometry with `grid-template-columns: 22px 1fr auto`, `gap: 12px`, and `padding: 10px 14px`.
-- Matched v2 goal title/id/horizon typography with `13px`, `10.5px`, and `10px` text respectively plus horizon pill padding `2px 8px`.
+- Matched v2 goal-row geometry with `grid-template-columns: 22px 1fr`, `gap: 12px`, and `padding: 10px 14px`.
+- Matched v2 goal title/id typography with `13px` and `10.5px` text.
 - Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the live config goal-list contract.
 
 ### Still Missing Vs v2 (26)
 
-- Rendered goal-row checkbox alignment, long title truncation, horizon wrapping, and selected-state treatment are not browser/screenshot verified.
+- Rendered goal-row checkbox alignment, long title truncation, and selected-state treatment are not browser/screenshot verified.
 - Full pixel-perfect keeper-config goal-list parity remains unproven without rendered mobile comparison against the v2 (26) reference.
 
 ## v2 (26) Keeper Config Hook Table Follow-up - 2026-06-25
@@ -2162,7 +2162,7 @@ Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/ke
 
 - Added selected-row visual treatment for live active-goal rows via `.kw-config-goal:has(.kw-config-goal-check:checked)` in `dashboard/src/styles/keeper-workspace.css`.
 - Matched the v2 checkbox geometry with an `18px` checkbox target and accent-colored checked state while preserving the real checkbox input and existing goal assignment behavior.
-- Kept goal data runtime-backed from the existing goal store response; no standalone fixture goals or fake horizon data were introduced.
+- Kept goal data runtime-backed from the existing goal store response; no standalone fixture goal metadata was introduced.
 - Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the goal selected-state and checkbox geometry contract.
 
 ### Still Missing Vs v2 (26)
@@ -2455,7 +2455,7 @@ Additional source reviewed: existing live `kw-config-goal-id` active-goal row me
 ### Still Missing Vs v2 (26)
 
 - Browser/screenshot validation is still not run in this pass.
-- Rendered QA should confirm long goal IDs truncate cleanly next to horizon chips on narrow mobile screens.
+- Rendered QA should confirm long goal IDs truncate cleanly next to adjacent metadata on narrow mobile screens.
 - Full pixel-perfect goal ID typography parity remains unproven without rendered mobile comparison against the v2 (26) reference.
 
 ## v2 (26) Keeper Config Readonly Long Text Overflow Follow-up - 2026-06-25
@@ -2473,22 +2473,6 @@ Additional source reviewed: existing live `kw-config-longtext` hook and the v2 r
 - Browser/screenshot validation is still not run in this pass.
 - Rendered QA should confirm long prompt/config blocks do not create nested scroll traps inside the mobile config drawer.
 - Full pixel-perfect readonly long-text overflow parity remains unproven without rendered mobile comparison against the v2 (26) reference.
-
-## v2 (26) Keeper Config Goal Horizon Typography Follow-up - 2026-06-25
-
-Additional source reviewed: existing live `kw-config-goal-hz` active-goal horizon chip styling and the v2 goal picker compact horizon metadata treatment.
-
-### Implemented In Current Worktree
-
-- Added explicit mono typography to `.kw-config-goal-hz` in `dashboard/src/styles/keeper-workspace.css`.
-- Preserved existing live horizon values, chip geometry, selected state, and goal assignment behavior.
-- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the goal horizon typography contract.
-
-### Still Missing Vs v2 (26)
-
-- Browser/screenshot validation is still not run in this pass.
-- Rendered QA should confirm horizon chips remain readable next to long titles and IDs on narrow mobile screens.
-- Full pixel-perfect goal horizon typography parity remains unproven without rendered mobile comparison against the v2 (26) reference.
 
 ## v2 (26) Keeper Config Empty Readonly Token Italic Cleanup - 2026-06-25
 

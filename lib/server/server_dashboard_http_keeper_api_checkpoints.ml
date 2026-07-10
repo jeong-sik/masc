@@ -20,7 +20,6 @@ let oas_checkpoint_summary_json
     Keeper_context_core.checkpoint_generation checkpoint ~fallback:fallback_generation
   in
   let messages = checkpoint.messages in
-  let continuity_summary = continuity_summary_of_messages messages in
   `Assoc
     [ "snapshot_id", `String snapshot_id
     ; "source_kind", `String source_kind
@@ -35,7 +34,6 @@ let oas_checkpoint_summary_json
            | Some prompt -> Option.is_some (String_util.trim_to_option prompt)
            | None -> false) )
     ; ( "latest_preview", Json_util.string_opt_to_json (latest_preview_of_messages messages) )
-    ; ( "continuity_summary", Json_util.string_opt_to_json continuity_summary )
     ; "file_stat", stat_json_of_path path
     ]
 ;;

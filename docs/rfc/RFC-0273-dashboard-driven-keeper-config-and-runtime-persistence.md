@@ -35,7 +35,7 @@ This RFC defines the backend write paths + the panel reshape needed to make thes
 
 `lib/keeper/keeper_meta_contract.ml:675` documents and the type at `:484` enforces:
 
-- `keeper_meta` directly holds `persona : string option`, `instructions : string`, `social_model : string`, `tool_access : string list`, `tool_denylist : string list`.
+- `keeper_meta` directly holds `persona : string option`, `instructions : string`, `tool_access : string list`, `tool_denylist : string list`.
 - **`model`/`runtime` are NOT free `keeper_meta` fields.** A keeper's runtime is assigned in `runtime.toml`; the model/provider identity is *resolved* from that assignment (falling back to the default runtime / persona profile `model`).
 
 Consequence: the v2 panel's *persona / instructions / tool-permission* edits write **keeper_meta** (per-keeper, CAS-safe); its *model / runtime* dropdowns write the **runtime.toml keeper→runtime assignment** (host_config, global routing). These are two different stores with two different risk tiers and MUST NOT be collapsed into one write.
@@ -58,7 +58,7 @@ This is entirely MASC-side config-persistence orchestration. OAS owns provider/m
 > **Amendment (PR-TierA, grounded correction).** The original draft assumed (a) persona/instructions need a *new* write path, (b) the tool-permission panel is a generic `Record<string,boolean>` needing reshape, and (c) `keeper-detail-page.ts:9` should swap to a v2 panel. Grounding `origin/main` corrected all three:
 > - **instructions** already persists via the production panel (`keeper-config-panel.ts` `saveConfig` → `patchKeeperConfig` → `POST /api/v1/keepers/:name/config`); **tool_access/tool_denylist** already persists via `saveToolDenylist` → `setKeeperToolPolicy` → `POST /api/v1/keepers/:name/tools` (action `set_policy`). Adding `Set_persona`/`Set_instructions` to `/tools` would duplicate `/config` (and silently weaken its auth: `/config` is `CanAdmin`, `/tools` is tool-auth).
 > - The production panel **already renders tool permissions masc-tool-keyed** from `KeeperConfig.tools` (`tool_access[]`/`resolved_allowlist[]`/`tool_denylist[]` + counts). The generic `Record<string,boolean>` only exists in `keeper-config-panel-v2.ts`, a dead local-state stub rendered nowhere.
-> - Swapping `keeper-detail-page.ts:9` to the v2 stub would **regress** the production editors (goals, will/needs/desires, sandbox/network, runtime_id, denylist, …) the stub does not implement.
+> - Swapping `keeper-detail-page.ts:9` to the v2 stub would **regress** the production editors (goal links, sandbox/network, runtime assignment, denylist, …) the stub does not implement.
 >
 > Tier A is therefore re-scoped to the **one genuine net-new gap**: the `set_policy` write accepts unknown tool names and persists them silently. There is no static per-tool "risk badge" field (risk is *computed* by `Governance_pipeline_risk.assess_risk`), so that part is dropped too.
 

@@ -37,7 +37,6 @@ type parsed_keeper_policy =
 type parsed_keeper_state =
   { ps_created_at_raw : string
   ; ps_updated_at_raw : string
-  ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
   ; ps_latched_reason : Keeper_latched_reason.t option
@@ -185,12 +184,12 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       Safe_ops.json_int ~default:env_token_gate "compaction_token_gate" json
       |> normalize_compaction_token_gate
     in
-    let continuity_compaction_cooldown_sec =
+    let compaction_cooldown_sec =
       Safe_ops.json_int
-        ~default:(keeper_continuity_compaction_cooldown_sec ())
-        "continuity_compaction_cooldown_sec"
+        ~default:(keeper_compaction_cooldown_sec ())
+        "compaction_cooldown_sec"
         json
-      |> normalize_continuity_compaction_cooldown_sec
+      |> normalize_compaction_cooldown_sec
     in
     let pp_auto_handoff = Safe_ops.json_bool ~default:true "auto_handoff" json in
     let pp_handoff_threshold =
@@ -219,7 +218,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
           ; ratio_gate = compaction_ratio_gate
           ; message_gate = compaction_message_gate
           ; token_gate = compaction_token_gate
-          ; cooldown_sec = continuity_compaction_cooldown_sec
+          ; cooldown_sec = compaction_cooldown_sec
           ; max_checkpoint_messages =
               Safe_ops.json_int ~default:120 "max_checkpoint_messages" json
           ; keep_recent_tool_results =
@@ -281,48 +280,6 @@ let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
   }
 ;;
 
-(* Observability for the synthetic-ts recovery branch.  Without
-   this counter, the loader silently substituted [Time_compat.now ()]
-   when persisted [last_continuity_update_ts] was missing/invalid
-   but [continuity_summary] was non-empty — a recovery designed to
-   stop the cooldown gate from bypassing on a corrupted meta JSON.
-   The substitution itself is correct, but operators had no way to
-   tell whether a keeper booted with a real timestamp or a
-   synthesised one.  Closes the silent-recovery gap noted in
-   .tmp/memory-compacting-analysis.html (continuity ts recovery). *)
-let () =
-  Otel_metric_store.register_counter
-    ~name:Keeper_metrics.(to_string ContinuityTsRecovered)
-    ~help:
-      "Total [parse_last_continuity_update_ts] events where the \
-       persisted timestamp was missing/invalid but the continuity \
-       summary was non-empty, triggering a synthetic now() \
-       substitution.  Non-zero counts mean the meta JSON was \
-       written without a valid timestamp or the field was \
-       corrupted on disk."
-    ()
-;;
-
-let parse_last_continuity_update_ts ~(continuity_summary : string) (json : Yojson.Safe.t) =
-  let parsed_ts = Safe_ops.json_float ~default:0.0 "last_continuity_update_ts" json in
-  if parsed_ts <= 0.0 && String.trim continuity_summary <> ""
-  then begin
-    let synthetic = Time_compat.now () in
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ContinuityTsRecovered)
-      ();
-    Log.Keeper.warn
-      "parse_last_continuity_update_ts: persisted ts missing/invalid \
-       (=%f) but continuity_summary is non-empty (len=%d); \
-       substituting now()=%f to keep cooldown gate from bypassing"
-      parsed_ts
-      (String.length continuity_summary)
-      synthetic;
-    synthetic
-  end
-  else parsed_ts
-;;
-
 let parse_keeper_state
       (json : Yojson.Safe.t)
       ~(trace_id : Keeper_id.Trace_id.t)
@@ -334,12 +291,6 @@ let parse_keeper_state
   let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
   let ps_created_at_raw = Safe_ops.json_string ~default:"" "created_at" json in
   let ps_updated_at_raw = Safe_ops.json_string ~default:"" "updated_at" json in
-  let ps_continuity_summary =
-    Safe_ops.json_string ~default:"" "continuity_summary" json
-  in
-  let last_continuity_update_ts =
-    parse_last_continuity_update_ts ~continuity_summary:ps_continuity_summary json
-  in
   let ps_active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
   let last_autonomous_action_at =
     Safe_ops.json_string ~default:"" "last_autonomous_action_at" json
@@ -430,7 +381,6 @@ let parse_keeper_state
   let ps_max_context_override = Safe_ops.json_int_opt "max_context_override" json in
   { ps_created_at_raw
   ; ps_updated_at_raw
-  ; ps_continuity_summary
   ; ps_active_goal_ids
   ; ps_paused
   ; ps_latched_reason
@@ -446,7 +396,6 @@ let parse_keeper_state
       ; trace_id
       ; trace_history
       ; last_handoff_ts
-      ; last_continuity_update_ts
       ; last_autonomous_action_at
       ; autonomous_action_count
       ; autonomous_turn_count
@@ -579,7 +528,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (if state.ps_updated_at_raw = ""
                         then now_iso ()
                         else state.ps_updated_at_raw)
-                   ; continuity_summary = state.ps_continuity_summary
                    ; active_goal_ids = state.ps_active_goal_ids
                    ; paused = state.ps_paused
                    ; latched_reason = state.ps_latched_reason

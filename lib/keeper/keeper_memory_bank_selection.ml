@@ -1,10 +1,5 @@
-(* Keeper_memory_bank_selection — candidate selection pipeline, dedup,
-   consensus detection, placeholder filtering, and snapshot extraction.
-   Extracted from keeper_memory_bank.ml during godfile decomposition. *)
-
-open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
+(* Keeper_memory_bank_selection -- lock management, deduplication,
+   consensus detection, and durable-memory text validation. *)
 
 include Keeper_memory_policy
 
@@ -31,65 +26,6 @@ let with_memory_bank_lock path f =
   with_stdlib_mutex mutex f
 ;;
 
-type candidate_selection_result = {
-  selected: (string * string * int) list;
-  dropped_by_kind: (string * int) list;
-  dropped_by_total_cap: int;
-  suppressed_synthetic_candidates: int;
-}
-
-let empty_candidate_selection =
-  {
-    selected = [];
-    dropped_by_kind = [];
-    dropped_by_total_cap = 0;
-    suppressed_synthetic_candidates = 0;
-  }
-
-let select_memory_candidates
-    (rows : (string * string * int) list) : candidate_selection_result =
-  let total_cap = total_cap () in
-  let kind_caps = kind_caps () in
-  let used_by_kind : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let dropped_by_kind : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let rec go acc dropped_total rest =
-    match rest with
-    | [] ->
-        {
-          selected = List.rev acc;
-          dropped_by_kind =
-            Hashtbl.to_seq dropped_by_kind
-            |> List.of_seq
-            |> List.sort (fun (a, _) (b, _) -> String.compare a b);
-          dropped_by_total_cap = dropped_total;
-          suppressed_synthetic_candidates = 0;
-        }
-    | _ when List.length acc >= total_cap ->
-        {
-          selected = List.rev acc;
-          dropped_by_kind =
-            Hashtbl.to_seq dropped_by_kind
-            |> List.of_seq
-            |> List.sort (fun (a, _) (b, _) -> String.compare a b);
-          dropped_by_total_cap = dropped_total + List.length rest;
-          suppressed_synthetic_candidates = 0;
-        }
-    | (kind, text, pr) :: rest' ->
-        let cap = cap_for_kind kind_caps kind in
-        let used = Option.value ~default:0 (Hashtbl.find_opt used_by_kind kind) in
-        if cap <= 0 || used >= cap then begin
-          let cur =
-            Option.value ~default:0 (Hashtbl.find_opt dropped_by_kind kind)
-          in
-          Hashtbl.replace dropped_by_kind kind (cur + 1);
-          go acc dropped_total rest'
-        end else begin
-          Hashtbl.replace used_by_kind kind (used + 1);
-          go ((kind, text, pr) :: acc) dropped_total rest'
-        end
-  in
-  go [] 0 rows
-
 (** Filter a list to unique items by a key function.
     Empty keys are skipped (treated as duplicates). *)
 let dedup_by_key (key_of : 'a -> string) (items : 'a list) : 'a list =
@@ -104,36 +40,6 @@ let dedup_by_key (key_of : 'a -> string) (items : 'a list) : 'a list =
   go SS.empty [] items
 
 let jaccard_similarity = Text_similarity.jaccard_similarity
-
-(* Step 14(b) of the bloodflow restoration plan inlined the env knob
-   [MASC_KEEPER_MEMORY_DEDUP_SIMILARITY_THRESHOLD]: hyperparameters
-   belong in code, not in [Sys.getenv_opt]. *)
-let semantic_dedup_similarity_threshold () = 0.85
-
-let dedup_memory_candidates
-    (items : (string * string * int) list) : (string * string * int) list =
-  let exact =
-    dedup_by_key
-      (fun (kind, text, _) ->
-        String.lowercase_ascii (String.trim kind ^ ":" ^ String.trim text))
-      items
-  in
-  let threshold = semantic_dedup_similarity_threshold () in
-  if threshold >= 1.0 then exact
-  else
-    let rec go kept = function
-      | [] -> List.rev kept
-      | (kind, text, pr) :: rest ->
-          let is_dup =
-            List.exists
-              (fun (_, kept_text, _) ->
-                jaccard_similarity text kept_text >= threshold)
-              kept
-          in
-          if is_dup then go kept rest
-          else go ((kind, text, pr) :: kept) rest
-    in
-    go [] exact
 
 (* Punctuation strip used by the dedup key — fully static, hoist to
    module level so the DFA is built once per process. *)
@@ -234,73 +140,3 @@ let is_meaningful_memory_text (s : string) : bool =
   && not (has_inflated_consensus_marker s)
   && not (String_util.contains_substring s "[turn budget exhausted")
   && String.length s <= max_memory_text_length ()
-
-let memory_candidates_from_snapshot
-    (snapshot : keeper_state_snapshot) : candidate_selection_result =
-  let add_opt kind value acc =
-    match value with
-    | None -> acc
-    | Some text ->
-        let text = String.trim text in
-        if text = "" || not (is_meaningful_memory_text text) then acc
-        else
-          let priority =
-            match snapshot.priority with
-            | Some p -> max 1 (min 100 p)
-            | None -> tuned_priority_for_candidate ~kind ~text
-          in
-          ( kind,
-            text,
-            priority )
-          :: acc
-  in
-  let add_list kind values acc =
-    List.fold_left
-      (fun acc item ->
-        let item = String.trim item in
-        if item = "" || not (is_meaningful_memory_text item) then acc
-        else
-          let priority =
-            match snapshot.priority with
-            | Some p -> max 1 (min 100 p)
-            | None -> tuned_priority_for_candidate ~kind ~text:item
-          in
-          ( kind,
-            item,
-            priority )
-          :: acc)
-      acc values
-  in
-  let raw =
-    []
-    |> add_opt "goal" snapshot.goal
-    |> add_opt "progress" snapshot.progress
-    |> add_opt "progress" snapshot.done_summary
-    |> add_opt "next" snapshot.next_summary
-    |> add_list "next" snapshot.next_items
-    |> add_list "decision" snapshot.decisions
-    |> add_list "open_question" snapshot.open_questions
-    |> add_list "constraints" snapshot.constraints
-    |> dedup_memory_candidates
-    |> List.sort (fun (_, ta, pa) (_, tb, pb) ->
-         let c = compare pb pa in
-         if c <> 0 then c else String.compare ta tb)
-  in
-  select_memory_candidates raw
-
-let memory_candidates_from_snapshot_gated ~is_synthetic snapshot =
-  if is_synthetic
-  then
-    let ungated = memory_candidates_from_snapshot snapshot in
-    let dropped_by_kind =
-      List.fold_left
-        (fun total (_, count) -> total + count)
-        0
-        ungated.dropped_by_kind
-    in
-    {
-      empty_candidate_selection with
-      suppressed_synthetic_candidates =
-        List.length ungated.selected + ungated.dropped_by_total_cap + dropped_by_kind;
-    }
-  else memory_candidates_from_snapshot snapshot

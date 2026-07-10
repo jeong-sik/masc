@@ -29,7 +29,6 @@ type runtime_manifest_scan =
   ; mutable source_clock_counts : (string, int) Hashtbl.t
   ; mutable context_injected_count : int
   ; mutable context_compacted_event_count : int
-  ; mutable active_open_loop_count : int option
   ; mutable provider_started_count : int
   ; mutable provider_finished_count : int
   ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
@@ -77,7 +76,6 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   ; source_clock_counts = Hashtbl.create 17
   ; context_injected_count = 0
   ; context_compacted_event_count = 0
-  ; active_open_loop_count = None
   ; provider_started_count = 0
   ; provider_finished_count = 0
   ; provider_terminal_row = None
@@ -191,12 +189,6 @@ let update_runtime_manifest_scan scan row =
    | Keeper_runtime_manifest.Context_compacted ->
      scan.context_compacted_event_count <- scan.context_compacted_event_count + 1;
      scan.latest_context_compacted_row <- Some row
-   | Keeper_runtime_manifest.State_snapshot_sidecar_saved ->
-     scan.active_open_loop_count <-
-       Json_util.get_int row.Keeper_runtime_manifest.decision "active_open_loop_count"
-   | Keeper_runtime_manifest.Working_state_sidecar_saved ->
-     scan.active_open_loop_count <-
-       Json_util.get_int row.Keeper_runtime_manifest.decision "active_open_loop_count"
    | Keeper_runtime_manifest.Event_bus_correlated ->
      let decision = row.Keeper_runtime_manifest.decision in
      scan.event_bus_count <- scan.event_bus_count + 1;

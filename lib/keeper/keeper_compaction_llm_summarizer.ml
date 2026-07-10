@@ -94,7 +94,7 @@ let messages_for_plan ~(messages : Agent_sdk.Types.message list) =
      indices. Prefer keeping recent messages and any with concrete code paths, \
      commands, decisions, or unresolved blockers. Write one durable [summary] \
      prose block that stands in for the summarized messages. Do not invent \
-     facts. Do not include [STATE] blocks or markdown fences."
+     facts. Do not include markdown fences."
   in
   let user =
     Printf.sprintf

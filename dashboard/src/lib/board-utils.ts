@@ -2,8 +2,7 @@
 
 /**
  * User-visible fallback shown when a board message arrives without a
- * `from` field — three board panels (state-block-messages,
- * mention-inbox, message-workspace-timeline) used to inline the literal
+ * `from` field — board message panels used to inline the literal
  * `'system'` in `row.message.from ?? 'system'`. Captured here so a
  * future relabel (e.g. localising to `'시스템'` or distinguishing
  * automation from system) updates every panel in one place.
@@ -17,12 +16,7 @@ export const SYSTEM_MESSAGE_FROM = 'system'
  * Falls back to `<seq>-<index>` for unposted/draft rows where `id`
  * hasn't been assigned yet, with `'message'` as the seq placeholder.
  *
- * Two board panels (`mention-inbox`, `message-workspace-timeline`) shipped
- * this exact body file-internal as `rowKey`. A third (`state-block-messages`)
- * uses a different base (`id ?? seq ?? index` single chain) plus a
- * `state-block.slice(0, 24)` suffix and is left on its own helper —
- * a future change to its base policy can adopt this helper once the
- * suffix is parameterised.
+ * The mention inbox and workspace timeline share this key policy.
  */
 export function boardMessageRowKey(message: Message, index: number): string {
   return message.id ?? `${message.seq ?? 'message'}-${index}`
@@ -31,28 +25,16 @@ export function boardMessageRowKey(message: Message, index: number): string {
 /**
  * One-line preview text for a board `Message`.
  *
- * Prefers the state-stripped content (so a message that's *only* a
- * state block falls through to either raw content or `'(empty)'`).
- * The state-only case is what differentiates this fallback chain from
- * the `state-block-messages` panel's variant, which intentionally
- * surfaces `'(state-only message)'` instead because that view is
- * specifically for state-block traffic.
- *
- * Two board panels (`mention-inbox`, `message-workspace-timeline`) shipped
- * this exact body file-internal as `previewContent`. The third panel
- * (`state-block-messages`) stays on its own variant — its empty branch
- * is `'(state-only message)'` rather than `'(empty)'`, and the fallback
- * chain skips the raw content step.
+ * The mention inbox and workspace timeline share this fallback.
  */
 export function previewBoardMessage(message: Message): string {
-  return stripStateBlocks(message.content).trim() || message.content.trim() || '(empty)'
+  return message.content.trim() || '(empty)'
 }
 
 import { navigate } from '../router'
 import type { Message } from '../types'
 import { findKeeper } from './keeper-utils'
 import { openKeeperDetail } from '../components/keeper-detail'
-import { stripStateBlocks } from '../keeper-message'
 import { clampPct } from './format-number'
 import type { BoardActorIdentity, BoardClaimEvidenceProjection, BoardContributorQuality, BoardPost } from '../types'
 

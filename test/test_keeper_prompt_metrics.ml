@@ -13,7 +13,6 @@ module KSR = Keeper_skill_routing
 module KP = Masc.Keeper_prompt
 module KRP = Masc.Keeper_run_prompt
 module KCB = Masc.Keeper_failure_circuit_breaker
-module KUP = Masc.Keeper_unified_prompt
 
 (* CJK-aware token estimator from OAS *)
 let estimate_tokens s =
@@ -56,8 +55,8 @@ let base_system_prompt =
    Follow the instructions carefully and maintain state across turns. \
    When using tools, prefer the most specific tool available."
 
-let continuity_snapshot_text =
-  "Recent continuity snapshot:\n\
+let checkpoint_context_text =
+  "Recent checkpoint context:\n\
    Goal: Deploy masc v0.97.0 to production\n\
    Progress: OAS pinned, keeper hooks updated, CI passing\n\
    Next: Run integration tests, prepare release notes\n\
@@ -89,7 +88,7 @@ let build_separated () : KAR.turn_prompt =
   let soft_parts = List.filter
     (fun s -> String.trim s <> "")
     [ skill_route_text;
-      continuity_snapshot_text;
+      checkpoint_context_text;
       worktree_text;
       turn_instructions_text ]
   in
@@ -97,7 +96,6 @@ let build_separated () : KAR.turn_prompt =
   let prompt =
     KP.append_direct_reply_mode_prompt ~base_prompt:base_system_prompt
   in
-  let prompt = prompt ^ "\n\n" ^ KP.state_block_output_guard_text in
   { system_prompt = prompt; dynamic_context }
 
 (* Simulate the pre-split combined prompt (everything in system_prompt) *)
@@ -107,9 +105,8 @@ let build_combined () : string =
   in
   let parts = [
     prompt;
-    KP.state_block_output_guard_text;
     skill_route_text;
-    continuity_snapshot_text;
+    checkpoint_context_text;
     worktree_text;
     turn_instructions_text;
   ] in
@@ -167,13 +164,9 @@ let test_hard_constraints_in_system_only () =
   (* Hard constraints must be in system_prompt *)
   check bool "direct_reply in system" true
     (has_in tp.system_prompt "<direct_reply_mode>");
-  check bool "output guard in system" true
-    (has_in tp.system_prompt "Output guard:");
   (* Hard constraints must NOT be in dynamic_context *)
   check bool "no direct_reply in dynamic" true
-    (not (has_in tp.dynamic_context "<direct_reply_mode>"));
-  check bool "no output guard in dynamic" true
-    (not (has_in tp.dynamic_context "Output guard:"))
+    (not (has_in tp.dynamic_context "<direct_reply_mode>"))
 
 let test_direct_reply_prompt_requires_action_evidence () =
   let tp = build_separated () in
@@ -191,8 +184,8 @@ let test_soft_context_in_dynamic_only () =
     with Not_found -> false
   in
   (* Soft context must be in dynamic_context *)
-  check bool "continuity in dynamic" true
-    (has_in tp.dynamic_context "continuity snapshot");
+  check bool "checkpoint context in dynamic" true
+    (has_in tp.dynamic_context "checkpoint context");
   check bool "skill route in dynamic" true
     (has_in tp.dynamic_context "Skill routing");
   check bool "worktree in dynamic" true
@@ -200,8 +193,8 @@ let test_soft_context_in_dynamic_only () =
   check bool "turn instructions in dynamic" true
     (has_in tp.dynamic_context "Turn-specific instructions");
   (* Soft context must NOT be in system_prompt *)
-  check bool "no continuity in system" true
-    (not (has_in tp.system_prompt "continuity snapshot"));
+  check bool "no checkpoint context in system" true
+    (not (has_in tp.system_prompt "checkpoint context"));
   check bool "no worktree in system" true
     (not (has_in tp.system_prompt "Worktree changes"))
 
@@ -217,17 +210,17 @@ let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
   check bool "does not mention masc_heartbeat" false
     (has_in prompt "masc_heartbeat")
 
-let test_keeper_prompt_preserves_snapshot_delta_anchors () =
+let test_keeper_prompt_preserves_runtime_continuity_anchors () =
   let prompt =
     KP.build_keeper_system_prompt
-      ~goal:"Keep live snapshot continuity safe"
+      ~goal:"Keep runtime continuity safe"
       ~instructions:""
       ()
   in
   check bool "continuity anchor present" true (has_in prompt "<continuity>");
   check bool "PR merge rules retained" true (has_in prompt "PR merge rules");
-  check bool "state block template retained" true
-    (has_in prompt "State block template");
+  check bool "runtime checkpoint ownership retained" true
+    (has_in prompt "runtime checkpoint");
   check bool "world anchor present" true (has_in prompt "<world>")
 
 let test_no_catalog_repository_injection () =
@@ -258,7 +251,7 @@ let test_no_catalog_repository_injection () =
 let test_prompt_recovery_guard_restores_missing_anchors () =
   let prompt =
     KP.ensure_critical_prompt_anchors
-      "You are imseonghan, a keeper agent.\nWill: keep going."
+      "You are imseonghan, a keeper agent.\nInstructions: keep going."
   in
   check bool "original persona text kept" true
     (has_in prompt "You are imseonghan");
@@ -266,8 +259,8 @@ let test_prompt_recovery_guard_restores_missing_anchors () =
     (has_in prompt "<continuity>");
   check bool "recovery PR merge rules present" true
     (has_in prompt "PR merge rules");
-  check bool "recovery state template present" true
-    (has_in prompt "State block template");
+  check bool "recovery names runtime-owned continuity" true
+    (has_in prompt "Continuity is runtime-owned");
   check bool "recovery world anchor present" true (has_in prompt "<world>")
 
 let test_prompt_recovery_guard_uses_code_fallback_when_registry_empty () =
@@ -275,70 +268,16 @@ let test_prompt_recovery_guard_uses_code_fallback_when_registry_empty () =
   Fun.protect ~finally:restore_prompt_registry (fun () ->
       let prompt =
         KP.ensure_critical_prompt_anchors
-          "You are imseonghan, a keeper agent.\nWill: keep going."
+          "You are imseonghan, a keeper agent.\nInstructions: keep going."
       in
       check bool "fallback continuity anchor present" true
         (has_in prompt "<continuity>");
       check bool "fallback PR merge rules present" true
         (has_in prompt "PR merge rules");
-      check bool "fallback state template present" true
-        (has_in prompt "State block template");
+      check bool "fallback names runtime-owned continuity" true
+        (has_in prompt "checkpoint");
       check bool "fallback world anchor present" true
         (has_in prompt "<world>"))
-
-let test_state_block_guard_is_runtime_managed_not_absolute_never () =
-  let guard = KP.state_block_output_guard_text in
-  check bool "guard mentions runtime-managed continuity" true
-    (has_in guard "runtime-managed continuity");
-  check bool "guard directs bracketed state block output" true
-    (has_in guard "[STATE]...[/STATE]");
-  check bool "guard avoids absolute NEVER state wording" false
-    (has_in guard ("NEVER output " ^ "[STATE]"));
-  check bool "guard mentions runtime synthesis and persistence" true
-    (has_in guard "synthesize and persist state metadata")
-
-let test_unified_state_instruction_respects_turn_level_guard () =
-  let text = KUP.state_block_instruction_text in
-  check bool "instruction names state block template" true
-    (has_in text "State block template");
-  check bool "instruction is scoped to non-direct turns" true
-    (has_in text "for non-direct keeper turns");
-  check bool "instruction lists canonical fields" true
-    (has_in text "DONE, NEXT, Goal, Decisions, OpenQuestions, and Constraints");
-  check bool "instruction does not depend on keeper_report_state" false
-    (has_in text "keeper_report_state");
-  check bool "instruction avoids old unconditional wording" false
-    (has_in text
-       ("End every response with a "
-        ^ "[STATE]...[/STATE] block:"))
-
-let test_state_block_schema_is_canonical_six_field_shape () =
-  let text = KUP.state_block_instruction_text in
-  List.iter
-    (fun field ->
-      check bool ("schema includes " ^ field) true (has_in text field))
-    [
-      "DONE: what you accomplished this turn";
-      "NEXT: what the next turn should do";
-      "Goal: active goal id from <available_goals> verbatim";
-      "Decisions: key decisions";
-      "OpenQuestions: unresolved items";
-      "Constraints: active constraints";
-    ];
-  check bool "schema excludes old Progress field" false (has_in text "Progress:");
-  (* #20937: prose in the Goal field is cleared by the post-turn sanitizer
-     (active_goal_ids membership), so the instruction must demand the id. *)
-  check bool "goal field demands id, not prose" false
-    (has_in text "Goal: current active goal")
-
-let test_constitution_uses_canonical_state_instruction () =
-  let text = KP.keeper_constitution () in
-  check bool "constitution placeholder rendered" false
-    (has_in text "{{state_block_instruction}}");
-  check bool "constitution embeds canonical instruction" true
-    (has_in text KUP.state_block_instruction_text);
-  check bool "constitution excludes old Progress template" false
-    (has_in text "Progress: <short>")
 
 let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
   let prompt =
@@ -355,7 +294,7 @@ let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
 let test_keeper_oas_guardrails_are_visibility_neutral () =
   let source_guardrails =
     { Agent_sdk.Guardrails.tool_filter =
-        Agent_sdk.Guardrails.AllowList [ "keeper_report_state" ]
+        Agent_sdk.Guardrails.AllowList [ "keeper_board_list" ]
     ; max_tool_calls_per_turn = Some 7
     }
   in
@@ -542,8 +481,8 @@ let () =
             test_soft_context_in_dynamic_only;
           test_case "direct reply prompt matches server-managed heartbeat policy" `Quick
             test_direct_reply_prompt_matches_server_managed_heartbeat_policy;
-          test_case "keeper prompt preserves snapshot delta anchors" `Quick
-            test_keeper_prompt_preserves_snapshot_delta_anchors;
+          test_case "keeper prompt preserves runtime continuity anchors" `Quick
+            test_keeper_prompt_preserves_runtime_continuity_anchors;
           test_case "no catalog repository injection (RFC-0324 B-1)" `Quick
             test_no_catalog_repository_injection;
           test_case "prompt recovery guard restores missing anchors" `Quick
@@ -551,14 +490,6 @@ let () =
           test_case "prompt recovery guard survives empty registry value"
             `Quick
             test_prompt_recovery_guard_uses_code_fallback_when_registry_empty;
-          test_case "state block guard is runtime-managed" `Quick
-            test_state_block_guard_is_runtime_managed_not_absolute_never;
-          test_case "unified state instruction respects turn-level guard" `Quick
-            test_unified_state_instruction_respects_turn_level_guard;
-          test_case "state block schema is canonical six-field shape" `Quick
-            test_state_block_schema_is_canonical_six_field_shape;
-          test_case "constitution uses canonical state instruction" `Quick
-            test_constitution_uses_canonical_state_instruction;
           test_case "keeper OAS base guardrails are visibility-neutral" `Quick
             test_keeper_oas_guardrails_are_visibility_neutral;
           test_case "prompt mentions runtime operator approval for risky actions" `Quick

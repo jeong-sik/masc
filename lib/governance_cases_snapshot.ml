@@ -2,8 +2,7 @@
 
     The governance case tracking UI was retired (dashboard hardcoded
     [("pending_ruling", Int 0)]), but stale case files remain on disk
-    from before the retirement — and [Meta_cognition_snapshot] still
-    consumes them.  This helper surfaces the raw counts so the
+    from before the retirement.  This helper surfaces the raw counts so the
     dashboard can report the truth instead of a constant zero.
 
     See #7815. *)

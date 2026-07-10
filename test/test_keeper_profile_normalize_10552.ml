@@ -1,12 +1,10 @@
 (** #10552: pin the WRITE/READ symmetry between TOML/persona profile
     load and JSON meta load for the [instructions] personality field.
-    (RFC-0282 removed the [will]/[needs]/[desires] triple this test
-    originally also covered; the byte-cap math is identical for the
-    surviving [instructions] field.)
+    The byte-cap math applies to the surviving [instructions] field.
 
     Pre-fix #10479 made [personality_text_equal] symmetric at compare
     time, but [profile_defaults_of_toml] still loaded the raw TOML
-    string without [normalize_self_model_text].  When [target_instructions]
+    string without [normalize_prompt_text]. When [target_instructions]
     was computed via [apply_default defaults.instructions meta.instructions]
     with [defaults.instructions = Some <raw>] (e.g. 322 bytes for
     nick0cave) and [meta.instructions] already normalized to 318 bytes,
@@ -60,13 +58,13 @@ let test_normalize_caps_to_317_idempotent () =
      is 317 bytes — the IDEMPOTENT shape that survives repeated
      application. *)
   let once =
-    KC.normalize_self_model_text
+    KC.normalize_prompt_text
       ~max_bytes:boundary_cap_bytes nick0cave_instructions_322
   in
   Alcotest.(check int) "first normalize: 317 bytes (idempotent)"
     317 (String.length once);
   let twice =
-    KC.normalize_self_model_text ~max_bytes:boundary_cap_bytes once
+    KC.normalize_prompt_text ~max_bytes:boundary_cap_bytes once
   in
   Alcotest.(check int) "second normalize: still 317 (idempotent)"
     317 (String.length twice);
@@ -96,14 +94,14 @@ let test_profile_toml_normalizes_instructions () =
      | None -> Alcotest.fail "expected Some instructions"
      | Some loaded ->
        (* Load path keeps the raw TOML bytes; the idempotent
-          [normalize_self_model_text] handles the compare-time
+          [normalize_prompt_text] handles the compare-time
           equivalence in [personality_text_equal]. *)
        Alcotest.(check int)
          "TOML defaults.instructions preserves the raw 322 bytes"
          322
          (String.length loaded);
        let n =
-         KC.normalize_self_model_text
+         KC.normalize_prompt_text
            ~max_bytes:boundary_cap_bytes loaded
        in
        Alcotest.(check int)
@@ -130,7 +128,7 @@ let test_apply_default_yields_no_drift () =
      Then [personality_text_equal] must return true so
      [personality_changed] is false and re-sync does NOT fire. *)
   let normalized =
-    KC.normalize_self_model_text
+    KC.normalize_prompt_text
       ~max_bytes:boundary_cap_bytes nick0cave_instructions_322
   in
   let defaults_instructions = Some normalized in

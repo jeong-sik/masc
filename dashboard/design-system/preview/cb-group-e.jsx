@@ -1,5 +1,5 @@
 // cb-group-e.jsx — Track 2 · COMMS PLANE
-// C1 Board Zone (3 variants) · C2 Messages (3 variants) · C3 Composer v2 (3 variants)
+// C1 Board Zone (3 variants) · C2 Messages (2 variants) · C3 Composer v2 (2 variants)
 
 const P2e = window.MASC_P2;
 
@@ -28,7 +28,6 @@ function BoardPost({ post, expanded = false }) {
         </div>
         <div className="ttl" role="heading" aria-level={4}>{post.title}</div>
         <div className={`body ${expanded ? 'expand' : 'clip'}`}>{post.body}</div>
-        {post.state_block && <div className="state-block" aria-label={`State block: ${post.state_block}`}>{post.state_block}</div>}
         <div className="ft" role="toolbar" aria-label={`Actions for ${post.id}`}>
           <button type="button">↳ reply ({post.replies})</button>
           <button type="button">★ pin</button>
@@ -212,7 +211,6 @@ function MessageWorkspaceTimeline() {
                       <span className="at">{m.at}</span>
                     </div>
                     <div className="text">{renderMsgBody(m.body, m.mentions)}</div>
-                    {m.state && <div className="state-block" aria-label={`State block: ${m.state}`}>{m.state}</div>}
                   </div>
                 </article>
               ))}
@@ -270,48 +268,8 @@ function MentionInbox() {
   );
 }
 
-// C2-C · State-block message focus
-function StateBlockMessage() {
-  const stateMsgs = P2e.messages.filter(m => m.state);
-  return (
-    <section className="cbp" aria-label="State-block messages">
-      <ZoneHeader
-        title="MESSAGES · [STATE] BLOCKS"
-        branch="main"
-        keepers={["nick0cave","sangsu"]}
-        meta={`${stateMsgs.length} state-bearing msgs · structured payload`}
-      />
-      <div className="body">
-        <p style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', padding:'4px 0', lineHeight:1.5}}>
-          [STATE] blocks are inline, machine-readable structure inside human prose. Keepers stamp them on every broadcast that changes goal/intention/blocker state. Other keepers parse them silently and update local belief.
-        </p>
-        <div role="list" aria-label={`${stateMsgs.length} state messages`}>
-          {stateMsgs.map(m => (
-            <article key={m.seq}
-                     role="listitem"
-                     className="ms-msg"
-                     aria-label={`#${m.seq} · ${m.from} ${m.kind} → #${m.workspace} · ${m.at}: ${m.body} · state: ${m.state}`}
-                     style={{padding:'8px 10px', background:'var(--color-bg-surface)', border:'1px solid var(--color-border-default)', borderLeft:'2px solid var(--brass-2)', borderRadius:0}}>
-              <div className="seq" aria-hidden="true">#{m.seq}</div>
-              <div className="body">
-                <div className="h" aria-hidden="true">
-                  <span className="au">{m.from}</span>
-                  <span className={`kk ${m.kind}`}>{m.kind}</span>
-                  <span className="at">→ #{m.workspace} · {m.at}</span>
-                </div>
-                <div className="text">{renderMsgBody(m.body, m.mentions)}</div>
-                <div className="state-block" aria-label={`State block: ${m.state}`}>{m.state}</div>
-              </div>
-            </article>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════════════
-// C3 · COMPOSER V2  (broadcast / mention / state-block)
+// C3 · COMPOSER V2  (broadcast / mention)
 // ═══════════════════════════════════════════════════════════════════
 
 // C3-A · Broadcast
@@ -323,7 +281,6 @@ function ComposerV2Broadcast() {
           <div className="seg" role="radiogroup" aria-label="Message kind">
             <button type="button" role="radio" aria-checked="true" className="on">broadcast</button>
             <button type="button" role="radio" aria-checked="false">dm</button>
-            <button type="button" role="radio" aria-checked="false">state</button>
           </div>
           <span className="workspace-sel" aria-label="Target workspace: default">default</span>
           <span className="grow" aria-hidden="true" />
@@ -335,7 +292,6 @@ function ComposerV2Broadcast() {
         <div className="ed" role="textbox" aria-label="Broadcast composer" aria-multiline="true">claimed task-031. backporting to release-0.42 next.<span className="caret" aria-hidden="true">▌</span></div>
         <div className="hint" aria-hidden="true">
           <span><span className="kbd">@</span>mention</span>
-          <span><span className="kbd">[</span>state-block</span>
           <span><span className="kbd">⌘D</span>dm-mode</span>
           <span><span className="kbd">⌘↵</span>send</span>
           <span style={{marginLeft:'auto'}}>last broadcast 16s ago</span>
@@ -400,45 +356,8 @@ function ComposerV2Mention() {
   );
 }
 
-// C3-C · State-block compose
-function ComposerV2State() {
-  return (
-    <div className="cb-board" style={{flexDirection:'column-reverse'}}>
-      <div className="cm2" role="region" aria-label="Composer v2 · state-block compose">
-        <div className="toolbar" role="toolbar" aria-label="Composer toolbar">
-          <div className="seg" role="radiogroup" aria-label="Message kind">
-            <button type="button" role="radio" aria-checked="false">broadcast</button>
-            <button type="button" role="radio" aria-checked="false">dm</button>
-            <button type="button" role="radio" aria-checked="true" className="on">state</button>
-          </div>
-          <span className="workspace-sel" aria-label="Target workspace: default">default</span>
-          <span aria-label="Structured · machine-readable" style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-accent-fg)', letterSpacing:'.04em'}}>
-            ◆ structured · machine-readable
-          </span>
-          <span className="grow" aria-hidden="true" />
-          <button type="button" className="send">send ⌘↵</button>
-        </div>
-        <div className="ed" role="textbox" aria-label="State-block composer · 4 keys: Goal, Phase, Next, Blocker" aria-multiline="true">
-          claimed task-031. backporting to release-0.42 next.
-          {'\n'}
-          <span className="state-block">[STATE]{'\n'}Goal: goal-merge-blockers{'\n'}Phase: executing{'\n'}Next: rebase + ci{'\n'}Blocker: none{'\n'}[/STATE]<span className="caret" aria-hidden="true">▌</span></span>
-        </div>
-        <div className="targets" aria-label="Parsed keys: Goal, Phase, Next, Blocker · 4 keys valid · will update belief in 9 keepers">
-          <span aria-hidden="true">parsed keys:</span>
-          <span className="t-pill" aria-hidden="true">Goal</span>
-          <span className="t-pill" aria-hidden="true">Phase</span>
-          <span className="t-pill" aria-hidden="true">Next</span>
-          <span className="t-pill" aria-hidden="true">Blocker</span>
-          <span aria-hidden="true" style={{marginLeft:'auto', color:'var(--color-fg-disabled)', textTransform:'none'}}>4 keys · valid · will update belief in 9 keepers</span>
-        </div>
-      </div>
-      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
-    </div>
-  );
-}
-
 Object.assign(window, {
   BoardFeed, BoardThread, BoardHotAuto,
-  MessageWorkspaceTimeline, MentionInbox, StateBlockMessage,
-  ComposerV2Broadcast, ComposerV2Mention, ComposerV2State,
+  MessageWorkspaceTimeline, MentionInbox,
+  ComposerV2Broadcast, ComposerV2Mention,
 });

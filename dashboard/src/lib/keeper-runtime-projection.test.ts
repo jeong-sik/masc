@@ -56,7 +56,6 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
         stop_requested: false,
         restart_budget_remaining: true,
         backoff_elapsed: true,
-        guardrail_triggered: false,
         drain_complete: false,
         context_overflow: false,
         compact_retry_exhausted: false,
@@ -132,13 +131,12 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
 }
 
 describe('deriveKeeperRuntimeProjection', () => {
-  it('couples heartbeat, context, social, fiber, stop, trace, tool, and FSM lanes', () => {
+  it('couples heartbeat, context, fiber, stop, trace, tool, and FSM lanes', () => {
     const projection = deriveKeeperRuntimeProjection({
       keeper: keeper({
         last_heartbeat: '2026-05-21T00:00:00Z',
         context_ratio: 0.97,
         runtime_warning_ctx_ratio: 0.95,
-        social_model_recognized: false,
       }),
       composite: composite({
         phase: 'failing',
@@ -159,7 +157,6 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(projection.headline).toBe('조치 필요')
     expect(projection.heartbeat.stale).toBe(true)
     expect(projection.context.breach).toBe(true)
-    expect(projection.socialModel.recognized).toBe(false)
     expect(projection.fiberAlive.alive).toBe(true)
     expect(projection.fsmLanes.map(lane => lane.axis)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC', 'KCB'])
     expect(projection.signals.map(signal => signal.kind)).toEqual([
@@ -167,7 +164,6 @@ describe('deriveKeeperRuntimeProjection', () => {
       'ksm_phase',
       'heartbeat',
       'context_ratio',
-      'social_model',
       'fiber_alive',
       'stop_requested',
       'runtime_trace',
@@ -176,7 +172,6 @@ describe('deriveKeeperRuntimeProjection', () => {
     ])
     expect(projection.synchronizationDetail).toContain('hb stale')
     expect(projection.synchronizationDetail).toContain('ctx breach')
-    expect(projection.synchronizationDetail).toContain('social unrecognized')
     expect(projection.synchronizationDetail).toContain('fiber alive')
     expect(projection.synchronizationDetail).toContain('stop clear')
     expect(projection.synchronizationDetail).toContain('KSM failing')

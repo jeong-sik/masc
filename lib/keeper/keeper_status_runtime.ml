@@ -485,7 +485,7 @@ let keeper_continuity_state
   else if recently_started || not healthy_like then Continuity_recovering
   else Continuity_healthy
 
-let keeper_continuity_summary = function
+let keeper_lifecycle_summary = function
   | Continuity_not_running ->
       "Keeper runtime is not running. The runtime should reconcile it."
   | Continuity_recovering ->
@@ -508,12 +508,12 @@ let augment_keeper_diagnostic_json
     keeper_continuity_state ~meta ~keepalive_running
       ~keepalive_started_at ~health_state ~now_ts
   in
-  let continuity_summary = keeper_continuity_summary continuity_state in
+  let lifecycle_summary = keeper_lifecycle_summary continuity_state in
   let continuity_str = keeper_continuity_to_string continuity_state in
   let summary =
     match json_string_opt "summary" diagnostic with
     | Some base when continuity_state = Continuity_healthy -> base
-    | Some _ | None -> continuity_summary
+    | Some _ | None -> lifecycle_summary
   in
   match diagnostic with
   | `Assoc fields ->
@@ -522,13 +522,11 @@ let augment_keeper_diagnostic_json
         |> List.filter (fun (key, _) ->
                not
                  (String.equal key "summary"
-                 || String.equal key "continuity_state"
-                 || String.equal key "continuity_summary"))
+                 || String.equal key "continuity_state"))
       in
       `Assoc
         (("summary", `String summary)
         :: ("continuity_state", `String continuity_str)
-        :: ("continuity_summary", `String continuity_summary)
         :: filtered)
   | other -> other
 

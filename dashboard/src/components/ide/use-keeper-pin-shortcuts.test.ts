@@ -68,7 +68,7 @@ afterEach(() => {
   clearPins()
 })
 
-describe('useKeeperPinShortcuts — RFC-0027 PR-γ-2', () => {
+describe('useKeeperPinShortcuts', () => {
   it('registers 5 shortcuts on mount (4 promote + 1 unpin)', async () => {
     const manager = createKeyboardShortcutManager({ platform: 'mac' })
     await mountHost(manager)

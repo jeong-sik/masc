@@ -155,8 +155,6 @@ let keeper_entries =
       "Max heartbeat failures before crash";
     entry ~default:"10" "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES"
       "Max turn failures before crash";
-    entry ~default:"true" "MASC_STRUCTURED_STATE"
-      "Enable structured JSON state in checkpoints (default true; set to \"false\" to opt out)";
     entry ~default:"(none)" "MASC_TLA_TRACE"
       "Enable TLA+ trace emission";
   ]
@@ -178,24 +176,6 @@ let keeper_execution_entries =
       "Autonomous execution max tokens";
   ]
 
-let keeper_guardrail_entries =
-  [
-    entry ~default:"0.86" "MASC_KEEPER_RULE_REFLECT_REPETITION"
-      "Reflection repetition threshold";
-    entry ~default:"0.06" "MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX"
-      "Plan goal alignment max";
-    entry ~default:"0.10" "MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX"
-      "Plan response alignment max";
-    entry ~default:"0.90" "MASC_KEEPER_RULE_GUARDRAIL_REPETITION"
-      "Guardrail repetition threshold";
-    entry ~default:"0.04" "MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX"
-      "Guardrail goal alignment max";
-    entry ~default:"0.08" "MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX"
-      "Guardrail response alignment max";
-    entry ~default:"0.70" "MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN"
-      "Guardrail context minimum";
-  ]
-
 let autonomy_entries =
   [
     entry ~default:"3" "MASC_AUTONOMY_QUIET_START" "Quiet hours start (0-23)";
@@ -208,8 +188,6 @@ let autonomy_entries =
       "Thompson sampling weight";
     entry ~default:"0.95" "MASC_AUTONOMY_VOTE_DECAY_FACTOR"
       "Vote decay factor";
-    entry ~default:"0.5" "MASC_GUARD_PENALTY_BETA"
-      "Guard penalty beta for B-SIM calibration (floor 0)";
   ]
 
 let level2_entries =
@@ -487,8 +465,6 @@ let keeper_keepalive_entries =
       "Heartbeat cycle interval (clamped 5-300 seconds)";
     entry ~default:"0.2" "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"
       "Jitter factor applied to heartbeat interval (clamped 0-0.5)";
-    entry ~default:"4" "MASC_KEEPER_IDLE_SKIP_THRESHOLD"
-      "Consecutive idle tool repetitions before Skip (clamped 2-20)";
     entry ~default:"10" "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"
       "Max idle turns for scheduled autonomous turns (clamped 2-50)";
     entry ~default:"15" "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"
@@ -912,7 +888,6 @@ let all_categories () =
       (keeper_execution_entries @ compaction_entries @ decision_entries
        @ keeper_tool_entries @ keeper_runtime_entries
        @ keeper_proactive_entries @ keeper_grpc_entries);
-    category "keeper_guardrails" keeper_guardrail_entries;
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);
     category "level2" level2_entries;
     category "dashboard" dashboard_entries;

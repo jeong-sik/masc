@@ -1,13 +1,12 @@
 """Slack message formatting for keeper responses.
 
 Converts keeper responses into Slack Block Kit format.
-Strips [STATE] blocks and handles message length limits.
+Handles structured content and message length limits.
 """
 
 from __future__ import annotations
 
 import html
-import re
 from typing import Any
 
 from .constants import SLACK_BLOCK_TEXT_LIMIT, SLACK_MAX_BLOCKS, SLACK_MESSAGE_LIMIT
@@ -17,14 +16,6 @@ STRUCTURED_TRUNCATION_TEMPLATE = (
     ":warning: {count} structured block(s) omitted because Slack allows "
     f"at most {SLACK_MAX_BLOCKS} blocks per message."
 )
-
-_RE_STATE_BLOCK = re.compile(r"\[STATE\].*?(?:\[/STATE\]|$)", re.DOTALL)
-
-
-def strip_state_blocks(text: str) -> str:
-    """Remove [STATE]...[/STATE] keeper metadata blocks from text."""
-    return _RE_STATE_BLOCK.sub("", text).strip()
-
 
 def chunk_text(text: str, limit: int = SLACK_MESSAGE_LIMIT) -> list[str]:
     """Split text into chunks that fit Slack's message limit."""

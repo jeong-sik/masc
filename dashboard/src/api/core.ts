@@ -452,7 +452,6 @@ function bootstrapInitializingPayload(path: string): unknown | null {
         status: bootstrapStatusEnvelope(generatedAt),
         counts: { agents: 0, tasks: 0, keepers: 0 },
         providers: {},
-        meta_cognition: null,
         auth: null,
         config_resolution: null,
         runtime_resolution: null,

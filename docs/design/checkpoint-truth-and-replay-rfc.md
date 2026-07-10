@@ -17,10 +17,9 @@ code_refs:
 ## Related Documents
 
 - `../spec/13-oas-integration.md`
-- `./checkpoint-truth-replay-implementation-checklist.md`
-- `./oas-masc-state-boundary.md`
+- `../OAS-MASC-BOUNDARY.md`
+- `../KEEPER-STATE-OWNERSHIP.md`
 - `./delta-checkpoint-read-path.md`
-- `./keeper-continuity-product-rfc.md`
 - `../KEEPER-CONTINUITY-VALIDATION.md`
 
 ## Problem
@@ -96,7 +95,7 @@ replay 시 중복 실행이 허용되지 않는 작업이 시작되는 지점.
 3. **Domain surfaces**
    - keeper meta summary
    - dashboard read models
-   - continuity summary text
+   - typed task/goal/event receipts
 
 Rule:
 
@@ -239,7 +238,8 @@ Replay rule:
 Primary spec / contract:
 
 - `docs/spec/13-oas-integration.md`
-- `docs/design/oas-masc-state-boundary.md`
+- `docs/OAS-MASC-BOUNDARY.md`
+- `docs/KEEPER-STATE-OWNERSHIP.md`
 
 Primary code anchors:
 
@@ -250,8 +250,7 @@ Primary code anchors:
 Secondary design touchpoints:
 
 - `docs/design/delta-checkpoint-read-path.md`
-- `docs/design/keeper-continuity-product-rfc.md`
-- `docs/design/handoff-ssot-adr.md`
+- `docs/KEEPER-CONTINUITY-VALIDATION.md`
 
 ## Rollout Order
 
@@ -292,7 +291,7 @@ Secondary design touchpoints:
   `docs/OAS-MASC-BOUNDARY.md` ,
   `docs/spec/13-oas-integration.md` ;
   확인일시 2026-04-12 ; 신뢰도 High
-- [근거] current keeper continuity product contract:
-  `docs/design/keeper-continuity-product-rfc.md` ,
+- [근거] current keeper state ownership and validation contracts:
+  `docs/KEEPER-STATE-OWNERSHIP.md` ,
   `docs/KEEPER-CONTINUITY-VALIDATION.md` ;
   확인일시 2026-04-12 ; 신뢰도 High

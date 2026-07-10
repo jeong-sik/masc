@@ -81,17 +81,17 @@ let test_to_string_skipped_no_checkpoint () =
     "skipped:no_checkpoint"
     (KCP.compaction_decision_to_string KCP.Skipped_no_checkpoint)
 
-let test_to_string_skipped_continuity () =
-  check_string "Skipped_continuity_reflection includes hold/cooldown"
-    "skipped:continuity_reflection(45s<60s)"
+let test_to_string_skipped_cooldown () =
+  check_string "Skipped_cooldown includes hold/cooldown"
+    "skipped:cooldown(45s<60s)"
     (KCP.compaction_decision_to_string
-       (KCP.Skipped_continuity_reflection { hold_s = 45.0; cooldown_sec = 60 }))
+       (KCP.Skipped_cooldown { hold_s = 45.0; cooldown_sec = 60 }))
 
-let test_to_string_skipped_continuity_zero () =
-  check_string "Skipped_continuity_reflection at boundaries"
-    "skipped:continuity_reflection(0s<0s)"
+let test_to_string_skipped_cooldown_zero () =
+  check_string "Skipped_cooldown at boundaries"
+    "skipped:cooldown(0s<0s)"
     (KCP.compaction_decision_to_string
-       (KCP.Skipped_continuity_reflection { hold_s = 0.0; cooldown_sec = 0 }))
+       (KCP.Skipped_cooldown { hold_s = 0.0; cooldown_sec = 0 }))
 
 (* ── compaction_decision_applied ─────────────────────────────────────── *)
 
@@ -107,10 +107,10 @@ let test_applied_false_for_skipped_no_checkpoint () =
   check_bool "Skipped_no_checkpoint → false" false
     (KCP.compaction_decision_applied KCP.Skipped_no_checkpoint)
 
-let test_applied_false_for_skipped_continuity () =
-  check_bool "Skipped_continuity_reflection → false" false
+let test_applied_false_for_skipped_cooldown () =
+  check_bool "Skipped_cooldown → false" false
     (KCP.compaction_decision_applied
-       (KCP.Skipped_continuity_reflection { hold_s = 1.0; cooldown_sec = 1 }))
+       (KCP.Skipped_cooldown { hold_s = 1.0; cooldown_sec = 1 }))
 
 (* ── threshold constants ─────────────────────────────────────────────── *)
 
@@ -129,8 +129,7 @@ let decide
     ?(message_gate = 0)
     ?(token_gate = 0)
     ?(cooldown_sec = 60)
-    ?(last_continuity_update_ts = 0.0)
-    ?(last_proactive_ts = 0.0)
+    ?(last_compaction_ts = 0.0)
     ?(now_ts = 100.0)
     () =
   KCP.decide_compaction
@@ -141,34 +140,33 @@ let decide
     ~message_gate
     ~token_gate
     ~cooldown_sec
-    ~last_continuity_update_ts
-    ~last_proactive_ts
+    ~last_compaction_ts
     ~now_ts
 
 let test_decide_ts_zero_bypasses_cooldown () =
-  match decide ~ratio:0.6 ~ratio_gate:0.5 ~last_continuity_update_ts:0.0 () with
+  match decide ~ratio:0.6 ~ratio_gate:0.5 ~last_compaction_ts:0.0 () with
   | KCP.Applied (Compaction_trigger.Ratio_threshold _) -> ()
   | other ->
     Alcotest.fail
       ("expected ratio compaction, got "
        ^ KCP.compaction_decision_to_string other)
 
-let test_decide_recent_state_blocks_non_emergency () =
+let test_decide_recent_compaction_blocks_non_emergency () =
   match
     decide
       ~ratio:0.6
       ~ratio_gate:0.5
-      ~last_continuity_update_ts:95.0
+      ~last_compaction_ts:95.0
       ~now_ts:100.0
       ~cooldown_sec:60
       ()
   with
-  | KCP.Skipped_continuity_reflection { hold_s; cooldown_sec } ->
+  | KCP.Skipped_cooldown { hold_s; cooldown_sec } ->
     Alcotest.(check int) "cooldown" 60 cooldown_sec;
     Alcotest.(check bool) "hold positive" true (hold_s > 0.0)
   | other ->
     Alcotest.fail
-      ("expected continuity skip, got "
+      ("expected cooldown skip, got "
        ^ KCP.compaction_decision_to_string other)
 
 let test_decide_emergency_bypasses_cooldown () =
@@ -176,7 +174,7 @@ let test_decide_emergency_bypasses_cooldown () =
     decide
       ~ratio:KCP.emergency_compact_ratio_threshold
       ~ratio_gate:0.5
-      ~last_continuity_update_ts:99.0
+      ~last_compaction_ts:99.0
       ~now_ts:100.0
       ~cooldown_sec:60
       ()
@@ -201,7 +199,7 @@ let test_decide_tool_heavy_profile_blocked () =
       ~ratio_gate:0.85
       ~message_gate:0
       ~token_gate:196608
-      ~last_continuity_update_ts:0.0
+      ~last_compaction_ts:0.0
       ~now_ts:100.0
       ~cooldown_sec:15
       ()
@@ -220,15 +218,15 @@ let test_decide_tool_heavy_profile_respects_cooldown () =
       ~ratio:0.2695
       ~msg_count:67
       ~ratio_gate:0.25 (* below current ratio: gate would fire if ready *)
-      ~last_continuity_update_ts:99.0
+      ~last_compaction_ts:99.0
       ~now_ts:100.0
       ~cooldown_sec:60
       ()
   with
-  | KCP.Skipped_continuity_reflection _ -> ()
+  | KCP.Skipped_cooldown _ -> ()
   | other ->
     Alcotest.fail
-      ("expected continuity skip at high msg_count, got "
+      ("expected cooldown skip at high msg_count, got "
        ^ KCP.compaction_decision_to_string other)
 
 (* ── runner ──────────────────────────────────────────────────────────── *)
@@ -243,10 +241,10 @@ let () =
             test_to_string_blocked;
           Alcotest.test_case "Skipped_no_checkpoint" `Quick
             test_to_string_skipped_no_checkpoint;
-          Alcotest.test_case "Skipped_continuity_reflection 45/60" `Quick
-            test_to_string_skipped_continuity;
-          Alcotest.test_case "Skipped_continuity_reflection 0/0" `Quick
-            test_to_string_skipped_continuity_zero;
+          Alcotest.test_case "Skipped_cooldown 45/60" `Quick
+            test_to_string_skipped_cooldown;
+          Alcotest.test_case "Skipped_cooldown 0/0" `Quick
+            test_to_string_skipped_cooldown_zero;
         ] );
       ( "compaction_decision_applied",
         [
@@ -255,8 +253,8 @@ let () =
             test_applied_false_for_blocked;
           Alcotest.test_case "Skipped_no_checkpoint → false" `Quick
             test_applied_false_for_skipped_no_checkpoint;
-          Alcotest.test_case "Skipped_continuity → false" `Quick
-            test_applied_false_for_skipped_continuity;
+          Alcotest.test_case "Skipped_cooldown → false" `Quick
+            test_applied_false_for_skipped_cooldown;
         ] );
       ( "thresholds",
         [
@@ -283,8 +281,8 @@ let () =
         [
           Alcotest.test_case "ts=0 bypasses cooldown" `Quick
             test_decide_ts_zero_bypasses_cooldown;
-          Alcotest.test_case "recent state blocks non-emergency" `Quick
-            test_decide_recent_state_blocks_non_emergency;
+          Alcotest.test_case "recent compaction blocks non-emergency" `Quick
+            test_decide_recent_compaction_blocks_non_emergency;
           Alcotest.test_case "emergency bypasses cooldown" `Quick
             test_decide_emergency_bypasses_cooldown;
           Alcotest.test_case "churn profile no longer compacts" `Quick

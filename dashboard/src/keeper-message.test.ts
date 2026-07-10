@@ -1,82 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import {
-  stripStateBlocks,
   formatKeeperVisibleReply,
   normalizeKeeperConversationDetails,
   normalizeKeeperToolResponse,
 } from './keeper-message'
 
 // ================================================================
-// stripStateBlocks
-// ================================================================
-
-describe('stripStateBlocks', () => {
-  it('returns original text when no state blocks', () => {
-    expect(stripStateBlocks('hello world')).toBe('hello world')
-  })
-
-  it('removes a single state block', () => {
-    const input = 'before[STATE]{\n  "phase": "Running"\n}[/STATE]after'
-    expect(stripStateBlocks(input)).toBe('beforeafter')
-  })
-
-  it('removes multiple state blocks', () => {
-    const input = 'a[STATE]x[/STATE]b[STATE]y[/STATE]c'
-    expect(stripStateBlocks(input)).toBe('abc')
-  })
-
-  it('handles state block at start', () => {
-    expect(stripStateBlocks('[STATE]data[/STATE]rest')).toBe('rest')
-  })
-
-  it('handles state block at end', () => {
-    expect(stripStateBlocks('start[STATE]data[/STATE]')).toBe('start')
-  })
-
-  it('returns empty string when only state block', () => {
-    expect(stripStateBlocks('[STATE]data[/STATE]')).toBe('')
-  })
-
-  it('handles unclosed STATE_START (no STATE_END)', () => {
-    const result = stripStateBlocks('before[STATE]no end')
-    expect(result).toBe('before')
-  })
-
-  it('handles nested-looking tags correctly', () => {
-    // [STATE] only matches the first [/STATE]
-    const input = '[STATE]a[/STATE][STATE]b[/STATE]'
-    expect(stripStateBlocks(input)).toBe('')
-  })
-
-  it('handles empty string', () => {
-    expect(stripStateBlocks('')).toBe('')
-  })
-
-  it('handles multi-line state blocks', () => {
-    const input = `line1
-[STATE]
-phase: Running
-generation: 42
-[/STATE]
-line2`
-    // State block removed, but surrounding newlines preserved
-    expect(stripStateBlocks(input)).toBe(`line1
-
-line2`)
-  })
-})
-
-// ================================================================
 // formatKeeperVisibleReply
 // ================================================================
 
 describe('formatKeeperVisibleReply', () => {
-  it('returns trimmed text without SKILL lines or state blocks', () => {
+  it('returns trimmed text without SKILL lines', () => {
     const input = `Hello
 SKILL some-skill
-[STATE]internal[/STATE]
 World`
-    expect(formatKeeperVisibleReply(input)).toBe('Hello\n\nWorld')
+    expect(formatKeeperVisibleReply(input)).toBe('Hello\nWorld')
   })
 
   it('removes SKILL lines', () => {
@@ -121,16 +59,6 @@ Line2`
     expect(formatKeeperVisibleReply('   \n\n   ')).toBe('')
   })
 
-  it('removes state blocks and SKILL lines together', () => {
-    const input = `Start
-SKILL route
-Middle
-[STATE]{"phase":"Running"}[/STATE]
-End`
-    // SKILL line filter removes entire line (no blank line left)
-    // STATE block removal leaves Middle\n\nEnd
-    expect(formatKeeperVisibleReply(input)).toBe('Start\nMiddle\n\nEnd')
-  })
 })
 
 // ================================================================
@@ -190,23 +118,6 @@ describe('normalizeKeeperConversationDetails', () => {
       cacheReadInputTokens: 11,
       costUsd: 0.04,
     })
-  })
-
-  it('extracts state block from reply', () => {
-    const result = normalizeKeeperConversationDetails({
-      reply: '[STATE]{\n  "phase": "Running"\n}[/STATE]Visible text',
-    })
-    expect(result).not.toBeNull()
-    expect(result!.stateBlock).toBe('{\n  "phase": "Running"\n}')
-    expect(result!.replyText).toBe('[STATE]{\n  "phase": "Running"\n}[/STATE]Visible text')
-  })
-
-  it('returns null stateBlock when reply has no state block', () => {
-    const result = normalizeKeeperConversationDetails({
-      reply: 'Just plain text',
-    })
-    expect(result).not.toBeNull()
-    expect(result!.stateBlock).toBeNull()
   })
 
   it('unwraps raw_payload wrapper', () => {
@@ -342,14 +253,6 @@ describe('normalizeKeeperToolResponse', () => {
     })
     const result = normalizeKeeperToolResponse(raw)
     expect(result.text).toBe('Line1\nLine2')
-  })
-
-  it('strips state blocks from JSON reply', () => {
-    const raw = JSON.stringify({
-      reply: 'Before[STATE]data[/STATE]After',
-    })
-    const result = normalizeKeeperToolResponse(raw)
-    expect(result.text).toBe('BeforeAfter')
   })
 
   it('returns raw text when JSON has no reply field', () => {

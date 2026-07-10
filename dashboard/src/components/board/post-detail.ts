@@ -10,7 +10,6 @@ import { LoadingState } from '../common/feedback-state'
 import { RichComposer } from '../common/rich-composer'
 import { RichContent } from '../common/rich-content'
 import { TextInput } from '../common/input'
-import { stripStateBlocks } from '../../keeper-message'
 import { TurnInspectorDrawer } from '../keeper-turn-inspector-drawer'
 import { findKeeper } from '../../lib/keeper-utils'
 import { route } from '../../router'
@@ -590,7 +589,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <div class="text-sm text-[var(--color-fg-primary)] leading-loose">
-            <${RichContent} text=${stripStateBlocks(post.body)} previewLimit=${4} />
+            <${RichContent} text=${post.body} previewLimit=${4} />
           </div>
 
           <${FusionBoardEvidence} post=${post} />
@@ -666,9 +665,6 @@ export function PostDetail({ post }: { post: BoardPost }) {
                   <summary class="cursor-pointer text-xs text-[var(--color-fg-secondary)] py-1.5 hover:text-[var(--color-fg-primary)] transition-colors">운영 메타</summary>
                   <div class="mt-2 p-3 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-divider)]">
                     ${post.meta.source ? html`<div class="text-xs text-[var(--color-fg-primary)]"><span class="text-[var(--color-fg-secondary)]">출처:</span> ${post.meta.source}</div>` : null}
-                    ${post.meta.state_block
-                      ? html`<pre class="whitespace-pre-wrap mt-2 text-2xs text-[var(--color-fg-secondary)] leading-relaxed">${post.meta.state_block}</pre>`
-                      : null}
                   </div>
                 </details>
               `

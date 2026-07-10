@@ -46,6 +46,14 @@ type alert_send_result =
   | Alert_sent of string option
   | Alert_failed of string option
 
+type alert_channel_result = {
+  channel : string;
+  attempted : bool;
+  success : bool;
+  attempts : int;
+  detail : string option;
+}
+
 (** Run a single alert channel with retry logic. *)
 val run_alert_channel_with_retry :
   _ context ->
@@ -63,79 +71,6 @@ val alert_dedup_window_sec : float
     Records the alert if not deduplicated. *)
 val is_alert_deduplicated :
   keeper_name:string -> reasons:string list -> bool
-
-(** {1 Alert Signal Scoring} *)
-
-(** Keyword weights for alert severity scoring. *)
-val alert_keyword_weights : (string * float) list
-
-val signal_bonus_guardrail_stop : float
-val signal_bonus_handoff_pressure : float
-val signal_bonus_low_alignment : float
-val signal_bonus_multi_tool : float
-
-val handoff_pressure_threshold : unit -> float
-val goal_alignment_floor : float
-val response_alignment_floor : float
-val multi_tool_min_count : int
-
-(** Compute alert signal score, reasons, and matched keywords.
-    Returns [(score, reasons, keywords)]. *)
-val keeper_alert_signal :
-  message:string ->
-  reply:string ->
-  context_ratio:float ->
-  goal_alignment:float ->
-  response_alignment:float ->
-  tool_call_count:int ->
-  auto_rules:keeper_auto_rule_eval ->
-  float * string list * string list
-
-(** Format alert text for fanout channels. *)
-val keeper_alert_text :
-  meta:keeper_meta ->
-  score:float ->
-  reasons:string list ->
-  keywords:string list ->
-  message:string ->
-  reply:string ->
-  work_kind:string ->
-  context_ratio:float ->
-  goal_alignment:float ->
-  response_alignment:float ->
-  string
-
-(** {1 Alert Channel Posting} *)
-
-val post_keeper_alert_board :
-  alert_text:string -> alert_send_result
-
-val post_keeper_alert_slack :
-  alert_text:string -> alert_send_result
-
-val post_keeper_alert_slack_dm :
-  alert_text:string -> user_id:string -> alert_send_result
-
-val post_keeper_alert_github :
-  title:string -> body:string -> alert_send_result
-
-(** {1 Alert Orchestration} *)
-
-(** Evaluate alert signal and fan out to configured channels
-    (board, Slack webhook, Slack DM, GitHub issue).
-    Handles dedup, JSONL logging, retry, and dead-letter queuing. *)
-val maybe_emit_interesting_alert :
-  _ context ->
-  meta:keeper_meta ->
-  message:string ->
-  reply:string ->
-  work_kind:string ->
-  tool_call_count:int ->
-  context_ratio:float ->
-  goal_alignment:float ->
-  response_alignment:float ->
-  auto_rules:keeper_auto_rule_eval ->
-  interesting_alert_result
 
 (** {1 Slack API Helpers} *)
 

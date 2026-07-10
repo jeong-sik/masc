@@ -681,10 +681,10 @@ let rec dispatch_event_with_audit
        event so downstream read-only observers (RFC-0003 composite
        observer) can project it without reading history files. Other
        events leave the field untouched. *)
-    let last_auto_rules =
+    let last_context_actions =
       match event with
-      | Keeper_state_machine.Context_measured { auto_rules; _ } -> Some (now, auto_rules)
-      | _ -> entry.last_auto_rules
+      | Keeper_state_machine.Context_measured { context_actions; _ } -> Some (now, context_actions)
+      | _ -> entry.last_context_actions
     in
     let origin_result = validate_paired_lifecycle_origin origin event in
     let pending_turn_measurement = pending_measurement_after_event now entry event in
@@ -759,7 +759,7 @@ let rec dispatch_event_with_audit
             ; conditions = tr.updated_conditions
             ; dead_since_ts
             ; transition_seq = new_seq
-            ; last_auto_rules
+            ; last_context_actions
             ; pending_turn_measurement
             ; compaction_stage
             }
@@ -923,7 +923,7 @@ let rec dispatch_event_with_audit
             { entry with
               conditions = tr.updated_conditions
             ; transition_seq = new_seq
-            ; last_auto_rules
+            ; last_context_actions
             ; pending_turn_measurement
             ; compaction_stage
             }

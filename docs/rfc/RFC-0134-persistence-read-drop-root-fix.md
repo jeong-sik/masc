@@ -16,7 +16,7 @@ Related: RFC-0044 (typed reason, partial fix), RFC-0088 (counter-as-fix
 umbrella), RFC-0097 (FD pressure / container reuse), RFC-0107
 (`Jsonl_atomic`, atomic-write SSOT)
 Plan SSOT: Error-Warn Reduction Goal §counter-as-fix
-(`memory/masc-oas-log-reduction-goal-2026-05-18.html` working state)
+(`memory/masc-oas-log-reduction-goal-2026-05-18.html` progress report)
 
 ## 1. Problem
 
@@ -148,8 +148,8 @@ the *no recovery, only telemetry* property.
 -   Operator-side cleanup of the 140 distinct `vrf-*` ids. They are
     not corrupted; they have already been overwritten or retired by
     normal control-plane churn.
--   Touching the four other callers
-    (`Meta_cognition_snapshot`, `Governance_anomaly`,
+-   Touching the three other callers
+    (`Governance_anomaly`,
     `Governance_cases_snapshot`, plus the `Safe_ops` helper itself).
     Their volume is zero on the sample day; reclassification is
     deferred until they emit.
@@ -324,8 +324,8 @@ This RFC is itself audited against the seven-item checklist:
      races) or be entirely silent? Default proposal: silent — the
      directory snapshot at the next call will reflect the new state,
      so no operator decision depends on the event.
-2.   Should the four other callers
-     (`Meta_cognition_snapshot`, `Governance_anomaly`,
+2.   Should the three other callers
+     (`Governance_anomaly`,
      `Governance_cases_snapshot`, `Governance_cases_snapshot.load_case`)
      receive the same typed-error promotion proactively? Default
      proposal: no — they currently emit zero WARNs/day; promoting

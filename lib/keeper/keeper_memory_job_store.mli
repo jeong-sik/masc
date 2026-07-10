@@ -1,6 +1,9 @@
 (** Durable per-keeper post-turn memory jobs.
 
-    The store is rooted exclusively from [base_path]. A job moves through
+    The store is rooted exclusively from [base_path], which must be an existing
+    real directory. Every managed descendant component from the MASC directory
+    through the per-keeper queues is created one segment at a time and checked
+    with [lstat]; symlink and non-directory components fail explicitly. A job moves through
     [awaiting-turn-commit -> pending -> inflight -> terminal receipt]. The
     execution receipt gates the first transition; the terminal memory receipt
     gates acknowledgement. Recovery requeues only inflight jobs that have no

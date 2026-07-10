@@ -32,12 +32,12 @@ Give each keeper its own memory execution lane, detached from the turn lane.
 New module `Keeper_memory_lane` mirroring `keeper_turn_admission`:
 
 - Per-keeper entry keyed by `Keeper_registry_types.registry_key ~base_path keeper_name`:
-  `{ mem_mu : Eio.Mutex.t; state_mu : Stdlib.Mutex.t; mutable pending : int }`.
-- `mem_mu` serializes memory work *within* a keeper (ordering preserved: turn N before turn N+1).
+  `{ state_mu; jobs; pending; active_worker_id }`.
+- One drain worker consumes each keeper's explicit FIFO, preserving turn N before turn N+1.
 - Different keepers run concurrently (independent lanes).
-- `pending` is bounded (`max_pending`, a named constant). Over the bound the submission is
-  dropped and logged — memory extraction is opt-in/best-effort, so dropping under saturation is
-  acceptable; the drop is counted, never silent.
+- Accepted units are not discarded because earlier memory work is slow. The pending gauge reports
+  backlog directly; only executor shutdown or worker-spawn failure can abandon queued work, and
+  those exceptional outcomes are counted and logged.
 
 ### Executor switch
 
@@ -48,15 +48,17 @@ lib/server/server_runtime_bootstrap.ml:139
   Eio_context.set_switch sw   (* server root switch *)
 ```
 
-`Keeper_memory_lane.init ~sw` records this switch. Each submitted unit is run with
-`Eio.Fiber.fork ~sw` and the switch re-bound via `Eio_context.with_turn_switch sw` so that
+`Keeper_memory_lane.init ~sw` records this switch. The first queued unit starts one drain worker
+with `Eio.Fiber.fork ~sw`; that worker re-binds the switch via
+`Eio_context.with_turn_switch sw` for every unit so that
 `run_best_effort` (which reads `sw`/`net`/`clock` from `Eio_context`, `keeper_librarian_runtime.ml:331,347`)
 issues its provider call under the executor switch. `net`/`clock` are global atomics set at the
 same startup point, available everywhere.
 
-Leak-safety follows `keeper_turn_admission.run_locked`: `pending` decrement and `mem_mu` release
-are bound to every exit path including `Eio.Cancel.Cancelled`, so a cancelled executor (server
-shutdown) cannot leak a permit or a counter.
+Leak-safety follows `keeper_turn_admission.run_locked`: the in-flight and pending decrements are
+bound to every unit exit including `Eio.Cancel.Cancelled`, while a switch release atomically clears
+and reports any queue it still owns. A cancelled executor therefore cannot leak worker ownership
+or counters.
 
 ### What moves to the lane vs stays inline
 
@@ -70,14 +72,14 @@ shutdown) cannot leak a permit or a counter.
 `Memory.append_from_tool_results` / `compact_if_needed` carry no internal lock; they are safe today only
 because the turn lane calls them single-fiber-per-keeper. Detaching (3) while (1) still ran inline
 would let two fibers touch the same keeper's memory bank concurrently. Therefore **(1) (2) (3) — all
-memory-bank-touching work — move onto the lane** (serialized per keeper by `mem_mu`). **(4) stays
+memory-bank-touching work — move onto the lane** (serialized by the keeper's FIFO worker). **(4) stays
 inline**: it only reads the typed turn history and writes the *decision* log, a separate
 file independent of (1)(2)(3).
 
 ### Separate keeper ordering from provider-pool protection
 
 The old global slot mixed two concerns: per-keeper memory ordering and provider-pool
-protection. Per-keeper ordering now comes from `Keeper_memory_lane.mem_mu`. Provider-pool
+protection. Per-keeper ordering now comes from `Keeper_memory_lane`'s FIFO worker. Provider-pool
 protection remains as a separate, optional fleet-wide gate around the provider round-trip only.
 That gate is not a memory-ordering primitive and does not serialize deterministic writes or
 compaction.
@@ -97,7 +99,7 @@ on the lane. The data the unit reads must not race that later turn:
   and the immutable snapshot is passed into the unit — so a later turn's
   emissions cannot fold into this turn's notes.
 - The remaining shared mutable state is the on-disk memory bank, which the
-  lane's per-keeper mutex serializes.
+  lane's single per-keeper worker serializes.
 
 ## Accepted consequence
 
@@ -115,13 +117,13 @@ provider concurrency gate** around librarian calls:
 - The wait is a fixed 0.25s best-effort acquisition window. It is deliberately not another
   environment knob; the capacity is the operator-controlled variable.
 
-Per-keeper lane fairness is preserved (`mem_mu` still orders each keeper's units), while the shared
+Per-keeper lane fairness is preserved (one FIFO worker orders each keeper's units), while the shared
 pool is protected from the empty-response storm observed in #21230. Lane independence and provider
 pool protection are now handled on separate axes rather than pretending one implies the other.
 
 Memory writes become eventually consistent: a keeper's turn N+1 can begin before turn N's
 deterministic note lands, so recall on turn N+1 may miss turn N's note. Ordering within a keeper is
-preserved by `mem_mu` (turn N completes before turn N+1 on the lane).
+preserved by the FIFO (turn N completes before turn N+1 on the lane).
 
 ## Relationship to #21408 (mutually exclusive)
 
@@ -129,13 +131,13 @@ PR #21408 is a competing solution to the same underlying problem: the old proces
 `provider_slot` serialized every keeper's librarian work fleet-wide. #21408 keeps the slot concept
 but re-implements it as a per-keeper `Hashtbl` registry of slots (`provider_slot_for keeper_id`),
 while #21376 (this RFC) removes the slot entirely and moves serialization into the per-keeper
-memory lane (`Keeper_memory_lane.mem_mu`). The two PRs touch the same lines in
+memory lane (`Keeper_memory_lane`). The two PRs touch the same lines in
 `keeper_librarian_runtime.ml` in opposite directions (one modifies `provider_slot`; the other deletes
 it), so they are textually and semantically mutually exclusive — both cannot merge.
 
 **Recommendation: keep #21376 and close #21408.** The per-keeper lane in #21376 already subsumes the
-per-keeper serialization goal of #21408 (`mem_mu` orders each keeper's units independently), and it
-does so with a cleaner architecture (lane admission + bounded queue + leak-safety tests). The
+per-keeper serialization goal of #21408 (one FIFO worker orders each keeper's units independently),
+and it does so with a cleaner architecture (lane ownership + explicit queue + leak-safety tests). The
 fleet-wide provider-pool gate added above covers the shared-pool protection that #21408 was trying
 to re-introduce. Merging both would create two concurrent primitives for the same concern.
 
@@ -145,18 +147,17 @@ PRs must end before either merges.
 
 ## Known limitations
 
-- Executor fibers are owned by the server root switch, not the per-keeper supervisor switch
+- Drain workers are owned by the server root switch, not the per-keeper supervisor switch
   (`keeper_supervisor_launch.ml`). If a keeper is stopped/recovered while a memory unit is in flight,
-  that unit runs to completion rather than being cancelled with the keeper. The work is bounded and
-  best-effort, writing only to that keeper's own memory bank, so the blast radius is one stale
-  extraction. Tying memory units to keeper lifecycle is deferred.
+  that unit runs to completion rather than being cancelled with the keeper.
+- The FIFO preserves accepted work during the current server lifetime but stores closures in memory.
+  Root-switch shutdown explicitly abandons and counts unfinished units; restart replay requires the
+  durable due/start/success/failure receipt tracked by production-hardening issue #23925 item 31.
 
 ## Runtime tunables and metrics
 
 Per-keeper lane:
 
-- `MASC_KEEPER_MEMORY_LANE_MAX_PENDING` (default `2`): reservation bound per keeper. Values `< 1`
-  are clamped to `1`.
 - `masc_keeper_memory_lane_submitted_total`
 - `masc_keeper_memory_lane_ran_inline_total`
 - `masc_keeper_memory_lane_dropped_total`
@@ -168,18 +169,19 @@ Fleet-wide librarian provider gate:
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` (default `1`)
 - `masc_keeper_memory_lane_provider_slot_busy_total`
 
-Saturation and provider-slot-busy events are also logged at WARN level with the keeper name.
+Exceptional queue abandonment and provider-slot-busy events are also logged at WARN level with the
+keeper name.
 
 ## Tests
 
 `test/test_keeper_memory_lane.ml`:
 
 - ungated path when executor not initialized falls back to inline (no lost work in tests).
-- `mem_mu` serializes two submissions for the same keeper (second runs after the first releases).
+- one FIFO worker serializes submissions for the same keeper.
 - two different keepers run concurrently (no cross-keeper blocking).
-- `pending` over `max_pending` drops and counts the submission.
-- a submitted unit that raises releases `mem_mu` and decrements `pending` (no leak).
-- cancelling the executor switch while a unit is in flight releases `mem_mu` and decrements
+- a backlog larger than two units is accepted, drained without loss, and preserves FIFO order.
+- a submitted unit that raises decrements `pending` and the worker continues (no leak).
+- cancelling the executor switch while a unit is in flight clears worker ownership and decrements
   `pending`.
 
 ## Rollback

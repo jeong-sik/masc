@@ -1,9 +1,9 @@
 (** Per-keeper memory execution lane (RFC-0257).
 
     Detaches post-turn memory work (deterministic write, librarian extraction,
-    compaction) from the keeper turn lane. Each keeper has its own mutex, so
-    memory work is serialized within a keeper and runs independently across
-    keepers. This replaces the process-global [Eio.Semaphore.make 1] in
+    compaction) from the keeper turn lane. Each keeper has one FIFO drain
+    worker, so memory work is serialized within a keeper and runs independently
+    across keepers. This replaces the process-global [Eio.Semaphore.make 1] in
     [Keeper_librarian_runtime] that previously serialized every keeper's
     librarian work fleet-wide — the opposite of the lane-per-keeper model
     (RFC-0225).
@@ -17,22 +17,27 @@
     (e.g. [Keeper_meta_contract.keeper_meta], [Workspace.config]) and never over
     mutable turn-local references.
 
-    The per-keeper reservation bound is controlled by
-    [MASC_KEEPER_MEMORY_LANE_MAX_PENDING] (default [2]). Submission outcomes
-    are counted under [masc_keeper_memory_lane_*] and per-keeper pending /
-    in-flight gauges are exported. *)
+    Submissions append immutable work closures and return without waiting for
+    earlier memory work; the worker processes every accepted unit in turn
+    order. Submission outcomes are counted under [masc_keeper_memory_lane_*]
+    and per-keeper pending / in-flight gauges are exported.
+
+    The FIFO owns closures for the lifetime of the server executor switch; it
+    is not a restart-durable job store. Switch shutdown explicitly abandons,
+    counts, and logs unfinished units. *)
 
 type outcome =
   | Submitted
-      (** Forked onto the keeper's lane and serialized behind its mutex. *)
+      (** Accepted by the keeper's FIFO and owned by its drain worker. *)
   | Ran_inline
       (** Executor switch not initialized; the unit ran synchronously in the
           caller so no work is lost (tests, or startup before {!init}). A
           raising unit is contained and emits a metric instead of escaping. *)
   | Dropped
-      (** The keeper's lane was saturated (pending at the bound); the unit was
-          discarded. Memory extraction is best-effort, so saturation drops
-          rather than blocking the turn. The drop is counted, never silent. *)
+      (** The executor switch could not own the unit (shutdown or worker-spawn
+          failure). Accepted work is never dropped merely because earlier
+          memory work is still running. Exceptional abandonment is counted and
+          logged. *)
 
 val init : sw:Eio.Switch.t -> unit
 (** Record the long-lived switch that owns detached memory fibers. Call once at
@@ -44,11 +49,11 @@ val submit
   -> (unit -> unit)
   -> outcome
 (** [submit ~base_path ~keeper_name f] runs [f] on [keeper_name]'s memory lane.
-    When the executor switch is set, [f] is forked and serialized behind that
-    keeper's mutex; over the pending bound it is dropped and counted. When the
+    When the executor switch is set, [f] is appended to that keeper's FIFO and
+    drained by one worker. The caller does not wait for earlier work. When the
     executor is not initialized, [f] runs inline and any exception is contained
-    and counted rather than escaping. The bound, outcomes, and per-keeper
-    pending/in-flight state are exported as metrics. *)
+    and counted rather than escaping. Outcomes and per-keeper pending/in-flight
+    state are exported as metrics. *)
 
 module For_testing : sig
   val reset : unit -> unit

@@ -37,8 +37,32 @@ let test_inline_contains_raise () =
   | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
 ;;
 
-(* Two units for the same keeper run one after another: the second only starts
-   after the first releases the keeper's mutex. *)
+(* [submit] must return control to the keeper turn before the detached memory
+   unit begins. Eio.Fiber.fork runs the child immediately unless it yields. *)
+let test_submit_detaches_before_job_runs () =
+  Lane.For_testing.reset ();
+  let submit_returned = ref false in
+  let job_observed_submit_returned = ref false in
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let outcome =
+        Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
+          job_observed_submit_returned := !submit_returned)
+      in
+      (match outcome with
+       | Lane.Submitted -> ()
+       | Lane.Ran_inline -> Alcotest.fail "detachment test ran inline"
+       | Lane.Dropped -> Alcotest.fail "detachment test was dropped");
+      submit_returned := true));
+  Alcotest.(check bool)
+    "job began after submit returned"
+    true
+    !job_observed_submit_returned
+;;
+
+(* Two units for the same keeper run one after another: the worker does not
+   begin the second until the first completes. *)
 let test_serializes_within_keeper () =
   Lane.For_testing.reset ();
   let order = ref [] in
@@ -103,50 +127,79 @@ let test_independent_across_keepers () =
   Alcotest.(check (list string)) "k2 before k1" [ "k2"; "k1" ] (List.rev !order)
 ;;
 
-(* With max_pending = 2, a third concurrent unit for one keeper is dropped. *)
-let test_saturation_drops () =
+(* Backlog is kept in FIFO order instead of being discarded at an arbitrary
+   pending bound. The turn-side submitter does not wait for the first unit. *)
+let test_backlog_is_queued_without_loss () =
   Lane.For_testing.reset ();
+  let order = ref [] in
+  let outcomes = ref [] in
   Eio_main.run (fun _env ->
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
+      let p_started, set_started = Eio.Promise.create () in
       let p_release, set_release = Eio.Promise.create () in
       let o1 =
         Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
-          Eio.Promise.await p_release)
+          Eio.Promise.resolve set_started ();
+          Eio.Promise.await p_release;
+          order := "a" :: !order)
       in
-      let o2 = Lane.submit ~base_path ~keeper_name:"k1" (fun () -> ()) in
-      let o3 = Lane.submit ~base_path ~keeper_name:"k1" (fun () -> ()) in
-      (match o1 with
-       | Lane.Submitted -> ()
-       | _ -> Alcotest.fail "o1 not submitted");
-      (match o2 with
-       | Lane.Submitted -> ()
-       | _ -> Alcotest.fail "o2 not submitted");
-      (match o3 with
-       | Lane.Dropped -> ()
-       | Lane.Submitted -> Alcotest.fail "o3 should be Dropped, got Submitted"
-       | Lane.Ran_inline -> Alcotest.fail "o3 should be Dropped, got Ran_inline");
+      Eio.Promise.await p_started;
+      let o2 =
+        Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
+          order := "b" :: !order)
+      in
+      let o3 =
+        Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
+          order := "c" :: !order)
+      in
+      outcomes := [ o1; o2; o3 ];
+      Alcotest.(check (option int))
+        "all three units remain pending"
+        (Some 3)
+        (Lane.For_testing.pending ~base_path ~keeper_name:"k1");
       Eio.Promise.resolve set_release ()))
+  ;
+  List.iter
+    (function
+      | Lane.Submitted -> ()
+      | Lane.Ran_inline -> Alcotest.fail "queued unit unexpectedly ran inline"
+      | Lane.Dropped -> Alcotest.fail "accepted backlog unit was dropped")
+    !outcomes;
+  Alcotest.(check (list string))
+    "FIFO order preserved"
+    [ "a"; "b"; "c" ]
+    (List.rev !order);
+  Alcotest.(check (option int))
+    "pending drained"
+    (Some 0)
+    (Lane.For_testing.pending ~base_path ~keeper_name:"k1")
 ;;
 
-(* A unit that raises releases the mutex and the pending slot, so the lane
-   recovers and later units run. *)
+(* A unit that raises releases its pending slot, so the worker continues and
+   later units run. *)
 let test_releases_on_raise () =
   Lane.For_testing.reset ();
   let ran_after = ref false in
   Eio_main.run (fun _env ->
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
-      let _ =
-        Lane.submit ~base_path ~keeper_name:"k1" (fun () -> raise Test_boom)
+      let started, set_started = Eio.Promise.create () in
+      let release, set_release = Eio.Promise.create () in
+      let first =
+        Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
+          Eio.Promise.resolve set_started ();
+          Eio.Promise.await release;
+          raise Test_boom)
       in
-      Eio.Fiber.yield ();
-      Eio.Fiber.yield ();
-      let _ =
+      Eio.Promise.await started;
+      let second =
         Lane.submit ~base_path ~keeper_name:"k1" (fun () -> ran_after := true)
       in
-      Eio.Fiber.yield ();
-      Eio.Fiber.yield ()));
+      (match first, second with
+       | Lane.Submitted, Lane.Submitted -> ()
+       | _ -> Alcotest.fail "raising unit backlog was not submitted");
+      Eio.Promise.resolve set_release ()));
   Alcotest.(check bool) "lane recovered after raise" true !ran_after;
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
   | Some 0 -> ()
@@ -157,6 +210,7 @@ let test_releases_on_raise () =
 (* Cancellation during shutdown releases both the mutex and the pending slot. *)
 let test_releases_on_cancel () =
   Lane.For_testing.reset ();
+  let queued_unit_ran = ref false in
   (try
      Eio_main.run (fun _env ->
        Eio.Switch.run (fun sw ->
@@ -173,9 +227,25 @@ let test_releases_on_cancel () =
          | Lane.Ran_inline -> Alcotest.fail "cancel test unexpectedly ran inline"
          | Lane.Dropped -> Alcotest.fail "cancel test unexpectedly dropped");
          Eio.Promise.await started;
+         let queued =
+           Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
+             queued_unit_ran := true)
+         in
+         (match queued with
+          | Lane.Submitted -> ()
+          | Lane.Ran_inline -> Alcotest.fail "queued cancel unit ran inline"
+          | Lane.Dropped -> Alcotest.fail "queued cancel unit was not accepted");
+         Alcotest.(check (option int))
+           "in-flight and queued before cancellation"
+           (Some 2)
+           (Lane.For_testing.pending ~base_path ~keeper_name:"k1");
          Eio.Switch.fail sw Cancel_lane_test))
    with
    | Cancel_lane_test -> ());
+  Alcotest.(check bool)
+    "queued unit did not run after cancellation"
+    false
+    !queued_unit_ran;
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
   | Some 0 -> ()
   | Some n -> Alcotest.failf "pending leaked after cancel: %d" n
@@ -224,6 +294,10 @@ let () =
             `Quick
             test_inline_contains_raise
         ; Alcotest.test_case
+            "submit detaches before job runs"
+            `Quick
+            test_submit_detaches_before_job_runs
+        ; Alcotest.test_case
             "serializes within keeper"
             `Quick
             test_serializes_within_keeper
@@ -231,7 +305,10 @@ let () =
             "independent across keepers"
             `Quick
             test_independent_across_keepers
-        ; Alcotest.test_case "saturation drops" `Quick test_saturation_drops
+        ; Alcotest.test_case
+            "backlog queued without loss"
+            `Quick
+            test_backlog_is_queued_without_loss
         ; Alcotest.test_case "releases on raise" `Quick test_releases_on_raise
         ; Alcotest.test_case "releases on cancel" `Quick test_releases_on_cancel
         ; Alcotest.test_case

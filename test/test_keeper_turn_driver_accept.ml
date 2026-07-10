@@ -399,6 +399,58 @@ let test_finalization_blank_response_is_typed_accept_rejection () =
        Alcotest.failf "expected typed keeper error, got %s"
          (Agent_sdk.Error.to_string err))
 
+let test_finalization_does_not_surface_hidden_reasoning () =
+  let hidden = "private chain of thought must not become a user reply" in
+  let response =
+    run_result
+      ~content:
+        [ Agent_sdk.Types.Thinking { signature = None; content = hidden }
+        ; Agent_sdk.Types.ReasoningDetails
+            { reasoning_content = Some "provider-private reasoning"
+            ; details = []
+            }
+        ]
+      ()
+  in
+  let finalize tool_names =
+    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+      ~runtime_id:"runtime.reasoning-model"
+      ~initial_messages:[]
+      ~run_result:response
+      ~text:""
+      ~tool_names
+      ()
+  in
+  (match finalize [ "masc_schedule_get" ] with
+   | Error err ->
+     Alcotest.failf "tool fallback should succeed: %s" (Agent_sdk.Error.to_string err)
+   | Ok text ->
+     Alcotest.(check string)
+       "hidden reasoning is replaced by the generic tool-list fallback"
+       "Completed without a textual reply. Tools used: masc_schedule_get."
+       text;
+     Alcotest.(check bool)
+       "Thinking content is not user-facing"
+       false
+       (contains ~needle:hidden text);
+     Alcotest.(check bool)
+       "ReasoningDetails content is not user-facing"
+       false
+       (contains ~needle:"provider-private reasoning" text));
+  let _err, reason_kind, reason = expect_accept_rejected (finalize []) in
+  Alcotest.(check bool)
+    "reasoning-only finalization keeps the typed no-progress rejection"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "typed rejection diagnostic does not expose Thinking content"
+    false
+    (contains ~needle:hidden reason);
+  Alcotest.(check bool)
+    "typed rejection diagnostic does not expose ReasoningDetails content"
+    false
+    (contains ~needle:"provider-private reasoning" reason)
+
 let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -2335,6 +2387,10 @@ let () =
             "blank finalization response is typed no-progress"
             `Quick
             test_finalization_blank_response_is_typed_accept_rejection;
+          Alcotest.test_case
+            "finalization does not surface hidden reasoning"
+            `Quick
+            test_finalization_does_not_surface_hidden_reasoning;
           Alcotest.test_case
             "runtime mapping preserves no-progress accept rejection"
             `Quick

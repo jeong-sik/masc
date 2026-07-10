@@ -56,7 +56,7 @@ val next_generation_with_floor_for_keepers_dir :
   keepers_dir:string ->
   floor:int ->
   keeper_id:Keeper_id.Keeper_name.t ->
-  trace_id:string ->
+  trace_id:Keeper_id.Trace_id.t ->
   int
 
 (** {1 Atomic writes} *)
@@ -78,7 +78,9 @@ val append_episode_for_keepers_dir :
 
 (** Serialize a cross-file episode bundle write for one keeper. Callers that
     write facts plus episode/event artifacts should take this before the facts
-    lock, then publish [events_path] last as the reader-visible commit marker. *)
+    lock, then publish [events_path] last as the reader-visible commit marker.
+    The global lock order is bundle lock, then facts lock; reversing it can
+    deadlock another writer. *)
 val with_episode_bundle_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   keeper_id:string ->
@@ -124,6 +126,19 @@ val with_facts_lock :
   -> on_timeout:(string -> 'a)
   -> (unit -> 'a)
   -> 'a
+
+(** Explicit-root form of {!with_facts_lock}. [keeper_id] is already validated,
+    [keepers_dir] must be an existing real directory, and symlink/non-regular
+    fact and lock targets are rejected. When both locks are needed, acquire
+    {!with_episode_bundle_lock_for_keepers_dir} first and this lock second. *)
+val with_facts_lock_for_keepers_dir :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
+  -> keeper_id:Keeper_id.Keeper_name.t
+  -> on_timeout:(string -> 'a)
+  -> (unit -> 'a)
+  -> 'a
+
 val save_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t -> unit
 val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t option
 
@@ -237,6 +252,9 @@ val merge_and_cap_facts :
   -> rank:(fact -> float)
   -> fact_merge_stats
 
+(** The explicit-root merge is a read-modify-rewrite operation. Its caller must
+    hold {!with_facts_lock_for_keepers_dir}; if an episode bundle is also being
+    published, the caller must hold the bundle lock before the facts lock. *)
 val merge_and_cap_facts_for_keepers_dir :
   keepers_dir:string
   -> now:float

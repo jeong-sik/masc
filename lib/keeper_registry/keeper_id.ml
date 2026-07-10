@@ -1,8 +1,16 @@
+(* Bounded preview for identifier validation errors. These values originate from
+   external requests/config/JSON, so emitting the full invalid value can amplify
+   logs. *)
+let preview_id s =
+  if String.length s <= 32 then s
+  else Printf.sprintf "%s… (%d bytes total)" (String.sub s 0 32) (String.length s)
+;;
+
 module Keeper_name = struct
   type t = string
   let is_valid s =
     let len = String.length s in
-    len > 0 && len <= 64 &&
+    s <> "." && s <> ".." && len > 0 && len <= 64 &&
     let rec check i =
       if i = len then true
       else
@@ -14,20 +22,24 @@ module Keeper_name = struct
 
   let of_string s =
     if is_valid s then Ok s
-    else Error (Printf.sprintf "Invalid keeper_name format: '%s'" s)
+    else
+      let reason =
+        if String.equal s "." then "reserved name '.'"
+        else if String.equal s ".." then "reserved name '..'"
+        else if String.length s = 0 then "empty string"
+        else if String.length s > 64
+        then Printf.sprintf "length %d exceeds 64" (String.length s)
+        else "contains characters outside [A-Za-z0-9_-]"
+      in
+      Error
+        (Printf.sprintf
+           "Invalid keeper_name %S: %s"
+           (preview_id s)
+           reason)
 
   let to_string s = s
   let equal = String.equal
 end
-
-(* Bounded preview for id validation error messages — these ids
-   originate from external requests / config / JSON; full dump risks
-   log spam on bad input. 32 bytes matches the pattern from iter#83
-   [decode_global_id] (#16903) and iter#84 [Ids.Trace_id]. *)
-let preview_id s =
-  if String.length s <= 32 then s
-  else Printf.sprintf "%s… (%d bytes total)" (String.sub s 0 32) (String.length s)
-;;
 
 module Trace_id = struct
   type t = string

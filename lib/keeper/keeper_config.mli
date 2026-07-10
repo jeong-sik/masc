@@ -131,9 +131,10 @@ val parse_self_model_opt : Yojson.Safe.t -> string -> string option
 (** {1 Compaction Configuration} *)
 
 (** HOW a checkpoint is summarized (orthogonal to [profile], which decides
-    WHEN to compact). [Deterministic] = the extractive OAS strategy chain
-    (fail-closed default); [Llm] = opt-in provider-backed summarizer on the
-    librarian lane (wired in W2). *)
+    WHEN to compact). [Llm] = provider-backed summarizer on the librarian
+    lane (the default; summarizer failure always falls back to the
+    deterministic chain); [Deterministic] = the extractive OAS strategy
+    chain only (opt-out). *)
 type compaction_mode =
   | Deterministic
   | Llm

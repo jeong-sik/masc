@@ -22,21 +22,28 @@ let test_checkpoint_compaction_uses_summarize_old () =
     [ "PruneToolOutputs"; "MergeContiguous"; "SummarizeOld"; "DropLowImportance" ]
     strategies
 
-(* ── compaction_mode (RFC-0313-adjacent W1) ──────────────────────────── *)
+(* ── compaction_mode (RFC-0313-adjacent) ─────────────────────────────── *)
 
-(* W1 invariant: [Llm] mode must not change behavior yet — until W2 wires
-   the librarian-lane summarizer, it delegates to the identical
-   deterministic chain. If this ever diverges, W2 landed and this test
-   must be updated deliberately (not a silent behavior flip). *)
-let test_llm_mode_delegates_to_deterministic_in_w1 () =
+(* Floor invariant: the [Llm] plan is a pre-step; both modes share the
+   identical deterministic strategy chain as the guaranteed fallback floor.
+   If this ever diverges the fallback semantics changed and this test must
+   be updated deliberately (not a silent behavior flip). *)
+let test_llm_mode_shares_deterministic_floor () =
   let names mode =
     KCP.checkpoint_compaction_strategies ~mode
     |> List.map Context_compact_oas.strategy_name
   in
   Alcotest.(check (list string))
-    "W1: Llm mode delegates to the deterministic chain"
+    "Llm mode shares the deterministic fallback chain"
     (names Keeper_config.Deterministic)
     (names Keeper_config.Llm)
+
+(* 38-bug campaign #3: compaction is a judgment call, so the LLM boundary is
+   the default; Deterministic is the explicit opt-out. Guards against a
+   silent flip back to extractive-only compaction. *)
+let test_default_compaction_mode_is_llm () =
+  check_string "default compaction mode" "llm"
+    (Keeper_config.compaction_mode_to_string Keeper_config.default_compaction_mode)
 
 let test_compaction_mode_parse_canonical () =
   let parse raw =
@@ -260,11 +267,13 @@ let () =
         [
           Alcotest.test_case "checkpoint compaction summarizes old context"
             `Quick test_checkpoint_compaction_uses_summarize_old;
-          Alcotest.test_case "W1: Llm mode delegates to deterministic"
-            `Quick test_llm_mode_delegates_to_deterministic_in_w1;
+          Alcotest.test_case "Llm mode shares the deterministic floor"
+            `Quick test_llm_mode_shares_deterministic_floor;
         ] );
       ( "compaction_mode",
         [
+          Alcotest.test_case "default mode is llm" `Quick
+            test_default_compaction_mode_is_llm;
           Alcotest.test_case "canonical + alias parse" `Quick
             test_compaction_mode_parse_canonical;
           Alcotest.test_case "unknown mode is a config error" `Quick

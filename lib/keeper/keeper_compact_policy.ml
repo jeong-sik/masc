@@ -404,7 +404,7 @@ let compact_if_needed_typed
       in
       (* RFC-0313-adjacent W2: [Llm] mode asks a librarian-lane summarizer for a
          structured kept/summarized/dropped plan and applies it; any failure
-         (opt-in off, no Eio context, no schema provider, invalid plan) yields
+         (no Eio context, no schema provider, invalid plan) yields
          [None] and falls back to the deterministic chain — the [Deterministic]
          floor is always the guaranteed result. Emergency compaction (a
          near-full context, [emergency] above) never calls the LLM: the reply

@@ -292,16 +292,20 @@ let default_compaction_profile = "custom"
    checkpoint is summarized. Orthogonal axes, so a separate closed variant
    rather than another [profile] string.
 
-   [Deterministic] = the extractive OAS strategy chain
-   ([Keeper_compact_policy.checkpoint_compaction_strategies]); this is the
-   fail-closed default (no provider spend, no latency, no re-arming loop).
-   [Llm] = opt-in provider-backed summarizer on the librarian lane (W2);
-   until W2 it delegates to the deterministic chain. *)
+   [Llm] = provider-backed summarizer on the librarian lane; the default,
+   because what to keep/summarize/drop is a judgment call and judgment goes
+   through an LLM boundary (project principle). Emergency compaction and any
+   summarizer failure (no Eio context, no schema-capable provider, invalid
+   plan) still fall back to the deterministic chain, so the extractive floor
+   is always guaranteed.
+   [Deterministic] = the extractive OAS strategy chain only
+   ([Keeper_compact_policy.checkpoint_compaction_strategies]); opt-out for
+   no provider spend / no latency. *)
 type compaction_mode =
   | Deterministic
   | Llm
 
-let default_compaction_mode = Deterministic
+let default_compaction_mode = Llm
 
 let compaction_mode_to_string = function
   | Deterministic -> "deterministic"

@@ -902,27 +902,49 @@ let review
                 (match parse_review_verdict_from_response_text text with
                  | Ok v -> v, Llm_text_fallback, None
                  | Error Empty_review_output ->
-                   (* Misattribution fix (24h tool-error audit, 2026-07-08): an
-                      empty completion is an evaluator-side failure — the
-                      keeper's notes were never reviewed, so a reason phrased
-                      as "review format unrecognized" sent keepers into a
-                      revise-notes retry loop (305 hits/24h). Still a
-                      deterministic Reject: #22573's ratchet (empty must not
-                      approve by liveness, independent of the fail_mode knob)
-                      holds. Only the attribution and the gate change. *)
-                   task_warn
-                     "[anti-rationalization] evaluator returned empty completion \
-                      (rejecting fail-closed; evaluator-side failure — keeper \
-                      notes were not reviewed)";
-                   ( Reject
-                       "evaluator returned an empty response; the completion \
-                        notes were not reviewed (evaluator-side failure). \
-                        Revising notes will not help — retry later, and if \
-                        this repeats the evaluator runtime needs operator \
-                        attention (structured-output capability or token \
-                        budget)."
-                   , Evaluator_empty
-                   , Some (verdict_parse_error_to_string Empty_review_output) )
+                   (* Topology deadlock fix (#10474): empty-text is an
+                      evaluator-side failure — the keeper's notes were never
+                      reviewed. The old hard-reject sent keepers into an
+                      unbounded revise-notes retry loop that could never
+                      succeed (305 hits/24h). Apply the same fail-open
+                      liveness policy as the Error/zero-providers branch:
+                      approve by liveness when no excuse advisory is active,
+                      reject only when there is an active safety-net pattern.
+                      Relaxes #22573 ratchet for empty-text specifically. *)
+                   (match excuse_advisory with
+                    | Some (pattern, reason) ->
+                      task_warn
+                        "[anti-rationalization] evaluator returned empty text \
+                         AND gate-2 advisory pattern=%s active: rejecting \
+                         (safety net) rather than laundering through liveness. \
+                         OPERATOR ACTION REQUIRED: fix the evaluator runtime."
+                        pattern;
+                      ( Reject
+                          (sprintf
+                             "anti-rationalization evaluator returned \
+                              empty text AND avoidance pattern \"%s\" \
+                              detected (%s); rejecting as fail-closed \
+                              safety net. Revise notes or wait for \
+                              evaluator runtime repair."
+                             pattern reason)
+                      , Fallback
+                      , Some
+                          (sprintf
+                             "evaluator returned empty text with \
+                              active gate-2 advisory pattern=%s"
+                             pattern) )
+                    | None ->
+                      task_warn
+                        "[anti-rationalization] evaluator returned empty text \
+                         — approving by liveness (no excuse advisory). \
+                         OPERATOR ACTION REQUIRED: fix the evaluator runtime \
+                         (provider capabilities, MCP policy, or tool \
+                         requirements).  See #10474.";
+                      ( Approve
+                      , Fallback
+                      , Some
+                          "anti-rationalization evaluator returned \
+                           empty text; approving by liveness (#10474)" ))
                  | Error (Unrecognized_review_format _ as parse_error) ->
                    let parse_err = verdict_parse_error_to_string parse_error in
                    task_warn

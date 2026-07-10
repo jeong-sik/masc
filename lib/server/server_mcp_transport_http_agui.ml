@@ -193,6 +193,7 @@ let handle_ag_ui_events ~deps request reqd =
       in
       register_owned_sse ~deps ~reqd ~origin ~session_id ~transport
         ~protocol_version ~sse_kind:Sse.Observer
+        (* DET-OK: an omitted SSE cursor means the protocol's initial cursor. *)
         ~last_event_id:(Option.value ~default:0 last_event_id) ~base_path
         ~admission ~lease ~headers (fun info event_stream ->
           if Option.is_some last_event_id then

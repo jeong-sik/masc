@@ -184,7 +184,8 @@ let handle_get_status (workspace_config : Workspace_utils_backend_setup.config) 
              ~agent_name:agent.name
              ~field:"session_bound_at"
              agent.session_bound_at
-       ; current_task_id = Option.value ~default:"" agent.current_task
+       ; (* DET-OK: absent task is represented as no current task in the response. *)
+         current_task_id = Option.value ~default:"" agent.current_task
        }
        : T.agent_info))
   in

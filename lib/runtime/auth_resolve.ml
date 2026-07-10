@@ -203,6 +203,7 @@ let emit_resolution_trace ~runtime ~keeper_id ~provider_label ~outcome =
         "auth_resolve: runtime=%s provider=%s keeper=%s outcome=ok source=%s verified_owner=%s"
         runtime provider_label keeper_label
         (token_source_label source)
+        (* DET-OK: absent verified identity is rendered only in diagnostics. *)
         (Option.value verified_agent_name ~default:"-")
   | Error err ->
       Log.Auth.error

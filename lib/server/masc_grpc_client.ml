@@ -39,6 +39,7 @@ let create_from_env ~sw ~env =
 let close t =
   Grpc_eio.Client.close t.client
 
+(* DET-OK: empty token is the explicit unauthenticated wire representation. *)
 let wire_auth_token t = Option.value ~default:"" t.auth_token
 
 (** {1 Internal helpers} *)

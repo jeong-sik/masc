@@ -238,6 +238,7 @@ let start_keeper_grpc_heartbeat
          Random_id.prefixed ~prefix:("keeper-" ^ m.name ^ "-") ~bytes:16
        in
        let sw =
+         (* NDT-OK: inherit the request switch only when no global supervisor switch exists. *)
          Option.value (Keeper_supervisor.get_global_switch ()) ~default:ctx.sw
        in
        run_grpc_heartbeat_fiber

@@ -209,6 +209,7 @@ let resolve_tool_lane_for_oas_tools
               ; disable_builtin_tools = false
               }
             |> runtime_mcp_policy_for_provider ~base_path ~provider_cfg
+                 (* DET-OK: empty agent name means the unbound MCP policy scope. *)
                  ~agent_name:(Option.value ~default:"" requested_agent_name))
       else
         runtime_mcp_policy_of_tool_names

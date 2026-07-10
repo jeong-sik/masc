@@ -353,6 +353,7 @@ let start_webrtc_connection ~sw ~env peer_id =
           with_registry (fun () ->
           match Hashtbl.find_opt active_peers peer_id with
           | Some conn ->
+            (* NDT-OK: wall-clock activity is telemetry/expiry state, never a branch key. *)
             conn.last_activity <- Unix.gettimeofday ();
             Hashtbl.find_opt peer_admissions peer_id
           | None -> None)

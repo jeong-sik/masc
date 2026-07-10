@@ -751,6 +751,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       "MCP initialize session commit failed: session=%s error=%s"
                                       session_id message;
                                     Mcp_transport_protocol.make_error
+                                      (* DET-OK: JSON-RPC error envelope requires null for absent ids. *)
                                       ~id:(Option.value ~default:`Null response_id)
                                       (Mcp_error_code.to_wire_code
                                          Mcp_error_code.Internal_error)
@@ -1064,6 +1065,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
          match
            Sse.register ~kind:sse_kind
              ~precondition:Sse.No_current_client ~auth session_id
+             (* DET-OK: an omitted SSE cursor means the protocol's initial cursor. *)
              ~last_event_id:(Option.value ~default:0 last_event_id)
              ~on_disconnect:(fun disconnected_client_id ->
                release_owner_lease ();

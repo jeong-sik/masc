@@ -524,6 +524,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                            session_id message;
                                          ( Mcp_transport_protocol.make_error
                                              ~id:
+                                               (* DET-OK: JSON-RPC errors use null when no request id exists. *)
                                                (Option.value ~default:`Null
                                                   (Server_mcp_transport_http
                                                    .body_jsonrpc_id
@@ -700,6 +701,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, "/graphql" ->
           with_h2_read_auth h2_reqd (fun _state ->
             let nonce =
+              (* NDT-OK: nonce generation is a security boundary, not a decision input. *)
               let rng = Random.State.make_self_init () in
               let bytes =
                 Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256))

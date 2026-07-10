@@ -129,6 +129,7 @@ let decode_hex value =
 let websocket_subprotocol_token_from_request request =
   let bearer_members =
     Httpun.Headers.get request.Httpun.Request.headers "sec-websocket-protocol"
+    (* DET-OK: missing websocket protocol header means no requested subprotocol. *)
     |> Option.value ~default:""
     |> String.split_on_char ','
     |> List.map String.trim

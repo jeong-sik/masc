@@ -789,6 +789,7 @@ let add_routes ~sw ~clock router =
        with_public_read (fun _state _req reqd ->
          let target_type_raw =
            Server_utils.query_param request "target_type"
+           (* DET-OK: absent filter means the unfiltered activity view. *)
            |> Option.value ~default:""
          in
          let target_id =

@@ -436,6 +436,7 @@ let rec claim_connection t ~session_id ~lifecycle_session_id ~sse_kind
 let claim_mcp_sse_session_owner_for_request t ~session_id
       ?lifecycle_session_id ~sse_kind ~requester =
   let lifecycle_session_id =
+    (* DET-OK: lifecycle id falls back to the authenticated session identity. *)
     Option.value ~default:session_id lifecycle_session_id
   in
   let result, operation_release =

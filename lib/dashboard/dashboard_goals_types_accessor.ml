@@ -79,6 +79,7 @@ let task_status_label (task : Masc_domain.task) : string =
   | Masc_domain.AwaitingVerification _ -> "awaiting_verification"
   | Masc_domain.Done _ -> "completed"
   | Masc_domain.Cancelled _ -> "cancelled"
+  | Masc_domain.OperatorBlocked _ -> "operator-blocked"
 
 let task_is_terminal (task : Masc_domain.task) : bool =
   Masc_domain.task_status_is_terminal task.task_status

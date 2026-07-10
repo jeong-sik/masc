@@ -140,26 +140,46 @@ let test_recent_activity_skips_bad_task_file () =
   | _ -> fail "expected one task activity item"
 ;;
 
-let test_recent_activity_falls_back_from_bad_task_timestamp () =
-  with_temp_dir "activity-feed-ts" @@ fun base_path ->
+let test_recent_activity_orders_limits_and_filters () =
+  with_temp_dir "activity-feed-order" @@ fun base_path ->
   let config = Workspace.default_config base_path in
-  let tasks_dir = Filename.concat (Workspace.masc_dir config) "tasks" in
-  Fs_compat.mkdir_p tasks_dir;
+  let masc_dir = Workspace.masc_dir config in
+  Fs_compat.mkdir_p masc_dir;
+  let board_posts_path = Filename.concat masc_dir "board_posts.jsonl" in
+  let post ~id ~author ~created_at =
+    `Assoc
+      [ "id", `String id
+      ; "author", `String author
+      ; "title", `String id
+      ; "content", `String "body"
+      ; "created_at", `Float created_at
+      ]
+    |> Yojson.Safe.to_string
+  in
   write_file
-    (Filename.concat tasks_dir "task.json")
-    (Yojson.Safe.to_string
-       (`Assoc
-         [ "id", `String "task-2"
-         ; "status", `String "running"
-         ; "assignee", `String "carol"
-         ; "title", `String "Investigate"
-         ; "created_at", `String "not-a-timestamp"
-         ]));
-  let items = Activity_feed.recent_activity config ~limit:10 () in
-  check int "task still included" 1 (List.length items);
-  match items with
-  | [ item ] -> check (float 0.01) "timestamp falls back to epoch" 0.0 item.created_at
-  | _ -> fail "expected one task activity item"
+    board_posts_path
+    (String.concat
+       "\n"
+       [ post ~id:"old-alice" ~author:"alice" ~created_at:100.0
+       ; post ~id:"middle-bob" ~author:"bob" ~created_at:200.0
+       ; post ~id:"new-alice" ~author:"alice" ~created_at:300.0
+       ]
+     ^ "\n");
+  let ids items = List.map (fun (item : Activity_feed.activity_item) -> item.id) items in
+  let newest_two = Activity_feed.recent_activity config ~limit:2 () |> ids in
+  check
+    (list string)
+    "descending order and limit"
+    [ "act-post-new-alice"; "act-post-middle-bob" ]
+    newest_two;
+  let alice_only =
+    Activity_feed.recent_activity config ~agent_name:"alice" ~limit:10 () |> ids
+  in
+  check
+    (list string)
+    "agent filter preserves descending order"
+    [ "act-post-new-alice"; "act-post-old-alice" ]
+    alice_only
 ;;
 
 let test_recent_activity_ignores_backlog_json_without_warning () =
@@ -203,9 +223,9 @@ let () =
                 test_recent_activity_accepts_iso_string_created_at_for_board_posts
             ; test_case "skips bad task file" `Quick test_recent_activity_skips_bad_task_file
             ; test_case
-                "falls back from bad task timestamp"
+                "orders, limits, and filters"
                 `Quick
-                test_recent_activity_falls_back_from_bad_task_timestamp
+                test_recent_activity_orders_limits_and_filters
             ; test_case
                 "ignores backlog json without warning"
                 `Quick

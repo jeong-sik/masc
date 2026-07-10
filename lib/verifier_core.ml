@@ -40,40 +40,33 @@ type grounded_verdict = {
 (* Read-Only Detection                                              *)
 (* ================================================================ *)
 
-let read_only_patterns = [
-  "read"; "glob"; "grep";
-  "search"; "find"; "list"; "ls"; "cat"; "head"; "tail";
-  "git status"; "git log"; "git diff";
-  "status"; "view"; "get"; "fetch"; "query";
-]
+type effect_class =
+  | Read_only
+  | Write
+  | Mutate
+  | Execute
 
-let is_word_char c =
-  match c with
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
-  | _ -> false
-
-let has_pattern_with_word_boundary ~text ~pat =
-  let tlen = String.length text in
-  let plen = String.length pat in
-  if plen = 0 || tlen < plen then false
-  else
-    let rec loop i =
-      if i > tlen - plen then false
-      else if String.sub text i plen = pat then
-        let before_ok = i = 0 || not (is_word_char text.[i - 1]) in
-        let after_idx = i + plen in
-        let after_ok = after_idx >= tlen || not (is_word_char text.[after_idx]) in
-        if before_ok && after_ok then true else loop (i + 1)
-      else
-        loop (i + 1)
-    in
-    loop 0
+let classify_tool ~name =
+  let n = String.lowercase_ascii name in
+  (* Write: filesystem mutations *)
+  if List.exists (fun p -> String.starts_with ~prefix:p n)
+    [ "write"; "edit"; "patch"; "mkdir"; "cp "; "mv " ]
+  then Write
+  (* Mutate: external side effects *)
+  else if List.exists (fun p -> String.starts_with ~prefix:p n)
+    [ "git push"; "git commit"; "gh pr create"; "gh pr merge";
+      "gh issue create"; "gh release create" ]
+  then Mutate
+  (* Execute: arbitrary code execution *)
+  else if String.starts_with ~prefix:"execute" n
+  then Execute
+  (* Default: read-only *)
+  else Read_only
 
 let should_skip ~action_description =
-  let text = String.lowercase_ascii action_description in
-  List.exists (fun pat ->
-    has_pattern_with_word_boundary ~text ~pat
-  ) read_only_patterns
+  match classify_tool ~name:action_description with
+  | Read_only -> true
+  | _ -> false
 
 (* ================================================================ *)
 (* Verdict Parsing                                                  *)

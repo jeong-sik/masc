@@ -74,6 +74,9 @@ let summary_routing_runtime_toml ~with_hitl_summary =
      api-name = \"judge\"\n\
      max-context = 1024\n\
      \n\
+     [models.judge.capabilities]\n\
+     supports-structured-output = true\n\
+     \n\
      [models.summary]\n\
      api-name = \"summary\"\n\
      max-context = 1024\n\

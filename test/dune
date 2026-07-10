@@ -2680,6 +2680,8 @@
 
 (include stanzas/test_tool_resource_gate.inc)
 
+(include stanzas/test_keeper_wire_capture_suppression.inc)
+
 (test
  (name test_keeper_visible_path_projection)
  (modules test_keeper_visible_path_projection)

@@ -165,7 +165,8 @@ let test_update_scheduled_request () =
   let payload = payload_exn payload_json in
   match
     update config ~schedule_id:request.schedule_id ~due_at:260.0
-      ~expires_at:(Some 360.0) ~payload
+      ~expires_at:(Some 360.0) ~payload ~updated_at:175.0
+      ~updated_by:request.requested_by ()
   with
   | Ok updated ->
     check_status "updated stays scheduled" Scheduled updated.status;
@@ -192,7 +193,8 @@ let test_update_due_request_reports_store_error () =
        (Schedule_store.Invalid_status_transition
           "only pending or scheduled requests can be updated"))
     (update config ~schedule_id:request.schedule_id ~due_at:260.0
-       ~expires_at:None ~payload:(updated_payload ()))
+       ~expires_at:None ~payload:(updated_payload ()) ~updated_at:210.0
+       ~updated_by:request.requested_by ())
 ;;
 
 let test_due_candidates_do_not_execute_and_require_approval () =

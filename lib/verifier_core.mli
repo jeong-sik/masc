@@ -36,13 +36,12 @@ type grounded_verdict = private {
 
 (** {1 Read-Only Detection} *)
 
-(** [should_skip ~action_description] returns [true] when the
-    description text contains a word-boundary match for any
-    read-only keyword ([read], [glob], [grep], [search], [find],
-    [list], [ls], [cat], [head], [tail], [git status], [git log],
-    [git diff], [status], [view], [get], [fetch], [query]).
-    Case-insensitive, word-boundary aware. *)
-val should_skip : action_description:string -> bool
+(** [should_skip ~tool_name ()] returns [true] when the tool is
+    read-only (effect_class = Read) and the verifier should skip
+    anti-rationalization review.
+    Accepts [~tool_name] for the typed effect_class path, or
+    [~action_description] for backward compatibility. *)
+val should_skip : ?tool_name:string -> ?action_description:string -> unit -> bool
 
 (** {1 Verdict Parsing} *)
 

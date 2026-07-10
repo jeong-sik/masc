@@ -33,6 +33,7 @@ type t =
   | Library_search
   | Memory_search
   | Memory_write
+  | Keeper_msg
   | Search_files
   | Surface_read
   | Surface_post

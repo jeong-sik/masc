@@ -1110,7 +1110,7 @@ let run_keeper_msg_turn_admitted
                                 ~is_retry
                                 ?event_bus
                                 ?continuation_channel
-                                ?channel:(Some (Keeper_continuation_channel.unrouted channel))
+                                ?channel:(Keeper_continuation_channel.unrouted channel)
                                 ())
 		                         ()))
 		            in

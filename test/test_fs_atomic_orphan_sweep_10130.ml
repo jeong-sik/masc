@@ -213,6 +213,37 @@ let test_direct_recovery_rejects_symlinked_destination () =
     0
     (Array.length (Sys.readdir target))
 
+let test_cleanup_rejects_recovery_escape () =
+  with_temp_base @@ fun base_path ->
+  let orphan = Filename.concat base_path ".atomic_data.tmp" in
+  write_file ~path:orphan ~content:"forensic payload";
+  (match
+     Fs_compat.cleanup_atomic_orphans
+       ~base_path
+       ~recovered_subdir:"../outside"
+       ()
+   with
+   | exception Invalid_argument _ -> ()
+   | _ -> Alcotest.fail "recovery traversal was accepted");
+  Alcotest.(check bool) "traversal source retained" true (Sys.file_exists orphan)
+
+let test_cleanup_rejects_symlinked_recovery_root () =
+  with_temp_base @@ fun base_path ->
+  let orphan = Filename.concat base_path ".atomic_data.tmp" in
+  let target = Filename.concat base_path "outside" in
+  let recovered = Filename.concat base_path ".recovered" in
+  write_file ~path:orphan ~content:"forensic payload";
+  Unix.mkdir target 0o755;
+  Unix.symlink target recovered;
+  let deleted, preserved = Fs_compat.cleanup_atomic_orphans ~base_path () in
+  Alcotest.(check int) "no deletion through symlink" 0 deleted;
+  Alcotest.(check int) "no preservation through symlink" 0 preserved;
+  Alcotest.(check bool) "symlink source retained" true (Sys.file_exists orphan);
+  Alcotest.(check int)
+    "symlink root target untouched"
+    0
+    (Array.length (Sys.readdir target))
+
 let test_direct_recovery_preserves_without_overwrite () =
   with_temp_base @@ fun base_path ->
   let orphan = Filename.concat base_path ".atomic_data.tmp" in
@@ -322,6 +353,10 @@ let () =
             test_recovered_dir_skipped_on_rescan;
           Alcotest.test_case "symlinked recovery rejected" `Quick
             test_direct_recovery_rejects_symlinked_destination;
+          Alcotest.test_case "recovery traversal rejected" `Quick
+            test_cleanup_rejects_recovery_escape;
+          Alcotest.test_case "symlinked recovery root rejected" `Quick
+            test_cleanup_rejects_symlinked_recovery_root;
           Alcotest.test_case "direct recovery does not overwrite" `Quick
             test_direct_recovery_preserves_without_overwrite;
         ] );

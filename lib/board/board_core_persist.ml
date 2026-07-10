@@ -839,11 +839,10 @@ let create_post_with_outcome
    status-rollup update path (find -> [{ existing with ... }] -> [Hashtbl.replace]
    -> [mark_dirty_post] -> snapshot save) but is initiated by an explicit edit
    request rather than a same-key automation re-post. The edited content is
-   normalized exactly like [create_post_with_outcome]: a [STATE] block in the
-   new body is lifted into [meta_json] (merged onto the existing meta via
-   [merge_meta_json]) rather than being stripped-and-dropped, so an edit cannot
-   silently lose state. [post_kind]/[visibility]/[hearth]/[thread_id]/[origin]
-   are preserved. Author mismatch returns [Unauthorized] (no silent ignore).
+   normalized exactly like [create_post_with_outcome], with the existing
+   metadata passed through [normalize_meta_json] so an edit cannot silently
+   lose it. [post_kind]/[visibility]/[hearth]/[thread_id]/[origin] are
+   preserved. Author mismatch returns [Unauthorized] (no silent ignore).
    Normalization runs inside the store lock because the meta merge needs the
    existing post's [meta_json]; the added work is pure string/JSON manipulation,
    dominated by the [posts_jsonl_unlocked] snapshot already taken under the
@@ -892,10 +891,9 @@ let update_post_with_outcome
              | Error e -> Error e
              | Ok next_author ->
             (* Normalize identically to create, seeded with the existing post's
-               meta so a [STATE] block in the edited body merges into [meta_json]
-               instead of being dropped. [post_kind] is passed through and the
-               result kind ([_kind]) discarded — the existing post's kind is
-               preserved via [{ existing with }]. *)
+               metadata so body edits cannot erase it. [post_kind] is passed
+               through and the result kind ([_kind]) discarded — the existing
+               post's kind is preserved via [{ existing with }]. *)
             match
               normalize_post_payload
                 ~content

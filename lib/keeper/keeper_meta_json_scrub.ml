@@ -5,11 +5,10 @@
     cycle. *)
 
 
-(* Config/policy fields owned by TOML only.  Never written to JSON; scrubbed
-   from existing JSON on first write.  Keeper self-model fields
-   [will/needs/desires/instructions] are identity snapshot fields, not policy
-   config: meta JSON must keep them so dashboards and status readers can show
-   the effective keeper persona without re-running prompt construction.
+(* Config/policy fields owned by TOML only. Never written to JSON; scrubbed
+   from existing JSON on first write. Persona and instructions are identity
+   snapshot fields, not policy config: meta JSON keeps them so dashboards and
+   status readers can show the effective keeper without rebuilding the prompt.
 
    Defined here (not in keeper_meta_json.ml) to avoid a cycle:
    keeper_meta_json.ml includes this module, so referencing a value
@@ -24,7 +23,7 @@ let config_field_names =
   ; "proactive_enabled"; "proactive_idle_sec"; "proactive_cooldown_sec"
   ; "compaction_profile"; "compaction_ratio_gate"
   ; "compaction_message_gate"; "compaction_token_gate"
-  ; "continuity_compaction_cooldown_sec"
+  ; "compaction_cooldown_sec"
   ; "max_checkpoint_messages"; "keep_recent_tool_results"
     (* tool_heavy_* fields were removed with the tool_heavy compaction
        trigger; kept here so legacy persisted JSON sheds the dead keys. *)

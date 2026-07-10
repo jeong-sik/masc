@@ -1438,7 +1438,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       check bool "keeper registered after approval" true
         (Reg.is_registered ~base_path:config.base_path meta.name))
 
-let test_sweep_warns_for_pending_hitl_approval () =
+let test_sweep_reports_pending_hitl_approval () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1482,21 +1482,21 @@ let test_sweep_warns_for_pending_hitl_approval () =
       sweep_and_recover_no_materialize ctx;
       let expected =
         Printf.sprintf
-          "keeper:%s blocked on 1 pending HITL approval(s); chat awaits operator \
-           decision"
+          "keeper:%s has 1 nonblocking HITL approval(s); chat lane remains \
+           available"
           name
       in
-      let warning_seen =
+      let visibility_seen =
         Log.Ring.recent
           ~limit:50
           ~module_filter:"Keeper"
-          ~min_level:(Log.level_to_int Log.Warn)
+          ~min_level:(Log.level_to_int Log.Info)
           ~since_seq:baseline
           ()
         |> List.exists (fun (entry : Log.Ring.entry) ->
              String.equal entry.message expected)
       in
-      check bool "pending HITL approval warning emitted" true warning_seen;
+      check bool "pending HITL approval visibility emitted" true visibility_seen;
       check bool "approval remains pending after visibility sweep" true
         (AQ.has_pending_for_keeper ~keeper_name:name);
       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
@@ -3745,7 +3745,7 @@ let () =
       test_case "sweep restores reconcile gate for paused keeper" `Quick
         test_sweep_restores_reconcile_gate_for_paused_keeper;
       test_case "sweep warns for pending HITL approval" `Quick
-        test_sweep_warns_for_pending_hitl_approval;
+        test_sweep_reports_pending_hitl_approval;
     ];
     "restart_metrics", [
       test_case "restart path emits attempt and started outcome metrics" `Quick

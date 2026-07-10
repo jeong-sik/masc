@@ -103,7 +103,6 @@ let global_backlog_obs : WO.world_observation =
   ; pending_scope_messages = []
   ; idle_seconds = 0
   ; active_goals = []
-  ; continuity_summary = ""
   ; context_ratio = lazy 0.0
   ; unclaimed_task_count = 1
   ; claimable_task_count = 1

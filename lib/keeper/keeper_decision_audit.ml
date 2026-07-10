@@ -243,7 +243,6 @@ let flush_if_needed ~base_path ~keeper_name =
 (* ================================================================ *)
 
 let decision_pipeline_to_mermaid
-    ?(guard_penalty_total : int option)
     ?(turn_outcome : [`Ok | `Failed] option)
     ~(phase : Keeper_state_machine.phase)
     ~(thompson_alpha : float)
@@ -261,9 +260,6 @@ let decision_pipeline_to_mermaid
   p "stateDiagram-v2\n";
   p "    state Running {\n";
   p "        [*] --> NormalOps\n";
-  p "        NormalOps --> GuardFires: guardrail_stop\n";
-  p "        GuardFires --> ThompsonPenalty: beta += 0.5\n";
-  p "        ThompsonPenalty --> NormalOps: cap 1/cycle\n";
   p "    }\n";
   p "    state Failing {\n";
   p "        [*] --> RecoveryPending\n";
@@ -287,10 +283,6 @@ let decision_pipeline_to_mermaid
      p "    class Running off\n";
      p "    class Failing off\n");
   p "\n";
-  let penalty_str = match guard_penalty_total with
-    | Some n -> string_of_int n
-    | None -> "n/a"
-  in
   let outcome_str = match turn_outcome with
     | Some `Ok -> "ok"
     | Some `Failed -> "failed"
@@ -299,7 +291,6 @@ let decision_pipeline_to_mermaid
   p "    note right of Running\n";
   p "      Thompson: %.2f (α=%.1f β=%.1f)\n" score thompson_alpha thompson_beta;
   p "      Level: %d\n" level;
-  p "      Guard pen this cycle: %s\n" penalty_str;
   p "      Turn outcome: %s\n" outcome_str;
   p "    end note\n";
   Buffer.contents b

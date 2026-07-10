@@ -11,7 +11,6 @@ import { ringFocusClasses } from './common/ring'
 import {
   agentTimeline,
   missionAgentBrief,
-  continuityBriefForAgent,
 } from './agent-detail-state'
 import { findKeeper } from '../lib/keeper-utils'
 import type { AgentTimelineEvent } from '../api'
@@ -128,7 +127,6 @@ function taskEventColor(type: string): string {
 
 function SessionMeta({ agentName }: { agentName: string }) {
   const brief = missionAgentBrief(agentName)
-  const continuity = continuityBriefForAgent(agentName)
   const keeper = findKeeper(agentName)
   const timeline = agentTimeline.value
 
@@ -153,10 +151,6 @@ function SessionMeta({ agentName }: { agentName: string }) {
 
   if (brief?.current_work) {
     meta.push({ label: '현재 작업', value: brief.current_work })
-  }
-
-  if (continuity?.continuity_summary) {
-    meta.push({ label: '연속성', value: continuity.continuity_summary })
   }
 
   if (meta.length === 0) return null

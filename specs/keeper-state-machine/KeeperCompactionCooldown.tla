@@ -1,97 +1,76 @@
 ---- MODULE KeeperCompactionCooldown ----
-\* Compact cooldown projection for post-turn continuity updates.
+\* Compaction cooldown projection.
 \*
-\* This spec pins the contract behind:
-\*   - lib/keeper/keeper_post_turn.ml: apply_continuity_summary
-\*   - lib/keeper/keeper_compact_policy.ml: cooldown gate inputs
+\* Contract anchors:
+\*   - lib/keeper/keeper_compact_policy.ml: decide_compaction
+\*   - keeper_meta.runtime.compaction_rt.last_ts
 \*
-\* Runtime intent:
-\*   A post-turn checkpoint that does not contain a parseable [STATE] block
-\*   must still advance the cooldown timestamp. Otherwise compaction policy
-\*   sees an old last_continuity_update_ts and may compact every turn while
-\*   metrics still look healthy.
-\*
-\* The model deliberately keeps STATE content out of scope. It only proves
-\* that every post-turn continuity observation, including no-state, refreshes
-\* the timestamp that the compaction gate consumes.
+\* Only an applied compaction advances the cooldown clock. Prompt text,
+\* assistant replies, proactive turns, and failed/skipped compactions cannot
+\* change it.
 
 EXTENDS Naturals, TLC
 
-CONSTANT MaxTime
+CONSTANTS MaxTime, Cooldown
 
-VARIABLES
-    now,
-    last_continuity_ts,
-    last_event
+VARIABLES now, last_compaction_ts, last_event
 
-vars == <<now, last_continuity_ts, last_event>>
+vars == <<now, last_compaction_ts, last_event>>
 
-EventSet == {"Init", "State", "NoState", "NoCheckpoint", "Tick"}
+EventSet == {"Init", "Applied", "BelowThreshold", "NoCheckpoint", "Tick"}
 
 TypeOK ==
     /\ now \in 0..MaxTime
-    /\ last_continuity_ts \in 0..MaxTime
-    /\ last_continuity_ts <= now
+    /\ last_compaction_ts \in 0..MaxTime
+    /\ last_compaction_ts <= now
     /\ last_event \in EventSet
 
 Init ==
     /\ now = 0
-    /\ last_continuity_ts = 0
+    /\ last_compaction_ts = 0
     /\ last_event = "Init"
 
-PostTurnWithState ==
-    /\ now < MaxTime
-    /\ now' = now + 1
-    /\ last_continuity_ts' = now'
-    /\ last_event' = "State"
+CooldownReady ==
+    last_compaction_ts = 0 \/ now - last_compaction_ts >= Cooldown
 
-PostTurnNoState ==
+ApplyCompaction ==
     /\ now < MaxTime
+    /\ CooldownReady
     /\ now' = now + 1
-    /\ last_continuity_ts' = now'
-    /\ last_event' = "NoState"
+    /\ last_compaction_ts' = now'
+    /\ last_event' = "Applied"
 
-NoCheckpoint ==
+NoCompaction(event) ==
     /\ now < MaxTime
     /\ now' = now + 1
-    /\ last_event' = "NoCheckpoint"
-    /\ UNCHANGED <<last_continuity_ts>>
-
-Tick ==
-    /\ now < MaxTime
-    /\ now' = now + 1
-    /\ last_event' = "Tick"
-    /\ UNCHANGED <<last_continuity_ts>>
+    /\ last_event' = event
+    /\ UNCHANGED <<last_compaction_ts>>
 
 Next ==
-    \/ PostTurnWithState
-    \/ PostTurnNoState
-    \/ NoCheckpoint
-    \/ Tick
+    \/ ApplyCompaction
+    \/ NoCompaction("BelowThreshold")
+    \/ NoCompaction("NoCheckpoint")
+    \/ NoCompaction("Tick")
 
 Spec == Init /\ [][Next]_vars
 
-StateAdvancesContinuity ==
-    last_event = "State" => last_continuity_ts = now
+AppliedRecordsTimestamp ==
+    last_event = "Applied" => last_compaction_ts = now
 
-NoStateAdvancesContinuity ==
-    last_event = "NoState" => last_continuity_ts = now
+NonAppliedDoesNotInventTimestamp ==
+    last_event \in {"BelowThreshold", "NoCheckpoint", "Tick"}
+    => last_compaction_ts < now
 
-NoCheckpointDoesNotInventContinuity ==
-    last_event = "NoCheckpoint" => last_continuity_ts < now
+Safety == TypeOK /\ AppliedRecordsTimestamp
 
-Safety ==
-    /\ TypeOK
-    /\ StateAdvancesContinuity
-    /\ NoStateAdvancesContinuity
-
-\* Bug: no-state post-turn observations leave last_continuity_ts unchanged.
-BuggyPostTurnNoState ==
+\* Bug: a skipped decision advances the cooldown timestamp even though no
+\* compaction committed.
+BuggyBelowThreshold ==
     /\ now < MaxTime
     /\ now' = now + 1
-    /\ last_event' = "NoState"
-    /\ UNCHANGED <<last_continuity_ts>>
+    /\ last_compaction_ts' = now'
+    /\ last_event' = "BelowThreshold"
 
-SpecBuggy == Init /\ [][Next \/ BuggyPostTurnNoState]_vars
+SpecBuggy == Init /\ [][Next \/ BuggyBelowThreshold]_vars
 
 ====

@@ -86,20 +86,18 @@ function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'o
   return TRACE_TOOL_STATUS_UI[status ?? 'pending']
 }
 
-function oasBlockBadge(index: number | undefined): string | null {
-  return index === undefined ? null : `OAS #${index}`
-}
-
 function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
-  const oasBlock = step.kind === 'think' || step.kind === 'tool'
-    ? oasBlockBadge(step.oasBlockIndex)
-    : null
+  // The stream content-block index (oasBlockIndex) is provenance detail, not
+  // an identity: it stays in the hover title and in the
+  // data-chat-trace-oas-block-index attribute, while the visible label keeps
+  // the stable channel name. An "OAS #3" badge told the operator nothing
+  // about where the step came from (bug #11).
   if (step.kind === 'think') {
     return {
-      label: oasBlock ?? 'thinking_delta',
-      title: oasBlock
-        ? `source: KEEPER_THINKING_DELTA, content block ${step.oasBlockIndex}`
-        : 'source: KEEPER_THINKING_DELTA',
+      label: 'thinking_delta',
+      title: step.oasBlockIndex === undefined
+        ? 'source: KEEPER_THINKING_DELTA'
+        : `source: KEEPER_THINKING_DELTA, content block ${step.oasBlockIndex}`,
       tone: 'stream',
     }
   }
@@ -113,10 +111,10 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
   const callId = step.toolCallId?.trim()
   if (callId) {
     return {
-      label: oasBlock ?? 'tool_call_id',
-      title: oasBlock
-        ? `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.oasBlockIndex}`
-        : `source: TOOL_CALL_*, tool_call_id=${callId}`,
+      label: 'tool_call_id',
+      title: step.oasBlockIndex === undefined
+        ? `source: TOOL_CALL_*, tool_call_id=${callId}`
+        : `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.oasBlockIndex}`,
       tone: 'tool',
     }
   }
@@ -572,24 +570,6 @@ function formatCurrency(value?: number | null): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   if (value === 0) return '$0.00'
   return formatCost(value) ?? null
-}
-
-function stateRows(stateBlock?: string | null): Array<{ label: string; value: string }> {
-  if (!stateBlock) return []
-  const labels = ['Goal', 'Progress', 'Next', 'Decisions', 'OpenQuestions', 'Constraints'] // state block parsing keys — keep English (API contract)
-  return stateBlock
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const match = labels.find(label => line.startsWith(`${label}:`))
-      if (!match) return null
-      return {
-        label: match,
-        value: line.slice(match.length + 1).trim(),
-      }
-    })
-    .filter((row): row is { label: string; value: string } => Boolean(row && row.value))
 }
 
 function overviewRows(details: KeeperConversationDetails): Array<{ label: string; value: string }> {
@@ -2361,7 +2341,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const detailItems = detailSummary(entry.details)
   const canExpand = showMetadata && !!entry.details
   const overview = entry.details ? overviewRows(entry.details) : []
-  const state = stateRows(entry.details?.stateBlock)
   const delivery = deliveryLabel(entry)
   const timestamp = timeLabel(entry.timestamp)
   const sourceBadge = showSourceBadge ? sourceBadgeInfo(entry) : null
@@ -2624,21 +2603,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                       ${entry.details.skillReason
                         ? html`<div class="mt-1 text-sm leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
                         : null}
-                    </div>
-                  `
-                : null}
-              ${state.length > 0
-                ? html`
-                    <div class="flex flex-col gap-2">
-                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">상태 스냅샷</div>
-                      <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
-                        ${state.map(item => html`
-                          <div class="rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-6)] px-3 py-2.5">
-                            <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
-                            <div class="mt-1 text-sm leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
-                          </div>
-                        `)}
-                      </div>
                     </div>
                   `
                 : null}

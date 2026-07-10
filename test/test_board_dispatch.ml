@@ -276,12 +276,9 @@ let test_update_post_with_explicit_title_and_body () =
           Alcotest.(check bool) "visibility preserved" true
             (updated.visibility = post.visibility))
 
-(* Regression for the meta-drop bug: a [STATE] block in the edited body must be
-   lifted into [meta_json] (same as create), not stripped from the body and
-   silently discarded. *)
-let meta_has_state_block (meta : Yojson.Safe.t option) : bool =
+let meta_has_source (meta : Yojson.Safe.t option) : bool =
   match meta with
-  | Some (`Assoc fields) -> List.mem_assoc "state_block" fields
+  | Some (`Assoc fields) -> List.mem_assoc "source" fields
   | _ -> false
 
 (* stdlib-only substring containment; avoids a [re] dep for this test exe. *)
@@ -303,27 +300,28 @@ let check_io_error ~where = function
   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
   | Ok _ -> Alcotest.fail "expected Io_error"
 
-let test_update_post_lifts_state_block_into_meta () =
+let test_update_post_preserves_meta_and_body () =
   match
     Board_dispatch.create_post ~author:"stateful-agent"
-      ~content:"plain original body" ~post_kind:Board.Human_post ()
+      ~content:"plain original body" ~post_kind:Board.Human_post
+      ~meta_json:(`Assoc [ "source", `String "operator" ]) ()
   with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post -> (
-      Alcotest.(check bool) "original has no state_block" false
-        (meta_has_state_block post.meta_json);
+      Alcotest.(check bool) "original metadata present" true
+        (meta_has_source post.meta_json);
       let pid = Board.Post_id.to_string post.id in
       match
         Board_dispatch.update_post ~post_id:pid ~editor:"stateful-agent"
-          ~content:"visible text [STATE]progress=halfway[/STATE] trailing" ()
+          ~content:"visible text with ordinary brackets [progress: halfway]" ()
       with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok updated ->
-          Alcotest.(check bool) "state_block lifted into meta" true
-            (meta_has_state_block updated.meta_json);
-          (* the marker is stripped from the stored body, not left inline *)
-          Alcotest.(check bool) "STATE marker stripped from body" false
-            (contains_substring ~needle:"[STATE]" updated.body))
+          Alcotest.(check bool) "metadata preserved" true
+            (meta_has_source updated.meta_json);
+          Alcotest.(check string) "body preserved verbatim"
+            "visible text with ordinary brackets [progress: halfway]"
+            updated.body)
 
 let test_keeper_signal_hook_failure_does_not_abort_create_post () =
   Board_dispatch.set_board_signal_hook (fun _ ->
@@ -410,7 +408,7 @@ let test_structured_post_roundtrip () =
   let meta = `Assoc [("source", `String "keeper_autonomy")] in
   match Board_dispatch.create_post ~author:"sangsu"
           ~title:"Explicit title"
-          ~content:"Visible line\n\n[STATE]\nGoal: keep context\n[/STATE]"
+          ~content:"Visible line\n\nSupporting detail"
           ~post_kind:Board.Automation_post
           ~meta_json:meta
           () with
@@ -418,16 +416,8 @@ let test_structured_post_roundtrip () =
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       Alcotest.(check string) "title stored" "Explicit title" post.title;
-      Alcotest.(check string) "body stripped" "Visible line" post.body;
-      let state_block =
-        match post.meta_json with
-        | Some (`Assoc fields) -> (
-            match List.assoc_opt "state_block" fields with
-            | Some (`String value) -> value
-            | _ -> "")
-        | _ -> ""
-      in
-      Alcotest.(check bool) "state block extracted" true (String.length state_block > 0);
+      Alcotest.(check string) "body stored" "Visible line\n\nSupporting detail" post.body;
+      Alcotest.(check bool) "metadata stored" true (meta_has_source post.meta_json);
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
       Board_dispatch.init_jsonl ();
@@ -435,8 +425,10 @@ let test_structured_post_roundtrip () =
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok fetched ->
           Alcotest.(check string) "roundtrip title" "Explicit title" fetched.title;
-          Alcotest.(check string) "roundtrip content alias" "Visible line" fetched.content;
-          Alcotest.(check string) "roundtrip body" "Visible line" fetched.body;
+          Alcotest.(check string) "roundtrip content alias"
+            "Visible line\n\nSupporting detail" fetched.content;
+          Alcotest.(check string) "roundtrip body"
+            "Visible line\n\nSupporting detail" fetched.body;
           Alcotest.(check string) "roundtrip kind" "automation"
             (Board.post_kind_to_string fetched.post_kind)
 
@@ -1765,8 +1757,8 @@ let () =
         (with_eio test_update_post_rejects_empty_content);
       Alcotest.test_case "update with explicit title and body" `Quick
         (with_eio test_update_post_with_explicit_title_and_body);
-      Alcotest.test_case "update lifts STATE block into meta" `Quick
-        (with_eio test_update_post_lifts_state_block_into_meta);
+      Alcotest.test_case "update preserves metadata and body" `Quick
+        (with_eio test_update_post_preserves_meta_and_body);
       Alcotest.test_case "keeper hook failure does not abort create" `Quick
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick

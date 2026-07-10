@@ -79,20 +79,16 @@ function keeperFixture(overrides: Partial<Keeper> & { name: string }): Keeper {
 }
 
 describe('buildComposerV2Request', () => {
-  it('keeps the compose shape required by the C3 contract', () => {
+  it('keeps the broadcast compose shape', () => {
     expect(buildComposerV2Request({
-      mode: 'state-block',
+      mode: 'broadcast',
       workspaceId: '#ops',
-      body: '[STATE]\nGoal: ship\nNEXT: verify\n[/STATE]',
+      body: 'ship and verify',
     })).toEqual({
       compose: {
-        mode: 'state-block',
+        mode: 'broadcast',
         target: { workspace_id: 'ops' },
-        body: {
-          kind: 'state-block',
-          raw: '[STATE]\nGoal: ship\nNEXT: verify\n[/STATE]',
-          keys: ['Goal', 'NEXT'],
-        },
+        body: 'ship and verify',
         attachments: [],
       },
     })
@@ -271,23 +267,4 @@ describe('ComposerV2', () => {
     expect(select.value).toBe('keeper:fallback-a')
   })
 
-  it('requires a parsed state block before state sends', async () => {
-    render(h(ComposerV2, { workspaceId: 'merge-blockers' }))
-
-    fireEvent.click(screen.getByRole('button', { name: 'State mode' }))
-
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
-
-    fireEvent.input(screen.getByLabelText('Composer v2 state block'), {
-      target: { value: '[STATE]\nGoal: close queue\nBlocker: none\n[/STATE]' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-
-    await waitFor(() => {
-      expect(sendBroadcastMock).toHaveBeenCalledWith(
-        'dashboard-test',
-        '[STATE]\nGoal: close queue\nBlocker: none\n[/STATE]',
-      )
-    })
-  })
 })

@@ -23,40 +23,7 @@ function KeeperTabs({ keepers, sel, onSelect, label }) {
   );
 }
 
-// K1-A · BDI Panel
-function KeeperBDIPanel() {
-  const [sel, setSel] = useState('sangsu');
-  const k = P2h.keepersFull.find(kp => kp.id === sel);
-  return (
-    <section aria-label="Keeper BDI panel · will, needs, desires" style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <KeeperTabs keepers={P2h.keepersFull} sel={sel} onSelect={setSel} label="Select keeper for BDI panel" />
-      <div role="tabpanel" aria-label={`BDI panel for ${k.id}`}>
-        <div role="region" aria-label={`${k.id} · ${k.role} · social model ${k.social_model}`} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',display:'flex',alignItems:'center',gap:'8px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>
-          <KeeperBadge id={k.id} variant="sigil" beat />
-          <span aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>{k.id}</span>
-          <span aria-hidden="true">·</span>
-          <span aria-hidden="true">{k.role}</span>
-          <span aria-hidden="true" style={{marginLeft:'auto',color:'var(--color-fg-disabled)',fontSize:'var(--fs-9)'}}>social · {k.social_model}</span>
-        </div>
-        <dl className="ki-bdi" aria-label="BDI attributes">
-          {[['will', k.will], ['needs', k.needs], ['desires', k.desires]].map(([lbl, v]) => (
-            <div key={lbl} className="row">
-              <dt className="lbl">{lbl}</dt>
-              <dd className="v">{v}</dd>
-            </div>
-          ))}
-          <div className="hz">
-            <dt className="lbl">short</dt><dd className="v">{k.short_goal}</dd>
-            <dt className="lbl">mid</dt>  <dd className="v">{k.mid_goal}</dd>
-            <dt className="lbl">long</dt> <dd className="v">{k.long_goal}</dd>
-          </div>
-        </dl>
-      </div>
-    </section>
-  );
-}
-
-// K1-B · Tool access + runtime config
+// K1-A · Tool access + runtime config
 function KeeperToolAccess() {
   const [sel, setSel] = useState('sangsu');
   const k = P2h.keepersFull.find(kp => kp.id === sel);
@@ -89,7 +56,7 @@ function KeeperToolAccess() {
   );
 }
 
-// K1-C · Token / handoff stats
+// K1-B · Token / handoff stats
 function KeeperTokenStats() {
   const keepers = P2h.keepersFull;
   const maxIn  = Math.max(...keepers.map(k => k.tokens.in));
@@ -157,17 +124,16 @@ function DecisionsStream() {
       </div>
       <div role="log" aria-live="polite" aria-label={`${rows.length} decisions`} style={{background:'var(--color-bg-page)',border:'1px solid var(--color-border-default)'}}>
         {rows.map(d => (
-          <div key={d.id} className="dec-row" role="listitem" aria-label={`${d.ts.slice(11,19)} · ${d.keeper} · ${d.outcome} · ${d.speech_act} via ${d.channel}${d.intention ? ' → ' + d.intention : ''}${d.blocker ? ' · blocker ' + d.blocker : ''}${d.belief ? ' · belief ' + d.belief : ''} · ${(d.latency_ms/1000).toFixed(1)}s`}>
+          <div key={d.id} className="dec-row" role="listitem" aria-label={`${d.ts.slice(11,19)} · ${d.keeper} · ${d.outcome} · ${d.channel} via ${d.surface}${d.blocker ? ' · blocker ' + d.blocker : ''} · ${d.summary} · ${(d.latency_ms/1000).toFixed(1)}s`}>
             <span className="ts" aria-hidden="true">{d.ts.slice(11,19)}</span>
             <span className="kpr" aria-hidden="true">{d.keeper}</span>
             <span className={`out ${d.outcome}`} aria-hidden="true">{d.outcome}</span>
             <div className="body" aria-hidden="true">
               <span className="act">
-                {d.speech_act} · {d.channel}
-                {d.intention && <span style={{color:'var(--color-fg-secondary)'}}> → {d.intention}</span>}
+                {d.channel} · {d.surface}
               </span>
               {d.blocker && <span className="blk">⚠ {d.blocker}</span>}
-              {d.belief  && <span className="bel">↳ {d.belief}</span>}
+              <span className="summary">↳ {d.summary}</span>
               <span className="lat">{(d.latency_ms/1000).toFixed(1)}s</span>
             </div>
           </div>
@@ -284,7 +250,7 @@ function EpisodeLearnings() {
 }
 
 Object.assign(window, {
-  KeeperBDIPanel, KeeperToolAccess, KeeperTokenStats,
+  KeeperToolAccess, KeeperTokenStats,
   DecisionsStream, MemoryEntries,
   EpisodeCards, EpisodeLearnings,
 });

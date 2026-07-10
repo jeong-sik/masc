@@ -329,7 +329,7 @@ end
     on_resolution callback) and a unit test, but was never invoked
     anywhere in production code.  Result: any HITL approval enqueued
     by a keeper turn would block [keeper_cycle_decision] forever via
-    [has_pending_for_keeper → Skip Approval_pending].  Once the 300s
+    [has_blocking_pending_for_keeper → Skip Approval_pending].  Once the 300s
     stale watchdog fired, the supervisor would respawn the fiber, the
     same approval would still be in the queue, and the cycle would
     repeat indefinitely.  This fork makes the existing timeout policy

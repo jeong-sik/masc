@@ -211,8 +211,19 @@ let normalize_tool_result
   let ensure_workflow_self_correction fields =
     match List.assoc_opt "failure_class" fields with
     | Some (`String "workflow_rejection")
-      when not (List.mem_assoc "self_correction_required" fields) ->
-      fields @ [ "self_correction_required", `Bool true ]
+      when not (List.mem_assoc "self_correction_required" fields)
+           && not
+                (List.mem_assoc
+                   "self_correction_required"
+                   workflow_rejection_recovery_fields) ->
+      let self_correction_required =
+        match List.assoc_opt "recoverable" fields with
+        | Some (`Bool false) -> false
+        | Some (`Bool true)
+        | None
+        | Some _ -> true
+      in
+      fields @ [ "self_correction_required", `Bool self_correction_required ]
     | _ -> fields
   in
   try

@@ -95,7 +95,7 @@ val int_member_fallback : string -> Yojson.Safe.t -> int option
 val take_list : int -> 'a list -> 'a list
 val percentile_sorted_float : float array -> float -> float
 val keeper_cost_metric_row_is_event : Yojson.Safe.t -> bool
-val memory_kind_for_log : string -> string
+val memory_kind_for_log : Keeper_memory_policy.memory_kind -> string
 val keeper_decisions_dashboard_surface : string
 
 (** {1 K2 decisions feed helpers} *)

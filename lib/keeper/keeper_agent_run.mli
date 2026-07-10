@@ -130,12 +130,8 @@ val run_turn
   -> ?turn_affordances:string list
   -> generation:int
   -> max_idle_turns:int
-       (* Required, no default: the OAS loop guard kills the run at this
-          count, so every caller must pick the channel-appropriate threshold
-          ([Keeper_runtime_resolved.reactive_max_idle_turns] /
-          [autonomous_max_idle_turns]). A silent default of 3 sat below the
-          graduated idle hook's skip threshold (4), making graceful Skip
-          unreachable — user chat turns died as IdleDetected errors. *)
+       (* Required, no default: forwarded to the OAS loop guard from the
+          caller's channel-specific runtime setting. *)
   -> ?history_user_source:string
   -> ?history_assistant_source:string
   -> ?guardrails:Agent_sdk.Guardrails.t
@@ -157,6 +153,7 @@ val run_turn
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_delivery_channel:Keeper_continuation_channel.t
+  -> ?hitl_approval_grant:Governance_pipeline.hitl_approval_grant
   -> ?yield_to_chat_waiting:(unit -> bool)
        (* Autonomous-lane hook: evaluated at each OAS agent-loop turn boundary
           (the same guard point as [max_idle_turns], before the next model

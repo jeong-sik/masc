@@ -37,6 +37,12 @@ val record_ready : bot_user_id:string -> unit
 (** Called by the in-process gateway's hello handler. Stores the bot identity
     that {!status_json} reports as [bot_user_id] / [last_ready_at]. *)
 
+val record_startup_error : string -> unit
+val clear_startup_error : unit -> unit
+(** Record/clear a fail-closed gateway bootstrap error. [status_json] exposes a
+    recorded error as [status = "unhealthy"] instead of presenting an invalid
+    configuration as an ordinary disconnected connector. *)
+
 val set_trigger_policy : Slack_gateway_state.trigger_policy -> unit
 val get_trigger_policy : unit -> Slack_gateway_state.trigger_policy option
 

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.208.20"
-# Pinned to oas main a44267d6 (release 0.208.22, #2492). Advances from
-# aad819bb (oas#2488 merge) and picks up the streaming empty-completion
-# fail-close at the driver boundary (oas#2483 / #2491): an empty
-# completion now fails closed inside lib/streaming.ml. No public .mli
-# surface change vs aad819bb (verified: consumer contract unchanged).
-# The reachability guard in check-oas-pin.sh tracks main.
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.209.0"
+# Pinned to oas release 0.209.0 (tag v0.209.0, #2504). Advances from
+# a44267d6 (release 0.208.22) and picks up: catalog-driven provider
+# capability + Anthropic thinking policy (oas#2499), typed empty-completion
+# boundary convergence (oas#2498), Hooks.Block + 0.209 breaking release
+# floor (oas#2495 / #2497). 0.209 declares the public API break
+# (exhaustive-match migration guidance). The reachability guard in
+# check-oas-pin.sh tracks main.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="a44267d61bef1f8deb7df73bbe8d73e10cdc5397"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.208.22"
+readonly OAS_AGENT_SDK_SHA="9fff304f9d906dbb453612ac6e113894ce54eccd"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.209.0"

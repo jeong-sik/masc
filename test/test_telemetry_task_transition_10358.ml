@@ -37,14 +37,31 @@ let make_ctx base_path =
   ignore (Workspace.init config ~agent_name:(Some agent_name));
   { Task.Tool.config; agent_name; sw = None }
 
-let run_transition ctx ~task_id ~action ?(notes = "") () =
+(* [evidence_refs]: completions require evidence since #23738 (Gate 0 /
+   Task_completion_gate); this test covers the telemetry lifecycle, not the
+   evidence gate, so the done transition carries a real ref. *)
+let run_transition ctx ~task_id ~action ?(notes = "") ?(evidence_refs = []) () =
+  let base_args =
+    [
+      ("task_id", `String task_id);
+      ("action", `String action);
+      ("notes", `String notes);
+    ]
+  in
   let args =
-    `Assoc
-      [
-        ("task_id", `String task_id);
-        ("action", `String action);
-        ("notes", `String notes);
-      ]
+    match evidence_refs with
+    | [] -> `Assoc base_args
+    | refs ->
+      `Assoc
+        (base_args
+         @ [
+             ( "handoff_context",
+               `Assoc
+                 [
+                   ("summary", `String notes);
+                   ("evidence_refs", `List (List.map (fun r -> `String r) refs));
+                 ] );
+           ])
   in
   match Task.Tool.dispatch ctx ~name:"masc_transition" ~args with
   | Some result ->
@@ -102,7 +119,8 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
     run_transition ctx ~task_id:"task-001" ~action:"claim" ();
     run_transition ctx ~task_id:"task-001" ~action:"start" ();
     run_transition ctx ~task_id:"task-001" ~action:"done"
-      ~notes:"Telemetry lifecycle regression proof completed." ();
+      ~notes:"Telemetry lifecycle regression proof completed."
+      ~evidence_refs:[ "test/test_telemetry_task_transition_10358.ml" ] ();
     let started =
       event_exists
         (function

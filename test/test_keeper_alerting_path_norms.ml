@@ -122,6 +122,42 @@ let test_raw_looks_repos_typo_rejected () =
     false
     (KAP.raw_looks_like_playground_subdir "repository/foo")
 
+(* ── is_masc_internal_state_path ────────────────────────────── *)
+
+let test_raw_masc_state_paths_blocked () =
+  List.iter
+    (fun path ->
+       check_bool
+         (Printf.sprintf "%s → internal" path)
+         true
+         (KAP.is_masc_internal_state_path path))
+    [ ".masc"; "./.masc/tasks/backlog.json"; ".masc/config/keepers/a.toml" ]
+;;
+
+let test_raw_masc_playground_allowed () =
+  check_bool
+    ".masc playground → keeper-owned"
+    false
+    (KAP.is_masc_internal_state_path ".masc/playground/keeper/repos/masc")
+;;
+
+let test_raw_masc_playground_sibling_blocked () =
+  check_bool
+    ".masc playground sibling → internal"
+    true
+    (KAP.is_masc_internal_state_path ".masc/playground-archive/backlog.json")
+;;
+
+let test_repository_backlog_files_allowed () =
+  List.iter
+    (fun path ->
+       check_bool
+         (Printf.sprintf "%s → ordinary repository file" path)
+         false
+         (KAP.is_masc_internal_state_path path))
+    [ "backlog.json"; "docs/backlog.json"; "fixtures/team/backlog.json" ]
+;;
+
 (* ── normalize_path_for_check_stripped ──────────────────────── *)
 
 let test_normalize_path_for_check_stripped_removes_trailing_slash () =
@@ -206,6 +242,17 @@ let () =
         [
           Alcotest.test_case "removes trailing slash" `Quick
             test_normalize_path_for_check_stripped_removes_trailing_slash;
+        ] );
+      ( "is_masc_internal_state_path",
+        [
+          Alcotest.test_case "blocks .masc state paths" `Quick
+            test_raw_masc_state_paths_blocked;
+          Alcotest.test_case "allows keeper playground" `Quick
+            test_raw_masc_playground_allowed;
+          Alcotest.test_case "blocks playground sibling" `Quick
+            test_raw_masc_playground_sibling_blocked;
+          Alcotest.test_case "allows repository backlog files" `Quick
+            test_repository_backlog_files_allowed;
         ] );
       ( "is_masc_internal_state_norm",
         [

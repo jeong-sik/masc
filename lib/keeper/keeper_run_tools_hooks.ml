@@ -227,6 +227,8 @@ let assemble_hooks
           <- { tool_name
              ; provider
              ; outcome
+             ; execution_outcome =
+                 (if success then Tool_result.Ok else Tool_result.Error)
              ; typed_outcome
              ; latency_ms = duration_ms
              ; task_id

@@ -636,15 +636,17 @@ let test_status_surfaces_chat_queue_runtime () =
       Eio_guard.disable ())
     (fun () ->
       Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path;
-      Masc.Keeper_chat_queue.enqueue
-        ~keeper_name:name
-        {
-          Masc.Keeper_chat_queue.content = "queued status probe";
-          user_blocks = [];
-          attachments = [];
-          timestamp = 1.0;
-          source = Masc.Keeper_chat_queue.Dashboard;
-        };
+      ignore
+        (Masc.Keeper_chat_queue.enqueue
+           ~keeper_name:name
+           {
+             Masc.Keeper_chat_queue.content = "queued status probe";
+             user_blocks = [];
+             attachments = [];
+             timestamp = 1.0;
+             source = Masc.Keeper_chat_queue.Dashboard;
+           }
+          : string);
       let status_json = status_json_with ~name config in
       let chat_queue = json_assoc_field "chat_queue" status_json in
       Alcotest.(check (option int))

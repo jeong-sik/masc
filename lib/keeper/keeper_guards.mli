@@ -10,7 +10,7 @@
     - Public SDK boundary (C0): OAS is consumed as-is, no OAS edits.
     - MASC/OAS boundary (C1): OAS primitives do not learn about
       keepers — keeper-specific state lives in MASC closures.
-    - Observability (C2): every override / approval emits a
+    - Observability (C2): every override / block / approval emits a
       [masc.keeper_gate] Event_bus Custom event in addition to the
       legacy [broadcast_tool_skipped] SSE call. *)
 
@@ -19,7 +19,7 @@
 val escape_field : string -> string
 
 (** Render the inline skip reason injected into the tool-result
-    when a guard returns [Override]. *)
+    when a guard returns [Override] or [Block]. *)
 val render_inline_skip_reason :
   tool_name:string ->
   reason_code:string ->
@@ -51,6 +51,7 @@ val extract_command_from_input : Yojson.Safe.t -> string
     variant exhaustively. *)
 type gate_decision =
   | Gate_override
+  | Gate_block
   | Gate_continue
   | Gate_approval_required
 
@@ -98,7 +99,7 @@ val notify_gate_decision :
 
 (** Emit a [masc.keeper_gate] event to the global [Masc_event_bus]
     when one is registered. Marks the turn as gate-rejected on
-    [override] / [approval_required] decisions. *)
+    [override] / [block] decisions. *)
 val emit_gate_event :
   source_path:string option ->
   source_line:int option ->

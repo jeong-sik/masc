@@ -90,6 +90,54 @@ let replay_response_text_for_capture ~suppress_visible_response ~response_text =
   else Some response_text
 ;;
 
+type reply_delivery_tool = Surface_post
+
+type reply_delivery_effect =
+  | Reply_delivered
+  | No_reply_delivery
+
+let reply_delivery_tool_of_name tool_name =
+  (* Parse exact wire names once into a closed delivery-effect vocabulary. *)
+  let canonical_name = Keeper_tool_resolution.canonical_tool_name tool_name in
+  match Keeper_tool_name.of_string canonical_name with
+  | Some Keeper_tool_name.Surface_post -> Some Surface_post
+  | Some _ | None -> None
+;;
+
+let reply_delivery_effect_of_tool_call
+      (detail : Keeper_agent_result.tool_call_detail)
+  =
+  match
+    reply_delivery_tool_of_name detail.tool_name,
+    detail.execution_outcome,
+    detail.typed_outcome
+  with
+  | Some _, Tool_result.Ok, (None | Some Keeper_tool_outcome.Progress) ->
+    Reply_delivered
+  | ( Some _
+    , Tool_result.Ok
+    , Some (Keeper_tool_outcome.No_progress _ | Keeper_tool_outcome.Error _) )
+  | Some _, (Tool_result.Error | Tool_result.Unknown), _
+  | None, _, _ ->
+    No_reply_delivery
+;;
+
+let has_reply_delivery_effect tool_calls =
+  List.exists
+    (fun detail ->
+       match reply_delivery_effect_of_tool_call detail with
+       | Reply_delivered -> true
+       | No_reply_delivery -> false)
+    tool_calls
+;;
+
+let continuation_delivery_gate ~channel ~tool_calls ~content =
+  Keeper_continuation_delivery.gate_decision
+    ~channel
+    ~already_replied:(has_reply_delivery_effect tool_calls)
+    ~content
+;;
+
 type wire_capture_response_suppression_reason =
   | Budget_exhausted
   | Completion_contract
@@ -286,6 +334,10 @@ module For_testing = struct
 
   let emit_wire_capture_response_suppressed_metrics =
     emit_wire_capture_response_suppressed_metrics
+
+  let reply_delivery_effect_of_tool_call = reply_delivery_effect_of_tool_call
+  let has_reply_delivery_effect = has_reply_delivery_effect
+  let continuation_delivery_gate = continuation_delivery_gate
 end
 
 let finalize
@@ -430,13 +482,7 @@ let finalize
      channel); [Keeper_continuation_delivery] fails closed on [Unrouted]. *)
   (match hitl_delivery_channel, replay_response_text with
    | Some channel, Some content ->
-     let already_replied =
-       List.exists
-         (fun name ->
-           String.equal name "keeper_surface_post"
-           || String.equal name "masc_keeper_msg")
-         actual_keeper_tool_names
-     in
+     let already_replied = has_reply_delivery_effect acc.tool_calls in
      let outcome =
        Keeper_continuation_delivery.maybe_deliver ~config
          ~keeper_name:meta.name ~channel ~already_replied ~content

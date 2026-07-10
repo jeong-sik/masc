@@ -605,10 +605,15 @@ let () = test "handle_done_rejects_empty_evidence_refs" (fun () ->
   let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [("task_id", `String "task-001")]) in
   with_task_completion_gate_decide real_task_completion_gate (fun () ->
+    (* Notes repeat the auto-injected default contract item verbatim
+       ("Task scope satisfied: <title>") so the legacy substring contract
+       gate (Gate 2.5, FSM disabled here) passes and the flow actually
+       reaches L1 — otherwise the contract gate rejects first and this
+       test pins the wrong gate (#23901 residual). *)
     let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [
         ("task_id", `String "task-001");
-        ("notes", `String "Task scope satisfied: long enough notes to avoid the length gate, but evidence_refs is empty.");
+        ("notes", `String "Task scope satisfied: Empty evidence refs task — notes long enough to clear the length gate, but evidence_refs is empty.");
         ("evidence_refs", `List [])
       ]) in
     assert (not (Tool_result.is_success result));

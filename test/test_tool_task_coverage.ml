@@ -642,7 +642,7 @@ let () = test "advisory_done_without_evidence_rejects_via_l1_not_gate0" (fun () 
         (* L1's actionable payload names the missing field... *)
         assert (str_contains msg "handoff_context.evidence_refs");
         (* ...and the rejection is NOT the L2 Gate 0 generic message. *)
-        assert (not (str_contains msg "no evidence references supplied")))))
+        assert (not (str_contains msg "no evidence references supplied"))))
 )
 
 let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->

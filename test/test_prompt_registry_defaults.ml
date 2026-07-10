@@ -319,6 +319,78 @@ let () =
               check string "invalid override not applied"
                 (fixture "keeper.deliberation")
                 (Prompt_registry.get_prompt "keeper.deliberation"));
+          test_case
+            "set_override rejects placeholder syntax on a prompt with no \
+             declared template_variables"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (* keeper.constitution has no template_variables, matching
+                 config/prompts/keeper.constitution.md after masc#23929
+                 dropped [template_variables: [state_block_instruction]]
+                 along with the retired STATE-block protocol. A restored
+                 legacy override still carrying that placeholder syntax
+                 must not be treated as "no variables declared, anything
+                 goes". *)
+              match
+                Prompt_registry.set_override "keeper.constitution"
+                  "Legacy rules {{state_block_instruction}} more text"
+              with
+              | Error msg ->
+                  check bool "mentions the stray placeholder" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "state_block_instruction")
+                            msg 0);
+                       true
+                     with Not_found -> false)
+              | Ok () ->
+                  fail
+                    "should reject {{placeholder}} syntax when no \
+                     template_variables are declared");
+          test_case
+            "set_override rejects placeholder syntax on any zero-variable \
+             prompt, not just keeper.constitution"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.set_override "keeper.world"
+                  "{{unexpected}} world override"
+              with
+              | Error _ -> ()
+              | Ok () ->
+                  fail
+                    "should reject {{placeholder}} syntax for keeper.world \
+                     too");
+          test_case
+            "restore_overrides rejects a persisted placeholder override and \
+             falls back to the file baseline"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir:_ ->
+              let labels = [ ("prompt", "override_restore") ] in
+              let before =
+                Lib.Otel_metric_store.metric_value_or_zero
+                  Keeper_metrics.(to_string PromptFailures)
+                  ~labels
+                  ()
+              in
+              let masc_dir = Filename.concat dir ".masc" in
+              Unix.mkdir masc_dir 0o755;
+              write_file
+                (Filename.concat masc_dir "prompt_overrides.json")
+                {|{"keeper.constitution":"Legacy STATE rules {{state_block_instruction}}"}|};
+              Prompt_registry.restore_overrides dir;
+              check (float 0.0001) "restore rejection counted"
+                (before +. 1.0)
+                (Lib.Otel_metric_store.metric_value_or_zero
+                   Keeper_metrics.(to_string PromptFailures)
+                   ~labels
+                   ());
+              check string "stale placeholder override not applied"
+                (fixture "keeper.constitution")
+                (Prompt_registry.get_prompt "keeper.constitution");
+              check string "source falls back to file" "file"
+                (Prompt_registry.prompt_source "keeper.constitution"));
         ] );
       ( "integration",
         [
@@ -326,6 +398,21 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "keeper constitution function"
+                (fixture "keeper.constitution")
+                (Lib.Keeper_prompt.keeper_constitution ()));
+          test_case
+            "keeper_constitution falls back to file when a persisted \
+             override still carries the retired {{state_block_instruction}} \
+             placeholder"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir:_ ->
+              let masc_dir = Filename.concat dir ".masc" in
+              Unix.mkdir masc_dir 0o755;
+              write_file
+                (Filename.concat masc_dir "prompt_overrides.json")
+                {|{"keeper.constitution":"Legacy STATE rules {{state_block_instruction}}"}|};
+              Prompt_registry.restore_overrides dir;
+              check string "keeper_constitution ignores the rejected override"
                 (fixture "keeper.constitution")
                 (Lib.Keeper_prompt.keeper_constitution ()));
         ] );

@@ -602,12 +602,22 @@ let resolved_of_snapshot (s : prompt_snapshot) =
     ~default_value:s.snap_default_value
     ~file_value
 
+(* [expected = []] means the prompt is never rendered through
+   {!render}/{!render_prompt_template} — it is spliced raw via
+   [get_prompt] (e.g. [keeper_constitution]) or otherwise has no
+   substitution points.  [List.mem variable []] is always [false], so
+   omitting an [expected = []] special case already treats every
+   [{{ident}}] found in [template] as unexpected for those prompts,
+   which is correct: nothing downstream will ever fill the
+   placeholder in, and a literal [{{...}}] (or a legacy instruction
+   gated behind one — masc#23929) would leak into the live prompt
+   unrendered. A prior version of this function short-circuited to
+   [[]] for [expected = []], which silently accepted any override
+   content for such prompts, including stale placeholder syntax. *)
 let unexpected_template_variables meta template =
   let expected = meta.template_variables in
-  if expected = [] then []
-  else
-    extract_variables template
-    |> List.filter (fun variable -> not (List.mem variable expected))
+  extract_variables template
+  |> List.filter (fun variable -> not (List.mem variable expected))
 
 (* Variant that takes a pre-computed [resolved] record.  Used by the
    batch listing paths that read files outside the mutex. *)
@@ -962,7 +972,7 @@ let restore_overrides base_path =
               | Ok () -> ()
               | Error reason ->
                   record_override_restore_failure ();
-                  Log.Misc.warn "prompt override restore: skipping %s: %s"
+                  Log.Misc.error "prompt override restore: rejected %s, falling back to file/default value: %s"
                     key reason)
           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> ()
         ) pairs

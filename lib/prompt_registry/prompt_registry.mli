@@ -13,8 +13,12 @@
     Persistence: {!persist_overrides} writes the override
     map to [.masc/prompt_overrides.json];
     {!restore_overrides} reapplies it through the same
-    validation as {!set_override} so manually-edited
-    entries are dropped with a warn instead of silently
+    validation as {!set_override} — including the
+    [{{ident}}] placeholder check, which applies even to
+    prompts with no declared [template_variables] (see
+    [unexpected_template_variables]) — so manually-edited
+    or stale entries are dropped with an error log and a
+    fallback to the file/default value instead of silently
     accepted.
 
     Concurrency: every state mutation goes through the

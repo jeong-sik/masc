@@ -286,11 +286,6 @@ export function KeeperCheckpointPanel({
   `
 }
 
-interface LineageJudgment {
-  verdict: string
-  similarity?: number | null
-}
-
 interface LineageDelta {
   inherited_fields: string[]
   changed_fields: string[]
@@ -306,7 +301,6 @@ interface GenerationLineageManifest {
   created_at?: string
   trigger_reason?: string
   context_ratio?: number
-  continuity_judgment?: LineageJudgment
   inheritance_delta?: LineageDelta
 }
 
@@ -319,21 +313,8 @@ interface GenerationLineageEntry {
   created_at?: string
   trigger_reason?: string
   context_ratio?: number
-  continuity_verdict?: string
-  continuity_similarity?: number | null
   identity_changed_fields?: string[]
   identity_dropped_fields?: string[]
-}
-
-interface LineageVerdictMeta {
-  badgeLabel: string
-  detail: string
-}
-
-
-function isLineageJudgment(value: unknown): value is LineageJudgment {
-  if (!isRecord(value)) return false
-  return typeof value.verdict === 'string'
 }
 
 function isLineageDelta(value: unknown): value is LineageDelta {
@@ -352,7 +333,6 @@ function isGenerationLineageManifest(value: unknown): value is GenerationLineage
     && (value.created_at == null || typeof value.created_at === 'string')
     && (value.trigger_reason == null || typeof value.trigger_reason === 'string')
     && (value.context_ratio == null || typeof value.context_ratio === 'number')
-    && (value.continuity_judgment == null || isLineageJudgment(value.continuity_judgment))
     && (value.inheritance_delta == null || isLineageDelta(value.inheritance_delta))
 }
 
@@ -365,8 +345,6 @@ function isGenerationLineageEntry(value: unknown): value is GenerationLineageEnt
     && (value.created_at == null || typeof value.created_at === 'string')
     && (value.trigger_reason == null || typeof value.trigger_reason === 'string')
     && (value.context_ratio == null || typeof value.context_ratio === 'number')
-    && (value.continuity_verdict == null || typeof value.continuity_verdict === 'string')
-    && (value.continuity_similarity == null || typeof value.continuity_similarity === 'number')
     && (value.identity_changed_fields == null || isStringArray(value.identity_changed_fields))
     && (value.identity_dropped_fields == null || isStringArray(value.identity_dropped_fields))
 }
@@ -377,46 +355,8 @@ function compactTraceId(traceId: string): string {
     : traceId
 }
 
-export function lineageVerdictMeta(verdict: string | undefined): LineageVerdictMeta {
-  switch (verdict) {
-    case 'verified':
-      return {
-        badgeLabel: '상태 보존',
-        detail: 'keeper 목표, 지침, 저장된 상태 요약이 핸드오프를 통해 전달됐는지 continuity 가 검사합니다.',
-      }
-    case 'drift_detected':
-      return {
-        badgeLabel: '드리프트 검토',
-        detail: '핸드오프는 완료됐지만 저장된 continuity 요약이 충분히 변경되어 operator 의 검토가 필요합니다.',
-      }
-    case 'unavailable':
-      return {
-        badgeLabel: '증거 필요',
-        detail: '핸드오프는 완료됐지만 generation 비교에 필요한 continuity 데이터가 충분하지 않습니다.',
-      }
-    default:
-      return {
-        badgeLabel: '알 수 없음',
-        detail: 'continuity 신호는 존재하지만 본 판정이 아직 operator-facing 설명에 매핑되지 않았습니다.',
-      }
-  }
-}
-
 export function lineageTransitionLabel(parentGeneration: number | null | undefined, generation: number): string {
   return `${parentGeneration != null ? `gen ${parentGeneration}` : 'root'} -> gen ${generation}`
-}
-
-export function lineageVerdictTone(verdict: string | undefined): StatusChipTone {
-  switch (verdict) {
-    case 'verified':
-      return 'ok'
-    case 'drift_detected':
-      return 'warn'
-    case 'unavailable':
-      return 'neutral'
-    default:
-      return 'neutral'
-  }
 }
 
 export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
@@ -438,10 +378,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
   if (currentGeneration == null && currentTraceId == null && recent.length === 0) return null
 
   const delta = manifest?.inheritance_delta ?? null
-  const continuity = manifest?.continuity_judgment
-  const continuityMeta = lineageVerdictMeta(continuity?.verdict)
   const latestEntry = recent[0] ?? null
-  const latestEntryMeta = latestEntry ? lineageVerdictMeta(latestEntry.continuity_verdict) : null
 
   return html`
     <div class="md:col-span-2">
@@ -456,16 +393,12 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
               <div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-accent-fg)]">최신 핸드오프</span>
                 <${MonoBadge}>${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}</${MonoBadge}>
-                <${StatusChip} tone=${lineageVerdictTone(latestEntry.continuity_verdict)} uppercase=${false} class="font-semibold">${latestEntryMeta?.badgeLabel}</${StatusChip}>
                 ${latestEntry.created_at
                   ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">recorded <${TimeAgo} timestamp=${latestEntry.created_at} /></span>`
                   : null}
               </div>
               <div class="text-2xs text-[var(--color-fg-primary)]">
                 ${latestEntry.trigger_reason ? `trigger ${latestEntry.trigger_reason} · ` : ''}context ratio ${formatPct1(latestEntry.context_ratio)}
-              </div>
-              <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">
-                ${latestEntryMeta?.detail}
               </div>
             </div>
           `
@@ -495,9 +428,6 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
               <div class="flex flex-wrap items-center gap-2 mb-2">
                 <${SectionHeader} size="xs">현재 매니페스트</${SectionHeader}>
                 <${MonoBadge}>gen ${manifest.generation}</${MonoBadge}>
-                ${continuity?.verdict
-                  ? html`<${StatusChip} tone=${lineageVerdictTone(continuity.verdict)} uppercase=${false} class="font-semibold">${continuityMeta.badgeLabel}</${StatusChip}>`
-                  : null}
                 ${manifest.created_at
                   ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">created <${TimeAgo} timestamp=${manifest.created_at} /></span>`
                   : null}
@@ -524,13 +454,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                     <${StatusChip} tone="neutral" uppercase=${false}>dropped ${delta.dropped_fields.length}</${StatusChip}>
                   `
                   : null}
-                ${continuity?.similarity != null
-                  ? html`<${StatusChip} tone="neutral" uppercase=${false}>similarity ${formatPct1(continuity.similarity)}</${StatusChip}>`
-                  : null}
               </div>
-              ${continuity?.verdict
-                ? html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">${continuityMeta.detail}</div>`
-                : null}
               ${delta && delta.changed_fields.length === 0 && delta.dropped_fields.length === 0
                 ? html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">identity-only inheritance stayed intact across the rollover.</div>`
                 : null}
@@ -550,16 +474,12 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
               <div class="flex flex-col gap-2 v2-monitoring-row">
                 ${recent.map((entry, index) => {
                   const isLatest = index === 0
-                  const entryMeta = lineageVerdictMeta(entry.continuity_verdict)
                   return html`
                     <div class=${`px-3 py-2 rounded-[var(--r-1)] border ${isLatest ? 'border-[var(--accent-22)] bg-[var(--accent-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'} v2-monitoring-row`}>
                       <div class="flex flex-wrap items-center gap-2">
                         <${MonoBadge}>gen ${entry.generation}</${MonoBadge}>
                         ${isLatest
                           ? html`<${StatusChip} tone="info" uppercase=${false} class="font-semibold">latest</${StatusChip}>`
-                          : null}
-                        ${entry.continuity_verdict
-                          ? html`<${StatusChip} tone=${lineageVerdictTone(entry.continuity_verdict)} uppercase=${false} class="font-semibold">${entryMeta.badgeLabel}</${StatusChip}>`
                           : null}
                         ${entry.created_at
                           ? html`<span class="text-3xs text-[var(--color-fg-disabled)]"><${TimeAgo} timestamp=${entry.created_at} /></span>`
@@ -573,9 +493,6 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                       <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)] truncate" title=${entry.trace_id}>
                         ${compactTraceId(entry.trace_id)}
                       </div>
-                      ${entry.continuity_verdict
-                        ? html`<div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">${entryMeta.detail}</div>`
-                        : null}
                       ${(entry.identity_changed_fields?.length ?? 0) > 0 || (entry.identity_dropped_fields?.length ?? 0) > 0
                         ? html`
                           <div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">

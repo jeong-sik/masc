@@ -353,22 +353,27 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
 let valid_next_actions_for_status
   : Masc_domain.task_status -> Masc_domain.task_action list
   = function
-  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Release; Masc_domain.Cancel ]
+  | Masc_domain.Todo ->
+    [ Masc_domain.Claim; Masc_domain.Release; Masc_domain.Cancel; Masc_domain.Block ]
   | Masc_domain.Claimed _ ->
     [ Masc_domain.Start
     ; Masc_domain.Done_action
     ; Masc_domain.Submit_for_verification
     ; Masc_domain.Release
     ; Masc_domain.Cancel
+    ; Masc_domain.Block
     ]
   | Masc_domain.InProgress _ ->
     [ Masc_domain.Done_action
     ; Masc_domain.Submit_for_verification
     ; Masc_domain.Release
     ; Masc_domain.Cancel
+    ; Masc_domain.Block
     ]
   | Masc_domain.AwaitingVerification _ ->
     [ Masc_domain.Approve_verification; Masc_domain.Reject_verification ]
+  | Masc_domain.Operator_blocked _ ->
+    [ Masc_domain.Release; Masc_domain.Cancel ] (* unblock or cancel *)
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> [] (* terminal *)
 ;;
 

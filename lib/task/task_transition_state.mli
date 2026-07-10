@@ -80,7 +80,7 @@ type status_kind =
   | InProgress_kind
   | AwaitingVerification_kind
   | Done_kind
-  | Cancelled_kind
+  | Operator_blocked_kind
 
 (** Closed-enum mirror of [Types_core.task_action]. Adding a new action
     upstream forces an arm here. Used for both fingerprinting and the
@@ -94,6 +94,7 @@ type transition_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
+  | Block
 
 (** Closed-enum classification of the [InvalidState] error message.
     Derived from the [Tool_task.validate_transition] surface and the

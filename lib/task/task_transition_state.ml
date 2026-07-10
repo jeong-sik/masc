@@ -17,6 +17,7 @@ type status_kind =
   | AwaitingVerification_kind
   | Done_kind
   | Cancelled_kind
+  | Operator_blocked_kind
 
 type transition_action =
   | Claim
@@ -27,6 +28,7 @@ type transition_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
+  | Block
 
 type family =
   | Invalid_transition of
@@ -62,6 +64,7 @@ let status_kind_to_string = function
   | AwaitingVerification_kind -> "awaiting_verification"
   | Done_kind -> "done"
   | Cancelled_kind -> "cancelled"
+  | Operator_blocked_kind -> "operator_blocked"
 
 let transition_action_to_string = function
   | Claim -> "claim"
@@ -72,6 +75,7 @@ let transition_action_to_string = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve_verification"
   | Reject_verification -> "reject_verification"
+  | Block -> "block"
 
 let family_to_string = function
   | Invalid_transition { from_status; action } ->
@@ -98,6 +102,7 @@ let all_status_kinds : status_kind list =
   ; AwaitingVerification_kind
   ; Done_kind
   ; Cancelled_kind
+  ; Operator_blocked_kind
   ]
 
 let all_transition_actions : transition_action list =
@@ -109,6 +114,7 @@ let all_transition_actions : transition_action list =
   ; Submit_for_verification
   ; Approve_verification
   ; Reject_verification
+  ; Block
   ]
 
 let all_families : family list =

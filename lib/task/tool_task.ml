@@ -456,6 +456,27 @@ let evidence_refs =
      force bypasses business-logic guards, but the evidence gate is a safety
      invariant that prevents silent task_done without a substantiveness check.
      Even operator-forced completions should produce auditable evidence. *)
+  (* Gate 0 fast-fail: reject empty evidence_refs before the LLM gate
+     round-trip. This matches the hard pre-check in keeper_task_done's
+     parse_keeper_task_done_evidence_refs but covers all code task
+     submissions (done + submit_for_verification). *)
+  if evidence_refs = [] && (match requested_action with Masc_domain.Submit_for_verification | Masc_domain.Done_action -> true | _ -> false) then
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (Printf.sprintf
+         "Completion rejected by anti-rationalization gate: evaluator returned \
+          an empty response; the completion notes were not reviewed \
+          (evaluator-side failure). Revising notes will not help — retry later, \
+          and if this repeats the evaluator runtime needs operator attention \
+          (structured-output capability or token budget).\n\
+          Revise your completion notes to describe actual work, then retry.\n\
+          Example of accepted notes: 'Added Event_kind.Board variant to \
+          lib/workspace/event_kind.{ml,mli}, migrated 8 call-sites in \
+          task_state.ml and activity_graph.ml, test_event_kind round-trip \
+          green, CI green on PR #NNNN.'\n\
+          Use force=true to override (operator only).")
+  else
   let evidence_decision =
     let needs_gate =
       match requested_action with
@@ -466,7 +487,8 @@ let evidence_refs =
       | Masc_domain.Cancel
       | Masc_domain.Release
       | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ->
+      | Masc_domain.Reject_verification
+      | Masc_domain.Block ->
         false
     in
     if not needs_gate then Workspace_hooks.Pass

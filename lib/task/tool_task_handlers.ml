@@ -165,7 +165,8 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
       |> List.find_map (fun (task : Masc_domain.task) ->
              match task.task_status with
              | Masc_domain.Claimed { assignee; _ }
-             | Masc_domain.InProgress { assignee; _ } ->
+             | Masc_domain.InProgress { assignee; _ }
+             | Masc_domain.Operator_blocked { assignee; _ } ->
                  if matches_you assignee then Some task.id else None
              | Masc_domain.Todo
              | Masc_domain.AwaitingVerification _

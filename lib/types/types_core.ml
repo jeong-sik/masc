@@ -233,6 +233,7 @@ type task_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
+  | Block
 [@@deriving show]
 
 (** RFC-0262: who authorizes a transition that would otherwise require the
@@ -269,6 +270,7 @@ let task_action_of_string s =
   | "submit_for_verification" -> Ok Submit_for_verification
   | "approve" -> Ok Approve_verification
   | "reject" -> Ok Reject_verification
+  | "block" -> Ok Block
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
 
 let task_action_to_string = function
@@ -280,11 +282,13 @@ let task_action_to_string = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve"
   | Reject_verification -> "reject"
+  | Block -> "block"
 
 (** All valid task actions, derived from the ADT (single source of truth). *)
 let all_task_actions =
   [ Claim; Start; Done_action; Cancel; Release;
-    Submit_for_verification; Approve_verification; Reject_verification ]
+    Submit_for_verification; Approve_verification; Reject_verification;
+    Block ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
 (* RFC-0220: the verification sub-state (previously a separate request_status
@@ -313,6 +317,11 @@ type task_status =
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
+  | Operator_blocked of {
+      assignee: string;
+      blocked_at: string;
+      reason: string;
+    }
 [@@deriving show]
 
 (** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
@@ -336,6 +345,7 @@ let task_status_to_string = function
   | AwaitingVerification _ -> "awaiting_verification"
   | Done _ -> "done"
   | Cancelled _ -> "cancelled"
+  | Operator_blocked _ -> "operator_blocked"
 
 let string_of_task_status = task_status_to_string
 
@@ -347,6 +357,7 @@ let task_status_icon = function
   | AwaitingVerification _ -> "🔍"
   | Done _ -> "✅"
   | Cancelled _ -> "🚫"
+  | Operator_blocked _ -> "🚧"
 
 (** Display assignee for task status.
     Cancelled surfaces [cancelled_by]; Todo yields "unclaimed".
@@ -355,6 +366,7 @@ let task_display_assignee = function
   | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
   | AwaitingVerification { assignee; _ } -> assignee
   | Cancelled { cancelled_by; _ } -> cancelled_by
+  | Operator_blocked { assignee; _ } -> assignee
   | Todo -> "unclaimed"
 
 (** Extract assignee as [Some string], or [None] for Todo/Cancelled.
@@ -363,13 +375,15 @@ let task_assignee_of_status = function
   | Claimed { assignee; _ } -> Some assignee
   | InProgress { assignee; _ } -> Some assignee
   | AwaitingVerification { assignee; _ } -> Some assignee
+  | Operator_blocked { assignee; _ } -> Some assignee
   | Todo | Done _ | Cancelled _ -> None
 
 (** Terminal states: [Done] or [Cancelled]. No further transitions possible.
     Exhaustive match — adding a constructor forces an update here. *)
 let task_status_is_terminal = function
   | Done _ | Cancelled _ -> true
-  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _
+  | Operator_blocked _ -> false
 
 (** Completed state: [Done]. Distinct from [task_status_is_terminal] which
     also includes [Cancelled]. Use this when only successful completion

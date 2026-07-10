@@ -171,13 +171,37 @@ let status_json ?(audit_limit = 10) () =
 
 let connector_json ?gate_status_json ?(audit_limit = 10) () =
   let status = status_json ~audit_limit () in
-  match gate_status_json with
-  | None -> status
-  | Some extra ->
+  let base =
+    match gate_status_json with
+    | None -> status
+    | Some extra ->
+      `Assoc
+        (match (status, extra) with
+         | `Assoc s, `Assoc e -> s @ e
+         | _ -> [ ("status", status); ("gate_status", extra) ])
+  in
+  (* The dashboard connectors endpoint
+     ([Channel_gate_connector.connectors_json]) matches each connector to its
+     tile by [connector_id]; the dashboard's [findConnector(connectors,
+     "slack")] returns null without it, so a connected Slack gateway rendered
+     as an unstarted "설정 필요" placeholder. Mirror Discord/Telegram
+     [connector_json], which carry both identity fields at the top level.
+     Prepend (with a dedupe filter) so the identity is authoritative even if a
+     merged [gate_status_json] also supplied the keys. *)
+  match base with
+  | `Assoc fields ->
+    let without_identity =
+      List.filter
+        (fun (k, _) ->
+          not
+            (String.equal k "connector_id" || String.equal k "display_name"))
+        fields
+    in
     `Assoc
-      (match (status, extra) with
-       | `Assoc s, `Assoc e -> s @ e
-       | _ -> [ ("status", status); ("gate_status", extra) ])
+      (("connector_id", `String connector_id)
+      :: ("display_name", `String display_name)
+      :: without_identity)
+  | other -> other
 
 let rollback_bindings original = save_bindings original
 

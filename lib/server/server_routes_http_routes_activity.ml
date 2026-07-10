@@ -21,7 +21,7 @@ let respond_board_reaction_result request reqd = function
   | Ok json -> respond_json_value_with_cors request reqd json
   | Error error ->
     respond_json_value_with_cors
-      ~status:(Server_board_reaction_http.error_status error)
+      ~status:(Server_board_reaction_http.error_status error :> Httpun.Status.t)
       request
       reqd
       (Server_board_reaction_http.error_json error)

@@ -138,7 +138,7 @@ let test_board_reaction_catalog_uses_board_ssot () =
         List.filter_map (function `String value -> Some value | _ -> None) values
       | Some _ | None -> fail "supported_emojis must be a JSON array"
     in
-    check (list string) "catalog" Board.board_reaction_emojis actual
+    check (list string) "catalog" Masc.Board.board_reaction_emojis actual
   | _ -> fail "reaction catalog must be a JSON object"
 
 let test_board_reaction_optional_auth_is_anonymous_only_without_header () =

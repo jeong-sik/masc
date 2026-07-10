@@ -32,7 +32,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
            ~status:`Internal_server_error
            ~extra_headers:cors;
          true)
-    | Some config ->
+    | Some (config : Workspace.config) ->
       (match
          Server_auth.authorize_optional_token_bound_permission_request
            ~base_path:config.base_path

@@ -146,7 +146,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
         h2_respond_json_value
           h2_reqd
           (Server_board_reaction_http.error_json error)
-          ~status:(Server_board_reaction_http.error_status error)
+          ~status:(Server_board_reaction_http.error_status error :> H2.Status.t)
           ~extra_headers:cors
     in
     let session_id_opt = get_session_id_any httpun_request in
@@ -896,12 +896,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_reqd
             ~permission:Masc_domain.CanReadState
             (fun _state actor ->
-               let actor = board_actor_author_for_write actor in
+               let actor = Server_utils.board_actor_author_for_write actor in
                let result =
                  Result.bind
                    (Server_board_reaction_http.target_of_strings
-                      ~target_type:(query_param httpun_request "target_type")
-                      ~target_id:(query_param httpun_request "target_id"))
+                      ~target_type:
+                        (Server_utils.query_param httpun_request "target_type")
+                      ~target_id:
+                        (Server_utils.query_param httpun_request "target_id"))
                    (Server_board_reaction_http.list_json ~actor)
                in
                h2_respond_board_reaction_result h2_reqd result)
@@ -911,7 +913,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_reqd
             ~permission:Masc_domain.CanVote
             (fun _state actor ->
-               let actor = board_actor_author_for_write actor in
+               let actor = Server_utils.board_actor_author_for_write actor in
                h2_read_body h2_reqd (fun body ->
                  let parsed =
                    match Yojson.Safe.from_string body with

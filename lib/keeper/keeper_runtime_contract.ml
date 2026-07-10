@@ -48,7 +48,8 @@ let task_is_unclaimed_todo (task : Masc_domain.task) =
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ ->
+  | Masc_domain.Cancelled _
+  | Masc_domain.OperatorBlocked _ ->
     false
 
 type claim_goal_scope = {
@@ -149,7 +150,8 @@ let task_is_blocked (task : Masc_domain.task) =
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ ->
+  | Masc_domain.Cancelled _
+  | Masc_domain.OperatorBlocked _ ->
     false
 
 let goal_progress_json ~(config : Workspace.config) (meta : keeper_meta) =

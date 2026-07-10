@@ -675,7 +675,8 @@ let transition_task_outcome_r
                | Masc_domain.Claimed _
                | Masc_domain.InProgress _
                | Masc_domain.AwaitingVerification _
-               | Masc_domain.Cancelled _ -> `Assoc [ "task_id", `String task_id ]
+               | Masc_domain.Cancelled _
+               | Masc_domain.OperatorBlocked _ -> `Assoc [ "task_id", `String task_id ]
              in
              emit_task_activity
                config

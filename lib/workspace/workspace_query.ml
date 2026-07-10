@@ -427,7 +427,8 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
           let status = task.task_status in
           let is_done = Masc_domain.task_status_is_done status in
           let is_cancelled = match status with
-            | Masc_domain.Cancelled _ -> true
+            | Masc_domain.Cancelled _
+            | Masc_domain.OperatorBlocked _ -> true
             | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
             | Masc_domain.AwaitingVerification _ | Masc_domain.Done _ -> false
           in

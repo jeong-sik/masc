@@ -369,7 +369,7 @@ let valid_next_actions_for_status
     ]
   | Masc_domain.AwaitingVerification _ ->
     [ Masc_domain.Approve_verification; Masc_domain.Reject_verification ]
-  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> [] (* terminal *)
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ | Masc_domain.OperatorBlocked _ -> [] (* terminal *)
 ;;
 
 let next_actions_hint status =
@@ -391,7 +391,8 @@ let task_started_at_unix status =
   | Masc_domain.Todo
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> default_time
+  | Masc_domain.Cancelled _
+  | Masc_domain.OperatorBlocked _ -> default_time
 ;;
 
 let task_transition_details

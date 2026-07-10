@@ -526,6 +526,7 @@ let test_approval_queue_submit_and_resolve () =
         ~input:(`Assoc [("path", `String "/dangerous")])
         ~risk_level:AQ.Critical
         ~base_path
+        ~channel:(Masc_domain.Keeper_continuation_channel.unrouted "test-channel")
         ()
     in
     result := Some decision

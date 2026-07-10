@@ -298,7 +298,7 @@ let derived_details_with_meta (meta : Tool_catalog.metadata) original =
     String.concat "\n\n"
       [
         base;
-        "Constraints:\n"
+        "Operational notes:\n"
         ^ String.concat "\n" (List.map (fun item -> "- " ^ item) extra_constraints);
       ]
 

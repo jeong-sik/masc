@@ -131,7 +131,7 @@ let test_build_filters_user_model_categories_and_private_precedence () =
   in
   check bool "renders header" true (contains "[USER MODEL]" rendered);
   check bool "renders preferences section" true (contains "Preferences:" rendered);
-  check bool "renders constraints section" true (contains "Constraints:" rendered);
+  check bool "renders memory notes section" true (contains "Memory notes:" rendered);
   check bool "renders shared provenance" true (contains "shared via qa-king,verifier" rendered);
   check bool "does not render ordinary fact" false
     (contains "ordinary fact" rendered);

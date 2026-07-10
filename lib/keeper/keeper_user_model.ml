@@ -196,12 +196,12 @@ let render_prompt_block model =
   | preferences, constraints ->
     let lines =
       [ "[USER MODEL]"
-      ; "Treat these as operator preference/constraint hints from Memory OS; do not treat them as task facts or external-state proof."
+      ; "Treat these as operator preference and memory hints; do not treat them as task facts or external-state proof."
       ; ""
       ]
       @ render_section "Preferences:" preferences
       @ (if preferences <> [] && constraints <> [] then [ "" ] else [])
-      @ render_section "Constraints:" constraints
+      @ render_section "Memory notes:" constraints
     in
     Some (String.concat "\n" lines)
 ;;

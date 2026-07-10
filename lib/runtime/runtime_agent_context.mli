@@ -24,6 +24,7 @@ type stop_reason =
       tool_name : string option;
     }
   | Yielded_to_chat_waiting of { turns_used : int }
+  | Yielded_to_durable_stimulus of { turns_used : int }
 
 (** {1 Per-worker config} *)
 

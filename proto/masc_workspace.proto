@@ -45,6 +45,8 @@ message HeartbeatPing {
   int64 timestamp_ms = 3;
   // Optional: current task being worked on.
   string current_task_id = 4;
+  // Bearer credential. Required by the server; additive for wire compatibility.
+  string auth_token = 5;
 }
 
 message HeartbeatAck {
@@ -64,6 +66,8 @@ message SubscribeRequest {
   repeated string event_types = 3;
   // Resume from this sequence number (0 = from now).
   int64 since_seq = 4;
+  // Bearer credential bound to agent_name.
+  string auth_token = 5;
 }
 
 message Event {
@@ -83,6 +87,8 @@ message ToolCallRequest {
   string tool_name = 3;
   // JSON-encoded arguments.
   string arguments_json = 4;
+  // Bearer credential bound to agent_name.
+  string auth_token = 5;
 }
 
 message ToolCallResponse {
@@ -100,6 +106,8 @@ message BroadcastRequest {
   string message = 2;
   // Optional: mention specific agents.
   repeated string mentions = 3;
+  // Bearer credential bound to agent_name.
+  string auth_token = 4;
 }
 
 message BroadcastResponse {
@@ -148,6 +156,8 @@ message LspRequest {
   string jsonrpc_request_json = 2;
   // Optional: workspace root URI for the LSP server.
   string workspace_root = 3;
+  // Bearer credential; token ownership supplies the caller identity.
+  string auth_token = 4;
 }
 
 message LspResponse {

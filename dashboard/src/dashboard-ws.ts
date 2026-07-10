@@ -2,7 +2,11 @@ import type { RouteState, SSEEvent } from './types'
 import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
-import { dashboardBearerToken, subscribeStoredTokenChanges } from './api/core'
+import {
+  dashboardBearerToken,
+  subscribeStoredTokenChanges,
+  websocketUrlWithDashboardBearer,
+} from './api/core'
 import { parseWebSocketSseFrames } from './dashboard-ws-parse'
 import {
   GLOBAL_DASHBOARD_PUSH_SLICES,
@@ -873,7 +877,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   helloFailed = false
   let ws: WebSocket
   try {
-    ws = new WebSocket(wsUrl)
+    ws = new WebSocket(websocketUrlWithDashboardBearer(wsUrl))
   } catch (err) {
     // A constructor failure proves this URL is unusable for the current
     // browser. Keep it out of the cache and let reconnect rediscover.

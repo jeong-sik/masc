@@ -36,6 +36,57 @@ let decode_request_or_raise ~rpc decode bytes =
       (Printf.sprintf "%s request decode failed: %s" rpc msg)
 ;;
 
+let grpc_status_of_admission_error = function
+  | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) ->
+    Grpc_core.Status.Permission_denied, "Bearer role does not permit this RPC."
+  | Masc_domain.Auth
+      (Masc_domain.Auth_error.Unauthorized _
+      | Masc_domain.Auth_error.TokenExpired _
+      | Masc_domain.Auth_error.InvalidToken _) ->
+    Grpc_core.Status.Unauthenticated, "Bearer authentication failed."
+  | Masc_domain.Task _
+  | Masc_domain.Agent _
+  | Masc_domain.System _
+  | Masc_domain.RateLimitExceeded _
+  | Masc_domain.CacheError _ ->
+    Grpc_core.Status.Internal, "Bearer admission failed internally."
+;;
+
+let authorize_or_raise ~workspace_config ~auth_token ~claimed_agent ~requirement =
+  match
+    Server_transport_admission.authorize
+      ~base_path:workspace_config.Workspace_utils_backend_setup.base_path
+      ~token:(Some auth_token)
+      ~claimed_agent
+      ~requirement
+  with
+  | Ok identity -> identity
+  | Error err ->
+    let code, message = grpc_status_of_admission_error err in
+    Grpc_core.Status.raise_error code message
+;;
+
+let decode_tool_arguments_or_raise arguments_json =
+  match Yojson.Safe.from_string arguments_json with
+  | `Assoc _ as arguments -> arguments
+  | `Null
+  | `Bool _
+  | `Int _
+  | `Intlit _
+  | `Float _
+  | `String _
+  | `List _
+  | `Tuple _
+  | `Variant _ ->
+    Grpc_core.Status.raise_error
+      Grpc_core.Status.Invalid_argument
+      "ToolCall arguments_json must encode a JSON object."
+  | exception Yojson.Json_error message ->
+    Grpc_core.Status.raise_error
+      Grpc_core.Status.Invalid_argument
+      (Printf.sprintf "ToolCall arguments_json is malformed JSON: %s" message)
+;;
+
 (** Read a file to string. Returns [""] on non-cancellation errors.
     Propagates [Eio.Cancel.Cancelled] so cooperative cancellation is preserved. *)
 let read_file_safe path =
@@ -85,6 +136,13 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
   let req =
     decode_request_or_raise ~rpc:"Broadcast" T.BroadcastRequest.of_bytes_result bytes
   in
+  let identity =
+    authorize_or_raise
+      ~workspace_config
+      ~auth_token:req.auth_token
+      ~claimed_agent:(Some req.agent_name)
+      ~requirement:(Server_transport_admission.Permission Masc_domain.CanBroadcast)
+  in
   let result =
     try
       let content =
@@ -96,7 +154,9 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
           in
           mention_prefix ^ " " ^ req.message)
       in
-      let _msg = Workspace.broadcast workspace_config ~from_agent:req.agent_name ~content in
+      let _msg =
+        Workspace.broadcast workspace_config ~from_agent:identity.agent_name ~content
+      in
       T.BroadcastResponse.{ success = true; seq = now_ms () }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -152,15 +212,35 @@ let handle_get_status (workspace_config : Workspace_utils_backend_setup.config) 
 
 (** ToolCall handler: dispatch an MCP tool call via gRPC. *)
 let handle_tool_call
-      (tool_dispatcher : string -> string -> (string, string) result)
+      (workspace_config : Workspace_utils_backend_setup.config)
+      (tool_dispatcher :
+         identity:Server_transport_admission.identity
+         -> auth_token:string
+         -> tool_name:string
+         -> arguments:Yojson.Safe.t
+         -> (string, string) result)
       (bytes : string)
   : string
   =
   let req =
     decode_request_or_raise ~rpc:"ToolCall" T.ToolCallRequest.of_bytes_result bytes
   in
+  let identity =
+    authorize_or_raise
+      ~workspace_config
+      ~auth_token:req.auth_token
+      ~claimed_agent:(Some req.agent_name)
+      ~requirement:(Server_transport_admission.Tool req.tool_name)
+  in
+  let arguments = decode_tool_arguments_or_raise req.arguments_json in
   let result =
-    match tool_dispatcher req.tool_name req.arguments_json with
+    match
+      tool_dispatcher
+        ~identity
+        ~auth_token:req.auth_token
+        ~tool_name:req.tool_name
+        ~arguments
+    with
     | Ok result_json ->
       T.ToolCallResponse.
         { success = true; result_json; error_message = ""; error_code = 0 }
@@ -183,6 +263,7 @@ let handle_tool_call
     [jsonrpc_response_json] is valid; otherwise the request was rejected
     before reaching the LSP process. *)
 let handle_lsp_call
+      (workspace_config : Workspace_utils_backend_setup.config)
       (lsp_dispatcher :
          language_id:string
          -> jsonrpc_request_json:string
@@ -193,6 +274,16 @@ let handle_lsp_call
   =
   let req =
     decode_request_or_raise ~rpc:"LspCall" T.LspRequest.of_bytes_result bytes
+  in
+  let _identity =
+    (* Unlike the dashboard WebSocket proxy, this raw gRPC bridge does not own
+       the proxy's read-only LSP method catalog. Keep it admin-only so a
+       worker credential cannot forward executeCommand/applyEdit-class calls. *)
+    authorize_or_raise
+      ~workspace_config
+      ~auth_token:req.auth_token
+      ~claimed_agent:None
+      ~requirement:(Server_transport_admission.Permission Masc_domain.CanAdmin)
   in
   let result =
     lsp_dispatcher
@@ -301,6 +392,14 @@ let handle_heartbeat
         (match T.HeartbeatPing.of_bytes_result bytes with
          | Error msg -> Log.Transport.warn "gRPC Heartbeat decode failed: %s" msg
          | Ok ping ->
+           let identity =
+             authorize_or_raise
+               ~workspace_config
+               ~auth_token:ping.auth_token
+               ~claimed_agent:(Some ping.agent_name)
+               ~requirement:(Server_transport_admission.Permission Masc_domain.CanReadState)
+           in
+           let agent_name = identity.agent_name in
            (try
               let t0 = Unix.gettimeofday () in
               (* Update agent last_seen *)
@@ -310,7 +409,7 @@ let handle_heartbeat
                      (Filename.concat
                         (Common.masc_dir_from_base_path ~base_path:workspace_config.base_path)
                         "agents")
-                     (safe_filename ping.agent_name ^ ".json")
+                     (safe_filename agent_name ^ ".json")
                  in
                  if Sys.file_exists agent_file
                  then (
@@ -329,7 +428,7 @@ let handle_heartbeat
                    | Error e ->
                      Log.Transport.warn
                        "gRPC heartbeat: invalid agent JSON for %s: %s"
-                       ping.agent_name
+                       agent_name
                        e)
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
@@ -358,7 +457,7 @@ let handle_heartbeat
                 else 0
               in
               let directives =
-                compute_directives ~workspace_config ~agent_name:ping.agent_name
+                compute_directives ~workspace_config ~agent_name
               in
               let ack =
                 T.HeartbeatAck.
@@ -402,12 +501,19 @@ let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (
   let req =
     decode_request_or_raise ~rpc:"Subscribe" T.SubscribeRequest.of_bytes_result bytes
   in
+  let identity =
+    authorize_or_raise
+      ~workspace_config
+      ~auth_token:req.auth_token
+      ~claimed_agent:(Some req.agent_name)
+      ~requirement:(Server_transport_admission.Permission Masc_domain.CanReadState)
+  in
   let stream = Grpc_eio.Stream.create 64 in
   Atomic.incr active_subscribe_streams;
   Transport_metrics.set_grpc_subscribers (Atomic.get active_subscribe_streams);
   let events_count = ref 0 in
   let stream_closed = Atomic.make false in
-  let sub_id = Printf.sprintf "grpc-subscribe-%s-%Ld" req.agent_name (now_ms ()) in
+  let sub_id = Printf.sprintf "grpc-subscribe-%s-%Ld" identity.agent_name (now_ms ()) in
   let cleanup_subscriber ?exn () =
     if Atomic.compare_and_set stream_closed false true
     then (
@@ -430,7 +536,7 @@ let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (
       ; payload_json =
           Printf.sprintf
             {|{"agent_name":"%s","event_types":%s}|}
-            req.agent_name
+            identity.agent_name
             (Yojson.Safe.to_string
                (`List (List.map (fun s -> `String s) req.event_types)))
       }
@@ -556,7 +662,12 @@ let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (
       [language_id -> jsonrpc_request_json -> workspace_root -> (response_json, error) result]. *)
 let create_service
       ~(workspace_config : Workspace_utils_backend_setup.config)
-      ~(tool_dispatcher : string -> string -> (string, string) result)
+      ~(tool_dispatcher :
+          identity:Server_transport_admission.identity
+          -> auth_token:string
+          -> tool_name:string
+          -> arguments:Yojson.Safe.t
+          -> (string, string) result)
       ~(lsp_dispatcher :
           language_id:string
           -> jsonrpc_request_json:string
@@ -567,8 +678,8 @@ let create_service
   Grpc_eio.Service.create service_name
   |> Grpc_eio.Service.add_unary "Broadcast" (handle_broadcast workspace_config)
   |> Grpc_eio.Service.add_unary "GetStatus" (handle_get_status workspace_config)
-  |> Grpc_eio.Service.add_unary "ToolCall" (handle_tool_call tool_dispatcher)
-  |> Grpc_eio.Service.add_unary "LspCall" (handle_lsp_call lsp_dispatcher)
+  |> Grpc_eio.Service.add_unary "ToolCall" (handle_tool_call workspace_config tool_dispatcher)
+  |> Grpc_eio.Service.add_unary "LspCall" (handle_lsp_call workspace_config lsp_dispatcher)
   |> Grpc_eio.Service.add_server_streaming "Subscribe" (handle_subscribe workspace_config)
   |> Grpc_eio.Service.add_bidi_streaming "Heartbeat" (handle_heartbeat workspace_config)
 ;;

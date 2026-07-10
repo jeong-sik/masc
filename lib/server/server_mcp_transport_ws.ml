@@ -27,8 +27,10 @@ let sha1 s =
 let websocket_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 let sec_websocket_accept key = Base64.encode_string (sha1 (key ^ websocket_guid))
 
-let inbound_message_handler : (string -> string -> unit) Atomic.t =
-  Atomic.make (fun session_id _body ->
+let inbound_message_handler
+    : (auth_token:string option -> string -> string -> unit) Atomic.t
+  =
+  Atomic.make (fun ~auth_token:_ session_id _body ->
       Log.Server.warn
         "WS inbound message received before dispatcher registered: session=%s"
         session_id)
@@ -36,8 +38,8 @@ let inbound_message_handler : (string -> string -> unit) Atomic.t =
 let set_inbound_message_handler handler =
   Atomic.set inbound_message_handler handler
 
-let dispatch_inbound_message session_id body =
-  Atomic.get inbound_message_handler session_id body
+let dispatch_inbound_message ?auth_token session_id body =
+  Atomic.get inbound_message_handler ~auth_token session_id body
 
 (** Dashboard authentication state for a WebSocket session.  Set once by
     [dashboard_hello] and then read on the SSE forward hot path and the

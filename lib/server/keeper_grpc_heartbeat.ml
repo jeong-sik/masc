@@ -16,6 +16,7 @@ let make_grpc_heartbeat_ping ~config ~agent_name ~session_id =
     ; session_id
     ; timestamp_ms = Int64.of_float (Time_compat.now () *. 1000.0)
     ; current_task_id = Keeper_keepalive.current_task_id_for_agent ~config agent_name
+    ; auth_token = ""
     }
 ;;
 

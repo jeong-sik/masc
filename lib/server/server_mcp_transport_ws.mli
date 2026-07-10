@@ -254,13 +254,20 @@ val try_begin_inbound_dispatch : string -> inbound_dispatch_admission
 val finish_inbound_dispatch : ws_session -> unit
 (** Release a dispatch slot reserved by {!try_begin_inbound_dispatch}. *)
 
-val set_inbound_message_handler : (string -> string -> unit) -> unit
+val set_inbound_message_handler :
+  (auth_token:string option -> string -> string -> unit) -> unit
 (** Installs the MCP JSON-RPC dispatcher invoked for inbound WebSocket
-    text messages.  Bootstrap sets this once it has a live server state. *)
+    text messages.  Bootstrap sets this once it has a live server state.
+    [auth_token] is the immutable credential admitted by the HTTP upgrade;
+    standalone connections pass [None] until their distinct handshake contract
+    supplies an authenticated request context. *)
 
-val dispatch_inbound_message : string -> string -> unit
+val dispatch_inbound_message : ?auth_token:string -> string -> string -> unit
 (** Dispatches an inbound WebSocket message through the currently installed
-    handler.  Used by both standalone WS and same-origin [/ws] upgrade paths. *)
+    handler.  Used by both standalone WS and same-origin [/ws] upgrade paths.
+    The optional credential is captured per connection and rechecked by the MCP
+    request handler; an authenticated upgrade is never itself authorization for
+    later tool calls. *)
 
 val mcp_websocket_handler :
   ?sw:Eio.Switch.t ->

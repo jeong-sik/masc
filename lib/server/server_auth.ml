@@ -79,6 +79,19 @@ let auth_token_from_request request =
       trim_opt
         (Httpun.Headers.get request.Httpun.Request.headers "x-masc-internal-token")
 
+let websocket_query_token_from_request request =
+  let path = Http_server_eio.Request.path request in
+  if request.Httpun.Request.meth = `GET
+     && (String.equal path "/ws" || String.equal path "/api/v1/ide/lsp")
+  then
+    trim_opt (query_param request "token")
+  else None
+
+let websocket_auth_token_from_request request =
+  match auth_token_from_request request with
+  | Some _ as token -> token
+  | None -> websocket_query_token_from_request request
+
 let observer_sse_query_token_from_request request =
   let path = Http_server_eio.Request.path request in
   let observer_stream_requested =
@@ -561,6 +574,18 @@ let ensure_same_origin_browser_request request :
                { agent = "browser";
                  action = "cross-origin HTTP mutation" })))
 
+let authorize_websocket_request ~base_path ~permission request =
+  let claimed_agent =
+    match internal_keeper_agent_from_request request with
+    | Some _ as agent -> agent
+    | None -> agent_from_request request
+  in
+  Server_transport_admission.admit
+    ~base_path
+    ~token:(websocket_auth_token_from_request request)
+    ~claimed_agent
+    ~requirement:(Server_transport_admission.Permission permission)
+
 (* Mirrors [Masc_error.code] (the typed SSOT in lib/types/masc_error.ml).
    Previously the catch-all [_ -> `Internal_server_error] silently demoted
    [RateLimitExceeded _] to 500 (should be 429), [Task/Agent (NotFound _)]
@@ -880,42 +905,19 @@ let authorize_tool_request ~base_path ~tool_name request :
 
 let authorize_token_bound_permission_request ~base_path ~permission request :
     (string, Masc_domain.masc_error) result =
-  let auth_cfg = Auth.load_auth_config base_path in
-  if not auth_cfg.enabled then
-    Error
-      (Masc_domain.Auth
-         (Masc_domain.Auth_error.Unauthorized
-            { reason = Missing_token
-            ; message = "HTTP mutation requires workspace auth enabled with require_token=true."
-            }))
-  else if not auth_cfg.require_token then
-    Error
-      (Masc_domain.Auth
-         (Masc_domain.Auth_error.Unauthorized
-            { reason = Missing_token
-            ; message = "HTTP mutation requires bearer token auth (require_token=true)."
-            }))
-  else
-    match auth_token_from_request request with
-    | None ->
-        Error
-          (Masc_domain.Auth
-             (Masc_domain.Auth_error.Unauthorized
-                { reason = Missing_token
-                ; message =
-                    "Authentication required. Use 'Authorization: Bearer <token>' header."
-                }))
-    | Some token ->
-        let* cred = Auth.find_credential_by_token base_path ~token in
-        if Masc_domain.has_permission cred.role permission then
-          Ok cred.agent_name
-        else
-          Error
-            (Masc_domain.Auth
-               (Masc_domain.Auth_error.Forbidden
-                  { agent = cred.agent_name
-                  ; action = Masc_domain.show_permission permission
-                  }))
+  let claimed_agent =
+    match internal_keeper_agent_from_request request with
+    | Some _ as agent -> agent
+    | None -> agent_from_request request
+  in
+  let+ identity =
+    Server_transport_admission.authorize
+      ~base_path
+      ~token:(auth_token_from_request request)
+      ~claimed_agent
+      ~requirement:(Server_transport_admission.Permission permission)
+  in
+  identity.agent_name
 
 let is_dashboard_bootstrap_path path =
   String.starts_with ~prefix:"/api/v1/dashboard/" path

@@ -88,48 +88,39 @@ let websocket_upgrade_unavailable_reason () =
   then Some "WebSocket transport not ready"
   else None
 
-let websocket_auth_error message =
-  Masc_domain.Auth
-    (Masc_domain.Auth_error.Unauthorized
-       { reason = Masc_domain.Auth_error.Generic; message })
-
 let websocket_upgrade_authorized ~base_path request =
-  match verify_mcp_auth ~base_path request with
-  | Ok _ -> Ok ()
-  | Error token_error ->
-    (match ensure_same_origin_browser_request request with
-     | Ok () -> Ok ()
-     | Error origin_error ->
-       let message =
-         Printf.sprintf
-           "%s Same-origin WebSocket upgrade rejected: %s"
-           token_error
-           (Masc_domain.masc_error_to_string origin_error)
-       in
-       Error (websocket_auth_error message))
+  authorize_websocket_request
+    ~base_path
+    ~permission:Masc_domain.CanReadState
+    request
 
 let websocket_handler ?sw ?clock ~upgrade request reqd =
   if is_websocket_upgrade_request request then
     match websocket_upgrade_unavailable_reason () with
     | None ->
-      let base_path =
-        match current_server_state_opt () with
-        | Some state -> (Mcp_server.workspace_config state).base_path
-        | None -> Server_mcp_transport_http.default_base_path ()
-      in
-      (match websocket_upgrade_authorized ~base_path request with
-       | Error err -> respond_auth_error request reqd err
-       | Ok () ->
-         (match
-            Server_mcp_transport_ws.upgrade_connection
-              ?sw
-              ?clock
-              ~on_message:Server_mcp_transport_ws.dispatch_inbound_message
-              ~upgrade
-              reqd
-          with
-          | Ok () -> ()
-          | Error msg -> Http.Response.text ~status:`Bad_request msg reqd))
+      (match current_server_state_opt () with
+       | None ->
+         Http.Response.json_value
+           ~status:`Service_unavailable
+           (`Assoc [ "error", `String "server state is not initialized" ])
+           reqd
+       | Some state ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         (match websocket_upgrade_authorized ~base_path request with
+          | Error err -> respond_auth_error request reqd err
+          | Ok admission ->
+            (match
+               Server_mcp_transport_ws.upgrade_connection
+                 ?sw
+                 ?clock
+                 ~on_message:
+                   (Server_mcp_transport_ws.dispatch_inbound_message
+                      ~auth_token:admission.auth_token)
+                 ~upgrade
+                 reqd
+             with
+             | Ok () -> ()
+             | Error msg -> Http.Response.text ~status:`Bad_request msg reqd)))
     | Some reason -> Http.Response.text ~status:`Service_unavailable reason reqd
   else
     websocket_discovery_handler request reqd

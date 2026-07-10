@@ -20,11 +20,15 @@ val websocket_upgrade_unavailable_reason : unit -> string option
     regression test; production requests still go through {!add_routes}. *)
 
 val websocket_upgrade_authorized :
-  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
-(** Token-or-same-origin admission gate for [/ws] upgrades, mirroring the
-    [/mcp] POST chain: [verify_mcp_auth] first, falling back to
-    [ensure_same_origin_browser_request].  [base_path] locates the auth
-    config; the production caller resolves it from the live server state.
+  base_path:string ->
+  Httpun.Request.t ->
+  (Server_transport_admission.admission, Masc_domain.masc_error) result
+(** Token-bound read-role admission gate for [/ws] upgrades. Same-origin never
+    grants admission, while an explicit valid bearer remains sufficient for
+    cross-origin/non-browser clients. [base_path] locates the auth config and
+    the production caller resolves it only from the live server state.  The
+    admitted credential is carried by the per-connection message closure so
+    protected MCP requests reauthorize instead of trusting the upgrade alone.
     Exposed for the admission parity regression tests; production requests
     still go through {!add_routes}. *)
 

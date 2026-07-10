@@ -336,11 +336,24 @@ describe('dashboard websocket route subscriptions', () => {
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     const socket = mockSockets[0]!
+    expect(socket.url).toBe('ws://localhost:3000/ws?token=ws-token')
     socket.open()
 
     const hello = parseRpc(socket, 0)
     expect(hello.method).toBe('dashboard/hello')
     expect(hello.params.token).toBe('ws-token')
+  })
+
+  it('does not place the bearer in a cross-origin discovery URL', async () => {
+    installWebSocketMocks()
+    setStoredToken('ws-token')
+    vi.mocked(fetch).mockResolvedValueOnce(
+      wsDiscoveryResponse('ws://remote.example/ws'),
+    )
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+
+    expect(mockSockets[0]?.url).toBe('ws://remote.example/ws')
   })
 
   it('omits blank raw stored tokens from websocket hello', async () => {

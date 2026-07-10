@@ -1354,12 +1354,25 @@ let add_routes ~sw ~clock router =
     Http.Router.ws_get
       "/api/v1/ide/lsp"
       (fun ~upgrade request reqd ->
-         with_public_read
-           (fun state _req reqd ->
+         match !server_state with
+         | None ->
+           Http.Response.json_value
+             ~status:`Service_unavailable
+             (`Assoc [ "error", `String "server state is not initialized" ])
+             reqd
+         | Some state ->
+           (match
+              authorize_websocket_request
+                ~base_path:(base_path_of_state state)
+                ~permission:Masc_domain.CanReadState
+                request
+            with
+            | Error err -> respond_auth_error request reqd err
+            | Ok _identity ->
               let origin =
                 match Http.Request.header request "origin" with
                 | Some o -> o
-                | None -> "localhost"
+                | None -> "non-browser-client"
               in
               (match state.Mcp_server.proc_mgr with
                | None ->
@@ -1425,9 +1438,7 @@ let add_routes ~sw ~clock router =
                           ())
                   with
                   | Ok () -> ()
-                  | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e)))
-           request
-           reqd)
+                  | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e))))
       router
   in
   router

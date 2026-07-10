@@ -33,6 +33,21 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 ;;
 
+let create_worker_token base_path agent_name =
+  match Auth.create_token base_path ~agent_name ~role:Masc_domain.Worker with
+  | Ok (token, _credential) -> token
+  | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err)
+;;
+
+let expect_grpc_status label expected f =
+  match f () with
+  | _ -> Alcotest.failf "%s: expected typed gRPC rejection" label
+  | exception Grpc_core.Status.Grpc_error status ->
+    Alcotest.(check bool) label true (status.Grpc_core.Status.code = expected)
+  | exception exn ->
+    Alcotest.failf "%s: unexpected exception %s" label (Printexc.to_string exn)
+;;
+
 (* ====== Type serialization/deserialization round-trip tests ====== *)
 
 let test_subscribe_filter_request_roundtrip () =
@@ -42,6 +57,7 @@ let test_subscribe_filter_request_roundtrip () =
       ; session_id = "grpc-session-001"
       ; event_types = [ "task"; "message"; "agent.session_bound" ]
       ; since_seq = 42L
+      ; auth_token = "subscribe-token"
       }
   in
   let bytes = T.SubscribeRequest_serde.to_bytes req in
@@ -50,6 +66,7 @@ let test_subscribe_filter_request_roundtrip () =
   Alcotest.(check string) "session_id" req.session_id decoded.session_id;
   Alcotest.(check (list string)) "event_types" req.event_types decoded.event_types;
   Alcotest.(check int64) "since_seq" req.since_seq decoded.since_seq
+  ; Alcotest.(check string) "auth_token" req.auth_token decoded.auth_token
 ;;
 
 let test_tool_call_dispatch_request_roundtrip () =
@@ -59,6 +76,7 @@ let test_tool_call_dispatch_request_roundtrip () =
       ; session_id = "grpc-gemini-12345"
       ; tool_name = "masc_status"
       ; arguments_json = {|{"_agent_name":"gemini-bright-owl"}|}
+      ; auth_token = "tool-token"
       }
   in
   let bytes = T.ToolCallRequest.to_bytes req in
@@ -67,6 +85,7 @@ let test_tool_call_dispatch_request_roundtrip () =
   Alcotest.(check string) "session_id" req.session_id decoded.session_id;
   Alcotest.(check string) "tool_name" req.tool_name decoded.tool_name;
   Alcotest.(check string) "arguments_json" req.arguments_json decoded.arguments_json
+  ; Alcotest.(check string) "auth_token" req.auth_token decoded.auth_token
 ;;
 
 let test_status_agents_response_roundtrip () =
@@ -101,6 +120,7 @@ let test_broadcast_request_roundtrip () =
       { agent_name = "codex-running-bear"
       ; message = "CI fixed, ready to merge"
       ; mentions = [ "claude"; "gemini" ]
+      ; auth_token = "broadcast-token"
       }
   in
   let bytes = T.BroadcastRequest.to_bytes req in
@@ -108,6 +128,7 @@ let test_broadcast_request_roundtrip () =
   Alcotest.(check string) "agent_name" req.agent_name decoded.agent_name;
   Alcotest.(check string) "message" req.message decoded.message;
   Alcotest.(check (list string)) "mentions" req.mentions decoded.mentions
+  ; Alcotest.(check string) "auth_token" req.auth_token decoded.auth_token
 ;;
 
 let test_broadcast_response_roundtrip () =
@@ -125,6 +146,7 @@ let test_heartbeat_ping_roundtrip () =
       ; session_id = "sess-1"
       ; timestamp_ms = 1700000000000L
       ; current_task_id = "task-42"
+      ; auth_token = "heartbeat-token"
       }
   in
   let bytes = T.HeartbeatPing.to_bytes ping in
@@ -133,6 +155,7 @@ let test_heartbeat_ping_roundtrip () =
   Alcotest.(check string) "session_id" "sess-1" decoded.session_id;
   Alcotest.(check int64) "timestamp_ms" 1700000000000L decoded.timestamp_ms;
   Alcotest.(check string) "current_task_id" "task-42" decoded.current_task_id
+  ; Alcotest.(check string) "auth_token" "heartbeat-token" decoded.auth_token
 ;;
 
 let test_heartbeat_ack_roundtrip () =
@@ -159,6 +182,7 @@ let test_subscribe_request_roundtrip () =
       ; session_id = "s1"
       ; event_types = [ "message"; "task" ]
       ; since_seq = 100L
+      ; auth_token = "subscribe-token"
       }
   in
   let bytes = Masc_grpc_types.SubscribeRequest_serde.to_bytes req in
@@ -166,6 +190,7 @@ let test_subscribe_request_roundtrip () =
   Alcotest.(check string) "agent_name" "test" decoded.agent_name;
   Alcotest.(check (list string)) "event_types" [ "message"; "task" ] decoded.event_types;
   Alcotest.(check int64) "since_seq" 100L decoded.since_seq
+  ; Alcotest.(check string) "auth_token" "subscribe-token" decoded.auth_token
 ;;
 
 let test_event_roundtrip () =
@@ -194,6 +219,7 @@ let test_tool_call_request_roundtrip () =
       ; session_id = "s1"
       ; tool_name = "masc_status"
       ; arguments_json = "{}"
+      ; auth_token = "tool-token"
       }
   in
   let bytes = T.ToolCallRequest.to_bytes req in
@@ -201,6 +227,7 @@ let test_tool_call_request_roundtrip () =
   Alcotest.(check string) "agent_name" "test" decoded.agent_name;
   Alcotest.(check string) "tool_name" "masc_status" decoded.tool_name;
   Alcotest.(check string) "arguments_json" "{}" decoded.arguments_json
+  ; Alcotest.(check string) "auth_token" "tool-token" decoded.auth_token
 ;;
 
 let test_tool_call_response_roundtrip () =
@@ -337,7 +364,8 @@ let test_grpc_server_registers_health_service () =
         Masc_grpc_server.create_server
              ~port:Masc_grpc_server.default_port
              ~workspace_config
-             ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+             ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
+               Ok "{}")
              ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
                Error "test stub")
          in
@@ -403,7 +431,8 @@ let test_get_status_projects_backlog_tasks () =
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
-        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
+          Ok "{}")
         ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
           Error "test stub")
     in
@@ -424,7 +453,12 @@ let test_empty_request_handling () =
   (* Verify graceful handling of empty protobuf message (all defaults). *)
   let bytes =
     T.ToolCallRequest.to_bytes
-      { agent_name = ""; session_id = ""; tool_name = ""; arguments_json = "" }
+      { agent_name = ""
+      ; session_id = ""
+      ; tool_name = ""
+      ; arguments_json = ""
+      ; auth_token = ""
+      }
   in
   let req = T.ToolCallRequest.of_bytes bytes in
   Alcotest.(check string) "empty agent_name" "" req.agent_name;
@@ -439,6 +473,7 @@ let test_protobuf_binary_format () =
       ; session_id = "grpc-test"
       ; tool_name = "masc_status"
       ; arguments_json = "{}"
+      ; auth_token = "tool-token"
       }
   in
   let bytes = T.ToolCallRequest.to_bytes req in
@@ -518,7 +553,8 @@ let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
-        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
+          Ok "{}")
         ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
           Error "test stub")
     in
@@ -542,7 +578,8 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
-        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
+          Ok "{}")
         ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
           Error "test stub")
     in
@@ -566,10 +603,12 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_temp_dir "masc-grpc-invalid-heartbeat" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
+    let token = create_worker_token dir "test-agent" in
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
-        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
+          Ok "{}")
         ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
           Error "test stub")
     in
@@ -588,6 +627,7 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
            ; session_id = "sess-1"
            ; timestamp_ms = 1700000000000L
            ; current_task_id = ""
+           ; auth_token = token
            });
       let ack_bytes =
         Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
@@ -615,6 +655,163 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
            logs);
       Grpc_eio.Stream.close request_stream
     | _ -> Alcotest.fail "Heartbeat bidi handler missing")
+;;
+
+let test_protected_methods_enforce_bearer_admission () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-tokenless" (fun dir ->
+    let workspace_config = Workspace_utils.default_config dir in
+    let tool_dispatches = ref 0 in
+    let lsp_dispatches = ref 0 in
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
+          incr tool_dispatches;
+          Ok "{}")
+        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+          incr lsp_dispatches;
+          Ok "{}")
+    in
+    let unary_reject method_name expected label request =
+      match Grpc_eio.Service.get_method service method_name with
+      | Some { handler = `Unary handler; _ } ->
+        expect_grpc_status label expected (fun () -> handler request)
+      | _ -> Alcotest.failf "%s unary handler missing" method_name
+    in
+    unary_reject
+      "Broadcast"
+      Grpc_core.Status.Unauthenticated
+      "Broadcast tokenless"
+      (T.BroadcastRequest.to_bytes
+         { agent_name = "test-agent"
+         ; message = "must not publish"
+         ; mentions = []
+         ; auth_token = ""
+         });
+    unary_reject
+      "ToolCall"
+      Grpc_core.Status.Unauthenticated
+      "ToolCall tokenless"
+      (T.ToolCallRequest.to_bytes
+         { agent_name = "test-agent"
+         ; session_id = "session-1"
+         ; tool_name = "masc_status"
+         ; arguments_json = "{}"
+         ; auth_token = ""
+         });
+    unary_reject
+      "LspCall"
+      Grpc_core.Status.Unauthenticated
+      "LspCall tokenless"
+      (T.LspRequest.to_bytes
+         { language_id = "ocaml"
+         ; jsonrpc_request_json = {|{"jsonrpc":"2.0","id":1,"method":"shutdown"}|}
+         ; workspace_root = None
+         ; auth_token = ""
+         });
+    let worker_token = create_worker_token dir "test-agent" in
+    unary_reject
+      "LspCall"
+      Grpc_core.Status.Permission_denied
+      "LspCall worker role"
+      (T.LspRequest.to_bytes
+         { language_id = "ocaml"
+         ; jsonrpc_request_json = {|{"jsonrpc":"2.0","id":1,"method":"shutdown"}|}
+         ; workspace_root = None
+         ; auth_token = worker_token
+         });
+    unary_reject
+      "ToolCall"
+      Grpc_core.Status.Unauthenticated
+      "ToolCall actor mismatch"
+      (T.ToolCallRequest.to_bytes
+         { agent_name = "different-agent"
+         ; session_id = "session-1"
+         ; tool_name = "masc_status"
+         ; arguments_json = "{}"
+         ; auth_token = worker_token
+         });
+    Alcotest.(check int) "rejected tool requests are not dispatched" 0 !tool_dispatches;
+    Alcotest.(check int) "rejected LSP requests are not dispatched" 0 !lsp_dispatches;
+    (match Grpc_eio.Service.get_method service "Subscribe" with
+     | Some { handler = `ServerStreaming handler; _ } ->
+       expect_grpc_status
+         "Subscribe tokenless"
+         Grpc_core.Status.Unauthenticated
+         (fun () ->
+            handler
+              (T.SubscribeRequest_serde.to_bytes
+                 { agent_name = "test-agent"
+                 ; session_id = "session-1"
+                 ; event_types = []
+                 ; since_seq = 0L
+                 ; auth_token = ""
+                 }))
+     | _ -> Alcotest.fail "Subscribe server-streaming handler missing");
+    (match Grpc_eio.Service.get_method service "Heartbeat" with
+     | Some { handler = `Bidi handler; _ } ->
+       Eio.Switch.run
+       @@ fun sw ->
+       let requests = Grpc_eio.Stream.create 2 in
+       let responses = handler ~sw requests in
+       Grpc_eio.Stream.add
+         requests
+         (T.HeartbeatPing.to_bytes
+            { agent_name = "test-agent"
+            ; session_id = "session-1"
+            ; timestamp_ms = 1L
+            ; current_task_id = ""
+            ; auth_token = ""
+            });
+       (match
+          Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+            Grpc_eio.Stream.take responses)
+        with
+        | _ -> Alcotest.fail "Heartbeat tokenless request produced an ack"
+        | exception End_of_file -> ()
+        | exception exn ->
+          Alcotest.failf
+            "Heartbeat tokenless rejection raised %s"
+            (Printexc.to_string exn))
+     | _ -> Alcotest.fail "Heartbeat bidi handler missing"))
+;;
+
+let test_tool_call_malformed_arguments_raise_invalid_argument () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-invalid-arguments" (fun dir ->
+    let workspace_config = Workspace_utils.default_config dir in
+    let token = create_worker_token dir "test-agent" in
+    let dispatched = ref false in
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun ~identity:_ ~auth_token:_ ~tool_name:_ ~arguments:_ ->
+          dispatched := true;
+          Ok "{}")
+        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+          Ok "{}")
+    in
+    match Grpc_eio.Service.get_method service "ToolCall" with
+    | Some { handler = `Unary handler; _ } ->
+      expect_grpc_status
+        "malformed arguments_json"
+        Grpc_core.Status.Invalid_argument
+        (fun () ->
+           handler
+             (T.ToolCallRequest.to_bytes
+                { agent_name = "test-agent"
+                ; session_id = "session-1"
+                ; tool_name = "masc_status"
+                ; arguments_json = "{"
+                ; auth_token = token
+                }));
+      Alcotest.(check bool) "dispatcher not called" false !dispatched
+    | _ -> Alcotest.fail "ToolCall unary handler missing")
 ;;
 
 (* ====== Test suite ====== *)
@@ -681,6 +878,14 @@ let () =
             "heartbeat invalid bytes warn and continue"
             `Quick
             test_heartbeat_handler_invalid_bytes_warns_and_continues
+        ; Alcotest.test_case
+            "protected methods enforce bearer admission"
+            `Quick
+            test_protected_methods_enforce_bearer_admission
+        ; Alcotest.test_case
+            "tool call malformed arguments raise invalid_argument"
+            `Quick
+            test_tool_call_malformed_arguments_raise_invalid_argument
         ] )
     ; ( "server_config"
       , [ Alcotest.test_case "default_port" `Quick test_grpc_default_port

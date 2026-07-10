@@ -24,6 +24,10 @@ import {
   TRANSPORT_RETRY_MAX_MS,
 } from '../../config/constants'
 import { DEFAULT_LANGUAGE_ID } from './ide-language'
+import {
+  subscribeStoredTokenChanges,
+  websocketUrlWithDashboardBearer,
+} from '../../api/core'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -391,18 +395,27 @@ export class LspConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
   private reconnectDelayMs = TRANSPORT_RETRY_BASE_MS
+  private started = false
+  private unsubscribeTokenChanges: (() => void) | null = null
 
   constructor(
     private readonly onDiagnostics: (uri: string | undefined, diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
     private readonly onError: (err: unknown) => void,
     private readonly onReady: () => void = () => {},
-  ) {}
+  ) {
+    this.unsubscribeTokenChanges = subscribeStoredTokenChanges(() => {
+      this.reconnectForCredentialChange()
+    })
+  }
 
   connect(): void {
     if (this.disposed) return
+    this.started = true
     this.clearReconnectTimer()
     const origin = typeof window !== 'undefined' ? window.location.origin : DEFAULT_MASC_ORIGIN
-    const wsUrl = origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp'
+    const wsUrl = websocketUrlWithDashboardBearer(
+      origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp',
+    )
     const ws = new WebSocket(wsUrl)
     this.ws = ws
 
@@ -643,6 +656,9 @@ export class LspConnection {
 
   dispose(): void {
     this.disposed = true
+    this.started = false
+    this.unsubscribeTokenChanges?.()
+    this.unsubscribeTokenChanges = null
     this.clearReconnectTimer()
     this.rejectPending(new Error('Connection disposed'))
     if (this.ws) {
@@ -655,6 +671,28 @@ export class LspConnection {
     if (this.reconnectTimer === null) return
     clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
+  }
+
+  private reconnectForCredentialChange(): void {
+    if (this.disposed || !this.started) return
+    this.clearReconnectTimer()
+    this.resetReconnectBackoff()
+    this.initialized = false
+    this.rejectPending(new Error('LSP bearer credential changed'))
+    const current = this.ws
+    this.ws = null
+    if (current) {
+      current.onopen = null
+      current.onmessage = null
+      current.onerror = null
+      current.onclose = null
+      try {
+        current.close()
+      } catch (err) {
+        this.onError(err)
+      }
+    }
+    this.connect()
   }
 
   private resetReconnectBackoff(): void {

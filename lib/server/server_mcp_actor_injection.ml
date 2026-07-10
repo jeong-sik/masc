@@ -6,6 +6,60 @@
     transport token; without HTTP auth, caller identity resolution ignores the
     argument token. Tool-domain [agent_name] is left untouched because some
     tools use it as a target argument rather than caller identity. *)
+let nonempty_string_field key json =
+  Option.bind
+    (Json_util.get_string json key)
+    (fun value ->
+       let trimmed = String.trim value in
+       if String.equal trimmed "" then None else Some trimmed)
+
+let inject_agent_name_into_arguments
+      ?(rewrite_existing = false)
+      ?(strip_token = false)
+      ~agent_name
+      arguments
+  =
+  let existing_agent = nonempty_string_field "_agent_name" arguments in
+  let existing_tool_agent_name = nonempty_string_field "agent_name" arguments in
+  match arguments with
+  | `Assoc fields ->
+    let normalized_fields =
+      let fields =
+        if rewrite_existing
+        then
+          List.filter
+            (fun (key, _) -> not (String.equal key "_agent_name"))
+            fields
+        else fields
+      in
+      if strip_token
+      then List.filter (fun (key, _) -> not (String.equal key "token")) fields
+      else fields
+    in
+    let should_inject =
+      rewrite_existing
+      || (Option.is_none existing_agent && Option.is_none existing_tool_agent_name)
+    in
+    if should_inject
+    then `Assoc (("_agent_name", `String agent_name) :: normalized_fields)
+    else arguments
+  | `Null
+  | `Bool _
+  | `Int _
+  | `Intlit _
+  | `Float _
+  | `String _
+  | `List _
+  | `Tuple _
+  | `Variant _ -> arguments
+
+let canonicalize_tool_arguments ~actor ~auth_token arguments =
+  inject_agent_name_into_arguments
+    ~rewrite_existing:(Option.is_some auth_token)
+    ~strip_token:(Option.is_some auth_token)
+    ~agent_name:actor
+    arguments
+
 let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = false)
     ~agent_name body_str =
   try
@@ -17,53 +71,12 @@ let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = fals
           |> Option.value ~default:`Null in
         let args = Json_util.assoc_member_opt "arguments" params
           |> Option.value ~default:`Null in
-        let existing_agent =
-          Option.bind
-            (Json_util.get_string args "_agent_name")
-            (fun value ->
-              let trimmed = String.trim value in
-              if String.equal trimmed "" then
-                None
-              else
-                Some trimmed)
-        in
-        let existing_tool_agent_name =
-          Option.bind
-            (Json_util.get_string args "agent_name")
-            (fun value ->
-              let trimmed = String.trim value in
-              if String.equal trimmed "" then
-                None
-              else
-                Some trimmed)
-        in
         let new_args =
-          match args with
-          | `Assoc fields ->
-              let normalized_fields =
-                let fields =
-                  if rewrite_existing then
-                    List.filter
-                      (fun (key, _) -> not (String.equal key "_agent_name"))
-                      fields
-                  else
-                    fields
-                in
-                if strip_token then
-                  List.filter (fun (key, _) -> not (String.equal key "token")) fields
-                else
-                  fields
-              in
-              let should_inject =
-                rewrite_existing
-                || (Option.is_none existing_agent
-                   && Option.is_none existing_tool_agent_name)
-              in
-              if should_inject then
-                `Assoc (("_agent_name", `String agent_name) :: normalized_fields)
-              else
-                args
-          | _ -> args
+          inject_agent_name_into_arguments
+            ~rewrite_existing
+            ~strip_token
+            ~agent_name
+            args
         in
         if new_args = args then
           body_str

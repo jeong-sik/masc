@@ -34,6 +34,7 @@ module HeartbeatPing : sig
     ; session_id : string
     ; timestamp_ms : int64
     ; current_task_id : string
+    ; auth_token : string
     }
 
   val of_bytes_result : string -> (t, string) result
@@ -61,6 +62,7 @@ module SubscribeRequest : sig
     ; session_id : string
     ; event_types : string list
     ; since_seq : int64
+    ; auth_token : string
     }
 
   val of_bytes_result : string -> (t, string) result
@@ -93,6 +95,7 @@ module ToolCallRequest : sig
     ; session_id : string
     ; tool_name : string
     ; arguments_json : string
+    ; auth_token : string
     }
 
   val of_bytes_result : string -> (t, string) result
@@ -119,6 +122,7 @@ module BroadcastRequest : sig
     { agent_name : string
     ; message : string
     ; mentions : string list
+    ; auth_token : string
     }
 
   val of_bytes_result : string -> (t, string) result
@@ -157,6 +161,7 @@ module LspRequest : sig
     { language_id : string
     ; jsonrpc_request_json : string
     ; workspace_root : string option
+    ; auth_token : string
     }
 
   val of_bytes_result : string -> (t, string) result

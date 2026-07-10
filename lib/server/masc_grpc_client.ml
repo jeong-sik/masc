@@ -11,12 +11,18 @@ let service = Masc_grpc_service.service_name
 
 type t = {
   client : Grpc_eio.Client.t;
+  auth_token : string option;
 }
 
-let create ~sw ~env target =
+let normalize_token token =
+  match Option.map String.trim token with
+  | Some token when not (String.equal token "") -> Some token
+  | Some _ | None -> None
+
+let create ?auth_token ~sw ~env target =
   let config = Grpc_eio.Client.default_config ~target in
   let client = Grpc_eio.Client.connect ~config ~sw ~env target in
-  { client }
+  { client; auth_token = normalize_token auth_token }
 
 let create_from_env ~sw ~env =
   let target =
@@ -26,10 +32,13 @@ let create_from_env ~sw ~env =
       let port = Masc_grpc_server.configured_port () in
       Printf.sprintf "http://%s:%d" Masc_network_defaults.masc_http_default_host port
   in
-  create ~sw ~env target
+  let auth_token = Sys.getenv_opt Auth.internal_keeper_token_env_key in
+  create ?auth_token ~sw ~env target
 
 let close t =
   Grpc_eio.Client.close t.client
+
+let wire_auth_token t = Option.value ~default:"" t.auth_token
 
 (** {1 Internal helpers} *)
 
@@ -58,12 +67,20 @@ let get_status t ~sw ~env =
 
 let tool_call t ~sw ~env ~agent_name ~session_id ~tool_name ~arguments_json =
   let request = T.ToolCallRequest.to_bytes
-    { agent_name; session_id; tool_name; arguments_json } in
+    { agent_name
+    ; session_id
+    ; tool_name
+    ; arguments_json
+    ; auth_token = wire_auth_token t
+    } in
   call_unary_safe t ~sw ~env ~method_:"ToolCall" ~request
     ~decode:T.ToolCallResponse.of_bytes
 
 let broadcast t ~sw ~env ~agent_name ~message ~mentions =
-  let request = T.BroadcastRequest.(to_bytes { agent_name; message; mentions }) in
+  let request =
+    T.BroadcastRequest.(
+      to_bytes { agent_name; message; mentions; auth_token = wire_auth_token t })
+  in
   call_unary_safe t ~sw ~env ~method_:"Broadcast" ~request
     ~decode:T.BroadcastResponse.of_bytes
 
@@ -71,7 +88,12 @@ let broadcast t ~sw ~env ~agent_name ~message ~mentions =
 
 let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
   let request = T.SubscribeRequest_serde.to_bytes
-    { agent_name; session_id; event_types; since_seq } in
+    { agent_name
+    ; session_id
+    ; event_types
+    ; since_seq
+    ; auth_token = wire_auth_token t
+    } in
   let raw_stream =
     Grpc_eio.Client.call_server_streaming ~sw ~env t.client
       ~service ~method_:"Subscribe" ~request
@@ -208,6 +230,11 @@ let heartbeat_stream t ~sw ~env =
       ~service ~method_:"Heartbeat" ~requests:raw_requests
   in
   let send (ping : T.HeartbeatPing.t) =
+    let ping =
+      match t.auth_token with
+      | Some auth_token -> { ping with auth_token }
+      | None -> ping
+    in
     Grpc_eio.Stream.add request_stream (T.HeartbeatPing.to_bytes ping)
   in
   let recv () =

@@ -109,6 +109,7 @@ module HeartbeatPing = struct
     ; session_id : string
     ; timestamp_ms : int64
     ; current_task_id : string
+    ; auth_token : string
     }
 
   let of_bytes_result bytes =
@@ -119,6 +120,7 @@ module HeartbeatPing = struct
          ; session_id = p.session_id
          ; timestamp_ms = p.timestamp_ms
          ; current_task_id = p.current_task_id
+         ; auth_token = p.auth_token
          }
          : t)
     | Error _ as err -> err
@@ -137,6 +139,7 @@ module HeartbeatPing = struct
       ; session_id = t.session_id
       ; timestamp_ms = t.timestamp_ms
       ; current_task_id = t.current_task_id
+      ; auth_token = t.auth_token
       }
   ;;
 end
@@ -177,6 +180,7 @@ module SubscribeRequest = struct
     ; session_id : string
     ; event_types : string list
     ; since_seq : int64
+    ; auth_token : string
     }
 
   let of_bytes_result bytes =
@@ -187,6 +191,7 @@ module SubscribeRequest = struct
          ; session_id = p.session_id
          ; event_types = p.event_types
          ; since_seq = p.since_seq
+         ; auth_token = p.auth_token
          }
          : t)
     | Error _ as err -> err
@@ -207,6 +212,7 @@ module SubscribeRequest_serde = struct
       ; session_id = t.session_id
       ; event_types = t.event_types
       ; since_seq = t.since_seq
+      ; auth_token = t.auth_token
       }
   ;;
 end
@@ -250,6 +256,7 @@ module ToolCallRequest = struct
     ; session_id : string
     ; tool_name : string
     ; arguments_json : string
+    ; auth_token : string
     }
 
   let of_bytes_result bytes =
@@ -260,6 +267,7 @@ module ToolCallRequest = struct
          ; session_id = p.session_id
          ; tool_name = p.tool_name
          ; arguments_json = p.arguments_json
+         ; auth_token = p.auth_token
          }
          : t)
     | Error _ as err -> err
@@ -278,6 +286,7 @@ module ToolCallRequest = struct
       ; session_id = t.session_id
       ; tool_name = t.tool_name
       ; arguments_json = t.arguments_json
+      ; auth_token = t.auth_token
       }
   ;;
 end
@@ -317,12 +326,19 @@ module BroadcastRequest = struct
     { agent_name : string
     ; message : string
     ; mentions : string list
+    ; auth_token : string
     }
 
   let of_bytes_result bytes =
     match decode_result ~type_name:"BroadcastRequest" P.BroadcastRequest.from_proto bytes with
     | Ok p ->
-      Ok ({ agent_name = p.agent_name; message = p.message; mentions = p.mentions } : t)
+      Ok
+        ({ agent_name = p.agent_name
+         ; message = p.message
+         ; mentions = p.mentions
+         ; auth_token = p.auth_token
+         }
+         : t)
     | Error _ as err -> err
   ;;
 
@@ -335,7 +351,11 @@ module BroadcastRequest = struct
   let to_bytes (t : t) =
     encode
       P.BroadcastRequest.to_proto
-      { agent_name = t.agent_name; message = t.message; mentions = t.mentions }
+      { agent_name = t.agent_name
+      ; message = t.message
+      ; mentions = t.mentions
+      ; auth_token = t.auth_token
+      }
   ;;
 end
 
@@ -392,6 +412,7 @@ module LspRequest = struct
     { language_id : string
     ; jsonrpc_request_json : string
     ; workspace_root : string option
+    ; auth_token : string
     }
 
   let of_bytes_result bytes =
@@ -404,6 +425,7 @@ module LspRequest = struct
              (match p.workspace_root with
               | "" -> None
               | s -> Some s)
+         ; auth_token = p.auth_token
          }
          : t)
     | Error _ as err -> err
@@ -421,6 +443,7 @@ module LspRequest = struct
       { language_id = t.language_id
       ; jsonrpc_request_json = t.jsonrpc_request_json
       ; workspace_root = Option.value ~default:"" t.workspace_root
+      ; auth_token = t.auth_token
       }
   ;;
 end

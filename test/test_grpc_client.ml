@@ -51,6 +51,7 @@ let test_heartbeat_ping_roundtrip () =
     session_id = "sess-42";
     timestamp_ms = 1700000000000L;
     current_task_id = "T-99";
+    auth_token = "heartbeat-token";
   } in
   let bytes = T.HeartbeatPing.to_bytes ping in
   let decoded = T.HeartbeatPing.of_bytes bytes in
@@ -92,6 +93,7 @@ let test_tool_call_request_roundtrip () =
     session_id = "s-1";
     tool_name = "masc_status";
     arguments_json = {|{"workspace":"main"}|};
+    auth_token = "tool-token";
   } in
   let bytes = T.ToolCallRequest.to_bytes req in
   let decoded = T.ToolCallRequest.of_bytes bytes in
@@ -104,6 +106,7 @@ let test_broadcast_request_roundtrip () =
     agent_name = "gemini";
     message = "starting work";
     mentions = ["claude"; "codex"];
+    auth_token = "broadcast-token";
   } in
   let bytes = T.BroadcastRequest.to_bytes req in
   let decoded = T.BroadcastRequest.of_bytes bytes in
@@ -185,6 +188,7 @@ let test_subscribe_request_serde () =
     session_id = "sess-1";
     event_types = ["message"; "task"];
     since_seq = 0L;
+    auth_token = "subscribe-token";
   } in
   let bytes = T.SubscribeRequest_serde.to_bytes req in
   let decoded = T.SubscribeRequest.of_bytes bytes in

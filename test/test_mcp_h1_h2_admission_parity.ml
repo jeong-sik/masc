@@ -438,95 +438,180 @@ let test_h1_h2_delete_route_wiring_parity () =
       ("forgets session after termination", "forget_mcp_session session_id");
     ]
 
-(* /ws upgrade admission — token-or-same-origin gate parity with the /mcp
-   POST chain.  A base_path with no auth config resolves to
-   [default_auth_config], which is strict (enabled + require_token), so the
-   token leg deterministically fails without a bearer token and the decision
-   falls to the same-origin leg.  If the strict default ever flips, these
-   deny cases must fail loudly — that is a security posture change. *)
-let ws_absent_base_path () =
-  Filename.concat
-    (Filename.get_temp_dir_name ())
-    (Printf.sprintf "ws-upgrade-auth-absent-%d" (Unix.getpid ()))
-
-let ws_upgrade_request headers =
-  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/ws"
-
-let ws_gate_on ~base_path headers =
-  Server_routes_http_routes_frontend.websocket_upgrade_authorized
-    ~base_path
-    (ws_upgrade_request headers)
-
-let ws_gate headers = ws_gate_on ~base_path:(ws_absent_base_path ()) headers
-
-let test_ws_upgrade_denied_without_token_or_origin () =
-  match ws_gate [ ("host", "127.0.0.1:8935") ] with
-  | Ok () -> fail "expected deny: no bearer token and no Origin header"
-  | Error (Masc_domain.Auth _) -> ()
-  | Error other ->
-    failf "expected Auth error, got %s"
-      (Masc_domain.masc_error_to_string other)
-
-let test_ws_upgrade_allows_same_origin () =
-  match
-    ws_gate
-      [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
-  with
-  | Ok () -> ()
-  | Error err ->
-    failf "expected same-origin upgrade to pass, got %s"
-      (Masc_domain.masc_error_to_string err)
-
-let test_ws_upgrade_denies_cross_origin () =
-  match
-    ws_gate
-      [ ("host", "127.0.0.1:8935"); ("origin", "http://evil.example:8935") ]
-  with
-  | Ok () -> fail "expected deny: cross-origin upgrade without token"
-  | Error (Masc_domain.Auth _) -> ()
-  | Error other ->
-    failf "expected Auth error, got %s"
-      (Masc_domain.masc_error_to_string other)
-
-let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then (
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+(* /ws upgrade admission — a bearer credential with CanReadState is the
+   boundary. Same-origin never substitutes for authentication, and Origin
+   metadata does not override an explicitly authenticated non-browser/proxy
+   client. *)
+let rec remove_path path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> remove_path (Filename.concat path name));
       Unix.rmdir path)
     else Sys.remove path
 
-let with_temp_auth_workspace f =
-  let path = Filename.temp_file "masc-ws-upgrade-auth" "" in
+let with_ws_auth_dir f =
+  let path = Filename.temp_file "ws-upgrade-auth" "" in
   Sys.remove path;
   Unix.mkdir path 0o700;
-  Fun.protect ~finally:(fun () -> rm_rf path) (fun () ->
+  Fun.protect ~finally:(fun () -> remove_path path) (fun () ->
     Auth.save_auth_config path
       { Masc_domain.default_auth_config with enabled = true; require_token = true };
     f path)
 
-let test_ws_upgrade_allows_authenticated_cross_origin () =
-  with_temp_auth_workspace (fun base_path ->
-    let token =
-      match
-        Auth.create_token base_path ~agent_name:"ws-auth-test"
-          ~role:Masc_domain.Worker
-      with
-      | Ok (raw_token, _) -> raw_token
-      | Error err ->
-        failf "expected test token creation to pass, got %s"
-          (Masc_domain.masc_error_to_string err)
-    in
-    match
-      ws_gate_on ~base_path
-        [ ("host", "127.0.0.1:8935");
-          ("origin", "http://evil.example:8935");
-          ("authorization", "Bearer " ^ token) ]
-    with
-    | Ok () -> ()
-    | Error err ->
-      failf "expected authenticated cross-origin upgrade to pass, got %s"
-        (Masc_domain.masc_error_to_string err))
+let worker_token base_path =
+  match Auth.create_token base_path ~agent_name:"ws-test-agent" ~role:Masc_domain.Worker with
+  | Ok (token, _credential) -> token
+  | Error err -> fail (Masc_domain.masc_error_to_string err)
+
+let ws_upgrade_request ?token headers =
+  let target =
+    match token with
+    | None -> "/ws"
+    | Some token -> "/ws?token=" ^ Uri.pct_encode token
+  in
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
+
+let ws_gate ?token ~base_path headers =
+  Server_routes_http_routes_frontend.websocket_upgrade_authorized
+    ~base_path
+    (ws_upgrade_request ?token headers)
+
+let test_ws_upgrade_denied_without_token () =
+  with_ws_auth_dir @@ fun base_path ->
+  match
+    ws_gate
+      ~base_path
+      [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+  with
+  | Ok _ -> fail "expected deny: same-origin request has no bearer token"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf
+      "expected Auth error, got %s"
+      (Masc_domain.masc_error_to_string other)
+
+let test_ws_upgrade_allows_token_bound_same_origin () =
+  with_ws_auth_dir @@ fun base_path ->
+  let token = worker_token base_path in
+  match
+    ws_gate
+      ~token
+      ~base_path
+      [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+  with
+  | Ok admission -> check string "retained bearer" token admission.auth_token
+  | Error err ->
+    failf
+      "expected token-bound same-origin upgrade to pass, got %s"
+      (Masc_domain.masc_error_to_string err)
+
+let test_ws_upgrade_allows_token_bound_cross_origin () =
+  with_ws_auth_dir @@ fun base_path ->
+  let token = worker_token base_path in
+  match
+    ws_gate
+      ~token
+      ~base_path
+      [ ("host", "127.0.0.1:8935"); ("origin", "http://evil.example:8935") ]
+  with
+  | Ok admission -> check string "retained bearer" token admission.auth_token
+  | Error err ->
+    failf
+      "expected token-bound cross-origin upgrade to pass, got %s"
+      (Masc_domain.masc_error_to_string err)
+
+let test_ws_upgrade_allows_bearer_header_for_non_browser_client () =
+  with_ws_auth_dir @@ fun base_path ->
+  let token = worker_token base_path in
+  let request =
+    ws_upgrade_request
+      [
+        ("host", "127.0.0.1:8935");
+        ("origin", "http://evil.example:8935");
+        ("authorization", "Bearer " ^ token);
+      ]
+  in
+  match
+    Server_routes_http_routes_frontend.websocket_upgrade_authorized
+      ~base_path
+      request
+  with
+  | Ok admission -> check string "retained bearer" token admission.auth_token
+  | Error err ->
+    failf
+      "expected bearer-authenticated non-browser upgrade to pass, got %s"
+      (Masc_domain.masc_error_to_string err)
+
+let test_ide_lsp_websocket_denies_tokenless_same_origin () =
+  with_ws_auth_dir @@ fun base_path ->
+  let request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [
+             ("host", "127.0.0.1:8935");
+             ("origin", "http://127.0.0.1:8935");
+           ])
+      `GET
+      "/api/v1/ide/lsp"
+  in
+  match
+    Server_auth.authorize_websocket_request
+      ~base_path
+      ~permission:Masc_domain.CanReadState
+      request
+  with
+  | Ok _ -> fail "expected IDE LSP same-origin request without token to be denied"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf
+      "expected Auth error, got %s"
+      (Masc_domain.masc_error_to_string other)
+
+let test_ide_lsp_websocket_allows_token_bound_same_origin () =
+  with_ws_auth_dir @@ fun base_path ->
+  let token = worker_token base_path in
+  let request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [
+             ("host", "127.0.0.1:8935");
+             ("origin", "http://127.0.0.1:8935");
+           ])
+      `GET
+      ("/api/v1/ide/lsp?token=" ^ Uri.pct_encode token)
+  in
+  match
+    Server_auth.authorize_websocket_request
+      ~base_path
+      ~permission:Masc_domain.CanReadState
+      request
+  with
+  | Ok admission ->
+    check string "credential owner" "ws-test-agent" admission.identity.agent_name;
+    check string "retained bearer" token admission.auth_token
+  | Error err ->
+    failf
+      "expected token-bound IDE LSP upgrade to pass, got %s"
+      (Masc_domain.masc_error_to_string err)
+
+let test_ws_dispatch_carries_admitted_bearer () =
+  let body = {|{"jsonrpc":"2.0","id":1,"method":"tools/list"}|} in
+  let observed = ref None in
+  Server_mcp_transport_ws.set_inbound_message_handler
+    (fun ~auth_token session_id message ->
+      observed := Some (auth_token, session_id, message));
+  Server_mcp_transport_ws.dispatch_inbound_message
+    ~auth_token:"admitted-token"
+    "ws-auth-session"
+    body;
+  check
+    (option (triple (option string) string string))
+    "per-connection bearer reaches MCP dispatcher"
+    (Some (Some "admitted-token", "ws-auth-session", body))
+    !observed
 
 let () =
   Eio_main.run @@ fun env ->
@@ -562,13 +647,19 @@ let () =
         ] );
       ( "ws-upgrade-admission",
         [
-          test_case "denies upgrade without token or Origin" `Quick
-            test_ws_upgrade_denied_without_token_or_origin;
-          test_case "allows same-origin upgrade" `Quick
-            test_ws_upgrade_allows_same_origin;
-          test_case "denies cross-origin upgrade without token" `Quick
-            test_ws_upgrade_denies_cross_origin;
-          test_case "allows authenticated cross-origin upgrade" `Quick
-            test_ws_upgrade_allows_authenticated_cross_origin;
+          test_case "denies same-origin upgrade without token" `Quick
+            test_ws_upgrade_denied_without_token;
+          test_case "allows token-bound same-origin upgrade" `Quick
+            test_ws_upgrade_allows_token_bound_same_origin;
+          test_case "allows token-bound cross-origin upgrade" `Quick
+            test_ws_upgrade_allows_token_bound_cross_origin;
+          test_case "allows bearer header for non-browser clients" `Quick
+            test_ws_upgrade_allows_bearer_header_for_non_browser_client;
+          test_case "carries admitted bearer into MCP dispatcher" `Quick
+            test_ws_dispatch_carries_admitted_bearer;
+          test_case "IDE LSP denies tokenless same-origin upgrade" `Quick
+            test_ide_lsp_websocket_denies_tokenless_same_origin;
+          test_case "IDE LSP allows token-bound same-origin upgrade" `Quick
+            test_ide_lsp_websocket_allows_token_bound_same_origin;
         ] );
     ]

@@ -1074,13 +1074,15 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          Otherwise HTTP can report ready while gRPC/WS startup is still stuck
          behind heavier startup work. *)
       (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
-      let tool_dispatcher tool_name args_json =
+      let tool_dispatcher ~identity ~auth_token ~tool_name ~arguments =
         let arguments =
-          try Yojson.Safe.from_string args_json
-          with Yojson.Json_error _ -> `Assoc []
+          Server_mcp_actor_injection.canonicalize_tool_arguments
+            ~actor:identity.Server_transport_admission.agent_name
+            ~auth_token:(Some auth_token)
+            arguments
         in
         let result =
-          Mcp_server_eio_execute.execute_tool_eio ~sw ~clock state
+          Mcp_server_eio_execute.execute_tool_eio ~sw ~clock ~auth_token state
             ~name:tool_name ~arguments
         in
         let success = Tool_result.is_success result
@@ -1145,7 +1147,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                  ~config:(Mcp_server.workspace_config state))
         | _ ->
             None);
-      let dispatch_ws_inbound_message ws_session_id body_str =
+      let dispatch_ws_inbound_message ~auth_token ws_session_id body_str =
           let jsonrpc_id_opt body =
             match Yojson.Safe.from_string body with
             | `Assoc fields -> (
@@ -1209,7 +1211,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                     try
                       let response_json =
                         Mcp_eio.handle_request ~clock ~sw
-                          ~mcp_session_id:ws_session_id state body_str
+                          ~mcp_session_id:ws_session_id ?auth_token state body_str
                       in
                       let response_str = Yojson.Safe.to_string response_json in
                       if response_str <> "null" then begin
@@ -1243,7 +1245,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Transport_metrics.set_ws_same_origin_runtime_ready true;
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
-        ~on_message:Server_mcp_transport_ws.dispatch_inbound_message;
+        ~on_message:(fun session_id body ->
+          Server_mcp_transport_ws.dispatch_inbound_message session_id body);
       (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
       if Server_webrtc_transport.is_enabled () then (
         Log.Server.info "WebRTC DataChannel transport enabled";

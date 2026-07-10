@@ -117,6 +117,23 @@ export function dashboardBearerToken(): string | null {
   return getStoredToken()
 }
 
+/** Attach the dashboard bearer to a WebSocket URL.
+ *
+ * Browser WebSocket constructors cannot set an Authorization header. The
+ * server accepts this query credential only on its two WebSocket routes; the
+ * URL is never written to browser history. */
+export function websocketUrlWithDashboardBearer(rawUrl: string): string {
+  const token = dashboardBearerToken()
+  if (!token) return rawUrl
+  if (typeof window === 'undefined') return rawUrl
+  const base = window.location.href
+  const url = new URL(rawUrl, base)
+  const websocketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  if (url.protocol !== websocketProtocol || url.host !== window.location.host) return rawUrl
+  url.searchParams.set('token', token)
+  return url.toString()
+}
+
 export function getStoredTokenMeta(): StoredTokenMeta | null {
   try {
     const raw = sessionStorage.getItem(TOKEN_META_STORAGE_KEY)

@@ -65,6 +65,14 @@ val bearer_token_from_header : string -> string option
 val auth_token_from_request : Httpun.Request.t -> string option
 (** Token from [Authorization: Bearer …] on the request. *)
 
+val websocket_query_token_from_request : Httpun.Request.t -> string option
+(** Browser WebSocket bearer token from the [token] query parameter.  Query
+    credentials are accepted only for GET [/ws] and GET [/api/v1/ide/lsp],
+    whose browser clients cannot set an [Authorization] header. *)
+
+val websocket_auth_token_from_request : Httpun.Request.t -> string option
+(** Header bearer token, falling back to {!websocket_query_token_from_request}. *)
+
 val observer_sse_query_token_from_request : Httpun.Request.t -> string option
 (** Observer/presence/cursor SSE allows the token via query string for browser
     EventSource. *)
@@ -184,6 +192,18 @@ val ensure_same_origin_browser_request :
   Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Reject mutations from off-origin browsers; allows the loopback dev
     allowlist. *)
+
+val authorize_websocket_request :
+  base_path:string ->
+  permission:Masc_domain.permission ->
+  Httpun.Request.t ->
+  (Server_transport_admission.admission, Masc_domain.masc_error) result
+(** Require token-bound role admission for a WebSocket upgrade. Same-origin
+    never substitutes for a bearer credential, while a
+    valid explicit bearer is not rejected merely because a non-browser or
+    proxied client supplies a different Origin.  The returned immutable
+    admission context must be carried into protected requests on the upgraded
+    connection. *)
 
 (** {1 Auth-error wire format} *)
 
@@ -314,8 +334,8 @@ val authorize_token_bound_permission_request :
   base_path:string ->
   permission:Masc_domain.permission ->
   Httpun.Request.t -> (string, Masc_domain.masc_error) result
-(** Like [authorize_permission_request] but returns the token id used
-    for auditing the call. *)
+(** Strict token-bound permission admission.  Returns the admitted credential
+    owner for auditing and actor binding. *)
 
 val is_dashboard_bootstrap_path : string -> bool
 (** [true] when the path is part of the dashboard bootstrap surface
@@ -363,5 +383,5 @@ val with_token_permission_auth :
   (Mcp_server.server_state ->
    string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Like [with_permission_auth] but threads the token id into the
-    handler so the handler can audit the call. *)
+(** Like [with_permission_auth] but requires strict token-bound admission and
+    threads the admitted credential owner into the handler for auditing. *)

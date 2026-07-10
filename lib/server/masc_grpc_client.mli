@@ -23,6 +23,7 @@ type t
     @param env Eio environment.
     @param target gRPC target URI (e.g. "http://127.0.0.1:8936"). *)
 val create :
+  ?auth_token:string ->
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->
   string ->
@@ -31,7 +32,8 @@ val create :
 (** Create a client from environment variables.
 
     Reads [MASC_GRPC_TARGET] or falls back to
-    [http://127.0.0.1:{MASC_GRPC_PORT|8936}]. *)
+    [http://127.0.0.1:{MASC_GRPC_PORT|8936}], and uses the internal keeper
+    credential when [MASC_INTERNAL_MCP_TOKEN] is available. *)
 val create_from_env :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->

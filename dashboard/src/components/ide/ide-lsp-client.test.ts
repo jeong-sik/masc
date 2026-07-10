@@ -12,6 +12,7 @@ import {
   TRANSPORT_RETRY_BASE_MS,
   TRANSPORT_RETRY_MAX_ATTEMPTS,
 } from '../../config/constants'
+import { clearStoredToken, setStoredToken } from '../../api/core'
 
 const mockSockets: MockWebSocket[] = []
 
@@ -70,6 +71,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   lspDiagnosticSnapshot.value = new Map()
   lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
+  clearStoredToken()
   mockSockets.length = 0
 })
 
@@ -145,6 +147,35 @@ describe('clearLspDiagnosticSnapshot', () => {
 })
 
 describe('LspConnection', () => {
+  it('carries the stored dashboard bearer on the WebSocket upgrade', () => {
+    installWebSocketMock()
+    setStoredToken('lsp-token')
+
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+
+    expect(mockSockets[0]?.url).toBe(
+      'ws://localhost:3000/api/v1/ide/lsp?token=lsp-token',
+    )
+    conn.dispose()
+  })
+
+  it('reconnects the active LSP socket when the dashboard bearer changes', () => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const first = mockSockets[0]!
+
+    setStoredToken('fresh-lsp-token')
+
+    expect(first.readyState).toBe(MockWebSocket.CLOSED)
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]?.url).toBe(
+      'ws://localhost:3000/api/v1/ide/lsp?token=fresh-lsp-token',
+    )
+    conn.dispose()
+  })
+
   it('publishes typed masc/lspStatus notifications', () => {
     installWebSocketMock()
     const conn = new LspConnection(() => {}, () => {})

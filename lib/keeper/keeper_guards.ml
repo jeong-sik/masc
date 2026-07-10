@@ -175,15 +175,17 @@ type gate_decision =
   | Gate_override
   | Gate_continue
   | Gate_approval_required
+  | Gate_non_author_verified
 
 let gate_decision_to_string = function
   | Gate_override -> "override"
   | Gate_continue -> "continue"
   | Gate_approval_required -> "approval_required"
+  | Gate_non_author_verified -> "non_author_verified"
 
 let gate_decision_is_rejection = function
   | Gate_override -> true
-  | Gate_continue | Gate_approval_required -> false
+  | Gate_continue | Gate_approval_required | Gate_non_author_verified -> false
 
 type gate_rejection_log_severity =
   | Gate_rejection_first_warn
@@ -398,7 +400,7 @@ let emit_gate_event
       ( "runtime_attempted"
       , `Bool
           (match decision with
-           | Gate_continue -> true
+           | Gate_continue | Gate_non_author_verified -> true
            | Gate_override | Gate_approval_required -> false) );
       ("source_path", Json_util.string_opt_to_json source_path);
       ("source_line", Json_util.int_opt_to_json source_line);

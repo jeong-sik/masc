@@ -1170,8 +1170,28 @@ let process_single_turn ~connector_user_line_recorded_upstream
   let dashboard_direct_stream =
     (not connector_user_line_recorded_upstream) && not (has_external_speaker payload)
   in
+  (* masc#23924: [f] below pushes its own [Stream_terminal] once it reaches a
+     completion arm, but a timeout/cancellation cuts [f] off before any of
+     those arms run — nothing would ever push to [worker_events], and
+     [consume_worker_events]'s [Eio.Stream.take] would block forever.
+     [on_worker_aborted] fires from Keeper_msg_async.submit's own catch
+     sites (never inside the cancelled [f]) so this turn still gets exactly
+     one terminal event via the same CAS-guarded [push_worker_event]. *)
+  let on_worker_aborted (reason : Keeper_msg_async.worker_abort_reason) =
+    let status, body =
+      match reason with
+      | Keeper_msg_async.Timeout { timeout_sec } ->
+          ( "timeout"
+          , Printf.sprintf
+              "keeper_msg request exceeded timeout_sec=%.3f before completion"
+              timeout_sec )
+      | Keeper_msg_async.Worker_cancelled { cancelled_by; reason } ->
+          "cancelled", Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
+    in
+    push_worker_event (Stream_terminal { ok = false; status; body })
+  in
   let request_id =
-    Keeper_msg_async.submit ?timeout_sec ~clock ~sw
+    Keeper_msg_async.submit ?timeout_sec ~clock ~sw ~on_worker_aborted
       ~base_path
       ~keeper_name:payload.name
       ~f:(fun () ->

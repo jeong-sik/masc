@@ -410,7 +410,7 @@ let messages_for_summary ~mode ~context_bundle =
     provider error. If it cannot, we return the un-schema'd config plus
     [Plain_json_text] so the evaluator still produces a judgment for every
     keeper's model fleet instead of failing outright. *)
-let provider_config_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
+let provider_config_for_summary ~runtime_id (provider_cfg : Llm_provider.Provider_config.t) =
   let summary_max_tokens = Keeper_config.hitl_summary_max_tokens () in
   let max_tokens =
     match provider_cfg.max_tokens with
@@ -421,10 +421,15 @@ let provider_config_for_summary (provider_cfg : Llm_provider.Provider_config.t) 
       Some summary_max_tokens
     | None -> Some summary_max_tokens
   in
+  let temperature =
+    Runtime_inference.resolve_temperature
+      ~runtime_id
+      ~fallback:Keeper_config.hitl_summary_temperature
+  in
   let clamped =
     { provider_cfg with
       max_tokens
-    ; temperature = Some (Keeper_config.hitl_summary_temperature ())
+    ; temperature = Some temperature
     ; tool_choice = None
     ; disable_parallel_tool_use = true
     }
@@ -437,8 +442,8 @@ let provider_config_for_summary (provider_cfg : Llm_provider.Provider_config.t) 
   | Error _ -> clamped, Plain_json_text
 ;;
 
-let call_summary_llm ~sw ~net ~provider_config ~context_bundle () =
-  let config, mode = provider_config_for_summary provider_config in
+let call_summary_llm ~sw ~net ~runtime_id ~provider_config ~context_bundle () =
+  let config, mode = provider_config_for_summary ~runtime_id provider_config in
   let messages = messages_for_summary ~mode ~context_bundle in
   match
     Keeper_llm_bridge.run_with_timeout_and_fallback
@@ -554,7 +559,7 @@ let summary_of_response ~generated_at ~mode (response : Agent_sdk.Types.api_resp
 
 (* ── Spawn ──────────────────────────────────────── *)
 
-let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failure () =
+let spawn ~sw ~runtime_id ?provider_config ~(entry : pending_approval) ~on_summary ~on_failure () =
   let generated_at = Time_compat.now () in
   match provider_config with
   | None ->
@@ -578,7 +583,9 @@ let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failu
             record_outcome ~risk_level:entry.risk_level "no_net";
             emit_fallback ~reason:"HITL summary worker: Eio net unavailable"
           | Some net ->
-            (match call_summary_llm ~sw ~net ~provider_config ~context_bundle () with
+            (match
+               call_summary_llm ~sw ~net ~runtime_id ~provider_config ~context_bundle ()
+             with
              | Ok (response, mode) ->
                (* Record the degradation itself (not just its outcome) so
                   operators can see when the judge fleet lacks native structured

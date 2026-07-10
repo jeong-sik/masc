@@ -252,7 +252,7 @@ let select_recent_messages ~max_messages messages =
   drop drop_count messages
 ;;
 
-let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
+let provider_for_librarian ~runtime_id (provider_cfg : Llm_provider.Provider_config.t) =
   let configured_librarian_max_tokens = librarian_max_tokens () in
   let max_tokens =
     match provider_cfg.max_tokens with
@@ -260,10 +260,15 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
     | Some _ -> Some configured_librarian_max_tokens
     | None -> Some configured_librarian_max_tokens
   in
+  let temperature =
+    Runtime_inference.resolve_temperature
+      ~runtime_id
+      ~fallback:(fun () -> Runtime_provider_defaults.deterministic_temperature)
+  in
   let tuned_cfg =
     { provider_cfg with
       max_tokens
-    ; temperature = Some 0.0
+    ; temperature = Some temperature
     ; tool_choice = None
     ; disable_parallel_tool_use = true
     ; enable_thinking = Some false
@@ -514,6 +519,7 @@ let extract_with_provider_classified
     ?(timeout_sec = librarian_default_timeout_sec)
     ~sw
     ~net
+    ~runtime_id
     ~provider_cfg
     ~generation
     (inp : Keeper_librarian.input)
@@ -524,7 +530,7 @@ let extract_with_provider_classified
     (match messages_for_librarian inp with
      | Error msg -> Error (Prompt_render_failed msg)
      | Ok messages ->
-       let provider_cfg = provider_for_librarian provider_cfg in
+       let provider_cfg = provider_for_librarian ~runtime_id provider_cfg in
        (match
           Llm_provider.Provider_config.validate_output_schema_request provider_cfg
         with
@@ -582,7 +588,17 @@ let extract_with_provider_classified
              Error (Provider_unparseable_response diagnostic.reason))))
 ;;
 
-let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp =
+let extract_with_provider
+    ?complete
+    ?clock
+    ?timeout_sec
+    ~sw
+    ~net
+    ~runtime_id
+    ~provider_cfg
+    ~generation
+    inp
+  =
   match
     extract_with_provider_classified
       ?complete
@@ -590,6 +606,7 @@ let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~
       ?timeout_sec
       ~sw
       ~net
+      ~runtime_id
       ~provider_cfg
       ~generation
       inp
@@ -605,6 +622,7 @@ let extract_and_append_with_provider_classified
     ~sw
     ~net
     ~keeper_id
+    ~runtime_id
     ~provider_cfg
     inp
   =
@@ -624,6 +642,7 @@ let extract_and_append_with_provider_classified
          ?timeout_sec
          ~sw
          ~net
+         ~runtime_id
          ~provider_cfg
          ~generation
          inp
@@ -716,6 +735,7 @@ let extract_and_append_with_provider
     ~sw
     ~net
     ~keeper_id
+    ~runtime_id
     ~provider_cfg
     inp
   =
@@ -727,6 +747,7 @@ let extract_and_append_with_provider
       ~sw
       ~net
       ~keeper_id
+      ~runtime_id
       ~provider_cfg
       inp
   with
@@ -787,6 +808,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                    ~sw
                    ~net
                    ~keeper_id
+                   ~runtime_id
                    ~provider_cfg
                    inp)
              with

@@ -241,7 +241,8 @@ let test_spawn_no_provider_config_uses_fallback_summary () =
       ignore reason;
       ignore retryable
     in
-    H.spawn ~sw ~entry:(dummy_pending_approval ()) ?provider_config:None
+    H.spawn ~sw ~runtime_id:"unconfigured" ~entry:(dummy_pending_approval ())
+      ?provider_config:None
       ~on_summary ~on_failure ();
     check bool "on_failure not called" false !failure_called;
     match !summary_ref with
@@ -343,7 +344,7 @@ let test_build_context_bundle_with_real_workspace () =
 
 (* ── Provider cost/token guard tests ────────────── *)
 
-let test_provider_config_for_summary_caps_tokens_and_temperature () =
+let test_provider_config_for_summary_caps_tokens_and_uses_fallback_temperature () =
   let provider_cfg : Llm_provider.Provider_config.t =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -356,12 +357,14 @@ let test_provider_config_for_summary_caps_tokens_and_temperature () =
       ~response_format:Llm_provider.Types.JsonMode
       ()
   in
-  let cfg, mode = H.For_testing.provider_config_for_summary provider_cfg in
+  let cfg, mode =
+    H.For_testing.provider_config_for_summary ~runtime_id:"unconfigured" provider_cfg
+  in
   check bool "max_tokens capped to policy" true
     (match cfg.max_tokens with
      | Some n -> n <= Keeper_config.hitl_summary_max_tokens ()
      | None -> false);
-  check (option (float 0.0001)) "temperature set to policy"
+  check (option (float 0.0001)) "unconfigured runtime uses subsystem fallback"
     (Some (Keeper_config.hitl_summary_temperature ())) cfg.temperature;
   check bool "tool_choice cleared" true (Option.is_none cfg.tool_choice);
   check bool "disable_parallel_tool_use true" true cfg.disable_parallel_tool_use;
@@ -560,8 +563,8 @@ let () =
             test_build_context_bundle_includes_ids_and_partial_context
         ; test_case "build_context_bundle with real workspace is not partial" `Quick
             test_build_context_bundle_with_real_workspace
-        ; test_case "provider_config_for_summary caps tokens and temperature" `Quick
-            test_provider_config_for_summary_caps_tokens_and_temperature
+        ; test_case "provider_config_for_summary uses fallback without runtime override" `Quick
+            test_provider_config_for_summary_caps_tokens_and_uses_fallback_temperature
         ] )
     ; ( "graceful_degradation"
       , [ test_case "extract_json_object handles bare/fenced/prose/invalid" `Quick

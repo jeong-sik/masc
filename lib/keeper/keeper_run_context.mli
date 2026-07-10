@@ -61,3 +61,5 @@ val prepare_run_context :
   -> generation:int
   -> unit
   -> run_context
+(** Resolve [temperature] as the caller fallback; a temperature declared by the
+    selected runtime model always wins. *)

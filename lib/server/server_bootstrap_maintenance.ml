@@ -45,32 +45,30 @@ let wake_enqueue_counts_of_dispatches dispatches =
     dispatches
 ;;
 
-(* Resolve the provider config for the Memory OS per-keeper consolidation pass.
+(* Resolve the runtime for the Memory OS per-keeper consolidation pass, keeping
+   its identity paired with the provider config through the inference boundary.
    Env var takes precedence; otherwise inherit the librarian runtime so the
    consolidation LLM uses the same JSON-capable model the librarian uses.
    An explicit but unknown runtime ID is logged and falls back to the default
    so typos in operator config are not silently masked. *)
-let provider_cfg_for_memory_os_consolidation () =
-  let default_cfg () =
-    Runtime.get_default_runtime ()
-    |> Option.map (fun rt -> rt.Runtime.provider_config)
-  in
+let runtime_for_memory_os_consolidation () =
+  let default_runtime () = Runtime.get_default_runtime () in
   let runtime_id =
     match Env_config.KeeperMemoryOs.consolidation_runtime_id () with
     | Some id -> Some id
     | None -> Runtime.librarian_runtime_id ()
   in
   match runtime_id with
-  | None -> default_cfg ()
+  | None -> default_runtime ()
   | Some id ->
     (match Runtime.get_runtime_by_id id with
-     | Some rt -> Some rt.Runtime.provider_config
+     | Some rt -> Some rt
      | None ->
        Log.Server.warn
          "memory_os_keeper_consolidation: requested runtime %s not found; \
           falling back to default"
          id;
-       default_cfg ())
+       default_runtime ())
 ;;
 
 (* P0-3: per-keeper maintenance timeout. One slow/corrupt keeper must not starve
@@ -100,6 +98,7 @@ let run_memory_os_consolidation_tick
       ~sw
       ~net
       ?clock
+      ~runtime_id
       ~provider_cfg
       ~now
       ()
@@ -113,6 +112,7 @@ let run_memory_os_consolidation_tick
           ~sw
           ~net
           ?clock
+          ~runtime_id
           ~provider_cfg
           ~now
           ~keeper_id
@@ -401,16 +401,17 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            so a 10-minute cadence bounds cost while still shrinking stores. *)
         let interval = 600.0 in
         let rec loop () =
-          (match provider_cfg_for_memory_os_consolidation () with
+          (match runtime_for_memory_os_consolidation () with
            | None ->
              Log.Server.warn
                "memory_os_keeper_consolidation: no runtime configured; skipping tick"
-           | Some provider_cfg ->
+           | Some runtime ->
              run_memory_os_consolidation_tick
                ~sw
                ~net:env#net
                ~clock
-               ~provider_cfg
+               ~runtime_id:runtime.Runtime.id
+               ~provider_cfg:runtime.Runtime.provider_config
                ~now:(Time_compat.now ())
                ());
           Eio.Time.sleep clock interval;

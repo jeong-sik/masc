@@ -20,6 +20,57 @@ let plan_json ~summary ~kept ~summarized ~dropped : Yojson.Safe.t =
 let is_ok = function Ok _ -> true | Error _ -> false
 let is_error = function Ok _ -> false | Error _ -> true
 
+let temperature_runtime_id = "local.kimi_like"
+
+let temperature_runtime_toml =
+  "[providers.local]\n\
+   display-name = \"Local\"\n\
+   protocol = \"ollama-http\"\n\
+   endpoint = \"http://localhost:11434\"\n\
+   \n\
+   [models.kimi_like]\n\
+   api-name = \"kimi-like\"\n\
+   max-context = 1024\n\
+   temperature = 1.0\n\
+   \n\
+   [models.kimi_like.capabilities]\n\
+   supports-structured-output = true\n\
+   \n\
+   [local.kimi_like]\n\
+   \n\
+   [runtime]\n\
+   default = \"local.kimi_like\"\n\
+   librarian = \"local.kimi_like\"\n"
+
+let with_temperature_runtime f =
+  let path = Filename.temp_file "compaction_temperature_runtime" ".toml" in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let oc = open_out path in
+  output_string oc temperature_runtime_toml;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+      match Runtime.save_config_text ~runtime_config_path:path temperature_runtime_toml with
+      | Error detail -> Alcotest.failf "runtime config should load: %s" detail
+      | Ok () ->
+        (match Runtime.get_runtime_by_id temperature_runtime_id with
+         | None -> Alcotest.fail "temperature runtime should resolve"
+         | Some runtime -> f runtime.Runtime.provider_config))
+
+let test_provider_for_plan_preserves_runtime_temperature () =
+  with_temperature_runtime (fun provider_cfg ->
+    let cfg =
+      C.For_testing.provider_for_plan ~runtime_id:temperature_runtime_id provider_cfg
+    in
+    Alcotest.(check (option (float 0.0001)))
+      "runtime.toml temperature overrides deterministic compaction fallback"
+      (Some 1.0)
+      cfg.temperature)
+
 (* -- plan_of_json: valid partition accepted -- *)
 
 let test_valid_partition_accepted () =
@@ -154,7 +205,11 @@ let test_apply_all_kept_is_identity () =
 
 let () =
   Alcotest.run "compaction_llm_summarizer"
-    [ ( "plan_of_json"
+    [ ( "provider"
+      , [ Alcotest.test_case "runtime temperature is authoritative" `Quick
+            test_provider_for_plan_preserves_runtime_temperature
+        ] )
+    ; ( "plan_of_json"
       , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted
         ; Alcotest.test_case "all kept accepted" `Quick test_all_kept_accepted
         ; Alcotest.test_case "drop-only with kept accepted" `Quick

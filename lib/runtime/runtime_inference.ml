@@ -1,9 +1,9 @@
 (* Per-runtime sampling temperature. A model may declare a fixed [temperature]
    in runtime.toml ([models.<id>.temperature], read via
    [Runtime.temperature_of_runtime_id]); when set, that value is the request
-   temperature for every turn on the model. Otherwise the caller [fallback]
-   ([Keeper_config.keeper_unified_temperature], i.e. [MASC_KEEPER_UNIFIED_TEMP])
-   stands.
+   temperature at every inference boundary for the model. Otherwise the caller's
+   subsystem fallback stands (keeper turn, deterministic compaction, or HITL
+   summary policy).
 
    Completes the previously stubbed per-runtime [resolve_temperature] (the
    [~runtime_id:_] passthrough), symmetric to [resolve_max_tokens]. Required for

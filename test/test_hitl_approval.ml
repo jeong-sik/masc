@@ -18,6 +18,14 @@ module KT = Keeper_types
 module Mcp_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
 
+let install_noop_resolution_delivery_hook () =
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      Ok (fun () -> ()))
+
+let () = install_noop_resolution_delivery_hook ()
+
 let check = Alcotest.(check string)
 
 let temp_dir () =
@@ -840,6 +848,8 @@ let test_approval_resolve_nonexistent () =
       (String.length (AQ.resolve_error_to_string err) > 0)
   | Error (AQ.Already_resolved _) ->
     Alcotest.fail "expected Not_found, got Already_resolved"
+  | Error (AQ.Delivery_failed _) ->
+    Alcotest.fail "expected Not_found, got Delivery_failed"
   | Ok () -> Alcotest.fail "expected error for nonexistent id"
 
 let test_approval_queue_cancel_cleans_up () =
@@ -1415,12 +1425,53 @@ let test_approval_resolve_missing_decision_is_rejected () =
            msg
        | Error (SDH.Gone _) ->
          Alcotest.fail "expected Bad_request, got Gone"
+       | Error (SDH.Unavailable _) ->
+         Alcotest.fail "expected Bad_request, got Unavailable"
        | Ok _ ->
          Alcotest.fail
            "missing decision must NOT resolve the approval (fail-closed, RFC-0305)");
       (* The pending approval must remain unresolved. *)
       Alcotest.(check bool) "pending approval not resolved" true
         (!resolved = None))
+
+let test_approval_delivery_failure_is_unavailable () =
+  let workspace_base = temp_dir () in
+  AQ.For_testing.clear_approval_resolution_wake_hook ();
+  Fun.protect
+    ~finally:(fun () ->
+      install_noop_resolution_delivery_hook ();
+      cleanup_dir workspace_base)
+    (fun () ->
+       let id =
+         AQ.submit_pending
+           ~keeper_name:"dashboard-delivery-failure-keeper"
+           ~tool_name:"masc_transition"
+           ~input:(`Assoc [ "action", `String "claim" ])
+           ~risk_level:AQ.Medium
+           ~base_path:workspace_base
+           ~on_resolution:(fun _ -> ())
+           ()
+       in
+       let args =
+         `Assoc [ "id", `String id; "decision", `String "approve" ]
+       in
+       (match
+          SDH.dashboard_governance_approval_resolve_http_json
+            ~base_path:workspace_base
+            ~args
+        with
+        | Error (SDH.Unavailable (AQ.Delivery_failed failure)) ->
+          Alcotest.(check string)
+            "unavailable identifies approval"
+            id
+            failure.approval_id
+        | Error err ->
+          Alcotest.fail
+            ("expected Unavailable, got "
+             ^ SDH.approval_resolve_http_error_to_string err)
+        | Ok _ -> Alcotest.fail "delivery failure must not return success");
+       Alcotest.(check bool) "unavailable approval remains pending" true
+         (Option.is_some (AQ.get_pending_entry ~id)))
 
 let test_submit_pending_audit_uses_workspace_base_path () =
   let env_base = temp_dir () in
@@ -1701,29 +1752,19 @@ let test_callback_nonblocking_high_returns_without_suspending () =
   let captured_resolution = ref None in
   AQ.set_approval_resolution_wake_hook
     (fun ~base_path:_ ~keeper_name:_ ~approval_id ~decision ~channel ->
-       captured_resolution :=
-         Some
-           Keeper_event_queue.
-             { approval_id
-             ; decision
-             ; channel =
-                 Option.value
-                   channel
-                   ~default:
-                     (Keeper_continuation_channel.unrouted
-                        "test: no approval continuation channel")
-             });
+       Ok
+         (fun () ->
+            captured_resolution :=
+              Some
+                Keeper_event_queue.
+                  { approval_id
+                  ; decision
+                  ; channel
+                  }));
   AQ.For_testing.reset_audit_store ();
   Fun.protect
     ~finally:(fun () ->
-      AQ.set_approval_resolution_wake_hook
-        (fun
-          ~base_path:_
-          ~keeper_name:_
-          ~approval_id:_
-          ~decision:_
-          ~channel:_ ->
-          ());
+      install_noop_resolution_delivery_hook ();
       AQ.For_testing.reset_audit_store ();
       cleanup_dir base_path)
     (fun () ->
@@ -2480,6 +2521,8 @@ let () =
         test_dashboard_resolve_and_delete_rules_use_workspace_base_path;
       Alcotest.test_case "resolve without decision is rejected (RFC-0305 fail-closed)" `Quick
         test_approval_resolve_missing_decision_is_rejected;
+      Alcotest.test_case "delivery failure is service unavailable" `Quick
+        test_approval_delivery_failure_is_unavailable;
       Alcotest.test_case "submit_pending audit uses workspace base_path" `Quick
         test_submit_pending_audit_uses_workspace_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick

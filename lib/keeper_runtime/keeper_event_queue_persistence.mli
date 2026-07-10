@@ -72,6 +72,26 @@ val update :
     persistence write lock. Use this for pre-registry mutation paths that do not
     have a live registry CAS cell yet. *)
 
+val update_result :
+  ?after_commit:(unit -> unit)
+  -> base_path:string
+  -> keeper_name:string
+  -> (Keeper_event_queue.t -> Keeper_event_queue.t)
+  -> (unit, string) result
+(** Result-returning form of {!update}. Critical delivery paths use this so a
+    failed durable write cannot be reported as a committed wake.
+    [after_commit] runs under the same write lock only after the snapshot is
+    durable, allowing a live queue publication without a generation gap. *)
+
+val update_checked_result :
+  ?after_commit:(unit -> unit)
+  -> base_path:string
+  -> keeper_name:string
+  -> (Keeper_event_queue.t -> (Keeper_event_queue.t, string) result)
+  -> (unit, string) result
+(** Checked transform form of {!update_result}. A transform error leaves the
+    existing durable snapshot and live queue unchanged. *)
+
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
 (** Evaluate [snapshot] while holding the persistence write lock, then atomically

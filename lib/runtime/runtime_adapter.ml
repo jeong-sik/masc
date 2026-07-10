@@ -329,7 +329,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~api_key
             ~headers
             ~request_path
-            ~max_context:spec.max_context
+            ?max_context:spec.max_context
             ?supports_tool_choice_override
             ?max_tokens
             ?top_p:spec.top_p
@@ -350,7 +350,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~base_url:""
             ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
             ~headers:(Option.value ~default:[] provider.headers)
-            ~max_context:spec.max_context
+            ?max_context:spec.max_context
             ?supports_tool_choice_override
             ?max_tokens
             ?top_p:spec.top_p
@@ -374,8 +374,13 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
   | Some spec ->
     let max_tokens =
+      (* Priced bindings historically sized [max_tokens] from the declared
+         [max-context] override. With the override now optional, an absent
+         override yields [None] and OAS resolves the output ceiling from its
+         capability catalog ([effective_max_output_tokens]) instead of
+         inheriting the input window. *)
       match binding.price_input, binding.price_output with
-      | Some input_cost, Some _ when input_cost > 0.0 -> Some spec.max_context
+      | Some input_cost, Some _ when input_cost > 0.0 -> spec.max_context
       | _ -> None
     in
     (match Runtime_schema.provider_of_id cfg binding.provider_id with

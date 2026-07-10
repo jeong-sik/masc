@@ -19,6 +19,15 @@ val websocket_upgrade_unavailable_reason : unit -> string option
     503 response body that should be returned.  Exposed for the route policy
     regression test; production requests still go through {!add_routes}. *)
 
+val websocket_upgrade_authorized :
+  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+(** Token-or-same-origin admission gate for [/ws] upgrades, mirroring the
+    [/mcp] POST chain: [verify_mcp_auth] first, falling back to
+    [ensure_same_origin_browser_request].  [base_path] locates the auth
+    config; the production caller resolves it from the live server state.
+    Exposed for the admission parity regression tests; production requests
+    still go through {!add_routes}. *)
+
 val canonical_loopback_location :
   default_port:int -> Httpun.Request.t -> string option
 (** [Some redirect_url] when the request's [Host] header advertises a

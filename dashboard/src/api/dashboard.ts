@@ -12,6 +12,14 @@ import {
   type ModelRouting,
 } from './schemas/runtime-defaults'
 import {
+  type RuntimeResolvedResponse,
+  type RuntimeResolution,
+  type MaxContextSource,
+  type RuntimeLaneSnapshot,
+  type ResolvedAssignmentTarget,
+  type RuntimeAssignment,
+} from './schemas/runtime-resolved'
+import {
   type ProviderLogCatalogEntry,
   type ProviderLogsCatalogResponse,
   type ProviderLogTailLine,
@@ -57,6 +65,14 @@ export { decodeDashboardFeedMetadata } from './dashboard-shared'
 
 export type { LogEntry, LogsResponse }
 export type { RuntimeDefaultsResponse, RuntimeEntry, KeeperAssignment, ModelRouting }
+export type {
+  RuntimeResolvedResponse,
+  RuntimeResolution,
+  MaxContextSource,
+  RuntimeLaneSnapshot,
+  ResolvedAssignmentTarget,
+  RuntimeAssignment,
+}
 export type {
   ProviderLogCatalogEntry,
   ProviderLogsCatalogResponse,
@@ -161,6 +177,7 @@ export {
   fetchRuntimeModelMetrics,
   fetchRuntimeTomlConfig,
   fetchRuntimeDefaults,
+  fetchRuntimeResolved,
   saveRuntimeTomlConfig,
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,

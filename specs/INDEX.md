@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-07-10T05:04:17Z (HEAD: 1e984f3cea)
+Generated: 2026-07-10T08:42:40Z (HEAD: c4e0c0764b)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -84,7 +84,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperTurnSingleFlight.tla | KeeperTurnSingleFlight | manual | 2 | 1 | clean={inv:TypeOK, inv:SingleFlight} buggy={inv:TypeOK, inv:SingleFlight} | b9c881db6540 |
 | KeeperWorkPipelineBug.tla | KeeperWorkPipelineBug | manual | 2 | 1 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent} buggy={inv:TypeOK, inv:WorkspaceAlwaysBounded} | dc1e83209ec5 |
 | KeeperWorktreeContainment.tla | KeeperWorktreeContainment | manual | 3 | 2 | clean={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} other-playground-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} server-root-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} | fc57677b6dc2 |
-| MemoryCompaction.tla | MemoryCompaction | manual | 2 | 1 | clean={inv:GoalsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} buggy={inv:GoalsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} | 621212475148 |
+| MemoryCompaction.tla | MemoryCompaction | manual | 2 | 1 | clean={inv:GoalsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} buggy={inv:GoalsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} | b4bc443cc7a6 |
 | OllamaBodyIntegrity.tla | OllamaBodyIntegrity | manual | 2 | 1 | clean={inv:BalancedNeverFails, inv:ParseErrorImpliesUnbalanced} buggy={inv:BalancedNeverFails} | 4b99edc99fe1 |
 | ReMintResetsAnchor.tla | ReMintResetsAnchor | manual | 2 | 1 | clean={inv:TypeOK, inv:NoUnverifiedVolatileClaimSurvivesBeyondHorizon} buggy={inv:TypeOK, inv:NoUnverifiedVolatileClaimSurvivesBeyondHorizon} | d900937ff999 |
 | SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | baa8b016ef40 |
@@ -110,7 +110,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| KeeperApprovalQueue.tla | KeeperApprovalQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 36bb593bbcf3 |
+| KeeperApprovalQueue.tla | KeeperApprovalQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 46d6c792a0a3 |
 | KeeperCircuitBreaker.tla | KeeperCircuitBreaker | manual | 2 | 1 | clean={inv:SafetyInvariant} | 3f49da13e4a8 |
 | KeeperCompactionCooldown.tla | KeeperCompactionCooldown | manual | 2 | 1 | clean={inv:Safety, inv:NonAppliedDoesNotInventTimestamp} buggy={inv:NonAppliedDoesNotInventTimestamp} | 117cd8f85f7d |
 | KeeperCompactionLifecycle.tla | KeeperCompactionLifecycle | manual | 2 | 1 | clean={inv:Safety, prop:OverflowEventuallyLeavesOverflow, prop:CompactingEventuallyStops} buggy={inv:CompactingAlignsAll} | 004f6c25b9cc |

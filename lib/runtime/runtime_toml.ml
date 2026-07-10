@@ -687,10 +687,14 @@ let parse_model (id : string) (tbl : Otoml.t)
        | Some n -> n
        | None -> id)
   in
-  let max_context = Otoml.find_or ~default:(-1) tbl Otoml.get_integer [ "max-context" ] in
-  if max_context <= 0
-  then Error (error (path ^ ".max-context") "missing or invalid max-context")
-  else (
+  (* [max-context] is an explicit operator override, not a required field: a
+     runtime whose model is covered by the OAS capability catalog can leave it
+     unset and inherit the catalog's max-context (see
+     [Runtime.resolve_max_context_of_runtime]). An operator-supplied value
+     must still be positive; [materialize_config] fail-closes at load time on
+     a runtime that resolves neither source (RFC-0206 §2.1). *)
+  let max_context_result = positive_int_opt_field ~path ~key:"max-context" tbl in
+  (
     let tools_support =
       Otoml.find_or ~default:false tbl Otoml.get_boolean [ "tools-support" ]
     in
@@ -736,6 +740,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
     let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
     let ( let* ) = Result.bind in
+    let* max_context = max_context_result in
     let* capabilities = capabilities_result in
     let* temperature = temperature_result in
     let* top_p = top_p_result in

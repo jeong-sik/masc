@@ -1082,6 +1082,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
      #20869 history this guards against. *)
   let text_accum = Keeper_stream_text_accum.create () in
   let worker_events = Eio.Stream.create worker_events_buffer_size in
+  let terminal_delivery_mu = Eio.Mutex.create () in
   let terminal_pushed = Atomic.make false in
   let client_disconnected = Atomic.make false in
   let stream_projection_done, stream_projection_done_resolver =
@@ -1094,14 +1095,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
   let push_worker_event event =
     match event with
     | Stream_dashboard_queued _ | Stream_terminal _ ->
-        if Atomic.compare_and_set terminal_pushed false true then
-          (try Eio.Stream.add worker_events event
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-               Log.Keeper.warn
-                 "keeper_stream: worker terminal push failed: %s"
-                 (Printexc.to_string exn))
+        Eio.Mutex.use_rw ~protect:true terminal_delivery_mu (fun () ->
+          if not (Atomic.get terminal_pushed) then begin
+            Eio.Stream.add worker_events event;
+            Atomic.set terminal_pushed true
+          end)
     | Stream_client_disconnected ->
         (try Eio.Stream.add worker_events event
          with
@@ -1218,7 +1216,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
      [consume_worker_events]'s [Eio.Stream.take] would block forever.
      [on_worker_aborted] fires from Keeper_msg_async.submit's own catch
      sites (never inside the cancelled [f]) so this turn still gets exactly
-     one terminal event via the same CAS-guarded [push_worker_event]. *)
+     one terminal event via the same serialized [push_worker_event]. *)
   let on_worker_aborted (reason : Keeper_msg_async.worker_abort_reason) =
     let status, body =
       match reason with
@@ -1228,6 +1226,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               "keeper_msg request exceeded timeout_sec=%.3f before completion"
               timeout_sec )
       | Keeper_msg_async.Worker_cancelled { cancelled_by; reason } ->
+          let cancelled_by =
+            Keeper_msg_async.worker_cancel_source_to_string cancelled_by
+          in
           "cancelled", Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
     in
     push_worker_event (Stream_terminal { ok = false; status; body })

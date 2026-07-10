@@ -50,7 +50,12 @@ let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
   ; arrived_at = 1234.5
   ; payload =
       Keeper_event_queue.Fusion_completed
-        { run_id; ok = true; resolved_answer = "use approach B"; board_post_id = "post-fus" }
+        { run_id
+        ; ok = true
+        ; resolved_answer = "use approach B"
+        ; board_post_id = "post-fus"
+        ; continuation_channel = Keeper_continuation_channel.unrouted "test legacy"
+        }
   }
 ;;
 

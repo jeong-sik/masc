@@ -286,7 +286,13 @@ let wake_keeper_on_fusion_completion
       ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id =
   try
     let fusion_completion =
-      Keeper_event_queue.{ run_id; ok; resolved_answer; board_post_id }
+      Keeper_event_queue.
+        { run_id
+        ; ok
+        ; resolved_answer
+        ; board_post_id
+        ; continuation_channel = Keeper_continuation_channel.unrouted ("fusion:" ^ run_id)
+        }
     in
     let post_id = Keeper_event_queue.fusion_completion_post_id fusion_completion in
     let stimulus : Keeper_event_queue.stimulus =

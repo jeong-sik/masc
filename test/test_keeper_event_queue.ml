@@ -155,19 +155,34 @@ let () =
   (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
   let fusion_payload () =
     Fusion_completed
-      { run_id = "fus-1"; ok = true; resolved_answer = "ok"; board_post_id = "post-1" }
+      { run_id = "fus-1"
+      ; ok = true
+      ; resolved_answer = "ok"
+      ; board_post_id = "post-1"
+      ; continuation_channel = Keeper_continuation_channel.unrouted "test legacy"
+      }
   in
   assert (not (is_board_signal (fusion_payload ())));
   assert (String.equal (payload_kind_label (fusion_payload ())) "fusion_completed");
   assert (
     String.equal
       (fusion_completion_post_id
-         { run_id = "fus-1"; ok = true; resolved_answer = "ok"; board_post_id = "post-1" })
+         { run_id = "fus-1"
+         ; ok = true
+         ; resolved_answer = "ok"
+         ; board_post_id = "post-1"
+         ; continuation_channel = Keeper_continuation_channel.unrouted "test legacy"
+         })
       "post-1");
   assert (
     String.equal
       (fusion_completion_post_id
-         { run_id = "fus-2"; ok = false; resolved_answer = "sink_failed"; board_post_id = "" })
+         { run_id = "fus-2"
+         ; ok = false
+         ; resolved_answer = "sink_failed"
+         ; board_post_id = ""
+         ; continuation_channel = Keeper_continuation_channel.unrouted "test legacy"
+         })
       "fusion-run:fus-2");
 
   (* RFC-0290: Bg_completed is a non-board stimulus with its own label; its
@@ -543,18 +558,20 @@ let () =
     in
     enqueue
       q
-         { post_id = "fp1"
-         ; urgency = Low
-         ; arrived_at = 2.5
-         ; payload =
-             Fusion_completed
-               { run_id = "fus-3"
-               ; ok = false
-               ; resolved_answer = "denied"
-               ; board_post_id = ""
-               }
-         }
-  in
+            { post_id = "fp1"
+              ; urgency = Low
+              ; arrived_at = 2.5
+              ; payload =
+                  Fusion_completed
+                    { run_id = "fus-3"
+                    ; ok = false
+                    ; resolved_answer = "denied"
+                    ; board_post_id = ""
+                    ; continuation_channel =
+                        Keeper_continuation_channel.unrouted "test legacy"
+                    }
+                 }
+      in
   let queue_for_snapshot =
     enqueue
       queue_for_snapshot
@@ -600,7 +617,8 @@ let () =
   assert (String.equal fourth.post_id "fp1");
   assert (
     match fourth.payload with
-    | Fusion_completed { run_id; ok; resolved_answer; board_post_id } ->
+    | Fusion_completed
+        { run_id; ok; resolved_answer; board_post_id; continuation_channel = _ } ->
       String.equal run_id "fus-3"
       && (not ok)
       && String.equal resolved_answer "denied"

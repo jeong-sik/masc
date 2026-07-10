@@ -108,6 +108,7 @@ and fusion_completion = {
   (* judge resolved answer; a failure label when [ok = false]. *)
   board_post_id : string;
   (* correlates to the sink's board evidence post; "" if none was created. *)
+  continuation_channel : Keeper_continuation_channel.t;
 }
 
 and bg_job_completion = {
@@ -538,6 +539,7 @@ let payload_to_yojson = function
       ; "ok", `Bool fusion.ok
       ; "resolved_answer", `String fusion.resolved_answer
       ; "board_post_id", `String fusion.board_post_id
+      ; "channel", Keeper_continuation_channel.to_yojson fusion.continuation_channel
       ]
   | Bg_completed c ->
     let ok, payload =
@@ -649,7 +651,15 @@ let payload_of_yojson json =
     let* ok = bool_field ~context "ok" fields in
     let* resolved_answer = string_field ~context "resolved_answer" fields in
     let* board_post_id = string_field ~context "board_post_id" fields in
-    Ok (Fusion_completed { run_id; ok; resolved_answer; board_post_id })
+    let* continuation_channel = continuation_channel_field fields in
+    Ok
+      (Fusion_completed
+         { run_id
+         ; ok
+         ; resolved_answer
+         ; board_post_id
+         ; continuation_channel
+         })
   | "bg_completed" ->
     let* run_id = string_field ~context "run_id" fields in
     let* job_kind_s = string_field ~context "job_kind" fields in

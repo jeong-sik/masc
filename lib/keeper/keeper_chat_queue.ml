@@ -184,11 +184,17 @@ let queue_of_yojson json =
   | Some _, _ -> Error "chat queue snapshot requires items array"
 
 let save_json_atomic path json =
-  Fs_compat.mkdir_p (Filename.dirname path);
-  json
-  |> Safe_ops.sanitize_json_utf8
-  |> Yojson.Safe.pretty_to_string
-  |> Fs_compat.save_file_atomic path
+  match
+    (try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printexc.to_string exn))
+  with
+  | Error _ as err -> err
+  | Ok () ->
+    json
+    |> Safe_ops.sanitize_json_utf8
+    |> Yojson.Safe.pretty_to_string
+    |> Fs_compat.save_file_atomic path
 
 let load_snapshot ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name with
@@ -337,7 +343,7 @@ let dequeue_batch ~keeper_name =
   | None -> []
   | Some entry ->
       with_entry_lock entry (fun () ->
-          let before = queue_to_list entry.q in
+          let _before = queue_to_list entry.q in
           match Queue.take_opt entry.q with
           | None -> []
           | Some first ->
@@ -349,7 +355,9 @@ let dequeue_batch ~keeper_name =
                 | Some _ | None -> List.rev acc
               in
               let batch = first :: drain [] in
-              persist_or_rollback ~keeper_name entry.q ~before;
+              (try persist_if_configured ~keeper_name entry.q with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn -> Log.Keeper.warn "keeper_chat_queue: dequeue_batch persistence failed for keeper=%s: %s" keeper_name (Printexc.to_string exn));
               batch)
 
 let merge_batch batch =

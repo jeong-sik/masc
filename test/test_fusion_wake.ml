@@ -144,7 +144,12 @@ let fusion_payload
       ()
   : Keeper_event_queue.fusion_completion
   =
-  { run_id; ok; resolved_answer; board_post_id }
+  { run_id
+  ; ok
+  ; resolved_answer
+  ; board_post_id
+  ; continuation_channel = Keeper_continuation_channel.unrouted "test legacy"
+  }
 ;;
 
 let fusion_stimulus ?run_id ?ok ?resolved_answer ?board_post_id () : Keeper_event_queue.stimulus =

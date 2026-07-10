@@ -927,7 +927,7 @@ let review
                               safety net. Revise notes or wait for \
                               evaluator runtime repair."
                              pattern reason)
-                      , Fallback
+                      , Evaluator_empty
                       , Some
                           (sprintf
                              "evaluator returned empty text with \
@@ -941,7 +941,7 @@ let review
                          (provider capabilities, MCP policy, or tool \
                          requirements).  See #10474.";
                       ( Approve
-                      , Fallback
+                      , Evaluator_empty
                       , Some
                           "anti-rationalization evaluator returned \
                            empty text; approving by liveness (#10474)" ))

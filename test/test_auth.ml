@@ -1081,6 +1081,9 @@ let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
 let test_authorize_tool_v2_destructive_catalog_requires_admin () =
+  (* Exercise the production registration order. [Operator_tool] writes the
+     canonical Tool_spec metadata after the seed catalog is initialized. *)
+  ignore Operator_tool.force_link;
   [ "masc_operator_action"; "masc_operator_confirm" ]
   |> List.iter (fun tool_name ->
     (match

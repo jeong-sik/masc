@@ -363,7 +363,10 @@ let tool_spec_read_only =
 
 (* Tools with explicit catalog metadata that must be preserved. *)
 let tool_spec_hidden = [ "masc_operator_judgment_write"; surface_audit_tool_name ]
-let tool_spec_hidden_destructive = [ operator_tool_name Operator_name.Operator_action ]
+let tool_spec_hidden_destructive =
+  [ operator_tool_name Operator_name.Operator_action
+  ; operator_tool_name Operator_name.Operator_confirm
+  ]
 
 let () =
   List.iter

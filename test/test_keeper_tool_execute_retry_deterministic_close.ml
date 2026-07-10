@@ -15,6 +15,8 @@ module Shell_dispatch = Keeper_tool_execute_shell_ir
 module AQ = Masc.Keeper_approval_queue
 module Metrics = Masc.Otel_metric_store
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 let reason_testable =
   let pp ppf reason = Format.pp_print_string ppf (D.to_telemetry_key reason) in
   Alcotest.testable pp ( = )
@@ -74,6 +76,63 @@ let cleanup_dir dir =
       Sys.remove path
   in
   try rm_rf dir with _ -> ()
+;;
+
+let shell_ir_approval_env_key = "MASC_SHELL_IR_APPROVAL"
+
+let set_shell_ir_approval_env = function
+  | Some value -> Unix.putenv shell_ir_approval_env_key value
+  | None -> unsetenv shell_ir_approval_env_key
+;;
+
+let with_shell_ir_approval_env value f =
+  let previous = Sys.getenv_opt shell_ir_approval_env_key in
+  Fun.protect
+    ~finally:(fun () -> set_shell_ir_approval_env previous)
+    (fun () ->
+      set_shell_ir_approval_env value;
+      f ())
+;;
+
+let overlay_testable =
+  let open Masc_exec.Approval_config in
+  let pp ppf overlay =
+    Format.fprintf
+      ppf
+      "{safe=%s; audited=%s; privileged=%s}"
+      (trust_level_to_string overlay.safe_trust)
+      (trust_level_to_string overlay.audited_trust)
+      (trust_level_to_string overlay.privileged_trust)
+  in
+  Alcotest.testable pp ( = )
+;;
+
+let test_shell_ir_approval_overlay_resolves_live () =
+  let module Approval = Masc_exec.Approval_config in
+  with_shell_ir_approval_env (Some "permissive") (fun () ->
+    Alcotest.check
+      overlay_testable
+      "initial parsed overlay"
+      Approval.permissive_default
+      (Execute_runtime.shell_ir_approval_overlay ());
+    set_shell_ir_approval_env (Some "enforced");
+    Alcotest.check
+      overlay_testable
+      "updated env is reflected without reloading the module"
+      Approval.enforced_all
+      (Execute_runtime.shell_ir_approval_overlay ());
+    set_shell_ir_approval_env (Some "not-a-valid-overlay");
+    Alcotest.check
+      overlay_testable
+      "invalid overlay falls back to autonomous"
+      Approval.autonomous
+      (Execute_runtime.shell_ir_approval_overlay ());
+    set_shell_ir_approval_env None;
+    Alcotest.check
+      overlay_testable
+      "missing overlay falls back to autonomous"
+      Approval.autonomous
+      (Execute_runtime.shell_ir_approval_overlay ()))
 ;;
 
 let submit_test_gh_approval_pending ~base_path () =
@@ -790,6 +849,10 @@ let () =
         ] )
     ; ( "shell_ir_approval_queue"
       , [ Alcotest.test_case
+            "overlay_resolves_live_with_autonomous_fallback"
+            `Quick
+            test_shell_ir_approval_overlay_resolves_live
+        ; Alcotest.test_case
             "gh_capability_requires_approval_enqueues_pending_without_wait"
             `Quick
             test_gh_approval_pending_helper_enqueues_nonblocking

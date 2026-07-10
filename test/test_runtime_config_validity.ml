@@ -291,7 +291,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
   | Some runtime ->
     check string (case.runtime_id ^ " api name") case.api_name
       runtime.model.api_name;
-    check int (case.runtime_id ^ " context") case.context
+    check (option int) (case.runtime_id ^ " context") (Some case.context)
       runtime.model.max_context;
     check bool (case.runtime_id ^ " tools") case.tools
       runtime.model.tools_support;
@@ -699,7 +699,7 @@ let test_repo_runtime_toml_loads () =
          "Gemma4 E2B model api name"
          "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
          runtime.model.api_name;
-       check int "Gemma4 E2B context" 131072 runtime.model.max_context;
+       check (option int) "Gemma4 E2B context" (Some 131072) runtime.model.max_context;
        check bool "Gemma4 E2B thinking enabled" true
          runtime.model.thinking_support;
        check (option bool) "Gemma4 E2B thinking not preserved" (Some false)
@@ -725,7 +725,7 @@ let test_repo_runtime_toml_loads () =
      | Some runtime ->
        check string "GLM Coding Plan model api name" "glm-4.7"
          runtime.model.api_name;
-       check int "GLM Coding Plan context" 200000 runtime.model.max_context;
+       check (option int) "GLM Coding Plan context" (Some 200000) runtime.model.max_context;
        check bool "GLM Coding Plan thinking enabled" true
          runtime.model.thinking_support;
       check (option bool) "GLM Coding Plan does not preserve thinking by default" (Some false)
@@ -777,7 +777,7 @@ let test_repo_runtime_toml_loads () =
      | None -> fail "expected MiniMax M3 Ollama Cloud runtime in seed"
      | Some runtime ->
        check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
-       check int "MiniMax M3 context" 524288 runtime.model.max_context;
+       check (option int) "MiniMax M3 context" (Some 524288) runtime.model.max_context;
        (match runtime.model.capabilities with
        | Some caps ->
           check bool "MiniMax M3 response_format json disabled" false
@@ -824,7 +824,7 @@ let test_repo_runtime_toml_loads () =
      | None -> fail "expected Kimi K2.7 Code Ollama Cloud runtime in seed"
      | Some runtime ->
        check string "Kimi K2.7 Code api name" "kimi-k2.7-code" runtime.model.api_name;
-       check int "Kimi K2.7 Code context" 262144 runtime.model.max_context;
+       check (option int) "Kimi K2.7 Code context" (Some 262144) runtime.model.max_context;
        (match runtime.model.capabilities with
         | Some caps ->
           check bool "Kimi K2.7 Code image input" true caps.supports_image_input;
@@ -2126,6 +2126,195 @@ let test_deprecated_capability_notice_warns_once_per_process () =
   check int "deprecation notice fires once per process across two parses" 1
     (List.length dep_warns)
 
+(* PR-6 (bugs #14/#15/#36): [model.max-context] is now optional — a runtime
+   can resolve its effective context window from the runtime.toml override,
+   the OAS capability catalog, or the override clamped by the catalog cap.
+   The four cases below cover [Runtime.resolve_max_context_of_runtime]'s
+   full match; the fifth covers the assignment-document default-rider join
+   (bug #14) that [Server_dashboard_runtime_resolved_json.assignment_json]
+   depends on. *)
+
+let test_runtime_max_context_capability_only_uses_catalog_cap () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"ollama_cloud/cap-only-model\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 4096\n"
+  in
+  let runtime_toml =
+    "[providers.ollama_cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://ollama.com/v1\"\n\
+     \n\
+     [models.capenly]\n\
+     api-name = \"cap-only-model\"\n\
+     \n\
+     [ollama_cloud.capenly]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama_cloud.capenly\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.init_default ~config_path:path with
+         | Error msg -> failf "capability-only max-context should load: %s" msg
+         | Ok () ->
+           (match Runtime.get_runtime_by_id "ollama_cloud.capenly" with
+            | None -> fail "expected ollama_cloud.capenly runtime"
+            | Some rt ->
+              check (option (pair int string)) "capability-derived max-context"
+                (Some (4096, "capability"))
+                (Runtime.resolve_max_context_of_runtime rt
+                 |> Option.map (fun (n, source) ->
+                   n, Runtime.max_context_source_to_string source)))))
+
+let test_runtime_max_context_override_below_cap_wins_as_override () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"ollama_cloud/override-under-cap\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 8192\n"
+  in
+  let runtime_toml =
+    "[providers.ollama_cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://ollama.com/v1\"\n\
+     \n\
+     [models.underprovision]\n\
+     api-name = \"override-under-cap\"\n\
+     max-context = 2048\n\
+     \n\
+     [ollama_cloud.underprovision]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama_cloud.underprovision\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.init_default ~config_path:path with
+         | Error msg -> failf "override-below-cap should load: %s" msg
+         | Ok () ->
+           (match Runtime.get_runtime_by_id "ollama_cloud.underprovision" with
+            | None -> fail "expected ollama_cloud.underprovision runtime"
+            | Some rt ->
+              check (option (pair int string)) "override wins under the catalog cap"
+                (Some (2048, "override"))
+                (Runtime.resolve_max_context_of_runtime rt
+                 |> Option.map (fun (n, source) ->
+                   n, Runtime.max_context_source_to_string source)))))
+
+let test_runtime_max_context_override_above_cap_is_clamped () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"ollama_cloud/override-over-cap\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 8192\n"
+  in
+  let runtime_toml =
+    "[providers.ollama_cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://ollama.com/v1\"\n\
+     \n\
+     [models.overprovision]\n\
+     api-name = \"override-over-cap\"\n\
+     max-context = 16384\n\
+     \n\
+     [ollama_cloud.overprovision]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama_cloud.overprovision\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.init_default ~config_path:path with
+         | Error msg -> failf "override-above-cap should load (clamped): %s" msg
+         | Ok () ->
+           (match Runtime.get_runtime_by_id "ollama_cloud.overprovision" with
+            | None -> fail "expected ollama_cloud.overprovision runtime"
+            | Some rt ->
+              check (option (pair int string))
+                "override above the catalog cap is clamped to the cap"
+                (Some (8192, "override_clamped_by_capability"))
+                (Runtime.resolve_max_context_of_runtime rt
+                 |> Option.map (fun (n, source) ->
+                   n, Runtime.max_context_source_to_string source)))))
+
+let test_runtime_max_context_missing_both_sources_rejected_at_load () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.nocap]\n\
+     api-name = \"nocap\"\n\
+     \n\
+     [local.nocap]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.nocap\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.load_list ~config_path:path with
+         | Ok _ ->
+           fail
+             "runtime with no max-context override and no capability catalog \
+              row should be rejected at load (fail-closed, no silent \
+              default)"
+         | Error msg ->
+           check bool "load error names the max-context field" true
+             (String_util.contains_substring msg "max-context")))
+
+let test_runtime_assignment_default_rider_resolves_to_default_runtime () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.good]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.good\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.init_default ~config_path:path with
+         | Error msg -> failf "runtime init_default should load: %s" msg
+         | Ok () ->
+           (* Bug #14: a keeper absent from [runtime.assignments] is not
+              "unrouted" — it rides [runtime].default. The resolved document's
+              assignment join ([Server_dashboard_runtime_resolved_json
+              .assignment_json]) depends on exactly this fallback pair. *)
+           check (option string) "unassigned keeper has no explicit assignment"
+             None
+             (Runtime.runtime_id_for_keeper "keeper_with_no_assignment");
+           check string
+             "unassigned keeper's default rider resolves to [runtime].default"
+             "local.good"
+             (Runtime.get_default_runtime_id ())))
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -2214,5 +2403,21 @@ let () =
             test_runtime_toml_max_concurrent_flows_to_candidate;
           test_case
             "deprecated capability notice warns once per process, not per parse"
-            `Quick test_deprecated_capability_notice_warns_once_per_process ] )
+            `Quick test_deprecated_capability_notice_warns_once_per_process;
+          test_case
+            "max-context: capability-only source uses the catalog cap"
+            `Quick test_runtime_max_context_capability_only_uses_catalog_cap;
+          test_case
+            "max-context: override below the catalog cap wins as override"
+            `Quick test_runtime_max_context_override_below_cap_wins_as_override;
+          test_case
+            "max-context: override above the catalog cap is clamped"
+            `Quick test_runtime_max_context_override_above_cap_is_clamped;
+          test_case
+            "max-context: missing both sources is rejected at load"
+            `Quick test_runtime_max_context_missing_both_sources_rejected_at_load;
+          test_case
+            "assignments: unassigned keeper rides [runtime].default"
+            `Quick test_runtime_assignment_default_rider_resolves_to_default_runtime
+        ] )
     ]

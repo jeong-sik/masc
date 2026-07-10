@@ -3816,7 +3816,13 @@ let test_consolidator_stale_peer_does_not_satisfy_min_keepers () =
 ;;
 
 (* A fact with no valid_until but an old last_verified_at is stale and must be
-   excluded from the representative and observed_by set. *)
+   excluded from the representative and observed_by set. Two fresh
+   contributors are required so the claim still meets min_keepers (=2) after
+   the stale one is filtered — with a single fresh peer nothing would be
+   promoted at all (that quorum behavior is pinned separately by
+   [test_consolidator_stale_peer_does_not_satisfy_min_keepers]). The original
+   #23748 version used one fresh peer and could never pass (main red #23901,
+   family consolidator). *)
 let test_consolidator_filters_stale_without_valid_until () =
   let now = 1_000_000.0 in
   let claim_id = Some "no-valid-until-stale" in
@@ -3827,7 +3833,14 @@ let test_consolidator_filters_stale_without_valid_until () =
     ; Types.claim_id = claim_id
     }
   in
-  let fresh =
+  let fresh_old =
+    { (mk_shared_fixture ~now ~category:"lesson" "fresh older no valid_until") with
+      Types.first_seen = 100.0
+    ; Types.last_verified_at = Some (now -. 100.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let fresh_new =
     { (mk_shared_fixture ~now ~category:"lesson" "fresh no valid_until") with
       Types.first_seen = now -. 1.0
     ; Types.last_verified_at = Some (now -. 1.0)
@@ -3835,7 +3848,9 @@ let test_consolidator_filters_stale_without_valid_until () =
     }
   in
   let promoted =
-    promote_one ~now [ "stale", [ stale ]; "fresh", [ fresh ] ]
+    promote_one
+      ~now
+      [ "stale", [ stale ]; "fresh-a", [ fresh_old ]; "fresh-b", [ fresh_new ] ]
   in
   Alcotest.(check string)
     "representative excludes stale contributor without valid_until"
@@ -3843,7 +3858,7 @@ let test_consolidator_filters_stale_without_valid_until () =
     promoted.Types.claim;
   Alcotest.(check (list string))
     "observed_by excludes stale contributor without valid_until"
-    [ "fresh" ]
+    [ "fresh-a"; "fresh-b" ]
     promoted.Types.observed_by
 ;;
 

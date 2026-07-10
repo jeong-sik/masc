@@ -885,7 +885,7 @@ case \"$1\" in\n\
     exit 2\n\
     ;;\n\
   rm)\n\
-    if [ \"$2\" = \"-f\" ] && [ \"$3\" = \"old-container\" ]; then\n\
+    if [ \"$2\" = \"-f\" ] && [ \"$3\" = \"-v\" ] && [ \"$4\" = \"old-container\" ]; then\n\
       printf 'old-container\\n'\n\
       exit 0\n\
     fi\n\
@@ -1215,9 +1215,9 @@ let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   Alcotest.(check (list string)) "no cleanup errors" [] result.errors;
   let log = read_file log_path in
   Alcotest.(check bool) "removes old container" true
-    (contains_substring log "rm -f old-container");
+    (contains_substring log "rm -f -v old-container");
   Alcotest.(check bool) "keeps fresh container" false
-    (contains_substring log "rm -f fresh-container")
+    (contains_substring log "rm -f -v fresh-container")
 
 let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->

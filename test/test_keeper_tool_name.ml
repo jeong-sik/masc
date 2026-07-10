@@ -1,5 +1,15 @@
 open Alcotest
 
+let test_keeper_msg_round_trip () =
+  let name = Keeper_tool_name.to_string Keeper_tool_name.Keeper_msg in
+  check string "wire name" "masc_keeper_msg" name;
+  check
+    bool
+    "typed parse"
+    true
+    (Keeper_tool_name.of_string name = Some Keeper_tool_name.Keeper_msg)
+;;
+
 let test_board_write_surface_names () =
   List.iter
     (fun name ->
@@ -36,7 +46,9 @@ let test_non_write_board_surface_names () =
 let () =
   run
     "Keeper_tool_name"
-    [ ( "board-write"
+    [ ( "vocabulary"
+      , [ test_case "keeper_msg round-trip" `Quick test_keeper_msg_round_trip ] )
+    ; ( "board-write"
       , [ test_case "recognizes write surfaces" `Quick test_board_write_surface_names
         ; test_case
             "rejects non-write and unknown surfaces"

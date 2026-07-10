@@ -182,6 +182,31 @@ let test_telegram_connector_json_reads_runtime_status () =
     check int "configured bindings count" 1
       (json |> U.member "configured_bindings" |> U.to_list |> List.length))
 
+let test_slack_connector_json_carries_identity () =
+  with_temp_dir @@ fun dir ->
+  with_sidecar_paths "slack" dir (fun () ->
+    (* Regression: the dashboard connectors endpoint matches a connected
+       gateway to its tile by [connector_id] (findConnector(connectors,
+       "slack")). Slack's connector_json used to omit connector_id/display_name
+       — Discord/Telegram carry them — so a connected Slack gateway rendered as
+       an unstarted "설정 필요" placeholder. Both fields must be present. *)
+    let json = Channel_gate_slack_state.connector_json () in
+    check string "connector id" "slack"
+      (json |> U.member "connector_id" |> U.to_string);
+    check string "display name" "Slack"
+      (json |> U.member "display_name" |> U.to_string);
+    (* The endpoint passes [~gate_status_json]; identity must survive the
+       merge, since it is the tile-matching key. *)
+    let merged =
+      Channel_gate_slack_state.connector_json
+        ~gate_status_json:(`Assoc [ ("channels", `List []) ])
+        ()
+    in
+    check string "connector id survives gate_status merge" "slack"
+      (merged |> U.member "connector_id" |> U.to_string);
+    check string "display name survives gate_status merge" "Slack"
+      (merged |> U.member "display_name" |> U.to_string))
+
 let () =
   run "channel_gate_connector_routes"
     [
@@ -206,5 +231,7 @@ let () =
             test_slack_default_paths_resolve_under_base_path;
           test_case "telegram connector json reads runtime status" `Quick
             test_telegram_connector_json_reads_runtime_status;
+          test_case "slack connector json carries connector_id/display_name" `Quick
+            test_slack_connector_json_carries_identity;
         ] );
     ]

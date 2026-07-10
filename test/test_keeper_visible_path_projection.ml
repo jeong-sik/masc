@@ -150,18 +150,20 @@ let test_playground_internal_path_now_allowed () =
      reachable. #23843 unblocked the whole arm; this keeps the playground half
      unblocked after re-narrowing the helper to exempt .masc/playground. *)
   setup
-  @@ fun ~config ~meta ~playground:_ ->
+  @@ fun ~config ~meta ~playground ->
   let private_raw =
     Masc.Keeper_sandbox.allowed_root_rel_of_meta ~meta ^ "mind/README.md"
   in
+  let target = Filename.concat playground "mind/README.md" in
+  write_file target "private storage fixture\n";
   (match
      Keeper_tool_shared_runtime.resolve_keeper_read_path
        ~config
        ~meta
        ~raw_path:private_raw
    with
-   | Ok _ ->
-     () (* playground-internal path resolves — keeper may reach its own area *)
+   | Ok path ->
+     Alcotest.(check string) "resolved private path" target path
    | Error e -> Alcotest.fail ("playground-internal path should resolve: " ^ e))
 ;;
 
@@ -209,6 +211,30 @@ let test_read_with_visible_repo_cwd_and_relative_file_path () =
   Alcotest.(check (option string))
     "content"
     (Some "repo readme\n")
+    (parse_string "content" raw)
+;;
+
+let test_repository_backlog_file_is_readable () =
+  setup
+  @@ fun ~config ~meta ~playground ->
+  allow_repo ~config ~meta "masc";
+  let target = Filename.concat playground "repos/masc/docs/backlog.json" in
+  write_file target {|{"scope":"repository fixture"}|};
+  let raw =
+    Keeper_tool_filesystem_runtime.handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~keeper_name:meta.name
+      ~args:
+        (`Assoc
+            [ "path", `String "repos/masc/docs/backlog.json"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if not (parse_ok raw) then Alcotest.failf "expected Read ok, got: %s" raw;
+  Alcotest.(check (option string))
+    "repository backlog content"
+    (Some {|{"scope":"repository fixture"}|})
     (parse_string "content" raw)
 ;;
 
@@ -298,6 +324,10 @@ let () =
             "Write visible mind path"
             `Quick
             test_write_visible_mind_path
+        ; Alcotest.test_case
+            "repository backlog.json remains readable"
+            `Quick
+            test_repository_backlog_file_is_readable
         ; Alcotest.test_case
             "repo-prefixed missing read surfaces playground hint"
             `Quick

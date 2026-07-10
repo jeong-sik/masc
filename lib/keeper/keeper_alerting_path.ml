@@ -259,22 +259,11 @@ let raw_looks_like_playground_subdir (raw : string) : bool =
     that also dropped the internal-state defence. The fix is to keep the arm
     and narrow the match so only workspace-level state is blocked. *)
 let is_masc_internal_state_path (raw : string) : bool =
-  (* Match ".masc/", "./.masc/", ".masc" at end, "*/backlog.json" *)
-  let masc_state =
-    (String.starts_with ~prefix:".masc/" raw)
-    || (String.starts_with ~prefix:"./.masc/" raw)
-    || (String.equal raw ".masc")
-    || (String.equal raw "./.masc")
-    || (let len = String.length raw in
-        len >= 12
-        && String.sub raw (len - 12) 12 = "backlog.json"
-        && (len = 12 || raw.[len - 13] = '/'))
-  in
-  let under_playground =
-    String.starts_with ~prefix:".masc/playground" raw
-    || String.starts_with ~prefix:"./.masc/playground" raw
-  in
-  masc_state && not under_playground
+  match split_relative_components raw with
+  | masc_dir :: "playground" :: _ when String.equal masc_dir Common.masc_dirname ->
+    false
+  | masc_dir :: _ when String.equal masc_dir Common.masc_dirname -> true
+  | _ -> false
 ;;
 
 let is_masc_internal_state_norm ~(root_norm : string) ~(target_norm : string) : bool =

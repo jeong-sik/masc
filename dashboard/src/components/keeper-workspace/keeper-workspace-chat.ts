@@ -20,7 +20,6 @@ import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { navigate } from '../../router'
 import { governanceData } from '../governance-signals'
-import { resolveGovernanceApproval } from '../../api/dashboard-governance'
 import type { ChatComposerCommand } from '../chat/primitives'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { keeperThreads } from '../../keeper-state'
@@ -432,9 +431,6 @@ function PendingApprovalCue({ keeper }: { keeper: Keeper }): VNode | null {
   if (!first) return null
   const rest = pending.length - 1
   const tool = first.tool_name?.trim() ?? ''
-  const resolve = (decision: 'approve' | 'reject') => {
-    resolveGovernanceApproval(first.id, decision).catch(() => {})
-  }
   return html`
     <div
       class="kw-chat-pending-cue flex items-center gap-2 px-4 py-2 text-xs text-[var(--color-fg-secondary)]"
@@ -444,18 +440,6 @@ function PendingApprovalCue({ keeper }: { keeper: Keeper }): VNode | null {
       <${Pill} tone="warn" dot="warn">승인 대기 ${pending.length}</${Pill}>
       <span>${tool || '결재 요청'}${rest > 0 ? ` 외 ${rest}건` : ''}</span>
       <span class="flex-1"></span>
-      <button
-        type="button"
-        class="kw-act v2-monitoring-action"
-        onClick=${() => resolve('approve')}
-        title="이 요청을 승인합니다"
-      >승인</button>
-      <button
-        type="button"
-        class="kw-act v2-monitoring-action"
-        onClick=${() => resolve('reject')}
-        title="이 요청을 거부합니다"
-      >거부</button>
       <button
         type="button"
         class="kw-act v2-monitoring-action"

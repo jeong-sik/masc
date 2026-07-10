@@ -14,20 +14,19 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 372 unique knobs across 10 modules.
+**Total**: 371 unique knobs across 10 modules.
 
 **Typed getter classification**: 54/224 tagged (`operator`: 54, `algorithm`: 0, `unclassified`: 170).
 
-## Env_config_core (28 knobs; typed classification 3/8)
+## Env_config_core (27 knobs; typed classification 3/8)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ADMIN_TOKEN` | string_literal | n/a | n/a | 515 | SSOT for auth env-var names (issue 8352). |
 | `MASC_BASE_PATH` | string_literal | n/a | n/a | 367 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
 | `MASC_BASE_PATH_INPUT` | string_literal | n/a | n/a | 368 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
-| `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 600 | Git commit hash override for build identity. |
+| `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 577 | Git commit hash override for build identity. |
 | `MASC_CLUSTER_NAME` | string_literal | n/a | n/a | 276 |  |
-| `MASC_CODE_EXEMPT_KEEPERS` | string_literal | Security | operator | 581 | Environment variable for space-separated keeper names exempt from code-execution governance gates (per task-1807). @c... |
 | `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 493 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
 | `MASC_DATA_DIR` | string_literal | n/a | n/a | 506 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for contract verdicts ... |
 | `MASC_DISABLE_HITL` | typed:bool | Security | operator | 571 | Whether to disable HITL (human-in-the-loop) approval gates. Default: false. @category Security @ops_class operator |
@@ -39,13 +38,13 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_HOST_FD_PRESSURE_STATE_FILE` | string_literal | n/a | n/a | 326 | {1 Host pressure integration} |
 | `MASC_HTTP_BASE_URL` | string_literal | n/a | n/a | 289 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 | `MASC_HTTP_PORT` | string_literal | n/a | n/a | 248 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
-| `MASC_KEEPER_DEFAULT_SANDBOX_PROFILE` | typed:string | unclassified | unclassified | 611 | Default sandbox profile for keepers. Default: "local". Set to "docker" to default all keepers to containerized execut... |
+| `MASC_KEEPER_DEFAULT_SANDBOX_PROFILE` | typed:string | unclassified | unclassified | 588 | Default sandbox profile for keepers. Default: "local". Set to "docker" to default all keepers to containerized execut... |
 | `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 539 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 540 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 489 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |
 | `MASC_PARSE_WARN` | string_literal | n/a | n/a | 35 |  |
 | `MASC_PERSONAS_DIR` | string_literal | n/a | n/a | 494 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
-| `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 604 | PubSub max messages per read. Default: 1000. |
+| `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 581 | PubSub max messages per read. Default: 1000. |
 | `MASC_SYSMON_PRESSURE_STATE` | string_literal | n/a | n/a | 327 | {1 Host pressure integration} |
 | `MASC_TELEMETRY_ENABLED` | typed:bool | unclassified | unclassified | 552 | Whether telemetry tracking is enabled. Default: true. |
 | `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 426 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |

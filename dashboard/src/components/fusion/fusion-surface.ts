@@ -386,13 +386,14 @@ function timeValue(iso: string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+// No sort here: ordering is owned exclusively by buildMergedRuns (creation/
+// start axis). A second, different sort key at this layer is exactly the
+// mixed-axis bug this file just removed.
 function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
-  return posts
-    .flatMap(post => {
-      const run = fusionRunFromPost(post)
-      return run ? [run] : []
-    })
-    .sort((a, b) => timeValue(b.updatedAt) - timeValue(a.updatedAt))
+  return posts.flatMap(post => {
+    const run = fusionRunFromPost(post)
+    return run ? [run] : []
+  })
 }
 
 // Registry status ('completed') aligned to the board run status enum ('complete')
@@ -410,10 +411,18 @@ type MergedRun =
   | { kind: 'board'; runId: string; sortTime: number; running: boolean; view: FusionRunView }
   | { kind: 'registry'; runId: string; sortTime: number; running: boolean; record: FusionRunRecord }
 
+// Master-list page size: rows rendered initially and added per "더 보기" click.
+const FUSION_LIST_PAGE_SIZE = 30
+
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
 // (it carries the detail), so the registry duplicate is dropped. Running rows pin
-// to the top (the live work), then recency — registry startedAt is unix seconds,
-// board updatedAt is an ISO string, so both are normalized to ms before sorting.
+// to the top (the live work), then recency on a SINGLE stable axis per row kind:
+// board post creation (createdAt ISO — the post lands when the deliberation
+// completes) and registry start (startedAt unix seconds), both normalized to ms.
+// The two kinds approximate different moments of a run's life, but each is
+// immutable, which is the property that matters: sorting board rows by
+// updatedAt let an old run leapfrog newer ones whenever its post was touched,
+// which read as a jumbled list (38-bug campaign #34).
 function buildMergedRuns(
   boardRuns: readonly FusionRunView[],
   registryRuns: readonly FusionRunRecord[],
@@ -423,7 +432,7 @@ function buildMergedRuns(
     ...boardRuns.map((view): MergedRun => ({
       kind: 'board',
       runId: view.runId,
-      sortTime: timeValue(view.updatedAt),
+      sortTime: timeValue(view.createdAt),
       running: view.status === 'running',
       view,
     })),
@@ -902,6 +911,9 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
   `
 }
 
+// Row timestamp renders createdAt to match the list's sort axis: showing
+// updatedAt made an edited old post wear a fresher timestamp than the rows
+// above it, reproducing the jumbled impression the sort fix removed.
 function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) {
   const dec = decisionSpecFor(run.judge.decision)
   return html`
@@ -914,7 +926,7 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
       <span class="fus-row-h">
         <${FusionStatusGlyph} status=${run.status} />
         <span class="fus-run-id mono">${run.runId}</span>
-        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.updatedAt} /></span>
+        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.createdAt} /></span>
       </span>
       <span class="fus-row-prompt">${compactText(run.question, 110)}</span>
       <span class="fus-row-f">
@@ -1313,6 +1325,17 @@ export function FusionSurface() {
   const selected = merged.find(run => run.runId === selectedRunId) ?? merged[0] ?? null
   const registryRunning = registryRuns.filter(run => run.status === 'running').length
   const registryFailed = registryRuns.filter(run => run.status === 'failed').length
+  // Paged master list (38-bug campaign #34): render a page of rows instead of
+  // the full history. The page grows by FUSION_LIST_PAGE_SIZE on demand and
+  // always extends far enough to include the routed selection so the active
+  // row never disappears from the list.
+  const [visibleCount, setVisibleCount] = useState(FUSION_LIST_PAGE_SIZE)
+  const selectedIndex = selected
+    ? merged.findIndex(run => run.runId === selected.runId)
+    : -1
+  const effectiveCount = Math.max(visibleCount, selectedIndex + 1)
+  const visibleRuns = merged.slice(0, effectiveCount)
+  const hiddenCount = merged.length - visibleRuns.length
 
   return html`
     <main class="surf fus v2-fusion-surface" data-testid="fusion-surface" data-screen-label="Fusion">
@@ -1376,7 +1399,7 @@ export function FusionSurface() {
             ? html`<div class="fus-list-scroll"><div class="ov-empty">심의 런이 없습니다</div></div>`
             : html`
                 <div class="fus-list-scroll">
-                  ${merged.map(run => run.kind === 'board'
+                  ${visibleRuns.map(run => run.kind === 'board'
                     ? html`<${FusionRunRow}
                         key=${run.runId}
                         run=${run.view}
@@ -1387,6 +1410,19 @@ export function FusionSurface() {
                         record=${run.record}
                         active=${selected?.runId === run.runId}
                       />`)}
+                  ${hiddenCount > 0
+                    ? html`<button
+                        type="button"
+                        class=${`fus-link inline fus-list-more ${ringFocusClasses()}`}
+                        data-testid="fusion-list-more"
+                        onClick=${() =>
+                          // Grow from what is actually rendered, not the
+                          // latch: after a deep link auto-extends the list
+                          // (effectiveCount >> visibleCount), growing the
+                          // latch alone would make the first clicks no-ops.
+                          setVisibleCount(effectiveCount + FUSION_LIST_PAGE_SIZE)}
+                      >더 보기 (${hiddenCount}개 남음)</button>`
+                    : null}
                 </div>
               `}
         </aside>

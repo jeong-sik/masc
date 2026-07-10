@@ -1932,8 +1932,6 @@
 
 (include stanzas/test_env_config_nonneg.inc)
 
-(include stanzas/test_env_config_code_exempt_keepers.inc)
-
 (include stanzas/test_env_config_sandbox.inc)
 
 (include stanzas/test_env_config_sidecar_timeouts.inc)

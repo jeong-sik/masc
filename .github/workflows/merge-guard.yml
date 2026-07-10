@@ -5,6 +5,12 @@
 # verdict re-computes the moment a blocker is added or removed, without
 # re-running the full CI matrix.
 #
+# The verdict reads LIVE PR state from the API at job execution, not the
+# triggering event's payload: event snapshots from rapid label flips can
+# complete out of order on the same head and leave a stale green
+# (#23966 P1). The event only decides WHEN to re-evaluate; the API decides
+# WHAT the state is.
+#
 # This check only binds merges once two repository settings hold
 # (operator-approved, see #23966):
 #   1. "Merge Guard" is in the branch-protection required contexts.
@@ -25,6 +31,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 # Rapid label/draft transitions fire one run per event; only the newest
 # verdict matters, so collapse the backlog per PR instead of queueing it.
@@ -37,29 +44,35 @@ jobs:
     name: Merge Guard
     runs-on: ubuntu-latest
     steps:
-      - name: Fail on blocker labels or draft state
+      - name: Fail on live blocker labels or draft state
         env:
-          # Snapshot from the triggering event, not a later API read, so the
-          # verdict is tied to the state transition that fired this run.
-          PR_DRAFT: ${{ github.event.pull_request.draft }}
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Event snapshot, logged for forensics only — the verdict below
+          # never uses it.
+          EVENT_DRAFT: ${{ github.event.pull_request.draft }}
+          EVENT_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           set -euo pipefail
+          echo "event snapshot: draft=${EVENT_DRAFT} labels=[${EVENT_LABELS}]"
+          live="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" \
+            --jq '{draft: .draft, labels: [.labels[].name]}')"
+          echo "live state: ${live}"
+          draft="$(jq -r '.draft' <<<"${live}")"
+          blockers="$(jq -r '.labels[] | select(. == "status:do-not-merge" or . == "p0" or . == "p1")' <<<"${live}")"
           blocked=0
-          IFS=',' read -ra labels <<< "${PR_LABELS}"
-          for label in "${labels[@]:-}"; do
-            case "$label" in
-              status:do-not-merge|p0|p1)
-                echo "::error title=Merge blocked::blocker label present: $label"
-                blocked=1
-                ;;
-            esac
-          done
-          if [[ "${PR_DRAFT}" == "true" ]]; then
+          if [[ -n "${blockers}" ]]; then
+            while IFS= read -r label; do
+              echo "::error title=Merge blocked::blocker label present: ${label}"
+            done <<<"${blockers}"
+            blocked=1
+          fi
+          if [[ "${draft}" == "true" ]]; then
             echo "::error title=Merge blocked::pull request is a draft"
             blocked=1
           fi
-          if [[ "$blocked" == "1" ]]; then
+          if [[ "${blocked}" == "1" ]]; then
             exit 1
           fi
           echo "no blocker labels, not a draft — merge guard clean"

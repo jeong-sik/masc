@@ -262,7 +262,9 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Cancel
       | Masc_domain.Submit_for_verification
       | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ), _ -> None
+      | Masc_domain.Reject_verification
+      | Masc_domain.Operator_block
+      | Masc_domain.Operator_unblock ), _ -> None
   in
   match release_owner_mismatch_rejection with
   | Some result -> result
@@ -469,7 +471,9 @@ let evidence_refs =
       | Masc_domain.Cancel
       | Masc_domain.Release
       | Masc_domain.Approve_verification
-      | Masc_domain.Reject_verification ->
+      | Masc_domain.Reject_verification
+      | Masc_domain.Operator_block
+      | Masc_domain.Operator_unblock ->
         false
     in
     if not needs_gate then Workspace_hooks.Pass
@@ -548,7 +552,9 @@ let evidence_refs =
     | Masc_domain.Cancel
     | Masc_domain.Release
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Reject_verification
+    | Masc_domain.Operator_block
+    | Masc_domain.Operator_unblock ->
       None
   in
   (* RFC-0221 §3.1: compensation for [Submit_for_verification]. If the status
@@ -579,7 +585,9 @@ let evidence_refs =
     | Masc_domain.Cancel
     | Masc_domain.Release
     | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
+    | Masc_domain.Reject_verification
+    | Masc_domain.Operator_block
+    | Masc_domain.Operator_unblock ->
       None
   in
   let prepare_verification_verdict =

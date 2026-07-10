@@ -1728,6 +1728,12 @@
 ; Special: Minimal dependency tests (CI scripts, governance)
 ; Special: Heartbeat/keeper minimal deps
 
+; RFC-0327 §A4: Effect_class typed field (task-1902)
+(test
+ (name test_verifier_core_effect_class)
+ (modules test_verifier_core_effect_class)
+ (libraries masc_test_deps))
+
 ; Executables (benchmarks, distributed tests, tools)
 
 ; test_cp_search_fabric_benchmark removed (CP purge)

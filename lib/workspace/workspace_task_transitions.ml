@@ -262,7 +262,8 @@ let transition_task_outcome_r
                  re-run this work, create a new task with predecessor_task_id \
                  via masc_add_task (RFC-0323); use masc_tasks to find claimable \
                  items."
-              | Masc_domain.Cancelled _, _ ->
+              | Masc_domain.Cancelled _, _
+              | Masc_domain.OperatorBlocked _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
               | _ -> ""

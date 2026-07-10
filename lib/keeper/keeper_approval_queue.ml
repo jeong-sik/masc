@@ -528,6 +528,7 @@ let create_entry
             closed" (#23716). #23845 reworded it in passing (main red #23901,
             family B). *)
          Keeper_continuation_channel.unrouted "no originating connector")
+      ?(channel = Keeper_continuation_channel.unrouted "legacy")
       ~lane_policy
       ~audit_base_path
       ~resolver
@@ -572,7 +573,7 @@ let create_entry
   ; on_resolution
   ; context_summary = None
   ; summary_status = Summary_not_requested
-  ; channel = Some continuation_channel
+  ; channel = Some channel
   }
 ;;
 
@@ -1146,6 +1147,7 @@ let submit_and_await
       ?disposition
       ?disposition_reason
       ?continuation_channel
+      ?channel
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
       ?(critical_escalation_after_s = default_critical_approval_escalation_after_s)
@@ -1173,6 +1175,7 @@ let submit_and_await
       ?disposition
       ?disposition_reason
       ?continuation_channel
+      ?channel
       ~lane_policy:Blocking
       ~audit_base_path:base_path
       ~resolver:(Some resolver)
@@ -1353,6 +1356,7 @@ let submit_pending
           ?disposition
           ?disposition_reason
           ?continuation_channel
+          ?channel
           ~lane_policy
           ~audit_base_path:base_path
           ~resolver:None

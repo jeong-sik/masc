@@ -411,6 +411,7 @@ let to_oas_approval_callback
       ?meta
       ?clock
       ?continuation_channel
+      ?channel
       ?(lane_policy = Keeper_approval_queue.Blocking)
       ?hitl_approval_grant
       ()
@@ -666,6 +667,7 @@ let to_oas_approval_callback
                   ~risk_level
                   ?clock
                   ?continuation_channel
+                  ?channel
                   ()
             in
             (match Operator_approval.decide_approval_mode ~mode ~band with

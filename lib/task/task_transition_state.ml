@@ -28,6 +28,8 @@ type transition_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
+  | Block_for_operator
+  | Unblock
 
 type family =
   | Invalid_transition of
@@ -74,6 +76,8 @@ let transition_action_to_string = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve_verification"
   | Reject_verification -> "reject_verification"
+  | Block_for_operator -> "block_for_operator"
+  | Unblock -> "unblock"
 
 let family_to_string = function
   | Invalid_transition { from_status; action } ->
@@ -112,6 +116,8 @@ let all_transition_actions : transition_action list =
   ; Submit_for_verification
   ; Approve_verification
   ; Reject_verification
+  ; Block_for_operator
+  ; Unblock
   ]
 
 let all_families : family list =
@@ -186,6 +192,8 @@ let parse_transition_action_token (s : string) : transition_action option =
   | "submit_for_verification" -> Some Submit_for_verification
   | "approve_verification" | "approve" -> Some Approve_verification
   | "reject_verification" | "reject" -> Some Reject_verification
+  | "block_for_operator" -> Some Block_for_operator
+  | "unblock" -> Some Unblock
   | _ -> None
 
 (* Find the substring between [prefix] and the first occurrence of

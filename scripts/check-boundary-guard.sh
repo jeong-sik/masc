@@ -60,6 +60,38 @@ check_forbidden_outside() {
   fi
 }
 
+check_forbidden_active() {
+  local label="$1" pattern="$2"
+  shift 2
+  local hits=()
+  local path
+  for path in "$@"; do
+    if [[ ! -e "$REPO_ROOT/$path" ]]; then
+      echo "BOUNDARY ERROR: $label — path $path does not exist"
+      rc=1
+      continue
+    fi
+    while IFS= read -r line; do
+      [[ -z "$line" ]] || hits+=("$line")
+    done < <(
+      grep -rnE \
+        --include='*.ml' --include='*.mli' \
+        --include='*.ts' --include='*.tsx' \
+        --include='*.py' --include='*.rs' \
+        --include='*.md' --include='*.json' \
+        "$pattern" "$REPO_ROOT/$path" 2>/dev/null || true
+    )
+  done
+
+  if [[ "${#hits[@]}" -gt 0 ]]; then
+    echo "BOUNDARY FAIL: $label — found ${#hits[@]} forbidden active-source match(es)"
+    printf '%s\n' "${hits[@]:0:8}"
+    rc=1
+  else
+    echo "BOUNDARY INFO: $label — no forbidden active-source matches"
+  fi
+}
+
 # V2: MASC-specific importance_scores in keeper working_context wrapper
 # These wrap OAS Context.t with domain-specific scoring that should
 # be handled by OAS custom closures instead.
@@ -75,16 +107,30 @@ check "V4-marker-definitions" 2 \
   'let goal_prefix\|let memory_summary_prefix' \
   "lib/"
 
+# V4b: retired model-authored state and introspection protocols are zero-pinned.
+# Decision-history RFC tombstones and negative regression tests are intentionally
+# outside this active product-source scan.
+check_forbidden_active "V4b-retired-state-protocol-zero-pin" \
+  '\[STATE\]|NEXT Constraints|OpenQuestions|SOCIAL_MODEL|MASC_STRUCTURED_STATE|state_block_start|keeper_working_state|keeper_state_block_prompt|meta_cognition|continuity_judgment|continuity_verdict|continuity_similarity|auto_rules|(^|[^[:alnum:]_])BDI([^[:alnum:]_]|$)' \
+  "lib/" \
+  "bin/" \
+  "dashboard/src/" \
+  "dashboard_bonsai/src/" \
+  "sidecars/" \
+  "viewer/src/" \
+  "config/prompts/" \
+  "config/personas/"
+
 # V6: OAS lifecycle orchestration from keeper_agent_run
 # Oas_worker.run_named calls should be isolated to a thin bridge.
-check "V6-oas-orchestration" 3 \
+check "V6-oas-orchestration" 0 \
   'Oas_worker\.run_named' \
   "lib/keeper/keeper_agent_run.ml"
 
 # V7: MASC-specific safety gates in OAS hook layer
 # Eval_gate destructive detection and keeper deny list should be
 # injected via OAS hook config, not hardcoded in hook callbacks.
-check "V7-masc-hook-gates" 4 \
+check "V7-masc-hook-gates" 3 \
   'Eval_gate\.detect_destructive\|[^[]keeper_denied_tools' \
   "lib/keeper/keeper_hooks_oas.ml"
 
@@ -95,9 +141,8 @@ check "V8-agent-state-mutation" 0 \
   "lib/keeper/"
 
 # V9: MASC_LLAMA env var coupling (should migrate to MASC_LOCAL_*)
-# 4 remaining after backward-compat fallbacks were trimmed; surface is
-# contained to env_config_runtime.ml + the Deprecated registry entry.
-check "V9-masc-llama-envvar" 4 \
+# The compatibility surface is fully removed; pin it at zero.
+check "V9-masc-llama-envvar" 0 \
   'MASC_LLAMA' \
   "lib/"
 

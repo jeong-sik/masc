@@ -155,8 +155,6 @@ let keeper_entries =
       "Max heartbeat failures before crash";
     entry ~default:"10" "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES"
       "Max turn failures before crash";
-    entry ~default:"true" "MASC_STRUCTURED_STATE"
-      "Enable structured JSON state in checkpoints (default true; set to \"false\" to opt out)";
     entry ~default:"(none)" "MASC_TLA_TRACE"
       "Enable TLA+ trace emission";
   ]

@@ -2082,6 +2082,8 @@
 
 (include stanzas/test_keeper_sandbox_docker_cwd_response.inc)
 
+(include stanzas/test_keeper_replay_checkpoint.inc)
+
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)

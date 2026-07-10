@@ -46,37 +46,3 @@ let drop_assoc_keys (keys : string list) (json : Yojson.Safe.t) : Yojson.Safe.t 
   | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> not (List.mem key keys)) fields)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ as j -> j
 ;;
-
-let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.t * bool =
-  match json with
-  | `Assoc fields ->
-    let removed_present =
-      fields
-      |> List.filter_map (fun (key, _) ->
-        if List.mem key config_field_names then Some key else None)
-    in
-    if removed_present = []
-    then json, false
-    else (
-      let scrubbed = drop_assoc_keys removed_present json in
-      let content = Yojson.Safe.pretty_to_string scrubbed in
-      (try
-         Fs_compat.save_file path content;
-         Log.Keeper.info
-           "scrubbed TOML-owned keeper meta fields for %s: %s"
-           path
-           (String.concat ", " removed_present)
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string MetaJsonFailures)
-           ~labels:[("site", "scrub")]
-           ();
-         Log.Keeper.warn
-           "failed to scrub removed keeper meta fields for %s: %s"
-           path
-           (Printexc.to_string exn));
-      scrubbed, true)
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ as j -> j, false
-;;

@@ -259,12 +259,55 @@ function rosterPresenceDisplay(
     return { status: 'offline', detail: `중단된 작업 ${agent.current_task}` }
   }
 
-  if (state.kind === 'running' && composite?.is_live === true) {
-    return { status: 'busy', detail: `${state.turnPhase} live` }
-  }
-
-  if (state.kind === 'running' && composite?.is_live === false) {
-    return { status: 'idle', detail: '대기 중' }
+  // #16 (38-bug campaign PR-5): prefer the backend's typed `run_state` —
+  // it distinguishes actively executing (and *why* it woke) from idle
+  // waiting for the proactive cadence, which the old `is_live` boolean
+  // could not. Falls back to `is_live` only when `run_state` is absent
+  // (a pinned backend that predates this field), never when it is present
+  // but `waiting`/`suspended` — those are honest "not busy" answers, not
+  // missing data.
+  if (state.kind === 'running') {
+    const runState = composite?.run_state
+    if (runState?.kind === 'in_turn') {
+      const wakeLabel = runState.wake_kind === 'woken'
+        ? '반응형'
+        : runState.wake_kind === 'proactive_tick'
+          ? '자율'
+          : runState.wake_kind != null
+            ? `기원 ${runState.wake_kind}`
+            : '기원 확인 필요'
+      return { status: 'busy', detail: `${state.turnPhase} live · ${wakeLabel}` }
+    }
+    if (runState?.kind === 'waiting') {
+      const depth = runState.queue_depth
+      const detail = depth == null
+        ? '대기 중 · 큐 확인 필요'
+        : depth > 0
+          ? `대기 중 · 큐 ${depth}`
+          : '대기 중'
+      return { status: 'idle', detail }
+    }
+    if (runState?.kind === 'suspended') {
+      const phase = runState.phase?.trim()
+      return {
+        status: agent.status ?? keeper.status ?? null,
+        detail: phase ? `중단 · ${phase}` : '중단 · 단계 확인 필요',
+      }
+    }
+    if (runState != null) {
+      return {
+        status: agent.status ?? keeper.status ?? null,
+        detail: `런타임 상태 ${runState.kind}`,
+      }
+    }
+    if (runState == null) {
+      if (composite?.is_live === true) {
+        return { status: 'busy', detail: `${state.turnPhase} live` }
+      }
+      if (composite?.is_live === false) {
+        return { status: 'idle', detail: '대기 중' }
+      }
+    }
   }
 
   return { status: agent.status ?? keeper.status ?? null, detail: null }
@@ -1056,9 +1099,15 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     // 일시정지 UI so it is filtered out in keeperExclusionLabel. Surfaced on
     // execution keepers via enrich_keeper_with_diagnostic.
     const exclusionLabel = keeperExclusionLabel(row.keeperRuntime?.exclusion_reason)
+    // #16 (38-bug campaign PR-5): never claim a bare "실행 중" (running)
+    // as a silent default — that hid actively-executing / idle-waiting /
+    // reactively-woken behind one label. Prefer the FSM stage label, then
+    // the typed presence detail (itself derived from `run_state`; see
+    // `rosterPresenceDisplay`), and only fall back to an explicit
+    // "unknown" when neither is available.
     const glossText = row.stateNote
       ? blockerDisplay.cell
-      : (stageLabel ?? '실행 중')
+      : (stageLabel ?? row.presenceDisplay.detail ?? '상태 확인 필요')
     const glossTitle = row.stateNote ? blockerDisplay.title : (stageLabel ?? '')
     const latestTool = row.recentTools[0] ?? (row.toolCallCount != null && row.toolCallCount > 0 ? `${row.toolCallCount} calls` : '—')
     const ctxPct = row.contextMeta?.pct ?? null

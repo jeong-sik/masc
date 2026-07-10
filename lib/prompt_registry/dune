@@ -3,7 +3,11 @@
 (library
  (name masc_prompt_registry)
  (public_name masc.prompt_registry)
- (modules prompt_registry_types prompt_registry_store prompt_registry)
+ (modules
+  prompt_registry_types
+  prompt_override_persistence
+  prompt_registry_store
+  prompt_registry)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
@@ -16,6 +20,7 @@
   yojson
   unix
   eio
+  digestif
   re
   re.str
   re.pcre)

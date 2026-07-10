@@ -55,7 +55,8 @@ let test_live_turn_surfaces_model_and_tools () =
   let json =
     observed_json ~base ~name
       ~setup:(fun () ->
-        Keeper_registry.mark_turn_started ~base_path:base name;
+        Keeper_registry.mark_turn_started ~base_path:base
+          ~wake:Keeper_registry.Proactive_tick name;
         Keeper_registry.set_turn_selected_model ~base_path:base name
           (Some "claude-sonnet");
         Keeper_registry.record_turn_tool_inflight ~base_path:base name ~count:3)
@@ -77,7 +78,9 @@ let test_live_turn_model_null_before_selection () =
   let name = "live-nomodel" in
   let json =
     observed_json ~base ~name
-      ~setup:(fun () -> Keeper_registry.mark_turn_started ~base_path:base name)
+      ~setup:(fun () ->
+        Keeper_registry.mark_turn_started ~base_path:base
+          ~wake:Keeper_registry.Proactive_tick name)
       ()
   in
   let live = J.member "live_turn" json in
@@ -136,6 +139,79 @@ let test_board_cursor_and_wakeups () =
     (J.member "board_wakeups" json |> J.to_int)
 ;;
 
+(* ── #16 (38-bug campaign PR-5): run_state / wake surfacing ──────────── *)
+
+let test_run_state_in_turn_reports_woken_wake () =
+  let base = temp_base () in
+  let name = "woken-keeper" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        Keeper_registry.mark_turn_started ~base_path:base
+          ~wake:
+            (Keeper_registry.Woken
+               [ Keeper_event_queue.Bootstrap
+               ; Keeper_event_queue.No_progress_recovery
+               ])
+          name)
+      ()
+  in
+  let rs = J.member "run_state" json in
+  check string "run_state.kind is in_turn" "in_turn"
+    (J.member "kind" rs |> J.to_string);
+  check string "run_state.wake_kind is woken" "woken"
+    (J.member "wake_kind" rs |> J.to_string);
+  check (list string) "run_state.stimulus_kinds preserves order"
+    [ "bootstrap"; "no_progress_recovery" ]
+    (J.member "stimulus_kinds" rs |> J.to_list |> List.map J.to_string);
+  check bool "run_state.started_at is a float" true
+    (match J.member "started_at" rs with `Float _ -> true | _ -> false)
+;;
+
+let test_run_state_in_turn_reports_proactive_tick () =
+  let base = temp_base () in
+  let name = "proactive-keeper" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        Keeper_registry.mark_turn_started ~base_path:base
+          ~wake:Keeper_registry.Proactive_tick name)
+      ()
+  in
+  let rs = J.member "run_state" json in
+  check string "run_state.wake_kind is proactive_tick" "proactive_tick"
+    (J.member "wake_kind" rs |> J.to_string);
+  check (list string) "run_state.stimulus_kinds is empty" []
+    (J.member "stimulus_kinds" rs |> J.to_list |> List.map J.to_string)
+;;
+
+let test_run_state_waiting_when_running_idle () =
+  let base = temp_base () in
+  let name = "waiting-keeper" in
+  let json = observed_json ~base ~name ~setup:(fun () -> ()) () in
+  let rs = J.member "run_state" json in
+  check string "run_state.kind is waiting for a Running keeper with no live turn"
+    "waiting" (J.member "kind" rs |> J.to_string);
+  check int "run_state.queue_depth is 0 for a fresh keeper" 0
+    (J.member "queue_depth" rs |> J.to_int)
+;;
+
+let test_run_state_suspended_for_non_running_phase () =
+  let base = temp_base () in
+  let name = "offline-keeper" in
+  ignore (Keeper_registry.register_offline ~base_path:base name (make_meta name));
+  let json =
+    match Keeper_registry.get ~base_path:base name with
+    | Some entry -> Observer.snapshot_to_json (Observer.observe entry)
+    | None -> failwith "keeper vanished from registry after register_offline"
+  in
+  let rs = J.member "run_state" json in
+  check string "run_state.kind is suspended for an Offline keeper" "suspended"
+    (J.member "kind" rs |> J.to_string);
+  check string "run_state.phase mirrors the raw phase" "offline"
+    (J.member "phase" rs |> J.to_string)
+;;
+
 (* ── Idle default shape: additive fields degrade to null/zero ───────── *)
 
 let test_idle_defaults_are_null_or_zero () =
@@ -170,6 +246,17 @@ let () =
       ( "last_skip",
         [ test_case "surfaces recent skip verdict" `Quick test_last_skip_surfaced ]
       );
+      ( "run_state",
+        [
+          test_case "in_turn reports the woken wake and its stimuli" `Quick
+            test_run_state_in_turn_reports_woken_wake;
+          test_case "in_turn reports the proactive tick wake" `Quick
+            test_run_state_in_turn_reports_proactive_tick;
+          test_case "waiting for a Running keeper with no live turn" `Quick
+            test_run_state_waiting_when_running_idle;
+          test_case "suspended for a non-Running phase" `Quick
+            test_run_state_suspended_for_non_running_phase;
+        ] );
       ( "board",
         [
           test_case "surfaces cursor and wakeup cardinality" `Quick

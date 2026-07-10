@@ -112,12 +112,14 @@ val messages_for_librarian
   -> (Agent_sdk.Types.message list, string) result
 
 val provider_for_librarian
-  :  Llm_provider.Provider_config.t
+  :  runtime_id:string
+  -> Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
 (** Provider config specialized for episode extraction. Caps [max_tokens] at
     the librarian output budget (default 4096, overridable with
     [MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS], floor 1) and requests the
-    structured episode output schema. *)
+    structured episode output schema. The runtime model's declared temperature
+    overrides the deterministic librarian fallback. *)
 
 val librarian_max_parse_retries : int
 (** Additional provider attempts after an initial unparseable response before
@@ -211,6 +213,7 @@ val extract_with_provider
   -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> runtime_id:string
   -> provider_cfg:Llm_provider.Provider_config.t
   -> generation:int
   -> Keeper_librarian.input
@@ -222,6 +225,7 @@ val extract_with_provider_classified
   -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> runtime_id:string
   -> provider_cfg:Llm_provider.Provider_config.t
   -> generation:int
   -> Keeper_librarian.input
@@ -239,6 +243,7 @@ val extract_and_append_with_provider
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
+  -> runtime_id:string
   -> provider_cfg:Llm_provider.Provider_config.t
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
@@ -250,6 +255,7 @@ val extract_and_append_with_provider_classified
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
+  -> runtime_id:string
   -> provider_cfg:Llm_provider.Provider_config.t
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, extraction_error) result

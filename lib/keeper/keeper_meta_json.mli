@@ -24,6 +24,11 @@ val fallback_canonical_keeper_meta_key_names : string list
     [fallback_canonical_keeper_meta_key_names] if serialization fails. *)
 val canonical_keeper_meta_key_names : string list
 
+(** Top-level keys in [json] that aren't in the canonical key list —
+    retired fields left behind by schema removals, or genuine drift.
+    Returns [[]] for non-object JSON. Pure; no logging. *)
+val unknown_keeper_meta_keys : Yojson.Safe.t -> string list
+
 (** Log a warning for any top-level keys in [json] that aren't in the
     canonical key list — catches schema drift early. *)
 val warn_unknown_keeper_meta_keys :

@@ -196,11 +196,6 @@ let prune_keeper_raw_trace_turn_files config name =
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")
 
-let keeper_progress_path config name =
-  let d = Filename.concat (keeper_dir_ config) name in
-  ignore (ensure_dir_ d);
-  Filename.concat d "progress.md"
-
 let keeper_generation_index_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".generation_index.jsonl")
 

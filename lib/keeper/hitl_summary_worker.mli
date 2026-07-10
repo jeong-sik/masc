@@ -1,4 +1,4 @@
-(** Spawn an asynchronous HITL context-summary worker.
+(** Spawn an asynchronous HITL context-summary worker for [runtime_id].
     The worker is fire-and-forget: it calls [on_summary] with either the LLM
     summary or a deterministic request-metadata fallback. [on_failure] is
     reserved for unexpected worker failures where even fallback generation did
@@ -7,6 +7,7 @@
     keeps the worker decoupled from the queue and avoids a module cycle. *)
 val spawn
   :  sw:Eio.Switch.t
+  -> runtime_id:string
   -> ?provider_config:Llm_provider.Provider_config.t
   -> entry:Keeper_approval_queue_rules_types.pending_approval
   -> on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit)
@@ -46,9 +47,11 @@ module For_testing : sig
 
   (** Returns the clamped config plus the chosen output mode: [Native_structured]
       when {!Llm_provider.Provider_config.validate_output_schema_request} accepts
-      a json_schema request for this endpoint, else [Plain_json_text]. *)
+      a json_schema request for this endpoint, else [Plain_json_text]. The
+      runtime.toml temperature for [runtime_id] overrides the subsystem fallback. *)
   val provider_config_for_summary
-    :  Llm_provider.Provider_config.t
+    :  runtime_id:string
+    -> Llm_provider.Provider_config.t
     -> Llm_provider.Provider_config.t * summary_mode
 
   (** Best-effort single-JSON-object extraction from model text (plain path). *)

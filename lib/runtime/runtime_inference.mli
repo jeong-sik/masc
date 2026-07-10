@@ -1,5 +1,7 @@
 val resolve_temperature :
   runtime_id:string -> fallback:(unit -> float) -> float
+(** Use the runtime.toml model override when present; evaluate [fallback] only
+    when that runtime has no temperature override. *)
 
 val resolve_max_tokens :
   runtime_id:string -> fallback:(unit -> int) -> int

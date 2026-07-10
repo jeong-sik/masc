@@ -1,18 +1,14 @@
 (** Keeper_tool_response - provider response acceptance and keeper reply text
     normalization. *)
 
-(** Keep [text] when non-blank. Otherwise, for an empty-answer turn:
-    - with [reasoning] (the model's thinking): surface a bounded tail of it so
-      an operator sees why no final reply was produced (e.g. "waiting on
-      approval");
-    - else with [tool_names]: synthesize a "Completed without a textual reply.
-      Tools used: ..." line;
-    - else error.
-    [reasoning] defaults to empty (preserves the prior tool-list fallback). *)
+(** Keep [text] when non-blank; otherwise synthesize a
+    "No textual reply was produced. Tools invoked: ..." line if [tool_names]
+    is non-empty, else error. The fallback reports only observed invocation;
+    it does not claim that tools succeeded or the turn completed. Hidden
+    reasoning is never user-facing fallback text. *)
 val normalize_response_text
   :  text:string
   -> tool_names:string list
-  -> ?reasoning:string
   -> unit
   -> (string, string) result
 

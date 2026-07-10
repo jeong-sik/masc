@@ -379,16 +379,31 @@ let is_version_conflict_error msg =
 
 (* ── Boot-time canonicalization ─────────────────────────── *)
 
-(* A key is retired only when neither side of the codec knows it: the
-   serializer does not emit it (not canonical) AND the parser does not
-   consume it. The parser-consumed-but-never-emitted set is exactly the
-   TOML-owned [config_field_names] (e.g. [autoboot_enabled], [goal],
-   [sandbox_profile]) — dropping those would destroy still-honored
-   values, so they are preserved even though the serializer ignores
-   them. *)
+(* Keys deliberately deleted from persisted keeper meta. Dropping is
+   destructive, so membership is EXPLICIT — a key is listed only after
+   BOTH codec sides stopped knowing it. Deriving this set instead
+   (canonical/config complement) was refuted twice: [compaction_mode]
+   (keeper_meta_json_parse.ml, fail-closed persisted override) and
+   [keeper_name] (keeper_identity.ml, wins over [name]) are
+   parser-consumed yet in neither derived list, and a derived drop
+   would silently destroy them. Forgetting to extend THIS list is
+   fail-safe: the file merely keeps triggering the unknown-keys
+   warning until the key is added here. *)
+let retired_keeper_meta_key_names =
+  [ (* #23929 continuity purge left these behind in .masc/keepers/ *)
+    "last_continuity_update_ts"
+  ; "continuity_summary"
+  ]
+;;
+
 let retired_keeper_meta_keys json =
-  unknown_keeper_meta_keys json
-  |> List.filter (fun key -> not (List.mem key config_field_names))
+  match json with
+  | `Assoc fields ->
+    fields
+    |> List.filter_map (fun (key, _) ->
+      if List.mem key retired_keeper_meta_key_names then Some key else None)
+    |> dedupe_keep_order
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> []
 ;;
 
 let canonicalize_persisted_meta_files config =

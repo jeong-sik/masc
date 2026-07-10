@@ -126,28 +126,42 @@ let test_drops_retired_keys_and_preserves_canonical_fields () =
    | Ok None -> fail "keeper meta vanished after canonicalize"
    | Error msg -> fail ("read_meta after canonicalize failed: " ^ msg))
 
-(* P2 regression (verify workflow wf_9a9ec740): "unknown to the serializer"
-   is not "retired" — the parser still consumes TOML-owned keys the
-   serializer never emits. A legacy file carrying autoboot_enabled=false
-   plus retired continuity keys must lose ONLY the continuity keys. *)
-let test_parser_consumed_config_keys_survive_the_pass () =
+(* Regressions from verify workflows wf_9a9ec740 / wf_ccff1ece: "unknown
+   to the serializer" is not "retired". The parser still consumes keys
+   the serializer never emits — TOML-owned config (autoboot_enabled),
+   the fail-closed persisted compaction_mode override, and the identity
+   key keeper_name (which wins over name). Only the explicitly listed
+   continuity keys may be dropped; everything else survives even though
+   the unknown-keys warning classifies it as unknown. *)
+let test_parser_consumed_keys_survive_the_pass () =
   with_workspace @@ fun config ->
   write_keeper config "dormant";
-  inject_keys config "dormant" ~extra:[ ("autoboot_enabled", `Bool false) ];
+  inject_keys config "dormant"
+    ~extra:
+      [
+        ("autoboot_enabled", `Bool false);
+        ("compaction_mode", `String "llm");
+        ("keeper_name", `String "dormant");
+      ];
   Keeper_meta_store.canonicalize_persisted_meta_files config;
   let json = raw_json config "dormant" in
   check bool "retired continuity keys dropped" true
     (assoc_field json "last_continuity_update_ts" = None
      && assoc_field json "continuity_summary" = None);
-  (match assoc_field json "autoboot_enabled" with
-   | Some (`Bool false) -> ()
-   | Some other ->
-     fail
-       ("autoboot_enabled value changed: " ^ Yojson.Safe.to_string other)
-   | None ->
-     fail
-       "autoboot_enabled destroyed by canonicalize — dormant keeper would \
-        autoboot on next boot")
+  let expect_preserved key expected =
+    match assoc_field json key with
+    | Some v when v = expected -> ()
+    | Some other ->
+      fail
+        (Printf.sprintf "%s value changed: %s" key (Yojson.Safe.to_string other))
+    | None ->
+      fail
+        (Printf.sprintf
+           "%s destroyed by canonicalize — parser-consumed value lost" key)
+  in
+  expect_preserved "autoboot_enabled" (`Bool false);
+  expect_preserved "compaction_mode" (`String "llm");
+  expect_preserved "keeper_name" (`String "dormant")
 
 let test_clean_files_are_not_rewritten () =
   with_workspace @@ fun config ->
@@ -163,11 +177,13 @@ let test_second_pass_is_a_no_op () =
   write_keeper config "stale";
   inject_retired_keys config "stale";
   Keeper_meta_store.canonicalize_persisted_meta_files config;
-  let version_after_first = read_version config "stale" in
+  (* Byte-level comparison: the raw-filter path never bumps meta_version,
+     so a version check could not detect a spurious second rewrite. *)
+  let bytes_after_first = Fs_compat.load_file (keeper_file config "stale") in
   Keeper_meta_store.canonicalize_persisted_meta_files config;
-  check int "second pass does not rewrite again"
-    version_after_first
-    (read_version config "stale")
+  check string "second pass leaves the file byte-identical"
+    bytes_after_first
+    (Fs_compat.load_file (keeper_file config "stale"))
 
 let test_unparsable_file_is_preserved_untouched () =
   with_workspace @@ fun config ->
@@ -208,8 +224,8 @@ let () =
         [
           test_case "drops retired keys, preserves canonical fields"
             `Quick test_drops_retired_keys_and_preserves_canonical_fields;
-          test_case "parser-consumed config keys survive the pass" `Quick
-            test_parser_consumed_config_keys_survive_the_pass;
+          test_case "parser-consumed keys survive the pass" `Quick
+            test_parser_consumed_keys_survive_the_pass;
           test_case "clean files are not rewritten" `Quick
             test_clean_files_are_not_rewritten;
           test_case "second pass is a no-op" `Quick test_second_pass_is_a_no_op;

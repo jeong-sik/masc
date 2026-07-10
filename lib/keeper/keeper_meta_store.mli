@@ -129,19 +129,21 @@ val is_version_conflict_error : string -> bool
     fields left behind by schema removals (e.g. the #23929 continuity
     purge left [last_continuity_update_ts]/[continuity_summary] in
     [.masc/keepers/], re-warning on every read until the next save;
-    dormant keepers never save). A key is retired only when neither
-    codec side knows it: not in the serializer-derived canonical set
-    ([Keeper_meta_json.canonical_keeper_meta_key_names]) and not in the
-    parser-consumed TOML-owned set
-    ([Keeper_meta_json.config_field_names]) — the latter (e.g.
-    [autoboot_enabled]) must survive even though the serializer never
-    emits it. Retired keys are filtered out of the raw JSON in place
+    dormant keepers never save). Deletion is destructive, so the drop
+    set is an explicit in-code list ([retired_keeper_meta_key_names]),
+    not a set derived from the codec: parser-consumed keys the
+    serializer never emits ([autoboot_enabled], [compaction_mode],
+    [keeper_name], ...) must survive, and deriving the complement was
+    twice shown to misclassify them. Forgetting to extend the list is
+    fail-safe — the unknown-keys warning keeps firing until the key is
+    added. Retired keys are filtered out of the raw JSON in place
     ([Keeper_fs.save_json_atomic]); no re-serialization, no
     [meta_version] bump, every surviving field keeps its exact on-disk
     value. Unreadable or parser-rejected files are logged and preserved
-    untouched. Call once at boot BEFORE keeper loops start — the write
-    is not CAS-guarded, so it relies on running ahead of concurrent
-    meta writers. *)
+    untouched. Call once at boot BEFORE keeper loops start; the write is
+    not CAS-guarded, so the only writers that can race it are external
+    request-driven mutations inside the per-file read/save span during
+    boot — a CAS-guarded loser self-heals on its retry path. *)
 val canonicalize_persisted_meta_files : Workspace.config -> unit
 
 (** Retry [write_meta] on CAS version conflicts using caller-declared

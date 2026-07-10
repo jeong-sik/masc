@@ -134,6 +134,7 @@ type recovery_report =
 type claim_report =
   { leases : lease list
   ; cleanup_errors : error list
+  ; blocked : error option
   }
 
 let io_operation_to_string = function
@@ -1455,76 +1456,88 @@ let claim_all ~base_path ~keeper_name ~now =
       |> List.map (fun (path, envelope) -> path, envelope.job)
       |> List.sort (fun (_, left) (_, right) -> compare_job_order left right)
     in
+    let process_item path job =
+      let receipt_path = receipt_path ~base_path job in
+      let* receipt_exists = file_exists receipt_path in
+      if receipt_exists
+      then
+        let* receipt = read_receipt receipt_path in
+        if not (receipt_identity_matches_job receipt.identity job)
+        then Error (Identity_conflict { job_id = job.id; path = receipt_path })
+        else
+          Ok
+            (`Skipped
+              (cleanup_paths
+                 [ path
+                 ; awaiting_path ~base_path job
+                 ; inflight_path ~base_path job
+                 ; operation_stage_path
+                     ~base_path
+                     ~keeper_name:job.keeper_name
+                     ~operation_id:job.id
+                 ]))
+      else
+        let lease = { job; started_at = now } in
+        let destination = inflight_path ~base_path job in
+        let* inflight_exists = file_exists destination in
+        if inflight_exists
+        then
+          let* inflight = read_envelope destination in
+          let* () =
+            ensure_queue_coordinates
+              ~expected_keeper_name:keeper_name
+              ~path:destination
+              inflight
+          in
+          let* () = ensure_same_job ~expected:job ~path:destination inflight in
+          let* () =
+            ensure_expected_state
+              ~expected:Expect_inflight
+              ~path:destination
+              inflight
+          in
+          Error
+            (Pending_already_inflight
+               { job_id = job.id
+               ; pending_path = path
+               ; inflight_path = destination
+               })
+        else
+          let* () =
+            save_json
+              destination
+              (envelope_to_json
+                 { job
+                 ; state = Inflight { started_at = lease.started_at }
+                 })
+          in
+          Ok (`Claimed (lease, cleanup_paths [ path ]))
+    in
     let rec claim leases cleanup_errors = function
       | [] ->
         Ok
           { leases = List.rev leases
           ; cleanup_errors = List.rev cleanup_errors
+          ; blocked = None
           }
       | (path, job) :: rest ->
-        let receipt_path = receipt_path ~base_path job in
-        let* receipt_exists = file_exists receipt_path in
-        if receipt_exists
-        then
-          let* receipt = read_receipt receipt_path in
-          if not (receipt_identity_matches_job receipt.identity job)
-          then Error (Identity_conflict { job_id = job.id; path = receipt_path })
-          else
-            let item_cleanup_errors =
-              cleanup_paths
-                [ path
-                ; awaiting_path ~base_path job
-                ; inflight_path ~base_path job
-                ; operation_stage_path
-                    ~base_path
-                    ~keeper_name:job.keeper_name
-                    ~operation_id:job.id
-                ]
-            in
-            claim
-              leases
-              (List.rev_append item_cleanup_errors cleanup_errors)
-              rest
-        else
-          let lease = { job; started_at = now } in
-          let destination = inflight_path ~base_path job in
-          let* inflight_exists = file_exists destination in
-          if inflight_exists
-          then
-            let* inflight = read_envelope destination in
-            let* () =
-              ensure_queue_coordinates
-                ~expected_keeper_name:keeper_name
-                ~path:destination
-                inflight
-            in
-            let* () = ensure_same_job ~expected:job ~path:destination inflight in
-            let* () =
-              ensure_expected_state
-                ~expected:Expect_inflight
-                ~path:destination
-                inflight
-            in
-            Error
-              (Pending_already_inflight
-                 { job_id = job.id
-                 ; pending_path = path
-                 ; inflight_path = destination
-                 })
-          else
-            let* () =
-              save_json
-                destination
-                (envelope_to_json
-                   { job
-                   ; state = Inflight { started_at = lease.started_at }
-                   })
-            in
-            let item_cleanup_errors = cleanup_paths [ path ] in
-            claim
-              (lease :: leases)
-              (List.rev_append item_cleanup_errors cleanup_errors)
-              rest
+        (match process_item path job with
+         | Error error ->
+           Ok
+             { leases = List.rev leases
+             ; cleanup_errors = List.rev cleanup_errors
+             ; blocked = Some error
+             }
+         | Ok (`Skipped item_cleanup_errors) ->
+           claim
+             leases
+             (List.rev_append item_cleanup_errors cleanup_errors)
+             rest
+         | Ok (`Claimed (lease, item_cleanup_errors)) ->
+           claim
+             (lease :: leases)
+             (List.rev_append item_cleanup_errors cleanup_errors)
+             rest)
     in
     claim [] [] ordered
 ;;

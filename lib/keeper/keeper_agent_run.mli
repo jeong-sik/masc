@@ -157,6 +157,7 @@ val run_turn
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_delivery_channel:Keeper_continuation_channel.t
+  -> ?hitl_approval_grant:Governance_pipeline.hitl_approval_grant
   -> ?yield_to_chat_waiting:(unit -> bool)
        (* Autonomous-lane hook: evaluated at each OAS agent-loop turn boundary
           (the same guard point as [max_idle_turns], before the next model

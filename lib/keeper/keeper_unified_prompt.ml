@@ -1097,15 +1097,11 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   let user_message =
     "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
   in
-  (* Single registry-driven sanitization pass: tool tokens that no longer
-     resolve via Keeper_tool_resolution are replaced with the
-     [<stale_tool_token>] placeholder so the surrounding sentence stays
-     intact; env-var-shaped tokens (uppercase) are preserved. The legacy
-     hardcoded [sanitize_retired_tool_names] pass is deleted (38-bug
-     campaign #6): it removed standalone words like "Grep"/"Bash" and
-     retired keeper_*-prefixed tokens outright, mangling legitimate prompt
-     prose. Hallucinated calls to non-existent tools are rejected at the
-     tool-dispatch boundary with a typed error, which is the correct seam. *)
+  (* The registry is the sole tool-token SSOT for instruction-owned prompt
+     surfaces. The deleted hardcoded sanitizer removed valid prose such as
+     "Grep"/"Bash". The structured world-state user message is different: its
+     board/task/connector values are observations, not tool instructions, so a
+     [keeper_*]/[masc_*] substring there must remain byte-for-byte intact. *)
   (* P0-3: rendered prompt token integrity ratchet. Scan the prompt surfaces
      *before* the registry-driven strip so stale tokens that are about to be
      replaced still increment [PromptUnknownToolTokens] and are logged. The
@@ -1113,10 +1109,9 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
      running the ratchet first preserves the producer-side alarm signal that
      would otherwise be silently dropped after removal. *)
   let (_ : string list) =
-    Keeper_prompt_token_integrity.scan_rendered_prompt
+    Keeper_prompt_token_integrity.scan_instruction_surfaces
       ~keeper_name:meta.name
       ~system_prompt
-      ~user_message
       ~continuity_summary:continuity_for_prompt
   in
   let sanitized_system =
@@ -1124,11 +1119,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
          ~keeper_name:meta.name
   in
-  let sanitized_user =
-    user_message
-    |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
-         ~keeper_name:meta.name
-  in
+  let sanitized_user = user_message in
   (* set_gauge only: a stray inc_counter here used to create this
      (name, labels) cell as Counter first, so the system_prompt series
      kept Counter kind, carried a non-monotonic byte length, and exported

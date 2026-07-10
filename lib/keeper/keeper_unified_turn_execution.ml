@@ -40,6 +40,9 @@ type ctx =
       (* RFC-0320 W3c: the originating channel to deterministically deliver this
          turn's reply to when the turn was opened by a Hitl_resolved wake; [None]
          on every other lane (fail-closed: no delivery). *)
+  ; hitl_approval_grant : Governance_pipeline.hitl_approval_grant option
+      (* Exact operator authorization scoped to this cycle and shared across
+         all runtime retry attempts so a retry cannot recreate the grant. *)
   ; cleanup : unit -> unit
   ; committed_mutating_tools_snapshot : unit -> string list
   ; config : Workspace.config
@@ -83,6 +86,7 @@ let run (ctx : ctx)
       ; turn_id
       ; channel
       ; hitl_delivery_channel
+      ; hitl_approval_grant
       ; shared_context
       ; base_dir
       ; build_turn_prompt
@@ -160,6 +164,7 @@ let run (ctx : ctx)
                  ~config
                  ~meta:run_meta
                  ?hitl_delivery_channel
+                 ?hitl_approval_grant
                  ~turn_ctx_cell
                  ~base_dir
                  ~max_context:execution.max_context

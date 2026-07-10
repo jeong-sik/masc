@@ -248,6 +248,31 @@ let test_board_reaction_event_renders_reaction_context () =
     (contains_sub "emoji=\"👏\"" user_msg)
 ;;
 
+(* Structured world-state values are observations, not tool instructions. A
+   diagnostic token must survive prompt assembly verbatim; the instruction
+   token scanner is intentionally not allowed to rewrite this surface. *)
+let test_observation_tool_names_are_preserved () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  let event =
+    {
+      sample_board_event with
+      post_id = "diagnostic-observation-1";
+      preview = "keeper_turn_id=turn-1 masc_oas_error=provider-timeout";
+    }
+  in
+  let obs = { base_observation with pending_board_events = [ event ] } in
+  let _, user_msg =
+    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+      ~observation:obs ()
+  in
+  check bool "keeper diagnostic token remains in observation" true
+    (contains_sub "keeper_turn_id=turn-1" user_msg);
+  check bool "OAS diagnostic token remains in observation" true
+    (contains_sub "masc_oas_error=provider-timeout" user_msg);
+  check bool "observation does not receive stale-token placeholder" false
+    (contains_sub "<stale_tool_token>" user_msg)
+;;
+
 let test_task_claim_requires_matched_backlog () =
   let obs =
     { base_observation with unclaimed_task_count = 3; claimable_task_count = 0 }
@@ -389,6 +414,9 @@ let () =
           test_case
             "prompt: board reaction event renders reaction context"
             `Quick test_board_reaction_event_renders_reaction_context;
+          test_case
+            "prompt: observation tool names remain immutable"
+            `Quick test_observation_tool_names_are_preserved;
           test_case "affordance: task claim requires matched backlog" `Quick
             test_task_claim_requires_matched_backlog;
           test_case "affordance: task claim present for claimable backlog" `Quick

@@ -1,6 +1,6 @@
-(** Keeper_prompt_token_integrity — scan rendered prompts and continuity
-    summaries for keeper_*/masc_* tokens and verify each one resolves through
-    the policy tool-name chain.
+(** Keeper_prompt_token_integrity — scan instruction-owned system prompts and
+    continuity summaries for keeper_*/masc_* tokens and verify each one
+    resolves through the policy tool-name chain.
 
     P0-3: Rendered Prompt Token Scanner. Emits the
     [masc_keeper_prompt_unknown_tool_tokens_total] CI metric for every token
@@ -9,7 +9,6 @@
 (** Which prompt/continuity surface a token came from. *)
 type source =
   | System_prompt
-  | User_message
   | Continuity
 
 val source_to_string : source -> string
@@ -20,13 +19,14 @@ val source_to_string : source -> string
     order they were first seen. *)
 val scan_text : keeper_name:string -> source:source -> string -> string list
 
-(** Scan the rendered system prompt, user message, and raw continuity summary.
-    Returns the deduplicated list of unknown token names across all three
-    surfaces. *)
-val scan_rendered_prompt :
+(** Scan only prompt surfaces that are owned by the instruction/memory
+    producer. The unified prompt's structured world-state user message is
+    intentionally absent: board/task/connector observations must remain
+    immutable even when a field happens to contain a [keeper_*] or [masc_*]
+    diagnostic name. *)
+val scan_instruction_surfaces :
   keeper_name:string ->
   system_prompt:string ->
-  user_message:string ->
   continuity_summary:string ->
   string list
 

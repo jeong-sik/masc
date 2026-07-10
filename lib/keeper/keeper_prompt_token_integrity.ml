@@ -10,7 +10,6 @@
 
 type source =
   | System_prompt
-  | User_message
   | Continuity
 
 type token_kind =
@@ -19,7 +18,6 @@ type token_kind =
 
 let source_to_string = function
   | System_prompt -> "system_prompt"
-  | User_message -> "user_message"
   | Continuity -> "continuity"
 
 let kind_to_string = function
@@ -154,17 +152,17 @@ let scan_text ~keeper_name ~source text : string list =
   |> List.filter_map (verify_token ~keeper_name ~source)
   |> dedup_strings
 
-let scan_rendered_prompt
+let scan_instruction_surfaces
       ~keeper_name
       ~system_prompt
-      ~user_message
       ~continuity_summary =
-  let system_unknowns = scan_text ~keeper_name ~source:System_prompt system_prompt in
-  let user_unknowns = scan_text ~keeper_name ~source:User_message user_message in
+  let system_unknowns =
+    scan_text ~keeper_name ~source:System_prompt system_prompt
+  in
   let continuity_unknowns =
     scan_text ~keeper_name ~source:Continuity continuity_summary
   in
-  system_unknowns @ user_unknowns @ continuity_unknowns |> dedup_strings
+  system_unknowns @ continuity_unknowns |> dedup_strings
 
 (* ── Registry-driven sanitization ─────────────────────────────────── *)
 

@@ -835,9 +835,9 @@ let start_keeper_loops
      implementation (queue removal, audit event, promise [Reject]
      resolution, on_resolution callback) with a unit test since
      introduction, but was never invoked by any production caller.
-     Result: a HITL approval enqueued by a keeper turn would block
+     Result: a blocking HITL approval enqueued by a keeper turn would block
      [keeper_cycle_decision] forever via the
-     [has_pending_for_keeper → Skip Approval_pending] branch in
+     [has_blocking_pending_for_keeper → Skip Approval_pending] branch in
      [keeper_world_observation.ml:928].  At the 300s stale-watchdog
      threshold the supervisor would respawn the fiber, the same
      approval entry would still be in the queue, and the cycle

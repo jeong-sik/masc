@@ -102,6 +102,10 @@ type ready_info = {
 }
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
+let startup_error : string option Atomic.t = Atomic.make None
+
+let record_startup_error message = Atomic.set startup_error (Some message)
+let clear_startup_error () = Atomic.set startup_error None
 
 let record_ready ~bot_user_id =
   Atomic.set last_ready
@@ -112,25 +116,31 @@ let record_ready ~bot_user_id =
 
 let status_json ?(audit_limit = 10) () =
   let gateway_state = Slack_socket_client.connection_state () in
+  let startup_error = Atomic.get startup_error in
   let bot_present = Option.is_some (bot_token_opt ()) in
   let app_present = Option.is_some (app_token_opt ()) in
   (* Socket Mode needs the app token; without it the gateway never starts. *)
-  let available = app_present in
+  let startup_ok = Option.is_none startup_error in
+  let available = app_present && startup_ok in
   let connected =
-    match gateway_state with
-    | Connected -> true
-    | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
+    startup_ok
+    && match gateway_state with
+       | Connected -> true
+       | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
   in
   let stale = false in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
   let error =
-    match gateway_state with
-    | Disconnected ->
-      if app_present then "" else "SLACK_APP_TOKEN is unset or empty"
-    | Failed msg -> msg
-    | Awaiting_hello | Connected | Reconnect_pending _ -> ""
+    match startup_error with
+    | Some message -> message
+    | None ->
+      (match gateway_state with
+       | Disconnected ->
+         if app_present then "" else "SLACK_APP_TOKEN is unset or empty"
+       | Failed msg -> msg
+       | Awaiting_hello | Connected | Reconnect_pending _ -> "")
   in
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
@@ -171,13 +181,37 @@ let status_json ?(audit_limit = 10) () =
 
 let connector_json ?gate_status_json ?(audit_limit = 10) () =
   let status = status_json ~audit_limit () in
-  match gate_status_json with
-  | None -> status
-  | Some extra ->
+  let base =
+    match gate_status_json with
+    | None -> status
+    | Some extra ->
+      `Assoc
+        (match (status, extra) with
+         | `Assoc s, `Assoc e -> s @ e
+         | _ -> [ ("status", status); ("gate_status", extra) ])
+  in
+  (* The dashboard connectors endpoint
+     ([Channel_gate_connector.connectors_json]) matches each connector to its
+     tile by [connector_id]; the dashboard's [findConnector(connectors,
+     "slack")] returns null without it, so a connected Slack gateway rendered
+     as an unstarted "설정 필요" placeholder. Mirror Discord/Telegram
+     [connector_json], which carry both identity fields at the top level.
+     Prepend (with a dedupe filter) so the identity is authoritative even if a
+     merged [gate_status_json] also supplied the keys. *)
+  match base with
+  | `Assoc fields ->
+    let without_identity =
+      List.filter
+        (fun (k, _) ->
+          not
+            (String.equal k "connector_id" || String.equal k "display_name"))
+        fields
+    in
     `Assoc
-      (match (status, extra) with
-       | `Assoc s, `Assoc e -> s @ e
-       | _ -> [ ("status", status); ("gate_status", extra) ])
+      (("connector_id", `String connector_id)
+      :: ("display_name", `String display_name)
+      :: without_identity)
+  | other -> other
 
 let rollback_bindings original = save_bindings original
 

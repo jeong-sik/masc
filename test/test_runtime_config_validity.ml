@@ -267,13 +267,6 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-rnj-1-8b"
-    ; api_name = "rnj-1:8b"
-    ; context = 32768
-    ; tools = true
-    ; thinking = false
-    ; vision = false
-    }
   ]
 
 let has_prefix ~prefix value =
@@ -635,7 +628,7 @@ let test_repo_runtime_toml_loads () =
     check
       (option string)
       "structured judge runtime"
-      (Some "ollama_cloud_native.minimax-m3-native-structured")
+      (Some "ollama.gemma4-26b-a4b-qat")
       structured_judge;
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
@@ -673,7 +666,9 @@ let test_repo_runtime_toml_loads () =
           (oas backend_ollama.ml:24); the OAS catalog must keep forced tool
           choice disabled for this transport. *)
        check bool "Gemma4 forced tool_choice disabled" false
-         caps.supports_tool_choice);
+         caps.supports_tool_choice;
+       check bool "Gemma4 native structured output from OAS" true
+         caps.supports_structured_output);
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -761,29 +756,6 @@ let test_repo_runtime_toml_loads () =
          caps.supports_multimodal_inputs;
        check bool "MiniMax M3 forced tool_choice disabled" false
          caps.supports_tool_choice);
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
-            String.equal runtime.id
-              "ollama_cloud_native.minimax-m3-native-structured")
-         runtimes
-     with
-     | None -> fail "expected native MiniMax M3 structured-output runtime in seed"
-     | Some runtime ->
-       check string "native MiniMax M3 api name" "minimax-m3"
-         runtime.model.api_name;
-       check (option (float 0.0)) "native MiniMax M3 connect timeout"
-         (Some 600.0)
-         runtime.provider_config.connect_timeout_s;
-       let caps = oas_caps_or_fail runtime in
-       check bool "native MiniMax M3 response_format json from OAS" true
-         caps.supports_response_format_json;
-       check bool "native MiniMax M3 structured output from OAS" true
-         caps.supports_structured_output;
-       check bool "native MiniMax M3 Ollama think control from OAS" true
-         (Runtime_schema.equal_thinking_control_format
-            caps.thinking_control_format
-            Runtime_schema.Ollama_think));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->

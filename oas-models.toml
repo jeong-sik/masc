@@ -1360,20 +1360,6 @@ supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 
-[[models]]
-id_prefix = "ollama_cloud/rnj-1:8b"
-base = "ollama_cloud"
-max_context_tokens = 32768
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-supports_extended_thinking = false
-supports_reasoning_budget = false
-thinking_control_format = "none"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
 # Bare entries for Cloud models not already represented above by a direct-provider seed.
 # Runtime startup still checks bare model membership before OAS provider-qualified dispatch.
 
@@ -1770,16 +1756,4 @@ supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 
-[[models]]
-id_prefix = "rnj-1:8b"
-base = "ollama_cloud"
-max_context_tokens = 32768
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-supports_extended_thinking = false
-supports_reasoning_budget = false
-thinking_control_format = "none"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
+# Gemini Models

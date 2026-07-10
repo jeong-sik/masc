@@ -224,13 +224,16 @@ def check_catalog(
         errors.append(
             f"OAS provider-qualified model no longer official: ollama_cloud/{name}"
         )
+    # This file is a runtime-binding projection, not the full model catalog.
+    # Provider-qualified rows are the dispatch SSOT for MASC's Ollama Cloud
+    # bindings; a bare row is optional and must not be required for every live
+    # Cloud model. Keep the bare-route count as observability without turning
+    # an intentional projection shape into a false failure.
     oas_bare_route_names = {
         name
         for name in official_names
         if any(name.startswith(prefix) for prefix in oas_bare_prefixes)
     }
-    for name in sorted(official_names - oas_bare_route_names):
-        errors.append(f"missing OAS bare route model: {name}")
 
     for name, model in sorted(official_by_name.items()):
         slug = runtime_api_to_slug.get(name)

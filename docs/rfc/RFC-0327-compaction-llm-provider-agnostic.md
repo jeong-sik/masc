@@ -1,26 +1,34 @@
 # RFC-0327: compaction LLM — provider-무관 structured output + 활성화/계측/가시화
 
 ## Status
-Draft — **Corrigendum 2026-07-08: 핵심 인과를 코드 기반 재실측한 결과 원인 진단이 틀렸음. B-0 withdrawn (아래 Corrigendum 참조)**
+Draft — **Corrigendum 2026-07-10: Ollama Cloud structured-output 전제를 공식 문서 기준으로 철회. B-0 withdrawn (아래 Corrigendum 참조)**
 
 ## Corrigendum (2026-07-08) — 전제 실측 정정, B-0 withdrawn
 
 이 RFC의 핵심 인과를 코드 기반으로 재실측한 결과, **현상의 원인 진단이 틀렸다.** B-0(tool-call fallback)는 해결할 문제가 현재 존재하지 않으므로 **withdrawn**한다.
 
-### 실측 결과 (코드 기반 — 문서/주석 아님)
+### 실측 결과 (코드와 공식 문서 기준 — 2026-07-10)
 
-1. **compaction provider는 glm이 아니라 librarian lane의 minimax-m3-native-structured.**
-   `lib/keeper/keeper_compaction_llm_summarizer.ml:286` → `Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id`.
-   `lib/keeper/keeper_memory_runtime_resolution.ml:3-11`: `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID` env → `[runtime].librarian` → keeper runtime fallback.
-   `config/runtime.toml:21`: `librarian = "ollama_cloud_native.minimax-m3-native-structured"` (commit `ad0b3ccc48`, 2026-07-01 도입 — 본 RFC 작성 07-08보다 7일 앞섬. RFC가 stale runtime을 기록함).
+1. **compaction provider는 librarian lane으로 해석된다.**
+   `lib/keeper/keeper_compaction_llm_summarizer.ml:286` →
+   `Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id`.
+   `lib/keeper/keeper_memory_runtime_resolution.ml:3-11`의 우선순위는
+   `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID` env → `[runtime].librarian` →
+   keeper runtime fallback이다.
 
-2. **minimax-m3-native-structured는 native json_schema를 지원.**
-   `config/runtime.toml:273-283`: `supports-structured-output = true`, `supports-response-format-json = true`.
-   oas `Llm_provider.Provider_config.validate_model_structured_output_capability`(`oas/lib/llm_provider/provider_config.ml:807`)는 `caps.supports_structured_output`만 체크 → 통과.
-   같은 모델이 `structured_judge` 라인(`runtime.toml:26`)으로 dashboard operator/governance judge를 이미 돌리고 있어, schema 지원은 production에서 입증됨.
+2. **Ollama Cloud의 structured-output 전제는 철회한다.**
+   Ollama 공식 structured-output 문서는 현재 Cloud가 structured outputs를
+   지원하지 않는다고 명시한다. 따라서 Cloud의 `response_format`/JSON mode를
+   native schema 보장으로 해석할 수 없다. MASC seed는 schema가 필요한
+   librarian/judge lane을 OAS catalog가 native `/api/chat` schema를 선언하는
+   로컬 Gemma runtime으로 라우팅한다. Cloud Fusion 호출은 공통 prompt tier와
+   strict parser를 사용한다.
 
-3. **→ `plan_schema_supported minimax` = true → `make`가 None이 아님.**
-   본 RFC Context 항목 2의 인과("structured 미지원 → `plan_schema_supported` false → `make` None → fallback")는 현재 기준 성립하지 않는다.
+3. **→ `plan_schema_supported`는 선택된 runtime의 OAS capability에 종속된다.**
+   로컬 schema-capable runtime에서는 `make`가 가능하고, Cloud runtime에서는
+   provider-native schema를 요구하는 경로를 만들지 않는다. 이전
+   `minimax-m3-native-structured` seed와 Cloud 모델의 schema `true` row는
+   historical probe에 기반한 stale 전제이며 현재 SSOT가 아니다.
 
 ### 진짜 원인
 
@@ -47,7 +55,7 @@ env `MASC_KEEPER_COMPACTION_MODE`(`keeper_config.ml:329`) 없으면 Deterministi
 compaction을 "LLM에 위임한다"는 것이 dashboard 어디에서도 증명되지 않는 현상을 진단했다. 진단 결과, **LLM compaction은 사실 현재 아무 keeper에서도 돌지 않는다**:
 
 1. `keeper_compaction_llm_summarizer` 경로는 존재(RFC-0313-adjacent W2)하지만 **opt-in**이고, keeper 설정 어디서도 `compaction_strategy = Llm`이 켜져 있지 않다 → 모든 keeper가 deterministic extractive chain으로 compaction.
-2. ⚠ **정정됨 (Corrigendum 참조) — 아래 인과는 틀렸음. 실제 compaction provider는 glm이 아니라 minimax-m3-native-structured(structured 지원), `make`는 None이 아님.** (원문 보존) opt-in이 안 켜인 **근본 이유**는 provider 의존이다. 현재 경로는 `Keeper_structured_output_schema.apply_to_provider_config`로 **provider-native `response_format`(json_schema)** 를 주입한다. `runtime.toml:257`("librarian native-json_schema rejection root cause"), `runtime.toml:580`("실측 전이라 fail-closed 유지")가 말하듯, 현재 librarian runtime(`glm-coding.glm-5-turbo`)은 native json_schema를 안 지원한다. 그래서 `plan_schema_supported`가 false → `make`가 None → deterministic fallback → LLM compaction이 활성화될 수 없었다.
+2. ⚠ **정정됨 (Corrigendum 참조) — 아래 인과는 틀렸음. 실제 compaction provider는 glm이 아니라 historical seed의 minimax-m3-native-structured였다.** (과거 원문 보존; 현재 전제로 사용하지 않음) 당시 경로는 `Keeper_structured_output_schema.apply_to_provider_config`로 **provider-native `response_format`(json_schema)** 를 주입했다. 현재는 Ollama Cloud의 공식 structured-output 비지원 계약을 반영해 schema-capable local Gemma lane을 사용한다. 이 원문의 `glm-coding` 진단과 Cloud schema 전제는 현재 SSOT가 아니다.
 3. dashboard의 compaction 표시는 `compactions_ok`/`compaction_failed`(outcomes), 차트 포인트, debug 카운터, 별도 `compaction-snapshots` 패널로 **deterministic compaction**은 보이지만, "LLM이 했는가/어떤 모델이/성공 실패"는 어디에도 없다.
 
 즉 "LLM 위임"이 빈말인 이유는 (a) provider schema 의존으로 활성화 자체가 막혀 있고, (b) 활성화되더라도 발생 계측/가시화가 없다.

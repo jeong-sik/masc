@@ -11,28 +11,26 @@
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
-# memory-os librarian (post-turn episode extraction) requests provider-native
-# structured output, so it is routed independently of keeper chat to the native
-# Ollama /api/chat binding whose `format` schema path was live-verified. The
-# OpenAI-compatible /v1 path accepts response_format but can still return fenced
-# prose, so do not point this lane at [providers.ollama_cloud]. Override per
-# process with MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID. Unset = inherit each
+# The memory-os librarian requires a provider-native schema-capable lane. Ollama
+# Cloud currently does not support structured outputs according to the official
+# Ollama capability contract (checked 2026-07-10 at
+# https://docs.ollama.com/capabilities/structured-outputs), so use the local
+# native Ollama Gemma canary whose OAS catalog entry advertises the /api/chat
+# format schema. Override per process
+# with MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID; unset = inherit each
 # keeper's runtime (legacy).
-librarian = "ollama_cloud_native.minimax-m3-native-structured"
+librarian = "ollama.gemma4-26b-a4b-qat"
 # Provider-native structured-output judges must not inherit the fleet chat
-# default when that default lacks schema support. Keep this lane explicit so
-# dashboard operator/governance judges fail at config load on typo/unsupported
-# routing instead of discovering the mismatch in the daemon loop.
-structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
-# HITL approval context summary (advisory operator display). Unset previously,
-# so it inherited [runtime].structured_judge = minimax-m3, a *reasoning* model:
-# extended thinking consumed the whole keeper.hitl_summary.max_tokens=512 budget,
-# leaving an empty answer that failed structured parse and always fell back to the
-# deterministic summary. Pin a structured runtime so the full token budget
-# produces the answer. The OAS provider/model catalog owns thinking and
-# structured-output capability facts; this file only selects the runtime
-# binding and MASC-local request policy.
-hitl_summary = "ollama_cloud.ollama-cloud-devstral-2-123b"
+# default when that default lacks schema support. Keep this lane explicit on the
+# local native Ollama catalog route so dashboard operator/governance judges fail
+# at config load on a typo or unsupported route instead of discovering the
+# mismatch in the daemon loop.
+structured_judge = "ollama.gemma4-26b-a4b-qat"
+# HITL approval context summary is an advisory background lane. Keep it on the
+# same schema-capable runtime so the worker can use native structured output;
+# the worker remains non-blocking and records an explicit failure if the local
+# provider is unavailable.
+hitl_summary = "ollama.gemma4-26b-a4b-qat"
 # Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.
@@ -64,8 +62,9 @@ key = "OLLAMA_CLOUD_API_KEY"
 display-name = "Ollama Cloud Native"
 protocol = "ollama-http"
 endpoint = "https://ollama.com"
-# Mirrors [providers.ollama_cloud]. This lane uses native /api/chat for schema
-# output, not OpenAI-compatible /v1/chat/completions.
+# Mirrors [providers.ollama_cloud] for ordinary native /api/chat calls. Ollama
+# Cloud currently does not support provider-native structured outputs; schema
+# lanes must use the local Ollama provider above.
 connect-timeout-s = 600.0
 
 [providers.ollama_cloud_native.healthcheck]
@@ -155,16 +154,6 @@ context-limit = 203000
 api-name = "minimax-m3"
 context-limit = 524288
 [ollama_cloud.minimax-m3]
-
-# MiniMax M3 native Ollama Cloud structured-output lane. This uses the same
-# provider-owned model id as [models.minimax-m3], but a distinct runtime model key
-# because the OpenAI-compatible /v1 transport does not strictly enforce
-# response_format/json_schema while native /api/chat `format` does.
-[models.minimax-m3-native-structured]
-api-name = "minimax-m3"
-context-limit = 524288
-[ollama_cloud_native.minimax-m3-native-structured]
-wizard-default = true
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
 # is kept separate from Kimi's direct API route; OAS owns provider/model wire
@@ -351,11 +340,6 @@ api-name = "qwen3.5:397b"
 context-limit = 262144
 [ollama_cloud.ollama-cloud-qwen3-5-397b]
 
-[models.ollama-cloud-rnj-1-8b]
-api-name = "rnj-1:8b"
-context-limit = 32768
-[ollama_cloud.ollama-cloud-rnj-1-8b]
-
 [ollama.gemma4-26b-a4b-qat]
 wizard-default = true
 max-concurrent = 1
@@ -471,8 +455,10 @@ panel = [
   "ollama_cloud.ollama-cloud-devstral-small-2-24b",
   "ollama_cloud.ollama-cloud-ministral-3-14b",
 ]
-# Fusion judges request provider-native structured output. Keep this on a
-# runtime whose model resolves through the OAS catalog with native schema support.
+# Fusion judges use the typed native-schema tier when the selected provider
+# advertises it; otherwise the shared prompt tier is used and strict parsing
+# still rejects malformed output. Ollama Cloud is intentionally in the latter
+# category until its official structured-output contract changes.
 judge = "ollama_cloud.ollama-cloud-devstral-2-123b"
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
@@ -499,11 +485,11 @@ max_tool_calls_per_panel = 0
 # "requires >= 2 judges"로 fail-closed된다 → 키퍼가 JoJ topology를 쓸 수 없었다.
 # quorum은 서로 다른 렌즈(evidence/coverage)의 1차 심판 2명을 두고, meta judge(judge=)가
 # 두 종합을 재조정한다. 키퍼 사용: masc_fusion preset="quorum" topology="judge_of_judges".
-# Panel models and Fusion judge/refine/meta paths request provider-native
-# structured output, so every panel and judge runtime below must resolve to an
-# OAS catalog entry with native schema support. Distinct labels preserve lens
-# identity while the schema contract prevents config drift back to JSON-mode
-# only runtimes.
+# Panel models are free-text; Fusion judge/refine/meta paths select the native
+# schema tier only when OAS declares it and otherwise use the shared prompt tier.
+# Every tier is strict-parsed and observable, so a Cloud JSON/prompt response is
+# never mistaken for provider-native schema enforcement. Distinct labels still
+# preserve lens identity.
 # staged_judge_of_judges는 [fusion].staged_judge_group_size(=3)의 정확한 배수
 # 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
 [fusion.presets.quorum]

@@ -637,7 +637,6 @@ let wakeup_relevant_keeper_for_board_signal
         | Ok (Some meta) ->
           let wake_reason =
             Keeper_world_observation.board_signal_wake_reason
-              ~continuity_summary:meta.continuity_summary
               ~meta
               ~signal
           in

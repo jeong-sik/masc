@@ -25,7 +25,7 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 - `docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
 - `docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
 - `docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md`는 OAS observability producer -> bridge -> durable store -> dashboard consumer chain과 fixed gaps를 기록한다.
-- `docs/design/oas-masc-state-boundary.md`는 historical audit + migration backlog로 취급한다.
+- `docs/KEEPER-STATE-OWNERSHIP.md`는 checkpoint, lane, domain receipt의 상태 소유권을 정의한다.
 
 ## 역할 분리
 
@@ -83,7 +83,7 @@ OAS  ──does not know──→ MASC
 | Event bus bridge | Complete for current native/custom flow | `oas_event_bridge.ml` relays both OAS native events and `masc:*` custom events, persists them under `.masc/oas-events/`, and feeds dashboard SSE |
 | Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |
 | Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |
-| Checkpoint integration | Mostly complete, sidecar debt remains | OAS checkpoint is used in shared worker/runtime paths. New keeper checkpoint writes keep continuity state out of `working_context`: `patch_checkpoint_last_assistant` strips visible `[STATE]`, stores replay metadata on the assistant message, and clears `Checkpoint.working_context`. Compatibility readers still accept legacy structured sidecars, and feature-flagged autonomous/resilience/multimodal adapters may store neutral sidecar metadata in `working_context`. |
+| Checkpoint integration | OAS-owned transcript state | OAS checkpoint is used in shared worker/runtime paths. MASC does not derive checkpoint state from assistant prose or maintain a duplicate prose-derived sidecar. Feature adapters may use typed, owner-specific checkpoint metadata only where the OAS contract explicitly exposes it. |
 | Memory projection | Removed | MASC no longer creates or passes OAS memory objects; memory storage stays MASC-owned |
 | Team-session swarm | Removed | `lib/team_session/` module purged; MASC no longer owns a session orchestration surface. OAS Swarm Runner is the sole substrate; consumers drive swarm runs via OAS primitives directly. |
 | Provider/model identity ownership | OAS-owned | MASC resolves logical `runtime_id` / runtime lane intent only; concrete provider/model selection and cost identity are OAS-owned. Legacy `allowed_providers` inputs are rejected |
@@ -93,13 +93,13 @@ OAS  ──does not know──→ MASC
 | Module / Surface | Classification | Why |
 |------------------|----------------|-----|
 | `lib/oas_worker*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, policy, and verification usage |
-| `lib/context_compact_oas.ml` | Acceptable but lossy | Runtime compaction delegates to OAS, but message-importance heuristics still depend on MASC text markers |
-| `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Mostly correct with adapter sidecar debt | Keeper no longer stores continuity runtime state in checkpoint `working_context` on new writes, and checkpoint recovery reads only canonical OAS checkpoints. Remaining debt is limited to MASC adapter sidecars (`autonomous_meta`, `resilience_meta`, `multimodal_artifacts`/`workspace_meta`) and legacy `[STATE]` parse compatibility. |
+| `lib/context_compact_oas.ml` | Adapter | Runtime compaction delegates to OAS. MASC-owned typed anchors may influence retention, but raw assistant text is not a domain-state channel. |
+| `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Correct boundary | Keeper recovery reads canonical OAS checkpoints. MASC does not parse assistant replies into continuity state; owner-specific typed adapter metadata remains separate from the transcript. |
 
 ## Open Structural Gaps
 
-- keeper runtime still has a small MASC-owned `working_context` facade around OAS context/checkpoint primitives for token observation, checkpoint loading, and adapter compatibility; this facade must remain read-only with respect to OAS-owned runtime transcript state.
-- keeper continuity no longer writes new `[STATE]` replay state into checkpoint `working_context`, but prompt paths still understand raw message text markers (`[STATE]`, goal/memory markers) for compatibility.
+- keeper runtime still has a small MASC-owned context facade around OAS context/checkpoint primitives for token observation and checkpoint loading; this facade must remain read-only with respect to OAS-owned runtime transcript state.
+- assistant prose is context only. MASC must not parse it into goal, task, continuity, or lifecycle transitions and must not keep compatibility readers for retired prose protocols.
 - runtime-health signaling still relies on a narrow boolean `resource_check` callback instead of a structured probe
 - proof-store and `oas-runtime` filesystem layout must stay behind thin adapters instead of being reconstructed ad hoc
 - provider/model ownership still has historical debug and lower-level
@@ -244,9 +244,9 @@ These stay in MASC:
 ## Priority Order
 
 1. **P1 — keeper runtime state ownership**
-   - keep new continuity state out of checkpoint `working_context`; reduce or externalize the remaining adapter sidecars when their feature-flagged owners grow stable storage
-2. **P2 — marker/text leakage**
-   - reduce remaining prompt/fallback dependence on raw `[STATE]`, `[GOAL]`, and memory-summary markers in runtime-facing paths
+   - keep domain state out of OAS transcript/checkpoint content; reduce remaining adapter metadata when its typed owner has stable storage
+2. **P2 — prose/state separation** — Required invariant
+   - prompt text and model replies never encode or authorize typed domain transitions
 3. **P3 — team-session bridge fidelity** — Resolved (2026-04, team_session module purged; OAS Swarm Runner is sole substrate)
    - MASC team-session surface removed; workspace collaboration needs served via board posts + keeper FSM, swarm runs driven through OAS directly
 4. **P4 — memory projection hard cut** — Resolved by removal

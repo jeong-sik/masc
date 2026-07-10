@@ -34,10 +34,6 @@ import type {
   KeeperRuntimeResolved,
   KeeperRuntimeField,
   KeeperRuntimeSource,
-  DashboardShellMetaCognitionBelief,
-  DashboardShellMetaCognitionDesire,
-  DashboardShellMetaCognitionSummary,
-  DashboardShellMetaCognitionTension,
   OperatorAttentionItem, OperatorRecommendedAction,
 } from './types'
 
@@ -423,75 +419,7 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
     tool_audit_source: asString(raw.tool_audit_source) ?? null,
     tool_audit_at: asString(raw.tool_audit_at) ?? null,
     last_proactive_preview: asString(raw.last_proactive_preview) ?? null,
-    continuity_summary: asString(raw.continuity_summary) ?? null,
     skill_route_summary: asString(raw.skill_route_summary) ?? null,
-  }
-}
-
-export function normalizeShellMetaCognitionBelief(
-  raw: unknown,
-): DashboardShellMetaCognitionBelief | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id)
-  const claim = asString(raw.claim)
-  const status = asString(raw.status)
-  if (!id || !claim || !status) return null
-  return {
-    id,
-    claim,
-    status,
-    confidence: asNumber(raw.confidence) ?? null,
-    support_agent_count: asNumber(raw.support_agent_count) ?? null,
-    challenge_agent_count: asNumber(raw.challenge_agent_count) ?? null,
-  }
-}
-
-export function normalizeShellMetaCognitionTension(
-  raw: unknown,
-): DashboardShellMetaCognitionTension | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id)
-  const topic = asString(raw.topic)
-  if (!id || !topic) return null
-  return {
-    id,
-    topic,
-    kind: asString(raw.kind) ?? null,
-    severity: asString(raw.severity) ?? null,
-    recurrence_count: asNumber(raw.recurrence_count) ?? null,
-    needs_operator: asBoolean(raw.needs_operator) ?? false,
-  }
-}
-
-export function normalizeShellMetaCognitionDesire(
-  raw: unknown,
-): DashboardShellMetaCognitionDesire | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id)
-  const desiredState = asString(raw.desired_state)
-  if (!id || !desiredState) return null
-  return {
-    id,
-    desired_state: desiredState,
-    type: asString(raw.type) ?? null,
-    actionability: asString(raw.actionability) ?? null,
-    strength: asNumber(raw.strength) ?? null,
-  }
-}
-
-export function normalizeShellMetaCognitionSummary(
-  raw: unknown,
-): DashboardShellMetaCognitionSummary | null {
-  if (!isRecord(raw)) return null
-  const stagnationScore = asNumber(raw.stagnation_score)
-  if (stagnationScore == null) return null
-  return {
-    stagnation_score: stagnationScore,
-    belief_count: asNumber(raw.belief_count) ?? 0,
-    contested_belief_count: asNumber(raw.contested_belief_count) ?? 0,
-    dominant_belief: normalizeShellMetaCognitionBelief(raw.dominant_belief),
-    top_tension: normalizeShellMetaCognitionTension(raw.top_tension),
-    top_desire: normalizeShellMetaCognitionDesire(raw.top_desire),
   }
 }
 

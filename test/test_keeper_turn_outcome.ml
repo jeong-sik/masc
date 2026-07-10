@@ -46,7 +46,13 @@ let test_of_stop_reason () =
   check outcome "mutation boundary -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.MutationBoundaryReached
-          { turns_used = 2; tool_name = Some "masc_add_task" }))
+          { turns_used = 2; tool_name = Some "masc_add_task" }));
+  check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
+    (TO.of_stop_reason
+       (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 }));
+  check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
+    (TO.of_stop_reason
+       (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }))
 
 let test_of_result_surface () =
   check outcome "completed with text -> visible" TO.Visible_reply
@@ -57,6 +63,58 @@ let test_of_result_surface () =
   check outcome "budget exhausted -> checkpoint" TO.Continuation_checkpoint
     (TO.of_result_surface ~response_text:"done"
        (Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 }))
+
+let test_autonomous_yield_boundary_contract () =
+  let module F = Masc.Keeper_agent_run.For_testing in
+  let start_turn = 11570 in
+  let immediate_chat : Masc.Keeper_agent_run.autonomous_yield_request =
+    { reason = Masc.Keeper_agent_run.Chat_waiting
+    ; boundary = Masc.Keeper_agent_run.Yield_immediately
+    }
+  in
+  let reactive_chat : Masc.Keeper_agent_run.autonomous_yield_request =
+    { reason = Masc.Keeper_agent_run.Chat_waiting
+    ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
+    }
+  in
+  let durable_stimulus : Masc.Keeper_agent_run.autonomous_yield_request =
+    { reason = Masc.Keeper_agent_run.Durable_stimulus_waiting
+    ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
+    }
+  in
+  check bool "chat may yield before first provider dispatch" true
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:start_turn
+       immediate_chat);
+  check bool "reactive chat cannot skip the leased stimulus" false
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:start_turn
+       reactive_chat);
+  check bool "durable backlog cannot skip the leased stimulus" false
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:start_turn
+       durable_stimulus);
+  check bool "durable backlog yields after one provider turn" true
+    (F.autonomous_yield_allowed_at_turn
+       ~start_turn
+       ~turn:(start_turn + 1)
+       durable_stimulus);
+  match
+    F.stop_reason_of_autonomous_yield
+      ~turn:(start_turn + 1)
+      durable_stimulus
+  with
+  | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
+    check int "typed durable yield carries the OAS turn" (start_turn + 1)
+      turns_used
+  | Runtime_agent.Completed
+  | Runtime_agent.TurnBudgetExhausted _
+  | Runtime_agent.MutationBoundaryReached _
+  | Runtime_agent.Yielded_to_chat_waiting _ ->
+    fail "durable request mapped to the wrong stop reason"
 
 let payload fields = Some (`Assoc fields)
 
@@ -185,6 +243,8 @@ let () =
         [
           test_case "of_stop_reason" `Quick test_of_stop_reason;
           test_case "of_result_surface" `Quick test_of_result_surface;
+          test_case "autonomous yield boundary contract" `Quick
+            test_autonomous_yield_boundary_contract;
         ] );
       ( "payload_decode",
         [

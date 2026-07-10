@@ -1,12 +1,12 @@
 ---
-description: keeper critical prompt anchor recovery fallback (continuity / pr_merge_rules / state_block_template / world)
+description: keeper critical prompt anchor recovery fallback (continuity / pr_merge_rules / world)
 category: keeper
 ---
 
 <continuity>
 Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.
 PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.
-State block template: non-direct keeper turns must report structured continuity using the [STATE]...[/STATE] block containing DONE, NEXT, Goal, Decisions, OpenQuestions, and Constraints.
+Continuity is runtime-owned: use the checkpoint, typed task/goal state, events, and tool results. Never infer a runtime transition from a prose envelope.
 </continuity>
 
 <world>

@@ -918,15 +918,6 @@ module KeeperKeepalive = struct
       (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC"))
   ;;
 
-  (** Consecutive idle tool repetitions before on_idle hook issues Skip.
-      Below this: graduated Nudge messages.
-      Optional tool use means this only applies after repeated tool
-      calls.  4 catches loops quickly while still allowing legitimate
-      exploration.
-      Env: [MASC_KEEPER_IDLE_SKIP_THRESHOLD]. Default: 4. *)
-  let idle_skip_threshold =
-    max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
-  ;;
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)

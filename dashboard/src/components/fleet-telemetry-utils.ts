@@ -432,8 +432,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             status: keeper.status ?? (keeper.keepalive_running ? 'active' : 'offline'),
             keepalive_running: keeper.keepalive_running === true,
             diagnostic_health_state: keeper.diagnostic?.health_state ?? null,
-            diagnostic_summary:
-              firstNonEmptyString(keeper.diagnostic?.continuity_summary, keeper.diagnostic?.summary) ?? null,
+            diagnostic_summary: firstNonEmptyString(keeper.diagnostic?.summary) ?? null,
             context_ratio: keeper.context_ratio ?? 0,
             turn_count: keeper.total_turns ?? keeper.turn_count ?? 0,
             last_latency_ms: keeperLastLatencyMs(keeper),

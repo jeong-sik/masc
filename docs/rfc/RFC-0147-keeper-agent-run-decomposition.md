@@ -76,9 +76,9 @@ L424-L2103 = **1679 LOC** 가 *single Step 8 closure*. 내부에 다음 *inline 
 | Partial tolerance (mixed valid/invalid tool calls) | L918 | issue #8471 |
 | Classify (most-specific actionable signal) | L1022 | structured signal classifier |
 | Required-tool turn filter | L1078 | provider allowlist |
-| Checkpoint save (after [STATE] synthesis) | L1346 | deferred persist |
+| Checkpoint save (after runtime result) | L1346 | deferred persist |
 | Memory write (deterministic) | L1518 | post-turn |
-| Episodic memory (episode from [STATE]) | L1569 | post-turn |
+| Episodic memory (episode from typed turn evidence) | L1569 | post-turn |
 | Memory bank compaction (dedup + consolidate) | L1582 | post-turn |
 | Quality metrics (goal alignment + memory recall) | L1617 | post-turn |
 | Canonical success emit (RFC-0047 PR-4) | L1800 | wire format |

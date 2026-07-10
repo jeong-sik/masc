@@ -144,13 +144,6 @@ let latest_preview_of_messages (messages : Agent_sdk.Types.message list) =
          |> trim_to_opt
          |> Option.map (truncate_text ~max_chars:180))
 
-let continuity_summary_of_messages (messages : Agent_sdk.Types.message list) =
-  match Keeper_memory_policy.latest_state_snapshot_from_messages messages with
-  | Some snapshot ->
-      Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
-      |> trim_to_opt
-  | None -> None
-
 let is_valid_keeper_name name =
   String.length name > 0
   && String.length name <= 128

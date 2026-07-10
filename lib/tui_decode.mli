@@ -53,9 +53,6 @@ type log_entry = {
   le_work_kind : string option;
   le_tools_used : string list;
   le_compacted : bool option;
-  le_goal_alignment : float option;
-  le_repetition_risk : float option;
-  le_guardrail_stop : bool option;
 }
 
 type http_response = {

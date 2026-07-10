@@ -65,6 +65,7 @@ type stop_reason =
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
   | Yielded_to_chat_waiting of { turns_used : int }
+  | Yielded_to_durable_stimulus of { turns_used : int }
 
 type config =
   Runtime_agent_context.config = {
@@ -111,9 +112,7 @@ type config =
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
       (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
-          Emergency-phase compaction. Defaults to OAS's extractive
-          default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
-          to scrub [STATE] blocks before the 100-char truncation. *)
+          Emergency-phase compaction. Defaults to OAS's extractive default. *)
   execution_idle_timeout_s : float option;
   thinking_budget : int option;
   top_p : float option;
@@ -998,6 +997,8 @@ let dashboard_status_of_stop_reason = function
       Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
   | Yielded_to_chat_waiting _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
+  | Yielded_to_durable_stimulus _ ->
+      Dashboard_oas_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
 
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =

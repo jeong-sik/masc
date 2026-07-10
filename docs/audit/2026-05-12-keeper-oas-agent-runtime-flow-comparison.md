@@ -19,7 +19,7 @@ Follow-up goal/plan: runtime naming cleanup moved into implementation PRs; the s
 | Keeper lifecycle | MASC owns a keeper-cycle FSM above OAS and records pre-dispatch terminal receipts for skips/errors before `Agent.run`. | One "turn" is split across MASC keeper turn, MASC runtime attempts, and OAS agent turns. A reader can easily confuse these clocks. | Add/keep a single turn manifest that records all three counters and every context/runtime/tool decision. |
 | Tools | Tool surface is rebuilt every OAS SDK turn: BM25 index, deterministic prefilter, optional LLM rerank, discovered tools, advisory tool affordances, policy allowlist, `tool_choice`, completion contract, observed/reported/canonical reconciliation. | Tool selection happens before final provider attempt. Provider lane resolution later can change inline-vs-runtime MCP exposure, so receipt/debug surfaces must show both "requested surface" and "resolved lane". | Record provider-lane result next to `tool_surface`; degrade unsupported tool exposure instead of treating tools as mandatory. |
 | Provider/model/runtime | `runtime.toml`/catalog routes are MASC-owned; MASC iterates providers and calls OAS as a single-provider runtime per attempt. OAS has its own `Complete_runtime`, but the keeper hot path does not use it. | Two runtime concepts exist. Future fixes can accidentally use OAS runtime semantics in a MASC-owned policy lane. | Document/enforce "one runtime plane per call path"; keep OAS `Complete_runtime` out of keeper hot path unless deliberately migrated. |
-| Context/memory/compaction | MASC has pre-dispatch checkpoint hygiene, memory hook injection, OAS proactive/emergency compaction, post-run checkpoint patching, and memory-bank writes. | Context state still straddles MASC `working_context`, OAS checkpoint, raw `[STATE]` text, memory hooks, and durable MASC memory. Boundary doc already calls this a partial migration. | Make OAS checkpoint/session the runtime SSOT and move MASC continuity to structured sidecars/receipts instead of raw markers. |
+| Context/memory/compaction | OAS owns transcript checkpoints and context reduction; MASC records workspace memory and domain transitions through typed stores and receipts. | A reader can still confuse OAS runtime context with MASC task, goal, event, and memory state. | Keep OAS checkpoint/session as runtime SSOT and project MASC continuity only from typed domain records. |
 | External comparison | Agent-LLM-A/Provider-D/ADK put turn loop + context/session near runner. OpenClaw/Hermes expose stronger provider failover and compaction surfaces, closer to MASC. | MASC has stronger operator receipts than most SDKs, but also more boundary complexity than runner-centered systems. | Preserve MASC receipts/governance, but simplify runtime state ownership around OAS primitives. |
 
 ## Evidence Map
@@ -351,11 +351,10 @@ flowchart TD
     O -- yes --> P[Budget_strategy + Context_reducer + compact events]
     P --> N
     O -- no --> Q[provider call + tool loop]
-    Q --> R[Memory_hooks.after_turn flush_incremental]
-    R --> S[patch checkpoint last assistant with state snapshot]
-    S --> T[save OAS checkpoint]
-    T --> U[append deterministic memory notes from reply/tool results]
-    U --> V[execution receipt]
+    Q --> R[save OAS checkpoint]
+    R --> S[persist typed post-turn metadata]
+    S --> T[append typed tool-result memory notes]
+    T --> U[execution receipt]
 ```
 
 ### What Is Added To Instructions
@@ -378,18 +377,13 @@ flowchart TD
 | Per-request long history | OAS `Context_reducer` and `Budget_strategy` reduce messages for provider calls. |
 | Large tool results | OAS can truncate, stub, clear, or relocate tool results depending on reducer/store options. |
 | Context overflow | OAS emergency compaction retries route up to the configured bound. |
-| Post-run assistant state | MASC patches last assistant checkpoint with structured state snapshot before saving. |
+| Post-run domain effects | MASC persists typed metadata and receipts outside assistant prose. |
 
-### Structural Gap
+### Structural Boundary
 
-`docs/OAS-MASC-BOUNDARY.md` already marks keeper context/checkpoint as partial: OAS checkpoint is used, but keeper still owns `working_context` and raw text continuity markers. This audit confirms that the runtime works, but the state ownership is still split:
-
-- MASC `working_context` is loaded, repaired, appended, persisted, and then converted to OAS `initial_messages`.
-- OAS `Agent.run` mutates its own `agent.state.messages`.
-- MASC patches and saves the OAS checkpoint after the run.
-- Memory is injected hook-first, but continuity still depends on text blocks and state snapshots.
-
-The improvement target is not "add more compaction"; it is a clearer SSOT: OAS should own runtime transcript/checkpoint state, and MASC should own workspace collaboration receipts, sidecars, governance, and durable memory policy.
+OAS owns runtime transcript/checkpoint state. MASC owns workspace collaboration
+receipts, governance, and durable memory policy. MASC domain transitions are
+persisted through typed APIs and receipts, never by patching assistant prose.
 
 ## 6. External Runtime Comparison
 
@@ -411,7 +405,7 @@ Create one durable manifest per keeper turn that links:
 - Phase gate decision, runtime route/profile, selected model labels, final provider attempt list.
 - Tool surface requested by keeper hook, provider-lane-resolved surface, `tool_choice`, completion contract.
 - Context sources injected: base prompt hash, dynamic context hash, memory sections count, temporal context hash, reducer/compaction decision.
-- Checkpoint ids before/after, state snapshot id, receipt id.
+- Checkpoint ids before/after and typed domain receipt ids.
 
 This does not replace receipts; it gives receipts a causality spine.
 
@@ -434,14 +428,14 @@ Extend receipt/tool-call context with:
 
 This closes the gap where tool policy is selected before final provider attempt.
 
-### P1: Shrink MASC `working_context`
+### P1: Consolidate runtime context ownership
 
 Move toward:
 
 - OAS checkpoint/session as runtime transcript SSOT,
-- MASC state snapshot as structured sidecar,
+- MASC task, goal, event, and execution receipts as domain truth,
 - memory injection as hook-only text or structured OAS context,
-- no direct reliance on raw `[STATE]` blocks for durable continuity.
+- no assistant-reply parsing in durable continuity.
 
 This aligns with the existing boundary doc P1/P2.
 

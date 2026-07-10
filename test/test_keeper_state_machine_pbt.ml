@@ -9,15 +9,12 @@ module IC = Masc.Keeper_invariant_check
 
 (* ── Chaos Generator: all 23 event variants ────────────── *)
 
-let gen_auto_rules : SM.auto_rule_summary QCheck.Gen.t =
+let gen_context_actions : SM.context_actions QCheck.Gen.t =
   let open QCheck.Gen in
-  let* guardrail_stop = bool in
   let* handoff = bool in
   let* compact = bool in
-  let* goal_drift = float_range 0.0 1.0 in
   return SM.{
-    reflect = false; plan = false; compact; handoff;
-    guardrail_stop; guardrail_reason = None; goal_drift;
+    compact; handoff;
   }
 
 let gen_event_chaos : SM.event QCheck.Gen.t =
@@ -30,10 +27,10 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
     (let* consecutive = int_range 1 5 in
      return (SM.Turn_failed { consecutive; max_allowed = 3 }));
     (let* ratio = float_range 0.0 1.0 in
-     let* auto_rules = gen_auto_rules in
+     let* context_actions = gen_context_actions in
      return (SM.Context_measured {
        context_ratio = ratio; message_count = 50;
-       token_count = 5000; auto_rules }));
+       token_count = 5000; context_actions }));
     return SM.Compaction_started;
     (let* before = int_range 1000 100000 in
      let* after = int_range 100 (max 101 before) in
@@ -53,7 +50,6 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
     (let* attempt = int_range 1 5 in
      return (SM.Supervisor_restart_attempt { attempt }));
     return SM.Restart_budget_exhausted;
-    return (SM.Guardrail_stop { reason = "pbt_test" });
   ]
 
 (* ── Guided Generator: phase-aware valid events ────────── *)
@@ -67,16 +63,13 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Turn_failed { consecutive = 1; max_allowed = 3 };
         SM.Context_measured {
           context_ratio = 0.5; message_count = 50; token_count = 5000;
-          auto_rules = { reflect = false; plan = false; compact = false;
-                         handoff = false; guardrail_stop = false;
-                         guardrail_reason = None; goal_drift = 0.0 }};
+          context_actions = { compact = false; handoff = false }};
         SM.Compaction_started;
         SM.Handoff_started;
         SM.Operator_pause;
         SM.Stop_requested;
         SM.Operator_stop { remove_meta = false };
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
-        SM.Guardrail_stop { reason = "test" };
         SM.Context_overflow_detected
           { source = `Prompt_rejected;
             token_count = 205000;
@@ -135,18 +128,8 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
     | SM.Stopped | SM.Dead | SM.Zombie -> []
     | SM.Offline -> [ SM.Fiber_started ]
   in
-  (* Also add Context_measured with guardrail=true when running *)
-  let guardrail_events = match phase with
-    | SM.Running | SM.Failing ->
-      [ SM.Context_measured {
-          context_ratio = 0.95; message_count = 200; token_count = 50000;
-          auto_rules = { reflect = false; plan = false; compact = false;
-                         handoff = false; guardrail_stop = true;
-                         guardrail_reason = Some "high_ratio"; goal_drift = 0.8 }} ]
-    | _ -> []
-  in
   let _ = c in
-  base @ guardrail_events
+  base
 
 let gen_event_guided (phase : SM.phase) (c : SM.conditions) : SM.event QCheck.Gen.t =
   match valid_events_for_phase phase c with

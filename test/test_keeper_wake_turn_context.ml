@@ -62,7 +62,6 @@ let base_observation : WO.world_observation =
     pending_scope_messages = [];
     idle_seconds = 0;
     active_goals = [];
-    continuity_summary = "";
     context_ratio = lazy 0.0;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
@@ -168,11 +167,10 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
     do_not_reclaim_reason = None;
   }
 
-let user_message ?turn_decision ?current_task ?active_goal_summaries
-    ?active_open_loops observation =
+let user_message ?turn_decision ?current_task ?active_goal_summaries observation =
   let _system, user =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?turn_decision
-      ?current_task ?active_goal_summaries ?active_open_loops ~observation ()
+      ?current_task ?active_goal_summaries ~observation ()
   in
   user
 
@@ -252,7 +250,7 @@ let test_hitl_resolution_steers_continuation () =
   check bool "continuation names the resolved approval" true
     (contains ~needle:"approval you were waiting on was just resolved" threaded)
 
-let test_legacy_recompute_renders_no_reason_on_empty_world () =
+let test_unthreaded_recompute_renders_no_reason_on_empty_world () =
   (* Same empty world without the threaded decision: the recompute sees no
      trigger, so no wake-reason section renders — the pre-RFC-0315 blindness
      this change removes for stimulus wakes. *)
@@ -272,8 +270,8 @@ let test_goal_summaries_render_titles () =
   check bool "id and title" true
     (contains ~needle:"- goal-x — Improve wake context" with_titles);
   let bare = user_message observation in
-  check bool "legacy bare id" true (contains ~needle:"- goal-x" bare);
-  check bool "legacy has no title" false
+  check bool "bare id" true (contains ~needle:"- goal-x" bare);
+  check bool "bare id has no title" false
     (contains ~needle:"Improve wake context" bare)
 
 let test_partial_goal_summaries_preserve_missing_ids () =
@@ -291,39 +289,6 @@ let test_partial_goal_summaries_preserve_missing_ids () =
     (contains ~needle:"- goal-a — Improve wake context" user);
   check bool "missing title falls back to bare id" true
     (contains ~needle:"- goal-b" user)
-
-(* --- 4. Open loops layer --- *)
-
-let make_loop ~id ~title ~what =
-  Masc.Keeper_working_state.make_loop ~id ~title
-    ~six_w:
-      (Masc.Keeper_working_state.make_six_w ~who:"wake-context-keeper"
-         ~what ~when_:"2026-07-07" ~where_:"masc" ~why:"test" ~how:"test")
-    ~evidence_refs:
-      [ Masc.Keeper_working_state.make_evidence_ref ~kind:"pr" ~target:"#23546" ]
-    ~updated_at_unix:1783776000.0 ()
-
-let test_open_loops_render () =
-  let loops =
-    [ make_loop ~id:"loop-1" ~title:"Finish parser wiring"
-        ~what:"parser half-wired to store" ]
-  in
-  let user = user_message ~active_open_loops:loops base_observation in
-  check bool "section header" true
-    (contains ~needle:"### Open Loops (1 unresolved" user);
-  check bool "loop line with what and evidence" true
-    (contains ~needle:"- Finish parser wiring — parser half-wired to store [pr:#23546]"
-       user);
-  check bool "no-silent-drop directive" true
-    (contains ~needle:"do not silently drop" user)
-
-let test_open_loops_absent_when_empty () =
-  let user = user_message ~active_open_loops:[] base_observation in
-  check bool "no section for empty ledger" false
-    (contains ~needle:"### Open Loops" user);
-  let user_default = user_message base_observation in
-  check bool "no section when omitted" false
-    (contains ~needle:"### Open Loops" user_default)
 
 let test_goal_holder_gets_self_direction_directive () =
   with_repo_prompt_config @@ fun () ->
@@ -372,23 +337,16 @@ let () =
             test_threaded_stimulus_decision_renders_wake_reason;
           test_case "hitl resolution steers continuation reply" `Quick
             test_hitl_resolution_steers_continuation;
-          test_case "legacy recompute stays blind on empty world" `Quick
-            test_legacy_recompute_renders_no_reason_on_empty_world;
+          test_case "unthreaded recompute stays blind on empty world" `Quick
+            test_unthreaded_recompute_renders_no_reason_on_empty_world;
         ] );
       ( "goal titles and parity directive",
         [
-          test_case "summaries render titles, bare ids stay legacy" `Quick
+          test_case "summaries render titles, unresolved ids stay bare" `Quick
             test_goal_summaries_render_titles;
           test_case "partial summaries preserve missing goal ids" `Quick
             test_partial_goal_summaries_preserve_missing_ids;
           test_case "goal holder gets self-direction directive" `Quick
             test_goal_holder_gets_self_direction_directive;
-        ] );
-      ( "open loops layer",
-        [
-          test_case "active loops render with what and evidence" `Quick
-            test_open_loops_render;
-          test_case "absent when empty or omitted" `Quick
-            test_open_loops_absent_when_empty;
         ] );
     ]

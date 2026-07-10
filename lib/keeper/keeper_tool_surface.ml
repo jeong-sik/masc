@@ -548,12 +548,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         | Ok (Some (_, meta)) -> Some meta
         | _ -> None
       in
-      let preserve_paused_state =
-        (match entry.phase with
-         | Keeper_state_machine.Paused -> true
-         | _ -> false)
-        || Atomic.get entry.fiber_stop
-      in
       let trace_id =
         match meta_for_trace with
         | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
@@ -628,34 +622,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
            | None -> ());
           msg_count - List.length cleared_messages
       in
-      let continuity_cleared =
-        match meta_for_trace with
-        | Some meta ->
-            let updated_meta =
-              {
-                meta with
-                continuity_summary = "";
-                paused = meta.paused || preserve_paused_state;
-                updated_at = Keeper_meta_contract.now_iso ();
-                runtime =
-                  {
-                    meta.runtime with
-                    last_continuity_update_ts = 0.0;
-                  };
-              }
-            in
-            (match
-               Keeper_meta_store.write_meta_with_merge
-                 ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
-             with
-             | Ok () -> true
-             | Error err ->
-                 Log.Keeper.warn
-                   "%s: failed to clear continuity meta during operator clear: %s"
-                   name err;
-                 false)
-        | None -> false
-      in
       (* Dispatch FSM event to clear overflow conditions *)
       Keeper_context_runtime.dispatch_keeper_phase_event
         ~config ~keeper_name:name
@@ -683,7 +649,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                     | None -> "unknown") );
                ("cleared_message_count", `Int cleared_count);
                ("checkpoint_found", `Bool checkpoint_found);
-               ("continuity_cleared", `Bool continuity_cleared);
                ("preserve_system_prompt", `Bool preserve_system);
                ("reason", `String reason);
              ]))

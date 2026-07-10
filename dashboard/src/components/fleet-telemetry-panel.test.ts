@@ -107,7 +107,6 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
     provenance: 'test',
   },
   operator: {
-    health: 'ok',
     pending_confirm_summary: {
       actor_filter: null,
       filter_active: false,
@@ -117,14 +116,6 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
       hidden_actors: [],
       confirm_required_actions: [],
     },
-    attention_summary: {
-      count: 1,
-      bad_count: 0,
-      warn_count: 1,
-      provenance: 'test',
-      top_item: null,
-    },
-    recommendation_summary: null,
     provenance: 'test',
   },
   readiness: {

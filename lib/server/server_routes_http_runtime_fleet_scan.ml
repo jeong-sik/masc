@@ -678,7 +678,7 @@ type blocked_keeper_operator_action =
   | Run_keeper_up_or_recreate_meta
   | Repair_keeper_toml_config
   | Add_sandbox_profile_to_keeper_toml
-  | Add_goal_or_goal_horizon_to_keeper_toml
+  | Add_goal_to_keeper_toml
   | Inspect_keeper_autoboot_logs
   | Enable_keeper_bootstrap_or_start_manually
   | Inspect_dead_keeper_root_cause
@@ -703,8 +703,8 @@ let blocked_keeper_operator_action_to_string = function
   | Run_keeper_up_or_recreate_meta -> "run_keeper_up_or_recreate_meta"
   | Repair_keeper_toml_config -> "repair_keeper_toml_config"
   | Add_sandbox_profile_to_keeper_toml -> "add_sandbox_profile_to_keeper_toml"
-  | Add_goal_or_goal_horizon_to_keeper_toml ->
-      "add_goal_or_goal_horizon_to_keeper_toml"
+  | Add_goal_to_keeper_toml ->
+      "add_goal_to_keeper_toml"
   | Inspect_keeper_autoboot_logs -> "inspect_keeper_autoboot_logs"
   | Enable_keeper_bootstrap_or_start_manually ->
       "enable_keeper_bootstrap_or_start_manually"
@@ -734,7 +734,7 @@ let blocked_keeper_action = function
   | Boot_failure Keeper_runtime.Sandbox_profile_required ->
       Add_sandbox_profile_to_keeper_toml
   | Boot_failure Keeper_runtime.Goal_required ->
-      Add_goal_or_goal_horizon_to_keeper_toml
+      Add_goal_to_keeper_toml
   | Boot_failure Keeper_runtime.Materialization_failed ->
       Inspect_keeper_autoboot_logs
   | Bootstrap_disabled -> Enable_keeper_bootstrap_or_start_manually

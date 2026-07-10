@@ -1,26 +1,15 @@
 """Telegram message formatting for keeper responses.
 
 Converts GateResponse into Telegram-friendly markdown.
-Strips [STATE] blocks and handles message length limits.
+Handles structured content and message length limits.
 """
 
 from __future__ import annotations
 
 import html
-import re
 from typing import Any
 
 from .config import TELEGRAM_MESSAGE_LIMIT
-
-_RE_STATE_BLOCK = re.compile(
-    r"\[STATE\].*?(?:\[/STATE\]|$)", re.DOTALL
-)
-
-
-def strip_state_blocks(text: str) -> str:
-    """Remove [STATE]...[/STATE] keeper metadata blocks from text."""
-    return _RE_STATE_BLOCK.sub("", text).strip()
-
 
 def chunk_text(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
     """Split text into chunks that fit Telegram's message limit.

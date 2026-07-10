@@ -1,4 +1,4 @@
-(** Coverage tests for Tool_agent — Agent management, fitness, and meta-cognition
+(** Coverage tests for Tool_agent — Agent management and fitness
 
     Tests dispatch routing, handler execution, helper functions for:
     masc_agents, masc_agent_update, masc_get_metrics, masc_agent_fitness,
@@ -6,8 +6,6 @@
 *)
 module Tool_args = Tool_args
 module Tool_result = Tool_result
-module Meta_cognition = Masc.Meta_cognition
-
 module Tool_agent = Masc.Tool_agent
 module Metrics_store_eio = Masc.Metrics_store_eio
 module Workspace = Masc.Workspace
@@ -47,70 +45,6 @@ let dispatch_exn ctx ~name ~args =
   match Tool_agent.dispatch ctx ~name ~args with
   | Some result -> result
   | None -> failwith ("dispatch returned None for " ^ name)
-
-let save_jsonl path entries =
-  let body =
-    entries
-    |> List.map Yojson.Safe.to_string
-    |> String.concat "\n"
-  in
-  Fs_compat.save_file path (if body = "" then "" else body ^ "\n")
-
-let post_json ~id ~author ?(title = "") ?(body = "") ?hearth ?thread_id
-    ?(created_at = 1000.0) () =
-  let fields =
-    [
-      ("id", `String id);
-      ("author", `String author);
-      ("title", `String title);
-      ("body", `String body);
-      ("content", `String body);
-      ("post_kind", `String "automation");
-      ("visibility", `String "internal");
-      ("created_at", `Float created_at);
-      ("updated_at", `Float created_at);
-      ("expires_at", `Float 0.0);
-      ("votes_up", `Int 0);
-      ("votes_down", `Int 0);
-      ("reply_count", `Int 0);
-    ]
-  in
-  let fields =
-    match hearth with
-    | Some value -> ("hearth", `String value) :: fields
-    | None -> fields
-  in
-  let fields =
-    match thread_id with
-    | Some value -> ("thread_id", `String value) :: fields
-    | None -> fields
-  in
-  `Assoc fields
-
-let comment_json ~id ~post_id ~author ~content ?(created_at = 1000.0) () =
-  `Assoc
-    [
-      ("id", `String id);
-      ("post_id", `String post_id);
-      ("author", `String author);
-      ("content", `String content);
-      ("created_at", `Float created_at);
-      ("expires_at", `Float 0.0);
-      ("votes_up", `Int 0);
-      ("votes_down", `Int 0);
-    ]
-
-let json_list_ids key json =
-  let open Yojson.Safe.Util in
-  json |> member key |> to_list
-  |> List.filter_map (fun item ->
-         match item |> member "id" with
-         | `String value -> Some value
-         | _ -> None)
-
-let json_member_float key json =
-  let open Yojson.Safe.Util in
-  json |> member key |> to_float
 
 (* ============================================================
    Dispatch routing tests
@@ -280,108 +214,6 @@ let test_agent_fitness_does_not_mutate_thompson_stats () =
   )
 
 (* ============================================================
-   Handler tests — meta_cognition_snapshot
-   ============================================================ *)
-
-let test_meta_cognition_snapshot_detects_signals () =
-  with_ctx (fun ctx ->
-  ignore (Workspace.bind_session ctx.config ~agent_name:"peer" ~capabilities:[] ());
-  ignore (Workspace.bind_session ctx.config ~agent_name:"observer" ~capabilities:[] ());
-  let masc_dir = Workspace.masc_dir ctx.config in
-  save_jsonl
-    (Filename.concat masc_dir "board_posts.jsonl")
-    [
-      post_json ~id:"p-root" ~author:"admin-keeper"
-        ~title:"RBAC blockage"
-        ~body:
-          "All masc_* tools tested return unregistered_masc_tool. \
-           Operator intervention needed. keeper_* tools function normally."
-        ~hearth:"ops" ~created_at:1000.0 ();
-      post_json ~id:"p-follow" ~author:"detail-demo"
-        ~title:"Cross-check"
-        ~body:
-          "Confirmed same unregistered_masc_tool block. This is a policy restriction."
-        ~hearth:"ops" ~thread_id:"p-root" ~created_at:1005.0 ();
-      post_json ~id:"p-idle" ~author:"detail-demo"
-        ~title:"Idle status"
-        ~body:
-          "No active tasks. backlog empty. idle and available for new work. \
-           This could be a good window to seed new tasks or run a synthetic multi-agent exercise."
-        ~hearth:"ops" ~created_at:1010.0 ();
-    ];
-  save_jsonl
-    (Filename.concat masc_dir "board_comments.jsonl")
-    [
-      comment_json ~id:"c-1" ~post_id:"p-root"
-        ~author:"audit-keeper-decision"
-        ~content:"Corroborated. This aligns with admin-keeper's finding."
-        ~created_at:1006.0 ();
-    ];
-  let ok, body =
-    (true, Yojson.Safe.to_string (Meta_cognition.snapshot_json ~limit:5 ctx.config))
-  in
-  Alcotest.(check bool) "snapshot succeeds" true ok;
-  let json = Yojson.Safe.from_string body in
-  let belief_ids = json_list_ids "beliefs" json in
-  let tension_ids = json_list_ids "tensions" json in
-  let desire_ids = json_list_ids "collective_desires" json in
-  let open Yojson.Safe.Util in
-  let edges = json |> member "social_edges" |> to_list in
-  let has_corroborate_edge =
-    List.exists
-      (fun edge ->
-        edge |> member "from_agent" |> to_string = "audit-keeper-decision"
-        && edge |> member "to_agent" |> to_string = "admin-keeper"
-        && edge |> member "edge_type" |> to_string = "corroborates")
-      edges
-  in
-  Alcotest.(check bool) "tool blockage belief detected" true
-    (List.mem "belief:masc_tools_blocked" belief_ids);
-  Alcotest.(check bool) "idle backlog belief detected" true
-    (List.mem "belief:idle_backlog_empty" belief_ids);
-  Alcotest.(check bool) "tool blockage tension detected" true
-    (List.mem "tension:masc_tool_blockage" tension_ids);
-  Alcotest.(check bool) "task seeding desire detected" true
-    (List.mem "desire:task_seeding" desire_ids);
-  Alcotest.(check bool) "synthetic exercise desire detected" true
-    (List.mem "desire:synthetic_exercise" desire_ids);
-  Alcotest.(check bool) "social edge extracted" true has_corroborate_edge;
-  Alcotest.(check bool) "stagnation score elevated" true
-    (json_member_float "stagnation_score" json > 0.5);
-  )
-
-let test_meta_cognition_snapshot_marks_contested_belief () =
-  with_ctx (fun ctx ->
-  let masc_dir = Workspace.masc_dir ctx.config in
-  save_jsonl
-    (Filename.concat masc_dir "board_posts.jsonl")
-    [
-      post_json ~id:"p-root" ~author:"admin-keeper"
-        ~title:"RBAC blockage"
-        ~body:
-          "All masc_* tools tested return unregistered_masc_tool. \
-           keeper_* tools function normally."
-        ~hearth:"ops" ~created_at:1000.0 ();
-    ];
-  save_jsonl
-    (Filename.concat masc_dir "board_comments.jsonl")
-    [
-      comment_json ~id:"c-1" ~post_id:"p-root" ~author:"keeper-a"
-        ~content:
-          "This contradicts the uniform block hypothesis. Access may be per-agent."
-        ~created_at:1010.0 ();
-    ];
-  let ok, body =
-    (true, Yojson.Safe.to_string (Meta_cognition.snapshot_json ~limit:5 ctx.config))
-  in
-  Alcotest.(check bool) "snapshot succeeds" true ok;
-  let json = Yojson.Safe.from_string body in
-  let contested_ids = json_list_ids "contested_beliefs" json in
-  Alcotest.(check bool) "contested belief captured" true
-    (List.mem "belief:masc_tools_blocked" contested_ids);
-  )
-
-(* ============================================================
    Helper function tests
    ============================================================ *)
 
@@ -457,12 +289,6 @@ let () =
       Alcotest.test_case "missing agent_name fails" `Quick test_get_metrics_missing_agent_name;
       Alcotest.test_case "keeper agent alias resolves metric key" `Quick
         test_get_metrics_resolves_keeper_agent_alias;
-    ]);
-    ("meta_cognition_snapshot", [
-      Alcotest.test_case "detects beliefs tensions desires and edges" `Quick
-        test_meta_cognition_snapshot_detects_signals;
-      Alcotest.test_case "marks contested belief" `Quick
-        test_meta_cognition_snapshot_marks_contested_belief;
     ]);
     ("helpers", [
       Alcotest.test_case "get_string present" `Quick test_get_string_present;

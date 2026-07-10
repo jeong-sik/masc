@@ -23,7 +23,7 @@ code_refs:
 - `./adaptive-heartbeat-phi-enforcement-rfc.md`
 - `./adaptive-heartbeat-safety-harness-spec.md`
 - `./contract-driven-agent-loop-rfc.md`
-- `./oas-masc-state-boundary.md`
+- `../OAS-MASC-BOUNDARY.md`
 - `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 - `../SUPERVISOR-MODE.md`
 - `../COMMAND-PLANE-RUNBOOK.md`

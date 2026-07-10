@@ -583,7 +583,6 @@ let parse_keeper_chat_stream_request body_str =
 let strip_keeper_visible_reply (reply : string) =
   reply
   |> Keeper_skill_routing.strip_skill_route_lines
-  |> Keeper_execution.strip_state_blocks_text
   |> String.trim
 
 let split_keeper_reply_chunks (text : string) : string list =

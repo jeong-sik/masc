@@ -76,8 +76,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_execution_join.mli` - execution-dispatch
 - `lib/keeper/keeper_hooks_oas_cost_events.ml` - hook-observation
 - `lib/keeper/keeper_hooks_oas_cost_events.mli` - hook-observation
-- `lib/keeper/keeper_hooks_oas_idle.ml` - hook-observation
-- `lib/keeper/keeper_hooks_oas_idle.mli` - hook-observation
 - `lib/keeper/keeper_hooks_oas_introspection.ml` - hook-observation
 - `lib/keeper/keeper_hooks_oas_introspection.mli` - hook-observation
 - `lib/keeper/keeper_hooks_oas_response_metrics.ml` - hook-observation

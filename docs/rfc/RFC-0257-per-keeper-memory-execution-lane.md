@@ -62,16 +62,16 @@ shutdown) cannot leak a permit or a counter.
 
 `Keeper_agent_run_post_turn_memory.run` does four things:
 
-1. deterministic memory write (`Memory.append_from_reply` / `append_from_tool_results`)
+1. typed tool-result memory promotion (`Memory.append_from_tool_results`)
 2. librarian extraction (`Keeper_librarian_runtime.run_best_effort`)
 3. memory-bank compaction (`Memory.compact_if_needed`)
 4. post-turn quality metrics → decision log (`append_jsonl_line` to `keeper_decision_log_path`)
 
-`Memory.append_from_reply` / `compact_if_needed` carry no internal lock; they are safe today only
+`Memory.append_from_tool_results` / `compact_if_needed` carry no internal lock; they are safe today only
 because the turn lane calls them single-fiber-per-keeper. Detaching (3) while (1) still ran inline
 would let two fibers touch the same keeper's memory bank concurrently. Therefore **(1) (2) (3) — all
 memory-bank-touching work — move onto the lane** (serialized per keeper by `mem_mu`). **(4) stays
-inline**: it only reads (`goal_alignment_score`, history) and writes the *decision* log, a separate
+inline**: it only reads the typed turn history and writes the *decision* log, a separate
 file independent of (1)(2)(3).
 
 ### Separate keeper ordering from provider-pool protection

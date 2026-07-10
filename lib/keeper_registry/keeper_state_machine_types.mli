@@ -30,7 +30,6 @@ type conditions = {
   stop_requested : bool;
   restart_budget_remaining : bool;
   backoff_elapsed : bool;
-  guardrail_triggered : bool;
   drain_complete : bool;
   context_overflow : bool;
   compact_retry_exhausted : bool;
@@ -39,14 +38,9 @@ type conditions = {
   zombie_timeout_reached : bool;
 }
 val default_conditions : conditions
-type auto_rule_summary = {
-  reflect : bool;
-  plan : bool;
+type context_actions = {
   compact : bool;
   handoff : bool;
-  guardrail_stop : bool;
-  guardrail_reason : string option;
-  goal_drift : float;
 }
 type event =
     Heartbeat_ok
@@ -54,7 +48,7 @@ type event =
   | Turn_succeeded
   | Turn_failed of { consecutive : int; max_allowed : int; }
   | Context_measured of { context_ratio : float; message_count : int;
-      token_count : int; auto_rules : auto_rule_summary;
+      token_count : int; context_actions : context_actions;
     }
   | Compaction_started
   | Compaction_completed of { before_tokens : int; after_tokens : int; }
@@ -75,7 +69,6 @@ type event =
   | Restart_budget_exhausted
   | Credential_archived
   | Zombie_timeout
-  | Guardrail_stop of { reason : string; }
   | Terminal_failure_detected of { reason : string; }
   | Context_overflow_detected of {
       source : [ `Oas_signal | `Prompt_rejected ]; token_count : int;

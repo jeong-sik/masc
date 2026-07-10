@@ -227,6 +227,8 @@ let assemble_hooks
           <- { tool_name
              ; provider
              ; outcome
+             ; execution_outcome =
+                 (if success then Tool_result.Ok else Tool_result.Error)
              ; typed_outcome
              ; latency_ms = duration_ms
              ; task_id
@@ -396,10 +398,10 @@ let assemble_hooks
                     then (
                       let nudge =
                         Printf.sprintf
-                          "[CLAIMED TASK] You hold %s. Do NOT call claim_next again. Use \
+                           "[CLAIMED TASK] You hold %s. Do NOT call claim_next again. Use \
                            an execution tool from your active runtime schema to start \
-                           working on it now. If no execution tool is available, emit \
-                           [STATE] with the blocker instead of inventing a tool name."
+                           working on it now. If no execution tool is available, explain \
+                           the blocker explicitly instead of inventing a tool name."
                           (Keeper_id.Task_id.to_string task_id)
                       in
                       record_block Prompt_block_id.Claimed_task_nudge nudge;

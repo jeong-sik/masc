@@ -6,6 +6,7 @@ import { get, post, type AbortableRequestOptions } from './core'
 import { isRecord, asBoolean, asNumber, asNullableString, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
+import type { RuntimeResolvedResponse } from './schemas/runtime-resolved'
 
 interface DashboardRuntimeProviderDiscovery {
   healthy?: boolean
@@ -1101,6 +1102,18 @@ export async function fetchRuntimeDefaults(
   const raw = await get<unknown>('/api/v1/dashboard/runtime-defaults', { signal: opts?.signal })
   const { parseRuntimeDefaultsResponse } = await import('./schemas/runtime-defaults')
   return parseRuntimeDefaultsResponse(raw)
+}
+
+// Single resolved-runtime document (bugs #14/#15/#36): effective max-context
+// + source per runtime, configured lanes, and the full keeper fleet joined
+// against [runtime.assignments] with the [runtime].default rider made
+// explicit. Public read, same posture as fetchRuntimeDefaults.
+export async function fetchRuntimeResolved(
+  opts?: AbortableRequestOptions,
+): Promise<RuntimeResolvedResponse> {
+  const raw = await get<unknown>('/api/v1/runtime/resolved', { signal: opts?.signal })
+  const { parseRuntimeResolvedResponse } = await import('./schemas/runtime-resolved')
+  return parseRuntimeResolvedResponse(raw)
 }
 
 export async function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {

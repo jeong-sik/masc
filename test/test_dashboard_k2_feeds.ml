@@ -283,8 +283,9 @@ let test_decisions_json_terminal_reason_duration_fallback () =
 (* --- Memory log tests --- *)
 
 let memory_horizon kind =
-  match Masc.Keeper_memory_policy.memory_horizon_of_kind_opt kind with
-  | Some horizon -> horizon
+  match Masc.Keeper_memory_policy.memory_kind_of_wire kind with
+  | Some memory_kind ->
+    Masc.Keeper_memory_policy.memory_horizon_of_kind memory_kind
   | None -> fail ("unknown memory kind: " ^ kind)
 ;;
 

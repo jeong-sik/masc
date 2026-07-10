@@ -98,7 +98,6 @@ code_refs:
 | Anti-Fake | Test quality scoring | IMPL | anti_fake.ml |
 | Hooks | Autonomy level gating (l3/l4/l5) | IMPL | keeper_hooks_oas.ml |
 | Proactive | Quality gate + similarity + 3-retry fallback | IMPL | keeper_prompt.ml |
-| Self-Model Drift | will/needs/desires compaction | IMPL | keeper_config.ml |
 | TOML Config | config/keepers/*.toml | IMPL | keeper_toml_loader.ml |
 | External memory projection | Removed; memory is MASC-owned | IMPL | projection/hooks/JSONL backend retired |
 

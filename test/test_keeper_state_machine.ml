@@ -67,9 +67,8 @@ let test_derive_dead_highest_priority () =
     { running_conditions with
       fiber_alive = false
     ; restart_budget_remaining = false
-    ; (* Even with other flags set, Dead wins *)
-      guardrail_triggered = true
-    ; compaction_active = true
+    ; (* Even with another active lifecycle operation, Dead wins *)
+      compaction_active = true
     }
   in
   check phase_t "Dead wins over everything" SM.Dead (SM.derive_phase c)
@@ -115,11 +114,6 @@ let test_derive_draining () =
   check phase_t "stop + no drain = Draining" SM.Draining (SM.derive_phase c)
 ;;
 
-let test_derive_guardrail_failing () =
-  let c = { running_conditions with guardrail_triggered = true } in
-  check phase_t "guardrail = Failing" SM.Failing (SM.derive_phase c)
-;;
-
 let test_derive_paused () =
   let c = { running_conditions with operator_paused = true } in
   check phase_t "paused" SM.Paused (SM.derive_phase c)
@@ -158,13 +152,6 @@ let test_derive_priority_stop_over_compact () =
   check phase_t "compaction blocks Stopped → Draining" SM.Draining (SM.derive_phase c);
   let c2 = { c with compaction_active = false } in
   check phase_t "no buffer ops → Stopped" SM.Stopped (SM.derive_phase c2)
-;;
-
-let test_derive_priority_guardrail_over_paused () =
-  let c =
-    { running_conditions with guardrail_triggered = true; operator_paused = true }
-  in
-  check phase_t "Guardrail(Failing) beats Paused" SM.Failing (SM.derive_phase c)
 ;;
 
 let test_derive_priority_handoff_over_compact () =
@@ -819,13 +806,6 @@ let base_thresholds : Meas.threshold_params =
   ; handoff_threshold = 0.85
   ; handoff_cooldown_sec = 300
   ; auto_handoff_enabled = true
-  ; reflect_repetition_threshold = 0.7
-  ; plan_goal_alignment_threshold = 0.3
-  ; plan_response_alignment_threshold = 0.3
-  ; guardrail_repetition_threshold = 0.9
-  ; guardrail_goal_alignment_threshold = 0.2
-  ; guardrail_response_alignment_threshold = 0.2
-  ; guardrail_context_threshold = 0.8
   ; max_consecutive_hb_failures = 5
   ; max_consecutive_turn_failures = 3
   ; model_ratio_multiplier = 1.0
@@ -845,12 +825,6 @@ let healthy_snapshot : Meas.measurement_snapshot =
       ; token_count = 15000
       ; max_tokens = 100000
       }
-  ; similarity =
-      { repetition_risk = 0.1
-      ; goal_alignment = 0.8
-      ; response_alignment = 0.7
-      ; similarity_measurable = true
-      }
   ; timing =
       { now_ts = 1000.0
       ; idle_seconds = 10
@@ -869,7 +843,6 @@ let test_guard_healthy_no_crash_events () =
       (function
         | SM.Heartbeat_failed _
         | SM.Turn_failed _
-        | SM.Guardrail_stop _
         | SM.Compaction_started
         | SM.Handoff_started -> true
         | _ -> false)
@@ -951,24 +924,24 @@ let test_guard_handoff_triggers () =
   check bool "handoff triggered" true has_handoff
 ;;
 
-let test_guard_guardrail_triggers () =
+let test_guard_context_actions_are_typed () =
   let snap =
     { healthy_snapshot with
-      similarity =
-        { repetition_risk = 0.95
-        ; goal_alignment = 0.1
-        ; response_alignment = 0.1
-        ; similarity_measurable = true
-        }
-    ; context = { healthy_snapshot.context with context_ratio = 0.85 }
+      context = { healthy_snapshot.context with context_ratio = 0.90 }
     }
   in
   let events = Guard.evaluate snap in
-  let prio = Guard.prioritized_event events in
-  match prio with
-  | SM.Guardrail_stop _ -> ()
-  | other ->
-    fail (Printf.sprintf "expected Guardrail_stop, got %s" (SM.event_to_string other))
+  match
+    List.find_opt
+      (function
+        | SM.Context_measured _ -> true
+        | _ -> false)
+      events
+  with
+  | Some (SM.Context_measured { context_actions; _ }) ->
+    check bool "compact action" true context_actions.compact;
+    check bool "handoff action" true context_actions.handoff
+  | Some _ | None -> fail "missing Context_measured event"
 ;;
 
 let test_guard_hb_failure_threshold () =
@@ -986,85 +959,6 @@ let test_guard_hb_failure_threshold () =
       events
   in
   check bool "heartbeat failure at threshold" true has_hb_fail
-;;
-
-let test_guard_plan_requires_both_alignments_low () =
-  let snap =
-    { healthy_snapshot with
-      similarity =
-        { healthy_snapshot.similarity with
-          goal_alignment = 0.2
-        ; response_alignment = 0.7
-        }
-    }
-  in
-  let events = Guard.evaluate snap in
-  let plan_flag =
-    List.find_map
-      (function
-        | SM.Context_measured { auto_rules; _ } -> Some auto_rules.plan
-        | _ -> None)
-      events
-  in
-  check bool "plan requires both" false (Option.value ~default:true plan_flag)
-;;
-
-(* Regression test for #10012.
-
-   Both [goal_alignment] and [response_alignment] at 0.0 would ordinarily
-   satisfy the plan gate's two [<=] comparisons, but when the snapshot was
-   produced by a turn that had no user/assistant message pair (status_tick,
-   heartbeat), those zeroes are markers, not measurements. The guard must
-   fail-closed via [similarity_measurable=false] and emit [plan=false]. *)
-let test_guard_plan_fails_closed_when_similarity_unmeasurable () =
-  let snap =
-    { healthy_snapshot with
-      similarity =
-        { healthy_snapshot.similarity with
-          goal_alignment = 0.0
-        ; response_alignment = 0.0
-        ; similarity_measurable = false
-        }
-    }
-  in
-  let events = Guard.evaluate snap in
-  let plan_flag =
-    List.find_map
-      (function
-        | SM.Context_measured { auto_rules; _ } -> Some auto_rules.plan
-        | _ -> None)
-      events
-  in
-  check
-    bool
-    "plan does not fire on unmeasurable similarity"
-    false
-    (Option.value ~default:true plan_flag)
-;;
-
-(* Same invariant for the guardrail gate — even when every float value lines
-   up for a guardrail stop, [similarity_measurable=false] must suppress it. *)
-let test_guard_guardrail_fails_closed_when_similarity_unmeasurable () =
-  let snap =
-    { healthy_snapshot with
-      similarity =
-        { repetition_risk = 0.95
-        ; goal_alignment = 0.0
-        ; response_alignment = 0.0
-        ; similarity_measurable = false
-        }
-    ; context = { healthy_snapshot.context with context_ratio = 0.85 }
-    }
-  in
-  let events = Guard.evaluate snap in
-  let has_guardrail =
-    List.exists
-      (function
-        | SM.Guardrail_stop _ -> true
-        | _ -> false)
-      events
-  in
-  check bool "guardrail does not fire on unmeasurable similarity" false has_guardrail
 ;;
 
 (* ── Phase roundtrip tests ─────────────────────────────── *)
@@ -1215,36 +1109,6 @@ let test_chain_compaction_fail_handoff_fallback () =
       ]
   in
   check phase_t "recovered via handoff" SM.Running final_phase
-;;
-
-(** 6. Guardrail -> recovery -> normal operations.
-    Guardrail triggers Failing, then context measurement clears it. *)
-let test_chain_guardrail_recovery () =
-  let final_phase, _ =
-    chain_apply
-      ~init_phase:SM.Running
-      ~init_conditions:running_conditions
-      [ SM.Guardrail_stop { reason = "repetition loop detected" }, SM.Failing
-      ; (* Context measurement with guardrail_stop=false clears the flag *)
-        ( SM.Context_measured
-            { context_ratio = 0.30
-            ; message_count = 20
-            ; token_count = 15000
-            ; auto_rules =
-                { reflect = false
-                ; plan = false
-                ; compact = false
-                ; handoff = false
-                ; guardrail_stop = false
-                ; guardrail_reason = None
-                ; goal_drift = 0.1
-                }
-            }
-        , SM.Running )
-      ; SM.Heartbeat_ok, SM.Running
-      ]
-  in
-  check phase_t "guardrail cleared" SM.Running final_phase
 ;;
 
 (** 7. Long-running keeper: multiple compaction + handoff cycles.
@@ -1446,58 +1310,6 @@ let test_chain_handoff_fail_retry () =
   check phase_t "handoff retry succeeded" SM.Running final_phase
 ;;
 
-(** 15. Guardrail fires during compaction.
-    Context_measured with guardrail_stop=true arrives while compaction is active.
-    Guardrail has HIGHER priority than compaction in derive_phase
-    (priority 4 vs priority 9), so keeper immediately enters Failing.
-    Compaction_completed clears compaction_active but guardrail persists.
-    Context_measured with guardrail_stop=false clears it -> Running. *)
-let test_chain_guardrail_during_compaction () =
-  let final_phase, _ =
-    chain_apply
-      ~init_phase:SM.Running
-      ~init_conditions:running_conditions
-      [ SM.Compaction_started, SM.Compacting
-      ; (* Guardrail > Compacting in priority -> immediate Failing *)
-        ( SM.Context_measured
-            { context_ratio = 0.85
-            ; message_count = 200
-            ; token_count = 85000
-            ; auto_rules =
-                { reflect = false
-                ; plan = false
-                ; compact = false
-                ; handoff = false
-                ; guardrail_stop = true
-                ; guardrail_reason = Some "repetition detected"
-                ; goal_drift = 0.9
-                }
-            }
-        , SM.Failing )
-      ; (* Compaction completes but guardrail still active -> still Failing *)
-        ( SM.Compaction_completed { before_tokens = 85000; after_tokens = 40000 }
-        , SM.Failing )
-      ; (* Clear guardrail -> Running *)
-        ( SM.Context_measured
-            { context_ratio = 0.40
-            ; message_count = 50
-            ; token_count = 40000
-            ; auto_rules =
-                { reflect = false
-                ; plan = false
-                ; compact = false
-                ; handoff = false
-                ; guardrail_stop = false
-                ; guardrail_reason = None
-                ; goal_drift = 0.1
-                }
-            }
-        , SM.Running )
-      ]
-  in
-  check phase_t "guardrail cleared after compaction" SM.Running final_phase
-;;
-
 (** 16. Turn failures accumulate alongside heartbeat failures.
     Both turn_healthy=false AND heartbeat_healthy=false. Recovery requires
     both Turn_succeeded AND Heartbeat_ok. *)
@@ -1557,15 +1369,7 @@ let test_chain_no_phoenix () =
         { context_ratio = 0.5
         ; message_count = 10
         ; token_count = 5000
-        ; auto_rules =
-            { reflect = false
-            ; plan = false
-            ; compact = false
-            ; handoff = false
-            ; guardrail_stop = false
-            ; guardrail_reason = None
-            ; goal_drift = 0.0
-            }
+        ; context_actions = { compact = false; handoff = false }
         }
     ; SM.Compaction_started
     ; SM.Compaction_completed { before_tokens = 100; after_tokens = 50 }
@@ -1582,7 +1386,6 @@ let test_chain_no_phoenix () =
     ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; SM.Supervisor_restart_attempt { attempt = 99 }
     ; SM.Restart_budget_exhausted
-    ; SM.Guardrail_stop { reason = "test" }
     ]
   in
   List.iter
@@ -1642,11 +1445,8 @@ let test_chain_triple_restart_survives () =
 ;;
 
 (** 20. Operator pause during Failing, then stop while paused.
-    The keeper is unhealthy AND paused. Guardrail beats Paused in priority,
-    but since heartbeat failure sets heartbeat_healthy=false (not guardrail),
-    and Paused comes before Failing in condition check...
-    Actually: derive_phase checks guardrail(false) then operator_paused(true).
-    So heartbeat unhealthy is checked AFTER paused -> paused wins.
+    The keeper is unhealthy AND paused. Operator pause precedes heartbeat
+    health in phase derivation, so Paused wins.
     Then stop while paused -> Draining. *)
 let test_chain_pause_while_failing_then_stop () =
   let failing_conds = { running_conditions with heartbeat_healthy = false } in
@@ -1708,7 +1508,6 @@ let test_chain_condition_snapshot_audit () =
   check bool "turn healthy" true tr1.updated_conditions.turn_healthy;
   check bool "no compaction" false tr1.updated_conditions.compaction_active;
   check bool "no handoff" false tr1.updated_conditions.handoff_active;
-  check bool "no guardrail" false tr1.updated_conditions.guardrail_triggered;
   check bool "backoff reset" false tr1.updated_conditions.backoff_elapsed;
   (* Step 2: crash *)
   let tr2 =
@@ -1743,7 +1542,6 @@ let test_chain_condition_snapshot_audit () =
   check bool "compaction (reset)" false tr4.updated_conditions.compaction_active;
   check bool "handoff (reset)" false tr4.updated_conditions.handoff_active;
   check bool "backoff (reset)" false tr4.updated_conditions.backoff_elapsed;
-  check bool "guardrail (reset)" false tr4.updated_conditions.guardrail_triggered;
   check bool "drain (reset)" false tr4.updated_conditions.drain_complete;
   (* Preserved across restart: *)
   check bool "budget preserved" true tr4.updated_conditions.restart_budget_remaining
@@ -1763,8 +1561,8 @@ let test_invariant_derive_phase_idempotent () =
     ; "hb_fail", { running_conditions with heartbeat_healthy = false }
     ; ( "paused+failing"
       , { running_conditions with operator_paused = true; heartbeat_healthy = false } )
-    ; ( "compacting+guardrail"
-      , { running_conditions with compaction_active = true; guardrail_triggered = true } )
+    ; ( "compacting+paused"
+      , { running_conditions with compaction_active = true; operator_paused = true } )
     ; ( "draining"
       , { running_conditions with stop_requested = true; drain_complete = false } )
     ; "stopped", { running_conditions with stop_requested = true; drain_complete = true }
@@ -1802,9 +1600,8 @@ let test_invariant_terminal_absorbing () =
     | `Hand_need -> { c with context_handoff_needed = not c.context_handoff_needed }
     | `Comp -> { c with compaction_active = not c.compaction_active }
     | `Hand -> { c with handoff_active = not c.handoff_active }
-    | `Guard -> { c with guardrail_triggered = not c.guardrail_triggered }
   in
-  let non_critical_fields = [ `Hb; `Turn; `Ctx; `Hand_need; `Comp; `Hand; `Guard ] in
+  let non_critical_fields = [ `Hb; `Turn; `Ctx; `Hand_need; `Comp; `Hand ] in
   (* Dead: toggling non-critical fields should keep Dead *)
   List.iter
     (fun field ->
@@ -1815,7 +1612,7 @@ let test_invariant_terminal_absorbing () =
      TLA+ fix: compaction_active and handoff_active are NOW critical for
      Stopped — toggling them ON breaks the Stopped condition (→ Draining).
      This is correct: buffer ops block terminal entry. *)
-  let stopped_non_critical = [ `Hb; `Turn; `Ctx; `Hand_need; `Guard ] in
+  let stopped_non_critical = [ `Hb; `Turn; `Ctx; `Hand_need ] in
   List.iter
     (fun field ->
        let mutated = toggle stopped_conds field in
@@ -1856,7 +1653,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
     ; stop_requested = true
     ; restart_budget_remaining = true
     ; backoff_elapsed = true
-    ; guardrail_triggered = true
     ; drain_complete = true
     ; context_overflow = true
     ; compact_retry_exhausted = true
@@ -1883,7 +1679,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
   check bool "compaction_active reset" false updated.compaction_active;
   check bool "handoff_active reset" false updated.handoff_active;
   check bool "backoff_elapsed reset" false updated.backoff_elapsed;
-  check bool "guardrail_triggered reset" false updated.guardrail_triggered;
   check bool "drain_complete reset" false updated.drain_complete;
   check bool "terminal_failure_latched reset" false updated.terminal_failure_latched;
   (* TLA+ liveness fix: stop_requested is now RESET on Fiber_started.
@@ -2018,7 +1813,6 @@ let test_invariant_stop_requested_monotonic () =
     ; SM.Handoff_completed { new_trace_id = "x"; generation = 1 }
     ; SM.Operator_pause
     ; SM.Operator_resume
-    ; SM.Guardrail_stop { reason = "test" }
     ; (* Fiber_started intentionally OMITTED — it resets stop *)
       SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; SM.Supervisor_restart_attempt { attempt = 1 }
@@ -2027,15 +1821,7 @@ let test_invariant_stop_requested_monotonic () =
         { context_ratio = 0.5
         ; message_count = 10
         ; token_count = 5000
-        ; auto_rules =
-            { reflect = false
-            ; plan = false
-            ; compact = false
-            ; handoff = false
-            ; guardrail_stop = false
-            ; guardrail_reason = None
-            ; goal_drift = 0.0
-            }
+        ; context_actions = { compact = false; handoff = false }
         }
     ]
   in
@@ -2115,7 +1901,6 @@ let test_invariant_budget_exhaustion_permanent () =
            ; compaction_active = false
            ; handoff_active = false
            ; backoff_elapsed = false
-           ; guardrail_triggered = false
            ; drain_complete = false
            }
          | Supervisor_restart_attempt _ -> { conds_no_budget with backoff_elapsed = true }
@@ -2159,7 +1944,6 @@ let test_invariant_derive_matches_matrix () =
     ; SM.Restart_budget_exhausted
     ; SM.Credential_archived
     ; SM.Zombie_timeout
-    ; SM.Guardrail_stop { reason = "test" }
     ]
   in
   let non_terminal_phases =
@@ -2240,7 +2024,6 @@ let test_invariant_priority_chain () =
     ; stop_requested = true
     ; restart_budget_remaining = true
     ; backoff_elapsed = true
-    ; guardrail_triggered = true
     ; drain_complete = true
     ; context_overflow = true
     ; compact_retry_exhausted = true
@@ -2263,17 +2046,14 @@ let test_invariant_priority_chain () =
   (* Remove drain_complete: Draining wins *)
   let no_drain = { all_true with drain_complete = false } in
   check phase_t "no drain_complete: Draining" SM.Draining (SM.derive_phase no_drain);
-  (* Remove stop: guardrail wins *)
+  (* Remove stop: operator pause wins *)
   let no_stop = { no_drain with stop_requested = false } in
-  check phase_t "no stop: guardrail->Failing" SM.Failing (SM.derive_phase no_stop);
-  (* Remove guardrail: paused wins *)
-  let no_guard = { no_stop with guardrail_triggered = false } in
-  check phase_t "no guardrail: Paused" SM.Paused (SM.derive_phase no_guard);
+  check phase_t "no stop: Paused" SM.Paused (SM.derive_phase no_stop);
   (* Remove paused trigger: must also clear the overflow-latched path
      (context_overflow && compact_retry_exhausted) that can hold the
      keeper in Paused independently of operator_paused. *)
   let no_paused =
-    { no_guard with
+    { no_stop with
       operator_paused = false
     ; context_overflow = false
     ; compact_retry_exhausted = false
@@ -2318,7 +2098,6 @@ let test_setclear_coverage () =
     ; ("stop_requested", fun c -> c.stop_requested)
     ; ("restart_budget_remaining", fun c -> c.restart_budget_remaining)
     ; ("backoff_elapsed", fun c -> c.backoff_elapsed)
-    ; ("guardrail_triggered", fun c -> c.guardrail_triggered)
     ; ("drain_complete", fun c -> c.drain_complete)
     ; ("context_overflow", fun c -> c.context_overflow)
     ; ("compact_retry_exhausted", fun c -> c.compact_retry_exhausted)
@@ -2341,7 +2120,6 @@ let test_setclear_coverage () =
     ; stop_requested = false
     ; restart_budget_remaining = false
     ; backoff_elapsed = false
-    ; guardrail_triggered = false
     ; drain_complete = false
     ; context_overflow = false
     ; compact_retry_exhausted = false
@@ -2364,7 +2142,6 @@ let test_setclear_coverage () =
     ; stop_requested = true
     ; restart_budget_remaining = true
     ; backoff_elapsed = true
-    ; guardrail_triggered = true
     ; drain_complete = true
     ; context_overflow = true
     ; compact_retry_exhausted = true
@@ -2373,38 +2150,30 @@ let test_setclear_coverage () =
     ; zombie_timeout_reached = true
     }
   in
-  (* auto_rules with all flags false *)
-  let auto_rules_clean : SM.auto_rule_summary =
-    { reflect = false
-    ; plan = false
-    ; compact = false
-    ; handoff = false
-    ; guardrail_stop = false
-    ; guardrail_reason = None
-    ; goal_drift = 0.0
-    }
+  let context_actions_clean : SM.context_actions =
+    { compact = false; handoff = false }
   in
   (* Every event variant with representative payloads.
      Context_measured needs two variants to cover both true/false
-     for guardrail_stop and handoff flags. *)
+     for the handoff action. *)
   let all_events : (string * SM.event) list =
     [ "Heartbeat_ok", SM.Heartbeat_ok
     ; "Heartbeat_failed", SM.Heartbeat_failed { consecutive = 3; max_allowed = 5 }
     ; "Turn_succeeded", SM.Turn_succeeded
     ; "Turn_failed", SM.Turn_failed { consecutive = 3; max_allowed = 10 }
-    ; ( "Context_measured(guardrail+handoff)"
+    ; ( "Context_measured(handoff)"
       , SM.Context_measured
           { context_ratio = 0.95
           ; message_count = 100
           ; token_count = 50000
-          ; auto_rules = { auto_rules_clean with guardrail_stop = true; handoff = true }
+          ; context_actions = { context_actions_clean with handoff = true }
           } )
     ; ( "Context_measured(clean)"
       , SM.Context_measured
           { context_ratio = 0.2
           ; message_count = 5
           ; token_count = 1000
-          ; auto_rules = auto_rules_clean
+          ; context_actions = context_actions_clean
           } )
     ; "Compaction_started", SM.Compaction_started
     ; ( "Compaction_completed"
@@ -2424,7 +2193,6 @@ let test_setclear_coverage () =
     ; "Restart_budget_exhausted", SM.Restart_budget_exhausted
     ; "Credential_archived", SM.Credential_archived
     ; "Zombie_timeout", SM.Zombie_timeout
-    ; "Guardrail_stop", SM.Guardrail_stop { reason = "test" }
     ; ( "Context_overflow_detected"
       , SM.Context_overflow_detected
           { source = `Prompt_rejected
@@ -2574,7 +2342,6 @@ let () =
         ; test_case "Crashed" `Quick test_derive_crashed
         ; test_case "Stopped" `Quick test_derive_stopped
         ; test_case "Draining" `Quick test_derive_draining
-        ; test_case "Guardrail -> Failing" `Quick test_derive_guardrail_failing
         ; test_case "Paused" `Quick test_derive_paused
         ; test_case "HandingOff" `Quick test_derive_handingoff
         ; test_case "Compacting" `Quick test_derive_compacting
@@ -2584,10 +2351,6 @@ let () =
             "priority: Stop > Compact"
             `Quick
             test_derive_priority_stop_over_compact
-        ; test_case
-            "priority: Guardrail > Paused"
-            `Quick
-            test_derive_priority_guardrail_over_paused
         ; test_case
             "priority: Handoff > Compact"
             `Quick
@@ -2730,24 +2493,12 @@ let () =
             `Quick
             test_guard_compaction_respects_cooldown
         ; test_case "handoff triggers" `Quick test_guard_handoff_triggers
-        ; test_case "guardrail triggers" `Quick test_guard_guardrail_triggers
+        ; test_case "typed context actions" `Quick test_guard_context_actions_are_typed
         ; test_case "hb failure at threshold" `Quick test_guard_hb_failure_threshold
-        ; test_case
-            "plan requires both low"
-            `Quick
-            test_guard_plan_requires_both_alignments_low
-        ; test_case
-            "plan fails-closed when similarity unmeasurable"
-            `Quick
-            test_guard_plan_fails_closed_when_similarity_unmeasurable
-        ; test_case
-            "guardrail fails-closed when similarity unmeasurable"
-            `Quick
-            test_guard_guardrail_fails_closed_when_similarity_unmeasurable
         ] )
     ; ( "roundtrip"
       , [ test_case "phase string roundtrip" `Quick test_phase_string_roundtrip
-        ; test_case "12 phases" `Quick test_all_phases_covered
+        ; test_case "13 phases" `Quick test_all_phases_covered
         ] )
     ; ( "lifecycle_chain"
       , [ test_case
@@ -2770,7 +2521,6 @@ let () =
             "compaction fail -> handoff fallback"
             `Quick
             test_chain_compaction_fail_handoff_fallback
-        ; test_case "guardrail -> recovery" `Quick test_chain_guardrail_recovery
         ; test_case
             "long-running multi-cycle (5 cycles)"
             `Quick
@@ -2797,15 +2547,11 @@ let () =
         ; test_case "restart clears stop_requested" `Quick test_chain_restart_clears_stop
         ; test_case "handoff fail then retry" `Quick test_chain_handoff_fail_retry
         ; test_case
-            "guardrail during compaction"
-            `Quick
-            test_chain_guardrail_during_compaction
-        ; test_case
             "double failure (hb+turn) recovery"
             `Quick
             test_chain_double_failure_recovery
         ; test_case "operator stop during handoff" `Quick test_chain_stop_during_handoff
-        ; test_case "no phoenix (22 events on Dead)" `Quick test_chain_no_phoenix
+        ; test_case "no phoenix (all events rejected on Dead)" `Quick test_chain_no_phoenix
         ; test_case "triple restart survives" `Quick test_chain_triple_restart_survives
         ; test_case
             "pause while failing then stop"

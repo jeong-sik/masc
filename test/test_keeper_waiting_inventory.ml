@@ -247,7 +247,7 @@ let test_chat_queue_pending_rows_are_visible () =
     ; source = Keeper_chat_queue.Discord { channel_id = "chan-42"; user_id = "user-7" }
     }
   in
-  Keeper_chat_queue.enqueue ~keeper_name message;
+  ignore (Keeper_chat_queue.enqueue ~keeper_name message : string);
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "chat queue metric"
     Otel_metric_store.metric_keeper_waiting_count

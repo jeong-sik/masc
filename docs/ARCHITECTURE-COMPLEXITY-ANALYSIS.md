@@ -120,9 +120,9 @@ They have been retired from the active runtime surface, so the current complexit
 ### Root cause
 
 - No retention/rotation on metrics files -> unbounded growth (~2MB/day)
-- dm-keeper: goal_drift 97%, goal_alignment 3%, tokens=0 (idle ticking)
-- sangsu: goal_drift 100%, goal_alignment 0% (completely idle)
-- No downstream consumer of these metrics
+- Historical idle-heartbeat samples reported derived goal-drift/alignment values
+  without downstream consumers. Those semantic metrics are no longer emitted;
+  current diagnostics use typed lifecycle, context-capacity, and turn evidence.
 
 ### Fix applied
 

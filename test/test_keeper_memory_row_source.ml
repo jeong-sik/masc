@@ -11,7 +11,8 @@
     - the literals the producers/consumers depend on ("voice_output",
       "progress_consolidation", "cross_trace_recurrence", "tool_result") parse
       to the constructors the exhaustive matches branch on — drift would now be
-      a compile error, but this pins the wire spelling itself. *)
+      a compile error, but this pins the wire spelling itself. Explicit tool
+      writes use their own constructor rather than an untyped source string. *)
 
 module Keeper_memory_bank = Masc.Keeper_memory_bank
 open Keeper_memory_bank
@@ -26,6 +27,8 @@ let test_of_string_known () =
     (memory_row_source_of_string "progress_consolidation");
   Alcotest.check source_testable "cross_trace_recurrence" Cross_trace_recurrence
     (memory_row_source_of_string "cross_trace_recurrence");
+  Alcotest.check source_testable "explicit_memory_write" Explicit_memory_write
+    (memory_row_source_of_string "explicit_memory_write");
   Alcotest.check source_testable "tool_result" Tool_result
     (memory_row_source_of_string "tool_result");
   Alcotest.check source_testable "voice_output" Voice_output
@@ -49,6 +52,7 @@ let test_to_string_inverse () =
         (memory_row_source_of_string (memory_row_source_to_string s)))
     [ Progress_consolidation
     ; Cross_trace_recurrence
+    ; Explicit_memory_write
     ; Tool_result
     ; Voice_output
     ; Other "external_producer"
@@ -63,6 +67,7 @@ let test_of_string_to_string_invariant () =
         (memory_row_source_to_string (memory_row_source_of_string s)))
     [ "progress_consolidation"
     ; "cross_trace_recurrence"
+    ; "explicit_memory_write"
     ; "tool_result"
     ; "voice_output"
     ; "anything_else"

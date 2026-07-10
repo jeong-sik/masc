@@ -145,7 +145,7 @@ type snapshot = {
   kcl_runtime_state : runtime_state;
   kmc_compaction : Keeper_registry.packed_compaction_stage;
   kcb_state : Keeper_failure_circuit_breaker.display_state;
-  shared_measurement : Keeper_state_machine.auto_rule_summary option;
+  shared_measurement : Keeper_state_machine.context_actions option;
   invariants : invariants_check;
   conditions : Keeper_state_machine.conditions;
   is_live : bool;
@@ -348,7 +348,7 @@ let live_runtime_state (entry : Keeper_registry.registry_entry) =
 
 let live_measurement (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
-  | Some { measurement = Some measurement; _ } -> Some measurement.tm_auto_rules
+  | Some { measurement = Some measurement; _ } -> Some measurement.tm_context_actions
   | _ -> None
 
 (* Invariants *)
@@ -595,16 +595,11 @@ let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
     "phase_derivation_agreement", `Bool inv.phase_derivation_agreement;
   ]
 
-let measurement_to_json (m : Keeper_state_machine.auto_rule_summary) : Yojson.Safe.t =
+let measurement_to_json (m : Keeper_state_machine.context_actions) : Yojson.Safe.t =
   `Assoc
     [
-      "reflect", `Bool m.reflect;
-      "plan", `Bool m.plan;
       "compact", `Bool m.compact;
       "handoff", `Bool m.handoff;
-      "guardrail_stop", `Bool m.guardrail_stop;
-      "guardrail_reason", Json_util.string_opt_to_json m.guardrail_reason;
-      "goal_drift", `Float m.goal_drift;
     ]
 
 type phase_condition_row = {
@@ -642,28 +637,25 @@ let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition
     row "draining_stop_requested" "Draining: stop requested" 7
       c.stop_requested
       Keeper_state_machine.Draining;
-    row "failing_guardrail" "Failing: guardrail triggered" 8
-      c.guardrail_triggered
-      Keeper_state_machine.Failing;
-    row "paused_operator_or_retry_exhausted" "Paused: operator pause or compact retry exhausted" 9
+    row "paused_operator_or_retry_exhausted" "Paused: operator pause or compact retry exhausted" 8
       (c.operator_paused || (c.context_overflow && c.compact_retry_exhausted))
       Keeper_state_machine.Paused;
-    row "handing_off_active" "HandingOff: handoff active" 10
+    row "handing_off_active" "HandingOff: handoff active" 9
       c.handoff_active
       Keeper_state_machine.HandingOff;
-    row "compacting_active" "Compacting: compaction active" 11
+    row "compacting_active" "Compacting: compaction active" 10
       c.compaction_active
       Keeper_state_machine.Compacting;
-    row "overflowed_context" "Overflowed: context overflow awaiting compaction" 12
+    row "overflowed_context" "Overflowed: context overflow awaiting compaction" 11
       c.context_overflow
       Keeper_state_machine.Overflowed;
-    row "failing_unhealthy" "Failing: heartbeat or turn unhealthy" 13
+    row "failing_unhealthy" "Failing: heartbeat or turn unhealthy" 12
       ((not c.heartbeat_healthy) || not c.turn_healthy)
       Keeper_state_machine.Failing;
-    row "running_fiber_alive" "Running: fiber alive" 14
+    row "running_fiber_alive" "Running: fiber alive" 13
       c.fiber_alive
       Keeper_state_machine.Running;
-    row "offline_fallback" "Offline: fallback" 15
+    row "offline_fallback" "Offline: fallback" 14
       true
       Keeper_state_machine.Offline;
   ]
@@ -727,7 +719,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "measurement", (match s.shared_measurement with
       | Some m -> `Assoc [
           "captured", `Bool true;
-          "auto_rules", measurement_to_json m;
+          "context_actions", measurement_to_json m;
         ]
       | None -> `Assoc [
           "captured", `Bool false;

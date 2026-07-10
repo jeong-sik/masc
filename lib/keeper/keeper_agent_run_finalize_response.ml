@@ -1,21 +1,13 @@
 (** Keeper_agent_run_finalize_response — Process provider text and finalize turn.
 
     Extracted from [Keeper_agent_run.run_turn]. Handles response text
-    finalization, sidecar persistence, checkpoint saving, contract-verification proof
+    finalization, checkpoint saving, contract-verification proof
     evaluation, post-turn memory, and result construction. *)
 
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
-
-let reported_state_snapshot_from_checkpoint
-    (checkpoint : Agent_sdk.Checkpoint.t option)
-  : Keeper_memory_policy.keeper_state_snapshot option =
-  (* keeper_report_state tool removed — state reporting uses [STATE] text
-     blocks parsed by Keeper_memory_policy elsewhere. *)
-  ignore (checkpoint : Agent_sdk.Checkpoint.t option);
-  None
 
 let completion_contract_drops_current_turn_replay
     (completion_contract_result :
@@ -27,67 +19,74 @@ let completion_contract_drops_current_turn_replay
 
 type replay_suffix_prune_reason =
   | Completion_contract_requires_attention
-  | Synthetic_empty_state_snapshot
   | Canonical_success_replay
 
 let replay_suffix_prune_reason_to_string = function
   | Completion_contract_requires_attention ->
     "completion_contract_requires_attention"
-  | Synthetic_empty_state_snapshot -> "synthetic_empty_state_snapshot"
   | Canonical_success_replay -> "canonical_success_replay"
-;;
-
-let synthetic_empty_state_drops_current_turn_replay
-      ~(state_snapshot_source : Keeper_memory_policy.state_snapshot_source)
-      ~response_text
-  =
-  Keeper_memory_policy.state_snapshot_source_is_synthetic state_snapshot_source
-  && String.trim response_text = ""
 ;;
 
 let replay_suffix_prune_reason
       ~completion_contract_result
-      ~state_snapshot_source
-      ~response_text
   =
   if completion_contract_drops_current_turn_replay completion_contract_result
   then Some Completion_contract_requires_attention
-  else if
-    synthetic_empty_state_drops_current_turn_replay
-      ~state_snapshot_source
-      ~response_text
-  then Some Synthetic_empty_state_snapshot
   else None
-;;
-
-let stop_reason_requests_resume_merge = function
-  | Runtime_agent.TurnBudgetExhausted _ -> true
-  (* A yield stops at a clean turn boundary (no partial in-flight work to merge),
-     like [MutationBoundaryReached]; the OAS checkpoint already holds the
-     completed turns and the keeper resumes on the next cycle. *)
-  | Runtime_agent.Completed
-  | Runtime_agent.MutationBoundaryReached _
-  | Runtime_agent.Yielded_to_chat_waiting _ -> false
-;;
-
-let should_resume_merge
-      ~pre_dispatch_compacted
-      ~state_snapshot_source
-      ~stop_reason
-      ~completion_contract_result
-  =
-  if completion_contract_drops_current_turn_replay completion_contract_result
-  then false
-  else
-    pre_dispatch_compacted
-    || Keeper_memory_policy.state_snapshot_source_is_synthetic state_snapshot_source
-    || stop_reason_requests_resume_merge stop_reason
 ;;
 
 let replay_response_text_for_capture ~suppress_visible_response ~response_text =
   if suppress_visible_response || String.trim response_text = ""
   then None
   else Some response_text
+;;
+
+type reply_delivery_tool = Surface_post
+
+type reply_delivery_effect =
+  | Reply_delivered
+  | No_reply_delivery
+
+let reply_delivery_tool_of_name tool_name =
+  (* Parse exact wire names once into a closed delivery-effect vocabulary. *)
+  let canonical_name = Keeper_tool_resolution.canonical_tool_name tool_name in
+  match Keeper_tool_name.of_string canonical_name with
+  | Some Keeper_tool_name.Surface_post -> Some Surface_post
+  | Some _ | None -> None
+;;
+
+let reply_delivery_effect_of_tool_call
+      (detail : Keeper_agent_result.tool_call_detail)
+  =
+  match
+    reply_delivery_tool_of_name detail.tool_name,
+    detail.execution_outcome,
+    detail.typed_outcome
+  with
+  | Some _, Tool_result.Ok, (None | Some Keeper_tool_outcome.Progress) ->
+    Reply_delivered
+  | ( Some _
+    , Tool_result.Ok
+    , Some (Keeper_tool_outcome.No_progress _ | Keeper_tool_outcome.Error _) )
+  | Some _, (Tool_result.Error | Tool_result.Unknown), _
+  | None, _, _ ->
+    No_reply_delivery
+;;
+
+let has_reply_delivery_effect tool_calls =
+  List.exists
+    (fun detail ->
+       match reply_delivery_effect_of_tool_call detail with
+       | Reply_delivered -> true
+       | No_reply_delivery -> false)
+    tool_calls
+;;
+
+let continuation_delivery_gate ~channel ~tool_calls ~content =
+  Keeper_continuation_delivery.gate_decision
+    ~channel
+    ~already_replied:(has_reply_delivery_effect tool_calls)
+    ~content
 ;;
 
 type wire_capture_response_suppression_reason =
@@ -164,8 +163,6 @@ let canonical_success_replay_checkpoint
       ~(history_messages : Agent_sdk.Types.message list)
       ~(session_id : string)
       ~(response_text : string)
-      ~(state_snapshot : Keeper_memory_policy.keeper_state_snapshot option)
-      ~(state_snapshot_source : Keeper_memory_policy.state_snapshot_source)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   if messages_prefix_equal history_messages checkpoint.Agent_sdk.Checkpoint.messages
@@ -208,8 +205,6 @@ let canonical_success_replay_checkpoint
           }
           ~session_id
           ~response_text
-          ?snapshot:state_snapshot
-          ~snapshot_source:state_snapshot_source
     in
     Ok
       ( checkpoint
@@ -229,15 +224,11 @@ let checkpoint_for_replay_persistence
          Keeper_execution_receipt.completion_contract_result)
       ~(session_id : string)
       ~(response_text : string)
-      ~(state_snapshot_source : Keeper_memory_policy.state_snapshot_source)
-      ~(state_snapshot : Keeper_memory_policy.keeper_state_snapshot option)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   match
     replay_suffix_prune_reason
       ~completion_contract_result
-      ~state_snapshot_source
-      ~response_text
   with
   | Some reason ->
     let pruned =
@@ -259,8 +250,6 @@ let checkpoint_for_replay_persistence
       ~history_messages
       ~session_id
       ~response_text
-      ~state_snapshot
-      ~state_snapshot_source
       checkpoint
 ;;
 
@@ -275,7 +264,6 @@ module For_testing = struct
     replay_suffix_prune_reason_to_string
 
   let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
-  let should_resume_merge = should_resume_merge
   let replay_response_text_for_capture = replay_response_text_for_capture
 
   let wire_capture_response_suppression_reasons =
@@ -286,6 +274,10 @@ module For_testing = struct
 
   let emit_wire_capture_response_suppressed_metrics =
     emit_wire_capture_response_suppressed_metrics
+
+  let reply_delivery_effect_of_tool_call = reply_delivery_effect_of_tool_call
+  let has_reply_delivery_effect = has_reply_delivery_effect
+  let continuation_delivery_gate = continuation_delivery_gate
 end
 
 let finalize
@@ -293,9 +285,8 @@ let finalize
     ~meta
     ~generation
     ~manifest_keeper_turn_id
-    ~trace_id
     ~session
-    ~(append_manifest : Keeper_agent_run_sidecar.append_manifest_fn)
+    ~(append_manifest : Keeper_agent_run_turn_helpers.append_manifest_fn)
     ~model
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~actual_keeper_tool_names
@@ -346,55 +337,13 @@ let finalize
   emit_wire_capture_response_suppressed_metrics
     ~keeper_name:meta.name
     suppression_reasons;
-  let reported_state_snapshot =
-    reported_state_snapshot_from_checkpoint result.checkpoint
-  in
-  let
-    { Keeper_agent_run_response_text.state_snapshot
-    ; state_snapshot_source
-    ; response_text
-    }
-    =
+  let { Keeper_agent_run_response_text.response_text } =
     Keeper_agent_run_response_text.finalize
-      ~reported_state_snapshot
-      ~keeper_name:meta.name
-      ~goal:meta.goal
-      ~actual_keeper_tool_names
       ~completion_contract_result
       ~stop_reason:result.stop_reason
       ~raw_response_text
       ~suppress_response_text:suppress_visible_response
       ()
-  in
-  (* Gate the working-state resume merge (ResumeFromDigest) to turns where active
-     loops can be silently lost: a pre-dispatch compaction may have dropped the
-     reminder, or the model emitted no structured state at all (synthesized). On
-     a normal model-authored state turn the snapshot is authoritative, so a
-     dropped loop still clears. *)
-  let resume_merge =
-    should_resume_merge
-      ~pre_dispatch_compacted
-      ~state_snapshot_source
-      ~stop_reason:result.stop_reason
-      ~completion_contract_result
-  in
-  let { Keeper_agent_run_sidecar.working_state = _
-      ; state_snapshot_saved = _
-      ; working_state_saved = _
-      } =
-    Keeper_agent_run_sidecar.save_sidecars
-      ~keeper_name:meta.name
-      ~agent_name:meta.agent_name
-      ~trace_id
-      ~generation
-      ~keeper_turn_id:manifest_keeper_turn_id
-      ~oas_turn_count:result.turns
-      ~session_dir:session.session_dir
-      ~state_snapshot
-      ~state_snapshot_source
-      ~resume_merge
-    ~append_manifest
-    ()
   in
   receipt_response_text_present_ref := raw_response_text_present;
   let replay_response_text =
@@ -405,12 +354,6 @@ let finalize
       (fun replay_response_text ->
          Agent_sdk.Types.make_message
            ~role:Agent_sdk.Types.Assistant
-           ~metadata:
-             [ ( Keeper_memory_policy.replay_metadata_key
-               , Keeper_memory_policy.replay_metadata_of_snapshot
-                   ~state_snapshot_source
-                   state_snapshot )
-             ]
            [ Agent_sdk.Types.Text replay_response_text ])
       replay_response_text
   in
@@ -430,13 +373,7 @@ let finalize
      channel); [Keeper_continuation_delivery] fails closed on [Unrouted]. *)
   (match hitl_delivery_channel, replay_response_text with
    | Some channel, Some content ->
-     let already_replied =
-       List.exists
-         (fun name ->
-           String.equal name "keeper_surface_post"
-           || String.equal name "masc_keeper_msg")
-         actual_keeper_tool_names
-     in
+     let already_replied = has_reply_delivery_effect acc.tool_calls in
      let outcome =
        Keeper_continuation_delivery.maybe_deliver ~config
          ~keeper_name:meta.name ~channel ~already_replied ~content
@@ -456,8 +393,6 @@ let finalize
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
-          ~state_snapshot_source
-          ~state_snapshot:(Some state_snapshot)
           checkpoint
       in
       (match checkpoint_for_save_result with
@@ -557,8 +492,6 @@ let finalize
       ~oas_turn_count:result.turns
       ~response_text
       ~actual_tools:actual_keeper_tool_names
-      ~state_snapshot
-      ~state_snapshot_source
       ~librarian_messages
       ~post_turn_t0
       ~runtime_id:runtime_id_string

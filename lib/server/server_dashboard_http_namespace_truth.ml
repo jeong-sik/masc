@@ -42,9 +42,8 @@ let namespace_truth_bootstrap_shell_json () =
             ("tasks", `Int 0);
             ("keepers", `Int 0);
             ("total_runtimes", `Int 0);
-          ] );
+      ] );
       ("configured_keepers", `Int 0);
-      ("meta_cognition", `Null);
     ]
 
 let shell_json_matches_config ~(config : Workspace.config) json =

@@ -1475,15 +1475,6 @@ button.ide-persistence-focus:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.ide-bdi-route-links {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px;
-  min-width: 0;
-}
-
-.ide-bdi-route-count,
 .ide-interject-context-count {
   height: 17px;
   padding: 0 6px;
@@ -1495,34 +1486,6 @@ button.ide-persistence-focus:focus-visible {
   font-size: var(--fs-9);
   line-height: 15px;
   white-space: nowrap;
-}
-
-.ide-bdi-route-link {
-  min-width: 0;
-  max-width: 72px;
-  height: 17px;
-  padding: 0 6px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
-  background: var(--color-bg-muted);
-  color: var(--color-fg-muted);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: var(--fs-9);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ide-bdi-route-link:hover,
-.ide-bdi-route-link:focus-visible {
-  border-color: var(--color-border-strong);
-  color: var(--color-accent-fg);
-}
-
-.ide-bdi-route-link:focus-visible {
-  outline: 1px solid var(--color-accent-fg);
-  outline-offset: 1px;
 }
 
 .ide-interject-context-links {

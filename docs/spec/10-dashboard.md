@@ -350,7 +350,7 @@ proof 문서가 존재하지 않으면 `Team_session_report_proof.generate_proof
 | 모듈 | LOC | 역할 |
 |------|-----|------|
 | `dashboard_http_keeper_metrics.ml` | 420 | `keeper_gen_window_stats` 타입, model/tool count table, UTF-8 safe prefix |
-| `dashboard_http_keeper_detail.ml` | 775 | metrics window computation: handoff/compaction/fallback/tool_call/drift/goal_alignment/memory 카운터 추출 |
+| `dashboard_http_keeper_detail.ml` | 775 | metrics window computation: handoff/compaction/fallback/tool_call/memory 카운터 추출 |
 | `dashboard_http_keeper.ml` | 606 | `keepers_dashboard_json` 최상위 함수. Eio.Fiber.all로 keeper별 I/O를 병렬 실행 |
 
 `keepers_dashboard_json` 흐름:

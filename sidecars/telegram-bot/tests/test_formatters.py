@@ -7,29 +7,8 @@ from src.formatters import (
     format_footer,
     format_footer_html,
     render_response_text,
-    strip_state_blocks,
     structured_html_text,
 )
-
-
-class TestStripStateBlocks:
-    def test_removes_state_block(self) -> None:
-        text = "Hello [STATE]internal data[/STATE] world"
-        assert strip_state_blocks(text) == "Hello  world"
-
-    def test_removes_unclosed_state_block(self) -> None:
-        text = "Hello [STATE]internal data without end"
-        assert strip_state_blocks(text) == "Hello"
-
-    def test_preserves_text_without_state(self) -> None:
-        assert strip_state_blocks("plain text") == "plain text"
-
-    def test_handles_empty_string(self) -> None:
-        assert strip_state_blocks("") == ""
-
-    def test_removes_multiline_state_block(self) -> None:
-        text = "Before\n[STATE]\nline1\nline2\n[/STATE]\nAfter"
-        assert strip_state_blocks(text) == "Before\n\nAfter"
 
 
 class TestChunkText:

@@ -27,7 +27,7 @@ remain readable) and does not touch the wake path or the RFC-0246 tombstone gate
   side-channel for untrusted observation. (`agent_sdk .../types.mli:71-77,132`.)
 - `Board.post_kind = Human_post | Automation_post | System_post`
   (`board_types.ml:127-131`) has **no Keeper variant**. Keepers post as `Automation_post`
-  (`keeper_social_model_bdi_speech_v1.ml:318`), so a peer keeper's narrative and a CI probe
+  (`keeper_tool_board_runtime.ml:118-121`), so a peer keeper's narrative and a CI probe
   render identically (`- [automation] ...`). The only signal a post is a peer is the author
   string — exactly what the wake-cascade confabulation cases exploited.
 - The system prompt already states board activity is observation

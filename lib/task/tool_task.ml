@@ -449,9 +449,12 @@ let evidence_refs =
      reviewer with the persisted completion contract in prompt context.
      Keep AwaitingVerification for explicit submit_for_verification only; a
      normal done action must not depend on the verifier agent being alive. *)
-  (* RFC-0109 Phase D hard cut: contracted verification submissions
-     require substantive evidence. Analysis-only tasks (no contract)
-     bypass the gate. *)
+  (* RFC-0109 Phase D hard cut, scope per RFC-0337 (tiered evidence):
+     [Task_completion_gate.decide] requires one trusted evidence ref for
+     EVERY completion — advisory tasks included; there is no analysis-only
+     bypass here. The L2 LLM review applies only to strict contracts.
+     The previous comment claimed a no-contract bypass that decide never
+     implemented (#23901 family A / RFC-0337 migration 3). *)
   (* Evidence gate is NOT bypassed by force=true. This is intentional:
      force bypasses business-logic guards, but the evidence gate is a safety
      invariant that prevents silent task_done without a substantiveness check.

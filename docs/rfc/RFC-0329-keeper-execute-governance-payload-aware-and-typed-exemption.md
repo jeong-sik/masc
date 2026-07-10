@@ -1,11 +1,18 @@
-# RFC-0329 — Excise the payload-blind Execute governance gate: typed Shell-IR risk with a fail-closed de-escalation, and a config-driven code exemption
+# RFC-0329 — Excise the payload-blind Execute governance gate: typed Shell-IR risk with fail-closed de-escalation and a typed exemption acceptance bar
 
-- Status: Draft
+- Status: Draft — no active code exemption; the unsafe partial implementation from PR #23761 was removed on 2026-07-10
 - Date: 2026-07-08
 - Type: Governance structural change (security-sensitive; isolated from the incident fix on purpose)
 - Scope: `lib/governance_pipeline_risk.ml`, `lib/governance_pipeline.ml`, `lib/keeper/keeper_guards.ml`, `lib/tool/tool_catalog.ml`, and the `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` flag path.
 - Companion: RFC-0328 owns the perseveration-engine fixes (memory grounding + purge, failover + stagnation) and is the incident fix. This RFC removes the operative gate structure. It is deliberately NOT bundled with RFC-0328: it loosens a safety wall and must land behind its own adversarial review and fail-closed default. It is not required to stop the `mad-improver` loop (the keeper never ran shell; `tool_calls=0`).
 - Cross-references: RFC-0091, RFC-0126, RFC-0131, RFC-0160, RFC-0208, RFC-0254, RFC-0255, RFC-0304, RFC-0309, RFC-0312, RFC-0321, RFC-0001.
+
+> **Implementation correction (2026-07-10).** Sections 3 and 4 are future
+> design, not live behavior. The raw keeper-name environment exemption from
+> PR #23761 was removed after audit found that it neither narrowed the bypass
+> to a typed tool category nor emitted an exemption audit event. Reintroduction
+> requires follow-up issue [#23906](https://github.com/jeong-sik/masc/issues/23906)
+> and security review.
 
 ---
 
@@ -15,7 +22,7 @@ A keeper is granted the `tool_execute` tool in its `tool_access`. The governance
 
 1. `tool_execute` is force-marked destructive in the catalog (`static_destructive_tool_names` includes `"tool_execute"`, `tool_catalog.ml:183-184`, applied via `force_true_if_member` `:416`), so `classify_with_metadata "tool_execute"` returns `Some Critical`. Independently, `risk_of_keeper Execute -> Critical` (`governance_pipeline_risk.ml:141`) is unconditional. Either source alone makes the risk Critical, ignoring the command payload.
 2. `keeper_guards.governance_approval_guard` (`keeper_guards.ml:944-963`) computes `hard_forbidden = auto_approval_hard_forbidden ~risk = (risk = Critical || runtime_auto_approval_blocked)` (`governance_pipeline.ml:104-105`). For Critical this is true, and the guard returns `Agent_sdk.Hooks.Block` with reason "hard_forbidden: unconditional block regardless of HITL mode" (`:958`) — before the tool handler runs.
-3. The only escape, `per_keeper_code_exemption` (`keeper_guards.ml:917-922`), is a hardcoded `false` placeholder, and it is checked only in the later `else if needs_approval` branch (`:964`), which is unreachable once `hard_forbidden` is true. So it cannot lift a Critical Execute block for anyone.
+3. There is no active exemption path. A prior attempt read keeper names from `MASC_CODE_EXEMPT_KEEPERS` and bypassed the generic `needs_approval` branch, but it was removed because the decision was not scoped to a typed code-tool category and was not audited. Critical Execute remains blocked before any future exemption point.
 
 Net: no keeper can run any shell command — `git status` and `rm -rf /` alike — and no HITL approval can change that. A capability that is always blocked is not a capability. This is the "weird structure" the incident (RFC-0328) exposed; `mad-improver` correctly observed "Execute is blocked" and then confabulated a repo-mapping cause because the true structure is invisible to the keeper.
 
@@ -87,38 +94,50 @@ It removes two classifiers (the catalog destructive override and `risk_of_keeper
 
 ---
 
-## 4. Gap B — replace the hardcoded-`false` exemption with a config-driven typed capability
+## 4. Gap B — no active exemption; typed reintroduction deferred
 
-**Operative mechanism (verified).** `keeper_guards.ml:917-922`:
+**Current production-safe state (verified 2026-07-10).**
+`governance_approval_guard` has no keeper-name exemption. Critical decisions
+take the `hard_forbidden` Block branch, and every remaining decision at or above
+the keeper confirmation threshold returns `ApprovalRequired`.
 
-```
-let per_keeper_code_exemption _keeper_name =
-  (* task-1806: operator-controlled allowlist needed. ... rondo (self-consented). Garnet and base declined ...
-     TODO: Replace with Env_config_core mechanism per task-1807. *)
-  false  (* placeholder — no keepers exempt until operator config exists *)
-```
+**Removed unsafe attempt.** PR #23761 added `MASC_CODE_EXEMPT_KEEPERS` as a
+space-split set of raw keeper-name strings. The generic approval branch checked
+only membership in that set: it did not parse a typed keeper identity, did not
+match a typed tool category or payload disposition, and did not emit an
+exemption audit event. Consequently, a listed keeper could bypass unrelated
+High-risk tools while the catalog's Critical classification still blocked the
+actual Execute/Edit/Write code paths before the exemption check. That mechanism
+was removed rather than patched with another string classifier.
 
-The comment names the intended replacement (task-1807 `Env_config_core`) and the temptation to avoid: an operator-controlled allowlist that grows by hand. A hand-grown `match name with "rondo" -> true | _ -> false` is exactly the hidden hardcoding this RFC forbids — it regresses to the old pattern (a per-keeper safety-wall bypass embedded in the risk path), which is morally identical to the keeper's hallucinated `execute=true`.
+### 4.1 Acceptance bar for a future implementation
 
-**Typed root fix.** Replace the hardcoded `false` with a per-keeper code-capability read from `Env_config_core` (task-1806/1807) as typed configuration: a closed representation of *which keepers are code-capable*, with a typed schema, read as config, fail-closed to "not exempt" on missing/unparseable config. The exemption stays scoped to its designed purpose — the High-risk code-tool (`Fs_edit`/`Fs_write`) HITL/`ApprovalRequired` branch — and must never lift a Critical block. Once Gap A lands, read-only shell no longer depends on the exemption at all (read-only commands fall below Critical and never reach it); a code-capable keeper runs reversible/irreversible shell only through the normal approval floor (§3.2), not through a blanket bypass.
-
-### 4.1 Why this is not a workaround
-
-The exemption is a typed config axis consumed at the guard, failing closed on missing config, not a per-keeper mutable classifier in the risk path and not a hardcoded name list. It is not pointed at Critical/Execute to "unblock" the keeper (that would be a safety-wall bypass); it stays on the High-risk code-tool approval branch it was designed for.
+A future exemption requires [#23906](https://github.com/jeong-sik/masc/issues/23906)
+and security review. It must use a
+typed keeper capability and a typed tool/effect category, fail closed on
+missing or malformed configuration, remain unreachable for Critical decisions,
+and emit a distinct auditable exemption decision. It must not reintroduce a raw
+keeper allowlist, command substring test, or generic `needs_approval` bypass.
 
 ---
 
-## 5. Workaround-bar and no-hardcoding self-check
+## 5. Proposed-design workaround-bar and no-hardcoding self-check
 
-1. **makes-visible-only.** Not tripped; both changes alter control flow (risk mapping, exemption source).
+The checks below are acceptance criteria for a future implementation, not a
+description of the live guard.
+
+1. **makes-visible-only.** The proposed changes must alter control flow (risk mapping, exemption source), not only add visibility.
 2. **string/substring classifier added.** Not tripped. Read-only is a typed shell-AST predicate (`R0_Read` + `typed_hit_of_ir`), never a command string list.
-3. **N-of-M.** Not tripped. Gap A removes both payload-blind Critical sources in one place; Gap B replaces the placeholder with one typed config axis, not per-keeper edits.
+3. **N-of-M.** Gap A must remove both payload-blind Critical sources in one place; a future Gap B must introduce one typed config axis, not per-keeper edits.
 4. **catch-all `_ ->` added.** Not tripped. Non-decidable arms map to Critical (fail-closed); the closed-sum mappings force a compile-time decision on new constructors.
 5. **cap/cooldown/dedup/repair.** Not tripped.
-6. **test backdoor.** Not tripped. Tests drive the classifier through real command strings and the exemption through real config.
+6. **test backdoor.** Future tests must drive the classifier through real command inputs and the exemption through its real typed configuration.
 7. **same fix N sites.** Not tripped. The read-only decision exists in exactly one substrate (`Shell_ir_risk`), consumed by both gates.
 
-Hidden-hardcoding audit (the user's explicit constraint): Gap A has no command string list (typed AST); Gap B has no keeper name list (typed config); the `R1 → High` mapping and the `typed_hit` gate are structural, not magic numbers. Nothing regresses to a hardcoded allowlist.
+Hidden-hardcoding acceptance bar: Gap A may have no command string list (typed
+AST), and a future Gap B may have no raw keeper-name list. The `R1 → High`
+mapping and the `typed_hit` gate are structural, not magic numbers. Nothing may
+regress to a hardcoded allowlist.
 
 Override clause: this is a security-loosening change, not production-blocking; it lands only with the §3.3 flag audit satisfied and its own adversarial review, never bundled under an incident umbrella.
 
@@ -137,8 +156,9 @@ Exercise `Governance_pipeline_risk.assess_risk ~tool_name:"tool_execute"` (the w
 
 ### 6.2 Exemption (Gap B)
 
-- No `Env_config_core` code-exemption config present: `per_keeper_code_exemption "mad-improver"` = false (fail-closed default preserved).
-- A keeper configured code-capable: exemption true only on the High-risk code-tool ApprovalRequired branch; Critical Execute still blocks (the exemption must not lift Critical).
+- The retired `MASC_CODE_EXEMPT_KEEPERS` value has no effect: a High-risk non-code tool still returns `ApprovalRequired`.
+- Critical Execute remains Block even when the retired environment variable names the current keeper.
+- Any future typed exemption must prove that only its explicit typed code-tool category can continue and that exactly one exemption audit event is emitted.
 
 ### 6.3 Flag audit (Gap A gating)
 
@@ -171,5 +191,5 @@ A test/assertion that with `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` off (if reachab
 - `R1_Reversible_mutation` governance mapping: High (this RFC's fail-closed default) vs proving the handler `Approval_policy` gates R1 for keepers and mapping to Medium. Verify the handler path before choosing Medium.
 - Scope of the first landing: keeper `tool_execute` only, or also operator/agent `tool_execute` governance risk through Shell-IR.
 - `typed_hit_of_ir` exact semantics for multi-node pipelines and redirections (RFC-0198): confirm a pipeline is `typed_hit` only if every node is typed-and-read-only.
-- The `Env_config_core` schema for code-capable keepers (task-1807): shape, default, and where it is read (must be one typed read site, not scattered).
+- Follow-up issue [#23906](https://github.com/jeong-sik/masc/issues/23906) must define the typed code-capability schema, default, tool/effect scope, and audit event before any exemption is reintroduced; there is no active `Env_config_core` exemption schema.
 - The `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` enforcement state for keepers — the §3.3 gating precondition.

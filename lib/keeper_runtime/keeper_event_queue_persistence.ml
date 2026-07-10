@@ -556,22 +556,68 @@ let persist_snapshot ~base_path ~keeper_name snapshot =
          path
          (Printexc.to_string exn))
 
-let update ~base_path ~keeper_name f =
+let snapshot_read_error_to_string (error : snapshot_read_error) =
+  let location =
+    match error.path with
+    | None -> ""
+    | Some path -> " path=" ^ path
+  in
+  Printf.sprintf
+    "%s%s: %s"
+    (snapshot_read_error_kind_to_string error.kind)
+    location
+    error.message
+
+let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name f =
   match snapshot_path ~base_path ~keeper_name with
-  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+  | Error msg -> Error msg
   | Ok path ->
     (try
        with_write_lock (fun () ->
-         let cur = load_from_path ~keeper_name path in
-         persist_to_path ~keeper_name path (f cur))
+         let cur, read_errors = load_from_path_with_errors ~keeper_name path in
+         match read_errors with
+         | _ :: _ ->
+           Error
+             (Printf.sprintf
+                "refusing to overwrite unreadable event queue keeper=%s: %s"
+                keeper_name
+                (String.concat
+                   "; "
+                   (List.map snapshot_read_error_to_string read_errors)))
+         | [] ->
+           (match f cur with
+            | Error _ as err -> err
+            | Ok next ->
+              (match persist_to_path_result ~keeper_name path next with
+               | Error _ as err -> err
+               | Ok () ->
+                 (* Keep the persistence lock through the live publication. Any
+                    ordinary CAS writer can advance the in-memory queue, but its
+                    snapshot is serialized after this callback and therefore
+                    observes the committed stimulus instead of overwriting it. *)
+                 after_commit ();
+                 Ok ())))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Log.Keeper.warn
-         "event_queue_snapshot: update raised keeper=%s path=%s: %s"
-         keeper_name
-         path
-         (Printexc.to_string exn))
+       Error
+         (Printf.sprintf
+            "update raised keeper=%s path=%s: %s"
+            keeper_name
+            path
+            (Printexc.to_string exn)))
+
+let update_result ?after_commit ~base_path ~keeper_name f =
+  update_checked_result
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    (fun queue -> Ok (f queue))
+
+let update ~base_path ~keeper_name f =
+  match update_result ~base_path ~keeper_name f with
+  | Ok () -> ()
+  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
 
 let record_inflight ~base_path ~keeper_name stimuli =
   match stimuli with

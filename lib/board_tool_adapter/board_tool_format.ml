@@ -21,36 +21,6 @@ module Float = Stdlib.Float
     truncated-markdown detector, and the Yojson-error boundary shared
     across the [Board_tool] submodules. Stage 10 split. *)
 
-(** Strip [STATE]...[/STATE] blocks. Inlined to avoid the
-    Keeper_prompt dependency cycle via Keeper_alerting. *)
-let strip_state_blocks_text (s : string) : string =
-  let start_marker = "[STATE]" in
-  let end_marker = "[/STATE]" in
-  let start_re = Re.str start_marker |> Re.compile in
-  let end_re = Re.str end_marker |> Re.compile in
-  let len = String.length s in
-  let rec loop from (buf : Buffer.t) =
-    if from >= len
-    then ()
-    else (
-      match Re.exec_opt ~pos:from start_re s with
-      | Some g ->
-        let i = Re.Group.start g 0 in
-        if i > from then Stdlib.Buffer.add_substring buf s from (i - from);
-        let block_start = i + String.length start_marker in
-        let next_from =
-          match Re.exec_opt ~pos:block_start end_re s with
-          | Some g2 -> Re.Group.start g2 0 + String.length end_marker
-          | None -> len
-        in
-        loop next_from buf
-      | None -> Stdlib.Buffer.add_substring buf s from (len - from))
-  in
-  let buf = Buffer.create len in
-  loop 0 buf;
-  Buffer.contents buf
-;;
-
 (** {1 Helpers} *)
 
 let raw_agent_name_meta_key ~field = field ^ "_raw_agent_name"

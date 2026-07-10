@@ -32,7 +32,7 @@ masc keeper governance guard가 파괴적/금지 도구를 거부할 때 `Agent_
 
 - `keeper_librarian.ml:42` — `is_error=%b`가 episode 메모리에 영구 기록 → 거부가 success로 학습
 - `keeper_tool_dispatch_runtime.ml:251-255` — `classify_tool_result_payload`가 Override payload `[tool_skipped] ...`를 기존엔 `Plain_text` 경로로 다뤄 `inferred_outcome=Success`가 발생하는 것으로 확인
-- `[tool_skipped] code=hard_forbidden` 문자열은 keeper system prompt(`keeper_prompt.ml`, `keeper_run_prompt.ml`, `keeper_state_block_prompt.ml`, `prompts/` 전수 grep 0건) 어디에서도 LLM에게 설명되지 않음 → LLM이 자유 텍스트 해석에 의존 (RFC-0042급 string 분류기 암시)
+- `[tool_skipped] code=hard_forbidden` 문자열은 keeper system prompt sources 전수 grep 0건으로 LLM에게 설명되지 않음 → LLM이 자유 텍스트 해석에 의존 (RFC-0042급 string 분류기 암시)
 
 ## 2. 원칙 — typed policy rejection
 

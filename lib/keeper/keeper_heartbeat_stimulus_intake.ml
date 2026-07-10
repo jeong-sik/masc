@@ -24,7 +24,6 @@ let stimulus_urgency_to_string = function
 
 let pending_board_event_of_stimulus ~meta_after_triage stim =
   Keeper_world_observation.pending_board_event_of_stimulus
-    ~continuity_summary:meta_after_triage.continuity_summary
     ~meta:meta_after_triage
     stim
 ;;
@@ -287,12 +286,10 @@ let consume_single_heartbeat_stimulus
       meta_after_triage.name;
     pending_events
   | Keeper_event_queue.Hitl_resolved r ->
-    (* The HITL approval this keeper was skipping on ([Skip Approval_pending])
-       was resolved. The wake is the whole point: the approval has left the
-       queue, so this cycle no longer skips and the keeper resumes on its own
-       state. There is no observation to inject — the decision reached the
-       keeper's suspended tool call (or the reject/expire teardown) through the
-       resolver, not turn input; injecting a pending event would fabricate one. *)
+    (* The approval has left the queue, so this cycle no longer skips. There is
+       no observation to fabricate: the typed resolution itself is threaded as
+       cycle context. An approved exact-action grant is consumed at governance;
+       reject/edit wakes carry no grant. *)
     Log.Keeper.info
       "turn entry: hitl resolution delivered approval=%s decision=%s (keeper=%s)"
       r.approval_id
@@ -324,6 +321,25 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
     batch
 ;;
 
+let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
+  match stimulus.payload with
+  | Keeper_event_queue.Hitl_resolved resolution ->
+    Option.is_none
+      (Keeper_approval_queue.get_pending_entry ~id:resolution.approval_id)
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.No_progress_recovery
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Bg_completed _
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Goal_verification_failed _
+  | Keeper_event_queue.Failure_judgment _
+  | Keeper_event_queue.Goal_assigned _
+  | Keeper_event_queue.Goal_stagnation _ ->
+    true
+;;
+
 let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
   (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus per
      turn, where the board unit is the turn digest: every queued board
@@ -339,9 +355,10 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
     match board_batch with
     | [] ->
       (match
-         Keeper_registry_event_queue.dequeue
+         Keeper_registry_event_queue.dequeue_when
            ~base_path:ctx.config.base_path
            meta_after_triage.name
+           ~ready:stimulus_ready_for_intake
        with
        | None -> [], []
        | Some stim -> consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim, [ stim ])

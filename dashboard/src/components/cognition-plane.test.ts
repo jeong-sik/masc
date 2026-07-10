@@ -77,7 +77,7 @@ describe('CognitionPlane', () => {
   })
 
   it('renders the keeper cognition inspector for the keeper view', async () => {
-    route.value.params = { section: 'cognition', view: 'keeper', focus: 'bdi' }
+    route.value.params = { section: 'cognition', view: 'keeper', focus: 'tool-access' }
     const { CognitionPlane } = await loadPlane()
 
     render(html`<${CognitionPlane} />`, container)

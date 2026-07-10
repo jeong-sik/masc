@@ -20,6 +20,12 @@ module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 
+let () =
+  AQ.set_approval_resolution_wake_hook
+    (fun
+      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      Ok (fun () -> ()))
+
 let supervisor_agent_name = Sup.supervisor_agent_name
 
 let temp_dir () =
@@ -1438,7 +1444,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       check bool "keeper registered after approval" true
         (Reg.is_registered ~base_path:config.base_path meta.name))
 
-let test_sweep_warns_for_pending_hitl_approval () =
+let test_sweep_reports_pending_hitl_approval () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1482,21 +1488,21 @@ let test_sweep_warns_for_pending_hitl_approval () =
       sweep_and_recover_no_materialize ctx;
       let expected =
         Printf.sprintf
-          "keeper:%s blocked on 1 pending HITL approval(s); chat awaits operator \
-           decision"
+          "keeper:%s has 1 nonblocking HITL approval(s); chat lane remains \
+           available"
           name
       in
-      let warning_seen =
+      let visibility_seen =
         Log.Ring.recent
           ~limit:50
           ~module_filter:"Keeper"
-          ~min_level:(Log.level_to_int Log.Warn)
+          ~min_level:(Log.level_to_int Log.Info)
           ~since_seq:baseline
           ()
         |> List.exists (fun (entry : Log.Ring.entry) ->
              String.equal entry.message expected)
       in
-      check bool "pending HITL approval warning emitted" true warning_seen;
+      check bool "pending HITL approval visibility emitted" true visibility_seen;
       check bool "approval remains pending after visibility sweep" true
         (AQ.has_pending_for_keeper ~keeper_name:name);
       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
@@ -3061,6 +3067,80 @@ let test_sweep_auto_resumes_registered_paused_entry () =
       check bool "auto-resume wakes existing keeper fiber" true
         (Atomic.get entry.Reg.fiber_wakeup))
 
+(* Test: Phase-3 prune of a stale paused meta file also unregisters the
+   registry entry. Without the unregister, the surviving entry is a ghost:
+   still a board-wake candidate (Paused is accepted by
+   [board_signal_entry_is_wakeup_candidate]) with no durable meta behind it,
+   and any later [write_meta] through it resurrects the pruned file at
+   meta_version=1 (RFC-0334 W3 census #23837, freshness caveat 1). Mirrors
+   [keeper_down]'s remove_meta branch, which pairs [Sys.remove] with
+   [unregister]. *)
+let test_prune_stale_paused_meta_unregisters_entry () =
+  ensure_test_runtime ();
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let name = "stale-paused-prune" in
+      write_keeper_toml config_dir ~name;
+      (* Just beyond the configured cleanup TTL, and
+         [auto_resume_after_sec = None] keeps Phase 3.5 auto-resume out of
+         the picture (operator pauses are never auto-resumed). *)
+      let stale_timestamp =
+        let t =
+          Unix.gmtime
+            (Unix.time () -. Env_config.KeeperSupervisor.paused_cleanup_ttl_sec
+             -. 1.0)
+        in
+        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+          (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+          t.tm_hour t.tm_min t.tm_sec
+      in
+      let stale_meta =
+        { (make_meta name) with
+          paused = true;
+          auto_resume_after_sec = None;
+          updated_at = stale_timestamp;
+        }
+      in
+      (match Keeper_meta_store.write_meta config stale_meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let _entry = Reg.register ~base_path:config.base_path name stale_meta in
+      (match Reg.dispatch_event ~base_path:config.base_path name KSM.Operator_pause with
+       | Ok _ -> ()
+       | Error err ->
+           fail
+             ("precondition: Operator_pause failed: "
+              ^ KSM.transition_error_to_string err));
+      let meta_path = Keeper_types_profile.keeper_meta_path config name in
+      check bool "precondition: meta file on disk" true (Sys.file_exists meta_path);
+      check bool "precondition: registered" true
+        (Reg.is_registered ~base_path:config.base_path name);
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      check bool "stale paused meta file pruned" false (Sys.file_exists meta_path);
+      check bool "pruned keeper unregistered (no ghost wake candidate)" false
+        (Reg.is_registered ~base_path:config.base_path name))
+
 (* Test: operator-paused keeper ([auto_resume_after_sec = None]) is NOT
    auto-resumed by the sweep — only the human can clear it. *)
 let test_operator_pause_not_auto_resumed () =
@@ -3745,7 +3825,7 @@ let () =
       test_case "sweep restores reconcile gate for paused keeper" `Quick
         test_sweep_restores_reconcile_gate_for_paused_keeper;
       test_case "sweep warns for pending HITL approval" `Quick
-        test_sweep_warns_for_pending_hitl_approval;
+        test_sweep_reports_pending_hitl_approval;
     ];
     "restart_metrics", [
       test_case "restart path emits attempt and started outcome metrics" `Quick
@@ -3806,6 +3886,8 @@ let () =
         test_sweep_auto_resumes_after_backoff;
       test_case "sweep auto-resumes registered paused keeper in registry" `Quick
         test_sweep_auto_resumes_registered_paused_entry;
+      test_case "prune of stale paused meta unregisters the registry entry" `Quick
+        test_prune_stale_paused_meta_unregisters_entry;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick
         test_operator_pause_not_auto_resumed;
       test_case "turn timeout blocker without resume policy is auto-recoverable"

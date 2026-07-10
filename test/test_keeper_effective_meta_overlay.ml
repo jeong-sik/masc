@@ -332,19 +332,14 @@ tool_access = ["tool_execute"]
       let status_json =
         Yojson.Safe.from_string (Profile.tool_result_body status_result)
       in
-      let self_model = json_assoc_field "self_model" status_json in
       Alcotest.(check (option string))
         "status keeps persona snapshot"
         (Some "probe")
         (json_string_field "persona" status_json);
       Alcotest.(check (option string))
-        "status self_model keeps persona snapshot"
-        (Some "probe")
-        (json_string_field "persona" self_model);
-      Alcotest.(check (option string))
-        "status self_model keeps instructions snapshot"
+        "status keeps instructions snapshot"
         (Some "profile instructions")
-        (json_string_field "instructions" self_model)
+        (json_string_field "instructions" status_json)
 
 let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -636,15 +631,17 @@ let test_status_surfaces_chat_queue_runtime () =
       Eio_guard.disable ())
     (fun () ->
       Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path;
-      Masc.Keeper_chat_queue.enqueue
-        ~keeper_name:name
-        {
-          Masc.Keeper_chat_queue.content = "queued status probe";
-          user_blocks = [];
-          attachments = [];
-          timestamp = 1.0;
-          source = Masc.Keeper_chat_queue.Dashboard;
-        };
+      ignore
+        (Masc.Keeper_chat_queue.enqueue
+           ~keeper_name:name
+           {
+             Masc.Keeper_chat_queue.content = "queued status probe";
+             user_blocks = [];
+             attachments = [];
+             timestamp = 1.0;
+             source = Masc.Keeper_chat_queue.Dashboard;
+           }
+          : string);
       let status_json = status_json_with ~name config in
       let chat_queue = json_assoc_field "chat_queue" status_json in
       Alcotest.(check (option int))

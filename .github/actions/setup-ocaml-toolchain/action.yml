@@ -39,25 +39,47 @@ runs:
     # The opam cache above only restores the toolchain/switch; every dune
     # build of masc itself still started cold (~50 min Build and Test).
     # Cache dune's content-addressed artifact store so an unchanged module
-    # graph rebuilds incrementally. Keyed by run id so each run REWRITES the
-    # cache with its newest artifacts (a stable key would freeze the first
-    # upload forever); restore always hits the newest same-prefix entry.
+    # graph rebuilds incrementally. Keyed by job and run id so each job publishes
+    # a new immutable cache with its newest artifacts (a stable key would freeze
+    # the first upload forever). [github.job] is part of both the primary key
+    # and restore namespace: Health/Lint/Build run in parallel and produce
+    # different artifact subsets, while GitHub cache entries are immutable
+    # after the first successful save. A shared run-id key would let the fastest, usually
+    # smallest job permanently win that run's save race.
     - name: Cache dune build artifacts (Linux)
       if: runner.os == 'Linux' && inputs.dune-cache == 'true'
       uses: actions/cache@v5
       with:
         path: ~/.cache/dune
-        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.run_id }}
+        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.job }}-${{ github.run_id }}
         restore-keys: |
-          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
+          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.job }}-
 
+    # Storage mode is hardlink, not copy. `copy` keeps every artifact twice:
+    # once in _build and once in ~/.cache/dune. On ubuntu-latest that
+    # duplication exhausted the runner disk and the Build and Test job of run
+    # 29090394322 (main, the #23996 merge) died while linking a test
+    # executable, with zero free space reported by the runner. Both paths live
+    # on `/`, so dune can hardlink cache entries into _build and keep a single
+    # copy on disk.
+    #
+    # This explanation stays a YAML comment on purpose. GitHub echoes the whole
+    # `run:` script into the job log, so a shell comment quoting the linker and
+    # disk-space messages would plant those exact strings in every job log —
+    # scripts/ci-run-tests.sh matches them in disk_full_detected().
     - name: Enable dune cache (Linux)
       if: runner.os == 'Linux' && inputs.dune-cache == 'true'
       shell: bash
       run: |
+        # hardlink, NOT copy: copy mode duplicates every artifact into
+        # ~/.cache/dune, roughly doubling disk while the cache populates.
+        # The first cache-cold Build and Test after #23996 died at link time
+        # with "/usr/bin/ld: final link failed: No space left on device"
+        # (run 29091172837). ~/.cache/dune and the workspace share one
+        # filesystem on GitHub runners, so hardlinks add no meaningful space.
         {
           echo "DUNE_CACHE=enabled"
-          echo "DUNE_CACHE_STORAGE_MODE=copy"
+          echo "DUNE_CACHE_STORAGE_MODE=hardlink"
         } >> "$GITHUB_ENV"
 
     - name: Bootstrap local opam switch (Linux)

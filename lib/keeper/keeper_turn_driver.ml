@@ -297,7 +297,8 @@ let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
        to_runtime_id, rerouted)
 
 type attempt_inference_policy =
-  { attempt_enable_thinking : bool option
+  { attempt_temperature : float
+  ; attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
   ; attempt_max_tokens : int
   }
@@ -305,11 +306,17 @@ type attempt_inference_policy =
 let attempt_inference_policy
     ?max_tokens_for_runtime
     ~runtime_id
+    ~fallback_temperature
     ~fallback_enable_thinking
     ~fallback_max_tokens
     ()
   =
   let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
+  let attempt_temperature =
+    Runtime_inference.resolve_temperature
+      ~runtime_id
+      ~fallback:(fun () -> fallback_temperature)
+  in
   let attempt_enable_thinking =
     match runtime_seed.thinking_enabled with
     | Some _ as enabled -> enabled
@@ -320,7 +327,8 @@ let attempt_inference_policy
     | Some resolver -> resolver ~runtime_id
     | None -> fallback_max_tokens
   in
-  { attempt_enable_thinking
+  { attempt_temperature
+  ; attempt_enable_thinking
   ; attempt_preserve_thinking = runtime_seed.preserve_thinking
   ; attempt_max_tokens
   }
@@ -618,6 +626,7 @@ let run_named
         attempt_inference_policy
           ?max_tokens_for_runtime
           ~runtime_id:attempt_runtime_id
+          ~fallback_temperature:temperature
           ~fallback_enable_thinking:enable_thinking
           ~fallback_max_tokens:max_tokens
           ()
@@ -677,7 +686,7 @@ let run_named
             ; stream_idle_timeout_s
             ; execution_idle_timeout_s
             ; body_timeout_s
-            ; temperature
+            ; temperature = inference_policy.attempt_temperature
             ; max_tokens = inference_policy.attempt_max_tokens
             ; accept
             ; guardrails

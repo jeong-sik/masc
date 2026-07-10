@@ -172,6 +172,42 @@ let check_json_null label = function
   | json -> failf "%s: expected JSON null, got %s" label (Yojson.Safe.to_string json)
 ;;
 
+let payload_contract_for_kind_exn ~surface contracts kind =
+  let expected_kind = Schedule_payload_projection.known_kind_to_string kind in
+  let open Yojson.Safe.Util in
+  match
+    List.find_opt
+      (fun contract ->
+         match contract |> member "kind" with
+         | `String actual_kind -> String.equal actual_kind expected_kind
+         | _ -> false)
+      contracts
+  with
+  | Some contract -> contract
+  | None -> failf "%s contract missing for kind %s" surface expected_kind
+;;
+
+let check_payload_contract
+    ~surface
+    ~side_effecting_risk_required
+    kind
+    contracts
+  =
+  let contract = payload_contract_for_kind_exn ~surface contracts kind in
+  let expected_kind = Schedule_payload_projection.known_kind_to_string kind in
+  let label suffix = Printf.sprintf "%s %s %s" surface expected_kind suffix in
+  let open Yojson.Safe.Util in
+  check string (label "kind") expected_kind (contract |> member "kind" |> to_string);
+  check string (label "dispatch tool")
+    (Schedule_payload_projection.dispatch_tool_name kind)
+    (contract |> member "dispatch_tool" |> to_string);
+  (match contract |> member "schema_versions" |> to_list with
+   | version :: _ -> check int (label "schema version") 1 (version |> to_int)
+   | [] -> failf "%s has no schema versions" (label "contract"));
+  check bool (label "side-effecting risk") side_effecting_risk_required
+    (contract |> member "side_effecting_risk_required" |> to_bool)
+;;
+
 let test_schema_and_descriptor_exposed () =
   let create_name = schedule_tool_name Tool_schemas_schedule.Create_request in
   let approve_name = operator_schedule_tool_name Tool_schemas_schedule.Approve_request in
@@ -365,17 +401,13 @@ let test_dispatch_list_surfaces_payload_support_summary () =
     let payload_support = data |> member "payload_support" in
     check string "supported kind" Schedule_supported_kinds.board_post
       (payload_support |> member "supported_kinds" |> to_list |> List.hd |> to_string);
-    let contract =
-      payload_support |> member "supported_contracts" |> to_list |> List.hd
-    in
-    check string "supported contract kind" Schedule_supported_kinds.board_post
-      (contract |> member "kind" |> to_string);
-    check string "supported contract dispatch tool"
-      (Schedule_payload_projection.dispatch_tool_name
-         Schedule_payload_projection.Board_post)
-      (contract |> member "dispatch_tool" |> to_string);
-    check bool "supported contract side-effecting risk" true
-      (contract |> member "side_effecting_risk_required" |> to_bool);
+    let contracts = payload_support |> member "supported_contracts" |> to_list in
+    check_payload_contract ~surface:"schedule_list"
+      ~side_effecting_risk_required:true
+      Schedule_payload_projection.Board_post contracts;
+    check_payload_contract ~surface:"schedule_list"
+      ~side_effecting_risk_required:false
+      Schedule_payload_projection.Keeper_wake contracts;
     check int "one unsupported request"
       1
       (payload_support |> member "unsupported_request_count" |> to_int);
@@ -732,10 +764,10 @@ let test_dispatch_create_keeper_wake_payload () =
 ;;
 
 let test_keeper_wake_creation_requires_reminder_only () =
-  (* Projection invariant guarding the tool-handler clamp: a keeper_wake with a
-     side-effecting risk_class is rejected at creation; reminder_only is
-     accepted. This keeps a self-wake out of the human-grant deadlock even for a
-     direct caller that bypasses the handler clamp. *)
+  (* Projection invariant guarding the tool-handler clamp: [keeper_wake] has
+     one intrinsic risk class, [Reminder_only]. Reject both side-effecting
+     classes and the other non-side-effecting class ([Read_only]) so metadata
+     cannot drift away from the typed payload contract. *)
   let payload =
     `Assoc
       [ "kind", `String "masc.keeper_wake"
@@ -751,6 +783,10 @@ let test_keeper_wake_creation_requires_reminder_only () =
     (Result.is_error
        (Schedule_payload_projection.validate_request_payload_for_creation
           ~payload ~risk_class:Schedule_domain.Workspace_write));
+  check bool "read-only keeper_wake rejected" true
+    (Result.is_error
+       (Schedule_payload_projection.validate_request_payload_for_creation
+          ~payload ~risk_class:Schedule_domain.Read_only));
   check bool "reminder_only keeper_wake accepted" true
     (Result.is_ok
        (Schedule_payload_projection.validate_request_payload_for_creation
@@ -979,23 +1015,16 @@ let test_payload_registry_matches_supported_kind_ssot () =
   check string "board-post variant string" Schedule_supported_kinds.board_post
     (Schedule_payload_projection.known_kind_to_string
        Schedule_payload_projection.Board_post);
-  (match
-     Schedule_payload_projection.supported_contracts_to_yojson ()
-     |> Yojson.Safe.Util.to_list
-   with
-   | contract :: _ ->
-     let open Yojson.Safe.Util in
-     check string "registry contract kind" Schedule_supported_kinds.board_post
-       (contract |> member "kind" |> to_string);
-     check string "registry contract dispatch tool"
-       (Schedule_payload_projection.dispatch_tool_name
-          Schedule_payload_projection.Board_post)
-       (contract |> member "dispatch_tool" |> to_string);
-     check int "registry contract schema version" 1
-       (contract |> member "schema_versions" |> to_list |> List.hd |> to_int);
-     check bool "registry contract side-effecting risk" true
-       (contract |> member "side_effecting_risk_required" |> to_bool)
-   | [] -> fail "expected at least one payload contract")
+  let contracts =
+    Schedule_payload_projection.supported_contracts_to_yojson ()
+    |> Yojson.Safe.Util.to_list
+  in
+  check_payload_contract ~surface:"registry"
+    ~side_effecting_risk_required:true
+    Schedule_payload_projection.Board_post contracts;
+  check_payload_contract ~surface:"registry"
+    ~side_effecting_risk_required:false
+    Schedule_payload_projection.Keeper_wake contracts
 ;;
 
 let test_dispatch_tool_projection_requires_dispatchable_payload () =
@@ -1340,14 +1369,15 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
   check string "supported payload kind" "masc.board_post"
     (json |> member "payload_support" |> member "supported_kinds" |> to_list
      |> List.hd |> to_string);
-  let payload_contract =
+  let payload_contracts =
     json |> member "payload_support" |> member "supported_contracts" |> to_list
-    |> List.hd
   in
-  check string "supported payload contract dispatch tool"
-    (Schedule_payload_projection.dispatch_tool_name
-       Schedule_payload_projection.Board_post)
-    (payload_contract |> member "dispatch_tool" |> to_string);
+  check_payload_contract ~surface:"dashboard"
+    ~side_effecting_risk_required:true
+    Schedule_payload_projection.Board_post payload_contracts;
+  check_payload_contract ~surface:"dashboard"
+    ~side_effecting_risk_required:false
+    Schedule_payload_projection.Keeper_wake payload_contracts;
   (match json |> member "payload_support" |> member "unsupported_kinds" |> to_list with
    | unsupported :: _ ->
      check string "unsupported payload kind" "test.reminder"

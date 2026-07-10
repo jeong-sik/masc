@@ -305,18 +305,20 @@ let dispatch_error_deterministic_retry_fields error =
   | Some reason -> Keeper_tool_deterministic_error.deterministic_retry_fields reason
   | None -> []
 
-let shell_ir_approval_overlay =
-  let default_overlay = Masc_exec.Approval_config.autonomous in
-  match Env_config_runtime.Shell_ir_approval.raw_overlay () with
-  | None -> default_overlay
-  | Some raw ->
-    (match Masc_exec.Approval_config.shell_ir_approval_overlay_of_string raw with
-     | Some overlay -> overlay
-     | None ->
-       Log.Dashboard.warn
-         "invalid MASC_SHELL_IR_APPROVAL value %S; using autonomous overlay"
-         raw;
-       default_overlay)
+let shell_ir_approval_overlay () =
+  let resolution =
+    Env_config_runtime.Shell_ir_approval.raw_overlay ()
+    |> Masc_exec.Approval_config.resolve_shell_ir_approval_overlay
+  in
+  (match resolution.source with
+   | Masc_exec.Approval_config.Invalid_overlay_fail_closed raw ->
+     Log.Dashboard.warn
+       "invalid MASC_SHELL_IR_APPROVAL value %S; using fail-closed enforced overlay"
+       raw
+   | Masc_exec.Approval_config.Default_autonomous
+   | Masc_exec.Approval_config.Configured_overlay _ ->
+     ());
+  resolution.effective
 
 let pr_action_status_label = function
   | Unix.WEXITED 0 -> "success"
@@ -589,6 +591,7 @@ module For_testing = struct
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
   let record_pr_action_metric = record_pr_action_metric
   let record_gh_classification_metric = record_gh_classification_metric
+  let shell_ir_approval_overlay = shell_ir_approval_overlay
   let shell_ir_approval_input = shell_ir_approval_input
   let submit_shell_ir_approval_pending = submit_shell_ir_approval_pending
   let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
@@ -1078,10 +1081,10 @@ let handle_tool_execute_typed
             if Env_config_runtime.Shell_ir_approval_gate.enabled ()
             then (
               let agent_id = Masc_exec.Agent_id.of_string meta.name in
-              (* RFC-0254 §5.2/§5.5: the keeper lane is autonomous — no human or
-                 resolver can answer an [Ask], so the overlay is [autonomous]
-                 (all [Observe] => non-catastrophic [Allow] + telemetry).  This
-                 unblocks the toolchain (defect §2.2.2) while the
+              (* RFC-0254 §5.2/§5.5: the keeper lane defaults to [autonomous] —
+                 no human or resolver can answer an [Ask].  Resolve the typed
+                 environment overlay at each Execute decision so enforcement
+                 and dashboard runtime truth observe the same live value.  The
                  trust-independent catastrophic floor in [Approval_policy.decide]
                  (destructive git, redirect write-escape, [mkfs]) still denies.
                  The floor is applied identically on Host and inside Docker
@@ -1089,7 +1092,7 @@ let handle_tool_execute_typed
                  the real remote even from a container), so no sandbox-conditional
                  branch is needed: both profiles use the same overlay. *)
               let approval_config =
-                { Masc_exec.Approval_config.defaults = shell_ir_approval_overlay
+                { Masc_exec.Approval_config.defaults = shell_ir_approval_overlay ()
                 ; per_agent = []
                 }
               in

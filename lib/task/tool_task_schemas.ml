@@ -304,8 +304,8 @@ completion review."
             ]);
             ("evidence_refs", `Assoc [
               ("type", `String "array");
-              ("items", `Assoc [ ("type", `String "string") ]);
-              ("description", `String "Trusted references substantiating completion. At least one reference must validate against local state to pass the task-completion evidence gate on done/submit_for_verification: existing base-path file/file:// URI, local git commit hash, or .masc trace/turn/receipt ref. URLs, PR numbers, and trace-shaped labels are recorded but not trusted by shape alone.");
+              ("items", `Assoc [ ("type", `String "string"); ("minLength", `Int 1) ]);
+              ("description", `String "Trusted references substantiating completion. Entries must be non-empty strings (blank entries are rejected, not dropped). At least one reference must validate against local state to pass the task-completion evidence gate on done/submit_for_verification: existing base-path file/file:// URI, local git commit hash, or .masc trace/turn/receipt ref. URLs, PR numbers, and trace-shaped labels are recorded but not trusted by shape alone.");
             ]);
           ]);
           ("required", `List [`String "summary"]);

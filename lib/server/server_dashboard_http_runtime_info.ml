@@ -1973,31 +1973,26 @@ let governance_hitl_json () =
 let shell_ir_approval_json () =
   let gate_enabled = Env_config_runtime.Shell_ir_approval_gate.enabled () in
   let raw_overlay = Env_config_runtime.Shell_ir_approval.raw_overlay () in
-  let parsed_overlay =
-    match raw_overlay with
-    | Some raw -> Masc_exec.Approval_config.shell_ir_approval_overlay_of_string raw
-    | None -> None
+  let resolution =
+    Masc_exec.Approval_config.resolve_shell_ir_approval_overlay raw_overlay
   in
-  let effective_overlay =
-    Option.value parsed_overlay ~default:Masc_exec.Approval_config.autonomous
-  in
-  let source =
-    match raw_overlay with
-    | None -> `String "default_autonomous"
-    | Some _ when Option.is_some parsed_overlay -> `String "raw_overlay"
-    | Some _ -> `String "invalid_overlay_fallback_autonomous"
-  in
-  let reason =
-    match gate_enabled, raw_overlay, parsed_overlay with
-    | false, _, _ ->
-      `String "shell-ir approval gate disabled via MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
-    | true, None, _ ->
-      `String "using fallback overlay: Masc_exec.Approval_config.autonomous"
-    | true, Some raw, Some _ ->
-      `String ("using parsed MASC_SHELL_IR_APPROVAL value: " ^ raw)
-    | true, Some raw, None ->
-      `String
-        ("invalid MASC_SHELL_IR_APPROVAL value; fallback to autonomous: " ^ raw)
+  let source, reason =
+    match gate_enabled, resolution.source with
+    | false, _ ->
+      ( `String "gate_disabled"
+      , `String
+          "shell-ir approval gate disabled via MASC_SHELL_IR_APPROVAL_GATE_ENABLED" )
+    | true, Masc_exec.Approval_config.Default_autonomous ->
+      ( `String "default_autonomous"
+      , `String "using default overlay: Masc_exec.Approval_config.autonomous" )
+    | true, Masc_exec.Approval_config.Configured_overlay raw ->
+      ( `String "raw_overlay"
+      , `String ("using parsed MASC_SHELL_IR_APPROVAL value: " ^ raw) )
+    | true, Masc_exec.Approval_config.Invalid_overlay_fail_closed raw ->
+      ( `String "invalid_overlay_fail_closed"
+      , `String
+          ("invalid MASC_SHELL_IR_APPROVAL value; using fail-closed enforced overlay: "
+           ^ raw) )
   in
   `Assoc
     [ "schema", `String "masc.shell_ir_approval.v1"
@@ -2006,9 +2001,9 @@ let shell_ir_approval_json () =
     ; "raw_overlay", Json_util.string_opt_to_json raw_overlay
     ; ( "trust"
       , `Assoc
-          [ "safe", `String (Masc_exec.Approval_config.trust_level_to_string effective_overlay.safe_trust)
-          ; "audited", `String (Masc_exec.Approval_config.trust_level_to_string effective_overlay.audited_trust)
-          ; "privileged", `String (Masc_exec.Approval_config.trust_level_to_string effective_overlay.privileged_trust)
+          [ "safe", `String (Masc_exec.Approval_config.trust_level_to_string resolution.effective.safe_trust)
+          ; "audited", `String (Masc_exec.Approval_config.trust_level_to_string resolution.effective.audited_trust)
+          ; "privileged", `String (Masc_exec.Approval_config.trust_level_to_string resolution.effective.privileged_trust)
           ] )
     ; "source", source
     ; "reason", reason

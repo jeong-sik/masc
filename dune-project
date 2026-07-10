@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.19.56)
+(version 0.20.0)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -55,11 +55,13 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.208.19 (oas#2474). Beyond v0.208.18 (oas#2468) it adds
-  ;; the reasoning replay token-waste fix (oas#2470, released via oas#2473).
+  ;; Pinned to OAS v0.208.22 (oas#2492, masc pin #23697). Beyond v0.208.19 it
+  ;; adds the RFC-0321 Block variant (oas#2487), typed Chat_template_token
+  ;; fail-close (oas#2484), openai-compat thinking + empty-completion fail-close
+  ;; (oas#2488), and streaming empty-completion fail-close (oas#2491).
   ;; Exact pin sha lives
   ;; in scripts/oas-agent-sdk-pin.sh (SSOT); see check-oas-pin.sh.
-  (agent_sdk (>= 0.208.20))
+  (agent_sdk (>= 0.208.22))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

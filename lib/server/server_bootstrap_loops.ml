@@ -512,20 +512,18 @@ let start_keeper_loops
      Keeper_world_observation -> Keeper_approval_queue dependency cycle. Mirrors
      the Fusion_completed/Bg_completed async-completion wakes. *)
   Keeper_approval_queue.set_approval_resolution_wake_hook
-    (fun ~base_path ~keeper_name ~approval_id ~decision ->
+    (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
        let resolution =
          Keeper_event_queue.
-           { approval_id
-           ; decision
-           (* WORKAROUND (RFC-0320 W2): the approval-submission connector is not
-              yet captured on the queue entry, so a HITL resolution cannot route
-              back to the originating chat thread and is [Unrouted]. 근본 해결:
-              W2b threads a continuation_channel through
-              [Keeper_approval_queue.create_entry] and the resolution wake hook
-              so this becomes [entry.channel] instead. *)
-           ; channel =
-               Keeper_continuation_channel.unrouted
-                 "hitl provenance capture pending (RFC-0320 W2b)"
+           {
+             approval_id;
+             decision;
+             channel =
+               Option.value
+                 channel
+                 ~default:
+                   (Keeper_continuation_channel.unrouted
+                      "legacy: no approval continuation channel");
            }
        in
        let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
@@ -785,14 +783,9 @@ let start_keeper_loops
           interaction_judge_ctx));
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
-  fork_subsystem "verification_timeout" (fun () ->
-    let interval = Env_config_runtime.Verification.timeout_check_interval_seconds in
-    let rec loop () =
-      Eio.Time.sleep clock interval;
-      Verification_protocol.check_timeouts ~config:(Mcp_server.workspace_config state);
-      loop ()
-    in
-    loop ());
+  (* No verification_timeout fork: RFC-0220 §11 PR-3 deleted the sweep —
+     the wall-clock deadline rescue was removed in §5 and the fork had been
+     spinning on a no-op since PR-1. *)
   (* HITL approval queue death-spiral fix.
      [Keeper_approval_queue.expire_stale] has been a complete
      implementation (queue removal, audit event, promise [Reject]
@@ -1105,7 +1098,7 @@ let start_keeper_loops
                     "keeper_chat_consumer: forking Slack adapter \
                      for keeper=%s"
                     keeper_name;
-                  (match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
+                  (match Env_config_slack.bot_token_opt () with
                    | Some token ->
                        (* Isolate from the shared [sw] like the Discord arm
                           above; a bare fork would cancel sibling fibers if
@@ -1118,12 +1111,20 @@ let start_keeper_loops
                              keeper_name (Printexc.to_string exn))
                          (fun () ->
                            Keeper_chat_slack.adapter_loop ~token
-                             ~channel ~events ())
+                             ~channel ~events
+                             ~on_send_result:(fun result ->
+                               Slack_observability.record_reply
+                                 (match result with
+                                  | Ok () -> Slack_observability.Reply_send_ok
+                                  | Error _ ->
+                                      Slack_observability.Reply_send_failed))
+                             ())
                    | None ->
-                       Log.Keeper.warn
+                       Log.Keeper.error
                          "keeper_chat_consumer: \
-                          MASC_SLACK_BOT_TOKEN not set, \
-                          skipping Slack delivery for keeper=%s"
+                          SLACK_BOT_TOKEN not set; \
+                          Slack delivery skipped for keeper=%s \
+                          (queued reply will not be delivered)"
                          keeper_name));
              (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
                 line recorded at the gate inbound boundary before the message was
@@ -1135,10 +1136,20 @@ let start_keeper_loops
                | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
                | Keeper_chat_queue.Dashboard -> false
              in
+             (* Derive the typed reply-continuation channel from the queued
+                message source so [process_single_turn] can route the
+                assistant reply to the originating connector (Discord/Slack)
+                or dashboard thread. [dashboard_thread_id] is the same
+                [thread_id] the turn itself uses. *)
+             let continuation_channel =
+               Keeper_chat_queue.continuation_channel_of_message_source
+                 ~dashboard_thread_id:thread_id
+                 queued_message.source
+             in
              process_single_turn ~connector_user_line_recorded_upstream
                ~state ~clock ~sw ~auth_token:None
-               ~thread_id ~closed ~client_disconnects:None ~payload ~run_id ~message_id
-               ~agent_name ~events)
+               ~thread_id ~continuation_channel ~closed ~client_disconnects:None
+               ~payload ~run_id ~message_id ~agent_name ~events)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

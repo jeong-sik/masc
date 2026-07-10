@@ -67,10 +67,12 @@ val owner_transition_action_denylist : context -> string list
 val review_completion_notes :
   completion_contract:string list option ->
   evaluator_runtime:string option ->
+  operator_override:bool ->
   ctx:context ->
   task_opt:Masc_domain.task option ->
   task_id:string ->
   notes:string ->
+  evidence_refs:string list ->
   string option
 
 val persisted_contract_rejection :

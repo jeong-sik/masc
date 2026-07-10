@@ -364,15 +364,17 @@ let classify_write_detail (words : string list) : risk_class option =
 
 let repo_hosting_cli_irreversible_ops =
   [
-    (* RFC-0309 W4/G-9 (completing the deferred [pr ready] case): only [merge]
-       is factually irreversible (it writes the base branch history). [ready]
-       toggles a PR between draft and ready-for-review and is reversible via
-       [gh pr ready --undo], so it moves to the reversible table below. Its
-       CI/notification side-effects are an externality (a capability concern,
-       identical to [pr create] which is already Allowed), NOT a reversibility
-       fact — encoding them as R2 here was the same policy-as-risk mistake W4/G-9
-       closed for repo create/fork/discussion. *)
-    ("pr", [ "merge" ]);
+    (* RFC-0309 W4/G-9 + follow-up: [pr] has NO irreversible action. [ready] is
+       reversible ([--undo]); [merge] is reversible too — [git revert] restores
+       the base-branch tree, exactly as a created repo can be deleted. What made
+       [merge] feel R2 ("it writes the base branch / triggers deploys") is a
+       durable-remote externality — a CAPABILITY concern, not a reversibility
+       fact. So [merge] moves to the reversible table and the "keeper may not
+       merge unsupervised" decision lives on the capability axis
+       ([Gh_capability_policy.creates_durable_remote_surface] -> Requires_approval,
+       i.e. non-blocking human approval), mirroring [gh repo create]. Same
+       policy-as-risk correction W4/G-9 applied to repo create/fork/discussion.
+       Operator decision 2026-07-08: gh pr merge -> Ask, not Deny. *)
     (* RFC-0309 W4/G-9: repo create/fork are factually REVERSIBLE (a created or
        forked repo can be deleted), so they move to the reversible table below.
        Only the genuinely irreversible repo ops stay here. This restores the
@@ -398,7 +400,7 @@ let repo_hosting_cli_reversible_mutations =
   [
     ("pr",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "review"; "lock"; "checkout";
-       "unlock"; "ready" ]);
+       "unlock"; "ready"; "merge" ]);
     ("issue",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "lock"; "unlock";
        "develop"; "pin"; "unpin" ]);
@@ -593,7 +595,17 @@ let classify_repo_hosting_cli (words : string list) : risk_class =
     if in_table repo_hosting_cli_irreversible_ops command sub
        || positional_dangerous_hit
     then R2_Irreversible
-    else if command = "api" then
+      (* [command = "api"] locates the subcommand at [words[1]]; [sub = "api"]
+         additionally catches a method flag placed BEFORE the subcommand
+         ([gh -XDELETE api /repos/o/r]), which gh's Cobra parser accepts as a
+         leading flag. Without [sub], the method token sits in the command slot
+         ([command = "-xdelete"]), the api branch is skipped, and the literal
+         DELETE (extracted from the full word list below) never fires the floor
+         — an autonomous DELETE bypass (#23451 form 1). Same leading-flag
+         positional class as #23390 (global flags). A spurious [sub = "api"]
+         without a real method stays [R0_Read] (no [-X] -> GET), so reads are
+         not over-blocked. *)
+    else if command = "api" || sub = "api" then
       let method_ =
         match extract_method_from_parts words with
         | Some m -> m

@@ -548,7 +548,8 @@ let () = test "handle_done_records_calibration_verdict" (fun () ->
   let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [
       ("task_id", `String "task-001");
-      ("notes", `String "x")
+      ("notes", `String "x");
+      ("evidence_refs", `List [ `String "commit:abc123" ])
     ]) in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "Completion rejected by anti-rationalization gate");
@@ -578,7 +579,8 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
   let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [
       ("task_id", `String "task-001");
-      ("notes", `String "Task scope satisfied: Approved calibration task. Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly. commit:abc123")
+      ("notes", `String "Task scope satisfied: Approved calibration task. Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly. commit:abc123");
+      ("evidence_refs", `List [ `String "commit:abc123" ])
     ]) in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result);
   let store = Eval_calibration.get_store () in
@@ -588,6 +590,22 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
   let verdict = Yojson.Safe.Util.(first |> member "verdict" |> to_string) in
   assert (verdict = "approve");
   Eval_calibration.reset_store_for_testing ()
+)
+
+let () = test "handle_done_rejects_empty_evidence_refs" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("title", `String "Empty evidence refs task")]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("task_id", `String "task-001")]) in
+  let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [
+      ("task_id", `String "task-001");
+      ("notes", `String "Task scope satisfied: long enough notes to avoid the length gate, but evidence_refs is empty.");
+      ("evidence_refs", `List [])
+    ]) in
+  assert (not (Tool_result.is_success result));
+  assert (str_contains (Tool_result.message result) "Completion rejected by anti-rationalization gate")
 )
 
 let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->
@@ -1485,12 +1503,12 @@ let () = test "handle_transition_force_done_still_rejects_cdal_evidence_incomple
             let result =
               Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
                 (`Assoc
-                  [
-                    ("task_id", `String "task-001");
-                    ("action", `String "done");
-                    ("force", `Bool true);
-                    ("notes", `String "");
-                  ])
+                   [
+                     ("task_id", `String "task-001");
+                     ("action", `String "done");
+                     ("force", `Bool true);
+                     ("notes", `String "");
+                   ])
             in
             assert (!gate_calls = 1);
             assert (not (Tool_result.is_success result));
@@ -1530,7 +1548,9 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
     let _ = Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
     let _ =
       Workspace.transition_task_r ctx.config ~agent_name:"test-agent"
-        ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ()
+        ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification
+        ~notes:"strict contract verification setup notes"
+        ()
     in
     let result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -2276,7 +2296,10 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
-let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
+(* RFC-0323 G-10 (+ #23661): the typed reclaim claim gate is retired. A
+   block_reclaim release persists policy + reason as operator-facing data,
+   but the recycled Todo is claimable again. *)
+let () = test "transition_release_block_reclaim_data_survives_reclaim" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
@@ -2325,8 +2348,13 @@ let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
             ("action", `String "claim");
           ])
     in
-    assert (not (Tool_result.is_success reclaim_result));
-    assert (str_contains (Tool_result.message reclaim_result) "blocked from re-claim"))
+    if not (Tool_result.is_success reclaim_result)
+    then failwith (Tool_result.message reclaim_result);
+    (* Block_reclaim + reason survive the claim as operator context. *)
+    assert ((only_task ctx).reclaim_policy = Some Masc_domain.Block_reclaim);
+    assert
+      ((only_task ctx).do_not_reclaim_reason
+       = Some "upstream PR already completed this scope"))
 )
 
 let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface" (fun () ->
@@ -2640,7 +2668,7 @@ let make_review_request () : Task.Anti_rationalization.review_request =
     task_description = "desc";
     completion_notes = "notes";
     agent_name = "alice";
-    task_id = "test-task-1" }
+    task_id = "test-task-1"; evidence_refs = [] }
 
 let make_review_result
     ?(verdict = Task.Anti_rationalization.Approve)

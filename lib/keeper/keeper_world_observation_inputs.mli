@@ -14,6 +14,24 @@ val read_backlog_counts
   -> meta:keeper_meta
   -> int * int * int * int * bool
 
+val audit_tasks_without_actionable_verification_ids
+  :  string list
+  -> Masc_domain.task list
+  -> (string * string) list
+(** RFC-0323 G-5 readiness gate 3 (pure core): list AwaitingVerification tasks
+    whose [verification_id] is absent from the given actionable request-id list.
+    Each entry is (task_id, verification_id). An orphan never wakes — the wake
+    join requires the record — so it is a silent starvation source under the
+    default-on flip. Pure so tests can drive it without a verification store. *)
+
+val audit_tasks_without_actionable_verification
+  :  config:Workspace.config
+  -> Masc_domain.task list
+  -> (string * string) list
+(** [audit_tasks_without_actionable_verification_ids] backed by the live
+    verification store ([actionable_verification_request_ids]). For runtime
+    diagnostics. *)
+
 val read_current_task
   :  config:Workspace.config
   -> meta:keeper_meta

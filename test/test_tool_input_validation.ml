@@ -1739,13 +1739,17 @@ let test_task_lifecycle_guidance_is_externalized () =
     read_source_file "config/prompts/tool_contract.task_lifecycle_workflow.md"
   in
   assert_contains
-    "external rule pins start before done"
+    "external rule pins the verification completion path (RFC-0323 G-4)"
     rule
-    "action='start' before action='done'";
+    "a verifier (not the assignee) then approves it to done";
   assert_contains
     "external workflow includes start transition"
     workflow
     "masc_transition(start)";
+  assert_contains
+    "external workflow routes completion through submit (RFC-0323 G-4)"
+    workflow
+    "masc_transition(submit_for_verification)";
   assert_contains
     "external workflow keeps branch-work guidance"
     workflow

@@ -15,6 +15,7 @@
   agent_sdk
   eio
   masc.keeper_registry
+  masc.keeper_runtime
   masc.keeper_metrics
   masc.masc_core
   masc.masc_types

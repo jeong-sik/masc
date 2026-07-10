@@ -1,7 +1,7 @@
 # MASC
 
 [![OCaml](https://img.shields.io/badge/OCaml-%3E%3D%205.4-orange.svg)](https://ocaml.org/)
-[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.208.20-blue.svg)](https://github.com/jeong-sik/oas)
+[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.208.22-blue.svg)](https://github.com/jeong-sik/oas)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 [한국어 버전](README.ko.md)
@@ -84,6 +84,40 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 ---
 
 ## Quick Start (5 minutes)
+
+### One-touch (recommended)
+
+From a clone, one command builds/starts the server, seeds a four-keeper team
+(tech lead, backend, frontend, QA) on `ollama_cloud.deepseek-v4-flash`, and opens
+the dashboard. Works on macOS and Linux.
+
+```bash
+export OLLAMA_CLOUD_API_KEY=...      # from https://ollama.com/settings/keys
+./quickstart.sh                      # native build+run, then opens the dashboard
+#   or fully containerized (self-contained image, builds from source):
+./quickstart.sh --docker
+```
+
+Then open `http://127.0.0.1:8935/dashboard`. Options: `--team <preset>` (see
+`presets/`), `--port N`, `--base-path DIR`, `--no-open`, `--no-start`,
+`./quickstart.sh --help`.
+
+- **Native** binds loopback, so the dashboard is served with data and needs no
+  login — this is the path to actually see the dashboard.
+- **`--docker`** builds a self-contained image and reproducibly boots the server
+  + the team; the container binds a network address, so the dashboard shell
+  serves but its live data needs an admin token (the zero-auth loopback dev-token
+  is intentionally not exposed on a non-loopback bind). Use it to verify the
+  install/boot; use native to browse the dashboard.
+
+For the `curl | bash` installer, add `--team classic` to seed the same team:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh \
+  | bash -s -- --team classic
+```
+
+### Manual (step by step)
 
 ```bash
 # 1. Install the binary (macOS arm64 / Linux x86_64)

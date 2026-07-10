@@ -19,6 +19,14 @@ type trust_level =
 
 val trust_level_to_string : trust_level -> string
 
+val trust_level_of_string : string -> trust_level option
+(** Parse a loose trust-level token.
+    Accepted values (case-insensitive):
+    - observe, obs
+    - suggest, s
+    - auto_safe, auto-safe, autosafe, allow
+    - enforced, ask, strict, deny. *)
+
 type agent_overlay = {
   safe_trust : trust_level;
   (** Trust level for [Safe] bins ([ls], [cat], [rg]). *)
@@ -49,6 +57,28 @@ val enforced_all : agent_overlay
 val permissive_default : agent_overlay
 (** [safe_trust = Auto_safe], audited/privileged at [Enforced].
     For well-trusted keeper agents in a dev worktree. *)
+
+val agent_overlay_of_profile : string -> agent_overlay option
+(** Parse a loose profile token to a complete overlay.
+    Accepted values (case-insensitive):
+    - autonomous, observe
+    - enforced, enforced_all, strict, deny_all, all_enforced
+    - permissive, permissive_default, perm
+    - suggest
+    - auto_safe, auto-safe, autosafe.
+
+    Returns [None] for unknown values. *)
+
+val shell_ir_approval_overlay_of_string : string -> agent_overlay option
+(** Parse a single env string to Shell IR overlay.
+    Accepted forms:
+    - preset profile token (e.g. [autonomous], [permissive])
+    - key/value overrides (comma-separated), e.g.
+      [safe=observe,audited=enforced,privileged=auto_safe]
+    - [profile=permissive,safe=enforced] (profile + overrides).
+    A profile must be present either as a bare token or via [profile=].
+
+    Unknown keys or values return [None]. *)
 
 val autonomous : agent_overlay
 (** All risk classes at [Observe] (allow + telemetry).  The overlay for an

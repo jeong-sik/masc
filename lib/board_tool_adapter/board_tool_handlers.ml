@@ -146,23 +146,11 @@ let invalid_vote_direction ~tool_name ~start_time raw : Tool_result.result =
     (Printf.sprintf "invalid vote direction %S; expected up or down" raw)
 ;;
 
-let legacy_vote_parameter_removed ~tool_name ~start_time raw : Tool_result.result =
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Policy_rejection
-    ~start_time
-    (Printf.sprintf
-       "legacy vote parameter %S is no longer accepted; use direction"
-       raw)
-;;
-
 let handle_vote ~tool_name ~start_time args =
   let post_id = get_string args "post_id" "" in
   let voter = get_string args "voter" "anonymous" in
-  match Safe_ops.json_string_opt "direction" args, get_string_opt args "vote" with
-  | None, Some raw ->
-    legacy_vote_parameter_removed ~tool_name ~start_time raw
-  | direction_arg, _ ->
+  match Safe_ops.json_string_opt "direction" args with
+  | direction_arg ->
     let direction_str =
       match direction_arg with
       | Some raw -> raw

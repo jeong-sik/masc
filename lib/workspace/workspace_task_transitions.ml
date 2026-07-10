@@ -79,23 +79,53 @@ let transition_task_outcome_r
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
+        (* RFC-0323 G-10: the typed reclaim claim precheck is retired — the
+           FSM decision below owns claimability by status alone. The evidence
+           requirements for submission/approval (#23719) stay. *)
         let* () =
           match action with
-          | Masc_domain.Claim ->
-            (match Masc_domain.task_claim_decision task with
-             | Claim_unavailable (Claim_block_reclaim_policy r) ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
-             | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> Ok ())
+          | Masc_domain.Claim
           | Masc_domain.Start
-          | Masc_domain.Done_action
           | Masc_domain.Cancel
-          | Masc_domain.Release
-          | Masc_domain.Submit_for_verification
+          | Masc_domain.Release -> Ok ()
+          | Masc_domain.Done_action
+          | Masc_domain.Submit_for_verification ->
+            (* #23719 evidence gate, scoped to the RFC-0323 Phase A predicate
+               (contract.strict, same as the G-1 done guard). Unconditional
+               enforcement regressed the G-2 deterministic probe and broke the
+               invariant documented below (empty evidence is valid for
+               analysis-only / advisory-contract tasks) — an unannounced
+               Phase B, exactly what the G-1 predicate decision avoided.
+               "Declared evidence" mirrors the verifier-request projection
+               (contract refs + typed handoff refs, prose excluded): a
+               contract that names its evidence up front satisfies the
+               gate without re-supplying refs at submit time. *)
+            if not (Masc_domain.task_requires_verification task)
+            then Ok ()
+            else if
+              Workspace_task_verification.declared_verification_evidence_refs
+                task handoff_context
+              = []
+            then
+              Error
+                (Masc_domain.Task
+                   (Masc_domain.Task_error.InvalidState
+                      "Strict-contract task completion requires declared evidence: contract required_evidence/verify_gate_evidence or handoff_context.evidence_refs (a verifier needs something to approve)"))
+            else Ok ()
           | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification -> Ok ()
+          | Masc_domain.Reject_verification ->
+            if not (Masc_domain.task_requires_verification task)
+            then Ok ()
+            else if
+              Workspace_task_verification.declared_verification_evidence_refs
+                task None
+              = []
+            then
+              Error
+                (Masc_domain.Task
+                   (Masc_domain.Task_error.InvalidState
+                      "Approve/reject on a strict-contract task requires declared evidence: contract required_evidence/verify_gate_evidence or persisted handoff_context.evidence_refs"))
+            else Ok ()
         in
         let* () =
           (match action, task.task_status with
@@ -127,6 +157,16 @@ let transition_task_outcome_r
           match
             Workspace_task_lifecycle.decide
               ~verification_enabled:(Env_config_runtime.Verification.fsm_enabled ())
+              (* RFC-0323 G-5 Phase B: when [Verification.default_on] is set,
+                 treat every task as verification-required so completion
+                 routes through submit→approve. The evidence gate above
+                 reads [task_requires_verification] (= contract.strict)
+                 directly and is intentionally NOT flipped here — keeping
+                 it on Phase-A scope avoids the #23719 G-2 regression
+                 (unannounced Phase B). Default off (readiness gate §5). *)
+              ~requires_verification:
+                (Masc_domain.task_requires_verification task
+                 || Env_config_runtime.Verification.default_on ())
               ~verification_timeout_seconds:
                 (Env_config_runtime.Verification.timeout_deadline_seconds ())
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
@@ -137,6 +177,7 @@ let transition_task_outcome_r
               ~action
               ~now
               ~authority
+              ~system_gate_exempt:false
               ~notes
               ~reason
           with
@@ -160,7 +201,7 @@ let transition_task_outcome_r
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
-                    "Task is verifier-required (completion_contract or goal verifier_policy set); use submit_for_verification instead of done (RFC-0308)"))
+                    "Task has a strict verification contract (contract.strict=true); use submit_for_verification — a verifier (not the assignee) then approves it to done (RFC-0323 G-1, implements RFC-0308)"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -186,7 +227,9 @@ let transition_task_outcome_r
                  action=claim first, then action=release once you own it."
               | Masc_domain.Todo, (Masc_domain.Done_action | Masc_domain.Cancel) ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
-                 action=claim then action=start before trying to finish or cancel it."
+                 action=claim then action=start; complete via \
+                 submit_for_verification → approve (action=done only for \
+                 non-strict tasks)."
               | Masc_domain.Todo, Masc_domain.Start ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
                  action=claim first — start needs ownership."
@@ -212,18 +255,16 @@ let transition_task_outcome_r
                  keeper_task_claim for unclaimed work."
               | Masc_domain.InProgress _, Masc_domain.Start ->
                 " Remediation: task is already in_progress. Valid actions from \
-                 in_progress: done, submit_for_verification, release, cancel."
+                 in_progress: submit_for_verification (→ verifier approve), done \
+                 (non-strict tasks only), release, cancel."
               | Masc_domain.Done _, _ ->
-                " Remediation: task is already in a terminal state (done). Use \
-                 masc_add_task for new work or masc_tasks to find claimable items."
+                " Remediation: task is already in a terminal state (done). To \
+                 re-run this work, create a new task with predecessor_task_id \
+                 via masc_add_task (RFC-0323); use masc_tasks to find claimable \
+                 items."
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
-              | _, Masc_domain.Submit_for_verification
-                when String.length (String.trim notes) = 0 ->
-                " Remediation: submit_for_verification requires non-empty notes \
-                 describing the deliverable. Provide a summary of what was done \
-                 and evidence references."
               | _ -> ""
             in
             Error
@@ -241,7 +282,25 @@ let transition_task_outcome_r
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
-(* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
+        let* () =
+          match action with
+          | Masc_domain.Submit_for_verification
+            when String.length (String.trim notes) = 0 ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "submit_for_verification requires non-empty notes describing the \
+                     deliverable and evidence references"))
+          | Masc_domain.Claim
+          | Masc_domain.Start
+          | Masc_domain.Done_action
+          | Masc_domain.Cancel
+          | Masc_domain.Release
+          | Masc_domain.Submit_for_verification
+          | Masc_domain.Approve_verification
+          | Masc_domain.Reject_verification -> Ok ()
+        in
+        (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =
           (match action, task.task_status, new_status, prepare_verification_request with
           | ( Masc_domain.Submit_for_verification
@@ -594,12 +653,26 @@ let transition_task_outcome_r
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
                ~payload
            | Masc_domain.Approve_verification ->
+             (* RFC-0323 G-3: the event actor is the verifier; carry the
+                assignee so graph reducers can close the assignee's
+                works_on edge. *)
+             let payload =
+               match new_status with
+               | Masc_domain.Done { assignee; _ } ->
+                 `Assoc
+                   [ "task_id", `String task_id; "assignee", `String assignee ]
+               | Masc_domain.Todo
+               | Masc_domain.Claimed _
+               | Masc_domain.InProgress _
+               | Masc_domain.AwaitingVerification _
+               | Masc_domain.Cancelled _ -> `Assoc [ "task_id", `String task_id ]
+             in
              emit_task_activity
                config
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Approved)
-               ~payload:(`Assoc [ "task_id", `String task_id ])
+               ~payload
            | Masc_domain.Reject_verification ->
              emit_task_activity
                config
@@ -607,15 +680,32 @@ let transition_task_outcome_r
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Rejected)
                ~payload:(`Assoc [ "task_id", `String task_id ]));
-          let duration_ms = match action with
-            | Masc_domain.Done_action | Masc_domain.Cancel ->
-              Some (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))
-            | Masc_domain.Claim
-            | Masc_domain.Start
-            | Masc_domain.Release
-            | Masc_domain.Submit_for_verification
-            | Masc_domain.Approve_verification
-            | Masc_domain.Reject_verification -> None
+          (* RFC-0323 G-3: completion side effects key off the RESULT (Done),
+             not the action — otherwise Approve_verification completions
+             record no duration. The value measures the last status phase
+             (started_at for in_progress, submitted_at for
+             awaiting_verification). *)
+          let completes_task =
+            Masc_domain.task_status_is_done new_status
+            && not (Masc_domain.task_status_is_done task.task_status)
+          in
+          let phase_duration_ms () =
+            Some
+              (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))
+          in
+          let duration_ms =
+            if completes_task
+            then phase_duration_ms ()
+            else (
+              match action with
+              | Masc_domain.Cancel -> phase_duration_ms ()
+              | Masc_domain.Done_action
+              | Masc_domain.Claim
+              | Masc_domain.Start
+              | Masc_domain.Release
+              | Masc_domain.Submit_for_verification
+              | Masc_domain.Approve_verification
+              | Masc_domain.Reject_verification -> None)
           in
           observe_task_transition
             config
@@ -631,12 +721,28 @@ let transition_task_outcome_r
                  ?duration_ms
                  ~forced:forced
                  ());
+          (* RFC-0323 G-3: done hooks (economy earn, relation/hebbian) fire for
+             every transition that PRODUCES Done — Done via
+             Approve_verification included. The completer is the Done record's
+             assignee: on approve the acting [agent_name] is the verifier. *)
+          (match new_status with
+           | Masc_domain.Done { assignee; _ } ->
+             if completes_task
+             then
+               Workspace_task_cleanup.run_done_hooks
+                 config
+                 ~agent_name:assignee
+                 ~task_id
+           | Masc_domain.Todo
+           | Masc_domain.Claimed _
+           | Masc_domain.InProgress _
+           | Masc_domain.AwaitingVerification _
+           | Masc_domain.Cancelled _ -> ());
           (match action with
-           | Masc_domain.Done_action ->
-             Workspace_task_cleanup.run_done_hooks config ~agent_name ~task_id
            | Masc_domain.Cancel ->
              Workspace_task_cleanup.run_cancel_hooks config ~agent_name
-           | Masc_domain.Release -> ()
+           | Masc_domain.Done_action
+           | Masc_domain.Release
            | Masc_domain.Claim
            | Masc_domain.Start
            | Masc_domain.Submit_for_verification

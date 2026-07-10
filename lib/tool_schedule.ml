@@ -319,9 +319,12 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
                 |> Schedule_payload_projection.support_status
                 |> Schedule_payload_projection.support_status_to_string) )
          ; ( "payload_dispatch_tool"
-           , match Schedule_payload_projection.dispatch_tool_for_request request with
-             | None -> `Null
-             | Some tool_name -> `String tool_name )
+             (* Display getter: non-logging result variant (see
+                server_dashboard_http_runtime_info). Avoids a per-poll WARN on
+                terminal unsupported-kind rows. *)
+           , match Schedule_payload_projection.dispatch_tool_for_request_result request with
+             | Ok tool_name -> `String tool_name
+             | Error _ -> `Null )
          ; ( "payload_target"
            , match payload_target with
              | None -> `Null
@@ -380,7 +383,17 @@ let request_result ~tool_name ~start_time = function
 let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
-    let* risk_class = risk_class_of_arg args in
+    let* requested_risk_class = risk_class_of_arg args in
+    (* Clamp the caller-supplied risk_class to the payload kind's intrinsic risk
+       when the kind mandates one. A keeper_wake is intrinsically reminder_only;
+       without this a keeper can request a side-effecting risk_class, forcing its
+       own wake into Pending_approval and then deadlocking as it polls a status
+       no self-waking keeper can advance. *)
+    let risk_class =
+      match Schedule_payload_projection.intrinsic_risk_class_of_payload payload with
+      | Some intrinsic -> intrinsic
+      | None -> requested_risk_class
+    in
     let* () = validate_known_payload_request ~payload ~risk_class in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in

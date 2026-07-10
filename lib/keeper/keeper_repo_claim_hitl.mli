@@ -20,7 +20,10 @@ val request_repository_access :
   access_result
 (** Request access to a registered repository. Registered repositories are
     allowed even when outside the keeper's advisory/default mapping scope. Hard
-    fail-closed cases return [Access_denied]. *)
+    fail-closed cases return [Access_denied]. When [repository_id] is not
+    registered but the keeper already has a verifiable sandbox clone with the
+    same repository component, this queues a non-blocking operator repository
+    registration request instead of silently collapsing to a terminal denial. *)
 
 val request_path_access :
   keeper_id:string -> base_path:string -> path:string -> access_result

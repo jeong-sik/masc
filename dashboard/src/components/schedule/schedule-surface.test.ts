@@ -1,7 +1,11 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
+import type {
+  DashboardKeeperBackground,
+  DashboardKeeperWaitingInventory,
+  DashboardScheduledAutomation,
+} from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -9,6 +13,7 @@ type MockToolsResponse = {
   tool_usage: Record<string, unknown>
   scheduled_automation?: DashboardScheduledAutomation
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
+  keeper_background?: DashboardKeeperBackground
 }
 
 const mocks = vi.hoisted(() => ({
@@ -129,6 +134,37 @@ function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
   }
 }
 
+function sampleKeeperBackground(): DashboardKeeperBackground {
+  return {
+    schema: 'masc.dashboard.keeper_background.v1',
+    source: 'server_keeper_background',
+    keeper_count: 1,
+    recurring_keeper_count: 1,
+    recurring_count: 1,
+    keepers: [
+      {
+        keeper_name: 'sangsu',
+        loop: { phase: 'running', restart_count: 0, started_at_iso: '2026-07-08T00:00:00Z' },
+        recurring_count: 1,
+        recurring: [
+          {
+            id: 'loop-1-1',
+            label: 'heartbeat-check',
+            action_kind: 'broadcast',
+            interval_sec: 30,
+            enabled: true,
+            run_count: 3,
+            failure_count: 0,
+            max_failures: 3,
+            last_run_at_iso: '2026-07-08T00:01:00Z',
+            next_run_at_iso: '2026-07-08T00:01:30Z',
+          },
+        ],
+      },
+    ],
+  }
+}
+
 async function flush(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -178,6 +214,7 @@ describe('ScheduleSurface', () => {
       tool_usage: {},
       scheduled_automation: sampleAutomation(),
       keeper_waiting_inventory: sampleWaitingInventory(),
+      keeper_background: sampleKeeperBackground(),
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -202,12 +239,23 @@ describe('ScheduleSurface', () => {
     container.querySelector<HTMLButtonElement>('[data-testid="schedule-view-list"]')?.click()
     await flush()
     expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
+    // The keeper-lane / background diagnostics are collapsed AND lazy-mounted by
+    // default; open them before asserting their content.
+    expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')).toBeNull()
+    container.querySelector<HTMLButtonElement>('[data-testid="schedule-diagnostics-toggle"]')?.click()
+    await flush()
     expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
       .toContain('Keeper Lanes · wake evidence')
     expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
       .toContain('sangsu')
     expect(container.querySelector('[data-testid="schedule-keeper-lanes"]')?.textContent)
       .toContain('masc.board_post')
+    // Keeper background panel renders as a sibling card on the same surface,
+    // reading data.keeper_background (recurring tasks + loop liveness).
+    expect(container.querySelector('[data-testid="schedule-keeper-background"]')?.textContent)
+      .toContain('Keeper Background · recurring tasks')
+    expect(container.querySelector('[data-testid="schedule-keeper-background"]')?.textContent)
+      .toContain('heartbeat-check')
     // REMOVED: '출처 <signal_source>' feed attribution line is not rendered on
     // the v2 surface (it is diagnostics-only); no equivalent element exists to
     // retarget, so this coverage is dropped rather than weakened.
@@ -270,6 +318,40 @@ describe('ScheduleSurface', () => {
     const pendingKpi = Array.from(container.querySelectorAll('.ov-kpi'))
       .find(element => element.textContent?.includes('승인 대기'))
     expect(pendingKpi?.textContent).toContain('2')
+  })
+
+  it('counts genuine queue-drain misses in the KPI (not_found queue AND not_found reaction)', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [
+      // Healthy completion: not in queue but the keeper reacted → not a miss.
+      {
+        ...automation.requests[0]!,
+        schedule_id: 'sched-drained',
+        keeper_queue_evidence: { projection_status: 'not_found' },
+        keeper_reaction_evidence: { projection_status: 'matched_turn_started' },
+      },
+      // Genuine miss: dispatched, in no queue, no keeper reaction recorded.
+      {
+        ...automation.requests[0]!,
+        schedule_id: 'sched-miss',
+        keeper_queue_evidence: { projection_status: 'not_found' },
+        keeper_reaction_evidence: { projection_status: 'not_found' },
+      },
+    ]
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: automation,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const missKpi = container.querySelector('[data-testid="schedule-kpi-queue-miss"]')
+    expect(missKpi?.textContent).toContain('큐 누락')
+    expect(missKpi?.textContent).toContain('1')
+    expect(missKpi?.querySelector('.ov-kpi-v')?.className).toContain('warn')
   })
 
   it('surfaces projection load errors without hiding stale schedule data', async () => {

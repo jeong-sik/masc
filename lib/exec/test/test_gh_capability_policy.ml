@@ -35,14 +35,17 @@ let test_durable_remote_surface () =
   let yes =
     [ ("repo", "create"); ("repo", "fork"); ("repo", "edit"); ("repo", "sync")
     ; ("repo", "rename"); ("discussion", "create"); ("discussion", "comment")
-    ; ("discussion", "edit"); ("discussion", "delete") ]
+    ; ("discussion", "edit"); ("discussion", "delete")
+      (* pr merge writes the base branch — the one Pr action that mutates a
+         durable remote surface. *)
+    ; ("pr", "merge") ]
   in
   (* local / read actions on the SAME families, and any non-durable family,
      and bare invocations -> false *)
   let no =
     [ ("repo", "clone"); ("repo", "view"); ("repo", "list")
     ; ("discussion", "view"); ("discussion", "list")
-    ; ("pr", "merge"); ("issue", "create"); ("release", "create")
+    ; ("issue", "create"); ("release", "create")
     ; ("api", "graphql"); ("frobnicate", "now") ]
   in
   List.iter
@@ -78,7 +81,6 @@ let test_current_dispositions () =
   check "issue create" (verb ~sub:"issue" ~act:"create" ()) Pol.Allowed;
   check "release create" (verb ~sub:"release" ~act:"create" ()) Pol.Allowed;
   (* genuinely irreversible (also risk-floored): Denied *)
-  check "pr merge" (verb ~sub:"pr" ~act:"merge" ()) Pol.Denied;
   check "repo delete" (verb ~sub:"repo" ~act:"delete" ()) Pol.Denied;
   check "discussion delete" (verb ~sub:"discussion" ~act:"delete" ()) Pol.Denied;
   (* W4/G-9 ENABLED: repo-create / discussion-create are now R1 (reversible) +
@@ -94,6 +96,10 @@ let test_current_dispositions () =
   check "discussion comment -> Requires_approval"
     (verb ~sub:"discussion" ~act:"comment" ()) Pol.Requires_approval;
   (* durable-remote R1 mutation -> Requires_approval *)
+  (* pr merge writes the base branch: R1 (revertable) + durable-remote -> Ask,
+     not Deny. Operator decision 2026-07-08. *)
+  check "pr merge -> Requires_approval" (verb ~sub:"pr" ~act:"merge" ())
+    Pol.Requires_approval;
   check "repo edit" (verb ~sub:"repo" ~act:"edit" ()) Pol.Requires_approval;
   check "repo sync" (verb ~sub:"repo" ~act:"sync" ()) Pol.Requires_approval;
   (* W3 per-action refinement: repo clone is a LOCAL op (copies to disk), not a
@@ -145,6 +151,32 @@ let gh_simple args : Shell_ir.simple =
   }
 
 let gh_simple_words words = gh_simple (List.map lit words)
+
+let test_repo_create_action_words_closed () =
+  Alcotest.(check (list string))
+    "repo-create action words"
+    [ "create"; "new" ]
+    Pol.repo_create_action_words;
+  let contract action =
+    Pol.repo_create_contract_of_simple
+      (gh_simple_words [ "repo"; action; "org/new-repo"; "--private" ])
+  in
+  List.iter
+    (fun action ->
+       match contract action with
+       | Some (Ok _) -> ()
+       | Some (Error errors) ->
+         Alcotest.failf "%s should parse repo-create: %s" action
+           (String.concat "," errors)
+       | None -> Alcotest.failf "%s should enter repo-create contract" action)
+    Pol.repo_create_action_words;
+  match contract "init" with
+  | None -> ()
+  | Some (Ok _) -> Alcotest.fail "gh repo init must not parse as repo-create"
+  | Some (Error errors) ->
+    Alcotest.failf "gh repo init must not enter repo-create contract: %s"
+      (String.concat "," errors)
+;;
 
 let test_repo_create_contract () =
   let contract words =
@@ -246,6 +278,12 @@ let test_graphql_opaque_query_simple () =
     ; ( "attached query"
       , [ lit "api"; lit "graphql"; concat [ lit "--raw-field=query="; var "MUTATION" ] ]
       )
+    ; ( "--paginate before graphql with --input file"
+      , [ lit "api"; lit "--paginate"; lit "graphql"; lit "--input"; lit "body.json" ]
+      )
+    ; ( "--paginate before graphql with external query field"
+      , [ lit "api"; lit "--paginate"; lit "graphql"; lit "-F"; lit "query=@mutation.graphql" ]
+      )
     ]
   in
   List.iter
@@ -273,6 +311,31 @@ let test_graphql_opaque_query_simple () =
   | None -> Alcotest.fail "expected gh disposition"
 ;;
 
+let test_pr_merge_admin_denies_simple () =
+  let cases =
+    [ "trailing admin", [ lit "pr"; lit "merge"; lit "123"; lit "--admin" ]
+    ; ( "leading repo admin"
+      , [ lit "--repo"; lit "o/r"; lit "pr"; lit "merge"; lit "123"; lit "--admin" ] )
+    ; "attached admin", [ lit "pr"; lit "merge"; lit "123"; lit "--admin=true" ]
+    ]
+  in
+  List.iter
+    (fun (label, args) ->
+       match Pol.disposition_of_simple (gh_simple args) with
+       | Some Pol.Denied -> ()
+       | Some d -> Alcotest.failf "%s: expected denied, got %s" label (dstr d)
+       | None -> Alcotest.failf "%s: expected gh disposition" label)
+    cases;
+  match
+    Pol.disposition_of_simple
+      (gh_simple [ lit "pr"; lit "merge"; lit "123"; lit "--subject"; lit "--admin" ])
+  with
+  | Some Pol.Requires_approval -> ()
+  | Some d ->
+    Alcotest.failf "--admin used as subject value should ask, got %s" (dstr d)
+  | None -> Alcotest.fail "expected gh disposition"
+;;
+
 let () =
   Alcotest.run "gh_capability_policy"
     [
@@ -282,12 +345,16 @@ let () =
             test_durable_remote_surface;
           Alcotest.test_case "current dispositions" `Quick
             test_current_dispositions;
+          Alcotest.test_case "repo-create action words are closed" `Quick
+            test_repo_create_action_words_closed;
           Alcotest.test_case "repo-create contract" `Quick
             test_repo_create_contract;
           Alcotest.test_case "graphql durable-remote (words)" `Quick
             test_graphql_durable_remote_words;
           Alcotest.test_case "graphql opaque query (simple)" `Quick
             test_graphql_opaque_query_simple;
+          Alcotest.test_case "pr merge admin deny (simple)" `Quick
+            test_pr_merge_admin_denies_simple;
         ] );
     ]
 ;;

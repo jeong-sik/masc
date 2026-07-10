@@ -259,6 +259,39 @@ let send_audio_block ~token ~channel_id ~base_url ~audio_token ~message_text
   in
   send_message ~token ~channel_id ~content
 
+let truncate_embed_desc s =
+  let max_len = 3900 in
+  truncate_to ~max_len s
+
+let code_to_embed ~source ~caption =
+  let source =
+    Observability_redact.redact_text source |> truncate_to ~max_len:3800
+  in
+  let language = Option.value caption ~default:"code" in
+  let title =
+    Printf.sprintf "Code (%s)" (Observability_redact.redact_text language)
+    |> truncate_to ~max_len:200
+  in
+  let body = Printf.sprintf "```%s\n%s\n```" language source in
+  { Discord_rest_client.title = title
+    ; description = Some (truncate_embed_desc body)
+    ; url = None
+    ; color = Discord_rest_client.color_green
+    ; image = None
+    ; fields = []
+    }
+
+let mermaid_to_embed ~source =
+  let source = Observability_redact.redact_text source |> truncate_to ~max_len:3800 in
+  let body = Printf.sprintf "```mermaid\n%s\n```" source in
+  { Discord_rest_client.title = "Mermaid Diagram"
+    ; description = Some (truncate_embed_desc body)
+    ; url = None
+    ; color = Discord_rest_client.color_blue
+    ; image = None
+    ; fields = []
+    }
+
 let rich_embed_of_chat_block = function
   | Keeper_chat_blocks.Image { src; cap } ->
       let caption = Option.map Observability_redact.redact_text cap in
@@ -272,13 +305,17 @@ let rich_embed_of_chat_block = function
           Discord_rest_client.link_embed ~url ~title ~description:None
             ~image:None)
         (redacted_http_url_opt url)
+  | Keeper_chat_blocks.Code { cap; html = _; source = Some source } ->
+      Some (code_to_embed ~source ~caption:cap)
+  | Keeper_chat_blocks.Code { cap; html; source = None } ->
+      Some (code_to_embed ~source:html ~caption:cap)
+  | Keeper_chat_blocks.Mermaid { source; caption = _ } ->
+      Some (mermaid_to_embed ~source)
   | Keeper_chat_blocks.Text _
   | Keeper_chat_blocks.Heading _
   | Keeper_chat_blocks.Unordered_list _
   | Keeper_chat_blocks.Callout _
   | Keeper_chat_blocks.Table _
-  | Keeper_chat_blocks.Code _
-  | Keeper_chat_blocks.Mermaid _
   | Keeper_chat_blocks.Svg _
   | Keeper_chat_blocks.Voice _
   | Keeper_chat_blocks.Attach _

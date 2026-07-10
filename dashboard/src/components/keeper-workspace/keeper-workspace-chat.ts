@@ -19,6 +19,8 @@ import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { navigate } from '../../router'
+import { governanceData } from '../governance-signals'
+import { resolveGovernanceApproval } from '../../api/dashboard-governance'
 import type { ChatComposerCommand } from '../chat/primitives'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { keeperThreads } from '../../keeper-state'
@@ -309,6 +311,7 @@ function ChatHeader({
   const tone = keeperStatusTone(keeper)
   const pill = statePillTone(tone)
   const live = phasePulse(keeper.lifecycle_phase)
+  const pendingApprovalCount = keeperPendingApprovals(keeper.name).length
 
   // Single-row header: identity + status + actions only. Runtime / model /
   // throughput / scope live in the context rail (ThroughputSection) — the
@@ -333,6 +336,9 @@ function ChatHeader({
       <div class="kw-chat-id">
         <div class="kw-chat-name-row">
           <h2 class="kw-chat-name">${keeper.koreanName ?? keeper.name}</h2>
+          ${pendingApprovalCount > 0
+            ? html`<${Pill} tone="warn" dot="warn" title=${`결재 대기 ${pendingApprovalCount}건`}>${pendingApprovalCount}</${Pill}>`
+            : null}
           <span class=${`kw-state-pill ${pill}`} title=${keeperDisplayStatus(keeper)}>
             <${StatusDot} tone=${tone} pulse=${live} />${keeperPhaseLabel(keeper)}
           </span>
@@ -409,26 +415,53 @@ function TurnInspectorDrawer({
 // top of the conversation so an operator who arrives via "대화에서 검토" sees the
 // keeper is awaiting a decision. Read-only display + a link back to the approvals
 // queue (the single act-point); no approve/reject action here by design.
+// Pending approval queue scoped to this keeper. Reads governance
+// approval_queue (the HITL SSOT) directly instead of keeper.trust.
+// approval_state, which is a separate payload field and diverges from the
+// queue — when it is empty while approval_queue has items, the cue stayed
+// blank and the operator saw no HITL signal inside the chat surface.
+function keeperPendingApprovals(keeperName: string) {
+  const queue = governanceData.value?.approval_queue ?? []
+  return queue.filter((a) => a.keeper_name === keeperName)
+}
+
 function PendingApprovalCue({ keeper }: { keeper: Keeper }): VNode | null {
-  const pending = keeper.trust?.approval_state?.pending_first
-  const id = pending?.id?.trim()
-  if (!id) return null
-  const tool = pending?.tool_name?.trim()
+  const pending = keeperPendingApprovals(keeper.name)
+  if (pending.length === 0) return null
+  const first = pending[0]
+  if (!first) return null
+  const rest = pending.length - 1
+  const tool = first.tool_name?.trim() ?? ''
+  const resolve = (decision: 'approve' | 'reject') => {
+    resolveGovernanceApproval(first.id, decision).catch(() => {})
+  }
   return html`
     <div
       class="kw-chat-pending-cue flex items-center gap-2 px-4 py-2 text-xs text-[var(--color-fg-secondary)]"
       role="status"
       data-testid="keeper-pending-approval-cue"
     >
-      <${Pill} tone="warn" dot="warn">승인 대기</${Pill}>
-      <span>이 keeper는 결재 대기 중입니다${tool ? ` · ${tool}` : ''}</span>
+      <${Pill} tone="warn" dot="warn">승인 대기 ${pending.length}</${Pill}>
+      <span>${tool || '결재 요청'}${rest > 0 ? ` 외 ${rest}건` : ''}</span>
       <span class="flex-1"></span>
       <button
         type="button"
         class="kw-act v2-monitoring-action"
+        onClick=${() => resolve('approve')}
+        title="이 요청을 승인합니다"
+      >승인</button>
+      <button
+        type="button"
+        class="kw-act v2-monitoring-action"
+        onClick=${() => resolve('reject')}
+        title="이 요청을 거부합니다"
+      >거부</button>
+      <button
+        type="button"
+        class="kw-act v2-monitoring-action"
         onClick=${() => navigate('approvals')}
-        title="결재 큐에서 이 요청을 승인·거부합니다"
-      >결재 큐에서 처리 →</button>
+        title="결재 큐에서 모든 요청을 봅니다"
+      >결재 큐 →</button>
     </div>
   `
 }

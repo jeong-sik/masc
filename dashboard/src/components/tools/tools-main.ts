@@ -12,9 +12,9 @@ import {
   loadTools,
 } from './tool-state'
 import { FullInventoryView } from './tool-full-inventory'
-import { PromptRegistryPanel } from './prompt-registry-panel'
 import { ConfigResolutionPanel } from './config-resolution-panel'
 import { ActionButton } from '../common/button'
+import { navigate } from '../../router'
 import { ToolExecutor } from '../tool-executor/tool-executor'
 import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
@@ -59,7 +59,16 @@ export function Tools() {
         runtimeResolution=${data?.runtime_resolution}
       />
 
-      <${PromptRegistryPanel} />
+      <${SectionCard} label="프롬프트 레지스트리" class="section v2-lab-panel mb-4">
+        <div class="text-xs text-[var(--color-fg-muted)] mb-3">
+          전역 프롬프트/오버라이드 편집은 <span class="font-mono">설정 › 프롬프트</span>에서 관리됩니다.
+          여기(Lab)에 있던 중복 편집기는 단일 편집 지점으로 통합했습니다.
+        </div>
+        <${ActionButton} variant="ghost" size="md" class="v2-lab-prompt-cta"
+          onClick=${() => { navigate('settings', { section: 'prompts' }) }}>
+          설정 › 프롬프트 열기 →
+        <//>
+      <//>
 
       <${SectionCard} label="예약 자동화 FSM" class="section v2-lab-panel mb-4">
         <${ScheduledAutomationPanel} automation=${data?.scheduled_automation ?? null} onResolved=${loadTools} />

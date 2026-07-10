@@ -20,6 +20,7 @@ let make_task ~id =
   ; files = []
   ; created_at = "2026-06-20T00:00:00Z"
   ; created_by = None
+  ; predecessor_task_id = None
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0

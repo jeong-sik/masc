@@ -299,32 +299,22 @@ let claim_next_r
                else compare a.created_at b.created_at)
             working_tasks
         in
-        (* Identify blocked Todo tasks for observability *)
-        let all_todo =
-          List.filter
-            (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
-            sorted
-        in
-        let blocked_todo =
-          List.filter
-            (fun (t : Masc_domain.task) ->
-               match Masc_domain.task_claim_next_action t with
-               | Skip_claim (Claim_block_reclaim_policy _) -> true
-               | Claim_now
-               | Skip_claim (Claim_block_not_todo _) ->
-                 false)
-            all_todo
-        in
+        (* RFC-0323 G-10: the typed reclaim claim gate is retired (#23661
+           removed the Todo producer, G-10 the Done producer) — nothing can be
+           blocked-by-reclaim. Kept as a literal empty list, mirroring the
+           RFC-0220 §3.2 [verification_blocked_todo] precedent below, so the
+           claim-next result shape ([blocked_count]) stays stable. *)
+        let blocked_reclaim : Masc_domain.task list = [] in
         (* RFC-0220 §3.2: no verification-based exclusion from the claim pool. *)
         let verification_blocked_todo : Masc_domain.task list = [] in
-        if blocked_todo <> []
+        if blocked_reclaim <> []
         then
           log_event
             config
             (`Assoc
                 [ "type", `String "task_claim_next_skip_blocked"
                 ; "agent", `String agent_name
-                ; "blocked", `Int (List.length blocked_todo)
+                ; "blocked", `Int (List.length blocked_reclaim)
                 ; "ts", `String (now_iso ())
                 ]);
         if verification_blocked_todo <> []
@@ -349,12 +339,13 @@ let claim_next_r
         let resolves_claimable (t : Masc_domain.task) =
           match
             Workspace_task_lifecycle.resolve_claim
-              ~same_actor ~agent_name ~now:(now_iso ()) t.task_status
+              ~same_actor ~agent_name ~now:(now_iso ()) t
           with
           | Workspace_task_lifecycle.Worker_claim _
           | Workspace_task_lifecycle.Verifier_claim _ -> true
           | Workspace_task_lifecycle.Self_owned
-          | Workspace_task_lifecycle.Held_by_other _ -> false
+          | Workspace_task_lifecycle.Held_by_other _
+          | Workspace_task_lifecycle.Held_terminal _ -> false
         in
         let unclaimed =
           sorted
@@ -364,7 +355,7 @@ let claim_next_r
         (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
         let blocked_ids =
-          List.map (fun (t : Masc_domain.task) -> t.id) blocked_todo
+          List.map (fun (t : Masc_domain.task) -> t.id) blocked_reclaim
           @ List.map (fun (t : Masc_domain.task) -> t.id) verification_blocked_todo
           |> List.sort_uniq String.compare
         in
@@ -430,8 +421,8 @@ let claim_next_r
               { agent with status = Active; current_task = None })
           | None -> ()
         in
-        (match all_todo, eligible with
-         | [], _ ->
+        (match eligible with
+         | [] when unclaimed = [] && blocked_reclaim = [] ->
            (* Even if we released a task, there may be nothing else to claim.
              Write the release if it happened. *)
            (match released_task_id with
@@ -446,7 +437,7 @@ let claim_next_r
             | None -> ());
            clear_agent_state_after_release ();
           Claim_next_no_unclaimed, None
-         | _ :: _, [] ->
+         | [] ->
            (match released_task_id with
             | Some _ ->
               let new_backlog =
@@ -460,14 +451,14 @@ let claim_next_r
            clear_agent_state_after_release ();
           ( Claim_next_no_eligible
               { excluded_count = no_eligible_excluded_count
-              ; blocked_count = List.length blocked_todo
+              ; blocked_count = List.length blocked_reclaim
               ; verification_blocked_count = List.length verification_blocked_todo
               ; scope_excluded_count = List.length task_filter_excluded
               ; explicit_excluded_count
               ; claim_pool_candidate_count = List.length unclaimed
               }
           , None )
-         | _ :: _, task :: _ ->
+         | task :: _ ->
            (* Claim this task. [resolve_claim] yields the post-claim status:
               [Claimed] for a Todo worker claim, or a verifier-bound
               [AwaitingVerification] for a cross-agent verification claim
@@ -479,12 +470,13 @@ let claim_next_r
            let claimed_status =
              match
                Workspace_task_lifecycle.resolve_claim
-                 ~same_actor ~agent_name ~now:(now_iso ()) task.task_status
+                 ~same_actor ~agent_name ~now:(now_iso ()) task
              with
              | Workspace_task_lifecycle.Worker_claim s
              | Workspace_task_lifecycle.Verifier_claim s -> s
              | Workspace_task_lifecycle.Self_owned
-             | Workspace_task_lifecycle.Held_by_other _ ->
+             | Workspace_task_lifecycle.Held_by_other _
+             | Workspace_task_lifecycle.Held_terminal _ ->
                Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () }
            in
            let new_tasks =

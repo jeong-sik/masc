@@ -23,4 +23,5 @@ export {
   respondToExecutionOrder,
   respondToKeeperApproval,
   deleteKeeperApprovalRule,
+  setKeeperApprovalMode,
 } from './governance-actions'

@@ -85,18 +85,59 @@ val force_done_task_r :
   config -> agent_name:string -> task_id:string ->
   notes:string -> unit -> string Masc_domain.masc_result
 
+(** Typed failure surface of {!submit_and_approve_task_r}. Every branch is
+    reported; none is swallowed. *)
+type machine_verify_failure =
+  | Machine_verify_invalid_verifier of string
+      (** [verifier_name] failed [Validation.Agent_id] — rejected before any
+          state mutation *)
+  | Machine_verify_verifier_not_distinct of
+      { agent_name : string
+      ; verifier_name : string
+      }
+      (** verifier and submitter share one identity key — rejected before any
+          state mutation (self-approval would be unrecoverable post-submit) *)
+  | Machine_verify_submit_failed of Masc_domain.masc_error
+      (** submit rejected by the FSM; task state unchanged *)
+  | Machine_verify_approve_failed_compensated of Masc_domain.masc_error
+      (** approve failed; the compensating reject succeeded — task is back to
+          [InProgress { assignee }] *)
+  | Machine_verify_approve_failed_stranded of
+      { approve_error : Masc_domain.masc_error
+      ; reject_error : Masc_domain.masc_error
+      }
+      (** approve and the compensating reject both failed — the task remains
+          [AwaitingVerification] and its Pending verification-store record is
+          deliberately left actionable, so the stranded task surfaces through
+          the pending-verification wake signal and the dashboard verification
+          panel; any other identity can approve/reject it *)
+
+(** RFC-0323 G-2: complete a task through the verification lane — submit as
+    [agent_name] (the assignee), approve as the distinct machine identity
+    [verifier_name]. Replaces direct [force_done_task_r] completion for
+    deterministic harnesses (RFC-0199 probe).
+
+    Verification-store lifecycle mirrors the tool layer (RFC-0221 hooks):
+    record created with the submit, machine verdict recorded on approve or on
+    the compensating reject; board/SSE notify hooks are not invoked (machine
+    completions do not announce). Hook defaults are no-ops.
+
+    [evidence_refs] is carried as the submit's [handoff_context.evidence_refs]
+    (summary = [notes]) and persisted through approve onto the Done record, so
+    the #23719 strict-contract evidence gate and audit consumers see the
+    machine-verified evidence. Pass the satisfied claim descriptions (probe:
+    [Evidence_claim.to_human_string]); [[]] is only valid for tasks without a
+    strict contract. *)
+val submit_and_approve_task_r :
+  config -> agent_name:string -> verifier_name:string -> task_id:string ->
+  notes:string -> approve_notes:string -> evidence_refs:string list -> unit ->
+  (string, machine_verify_failure) result
+
 (** {1 Task cancellation} *)
 
 val cancel_task_r :
   config -> agent_name:string -> task_id:string ->
   reason:string -> string Masc_domain.masc_result
-
-(** Force-cancel a task regardless of assignee. System privilege.
-    Used by {!Verification_protocol.check_timeouts} to expire
-    [AwaitingVerification] tasks whose verifier deadline has passed. *)
-val force_cancel_task_r :
-  config -> agent_name:string -> task_id:string ->
-  reason:string -> unit -> string Masc_domain.masc_result
 
 val link_task_execution_artifacts_r :
   config -> task_id:string ->

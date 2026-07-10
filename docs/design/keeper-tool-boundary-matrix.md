@@ -44,6 +44,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_in_process_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_memory_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_memory_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_persona_crud.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_persona_crud.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_persona_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_persona_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_registered_runtime.ml` - execution-dispatch

@@ -155,6 +155,7 @@ val process_single_turn :
   sw:Eio.Switch.t ->
   auth_token:string option ->
   thread_id:string ->
+  continuation_channel:Keeper_continuation_channel.t ->
   closed:bool ref ->
   client_disconnects:(Eio.Switch.t * unit Eio.Stream.t) option ->
   payload:keeper_chat_stream_request ->

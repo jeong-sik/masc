@@ -23,6 +23,7 @@ type review_request = {
   completion_notes : string;
   agent_name : string;
   task_id : string;
+  evidence_refs : string list;
 }
 
 (** Gate verdict. *)
@@ -56,12 +57,19 @@ val valid_verdict_strings : string list
 (** Which gate produced the verdict. Variant type prevents typos that
     would silently compile with a stringly-typed field. *)
 type gate =
+  | Evidence
   | Length
   | Excuse
   | Contract
   | Structured_tool
   | Llm_text_fallback
   | Format_reject
+  | Evaluator_empty
+      (** Evaluator responded with an empty completion — an evaluator-side
+          failure, distinct from [Format_reject] (a parseable-but-wrong
+          response). Deterministic Reject either way; empty output never
+          approves (#22573 ratchet). Typed apart so evaluator health is
+          observable and the keeper is not told to revise its notes. *)
   | Fallback
 
 val gate_to_string : gate -> string
@@ -94,7 +102,8 @@ val review :
   ?verify_gate_evidence:string list ->
   ?on_verdict:(review_result -> unit) ->
   ?few_shot_block:string ->
-  ?sw:Eio.Switch.t ->
+  ?operator_override:bool ->
+  ?sw:Eio.Switch.t option ->
   review_request -> review_result
 
 (** Check completion notes against a contract. Returns unmet items.

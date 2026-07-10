@@ -48,6 +48,15 @@ let creates_durable_remote_surface (v : Gh_verb.t) : bool =
   | (Gh_verb.Repo | Gh_verb.Discussion), Some action ->
     not (local_or_read_repo_action action)
   | (Gh_verb.Repo | Gh_verb.Discussion), None -> false
+  (* [pr merge] writes the base branch — a durable remote surface whose
+     post-merge state (deploys, release history, protected-branch history) is
+     not modeled in keeper tool contracts. It is the ONE Pr action that mutates a
+     shared durable surface; every other Pr action acts within the PR. Risk says
+     it is reversible (R1, [git revert]); the capability axis gates it to
+     Requires_approval, mirroring [gh repo create]. "merge" is the literal gh
+     subcommand, matched the same way [local_or_read_repo_action] matches gh
+     action tokens. *)
+  | Gh_verb.Pr, Some "merge" -> true
   | ( ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Release | Gh_verb.Secret
       | Gh_verb.Ssh_key | Gh_verb.Workflow | Gh_verb.Auth | Gh_verb.Gist
       | Gh_verb.Ruleset | Gh_verb.Label | Gh_verb.Run | Gh_verb.Cache
@@ -173,12 +182,25 @@ let rec next_gh_positional = function
   | tok :: rest -> Some (tok, rest)
 ;;
 
+(* `gh repo new` is an official alias of `gh repo create` (see `gh repo create
+   --help`, ALIASES section). The repo-create contract must fire on both, or
+   an agent reaches the exact ambient-ownership / missing-visibility failure
+   G-10 exists to prevent by routing through the alias. This is the closed
+   acceptance set over `gh`'s documented create-aliases, not a risk
+   classifier: keep it in sync with `gh`'s ALIASES list. *)
+let repo_create_action_words = [ "create"; "new" ]
+
+let is_repo_create_action action =
+  let action = String.lowercase_ascii action in
+  List.exists (String.equal action) repo_create_action_words
+;;
+
 let repo_create_tail words =
   match next_gh_positional words with
   | Some (family, after_family) when String.equal (String.lowercase_ascii family) "repo" ->
     (match next_gh_positional after_family with
      | Some (action, after_action)
-       when String.equal (String.lowercase_ascii action) "create" -> Some after_action
+       when is_repo_create_action action -> Some after_action
      | Some _ | None -> None)
   | Some _ | None -> None
 ;;
@@ -510,6 +532,59 @@ let repo_create_contract_rule_of_simple simple =
   | Some (Ok _) | None -> None
 ;;
 
+let pr_merge_tail words =
+  match next_gh_positional words with
+  | Some (family, after_family) when String.equal (String.lowercase_ascii family) "pr" ->
+    (match next_gh_positional after_family with
+     | Some (action, after_action)
+       when String.equal (String.lowercase_ascii action) "merge" -> Some after_action
+     | Some _ | None -> None)
+  | Some _ | None -> None
+;;
+
+let pr_merge_value_flags =
+  [ "--author-email"; "-A"; "--body"; "-b"; "--body-file"; "-F"
+  ; "--match-head-commit"; "--subject"; "-t" ]
+;;
+
+let pr_merge_value_flag_keys = gh_global_value_flags @ pr_merge_value_flags
+
+let pr_merge_admin_flag tok =
+  String.equal tok "--admin"
+  ||
+  match split_eq tok with
+  | Some (key, _) -> String.equal key "--admin"
+  | None -> false
+;;
+
+let rec pr_merge_tail_has_admin_flag = function
+  | [] -> false
+  | "--" :: _ -> false
+  | tok :: rest when List.mem tok pr_merge_value_flag_keys ->
+    (match rest with
+     | _ :: tail -> pr_merge_tail_has_admin_flag tail
+     | [] -> false)
+  | tok :: rest
+    when (match split_eq tok with
+          | Some (key, _) -> List.mem key pr_merge_value_flag_keys
+          | None -> false) ->
+    pr_merge_tail_has_admin_flag rest
+  | tok :: rest -> pr_merge_admin_flag tok || pr_merge_tail_has_admin_flag rest
+;;
+
+let pr_merge_admin_rule_of_simple simple =
+  match pr_merge_tail (List.map arg_word simple.Shell_ir.args) with
+  | Some tail when pr_merge_tail_has_admin_flag tail ->
+    Some "gh_pr_merge_admin_bypass"
+  | Some _ | None -> None
+;;
+
+let policy_deny_rule_of_simple simple =
+  match repo_create_contract_rule_of_simple simple with
+  | Some _ as rule -> rule
+  | None -> pr_merge_admin_rule_of_simple simple
+;;
+
 let is_graphql_api (v : Gh_verb.t) : bool =
   match v.Gh_verb.family, v.Gh_verb.action with
   | Gh_verb.Api, Some action -> String.equal (String.lowercase_ascii action) "graphql"
@@ -650,10 +725,64 @@ let graphql_query_body_is_opaque (args : Shell_ir.arg list) : bool =
   scan args
 ;;
 
+let is_rest_api (v : Gh_verb.t) : bool =
+  match v.Gh_verb.family with
+  | Gh_verb.Api -> not (is_graphql_api v)
+  | Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
+  | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
+  | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
+  | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project | Gh_verb.Other _ -> false
+;;
+
+let is_method_flag = function
+  | "-X" | "--method" -> true
+  | _ -> false
+;;
+
+(* Leading literal of an attached/opaque method arg: [-X$M] ([Concat [Lit "-X";
+   Var _]] -> "-X"), [-XDELETE...$M], or [--method=$M]. Distinguishes a method
+   flag from other gh flags (none of which share the [-X] short form). *)
+let attached_method_prefix prefix =
+  let lower = String.lowercase_ascii prefix in
+  String.starts_with ~prefix:"-x" lower
+  || String.starts_with ~prefix:"--method" lower
+;;
+
+(* [gh api] REST HTTP method opacity (#23451). The method ([-X]/[--method])
+   decides read (GET) vs durable/destructive write (POST/PUT/PATCH/DELETE). When
+   the method VALUE is opaque (Shell IR Var/Concat), the literal method
+   classifier ([Shell_ir_risk]'s floor) cannot see it, defaults to GET/R0, and a
+   [$METHOD]-carried DELETE/POST silently downgrades to [Allow] under the
+   autonomous overlay. Mirror the graphql body-opacity fail-closed: an opaque
+   method on a REST [gh api] routes to [Requires_approval]. Literal methods are
+   unaffected — the floor classifies them precisely (DELETE -> R2 Deny,
+   POST/PUT/PATCH -> R1, GET -> R0 Allow). The value/file is never read (no
+   TOCTOU); opacity alone gates. *)
+let gh_api_method_is_opaque (args : Shell_ir.arg list) : bool =
+  let rec scan = function
+    | [] -> false
+    | arg :: rest ->
+      (match arg_literal arg with
+       | Some tok when is_method_flag tok ->
+         (* separate value form: [-X <VALUE>] / [--method <VALUE>] *)
+         (match rest with
+          | value :: tail -> Option.is_none (arg_literal value) || scan tail
+          | [] -> false)
+       | Some _ -> scan rest
+       | None ->
+         (* opaque arg (has a Var): attached method flag with opaque value, e.g.
+            [-X$M] or [--method=$M]. Its leading literal chunk names the flag. *)
+         (match arg_leading_literal arg with
+          | Some prefix when attached_method_prefix prefix -> true
+          | Some _ | None -> scan rest))
+  in
+  scan args
+;;
+
 let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
   match Exec_program.known simple.Shell_ir.bin with
   | Some Exec_program.Gh ->
-    (match repo_create_contract_rule_of_simple simple with
+    (match policy_deny_rule_of_simple simple with
      | Some _ -> Some Denied
      | None ->
     let words =
@@ -664,15 +793,24 @@ let disposition_of_simple (simple : Shell_ir.simple) : disposition option =
        subcommand past leading value-taking global flags, so [gh --repo O/R pr
        view] is read as [Pr/view] (Allowed) rather than [Gh_verb.Other] (Ask).
        Falls back to the word-list [Gh_verb.classify] only for the [Generic]
-       escape hatch (non-literal argv), preserving prior behavior there. The
-       typed parser preserves the [Api]/[gh api graphql] identity, so the graphql
-       opacity fail-closed below still fires (RFC-0208). *)
+       escape hatch (non-literal argv), preserving prior behavior there.
+
+       The RFC-0208 graphql opacity check also consults the word-list
+       classifier.  That deliberately preserves fail-closed behavior for valid
+       gh api boolean flags that the typed parser does not model (for example
+       [gh api --paginate graphql --input body.json]): such flags must not hide
+       the [graphql] endpoint from the approval gate. *)
+    let words_verb = Gh_verb.classify words in
     let verb =
       match Shell_ir_risk.gh_verb_of_simple simple with
       | Some v -> v
-      | None -> Gh_verb.classify words
+      | None -> words_verb
     in
-    if is_graphql_api verb && graphql_query_body_is_opaque simple.Shell_ir.args
+    if
+      (is_graphql_api verb || is_graphql_api words_verb)
+      && graphql_query_body_is_opaque simple.Shell_ir.args
+    then Some Requires_approval
+    else if is_rest_api verb && gh_api_method_is_opaque simple.Shell_ir.args
     then Some Requires_approval
     else Some (disposition_of_words words verb))
   | Some _ | None -> None

@@ -305,6 +305,19 @@ let dispatch_error_deterministic_retry_fields error =
   | Some reason -> Keeper_tool_deterministic_error.deterministic_retry_fields reason
   | None -> []
 
+let shell_ir_approval_overlay =
+  let default_overlay = Masc_exec.Approval_config.autonomous in
+  match Env_config_runtime.Shell_ir_approval.raw_overlay () with
+  | None -> default_overlay
+  | Some raw ->
+    (match Masc_exec.Approval_config.shell_ir_approval_overlay_of_string raw with
+     | Some overlay -> overlay
+     | None ->
+       Log.Dashboard.warn
+         "invalid MASC_SHELL_IR_APPROVAL value %S; using autonomous overlay"
+         raw;
+       default_overlay)
+
 let pr_action_status_label = function
   | Unix.WEXITED 0 -> "success"
   | Unix.WEXITED _ -> "exit_nonzero"
@@ -1076,7 +1089,7 @@ let handle_tool_execute_typed
                  the real remote even from a container), so no sandbox-conditional
                  branch is needed: both profiles use the same overlay. *)
               let approval_config =
-                { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.autonomous
+                { Masc_exec.Approval_config.defaults = shell_ir_approval_overlay
                 ; per_agent = []
                 }
               in
@@ -1301,6 +1314,18 @@ let handle_tool_execute_typed
                 ~status:result.status
                 ~stderr
             in
+            (* Mutually exclusive with the glob hint: both share the
+               execution_hint/shell_ir_hint keys, and a command carrying a glob
+               token gets the more specific glob guidance first. *)
+            let duplicate_argv0_failure_fields =
+              if glob_literal_failure_fields <> []
+              then []
+              else
+                Masc_exec.Shell_ir_diagnostics.duplicate_argv0_failure_fields
+                  ~ir
+                  ~status:result.status
+                  ~stderr
+            in
             let classification = Exec_core.classify_command_of_ir ir in
             (* Only include command_descriptor on success — errors already carry
                sufficient diagnostic info (exit code, stderr, classification). *)
@@ -1320,6 +1345,7 @@ let handle_tool_execute_typed
                  ~extra:
                    (failure_error_fields
                     @ glob_literal_failure_fields
+                    @ duplicate_argv0_failure_fields
                     @ sandbox_extra_fields
                     @ [ "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms

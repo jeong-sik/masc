@@ -230,51 +230,30 @@ let test_keeper_prompt_preserves_snapshot_delta_anchors () =
     (has_in prompt "State block template");
   check bool "world anchor present" true (has_in prompt "<world>")
 
-let test_registered_repositories_block_lists_valid_repos () =
-  (* ~780 wrong-repo-name failures: keepers guess org-prefixed / stale /
-     invented names. The block hands them the global registered id set. *)
+let test_no_catalog_repository_injection () =
+  (* RFC-0324 B-1 regression guard: the prompt must never re-grow a
+     catalog-fed repository list. The old <registered_repositories> block
+     asserted that every repositories.toml id "resolves under repos/<name>/"
+     while the sandbox held a different (or empty) set of checkouts —
+     keepers that trusted it referenced un-cloned repos (path_not_found,
+     379/24h in the 2026-07-08 tool-error audit). Filesystem is the truth;
+     the prompt carries only the constant self-discovery instruction. *)
   let prompt =
     KP.build_keeper_system_prompt
-      ~goal:"Work on the registered repositories"
+      ~goal:"Work on repositories"
       ~instructions:""
-      ~registered_repositories:(KP.Registered_repository_ids [ "masc"; "oas" ])
       ()
   in
-  check bool "block header present" true
+  check bool "catalog injection block stays removed" false
     (has_in prompt "<registered_repositories>");
-  check bool "lists repos/masc" true (has_in prompt "- repos/masc");
-  check bool "lists repos/oas" true (has_in prompt "- repos/oas");
-  check bool "states unregistered names are rejected" true
-    (has_in prompt "rejected as")
-
-let test_registered_repositories_block_empty_renders_nothing () =
-  (* Empty catalog still degrades to silence, never a fabricated name — same
-     policy as empty active_goals / empty home_ground. *)
-  let prompt =
-    KP.build_keeper_system_prompt
-      ~goal:"No registered repositories"
-      ~instructions:""
-      ()
-  in
-  check bool "no block when list empty" false
-    (has_in prompt "<registered_repositories>")
-
-let test_registered_repositories_block_failure_renders_fail_closed () =
-  let prompt =
-    KP.build_keeper_system_prompt
-      ~goal:"Repository catalog unavailable"
-      ~instructions:""
-      ~registered_repositories:
-        (KP.Registered_repositories_unavailable "repositories.toml parse error")
-      ()
-  in
-  check bool "block header present" true
-    (has_in prompt "<registered_repositories>");
-  check bool "catalog unavailable visible" true
-    (has_in prompt "Repository catalog unavailable");
-  check bool "tells keeper not to guess" true (has_in prompt "Do not guess");
-  check bool "carries parse error" true
-    (has_in prompt "repositories.toml parse error")
+  check bool "constant repositories block present" true
+    (has_in prompt "<repositories>");
+  check bool "names the filesystem as the source of truth" true
+    (has_in prompt "filesystem is the source of truth");
+  check bool "instructs listing repos/ before referencing" true
+    (has_in prompt "list repos/");
+  check bool "warns registration does not imply a checkout" true
+    (has_in prompt "registration does not imply a checkout")
 
 let test_prompt_recovery_guard_restores_missing_anchors () =
   let prompt =
@@ -565,12 +544,8 @@ let () =
             test_direct_reply_prompt_matches_server_managed_heartbeat_policy;
           test_case "keeper prompt preserves snapshot delta anchors" `Quick
             test_keeper_prompt_preserves_snapshot_delta_anchors;
-          test_case "registered_repositories block lists valid repos" `Quick
-            test_registered_repositories_block_lists_valid_repos;
-          test_case "registered_repositories block empty renders nothing" `Quick
-            test_registered_repositories_block_empty_renders_nothing;
-          test_case "registered_repositories failure block is fail closed" `Quick
-            test_registered_repositories_block_failure_renders_fail_closed;
+          test_case "no catalog repository injection (RFC-0324 B-1)" `Quick
+            test_no_catalog_repository_injection;
           test_case "prompt recovery guard restores missing anchors" `Quick
             test_prompt_recovery_guard_restores_missing_anchors;
           test_case "prompt recovery guard survives empty registry value"

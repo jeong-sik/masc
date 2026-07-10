@@ -281,12 +281,19 @@ let board_reaction_note (reaction : Keeper_world_observation.board_reaction_even
 let board_event_note = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
     board_reaction_note reaction
+  | Keeper_world_observation.External_attention ->
+    (* RFC-0320 W3(a): steer a woken keeper to answer back into the connector
+       conversation this attention came from (via keeper_surface_post), instead
+       of only proceeding on its own state. The routing target is deterministic
+       — it is the conversation surface already on this observation; the LLM
+       decides only what to say. *)
+    " [continuation: someone is waiting in this conversation — reply to them \
+     with keeper_surface_post, do not only proceed on your own state]"
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
   | Keeper_world_observation.Schedule_due
-  | Keeper_world_observation.External_attention
   | Keeper_world_observation.Goal_verification_failed
   | Keeper_world_observation.Failure_judgment
   | Keeper_world_observation.Goal_assigned
@@ -737,13 +744,38 @@ let autonomous_trigger_lines
          still render in their own layers; event-queue stimuli (bootstrap,
          no-progress recovery, schedule-due, connector attention) surface
          ONLY here — before this arm the model had no trace of why it woke. *)
-      "- Scheduler: reactive turn (external stimulus)."
-      :: (match
-            Keeper_world_observation.verdict_reasons_to_strings decision.verdict
-          with
-          | [] -> []
-          | reasons ->
-              [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ])
+      let hitl_continuation_steer =
+        (* RFC-0320 W3b: when this reactive turn was opened by a resolved HITL
+           approval, steer the keeper back to the conversation it asked from.
+           The routing (which surface) stays the keeper's own recent context;
+           this only tells it to answer there rather than proceed silently. A
+           keeper whose original turn already resumed (fast approval) can
+           ignore this soft line, so it does not force a duplicate reply. *)
+        let has_hitl_resolution =
+          match decision.verdict with
+          | Keeper_world_observation.Run { reasons = first, rest } ->
+              List.exists
+                (function
+                  | Keeper_world_observation.Hitl_resolved_pending -> true
+                  | _ -> false)
+                (first :: rest)
+          | Keeper_world_observation.Skip _ -> false
+        in
+        if has_hitl_resolution then
+          [ "- Continuation: an approval you were waiting on was just resolved. \
+             If you requested it inside a conversation (dashboard / Discord / \
+             Slack), reply back into that conversation with keeper_surface_post \
+             instead of only proceeding on your own state." ]
+        else []
+      in
+      ("- Scheduler: reactive turn (external stimulus)."
+       :: (match
+             Keeper_world_observation.verdict_reasons_to_strings decision.verdict
+           with
+           | [] -> []
+           | reasons ->
+               [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ]))
+      @ hitl_continuation_steer
   | _ -> []
 
 let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)

@@ -14,14 +14,14 @@
 
 type connector_kind =
   | Discord
+  | Slack
   | Generic
 (** The typed identity of the connector a {!dispatch} serves, injected at
-    dispatch-construction time. [Discord] has an in-process inbound gateway and
-    outbound adapter, so a busy message projects onto the chat queue; [Generic]
-    (the HTTP gate-route lane: imessage-bot, cli-connector) keeps the async
-    [masc_keeper_msg] poll path. Slack is intentionally absent — there is no
-    wired Slack inbound gateway — to avoid a dead branch. See
-    RFC-connector-deferred-reply-via-chat-queue §3.2–3.3. *)
+    dispatch-construction time. [Discord] and [Slack] each have an in-process
+    inbound gateway and an outbound adapter, so a busy message projects onto the
+    chat queue; [Generic] (the HTTP gate-route lane: imessage-bot, cli-connector)
+    keeps the async [masc_keeper_msg] poll path. See
+    RFC-connector-deferred-reply-via-chat-queue §3.2–3.3 and RFC-0317. *)
 
 val route_busy_connector :
   connector_kind ->
@@ -29,8 +29,8 @@ val route_busy_connector :
   user_id:string ->
   [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ]
 (** Pure routing decision for a connector message that arrives while the keeper
-    has an in-flight turn. Exhaustive over {!connector_kind}: [Discord] returns
-    [`Enqueue_chat_queue] with the typed source so the serial
+    has an in-flight turn. Exhaustive over {!connector_kind}: [Discord] and
+    [Slack] return [`Enqueue_chat_queue] with the typed source so the serial
     {!Keeper_chat_consumer} drains and delivers it after the slot frees;
     [Generic] returns [`Async_poll]. Exposed for unit testing the decision in
     isolation. *)

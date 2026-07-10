@@ -118,6 +118,11 @@ type masc_internal_error =
       model : string option;
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
+      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+         [MaxTokens] on an empty/thinking_only shape marks a truncation, distinct
+         from a clean [EndTurn] no-progress terminal. Groundwork slice: threaded
+         and serialized, not yet consumed by classification. *)
+      stop_reason : Agent_sdk.Types.stop_reason option;
       last_tool_effect : tool_progress_effect option;
       any_mutating_tool : bool option;
       tool_effects_seen : tool_progress_effect list;
@@ -156,6 +161,7 @@ type masc_internal_error =
   | Internal_unhandled_exception of {
       site : string;
       exn_repr : string;
+      transport_error_kind : Llm_provider.Http_client.network_error_kind option;
     }
   | Internal_bridge_exception of {
       caller : string;
@@ -164,6 +170,8 @@ type masc_internal_error =
   | Internal_contract_rejected of { reason : string }
 
 val masc_internal_error_prefix : string
+
+val runtime_runner_execute_site : string
 
 val blocker_detail_structured_max_chars : int
 (** Upper bound (~2000) preserved for a [masc_oas_error] structured payload

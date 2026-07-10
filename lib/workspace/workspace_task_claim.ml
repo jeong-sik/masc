@@ -97,17 +97,8 @@ let claim_task_r config ~agent_name ~task_id ()
            | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
            | Some task -> Ok task
          in
-         (* Claim gate: only typed policy blocks Todo reclaim.
-         do_not_reclaim_reason is an operator-facing explanation, not state;
-         task-local runtime repair is not part of the claim gate. *)
-         let* () =
-           match Masc_domain.task_claim_decision task with
-           | Claim_unavailable (Claim_block_reclaim_policy r) ->
-             Error
-               (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                  (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
-           | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> Ok ()
-         in
+         (* RFC-0323 G-10: the typed reclaim claim gate is retired — status
+            alone decides claimability ([resolve_claim] below owns it). *)
          let* () =
            match task.task_status with
            | Todo ->
@@ -148,7 +139,7 @@ let claim_task_r config ~agent_name ~task_id ()
                         Workspace_task_classify.same_task_actor config a agent_name)
                       ~agent_name
                       ~now:(now_iso ())
-                      t.task_status
+                      t
                   with
                   | Workspace_task_lifecycle.Worker_claim status ->
                     let t = clear_reclaim_decision t in
@@ -157,7 +148,9 @@ let claim_task_r config ~agent_name ~task_id ()
                     `Claimed_verification, { t with task_status = status } :: acc
                   | Workspace_task_lifecycle.Self_owned -> `Already_mine, t :: acc
                   | Workspace_task_lifecycle.Held_by_other holder ->
-                    `Claimed_by holder, t :: acc)
+                    `Claimed_by holder, t :: acc
+                  | Workspace_task_lifecycle.Held_terminal status ->
+                    `Terminal status, t :: acc)
                 else state, t :: acc)
              (`Not_found, [])
              backlog.tasks
@@ -165,6 +158,19 @@ let claim_task_r config ~agent_name ~task_id ()
          let new_tasks = List.rev new_tasks in
          match claim_state with
          | `Not_found -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
+         | `Terminal status ->
+           (* RFC-0323: completed work is terminal — point the caller at the
+              linked re-run path instead of a bare AlreadyClaimed. *)
+           Error
+             (Masc_domain.Task
+                (Masc_domain.Task_error.InvalidState
+                   (Printf.sprintf
+                      "Task %s is %s — completed work is terminal. To run it \
+                       again, create a new task with predecessor_task_id=%s \
+                       (masc_add_task, RFC-0323)."
+                      task_id
+                      (Masc_domain.task_status_to_string status)
+                      task_id)))
          | `Claimed_by other -> Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = other }))
          | `Already_mine ->
            Ok

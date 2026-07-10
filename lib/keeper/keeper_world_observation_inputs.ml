@@ -19,9 +19,13 @@ let backlog_updated_since_last_scheduled_autonomous
     | None -> false)
 ;;
 
-let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta) () =
+let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
+    ~(tasks : Masc_domain.task list) () =
+  (* [read_backlog_counts] already loaded [tasks]. Reuse them to get the same
+     empty-scope fallback as the claim path without a second backlog read. *)
   let scope =
-    Keeper_runtime_contract.resolve_observation_claim_goal_scope ~config ~meta ()
+    Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks ~config ~meta
+      ~tasks ()
   in
   scope.task_filter
 ;;
@@ -44,6 +48,34 @@ let task_has_actionable_verification actionable_request_ids
   | Masc_domain.Cancelled _ -> false
 ;;
 
+(** RFC-0323 G-5 readiness gate 3 audit: AwaitingVerification tasks whose
+    [verification_id] has no actionable verification-store record. Such a task
+    will never wake — the wake join ([actionable_verification_request_ids])
+    requires the record, so an orphan starves silently (no wake signal, no
+    timer backstop per RFC-0220). This is the inverse of
+    [task_has_actionable_verification]: it lists the violations rather than
+    counting healthy ones, so a default-on flip (G-5) can detect store-record
+    loss before it becomes invisible starvation. *)
+let audit_tasks_without_actionable_verification_ids
+    (actionable_request_ids : string list) (tasks : Masc_domain.task list)
+    : (string * string) list =
+  List.filter_map
+    (fun (task : Masc_domain.task) ->
+      match task.task_status with
+      | Masc_domain.AwaitingVerification { verification_id; _ } ->
+        if List.exists (String.equal verification_id) actionable_request_ids
+        then None
+        else Some (task.id, verification_id)
+      | _ -> None)
+    tasks
+;;
+
+let audit_tasks_without_actionable_verification ~config
+    (tasks : Masc_domain.task list) : (string * string) list =
+  audit_tasks_without_actionable_verification_ids
+    (actionable_verification_request_ids ~config) tasks
+;;
+
 (** Read workspace backlog counts. *)
 let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
   : int * int * int * int * bool
@@ -56,7 +88,9 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         backlog.tasks
     in
     let unclaimed = List.length unclaimed_tasks in
-    let claim_scope_filter = claim_goal_scope_filter ~config ~meta () in
+    let claim_scope_filter =
+      claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
+    in
     let claimable =
       List.length
         (List.filter

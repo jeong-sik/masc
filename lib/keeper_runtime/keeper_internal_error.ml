@@ -280,6 +280,14 @@ type masc_internal_error =
       model : string option;
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
+      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+         [MaxTokens] on an empty/thinking_only shape marks a truncation (the
+         shared output budget was exhausted, most often by thinking) and must be
+         distinguished from a clean [EndTurn] no-progress terminal — OAS gates
+         its own [ended_without_deliverable_content] on [EndTurn] for exactly
+         this reason. Groundwork only in this slice: threaded and serialized,
+         not yet consumed by classification (§4.5 slices 2-3). *)
+      stop_reason : Agent_sdk.Types.stop_reason option;
       last_tool_effect : tool_progress_effect option;
       any_mutating_tool : bool option;
       tool_effects_seen : tool_progress_effect list;
@@ -320,6 +328,7 @@ type masc_internal_error =
   | Internal_unhandled_exception of {
       site : string;
       exn_repr : string;
+      transport_error_kind : Llm_provider.Http_client.network_error_kind option;
     }
   | Internal_bridge_exception of {
       caller : string;
@@ -330,6 +339,7 @@ type masc_internal_error =
     }
 
 let masc_internal_error_prefix = "[masc_oas_error] "
+let runtime_runner_execute_site = "runtime_runner.execute"
 
 (* #9933: a keeper [blocker_info] detail string may carry a structured
    [masc_oas_error] JSON payload — [masc_internal_error_prefix] above,
@@ -411,6 +421,33 @@ let string_opt_of_assoc key json =
   Json_field.string json key |> Json_field.to_option
 ;;
 
+let network_error_kind_to_string = function
+  | Llm_provider.Http_client.Connection_refused -> "connection_refused"
+  | Llm_provider.Http_client.Dns_failure -> "dns_failure"
+  | Llm_provider.Http_client.Tls_error -> "tls_error"
+  | Llm_provider.Http_client.Timeout -> "timeout"
+  | Llm_provider.Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
+  | Llm_provider.Http_client.End_of_file -> "end_of_file"
+  | Llm_provider.Http_client.Unknown -> "unknown"
+;;
+
+let network_error_kind_of_string = function
+  | "connection_refused" -> Some Llm_provider.Http_client.Connection_refused
+  | "dns_failure" -> Some Llm_provider.Http_client.Dns_failure
+  | "tls_error" -> Some Llm_provider.Http_client.Tls_error
+  | "timeout" -> Some Llm_provider.Http_client.Timeout
+  | "local_resource_exhaustion" ->
+    Some Llm_provider.Http_client.Local_resource_exhaustion
+  | "end_of_file" -> Some Llm_provider.Http_client.End_of_file
+  | "unknown" -> Some Llm_provider.Http_client.Unknown
+  | _ -> None
+;;
+
+let transport_error_kind_json_fields = function
+  | None -> []
+  | Some kind -> [ "transport_error_kind", `String (network_error_kind_to_string kind) ]
+;;
+
 let bool_opt_of_assoc key = function
   | `Assoc fields -> (
     match List.assoc_opt key fields with
@@ -480,6 +517,7 @@ let masc_internal_error_to_json = function
         model;
         reason_kind;
         response_shape;
+        stop_reason;
         last_tool_effect;
         any_mutating_tool;
         tool_effects_seen;
@@ -496,6 +534,9 @@ let masc_internal_error_to_json = function
         ( "response_shape",
           Json_util.string_opt_to_json
             (Option.map accept_response_shape_to_string response_shape) );
+        ( "stop_reason",
+          Json_util.string_opt_to_json
+            (Option.map Agent_sdk.Types.stop_reason_to_string stop_reason) );
         ( "last_tool_effect",
           Json_util.string_opt_to_json
             (Option.map tool_progress_effect_to_string last_tool_effect) );
@@ -569,13 +610,13 @@ let masc_internal_error_to_json = function
         ("tools", Json_util.json_string_list tools);
         ("original_error", `String original_error);
       ]
-  | Internal_unhandled_exception { site; exn_repr } ->
+  | Internal_unhandled_exception { site; exn_repr; transport_error_kind } ->
     `Assoc
-      [
-        ("kind", `String "internal_unhandled_exception");
-        ("site", `String site);
-        ("exn_repr", `String exn_repr);
-      ]
+      ([ ("kind", `String "internal_unhandled_exception")
+       ; ("site", `String site)
+       ; ("exn_repr", `String exn_repr)
+       ]
+       @ transport_error_kind_json_fields transport_error_kind)
   | Internal_bridge_exception { caller; exn_repr } ->
     `Assoc
       [
@@ -1027,6 +1068,10 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                      Option.bind
                        (string_opt_of_assoc "response_shape" json)
                        accept_response_shape_of_string;
+                   stop_reason =
+                     Option.map
+                       Agent_sdk.Types.stop_reason_of_string
+                       (string_opt_of_assoc "stop_reason" json);
                    last_tool_effect =
                      Option.bind
                        (string_opt_of_assoc "last_tool_effect" json)
@@ -1144,11 +1189,20 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
             Some (Ambiguous_post_commit { is_timeout; tools; original_error })
           | _ -> None)
       | Some (`String "internal_unhandled_exception") -> (
-          match string_opt_of_assoc "site" json,
-                string_opt_of_assoc "exn_repr" json
-          with
+          match string_opt_of_assoc "site" json, string_opt_of_assoc "exn_repr" json with
           | Some site, Some exn_repr ->
-            Some (Internal_unhandled_exception { site; exn_repr })
+            (match string_opt_of_assoc "transport_error_kind" json with
+             | None ->
+               Some
+                 (Internal_unhandled_exception
+                    { site; exn_repr; transport_error_kind = None })
+             | Some raw_kind ->
+               (match network_error_kind_of_string raw_kind with
+                | Some transport_error_kind ->
+                  Some
+                    (Internal_unhandled_exception
+                       { site; exn_repr; transport_error_kind = Some transport_error_kind })
+                | None -> None))
           | _ -> None)
       | Some (`String "internal_bridge_exception") -> (
           match string_opt_of_assoc "caller" json,

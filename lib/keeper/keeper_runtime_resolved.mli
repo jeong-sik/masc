@@ -22,6 +22,7 @@ type t = {
   bootstrap_max_active_keepers : int field;
   reactive_max_idle_turns : int field;
   autonomous_max_idle_turns : int field;
+  idle_skip_threshold : int field;
   turn_timeout_sec : float field;
   admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
@@ -42,6 +43,7 @@ val to_yojson : t -> Yojson.Safe.t
 val bootstrap_max_active_keepers : unit -> int
 val reactive_max_idle_turns : unit -> int
 val autonomous_max_idle_turns : unit -> int
+val idle_skip_threshold : unit -> int
 val turn_timeout_sec : unit -> float
 val admission_wait_timeout_sec : unit -> float
 val stream_idle_timeout_sec : unit -> float

@@ -90,10 +90,11 @@ type thinking_control_format =
   | Enable_thinking
 [@@deriving show, eq]
 
-(** Per-model capabilities, mirroring OAS [Llm_provider.Capabilities] for the
-    fields callers branch on. Fields already present on {!model_spec}
-    ([tools_support]/[thinking_support]/[max_context]/[streaming]) are not
-    duplicated here, to avoid two-SSOT drift. *)
+(** Legacy runtime.toml capability declaration retained only for config
+    migration and read-only compatibility. Execution uses the OAS-resolved
+    capability projection on {!Runtime.t}; MASC declarations must not override
+    provider/model truth. New production config should declare capabilities in
+    the OAS model catalog. *)
 type model_capabilities =
   { max_output_tokens : int option
   ; supports_tool_choice : bool
@@ -155,10 +156,15 @@ let model_capabilities_default =
   }
 ;;
 
-(** [models.<id>] — capability declaration. [match_prefixes] empty = match only
-    exact [api_name] equality; non-empty = match any requested model id starting
-    with one of the prefixes (longest-prefix-first; resolver lives outside the
-    schema and is added only if a binding needs fuzzy resolution — RFC-0206 R4). *)
+(** [models.<id>] — MASC runtime-binding policy. [max_context] is a local
+    context ceiling, not a model fact; OAS supplies the provider/model catalog
+    ceiling used for effective dispatch. The capability-shaped fields below
+    remain only so old runtime.toml files can be read and audited; execution
+    must use {!Runtime.capabilities_for_runtime}. [match_prefixes] empty = match
+    only exact [api_name] equality; non-empty = match any requested model id
+    starting with one of the prefixes (longest-prefix-first; resolver lives
+    outside the schema and is added only if a binding needs fuzzy resolution —
+    RFC-0206 R4). *)
 type model_spec =
   { id : string
   ; api_name : string
@@ -331,10 +337,9 @@ type config =
   ; media_failover : string list
     (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
         when a turn's input modality (image/audio/document) exceeds the assigned
-        runtime's declared capabilities; the turn reroutes to the first that
-        admits it. [[]] = derive capable runtimes from declared
-        [\[models.*.capabilities\]] in declaration order. Each id must resolve to
-        a configured runtime (rejected at load like [\[runtime\].default]). *)
+        runtime's OAS-resolved provider/model capabilities; the turn reroutes to
+        the first that admits it. Each id must resolve to a configured runtime
+        (rejected at load like [\[runtime\].default]). *)
   ; pause_threshold : pause_threshold
     (** [\[pause\]] — typed SSOT for keeper pause / regime threshold knobs
         previously hardcoded in [Keeper_behavioral_regime]. Mirrors the same

@@ -324,8 +324,8 @@ let test_skips_corrupt_jsonl_keeper () =
     ~keepers_dir
     ~keeper_id:"good"
     [ fact ~now "valid durable row" ];
-  (* A malformed facts.jsonl makes the strict GC read raise; the route must skip
-     that keeper rather than abort the whole snapshot (the documented behavior). *)
+  (* A malformed facts.jsonl makes the strict GC read raise; the route keeps the
+     valid keeper and exposes the failed snapshot in the top-level error list. *)
   let broken_path = Io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id:"broken" in
   Out_channel.with_open_text broken_path (fun oc ->
     Out_channel.output_string oc "{ this is not valid json\n");
@@ -334,6 +334,10 @@ let test_skips_corrupt_jsonl_keeper () =
     "corrupt keeper skipped, valid one kept"
     [ "good" ]
     (keeper_ids json)
+  ;
+  let errors = list_field "errors" json in
+  Alcotest.(check int) "corrupt keeper is observable" 1 (List.length errors);
+  Alcotest.(check string) "error keeper id" "broken" (string_field "keeper_id" (List.hd errors))
 ;;
 
 let () =
@@ -367,7 +371,7 @@ let () =
             `Quick
             test_empty_store_has_no_keepers_and_zero_totals
         ; Alcotest.test_case
-            "skips a keeper with a corrupt facts.jsonl"
+            "reports a keeper with a corrupt facts.jsonl"
             `Quick
             test_skips_corrupt_jsonl_keeper
         ] )

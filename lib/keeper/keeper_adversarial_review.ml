@@ -93,6 +93,7 @@ let run_grounded_review ~base_path ~runtime_id (input : review_input) :
         ~masc_tools:[ Verifier_core.report_verdict_schema ]
         ~dispatch
         ~temperature:Runtime_provider_defaults.deterministic_temperature
+        ~max_idle_turns:(Keeper_runtime_resolved.autonomous_max_idle_turns ())
         ~approval:Approval_callbacks.auto_approve
         ~provider_config_transform:apply_report_verdict_output_schema
         ()

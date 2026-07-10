@@ -83,29 +83,10 @@ let build_runtime_execution
                 ~meta_name:meta.name
                 ~profile_defaults)
        in
-       let max_output_ceiling =
-         None
-       in
-       (match
-         Runtime_inference.validate_max_tokens_within_ceiling
-           ~runtime_id
-            ~provider_ceiling:max_output_ceiling
-            raw_max_tokens
-        with
-        | Error err ->
-          let detail =
-            Option.value
-              ~default:(Keeper_internal_error.kind_of_masc_internal_error err)
-              (Keeper_internal_error.summary_of_masc_internal_error err)
-          in
-          log_pre_dispatch_error ~site:"validate_max_tokens_within_ceiling" detail;
-          Error
-            (Keeper_internal_error.sdk_error_of_masc_internal_error err)
-        | Ok max_tokens ->
-          Ok
-            { Keeper_turn_runtime_budget.runtime_id
-            ; max_context_resolution
-            ; max_context
-            ; temperature
-            ; max_tokens
-            }))
+       Ok
+         { Keeper_turn_runtime_budget.runtime_id
+         ; max_context_resolution
+         ; max_context
+         ; temperature
+         ; max_tokens = raw_max_tokens
+         })

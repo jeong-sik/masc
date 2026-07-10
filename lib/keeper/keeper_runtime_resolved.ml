@@ -13,6 +13,7 @@ type t = {
   bootstrap_max_active_keepers : int field;
   reactive_max_idle_turns : int field;
   autonomous_max_idle_turns : int field;
+  idle_skip_threshold : int field;
   turn_timeout_sec : float field;
   admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
@@ -48,8 +49,11 @@ let bootstrap_max_active_keepers_live () =
   get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
   |> Keeper_fd_pressure.cap_active_keepers_for_nofile
 
+let idle_skip_threshold_live () =
+  max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
+
 (* The idle loop guard must sit strictly above the graduated idle hook's
-   skip threshold ([Env_config_keeper.KeeperKeepalive.idle_skip_threshold],
+   skip threshold ([idle_skip_threshold_live ()],
    default 4): the hook ends an idle run gracefully (Skip) at skip_at,
    while the OAS guard aborts the run with IdleDetected at the guard
    value. A guard <= skip_at makes Skip unreachable and turns die as
@@ -57,7 +61,7 @@ let bootstrap_max_active_keepers_live () =
    that contract at resolution time, so an env override cannot silently
    reintroduce the dead zone. *)
 let idle_guard_floor () =
-  Env_config_keeper.KeeperKeepalive.idle_skip_threshold + 1
+  idle_skip_threshold_live () + 1
 
 let reactive_max_idle_turns_live () =
   max (idle_guard_floor ())
@@ -80,7 +84,7 @@ let turn_timeout_sec_live () =
 let admission_wait_timeout_sec_live () =
   Float.max 5.0
     (Float.min 1200.0
-       (180.0))
+       (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
 
 let stream_idle_timeout_sec_live () =
   Float.max 5.0
@@ -161,6 +165,11 @@ let freeze_from_current () =
       "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"
       (autonomous_max_idle_turns_live ())
   in
+  let idle_skip_threshold =
+    source_field
+      "MASC_KEEPER_IDLE_SKIP_THRESHOLD"
+      (idle_skip_threshold_live ())
+  in
   let turn_timeout_sec =
     source_field
       "MASC_KEEPER_TURN_TIMEOUT_SEC"
@@ -215,6 +224,7 @@ let freeze_from_current () =
     bootstrap_max_active_keepers;
     reactive_max_idle_turns;
     autonomous_max_idle_turns;
+    idle_skip_threshold;
     turn_timeout_sec;
     admission_wait_timeout_sec;
     oas_timeout_override_sec;
@@ -257,6 +267,7 @@ let to_yojson (runtime : t) =
       ("bootstrap_max_active_keepers", field_to_yojson (fun value -> `Int value) runtime.bootstrap_max_active_keepers);
       ("reactive_max_idle_turns", field_to_yojson (fun value -> `Int value) runtime.reactive_max_idle_turns);
       ("autonomous_max_idle_turns", field_to_yojson (fun value -> `Int value) runtime.autonomous_max_idle_turns);
+      ("idle_skip_threshold", field_to_yojson (fun value -> `Int value) runtime.idle_skip_threshold);
       ("turn_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.turn_timeout_sec);
       ("admission_wait_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.admission_wait_timeout_sec);
       ("oas_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.oas_timeout_override_sec);
@@ -275,6 +286,9 @@ let reactive_max_idle_turns () =
 
 let autonomous_max_idle_turns () =
   (current ()).autonomous_max_idle_turns.value
+
+let idle_skip_threshold () =
+  (current ()).idle_skip_threshold.value
 
 let turn_timeout_sec () =
   (current ()).turn_timeout_sec.value

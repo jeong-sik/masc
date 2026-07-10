@@ -631,7 +631,7 @@ let test_context_layer_budget_records_decisions () =
         && List.assoc_opt "kept_tokens" fields = None)
    | _ -> Alcotest.fail "expected context layer budget JSON object")
 
-let test_context_layer_policy_caps_are_typed () =
+let test_context_layer_policy_uses_provider_window () =
   let budget policy text =
     Keeper_run_prompt.estimate_context_layer_policy_budget
       ~max_context:160
@@ -646,13 +646,13 @@ let test_context_layer_policy_caps_are_typed () =
     "world_dynamic_context"
     dynamic.context_layer_name;
   Alcotest.(check string) "dynamic priority" "high" dynamic.context_layer_priority;
-  Alcotest.(check int) "dynamic cap" 40 dynamic.context_layer_cap_tokens;
+  Alcotest.(check int) "dynamic cap uses provider window" 160 dynamic.context_layer_cap_tokens;
   let memory = budget Keeper_run_prompt.memory_context_layer_policy "memory" in
-  Alcotest.(check int) "memory cap" 20 memory.context_layer_cap_tokens;
+  Alcotest.(check int) "memory cap uses provider window" 160 memory.context_layer_cap_tokens;
   let temporal =
     budget Keeper_run_prompt.temporal_context_layer_policy "temporal"
   in
-  Alcotest.(check int) "temporal cap" 10 temporal.context_layer_cap_tokens;
+  Alcotest.(check int) "temporal cap uses provider window" 160 temporal.context_layer_cap_tokens;
   let user =
     budget Keeper_run_prompt.user_message_context_layer_policy "user"
   in
@@ -974,7 +974,7 @@ let () =
         Alcotest.test_case "context layer budget records decisions" `Quick
           test_context_layer_budget_records_decisions;
         Alcotest.test_case "context layer policy caps are typed" `Quick
-          test_context_layer_policy_caps_are_typed;
+          test_context_layer_policy_uses_provider_window;
         Alcotest.test_case "context preflight manifest records budget delta" `Quick
           test_context_preflight_manifest_records_budget_delta;
         Alcotest.test_case "context injection hook records post-tool ledger" `Quick

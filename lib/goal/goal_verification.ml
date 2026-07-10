@@ -237,12 +237,15 @@ let goal_verification_vote_of_yojson = function
       let* evidence_refs =
         match Json_util.assoc_member_opt "evidence_refs" json with
         | Some `Null -> Ok []
-        | Some (`List values) -> (
-            try Ok (List.map (function `String s -> s | _ -> "") values)
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ ->
-              Error "goal_verification_vote_of_yojson: invalid evidence_refs")
+        | Some (`List values) ->
+            result_map_list
+              (function
+                | `String value -> Ok value
+                | json ->
+                    Error
+                      ( "goal_verification_vote_of_yojson: invalid evidence_refs item "
+                      ^ Yojson.Safe.to_string json ))
+              values
         | other ->
             Error
               ( "goal_verification_vote_of_yojson: invalid evidence_refs "
@@ -354,6 +357,25 @@ type state = {
   requests : goal_verification_request list;
 }
 
+type read_error =
+  | Corrupt_state of {
+      primary_err : string;
+      recovery_err : string option;
+    }
+
+let read_error_to_string = function
+  | Corrupt_state { primary_err; recovery_err = None } ->
+      Printf.sprintf
+        "goal verification ledger is present but unparseable (primary: %s); no .last-good recovery file exists"
+        primary_err
+  | Corrupt_state { primary_err; recovery_err = Some recovery_err } ->
+      Printf.sprintf
+        "goal verification ledger is present but unparseable (primary: %s; .last-good recovery: %s)"
+        primary_err
+        recovery_err
+
+exception Corrupt_state_exn of read_error
+
 type goal_policy_node = {
   goal_id : string;
   parent_goal_id : string option;
@@ -404,67 +426,46 @@ let events_path config =
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); requests = [] }
 
-let read_state config =
+let read_state_result config =
   let path = requests_path config in
-  if Workspace_utils.path_exists config path then
-    match Workspace_utils.read_json_result config path with
-    | Ok json -> (
-        match state_of_yojson json with
-        | Ok state -> state
-        | Error primary_msg ->
-            let recovery = requests_recovery_path config in
-            if Workspace_utils.path_exists config recovery then
-              match Workspace_utils.read_json_result config recovery with
-              | Ok recovery_json -> (
-                  match state_of_yojson recovery_json with
-                  | Ok state ->
-                      Log.Misc.warn
-                        "goal_verification: primary goal_verifications.json corrupt (%s), recovered from %s"
-                        primary_msg recovery;
-                      state
-                  | Error recovery_msg ->
-                      Log.Misc.error
-                        "goal_verification: both primary and recovery corrupt (primary: %s, recovery: %s)"
-                        primary_msg recovery_msg;
-                      default_state ())
-              | Error recovery_read_msg ->
-                  Log.Misc.warn
-                    "goal_verification: primary corrupt (%s), recovery read failed: %s"
-                    primary_msg recovery_read_msg;
-                  default_state ()
-            else
-              (Log.Misc.warn
-                 "goal_verification: goal_verifications.json corrupt (%s), no .last-good available"
-                 primary_msg;
-               default_state ()))
-    | Error primary_msg ->
-        let recovery = requests_recovery_path config in
-        if Workspace_utils.path_exists config recovery then
-          match Workspace_utils.read_json_result config recovery with
-          | Ok recovery_json -> (
-              match state_of_yojson recovery_json with
-              | Ok state ->
-                  Log.Misc.warn
-                    "goal_verification: primary unreadable (%s), recovered from %s"
-                    primary_msg recovery;
-                  state
-              | Error recovery_msg ->
-                  Log.Misc.error
-                    "goal_verification: primary unreadable (%s), recovery corrupt (%s)"
-                    primary_msg recovery_msg;
-                  default_state ())
-          | Error recovery_msg ->
-              Log.Misc.error
-                "goal_verification: primary unreadable (%s), recovery unreadable (%s)"
-                primary_msg recovery_msg;
-              default_state ()
-        else
-          (Log.Misc.warn
-             "goal_verification: goal_verifications.json unreadable (%s), no .last-good available"
-             primary_msg;
-           default_state ())
+  let read_file file_path =
+    match Workspace_utils.read_json_result config file_path with
+    | Error msg -> Error msg
+    | Ok json -> state_of_yojson json
+  in
+  if not (Workspace_utils.path_exists config path)
+  then Ok (default_state ())
   else
-    default_state ()
+    match read_file path with
+    | Ok state -> Ok state
+    | Error primary_err ->
+        let recovery = requests_recovery_path config in
+        if not (Workspace_utils.path_exists config recovery)
+        then (
+          Log.Misc.error
+            "goal_verification: goal_verifications.json corrupt (%s), no .last-good available"
+            primary_err;
+          Error (Corrupt_state { primary_err; recovery_err = None }))
+        else
+          match read_file recovery with
+          | Ok state ->
+              Log.Misc.warn
+                "goal_verification: primary goal_verifications.json corrupt (%s), recovered from %s"
+                primary_err
+                recovery;
+              Ok state
+          | Error recovery_err ->
+              Log.Misc.error
+                "goal_verification: both primary and recovery corrupt (primary: %s, recovery: %s)"
+                primary_err
+                recovery_err;
+              Error (Corrupt_state { primary_err; recovery_err = Some recovery_err })
+;;
+
+let read_state config =
+  match read_state_result config with
+  | Ok state -> state
+  | Error error -> raise (Corrupt_state_exn error)
 
 let write_state_result config (state : state) =
   let json = state_to_yojson state in
@@ -577,7 +578,10 @@ let emit_event config ~(goal_id : string) ~(event_type : string)
 let update_state config f =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
+      let* state =
+        read_state_result config
+        |> Result.map_error read_error_to_string
+      in
       let next_state = f state in
       let* () = write_state_result config next_state in
       Ok next_state)
@@ -652,7 +656,10 @@ let evaluate_quorum request =
 let cancel_request_if_open config ~(request_id : string) =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
+      let* state =
+        read_state_result config
+        |> Result.map_error read_error_to_string
+      in
       match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
       | None -> Error "goal verification request not found"
       | Some request when request.status <> Open -> Ok (Already_resolved_request request)
@@ -686,7 +693,10 @@ let submit_vote config ~(goal_id : string) ~(request_id : string) ~(principal : 
     ~(decision : vote_decision) ?note ?(evidence_refs = []) () =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
+      let* state =
+        read_state_result config
+        |> Result.map_error read_error_to_string
+      in
       match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
       | None -> Error "goal verification request not found"
       | Some request when not (String.equal request.goal_id goal_id) ->

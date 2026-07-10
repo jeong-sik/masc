@@ -107,6 +107,9 @@ val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t 
 
 val read_facts_all : keeper_id:string -> fact list
 val read_facts_all_for_keepers_dir : keepers_dir:string -> keeper_id:string -> fact list
+(** Lenient recall reader: valid rows remain available when a store contains a
+    malformed row, but each dropped row is reported through the persistence
+    read-drop log and metric. Use the strict variant before any rewrite. *)
 (** Read every fact in the store, failing if any JSONL row is malformed or does
     not match the fact schema. Use this before destructive rewrites so corrupt
     input cannot be partially dropped and overwritten. *)

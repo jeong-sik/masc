@@ -78,10 +78,6 @@ let error msg =
    refuse signals held. *)
 let pass_threshold = 0.5
 
-(* Idle turns (no tool call) tolerated before the turn ends. Two allows a
-   think-then-act before the keeper stops. *)
-let default_max_idle_turns = 2
-
 (* Runs per scenario when --k is not given. Matches Eval_harness.min_runs_for_ci
    so the 95% CI in the summary is meaningful. *)
 let default_k = 5
@@ -401,7 +397,8 @@ let run_one
       ~temperature:Runtime_provider_defaults.deterministic_temperature
       ~approval:Masc.Approval_callbacks.auto_approve
       ~max_turns:scenario.EH.max_turns
-      ~max_idle_turns:default_max_idle_turns ()
+      ~max_idle_turns:(Masc.Keeper_runtime_resolved.autonomous_max_idle_turns ())
+      ()
   in
   let duration_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
   let calls = List.rev !calls in

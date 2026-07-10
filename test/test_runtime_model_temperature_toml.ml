@@ -17,8 +17,8 @@
     7. [top-p], [top-k], and [min-p] parse into model sampling fields.
     8. Sampling probability fields are finite numbers in [0.0, 1.0].
     9. [top-k] is a positive integer.
-    10. [top-k]/[min-p] fail closed when declared model capabilities say the
-        field is unsupported.
+    10. Legacy [models.<id>.capabilities] fields do not decide sampling
+        admission; the OAS provider/model catalog owns that contract.
 
     Motivation: Kimi K2.7 (kimi-for-coding) accepts only [temperature = 1.0] and
     rejects any other value ("only 1 is allowed for this model"). This field lets
@@ -49,19 +49,6 @@ let parse_string_expect_error label s =
   | Error _ -> ()
 ;;
 
-let parse_string_expect_error_entry label ~path ~message s =
-  match Toml.parse_string s with
-  | Ok _ -> failf "%s: expected parse error, got Ok" label
-  | Error errors ->
-    let found =
-      List.exists
-        (fun (err : Toml.parse_error) ->
-           String.equal err.path path && String.equal err.message message)
-        errors
-    in
-    check bool label true found
-;;
-
 let model_temperature cfg id =
   match List.find_opt (fun (m : Schema.model_spec) -> String.equal m.id id) cfg.Schema.models with
   | Some m -> m.Schema.temperature
@@ -74,10 +61,10 @@ let model_sampling cfg id =
   | None -> failf "model %S absent from parsed config" id
 ;;
 
-(* A minimal valid [[models.<id>]] table needs [max-context]; [temperature] is
-   optional and appended per case. *)
+(* A minimal valid [[models.<id>]] table needs the MASC-local [context-limit];
+   [temperature] is optional and appended per case. *)
 let model_toml ~extra_lines =
-  Printf.sprintf "[models.m]\nmax-context = 200000\n%s" extra_lines
+  Printf.sprintf "[models.m]\ncontext-limit = 200000\n%s" extra_lines
 ;;
 
 let test_float_temperature_parses () =
@@ -175,22 +162,29 @@ let test_top_k_invalid_values_fail_closed () =
     (model_toml ~extra_lines:"top-k = 1.5\n")
 ;;
 
-let test_sampling_fields_conflicting_declared_capabilities_fail_closed () =
+let test_match_prefixes_invalid_values_fail_closed () =
+  parse_string_expect_error "match-prefixes must be an array"
+    (model_toml ~extra_lines:"match-prefixes = \"m\"\n");
+  parse_string_expect_error "match-prefixes entries must be non-empty"
+    (model_toml ~extra_lines:"match-prefixes = [\"\", \"m\"]\n")
+;;
+
+let test_context_limit_alias_conflict_fails_closed () =
+  parse_string_expect_error "context-limit and legacy max-context cannot coexist"
+    (model_toml ~extra_lines:"max-context = 100000\n")
+;;
+
+let test_sampling_fields_ignore_legacy_capability_admission () =
   let content =
     model_toml
       ~extra_lines:
         "top-k = 42\nmin-p = 0.07\n[models.m.capabilities]\nsupports-top-k = false\nsupports-min-p = false\n"
   in
-  parse_string_expect_error_entry
-    "top-k conflicts with declared capabilities"
-    ~path:"models.m.top-k"
-    ~message:"top-k is set but models.m.capabilities.supports-top-k is false"
-    content;
-  parse_string_expect_error_entry
-    "min-p conflicts with declared capabilities"
-    ~path:"models.m.min-p"
-    ~message:"min-p is set but models.m.capabilities.supports-min-p is false"
-    content
+  let cfg = parse_string_or_fail content in
+  let _, top_k, min_p = model_sampling cfg "m" in
+  check (option int) "top-k is not gated by legacy MASC capabilities" (Some 42) top_k;
+  check (option (float 0.0001)) "min-p is not gated by legacy MASC capabilities"
+    (Some 0.07) min_p
 ;;
 
 let () =
@@ -220,8 +214,12 @@ let () =
             test_sampling_probability_non_number_fails_closed
         ; test_case "top-k invalid values fail parse" `Quick
             test_top_k_invalid_values_fail_closed
-        ; test_case "sampling fields conflict with declared capabilities" `Quick
-            test_sampling_fields_conflicting_declared_capabilities_fail_closed
+        ; test_case "match-prefixes invalid values fail parse" `Quick
+            test_match_prefixes_invalid_values_fail_closed
+        ; test_case "context-limit alias conflict fails parse" `Quick
+            test_context_limit_alias_conflict_fails_closed
+        ; test_case "sampling fields ignore legacy capability admission" `Quick
+            test_sampling_fields_ignore_legacy_capability_admission
         ] )
     ]
 ;;

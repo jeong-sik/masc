@@ -77,6 +77,8 @@ val resolve_overrides :
       stream_idle_timeout_sec   = 120
       execution_idle_timeout_sec = 300
       llm_rerank                  = true
+      admission_wait_timeout_sec  = 180
+      idle_skip_threshold         = 4
 
       [web_search]
       searxng_url                 = "http://localhost:8888"

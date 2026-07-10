@@ -136,6 +136,23 @@ let test_cancel_if_open_reports_already_resolved () =
   check bool "saved status still approved" true
     (saved.status = Goal_verification.Approved)
 
+let test_invalid_evidence_ref_is_not_coerced_to_empty_string () =
+  match
+    Goal_verification.goal_verification_vote_of_yojson
+      (`Assoc
+        [ ( "principal"
+          , `Assoc [ ("id", `String "reviewer-1"); ("display_name", `Null) ] )
+        ; ("decision", `String "approve")
+        ; ("evidence_refs", `List [ `Int 7 ])
+        ; ("submitted_at", `String "2026-07-10T00:00:00Z")
+        ])
+  with
+  | Error message ->
+      check bool "invalid evidence ref is reported" true
+        (String_util.contains_substring message "invalid evidence_refs item")
+  | Ok vote ->
+      failf "invalid evidence ref was silently coerced: %S" (List.hd vote.evidence_refs)
+
 let test_create_request_keeps_primary_commit_when_recovery_write_fails () =
   with_workspace @@ fun config ->
   Unix.mkdir (requests_recovery_path config) 0o755;
@@ -157,6 +174,40 @@ let test_create_request_keeps_primary_commit_when_recovery_write_fails () =
   | Some stored -> check string "primary has request" request.id stored.id
   | None -> fail "primary request missing after recovery mirror failure"
 
+let test_corrupt_state_is_not_replaced_with_empty_default () =
+  with_workspace
+  @@ fun config ->
+  Workspace.write_json config (Goal_verification.requests_path config)
+    (`Assoc [ ("version", `String "not-an-int") ]);
+  (match Goal_verification.read_state_result config with
+   | Error (Goal_verification.Corrupt_state { recovery_err = None; _ }) -> ()
+   | Error error ->
+       fail
+         ("unexpected verification read error: "
+          ^ Goal_verification.read_error_to_string error)
+   | Ok _ -> fail "corrupt verification state was converted to an empty default");
+  let raised =
+    try
+      ignore (Goal_verification.read_state config);
+      false
+    with
+    | Goal_verification.Corrupt_state_exn _ -> true
+  in
+  check bool "read_state raises on unrecoverable corruption" true raised;
+  match
+    Goal_verification.create_request
+      config
+      ~goal_id:"goal-1"
+      ~requested_by:(operator "planner")
+      ~policy_snapshot:(single_approver_snapshot ~requested_by:(operator "planner"))
+  with
+  | Error message ->
+      check bool "mutation reports corrupt ledger" true
+        (String_util.contains_substring
+           message
+           "goal verification ledger is present")
+  | Ok _ -> fail "mutation silently replaced corrupt verification state"
+
 let () =
   run "Goal_verification"
     [
@@ -168,7 +219,11 @@ let () =
             test_invalid_vote_does_not_bump;
           test_case "cancel if open reports already resolved" `Quick
             test_cancel_if_open_reports_already_resolved;
+          test_case "invalid evidence ref is rejected" `Quick
+            test_invalid_evidence_ref_is_not_coerced_to_empty_string;
           test_case "recovery mirror write failure preserves primary" `Quick
             test_create_request_keeps_primary_commit_when_recovery_write_fails;
+          test_case "corrupt state is not defaulted" `Quick
+            test_corrupt_state_is_not_replaced_with_empty_default;
         ] );
     ]

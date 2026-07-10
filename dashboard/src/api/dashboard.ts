@@ -332,6 +332,7 @@ export type {
   KeeperMemoryHealthAlertSeverity,
   KeeperMemoryHealthAlertTarget,
   KeeperMemoryHealthKeeperEntry,
+  KeeperMemoryHealthError,
   KeeperMemoryHealthResponse,
   VerificationRequestStatus,
   VerificationRequestVerdict,

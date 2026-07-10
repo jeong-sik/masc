@@ -14,7 +14,7 @@ val run_model_by_label :
   goal:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
-  ?max_idle_turns:int ->
+  max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
@@ -47,6 +47,7 @@ val run_named_with_masc_tools :
   ?system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
+  max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
@@ -62,7 +63,6 @@ val run_named_with_masc_tools :
   ?compact_ratio:float ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?max_turns:int ->
-  ?max_idle_turns:int ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
@@ -71,7 +71,9 @@ val run_named_with_masc_tools :
   unit ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 (** [run_named] variant that bridges MASC tool schemas into OAS tools
-    via {!Tool_bridge.oas_tool_of_masc}. *)
+    via {!Tool_bridge.oas_tool_of_masc}. [max_idle_turns] is required so the
+    caller selects the channel policy explicitly; this wrapper does not
+    invent a lifecycle guard. *)
 
 val run_model_with_masc_tools :
   model_label:string ->
@@ -80,6 +82,7 @@ val run_model_with_masc_tools :
   ?system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
+  max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->

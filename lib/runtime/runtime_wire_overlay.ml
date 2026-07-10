@@ -9,7 +9,7 @@ let api_key_from_env name =
   match String.trim name with
   | "" -> ""
   | env_name ->
-    (match Sys.getenv_opt env_name with
+    (match Env_config_core.raw_value_opt env_name with
      | Some value -> value
      | None -> "")
 ;;

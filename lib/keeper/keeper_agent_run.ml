@@ -341,27 +341,7 @@ let run_turn
   let requested_max_tokens = max_tokens in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
-  let max_output_ceiling =
-    None
-  in
-  let max_tokens, pre_dispatch_max_tokens_error =
-    match
-      Runtime_inference.validate_max_tokens_within_ceiling
-        ~runtime_id
-        ~provider_ceiling:max_output_ceiling
-        ctx.max_tokens
-    with
-    | Ok max_tokens -> max_tokens, None
-    | Error internal_error ->
-      let detail =
-        Option.value
-          ~default:(Keeper_internal_error.kind_of_masc_internal_error internal_error)
-          (Keeper_internal_error.summary_of_masc_internal_error internal_error)
-      in
-      Log.Keeper.error "%s: %s" meta.name detail;
-      ( ctx.max_tokens,
-        Some (Keeper_internal_error.sdk_error_of_masc_internal_error internal_error) )
-  in
+  let max_tokens = ctx.max_tokens in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
   let session = ctx.session in
@@ -679,11 +659,7 @@ let run_turn
          ~max_context
          ~pre_dispatch_compacted;
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
-       let pre_dispatch_error =
-         match pre_dispatch_checkpoint_error with
-         | Some err -> Some err
-         | None -> pre_dispatch_max_tokens_error
-       in
+       let pre_dispatch_error = pre_dispatch_checkpoint_error in
        let turn_result =
          match pre_dispatch_error with
          | Some err -> Error err
@@ -1052,10 +1028,7 @@ let run_turn
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string
-            ; max_tokens =
-                (match pre_dispatch_max_tokens_error with
-                 | None -> Some max_tokens
-                 | Some _ -> None)
+            ; max_tokens = Some max_tokens
             ; thinking_budget = tctx.thinking_budget
             ; enable_thinking = tctx.thinking_enabled
             }

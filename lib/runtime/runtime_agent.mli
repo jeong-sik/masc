@@ -236,8 +236,8 @@ val content_blocks_for_run :
 val input_capabilities_of_runtime :
   Runtime.t -> Llm_provider.Capabilities.capabilities
 (** Effective input capabilities of a materialized runtime: provider caps overlaid
-    with the model's declared media capabilities (the MASC SSOT). Used to score the
-    assigned runtime and reroute candidates. *)
+    with the OAS-resolved model media capabilities. Used to score the assigned
+    runtime and reroute candidates. *)
 
 val media_reroute_candidates :
   exclude:string -> (string * Llm_provider.Capabilities.capabilities) list
@@ -386,7 +386,7 @@ module For_testing : sig
 
   val apply_runtime_model_input_capabilities :
     Llm_provider.Capabilities.capabilities ->
-    Runtime_schema.model_capabilities ->
+    Llm_provider.Capabilities.capabilities ->
     Llm_provider.Capabilities.capabilities
 
   val runtime_observation_for_completed_config :

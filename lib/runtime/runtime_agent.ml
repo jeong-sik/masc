@@ -719,11 +719,11 @@ let validate_content_blocks_for_run_against_capabilities
 
 let apply_runtime_model_input_capabilities
     (caps : Llm_provider.Capabilities.capabilities)
-    (model_caps : Runtime_schema.model_capabilities) =
-  (* Runtime model specs are the MASC SSOT for concrete media input support.
-     Provider-level caps may be broader than the selected model; media input
-     must fail closed before dispatch rather than letting a provider 400 leak
-     back as a late runtime error. *)
+    (model_caps : Llm_provider.Capabilities.capabilities) =
+  (* OAS resolves the concrete provider/model pair.  Provider-level caps may be
+     broader than the selected model; media input must fail closed before
+     dispatch rather than letting a provider 400 leak back as a late runtime
+     error. *)
   { caps with
     supports_multimodal_inputs = model_caps.supports_multimodal_inputs;
     supports_image_input = model_caps.supports_image_input;
@@ -736,22 +736,20 @@ let input_capabilities_for_config (config : config) =
   match Runtime.get_runtime_by_id (runtime_id_of_config config) with
   | None -> caps
   | Some runtime ->
-      let model_caps =
-        Option.value
-          runtime.model.capabilities
-          ~default:Runtime_schema.model_capabilities_default
-      in
-      apply_runtime_model_input_capabilities caps model_caps
+      (match Runtime.capabilities_for_runtime runtime with
+       | Some model_caps -> apply_runtime_model_input_capabilities caps model_caps
+       | None -> caps)
 
 (* Effective input capabilities of a materialized runtime (RFC-0265 reroute
    candidate scoring). Same composition as [input_capabilities_for_config]:
-   provider caps overlaid with the model's declared media capabilities (the MASC
-   SSOT, [apply_runtime_model_input_capabilities]). *)
+   provider caps overlaid with the OAS-resolved model media capabilities. *)
 let input_capabilities_of_runtime (rt : Runtime.t) =
-  apply_runtime_model_input_capabilities
-    (provider_caps_of_config rt.Runtime.provider_config)
-    (Option.value rt.Runtime.model.capabilities
-       ~default:Runtime_schema.model_capabilities_default)
+  match Runtime.capabilities_for_runtime rt with
+  | Some model_caps ->
+    apply_runtime_model_input_capabilities
+      (provider_caps_of_config rt.Runtime.provider_config)
+      model_caps
+  | None -> provider_caps_of_config rt.Runtime.provider_config
 
 (* Ordered (runtime_id, input_caps) reroute candidates: [\[runtime\].media_failover]
    order first (validated at load to resolve), then the remaining configured

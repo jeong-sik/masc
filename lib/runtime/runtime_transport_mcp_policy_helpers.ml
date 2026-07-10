@@ -14,7 +14,7 @@ let keeper_name_of_agent_name = Runtime_transport_authorization.keeper_name_of_a
 ;;
 
 let first_nonempty_env names =
-  List.find_map (fun name -> Sys.getenv_opt name |> String_util.option_trim) names
+  List.find_map (fun name -> Env_config_core.raw_value_opt name |> String_util.option_trim) names
 ;;
 
 let runtime_mcp_policy_with_masc_agent_name

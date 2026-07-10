@@ -52,7 +52,7 @@ let show_auth_error e =
 let first_nonempty_env keys =
   List.find_map
     (fun key ->
-      match Sys.getenv_opt key with
+      match Env_config_core.raw_value_opt key with
       | Some v ->
           let trimmed = String.trim v in
           if trimmed <> "" then Some (trimmed, key) else None

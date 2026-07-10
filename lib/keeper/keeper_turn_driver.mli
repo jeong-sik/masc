@@ -52,7 +52,8 @@ val sdk_error_runtime_fallback_class :
 
 (** [apply_stream_idle_timeout_default opt] returns [opt] when the caller
     supplied a value, otherwise injects
-    [Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec]. Used at
+    [Keeper_runtime_resolved.stream_idle_timeout_sec], the frozen MASC
+    runtime-policy value. Used at
     every {!run_model_by_label} / {!run_model_with_masc_tools} entry so a
     single-agent dashboard run cannot block forever on a stalled HTTP
     stream. *)

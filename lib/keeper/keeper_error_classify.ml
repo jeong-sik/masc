@@ -664,7 +664,10 @@ let default_degraded_rotation_candidates
   | Some (Read_only_no_progress | Empty_no_progress | Thinking_only_no_progress) ->
     let tool_capable =
       Runtime.get_runtimes ()
-      |> List.filter (fun (runtime : Runtime.t) -> runtime.model.tools_support)
+      |> List.filter (fun (runtime : Runtime.t) ->
+             match Runtime.capabilities_for_runtime runtime with
+             | Some caps -> caps.Llm_provider.Capabilities.supports_tools
+             | None -> false)
       |> List.map (fun (runtime : Runtime.t) ->
              normalized_runtime_id ~catalog_names runtime.id)
     in

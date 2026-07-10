@@ -49,6 +49,10 @@ let of_binding (cfg : config) (b : binding) : t option =
   Result.to_option (of_binding_result cfg b)
 ;;
 
+let capabilities_for_runtime (rt : t) =
+  Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config
+;;
+
 let is_local_provider (provider : provider) =
   match provider.transport, provider.credentials with
   | Cli _, _ -> true
@@ -175,7 +179,7 @@ let validate_cross_verifier_runtime ~(config_path : string)
            (unresolved_runtime_suffix ~dropped_bindings
               ~runtime_count:(List.length runtimes) id))
      | Some runtime ->
-       (match runtime.model.capabilities with
+       (match capabilities_for_runtime runtime with
         | Some caps when caps.supports_response_format_json -> Ok ()
         | _ ->
           Error
@@ -208,7 +212,7 @@ let validate_structured_judge_runtime ~(config_path : string)
             (unresolved_runtime_suffix ~dropped_bindings
                ~runtime_count:(List.length runtimes) id))
      | Some runtime ->
-       (match runtime.model.capabilities with
+       (match capabilities_for_runtime runtime with
         | Some caps when caps.supports_structured_output -> Ok ()
         | _ ->
           Error
@@ -243,8 +247,9 @@ let validate_hitl_summary_runtime ~(config_path : string)
 
 (* [runtime].media_failover (RFC-0265) mirrors [runtime].librarian validation for
    each id in the ordered list: an unknown id is an operator typo rejected at
-   load, not a silent drop (Unknown→Permissive anti-pattern). [[]] is the designed
-   "derive capable runtimes from declared capabilities" case. *)
+   load, not a silent drop (Unknown→Permissive anti-pattern). Candidate
+   admission later reads OAS-resolved capabilities; an empty list means no
+   operator-specified failover order. *)
 let validate_media_failover ~(config_path : string)
     ~(dropped_bindings : (string * string) list) (runtimes : t list)
     (media_failover : string list) : (unit, string) result =
@@ -498,10 +503,6 @@ let startup_degradation_to_yojson = function
              those runtime.toml bindings; uncatalogued runtimes are disabled \
              for this process." )
       ]
-;;
-
-let capabilities_for_runtime (rt : t) =
-  Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the OAS
@@ -1068,7 +1069,7 @@ let runtime_id_for_hitl_summary () =
 let cross_verifier_runtime_id () = (runtime_state ()).cross_verifier_runtime_id
 
 (* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
-   reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
+   reroute. Candidate admission uses OAS-resolved capabilities. Reads the
    Atomic ref set by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 
@@ -1141,7 +1142,10 @@ let max_output_tokens_of_runtime_id (id : string) : int option =
 
 let thinking_support_of_runtime_id (id : string) : bool option =
   match get_runtime_by_id id with
-  | Some rt -> Some rt.model.thinking_support
+  | Some rt ->
+    Option.map
+      (fun caps -> caps.Llm_provider.Capabilities.supports_extended_thinking)
+      (capabilities_for_runtime rt)
   | None -> None
 ;;
 
@@ -1175,20 +1179,24 @@ let min_p_of_runtime_id (id : string) : float option =
   | None -> None
 ;;
 
-let default_preserve_thinking_for_model (_rt : t) : bool option =
-  (* OAS owns provider/model capability truth and can preserve reasoning when
-     the provider contract requires it. MASC must not turn "request-side
-     preserve is supported" into a fleet-wide replay policy; long-running
-     keepers otherwise accumulate hidden reasoning across unrelated turns. *)
-  None
+let preserve_thinking_of_capabilities
+    (caps : Llm_provider.Capabilities.capabilities) : bool option =
+  (* OAS owns the wire capability and replay contract.  Only an explicit
+     always-preserve/no-preserve declaration becomes a request seed; merely
+     supporting an optional preserve field does not turn on cross-turn replay
+     for every keeper. *)
+  match caps.preserve_thinking_control_format with
+  | Llm_provider.Capabilities.Always_preserved_thinking -> Some true
+  | Llm_provider.Capabilities.No_preserve_thinking_control -> Some false
+  | _ -> None
 ;;
 
 let preserve_thinking_of_runtime_id (id : string) : bool option =
   match get_runtime_by_id id with
   | Some rt ->
-    (match rt.model.preserve_thinking with
-     | Some _ as explicit -> explicit
-     | None -> default_preserve_thinking_for_model rt)
+    Option.bind
+      (capabilities_for_runtime rt)
+      preserve_thinking_of_capabilities
   | None -> None
 ;;
 

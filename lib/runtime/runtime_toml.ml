@@ -556,6 +556,23 @@ let temperature_max = 2.0
 let probability_min = 0.0
 let probability_max = 1.0
 
+let model_capability_deprecation_warned = Atomic.make false
+let legacy_max_context_warned = Atomic.make false
+
+let warn_legacy_model_capabilities path =
+  if Atomic.compare_and_set model_capability_deprecation_warned false true
+  then
+    Log.Runtime.warn
+      "runtime_toml: %s contains legacy model capability declarations; they are deprecated and ignored for execution; model capability truth is resolved from the OAS provider/model catalog"
+      path
+
+let warn_legacy_max_context path =
+  if Atomic.compare_and_set legacy_max_context_warned false true
+  then
+    Log.Runtime.warn
+      "runtime_toml: %s.max-context is deprecated; use context-limit for the MASC-local runtime ceiling; OAS owns the provider/model context capability"
+      path
+
 let number_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
   : (float option, parse_error list) result
   =
@@ -642,39 +659,6 @@ let positive_int_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
                value))
 ;;
 
-let sampling_capability_errors
-      ~(path : string)
-      ~(capabilities : Runtime_schema.model_capabilities option)
-      ~(top_k : int option)
-      ~(min_p : float option)
-  : parse_error list
-  =
-  match capabilities with
-  | None -> []
-  | Some capabilities ->
-    let top_k_errors =
-      match top_k with
-      | Some _ when not capabilities.supports_top_k ->
-        error
-          (path ^ ".top-k")
-          (Printf.sprintf
-             "top-k is set but %s.capabilities.supports-top-k is false"
-             path)
-      | Some _ | None -> []
-    in
-    let min_p_errors =
-      match min_p with
-      | Some _ when not capabilities.supports_min_p ->
-        error
-          (path ^ ".min-p")
-          (Printf.sprintf
-             "min-p is set but %s.capabilities.supports-min-p is false"
-             path)
-      | Some _ | None -> []
-    in
-    top_k_errors @ min_p_errors
-;;
-
 let parse_model (id : string) (tbl : Otoml.t)
   : (Runtime_schema.model_spec, parse_error list) result
   =
@@ -687,10 +671,31 @@ let parse_model (id : string) (tbl : Otoml.t)
        | Some n -> n
        | None -> id)
   in
-  let max_context = Otoml.find_or ~default:(-1) tbl Otoml.get_integer [ "max-context" ] in
-  if max_context <= 0
-  then Error (error (path ^ ".max-context") "missing or invalid max-context")
-  else (
+  let context_limit_value = Otoml.find_opt tbl Otoml.get_integer [ "context-limit" ] in
+  let legacy_max_context_value = Otoml.find_opt tbl Otoml.get_integer [ "max-context" ] in
+  let context_limit_result =
+    match context_limit_value, legacy_max_context_value with
+    | Some _, Some _ ->
+      Error
+        (error
+           path
+           "models must not declare both context-limit and legacy max-context")
+    | Some value, None -> Ok ("context-limit", value)
+    | None, Some value ->
+      warn_legacy_max_context path;
+      Ok ("max-context", value)
+    | None, None -> Ok ("context-limit", -1)
+  in
+  match context_limit_result with
+  | Error errs -> Error errs
+  | Ok (context_limit_key, max_context) ->
+    if max_context <= 0
+    then
+      Error
+        (error
+           (path ^ "." ^ context_limit_key)
+           (Printf.sprintf "missing or invalid %s" context_limit_key))
+    else (
     let tools_support =
       Otoml.find_or ~default:false tbl Otoml.get_boolean [ "tools-support" ]
     in
@@ -704,32 +709,47 @@ let parse_model (id : string) (tbl : Otoml.t)
       Otoml.find_opt tbl Otoml.get_integer [ "max-thinking-budget" ]
     in
     let streaming = Otoml.find_or ~default:true tbl Otoml.get_boolean [ "streaming" ] in
+    let legacy_scalar_capability_present =
+      List.exists
+        (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
+        [ "tools-support"; "thinking-support"; "preserve-thinking"; "streaming"; "max-thinking-budget" ]
+    in
+    let legacy_capabilities_table = Otoml.find_opt tbl Fun.id [ "capabilities" ] in
+    let () =
+      if legacy_scalar_capability_present || Option.is_some legacy_capabilities_table
+      then warn_legacy_model_capabilities path
+    in
     let capabilities_result =
-      match Otoml.find_opt tbl Fun.id [ "capabilities" ] with
+      match legacy_capabilities_table with
       | None -> Ok None
       | Some t ->
         Result.map Option.some (parse_model_capabilities ~path:(path ^ ".capabilities") t)
     in
-    let match_prefixes =
+    let match_prefixes_result =
       match Otoml.find_opt tbl Fun.id [ "match-prefixes" ] with
-      | None -> []
+      | None -> Ok []
       | Some v ->
-        (* RFC-0145 — narrow to the only exception [Otoml.get_array]
-           raises on a wrong-typed value.  Unrelated runtime exceptions
-           propagate. *)
         (try
-           Otoml.get_array Otoml.get_string v
-           |> List.filter_map (fun s ->
-             let trimmed = String.trim s in
-             if String.length trimmed = 0
-             then (
-               Log.Runtime.warn "runtime_toml: %s.match-prefixes contains empty entry, ignoring" path;
-               None)
-             else Some trimmed)
+           let values = Otoml.get_array Otoml.get_string v in
+           let rec validate acc = function
+             | [] -> Ok (List.rev acc)
+             | value :: rest ->
+               let trimmed = String.trim value in
+               if String.equal trimmed ""
+               then
+                 Error
+                   (error
+                      (path ^ ".match-prefixes")
+                      "match-prefixes entries must be non-empty strings")
+               else validate (trimmed :: acc) rest
+           in
+           validate [] values
          with
-         | Otoml.Type_error _ ->
-           Log.Runtime.warn "runtime_toml: %s.match-prefixes — expected string array, ignoring" path;
-           [])
+         | Otoml.Type_error detail ->
+           Error
+             (error
+                (path ^ ".match-prefixes")
+                (Printf.sprintf "match-prefixes must be a string array; got %s" detail)))
     in
     let temperature_result = temperature_opt_field ~path tbl in
     let top_p_result = probability_opt_field ~path ~key:"top-p" tbl in
@@ -741,25 +761,23 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* top_p = top_p_result in
     let* top_k = top_k_result in
     let* min_p = min_p_result in
-    match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
-    | _ :: _ as errors -> Error errors
-    | [] ->
-      Ok
-        { Runtime_schema.id
-        ; api_name
-        ; tools_support
-        ; max_context
-        ; thinking_support
-        ; preserve_thinking
-        ; max_thinking_budget
-        ; streaming
-        ; temperature
-        ; top_p
-        ; top_k
-        ; min_p
-        ; capabilities
-        ; match_prefixes
-        })
+    let* match_prefixes = match_prefixes_result in
+    Ok
+      { Runtime_schema.id
+      ; api_name
+      ; tools_support
+      ; max_context
+      ; thinking_support
+      ; preserve_thinking
+      ; max_thinking_budget
+      ; streaming
+      ; temperature
+      ; top_p
+      ; top_k
+      ; min_p
+      ; capabilities
+      ; match_prefixes
+      })
 ;;
 
 let parse_models (toml : Otoml.t)

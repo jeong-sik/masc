@@ -285,6 +285,19 @@ let find_runtime runtimes runtime_id =
     (fun (runtime : Runtime.t) -> String.equal runtime.id runtime_id)
     runtimes
 
+let oas_caps_or_fail (runtime : Runtime.t) =
+  match
+    Llm_provider.Provider_config.capabilities_for_config_model
+      runtime.provider_config
+  with
+  | Some caps -> caps
+  | None ->
+    failf
+      "expected OAS capabilities for %s (%s/%s)"
+      runtime.id
+      (Llm_provider.Provider_config.capability_provider_label runtime.provider_config)
+      runtime.provider_config.model_id
+
 let assert_ollama_cloud_seed_runtime runtimes case =
   match find_runtime runtimes case.runtime_id with
   | None -> failf "expected Ollama Cloud runtime in seed: %s" case.runtime_id
@@ -293,36 +306,14 @@ let assert_ollama_cloud_seed_runtime runtimes case =
       runtime.model.api_name;
     check int (case.runtime_id ^ " context") case.context
       runtime.model.max_context;
-    check bool (case.runtime_id ^ " tools") case.tools
-      runtime.model.tools_support;
-    check bool (case.runtime_id ^ " thinking") case.thinking
-      runtime.model.thinking_support;
-    check bool (case.runtime_id ^ " known to provider-qualified OAS catalog") true
-      (Option.is_some
-         (Llm_provider.Provider_config.capabilities_for_config_model
-            runtime.provider_config));
-    (match runtime.model.capabilities with
-     | None -> failf "expected capabilities for %s" case.runtime_id
-     | Some caps ->
-       let expected_thinking_format =
-         if case.thinking
-         then Runtime_schema.Reasoning_effort
-         else Runtime_schema.No_thinking_control
-       in
-       check bool (case.runtime_id ^ " forced tool_choice disabled") false
-         caps.supports_tool_choice;
-       check bool (case.runtime_id ^ " image input") case.vision
-         caps.supports_image_input;
-       check bool (case.runtime_id ^ " multimodal input") case.vision
-         caps.supports_multimodal_inputs;
-       check bool (case.runtime_id ^ " extended thinking") case.thinking
-         caps.supports_extended_thinking;
-       check bool (case.runtime_id ^ " reasoning budget") case.thinking
-         caps.supports_reasoning_budget;
-       check bool (case.runtime_id ^ " thinking control") true
-         (Runtime_schema.equal_thinking_control_format
-            caps.thinking_control_format
-            expected_thinking_format))
+    let caps = oas_caps_or_fail runtime in
+    check bool (case.runtime_id ^ " tools from OAS") case.tools caps.supports_tools;
+    check bool (case.runtime_id ^ " thinking from OAS") case.thinking
+      caps.supports_extended_thinking;
+    check bool (case.runtime_id ^ " image input from OAS") case.vision
+      caps.supports_image_input;
+    check bool (case.runtime_id ^ " multimodal input from OAS") case.vision
+      caps.supports_multimodal_inputs
 
 let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
@@ -671,22 +662,18 @@ let test_repo_runtime_toml_loads () =
      with
      | None -> fail "expected Gemma4 Ollama runtime in seed"
      | Some runtime ->
-       check bool "Gemma4 thinking enabled" true runtime.model.thinking_support;
-       check (option bool) "Gemma4 thinking not preserved" (Some false)
-         runtime.model.preserve_thinking;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "Gemma4 chat-template-token thinking control" true
-            (Runtime_schema.equal_thinking_control_format
-               caps.thinking_control_format
-               (Runtime_schema.Chat_template_token "<|think|>"));
-          (* Native Ollama /api/chat never serializes tool_choice
-             (oas backend_ollama.ml:24); declaring true here would override
-             oas models.toml false while the transport drops forced tool
-             choice. *)
-          check bool "Gemma4 forced tool_choice disabled" false
-            caps.supports_tool_choice
-        | None -> fail "expected Gemma4 capabilities"));
+       let caps = oas_caps_or_fail runtime in
+       check bool "Gemma4 thinking enabled from OAS" true
+         caps.supports_extended_thinking;
+       check bool "Gemma4 chat-template-token thinking control" true
+         (Runtime_schema.equal_thinking_control_format
+            caps.thinking_control_format
+            (Runtime_schema.Chat_template_token "<|think|>"));
+       (* Native Ollama /api/chat never serializes tool_choice
+          (oas backend_ollama.ml:24); the OAS catalog must keep forced tool
+          choice disabled for this transport. *)
+       check bool "Gemma4 forced tool_choice disabled" false
+         caps.supports_tool_choice);
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -700,21 +687,17 @@ let test_repo_runtime_toml_loads () =
          "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
          runtime.model.api_name;
        check int "Gemma4 E2B context" 131072 runtime.model.max_context;
-       check bool "Gemma4 E2B thinking enabled" true
-         runtime.model.thinking_support;
-       check (option bool) "Gemma4 E2B thinking not preserved" (Some false)
-         runtime.model.preserve_thinking;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "Gemma4 E2B chat-template-token thinking control" true
-            (Runtime_schema.equal_thinking_control_format
-               caps.thinking_control_format
-               (Runtime_schema.Chat_template_token "<|think|>"));
-          check bool "Gemma4 E2B forced tool_choice disabled" false
-            caps.supports_tool_choice;
-          check bool "Gemma4 E2B image input" true caps.supports_image_input;
-          check bool "Gemma4 E2B audio input" true caps.supports_audio_input
-        | None -> fail "expected Gemma4 E2B capabilities"));
+       let caps = oas_caps_or_fail runtime in
+       check bool "Gemma4 E2B thinking enabled from OAS" true
+         caps.supports_extended_thinking;
+       check bool "Gemma4 E2B chat-template-token thinking control" true
+         (Runtime_schema.equal_thinking_control_format
+            caps.thinking_control_format
+            (Runtime_schema.Chat_template_token "<|think|>"));
+       check bool "Gemma4 E2B forced tool_choice disabled" false
+         caps.supports_tool_choice;
+       check bool "Gemma4 E2B image input" true caps.supports_image_input;
+       check bool "Gemma4 E2B audio input" true caps.supports_audio_input);
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -726,19 +709,13 @@ let test_repo_runtime_toml_loads () =
        check string "GLM Coding Plan model api name" "glm-4.7"
          runtime.model.api_name;
        check int "GLM Coding Plan context" 200000 runtime.model.max_context;
-       check bool "GLM Coding Plan thinking enabled" true
-         runtime.model.thinking_support;
-      check (option bool) "GLM Coding Plan does not preserve thinking by default" (Some false)
-        runtime.model.preserve_thinking;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check (option int) "GLM Coding Plan output cap" (Some 128000)
-            caps.max_output_tokens;
-          check bool "GLM Coding Plan forced tool_choice disabled" false
-            caps.supports_tool_choice;
-          check bool "GLM Coding Plan extended thinking" true
-            caps.supports_extended_thinking
-        | None -> fail "expected GLM Coding Plan capabilities"));
+       let caps = oas_caps_or_fail runtime in
+       check bool "GLM Coding Plan thinking enabled from OAS" true
+         caps.supports_extended_thinking;
+       check (option int) "GLM Coding Plan output cap from OAS" (Some 128000)
+         caps.max_output_tokens;
+       check bool "GLM Coding Plan forced tool_choice disabled" false
+         caps.supports_tool_choice);
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -750,11 +727,9 @@ let test_repo_runtime_toml_loads () =
        check (option (float 0.0)) "DeepSeek keeps OAS connect timeout default"
          None
          runtime.provider_config.connect_timeout_s;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "DeepSeek Pro structured output disabled" false
-            caps.supports_structured_output
-        | None -> fail "expected DeepSeek Pro capabilities"));
+       let caps = oas_caps_or_fail runtime in
+       check bool "DeepSeek Pro structured output disabled in OAS" false
+         caps.supports_structured_output);
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -763,11 +738,9 @@ let test_repo_runtime_toml_loads () =
      with
      | None -> fail "expected DeepSeek Flash runtime in seed"
      | Some runtime ->
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "DeepSeek Flash structured output disabled" false
-            caps.supports_structured_output
-        | None -> fail "expected DeepSeek Flash capabilities"));
+       let caps = oas_caps_or_fail runtime in
+       check bool "DeepSeek Flash structured output disabled in OAS" false
+         caps.supports_structured_output);
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -778,18 +751,16 @@ let test_repo_runtime_toml_loads () =
      | Some runtime ->
        check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
        check int "MiniMax M3 context" 524288 runtime.model.max_context;
-       (match runtime.model.capabilities with
-       | Some caps ->
-          check bool "MiniMax M3 response_format json disabled" false
-            caps.supports_response_format_json;
-          check bool "MiniMax M3 structured output disabled" false
-            caps.supports_structured_output;
-          check bool "MiniMax M3 image input" true caps.supports_image_input;
-          check bool "MiniMax M3 multimodal input" true
-            caps.supports_multimodal_inputs;
-          check bool "MiniMax M3 forced tool_choice disabled" false
-            caps.supports_tool_choice
-        | None -> fail "expected MiniMax M3 capabilities"));
+       let caps = oas_caps_or_fail runtime in
+       check bool "MiniMax M3 response_format json disabled in OAS" false
+         caps.supports_response_format_json;
+       check bool "MiniMax M3 structured output disabled in OAS" false
+         caps.supports_structured_output;
+       check bool "MiniMax M3 image input from OAS" true caps.supports_image_input;
+       check bool "MiniMax M3 multimodal input from OAS" true
+         caps.supports_multimodal_inputs;
+       check bool "MiniMax M3 forced tool_choice disabled" false
+         caps.supports_tool_choice);
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -804,17 +775,15 @@ let test_repo_runtime_toml_loads () =
        check (option (float 0.0)) "native MiniMax M3 connect timeout"
          (Some 600.0)
          runtime.provider_config.connect_timeout_s;
-       (match runtime.model.capabilities with
-       | Some caps ->
-         check bool "native MiniMax M3 response_format json" true
-           caps.supports_response_format_json;
-         check bool "native MiniMax M3 structured output" true
-           caps.supports_structured_output;
-         check bool "native MiniMax M3 Ollama think control" true
-           (Runtime_schema.equal_thinking_control_format
-              caps.thinking_control_format
-              Runtime_schema.Ollama_think)
-       | None -> fail "expected native MiniMax M3 capabilities"));
+       let caps = oas_caps_or_fail runtime in
+       check bool "native MiniMax M3 response_format json from OAS" true
+         caps.supports_response_format_json;
+       check bool "native MiniMax M3 structured output from OAS" true
+         caps.supports_structured_output;
+       check bool "native MiniMax M3 Ollama think control from OAS" true
+         (Runtime_schema.equal_thinking_control_format
+            caps.thinking_control_format
+            Runtime_schema.Ollama_think));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -825,16 +794,15 @@ let test_repo_runtime_toml_loads () =
      | Some runtime ->
        check string "Kimi K2.7 Code api name" "kimi-k2.7-code" runtime.model.api_name;
        check int "Kimi K2.7 Code context" 262144 runtime.model.max_context;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "Kimi K2.7 Code image input" true caps.supports_image_input;
-          check bool "Kimi K2.7 Code multimodal input" true
-            caps.supports_multimodal_inputs;
-          check bool "Kimi K2.7 Code reasoning effort" true
-            (Runtime_schema.equal_thinking_control_format
-               caps.thinking_control_format
-               Runtime_schema.Reasoning_effort)
-        | None -> fail "expected Kimi K2.7 Code capabilities"))
+       let caps = oas_caps_or_fail runtime in
+       check bool "Kimi K2.7 Code image input from OAS" true
+         caps.supports_image_input;
+       check bool "Kimi K2.7 Code multimodal input from OAS" true
+         caps.supports_multimodal_inputs;
+       check bool "Kimi K2.7 Code reasoning effort from OAS" true
+         (Runtime_schema.equal_thinking_control_format
+            caps.thinking_control_format
+            Runtime_schema.Reasoning_effort))
 
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =

@@ -52,6 +52,11 @@ type keeper_alert =
   ; threshold : float
   }
 
+type keeper_health_error =
+  { keeper_id : string
+  ; message : string
+  }
+
 let ttl_expired_on_disk_threshold = 0.0
 let near_duplicate_threshold = 0.0
 
@@ -202,8 +207,10 @@ let provider_slot_busy_for_keeper keeper_id =
 
 let keeper_health ~keepers_dir ~now keeper_id =
   let facts =
-    (* [read_facts_all] raises on malformed JSONL — treated as a read failure
-       for this keeper; the caller catches and skips it. *)
+    (* [read_facts_all_for_keepers_dir] is the lenient recall reader: malformed
+       rows are excluded from the count. The dry-run GC below uses the strict
+       reader and therefore still reports the same store as corrupt without
+       rewriting it. *)
     Keeper_memory_os_io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id
   in
   let facts_count = List.length facts in
@@ -253,6 +260,10 @@ let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
     ]
 ;;
 
+let keeper_health_error_to_json error : Yojson.Safe.t =
+  `Assoc [ "keeper_id", `String error.keeper_id; "message", `String error.message ]
+;;
+
 let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   (* One wall-clock instant is shared by the snapshot timestamp and dry-run GC
      scans; no retention or control logic depends on the exact value. *)
@@ -260,18 +271,26 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   let now = Unix.gettimeofday () in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let cadence_counter_entries = Keeper_librarian_runtime.cadence_counter_entries () in
-  let entries =
+  let health_entries, health_errors =
     Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir
-    |> List.filter_map (fun keeper_id ->
-      match keeper_health ~keepers_dir ~now keeper_id with
-      | h -> Some h
-      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-      | exception exn ->
-        Log.Dashboard.warn
-          "[keeper_memory_health] skipping keeper %s: %s"
-          keeper_id
-          (Printexc.to_string exn);
-        None)
+    |> List.fold_left
+         (fun (entries, errors) keeper_id ->
+           try
+             keeper_health ~keepers_dir ~now keeper_id :: entries, errors
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+             let message = Printexc.to_string exn in
+             Log.Dashboard.warn
+               "[keeper_memory_health] keeper %s snapshot failed: %s"
+               keeper_id
+               message;
+             ( entries
+             , { keeper_id; message } :: errors ))
+         ([], [])
+  in
+  let entries =
+    health_entries
     |> List.map (fun h -> h, keeper_alerts h)
     (* Largest stores first so the worst offenders surface at the top. *)
     |> List.sort (fun (a, _) (b, _) -> compare b.facts_bytes a.facts_bytes)
@@ -287,6 +306,8 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   `Assoc
     [ "generated_at", `Float now
     ; "cadence_counter_entries", `Int cadence_counter_entries
+    ; ( "errors"
+      , `List (List.map keeper_health_error_to_json (List.rev health_errors)) )
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"
       , `Assoc

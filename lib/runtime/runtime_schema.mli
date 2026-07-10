@@ -60,7 +60,7 @@ type provider =
   }
 [@@deriving show, eq]
 
-(** {1 Layer 2: Model} *)
+(** {1 Layer 2: Model binding policy} *)
 
 (** Re-exported from OAS so thinking-control capability drift is
     compiler-checked. *)
@@ -107,9 +107,15 @@ type model_capabilities =
   }
 [@@deriving show, eq]
 
+(** Legacy runtime.toml capability declaration retained only for config
+    migration and read-only compatibility. Execution must use the OAS-resolved
+    capability projection on {!Runtime.t}; MASC declarations must not override
+    provider/model truth. New production config should declare capabilities in
+    the OAS model catalog. *)
+
 (** All-false / [None] defaults, except [emits_usage_tokens = true] (most
-    providers report usage; CLI wrappers opt out). Used when
-    [\[models.<id>.capabilities\]] is absent. *)
+    providers report usage; CLI wrappers opt out). Retained for parsing old
+    runtime.toml documents only; it is not an execution policy default. *)
 val model_capabilities_default : model_capabilities
 
 type model_spec =
@@ -129,6 +135,13 @@ type model_spec =
   ; match_prefixes : string list
   }
 [@@deriving show, eq]
+
+(** [tools_support], [thinking_support], [preserve_thinking],
+    [max_thinking_budget], [streaming], and [capabilities] are legacy
+    runtime.toml fields retained for migration/read-only audit only. They must
+    not be used to decide provider/model behavior; OAS's resolved capability
+    catalog is the execution source of truth. [max_context] is a MASC-local
+    context ceiling and is bounded by the OAS catalog ceiling. *)
 
 (** {1 Layer 3: Binding} *)
 
@@ -217,10 +230,10 @@ type config =
         overrides. *)
   ; structured_judge_runtime_id : string option
     (** [\[runtime\].structured_judge] — runtime id for provider-native
-        structured-output judge calls. When set, the model must declare
-        [supports-structured-output]. [None] lets callers use their documented
-        migration fallback; schema requests still fail loudly if the resolved
-        runtime cannot satisfy them. *)
+        structured-output judge calls. When set, the concrete provider/model
+        pair must resolve in the OAS catalog with [supports-structured-output].
+        [None] lets callers use their documented migration fallback; schema
+        requests still fail loudly if the resolved runtime cannot satisfy them. *)
   ; hitl_summary_runtime_id : string option
     (** [\[runtime\].hitl_summary] — runtime id for HITL approval context
         summaries. When set, it must resolve to a configured runtime. The HITL
@@ -231,8 +244,9 @@ type config =
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
         evaluator (cross-model task verification). The evaluator requests JSON
         mode (a structured verdict tool call), so it must run on a model
-        declaring [supports-response-format-json]; otherwise it returns empty
-        output and the gate approves by liveness. [None] = inherit
+        whose OAS provider/model catalog declares
+        [supports-response-format-json]; otherwise it returns empty output and
+        the gate approves by liveness. [None] = inherit
         [\[runtime\].default]. Unknown id rejected at load like
         [\[runtime\].default]. *)
   ; keeper_assignments : (string * string) list
@@ -244,10 +258,9 @@ type config =
   ; media_failover : string list
     (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
         when a turn's input modality (image/audio/document) exceeds the assigned
-        runtime's declared capabilities; the turn reroutes to the first that
-        admits it. [[]] = derive capable runtimes from declared
-        [\[models.*.capabilities\]] in declaration order. Each id must resolve to
-        a configured runtime (rejected at load like [\[runtime\].default]). *)
+        runtime's OAS-resolved provider/model capabilities; the turn reroutes to
+        the first that admits it. Each id must resolve to a configured runtime
+        (rejected at load like [\[runtime\].default]). *)
   ; pause_threshold : pause_threshold
     (** [\[pause\]] — typed SSOT for keeper pause / regime threshold knobs.
         Missing or wrong-typed values fall back to [pause_threshold_default]. *)

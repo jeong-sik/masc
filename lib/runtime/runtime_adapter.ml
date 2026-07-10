@@ -154,7 +154,7 @@ let credential_env_candidates = function
 let api_key_from_env key =
   credential_env_candidates key
   |> List.find_map (fun env ->
-         match Sys.getenv_opt env with
+         match Env_config_core.raw_value_opt env with
          | Some value when String.trim value <> "" -> Some value
          | _ -> None)
   |> Option.value ~default:""
@@ -262,28 +262,6 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
   | _ -> request_path
 ;;
 
-(* --- Model capability projection --- *)
-
-let supports_tool_choice_override_of_model_spec (spec : Runtime_schema.model_spec) =
-  match spec.capabilities with
-  | Some capabilities -> Some capabilities.supports_tool_choice
-  | None -> None
-;;
-
-let max_output_tokens_of_model_spec (spec : Runtime_schema.model_spec) =
-  match spec.capabilities with
-  | Some capabilities -> capabilities.max_output_tokens
-  | None -> None
-;;
-
-let effective_max_tokens_for_model spec requested =
-  match requested, max_output_tokens_of_model_spec spec with
-  | Some configured, Some capability -> Some (min configured capability)
-  | Some configured, None -> Some configured
-  | None, Some capability -> Some capability
-  | None, None -> None
-;;
-
 (* --- provider × model spec → Provider_config.t ---
 
    v1 drops the [Provider_tool_support.runtime_capabilities_override] that the
@@ -293,8 +271,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
     ~(max_tokens : int option) : (Llm_provider.Provider_config.t, string) result =
   let registry_entry = find_registry_entry provider.id in
-  let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
-  let max_tokens = effective_max_tokens_for_model spec max_tokens in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
@@ -330,7 +306,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~headers
             ~request_path
             ~max_context:spec.max_context
-            ?supports_tool_choice_override
             ?max_tokens
             ?top_p:spec.top_p
             ?top_k:spec.top_k
@@ -351,7 +326,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
             ~headers:(Option.value ~default:[] provider.headers)
             ~max_context:spec.max_context
-            ?supports_tool_choice_override
             ?max_tokens
             ?top_p:spec.top_p
             ?top_k:spec.top_k
@@ -373,11 +347,6 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
   | Some spec ->
-    let max_tokens =
-      match binding.price_input, binding.price_output with
-      | Some input_cost, Some _ when input_cost > 0.0 -> Some spec.max_context
-      | _ -> None
-    in
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
@@ -391,5 +360,8 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          ?num_ctx:binding.num_ctx
          provider
          spec
-         ~max_tokens)
+         (* Pricing is telemetry metadata, not an output-token policy. OAS
+            resolves the model ceiling and the keeper turn supplies any
+            explicit request max_tokens. *)
+         ~max_tokens:None)
 ;;

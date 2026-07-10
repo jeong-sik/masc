@@ -448,9 +448,47 @@ let take_last n xs =
   if n <= 0 then [] else if len <= n then xs else drop (len - n) xs
 ;;
 
-let parse_json_line parse line =
-  try parse (Yojson.Safe.from_string line) with
-  | Yojson.Json_error _ -> None
+let persistence_surface = "keeper_memory_os"
+
+let report_jsonl_read_drop ~path ?line_number ~reason ~detail () =
+  let detail =
+    match line_number with
+    | None -> detail
+    | Some line_number -> Printf.sprintf "line=%d: %s" line_number detail
+  in
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_persistence_read_drops
+        ~labels:[ "surface", persistence_surface; "reason", reason ]
+        ())
+    ~surface:persistence_surface
+    ~reason
+    ~path
+    ~detail
+;;
+
+let parse_json_line ~path ?line_number ~kind parse line =
+  try
+    match parse (Yojson.Safe.from_string line) with
+    | Some value -> Some value
+    | None ->
+      report_jsonl_read_drop
+        ~path
+        ?line_number
+        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~detail:(Printf.sprintf "%s JSON shape rejected" kind)
+        ();
+      None
+  with
+  | Yojson.Json_error message ->
+    report_jsonl_read_drop
+      ~path
+      ?line_number
+      ~reason:Safe_ops.persistence_read_drop_reason_json_syntax_error
+      ~detail:(Printf.sprintf "%s JSON syntax error: %s" kind message)
+      ();
+    None
 ;;
 
 let parse_fact_json_line_strict ~path ~line_number line =
@@ -464,8 +502,16 @@ let parse_fact_json_line_strict ~path ~line_number line =
 ;;
 
 let read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id =
-  read_lines_all (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-  |> List.filter_map (parse_json_line fact_of_json)
+  let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  read_lines_all path
+  |> List.mapi (fun index line ->
+    parse_json_line
+      ~path
+      ~line_number:(index + 1)
+      ~kind:"fact"
+      fact_of_json
+      line)
+  |> List.filter_map Fun.id
 ;;
 
 let read_facts_all ~keeper_id =
@@ -488,8 +534,10 @@ let read_facts_all_strict ~keeper_id =
 ;;
 
 let read_facts_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
-  read_lines_tail (facts_path_for_keepers_dir ~keepers_dir ~keeper_id) ~n
-  |> List.filter_map (parse_json_line fact_of_json)
+  let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  read_lines_tail path ~n
+  |> List.filter_map
+       (parse_json_line ~path ~kind:"fact" fact_of_json)
   |> take_last n
 ;;
 
@@ -675,8 +723,10 @@ let merge_and_cap_facts ~now ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
 ;;
 
 let read_events_tail ~keeper_id ~n =
-  read_lines_tail (events_path ~keeper_id) ~n
-  |> List.filter_map (parse_json_line episode_of_json)
+  let path = events_path ~keeper_id in
+  read_lines_tail path ~n
+  |> List.filter_map
+       (parse_json_line ~path ~kind:"episode" episode_of_json)
   |> take_last n
 ;;
 
@@ -687,7 +737,7 @@ let read_episode_file path =
     (fun () ->
        let len = in_channel_length ic in
        let buf = really_input_string ic len in
-       parse_json_line episode_of_json buf)
+       parse_json_line ~path ~kind:"episode" episode_of_json buf)
 ;;
 
 let compare_episode_recency a b =

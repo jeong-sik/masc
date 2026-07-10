@@ -181,7 +181,7 @@ let max_execution_time_for_attempt ?per_provider_timeout_s () =
 let stream_idle_timeout_for_attempt ~configured =
   Some
     (Option.value
-       ~default:Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
+       ~default:(Keeper_runtime_resolved.stream_idle_timeout_sec ())
        configured)
 
 let body_timeout_for_attempt ?per_provider_timeout_s () =

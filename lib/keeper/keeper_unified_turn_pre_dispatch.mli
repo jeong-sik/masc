@@ -3,8 +3,8 @@
 
     Owns the runtime-execution builder: runtime-name → keeper-meta
     projection, model-label resolution, API-key + local-discovery
-    readiness checks, context budget resolution, temperature/max-tokens
-    inference, and ceiling validation. Returns a
+    readiness checks, context budget resolution, and temperature/max-tokens
+    inference. Returns a
     [Keeper_turn_runtime_budget.runtime_execution] record on success,
     or a typed [Agent_sdk.Error.sdk_error] on the first failed check.
 
@@ -25,8 +25,6 @@ val build_runtime_execution
     Failure modes (returned as [Error]):
     - [Keeper_types_support.ensure_api_keys_for_labels] missing required keys.
     - [ensure_local_discovery_ready] local-runtime discovery fail.
-    - [validate_max_tokens_within_ceiling] raw_max_tokens exceeds the
-      provider's [Runtime_runtime.max_output_tokens_ceiling].
 
     The function is total over its three failure modes plus the [Ok]
     case; no exceptions cross the boundary. *)

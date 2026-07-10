@@ -598,6 +598,8 @@ supports-structured-output = false
 
 [glm-coding.glm-4-7-coding]
 max-concurrent = 3
+price-input = 1.0
+price-output = 2.0
 |}
 
 let glm_coding_runtime_config_or_fail () =
@@ -695,7 +697,8 @@ let test_runtime_adapter_materializes_deepseek_openai_compat () =
     check string "model_id" "deepseek-v4-pro" provider_cfg.model_id;
     check string "api key" "ds-test-key" (Llm_provider.Secret.header_value provider_cfg.api_key);
     check (option int) "max_context" (Some 1000000) provider_cfg.max_context;
-    check (option int) "max_tokens" (Some 384000) provider_cfg.max_tokens;
+    check (option int) "MASC capability no longer overrides max_tokens" None
+      provider_cfg.max_tokens;
     check int "Authorization header count" 0
       (normalized_header_count "Authorization" provider_cfg.headers))
 
@@ -724,8 +727,9 @@ let test_runtime_adapter_materializes_glm_coding_provider () =
     check string "model_id" "glm-4.7" provider_cfg.model_id;
     check string "api key uses coding lane" "coding-key" (Llm_provider.Secret.header_value provider_cfg.api_key);
     check (option int) "max_context" (Some 200000) provider_cfg.max_context;
-    check (option int) "max_tokens" (Some 128000) provider_cfg.max_tokens;
-    check (option bool) "tool choice override" (Some false)
+    check (option int) "price metadata does not set max_tokens" None
+      provider_cfg.max_tokens;
+    check (option bool) "legacy model capability does not override tool choice" None
       provider_cfg.supports_tool_choice_override;
     check int "Authorization header count" 0
       (normalized_header_count "Authorization" provider_cfg.headers))

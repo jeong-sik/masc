@@ -233,9 +233,15 @@ export interface KeeperMemoryHealthKeeperEntry {
   alerts: KeeperMemoryHealthAlert[]
 }
 
+export interface KeeperMemoryHealthError {
+  keeper_id: string
+  message: string
+}
+
 export interface KeeperMemoryHealthResponse {
   generated_at: number
   cadence_counter_entries: number
+  errors: KeeperMemoryHealthError[]
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
     facts: number

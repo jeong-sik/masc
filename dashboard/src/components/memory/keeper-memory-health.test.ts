@@ -48,6 +48,7 @@ function makeResponse(
   return {
     generated_at: 1_700_000_000,
     cadence_counter_entries: 3,
+    errors: [],
     keepers,
     totals: {
       facts: 0,
@@ -138,6 +139,15 @@ describe('KeeperMemoryHealth', () => {
       expect(container.querySelector('.kmh-row--warn')).toBeNull()
       expect(container.querySelector('.kmh-badge--warn')).toBeNull()
       expect(screen.getByText('3.00')).not.toBeNull()
+    })
+
+    it('surfaces keeper snapshot errors instead of treating missing rows as empty', async () => {
+      mockFetch.mockResolvedValue({
+        ...makeResponse([]),
+        errors: [{ keeper_id: 'broken', message: 'facts store is corrupt' }],
+      })
+      render(html`<${KeeperMemoryHealth} />`)
+      await waitFor(() => expect(screen.getByText(/broken \(facts store is corrupt\)/)).not.toBeNull())
     })
 
     it('flags a ratio row only when the backend emits a ratio alert target', async () => {

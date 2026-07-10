@@ -28,6 +28,14 @@ val of_binding_result : config -> binding -> (t, string) result
     validation can report a dropped target's materialize failure instead of a
     bare "not found among N runtimes" that points at a non-existent typo. *)
 
+val capabilities_for_runtime :
+  t -> Llm_provider.Capabilities.capabilities option
+(** Resolve the effective provider/model capabilities through OAS.
+
+    MASC runtime TOML must not override model capability truth.  [None] means
+    the OAS catalog has no declaration for this concrete provider/model pair;
+    strict startup paths reject that state before dispatch. *)
+
 val decide_capability_gate :
   config_path:string -> (string * bool) list -> (unit, string) result
 (** Pure capability-gate decision applied at startup by [init_default_strict]
@@ -230,10 +238,9 @@ val runtime_id_for_hitl_summary : unit -> string
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a
-    turn's input modality exceeds the assigned runtime's declared capabilities;
-    the turn reroutes to the first that admits it. [[]] = derive capable runtimes
-    from declared [\[models.*.capabilities\]] in declaration order. Every entry is
-    validated at load so each resolves to a configured runtime. *)
+    turn's input modality exceeds the assigned runtime's OAS-resolved
+    provider/model capabilities; the turn reroutes to the first that admits it.
+    Every entry is validated at load so each resolves to a configured runtime. *)
 
 val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
@@ -286,8 +293,9 @@ val max_context_of_runtime_id : string -> int option
     when the id is not configured.  Budgeting callers use this to size a
     per-keeper routed turn against the same runtime that dispatch will use.
     When the OAS provider capability catalog declares a context cap, the value
-    is clamped to [min runtime.toml max-context provider cap] so MASC cannot
-    admit a prompt larger than the provider-owned window. *)
+    is clamped to [min runtime.toml context-limit provider cap] so MASC cannot
+    admit a prompt larger than the provider-owned window. The legacy
+    [max-context] key is accepted only as a migration alias. *)
 
 val max_output_tokens_of_runtime_id : string -> int option
 (** Declared max output tokens (OAS capability catalog) for the model bound to
@@ -297,10 +305,10 @@ val max_output_tokens_of_runtime_id : string -> int option
     fallback. *)
 
 val thinking_support_of_runtime_id : string -> bool option
-(** [thinking-support] capability of the model bound to runtime [id], or [None]
-    when the id is not configured (e.g. before {!init_default}).  Consumed by
-    {!Runtime_inference.for_runtime} to gate keeper thinking per model from the
-    runtime.toml SSOT. *)
+(** OAS [supports_extended_thinking] capability of the model bound to runtime
+    [id], or [None] when the id is not configured or has no OAS catalog row.
+    Consumed by {!Runtime_inference.for_runtime}; MASC runtime.toml does not
+    override this model fact. *)
 
 val temperature_of_runtime_id : string -> float option
 (** Per-model [temperature] override ([models.<id>.temperature] in runtime.toml)
@@ -324,13 +332,10 @@ val min_p_of_runtime_id : string -> float option
     or [None] when absent. *)
 
 val preserve_thinking_of_runtime_id : string -> bool option
-(** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,
-    uninitialized cache, or no explicit TOML field.
-
-    OAS owns provider/model capability truth and applies provider-required
-    reasoning replay internally. MASC does not promote a request-side preserve
-    capability into default keeper policy. Consumed by
-    {!Runtime_inference.for_runtime} without provider/model string matching. *)
+(** OAS preserve/replay capability for runtime [id]. [None] means the runtime
+    has no resolved OAS policy or only supports optional preservation. Explicit
+    always-preserve and no-preserve declarations are projected as [Some true]
+    and [Some false]. MASC [preserve-thinking] does not override this. *)
 
 val pricing_of_runtime_id : string -> float option * float option
 (** [(price_input, price_output)] per-million-token USD rates declared on the

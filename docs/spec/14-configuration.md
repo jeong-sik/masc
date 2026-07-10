@@ -304,7 +304,7 @@ Tier는 mode/category와 독립적으로 적용되는 추가 필터 레이어다
 | 레이어 | TOML namespace | 역할 |
 |--------|----------------|------|
 | Provider | `[providers.<id>]` | transport/protocol/credential 정의 |
-| Model | `[models.<id>]` | provider-neutral model metadata/capability 정의 |
+| Model binding policy | `[models.<id>]` | provider-neutral API id와 MASC-local request/context policy; model capability facts are owned by the OAS catalog |
 | Binding | `[<provider>.<model>]` | provider-model 결합, capacity, pricing |
 | Alias | `[<provider>.<model>.<alias>]` | 호출 목적별 temperature/max-output override |
 | Tier/Route | `[tier.*]`, `[runtime.*]`, `[routes.*]` | 실행 후보 묶음, fallback chain, logical route |
@@ -319,9 +319,7 @@ is-non-interactive = true
 
 [models.agent-code-spark]
 api-name = "model-d-spark"
-max-context = 128000
-tools-support = true
-streaming = true
+context-limit = 128000
 
 [cli-tool-a.agent-code-spark]
 is-default = true

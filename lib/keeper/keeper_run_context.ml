@@ -84,11 +84,7 @@ let resolve_max_tokens_for_runtime_with_profile ~keeper_name ~profile_defaults
       ?max_tokens ~runtime_id ()
   =
   match max_tokens with
-  | Some t ->
-    Runtime_inference.cap_max_tokens_to_runtime_ceiling
-      ~runtime_id
-      ~source:"caller_override"
-      t
+  | Some t -> t
   | None ->
     Runtime_inference.resolve_max_tokens
       ~runtime_id

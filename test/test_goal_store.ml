@@ -307,6 +307,30 @@ let test_write_state_result_keeps_primary_commit_when_recovery_write_fails () =
   | Some stored -> check string "primary has goal" goal.title stored.title
   | None -> fail "primary goal missing after recovery mirror failure"
 
+let test_corrupt_state_is_not_replaced_with_empty_default () =
+  with_workspace
+  @@ fun config ->
+  Workspace.write_json config (Goal_store.goals_path config)
+    (`Assoc [ ("version", `String "not-an-int") ]);
+  (match Goal_store.read_state_result config with
+   | Error (Goal_store.Corrupt_state { recovery_err = None; _ }) -> ()
+   | Error error ->
+       fail ("unexpected goal read error: " ^ Goal_store.read_error_to_string error)
+   | Ok _ -> fail "corrupt goal state was converted to an empty default");
+  let raised =
+    try
+      ignore (Goal_store.read_state config);
+      false
+    with
+    | Goal_store.Corrupt_state_exn _ -> true
+  in
+  check bool "read_state raises on unrecoverable corruption" true raised;
+  (match Goal_store.upsert_goal config ~title:"must not overwrite" () with
+   | Error message ->
+       check bool "mutation reports corrupt ledger" true
+         (String_util.contains_substring message "goal ledger is present")
+   | Ok _ -> fail "mutation silently replaced corrupt goal state")
+
 let () =
   run "Goal_store.delete_goal"
     [ ( "regression-7690",
@@ -332,4 +356,6 @@ let () =
           test_case "write_state sanitizes invalid utf8" `Quick
             test_write_state_sanitizes_invalid_utf8_before_persisting;
           test_case "recovery mirror write failure preserves primary" `Quick
-            test_write_state_result_keeps_primary_commit_when_recovery_write_fails ] ) ]
+            test_write_state_result_keeps_primary_commit_when_recovery_write_fails;
+          test_case "corrupt state is not defaulted" `Quick
+            test_corrupt_state_is_not_replaced_with_empty_default ] ) ]

@@ -1780,14 +1780,15 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
   let models = [ rt.model.api_name ] in
   let capabilities_declared, caps =
-    match rt.model.capabilities with
+    match Runtime.capabilities_for_runtime rt with
     | Some caps -> true, caps
     | None ->
       ( false
-      , Runtime_schema.model_capabilities_default
-        (* DET-OK: absent [models.<id>.capabilities] is exposed below as
-           [capabilities_declared=false]; the all-false record only keeps this
-           read-only dashboard projection total, it is not a policy default. *) )
+      , Llm_provider.Capabilities.default_capabilities
+        (* DET-OK: an unresolved OAS provider/model capability is exposed below
+           as [capabilities_declared=false]. The all-false record only keeps
+           this read-only dashboard projection total; it is never a dispatch
+           or policy default. *) )
   in
   `Assoc
     [ "provider", `String rt.id
@@ -1804,10 +1805,10 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "status", `String "configured"
     ; "available", `Bool true
     ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
-    ; "max_context", `Int rt.model.max_context
-    ; "tools_support", `Bool rt.model.tools_support
-    ; "thinking_support", `Bool rt.model.thinking_support
-    ; "streaming", `Bool rt.model.streaming
+    ; "max_context", `Int (Runtime.max_context_of_runtime rt)
+    ; "tools_support", `Bool caps.supports_tools
+    ; "thinking_support", `Bool caps.supports_extended_thinking
+    ; "streaming", `Bool caps.supports_native_streaming
       (* Per-model sampling temperature override ([models.<id>].temperature).
          [`Null] when unset (the runtime keeps the fleet fallback). Read-only
          projection for the dashboard runtime capability card. *)
@@ -1818,11 +1819,16 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "top_p", Json_util.float_opt_to_json rt.model.top_p
     ; "top_k", Json_util.int_opt_to_json rt.model.top_k
     ; "min_p", Json_util.float_opt_to_json rt.model.min_p
-      (* Additive capability projection for dashboard runtime snapshot cards.
-         These mirrors are declared model capabilities from runtime.toml only;
-         [capabilities_declared=false] below keeps the all-false fallback from
+      (* Effective capability projection for dashboard runtime snapshot cards.
+         These fields are resolved by OAS for the concrete provider/model pair;
+         [capabilities_declared=false] below keeps the read-only fallback from
          being mistaken for provider/model inference. *)
     ; "capabilities_declared", `Bool capabilities_declared
+    ; ( "capabilities_source"
+      , `String
+          (if capabilities_declared
+           then "oas.provider_model_catalog"
+           else "unresolved") )
     ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
     ; "supports_tool_choice", `Bool caps.supports_tool_choice
     ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice

@@ -119,6 +119,16 @@ type state = {
     increments on every write so concurrent readers detect
     drift. *)
 
+type read_error =
+  | Corrupt_state of {
+      primary_err : string;
+      recovery_err : string option;
+    }
+
+val read_error_to_string : read_error -> string
+
+exception Corrupt_state_exn of read_error
+
 (** {1 Rollup} *)
 
 type rollup = {
@@ -144,11 +154,17 @@ val goals_path : Workspace_utils.config -> string
 
 (** {1 State I/O} *)
 
+val read_state_result :
+  Workspace_utils.config -> (state, read_error) result
+(** Reads {!goals_path}.  A missing file is a fresh empty state;
+    a present but corrupt primary and recovery file is an error.
+    A valid [.last-good] snapshot is returned with a warning.
+    This function never replaces corrupt data with an empty state. *)
+
 val read_state : Workspace_utils.config -> state
-(** Reads {!goals_path}; returns an empty default state on
-    missing file or parse failure.  Goals loaded from disk
-    are passed through the internal normaliser ([priority]
-    clamp + phase/status reconciliation). *)
+(** Read-only convenience projection of {!read_state_result}.  Raises
+    {!Corrupt_state_exn} for a present but unrecoverable ledger instead of
+    silently returning an empty state. *)
 
 val write_state : Workspace_utils.config -> state -> unit
 (** Direct overwrite of {!goals_path} with the supplied state.

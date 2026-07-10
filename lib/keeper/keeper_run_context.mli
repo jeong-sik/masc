@@ -44,10 +44,9 @@ val resolve_max_tokens_for_runtime :
   -> int
 (** Resolve the keeper turn max-token budget for a concrete runtime id.
 
-    [max_tokens] is an explicit caller override and is capped through
-    {!Runtime_inference.cap_max_tokens_to_runtime_ceiling}. When absent, the
-    keeper profile/env fallback is passed through
-    {!Runtime_inference.resolve_max_tokens} for the supplied runtime. *)
+    [max_tokens] is an explicit caller override. When absent, the keeper
+    profile/env fallback is passed through {!Runtime_inference.resolve_max_tokens}
+    for the supplied runtime; OAS remains the provider/model capability owner. *)
 
 val prepare_run_context :
      config:Workspace.config

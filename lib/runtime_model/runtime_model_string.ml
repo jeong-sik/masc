@@ -93,7 +93,7 @@ let make_registry_config
   let api_key =
     if effective_api_key_env = ""
     then ""
-    else Sys.getenv_opt effective_api_key_env |> Option.value ~default:""
+    else Env_config_core.raw_value_opt effective_api_key_env |> Option.value ~default:""
   in
   let headers = Binding.default_headers_for_kind defaults.kind in
   let discover =

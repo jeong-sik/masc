@@ -149,6 +149,7 @@ export function KeeperMemoryHealth() {
 
   const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
   const totalAlerts = data.alert_summary.total_alerts
+  const snapshotErrors = data.errors
   const ttlExpiredWarn = data.alert_summary.ttl_expired_keepers > 0
   const providerSlotBusyWarn = data.alert_summary.provider_slot_busy_keepers > 0
   const totalProviderSlotBusy = data.totals.provider_slot_busy
@@ -205,6 +206,10 @@ export function KeeperMemoryHealth() {
           ${formatAutoRefreshLabel(DEFAULT_PANEL_REFRESH_MS)} — 기준 ${generatedAt}
         </div>
       </div>
+
+      ${snapshotErrors.length > 0
+        ? html`<p class="kmh-empty">일부 키퍼 메모리 상태를 읽지 못했습니다: ${snapshotErrors.map(error => `${error.keeper_id} (${error.message})`).join(', ')}</p>`
+        : null}
 
       ${data.keepers.length === 0
         ? html`<p class="kmh-empty">등록된 키퍼 팩트 스토어 없음.</p>`

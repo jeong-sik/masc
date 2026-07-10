@@ -114,12 +114,14 @@ let test_applies_turn_execution_overrides () =
      temperature = 0.65\n\
      max_output_tokens = 8192\n\
      stream_idle_timeout_sec = 90\n\
-     execution_idle_timeout_sec = 95\n"
+     execution_idle_timeout_sec = 95\n\
+     admission_wait_timeout_sec = 45\n\
+     idle_skip_threshold = 6\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 6" 6 count;
+  check int "applied 8" 8 count;
   check (option string) "llm rerank"
     (Some "true")
     (List.assoc_opt "MASC_KEEPER_LLM_RERANK" overrides);
@@ -137,7 +139,13 @@ let test_applies_turn_execution_overrides () =
     (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides);
   check (option string) "execution idle timeout"
     (Some "95")
-    (List.assoc_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" overrides)
+    (List.assoc_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" overrides);
+  check (option string) "admission wait timeout"
+    (Some "45")
+    (List.assoc_opt "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC" overrides);
+  check (option string) "idle skip threshold"
+    (Some "6")
+    (List.assoc_opt "MASC_KEEPER_IDLE_SKIP_THRESHOLD" overrides)
 
 let test_applies_proactive_min_interval_override () =
   let doc =
@@ -459,6 +467,17 @@ let test_resolved_runtime_prefers_env_over_toml () =
     "env"
     (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source)
 
+let test_resolved_admission_wait_uses_env_override () =
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC" (Some "45") @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "admission wait env override" 45.0
+    runtime.admission_wait_timeout_sec.value;
+  check string "admission wait env source"
+    "env"
+    (Keeper_runtime_resolved.source_to_string runtime.admission_wait_timeout_sec.source)
+
 let test_resolved_cli_subprocess_idle_default_120s () =
   with_clean_boot_overrides @@ fun () ->
   Keeper_runtime_resolved.init ();
@@ -569,6 +588,7 @@ let () =
         ; test_case "execution idle timeout uses toml" `Quick test_resolved_execution_idle_timeout_uses_toml
         ; test_case "execution idle timeout zero disables" `Quick test_resolved_execution_idle_timeout_zero_disables
         ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
+        ; test_case "admission wait uses env override" `Quick test_resolved_admission_wait_uses_env_override
         ; test_case "cli subprocess idle default 120s" `Quick test_resolved_cli_subprocess_idle_default_120s
         ; test_case "cli subprocess idle from toml" `Quick test_resolved_cli_subprocess_idle_from_toml
         ; test_case "cli subprocess idle clamps to 10s floor" `Quick test_resolved_cli_subprocess_idle_clamps_low

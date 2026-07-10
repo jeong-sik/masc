@@ -513,6 +513,7 @@ let install () =
              
              ~temperature:Runtime_provider_defaults.deterministic_temperature
              ~max_tokens:200
+             ~max_idle_turns:(Keeper_runtime_resolved.autonomous_max_idle_turns ())
              ~approval:Approval_callbacks.auto_approve
              ~provider_config_transform:apply_review_verdict_output_schema
              ?sw

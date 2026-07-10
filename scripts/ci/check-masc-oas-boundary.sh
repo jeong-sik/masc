@@ -141,6 +141,36 @@ if [ -n "$masc_matches" ]; then
   head -20 <<< "$masc_matches"
 fi
 
+# 2b. Model capability truth must not flow from the legacy MASC runtime schema
+#     into execution.  runtime.toml still has a compatibility parser for old
+#     workspace documents, but the effective provider/model capability record
+#     is owned by OAS and must be read from the materialized Provider_config.
+echo "=== Scan: OAS model-capability SSOT ==="
+legacy_capability_matches=$(
+  rg -n --type ml --type mli \
+    -e 'Runtime_schema\.model_capabilities' \
+    -e 'model_capabilities_default' \
+    -e '\.model\.capabilities' \
+    -e '\.model\.thinking_support' \
+    -e '\.model\.tools_support' \
+    -e '\.model\.streaming' \
+    -e 'supports_tool_choice_override_of_model_spec' \
+    -e 'max_output_tokens_of_model_spec' \
+    lib/runtime/runtime.ml \
+    lib/runtime/runtime_adapter.ml \
+    lib/runtime/runtime_agent.ml \
+    lib/runtime/runtime_inference.ml \
+    lib/keeper/ 2>/dev/null || true
+)
+if [ -n "$legacy_capability_matches" ]; then
+  echo "FAIL: execution code consumes legacy MASC model capability declarations:"
+  echo "$legacy_capability_matches"
+  echo "  repair: resolve the concrete provider/model capability through OAS Provider_config"
+  exit_code=1
+else
+  echo "PASS: execution code has no legacy MASC model-capability consumers"
+fi
+
 # 3. MASC using Oas_worker raw/internal interfaces instead of public API.
 #    lib/oas_response.ml is a MASC-owned facade module; using
 #    Oas_response.* from keeper code is the correct pattern (not a violation).

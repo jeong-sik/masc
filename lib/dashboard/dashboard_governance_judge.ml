@@ -696,6 +696,7 @@ let compute_judgments
       Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
         ~base_path ~goal:prompt ~masc_tools ~dispatch
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+        ~max_idle_turns:(Keeper_runtime_resolved.autonomous_max_idle_turns ())
         ~approval:Approval_callbacks.auto_approve
         ~provider_config_transform:apply_governance_judge_output_schema
         ()

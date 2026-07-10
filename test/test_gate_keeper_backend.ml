@@ -2102,7 +2102,7 @@ let multimodal_caps ?(image = false) ?(audio = false) ?(multimodal = false) () =
 let test_runtime_multimodal_gate_model_caps_fail_closed () =
   let provider_caps = multimodal_caps ~image:true ~multimodal:true () in
   let model_caps =
-    { Runtime_schema.model_capabilities_default with
+    { Llm_provider.Capabilities.default_capabilities with
       supports_image_input = false;
       supports_multimodal_inputs = false;
     }

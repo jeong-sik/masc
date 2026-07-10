@@ -100,7 +100,7 @@ let recovery_hint ~allowed_tools ~tool_names =
 (** Pure decision logic for the on_idle hook.  Testable without Workspace.config.
 
     Graduated response to repeated tool calls uses the configured
-    [Env_config_keeper.KeeperKeepalive.idle_skip_threshold]:
+    [Keeper_runtime_resolved.idle_skip_threshold]:
     - For idle counts below [skip_at - 1]: gentle nudge suggesting alternatives
     - For idle counts at [skip_at - 1]: final warning (stronger nudge)
       suggesting a different visible tool or a text/no-work completion
@@ -176,12 +176,12 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
             tools_str alt_str))
 
 (** Wrapper around {!on_idle_decision_with_threshold} that supplies the
-    [idle_skip_threshold] constant from [Env_config_keeper.KeeperKeepalive].
+    frozen [idle_skip_threshold] from [Keeper_runtime_resolved].
     Reads the keeper's allowed tool names from [meta_ref] for concrete
     alternative suggestions. *)
 let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
   : Agent_sdk.Hooks.hook_decision =
-  let skip_at = Env_config_keeper.KeeperKeepalive.idle_skip_threshold in
+  let skip_at = Keeper_runtime_resolved.idle_skip_threshold () in
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
 

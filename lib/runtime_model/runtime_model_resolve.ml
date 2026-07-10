@@ -30,7 +30,7 @@ type model_resolution =
   ; provenance : model_resolution_provenance
   }
 
-let env_value_opt ?(getenv = Sys.getenv_opt) var =
+let env_value_opt ?(getenv = Env_config_core.raw_value_opt) var =
   match getenv var with
   | Some v ->
     let trimmed = String.trim v in

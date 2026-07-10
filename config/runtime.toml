@@ -28,9 +28,10 @@ structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
 # so it inherited [runtime].structured_judge = minimax-m3, a *reasoning* model:
 # extended thinking consumed the whole keeper.hitl_summary.max_tokens=512 budget,
 # leaving an empty answer that failed structured parse and always fell back to the
-# deterministic summary. Pin a *non-reasoning* structured runtime so the full token
-# budget produces the answer. devstral-2-123b (thinking-support=false,
-# supports-structured-output=true) is the same runtime the Fusion judge uses.
+# deterministic summary. Pin a structured runtime so the full token budget
+# produces the answer. The OAS provider/model catalog owns thinking and
+# structured-output capability facts; this file only selects the runtime
+# binding and MASC-local request policy.
 hitl_summary = "ollama_cloud.ollama-cloud-devstral-2-123b"
 # Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
@@ -108,105 +109,25 @@ path = "/api/tags"
 
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
-max-context = 1000000
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.deepseek-v4-pro.capabilities]
-max-output-tokens = 384000
-supports-tool-choice = true
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = false
-
+context-limit = 1000000
 [models.deepseek-v4-flash]
 api-name = "deepseek-v4-flash"
-max-context = 1048576
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.deepseek-v4-flash.capabilities]
-max-output-tokens = 384000
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 1048576
 [models.glm-4-7-coding]
 api-name = "glm-4.7"
-max-context = 200000
-tools-support = true
-thinking-support = true
-# Keep long-running keeper turns on non-preserved reasoning by default. OAS owns
-# GLM's clear_thinking wire contract; enabling preserved thinking here replays
-# historical reasoning into every subsequent keeper turn.
-preserve-thinking = false
-streaming = true
-
-[models.glm-4-7-coding.capabilities]
-max-output-tokens = 128000
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = false
-
+context-limit = 200000
+# OAS owns GLM's clear_thinking wire contract and preservation policy. This
+# binding does not override that model policy locally.
 [models.gemma4-26b-a4b-qat]
 api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
-max-context = 262144
-tools-support = true
+context-limit = 262144
 # OAS maps this to Gemma 4's <|think|> chat-template token and omits the
 # generic Ollama top-level think field for this model family.
-thinking-support = true
-preserve-thinking = false
-streaming = true
-
-[models.gemma4-26b-a4b-qat.capabilities]
-# This runtime rides OAS native Ollama /api/chat, which does not serialize
-# tool_choice (oas backend_ollama.ml:24). Declaring true here would override
-# oas models.toml's supports_tool_choice=false (provider_runtime_binding.ml
-# applies this override last) while the transport silently drops forced tool
-# choice. Do not re-enable without a serializer path + model-side proof.
-supports-tool-choice = false
-thinking-control-format = "chat_template_token"
-thinking-control-token = "<|think|>"
-supports-native-streaming = true
-supports-top-k = true
-supports-seed = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
 [models.gemma4-e2b-it-qat]
 api-name = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
-max-context = 131072
-tools-support = true
+context-limit = 131072
 # OAS maps this to Gemma 4's <|think|> chat-template token and omits the
 # generic Ollama top-level think field for this model family.
-thinking-support = true
-preserve-thinking = false
-streaming = true
-
-[models.gemma4-e2b-it-qat.capabilities]
-# This exact local model reports 131072 context and tools/vision/audio via
-# `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`.
-supports-tool-choice = false
-thinking-control-format = "chat_template_token"
-thinking-control-token = "<|think|>"
-supports-native-streaming = true
-supports-top-k = true
-supports-seed = true
-supports-image-input = true
-supports-audio-input = true
-supports-multimodal-inputs = true
-
 [ollama_cloud.deepseek-v4-flash]
 wizard-default = true
 
@@ -220,23 +141,9 @@ wizard-default = true
 
 [models.glm-5-turbo]
 api-name = "GLM-5-Turbo"
-max-context = 203000
-tools-support = true
-thinking-support = true
-# Keep long-running keeper turns on non-preserved reasoning by default. OAS owns
-# GLM's clear_thinking wire contract; enabling preserved thinking here replays
-# historical reasoning into every subsequent keeper turn.
-preserve-thinking = false
-streaming = true
-
-[models.glm-5-turbo.capabilities]
-max-output-tokens = 131072
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = false
-
+context-limit = 203000
+# OAS owns GLM's clear_thinking wire contract and preservation policy. This
+# binding does not override that model policy locally.
 [glm-coding.glm-5-turbo]
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit
@@ -246,25 +153,7 @@ supports-structured-output = false
 # https://ollama.com/v1/chat/completions.
 [models.minimax-m3]
 api-name = "minimax-m3"
-max-context = 524288
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.minimax-m3.capabilities]
-max-output-tokens = 131072
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-# SSOT = OAS models.toml per official MiniMax Chat docs: Chat tool_choice /
-# response_format / structured output are not documented (jeong-sik/oas#2339).
-supports-response-format-json = false
-supports-structured-output = false
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 524288
 [ollama_cloud.minimax-m3]
 
 # MiniMax M3 native Ollama Cloud structured-output lane. This uses the same
@@ -273,52 +162,19 @@ supports-multimodal-inputs = true
 # response_format/json_schema while native /api/chat `format` does.
 [models.minimax-m3-native-structured]
 api-name = "minimax-m3"
-max-context = 524288
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.minimax-m3-native-structured.capabilities]
-max-output-tokens = 131072
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "ollama_think"
-supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 524288
 [ollama_cloud_native.minimax-m3-native-structured]
 wizard-default = true
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
 # is kept separate from Kimi's direct API route; OAS owns provider/model wire
-# details and MASC declares only runtime-local concrete model capabilities.
+# details; MASC declares only the runtime binding and local context/request
+# policy.
 # Official Kimi docs checked 2026-07-04: kimi-k2.7-code is the latest
 # code-focused thinking model; keep the short Kimi seed on the current model.
 [models.kimi-k2-7-code]
 api-name = "kimi-k2.7-code"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.kimi-k2-7-code.capabilities]
-max-output-tokens = 32768
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-# SSOT = OAS models.toml; Ollama Cloud Kimi rows do not currently advertise a
-# native schema/response_format guarantee.
-supports-response-format-json = false
-supports-structured-output = false
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.kimi-k2-7-code]
 
 # Ollama Cloud canonical model seeds
@@ -327,641 +183,177 @@ supports-multimodal-inputs = true
 
 [models.ollama-cloud-deepseek-v3-1-671b]
 api-name = "deepseek-v3.1:671b"
-max-context = 163840
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-deepseek-v3-1-671b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 163840
 [ollama_cloud.ollama-cloud-deepseek-v3-1-671b]
 
 [models.ollama-cloud-deepseek-v3-2]
 api-name = "deepseek-v3.2"
-max-context = 163840
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-deepseek-v3-2.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 163840
 [ollama_cloud.ollama-cloud-deepseek-v3-2]
 
 [models.ollama-cloud-deepseek-v4-flash]
 api-name = "deepseek-v4-flash"
-max-context = 1048576
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-deepseek-v4-flash.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 1048576
 [ollama_cloud.ollama-cloud-deepseek-v4-flash]
 
 [models.ollama-cloud-deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
-max-context = 524288
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-deepseek-v4-pro.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 524288
 [ollama_cloud.ollama-cloud-deepseek-v4-pro]
 
 [models.ollama-cloud-devstral-2-123b]
 api-name = "devstral-2:123b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-devstral-2-123b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-devstral-2-123b]
 
 [models.ollama-cloud-devstral-small-2-24b]
 api-name = "devstral-small-2:24b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-devstral-small-2-24b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-devstral-small-2-24b]
 
 [models.ollama-cloud-gemini-3-flash-preview]
 api-name = "gemini-3-flash-preview"
-max-context = 1048576
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-gemini-3-flash-preview.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 1048576
 [ollama_cloud.ollama-cloud-gemini-3-flash-preview]
 
 [models.ollama-cloud-gemma3-4b]
 api-name = "gemma3:4b"
-max-context = 131072
-tools-support = false
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-gemma3-4b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 131072
 [ollama_cloud.ollama-cloud-gemma3-4b]
 
 [models.ollama-cloud-gemma3-12b]
 api-name = "gemma3:12b"
-max-context = 131072
-tools-support = false
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-gemma3-12b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 131072
 [ollama_cloud.ollama-cloud-gemma3-12b]
 
 [models.ollama-cloud-gemma3-27b]
 api-name = "gemma3:27b"
-max-context = 131072
-tools-support = false
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-gemma3-27b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 131072
 [ollama_cloud.ollama-cloud-gemma3-27b]
 
 [models.ollama-cloud-gemma4-31b]
 api-name = "gemma4:31b"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-gemma4-31b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-gemma4-31b]
 
 [models.ollama-cloud-glm-4-7]
 api-name = "glm-4.7"
-max-context = 202752
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-glm-4-7.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 202752
 [ollama_cloud.ollama-cloud-glm-4-7]
 
 [models.ollama-cloud-glm-5]
 api-name = "glm-5"
-max-context = 202752
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-glm-5.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 202752
 [ollama_cloud.ollama-cloud-glm-5]
 
 [models.ollama-cloud-glm-5-1]
 api-name = "glm-5.1"
-max-context = 202752
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-glm-5-1.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 202752
 [ollama_cloud.ollama-cloud-glm-5-1]
 
 [models.ollama-cloud-glm-5-2]
 api-name = "glm-5.2"
-max-context = 1000000
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-glm-5-2.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 1000000
 [ollama_cloud.ollama-cloud-glm-5-2]
 
 [models.ollama-cloud-gpt-oss-20b]
 api-name = "gpt-oss:20b"
-max-context = 131072
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-gpt-oss-20b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 131072
 [ollama_cloud.ollama-cloud-gpt-oss-20b]
 
 [models.ollama-cloud-gpt-oss-120b]
 api-name = "gpt-oss:120b"
-max-context = 131072
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-gpt-oss-120b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 131072
 [ollama_cloud.ollama-cloud-gpt-oss-120b]
 
 [models.ollama-cloud-kimi-k2-5]
 api-name = "kimi-k2.5"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-kimi-k2-5.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-kimi-k2-5]
 
 [models.ollama-cloud-kimi-k2-6]
 api-name = "kimi-k2.6"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-kimi-k2-6.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-kimi-k2-6]
 
 [models.ollama-cloud-kimi-k2-7-code]
 api-name = "kimi-k2.7-code"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-kimi-k2-7-code.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-kimi-k2-7-code]
 
 [models.ollama-cloud-minimax-m2-1]
 api-name = "minimax-m2.1"
-max-context = 204800
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-minimax-m2-1.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 204800
 [ollama_cloud.ollama-cloud-minimax-m2-1]
 
 [models.ollama-cloud-minimax-m2-5]
 api-name = "minimax-m2.5"
-max-context = 196608
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-minimax-m2-5.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 196608
 [ollama_cloud.ollama-cloud-minimax-m2-5]
 
 [models.ollama-cloud-minimax-m2-7]
 api-name = "minimax-m2.7"
-max-context = 196608
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-minimax-m2-7.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 196608
 [ollama_cloud.ollama-cloud-minimax-m2-7]
 
 [models.ollama-cloud-minimax-m3]
 api-name = "minimax-m3"
-max-context = 524288
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-minimax-m3.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-# SSOT = OAS models.toml per official MiniMax Chat docs (jeong-sik/oas#2339).
-supports-response-format-json = false
-supports-structured-output = false
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 524288
 [ollama_cloud.ollama-cloud-minimax-m3]
 
 [models.ollama-cloud-ministral-3-3b]
 api-name = "ministral-3:3b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-ministral-3-3b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-ministral-3-3b]
 
 [models.ollama-cloud-ministral-3-8b]
 api-name = "ministral-3:8b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-ministral-3-8b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-ministral-3-8b]
 
 [models.ollama-cloud-ministral-3-14b]
 api-name = "ministral-3:14b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-ministral-3-14b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-ministral-3-14b]
 
 [models.ollama-cloud-mistral-large-3-675b]
 api-name = "mistral-large-3:675b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-mistral-large-3-675b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-mistral-large-3-675b]
 
 [models.ollama-cloud-nemotron-3-nano-30b]
 api-name = "nemotron-3-nano:30b"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-nemotron-3-nano-30b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-nemotron-3-nano-30b]
 
 [models.ollama-cloud-nemotron-3-super]
 api-name = "nemotron-3-super"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-nemotron-3-super.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-nemotron-3-super]
 
 [models.ollama-cloud-nemotron-3-ultra]
 api-name = "nemotron-3-ultra"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-nemotron-3-ultra.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-nemotron-3-ultra]
 
 [models.ollama-cloud-qwen3-coder-480b]
 api-name = "qwen3-coder:480b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-qwen3-coder-480b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-qwen3-coder-480b]
 
 [models.ollama-cloud-qwen3-coder-next]
 api-name = "qwen3-coder-next"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-qwen3-coder-next.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-qwen3-coder-next]
 
 [models.ollama-cloud-qwen3-5-397b]
 api-name = "qwen3.5:397b"
-max-context = 262144
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-qwen3-5-397b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-native-streaming = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
+context-limit = 262144
 [ollama_cloud.ollama-cloud-qwen3-5-397b]
 
 [models.ollama-cloud-rnj-1-8b]
 api-name = "rnj-1:8b"
-max-context = 32768
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-rnj-1-8b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-native-streaming = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
+context-limit = 32768
 [ollama_cloud.ollama-cloud-rnj-1-8b]
 
 [ollama.gemma4-26b-a4b-qat]
@@ -1069,8 +461,8 @@ staged_judge_group_size = 3
 
 # 패널 프리셋. 패널 답변은 free text다. 2026-07-01 사고(ollama.com cloud가 json_schema를
 # 조용히 무시 → 패널 전멸) 이후 패널의 provider-native structured output 요구는 제거됐다
-# (fusion_panel.ml). 따라서 패널 런타임은 supports-structured-output 선언이 필요 없다 —
-# structured output 요구는 아래 judge에만 남는다.
+# (fusion_panel.ml). 따라서 패널 런타임은 별도의 MASC capability 선언이
+# 필요 없다 — OAS catalog의 structured-output capability가 transport 사실의 SSOT다.
 # 프롬프트는 행동을 정의하므로 코드 default가 아니라 여기서 받는다 (누락 시 로드
 # 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
 [fusion.presets.trio]
@@ -1108,9 +500,10 @@ max_tool_calls_per_panel = 0
 # quorum은 서로 다른 렌즈(evidence/coverage)의 1차 심판 2명을 두고, meta judge(judge=)가
 # 두 종합을 재조정한다. 키퍼 사용: masc_fusion preset="quorum" topology="judge_of_judges".
 # Panel models and Fusion judge/refine/meta paths request provider-native
-# structured output, so every panel and judge runtime below must declare
-# supports-structured-output=true. Distinct labels preserve lens identity while
-# the schema contract prevents config drift back to JSON-mode-only runtimes.
+# structured output, so every panel and judge runtime below must resolve to an
+# OAS catalog entry with native schema support. Distinct labels preserve lens
+# identity while the schema contract prevents config drift back to JSON-mode
+# only runtimes.
 # staged_judge_of_judges는 [fusion].staged_judge_group_size(=3)의 정확한 배수
 # 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
 [fusion.presets.quorum]

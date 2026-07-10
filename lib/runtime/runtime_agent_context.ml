@@ -152,7 +152,7 @@ let default_config
   ; tools
   ; runtime_mcp_policy = None
   ; max_turns = default_max_turns
-  ; max_idle_turns = 3
+  ; max_idle_turns = Agent_sdk.Types.default_config.max_idle_turns
   ; stream_idle_timeout_s = None
   ; max_execution_time_s = None
   ; body_timeout_s = None

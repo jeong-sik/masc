@@ -21,7 +21,7 @@ module KSM = Keeper_state_machine
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Observations = Masc.Keeper_heartbeat_loop_observations
 
-let skip_at = Env_config_keeper.KeeperKeepalive.idle_skip_threshold
+let skip_at = Masc.Keeper_runtime_resolved.idle_skip_threshold ()
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_idle_threshold_contract_" "" in

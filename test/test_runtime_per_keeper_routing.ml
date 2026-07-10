@@ -1074,6 +1074,26 @@ max-concurrent = 1
 let runtime_thinking_model_catalog =
   {|
 [[models]]
+id_prefix = "openai_compat/think"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_reasoning = true
+supports_extended_thinking = true
+preserve_thinking_control_format = "always_preserved"
+reasoning_replay = "preserve_always"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "openai_compat/nothink"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_reasoning = false
+supports_extended_thinking = false
+supports_native_streaming = true
+
+[[models]]
 id_prefix = "openai_compat/qwen36-35b-a3b-mtp"
 base = "openai_chat"
 max_context_tokens = 131072
@@ -1147,7 +1167,7 @@ let with_runtime_thinking f =
       f ())
 ;;
 
-let test_thinking_support_true_enables_thinking_and_preserves () =
+let test_thinking_support_true_enables_thinking_from_oas () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.think" in
     Alcotest.(check (option bool))
@@ -1169,12 +1189,12 @@ let test_thinking_support_true_leaves_preserve_unset () =
       seed.Runtime_inference.preserve_thinking)
 ;;
 
-let test_explicit_preserve_false_overrides_capability_default () =
+let test_masc_explicit_preserve_false_does_not_override_oas () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.thinkexplicitoff" in
     Alcotest.(check (option bool))
-      "explicit preserve-thinking=false remains Some false"
-      (Some false)
+      "MASC preserve-thinking=false does not override OAS"
+      None
       seed.Runtime_inference.preserve_thinking)
 ;;
 
@@ -1528,12 +1548,10 @@ let test_seed_of_thinking_support_gate_contract () =
 ;;
 
 (* ---- reasoning max_tokens resolution: [Runtime_inference.resolve_max_tokens]
-   sizes a reasoning turn from the model's declared output ceiling (OAS catalog),
-   bounded above by the operational [reasoning_turn_max_tokens] (32768). A
-   reasoning runtime with no catalog ceiling keeps the caller fallback (the bound
-   is never the request value on its own); non-reasoning runtimes keep the caller
-   fallback. Regression guard for the thinking_only + stop_reason=max_tokens
-   truncation (live fleet 2026-06-30). ----
+   sizes a reasoning turn from the model's declared output ceiling (OAS catalog)
+   without a second MASC ceiling. A reasoning runtime with no catalog ceiling
+   keeps the caller fallback; non-reasoning runtimes keep the caller fallback.
+   Regression guard for the thinking_only + stop_reason=max_tokens truncation. ----
 
    The fallback sentinel (8192) mirrors the keeper path's flat default and is
    distinct from every reasoning result asserted below, so a test failure
@@ -1544,12 +1562,11 @@ let test_resolve_max_tokens_reasoning_defers_to_caps_not_fallback () =
   with_runtime_thinking (fun () ->
     (* qwen36-35b-a3b-mtp declares [max_output_tokens = 65536] in the OAS
        fixture catalog. The reasoning path defers to that OAS-owned ceiling,
-       bounded by the 32768 operational cap — NOT the flat keeper fallback
-       (8192). *)
+       not the flat keeper fallback (8192). *)
     Alcotest.(check int)
-      "reasoning runtime defers to its OAS capability ceiling, clamped by the \
-       operational bound above the 8192 keeper fallback"
-      32768
+      "reasoning runtime defers to its OAS capability ceiling above the 8192 \
+       keeper fallback"
+      65536
       (Runtime_inference.resolve_max_tokens
          ~runtime_id:"ollama_cloud.thinkdefault"
          ~fallback:fallback_sentinel))
@@ -1568,20 +1585,18 @@ let test_resolve_max_tokens_non_reasoning_uses_fallback () =
 let test_resolve_max_tokens_reasoning_small_ceiling_respected () =
   with_runtime_thinking (fun () ->
     Alcotest.(check int)
-      "reasoning runtime whose declared ceiling is below the operational bound \
-       keeps its smaller ceiling (never request more than the provider accepts)"
+      "reasoning runtime keeps the smaller OAS ceiling"
       4096
       (Runtime_inference.resolve_max_tokens
          ~runtime_id:"ollama_cloud.smallout"
          ~fallback:fallback_sentinel))
 ;;
 
-let test_resolve_max_tokens_reasoning_big_ceiling_clamped () =
+let test_resolve_max_tokens_reasoning_big_ceiling_is_not_masc_clamped () =
   with_runtime_thinking (fun () ->
     Alcotest.(check int)
-      "reasoning runtime whose declared ceiling exceeds the operational bound is \
-       clamped to the bound (runaway guard)"
-      32768
+      "reasoning runtime keeps the OAS ceiling; MASC adds no arbitrary bound"
+      200000
       (Runtime_inference.resolve_max_tokens
          ~runtime_id:"ollama_cloud.bigout"
          ~fallback:fallback_sentinel))
@@ -1599,16 +1614,11 @@ let test_resolve_max_tokens_unknown_runtime_uses_fallback () =
 
 let test_resolve_max_tokens_reasoning_no_capability_falls_back () =
   with_runtime_thinking (fun () ->
-    (* [ollama_cloud.think]'s model api-name is absent from the OAS catalog, so
-       its capability projection has no max_output_tokens even though
-       runtime.toml marks it thinking-support=true. A reasoning runtime with no
-       declared ceiling must NOT jump to the operational bound — without a known
-       provider ceiling, requesting 32768 could exceed what the provider accepts
-       and turn the thinking truncation into a max_tokens rejection. It keeps the
-       caller fallback (the budget increase is gated on an OAS-declared ceiling). *)
+    (* [ollama_cloud.think]'s OAS row has no max_output_tokens. A reasoning
+       runtime with no declared ceiling keeps the caller fallback because there
+       is no provider-owned value to project. *)
     Alcotest.(check int)
-      "reasoning runtime with no catalog ceiling keeps the fallback, does not \
-       jump to the operational bound"
+      "reasoning runtime with no catalog ceiling keeps the fallback"
       8192
       (Runtime_inference.resolve_max_tokens
          ~runtime_id:"ollama_cloud.think"
@@ -1930,17 +1940,17 @@ let () =
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case
-            "thinking-support=true enables thinking and preserve-thinking"
+            "OAS thinking capability enables thinking and preserve policy"
             `Quick
-            test_thinking_support_true_enables_thinking_and_preserves
+            test_thinking_support_true_enables_thinking_from_oas
         ; Alcotest.test_case
             "request-side preserve capability stays policy-neutral"
             `Quick
             test_thinking_support_true_leaves_preserve_unset
         ; Alcotest.test_case
-            "explicit preserve-thinking=false stays explicit"
+            "MASC preserve-thinking=false cannot override OAS"
             `Quick
-            test_explicit_preserve_false_overrides_capability_default
+            test_masc_explicit_preserve_false_does_not_override_oas
         ; Alcotest.test_case
             "thinking-support=false forces thinking off (Some false)"
             `Quick
@@ -1988,9 +1998,9 @@ let () =
             `Quick
             test_resolve_max_tokens_reasoning_small_ceiling_respected
         ; Alcotest.test_case
-            "reasoning runtime, ceiling above bound -> clamped to bound"
+            "reasoning runtime keeps its OAS ceiling without a MASC clamp"
             `Quick
-            test_resolve_max_tokens_reasoning_big_ceiling_clamped
+            test_resolve_max_tokens_reasoning_big_ceiling_is_not_masc_clamped
         ; Alcotest.test_case
             "unknown runtime id -> caller fallback"
             `Quick

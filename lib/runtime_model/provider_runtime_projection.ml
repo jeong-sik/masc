@@ -35,7 +35,7 @@ let normalize_label label = String.trim label |> String.lowercase_ascii
 
 ;;
 
-let env_value_opt ?(getenv = Sys.getenv_opt) name =
+let env_value_opt ?(getenv = Env_config_core.raw_value_opt) name =
   match getenv name with
   | Some raw ->
     let trimmed = String.trim raw in

@@ -41,7 +41,7 @@ let fail_open_health_filtered_candidates
 
 let apply_stream_idle_timeout_default = function
   | Some _ as v -> v
-  | None -> Some Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
+  | None -> Some (Keeper_runtime_resolved.stream_idle_timeout_sec ())
 
 let checkpoint_after_attempt ?agent_ref = function
   | Some agent ->

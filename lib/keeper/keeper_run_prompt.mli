@@ -46,16 +46,9 @@ type context_layer_budget =
   ; context_layer_decision : context_layer_decision
   }
 
-type context_layer_cap =
-  | Full_context_window
-  | Quarter_context_window
-  | Eighth_context_window
-  | Sixteenth_context_window
-
 type context_layer_policy =
   { context_layer_policy_name : string
   ; context_layer_policy_priority : string
-  ; context_layer_policy_cap : context_layer_cap
   }
 
 type extra_system_context_budget =
@@ -149,11 +142,6 @@ val estimate_context_layer_budget :
     the layer text; over-cap layers are reported as [over_cap_observed], not as
     truncated. [context_layer_would_fit_tokens] is the amount that would fit if
     the cap were applied, not the amount sent to OAS. *)
-
-val context_layer_cap_tokens :
-  max_context:int -> context_layer_cap -> int
-(** Resolve a typed context-layer cap against the effective provider context
-    window. *)
 
 val world_dynamic_context_layer_policy : context_layer_policy
 (** Manifest budget policy for the dynamic world/context layer. *)

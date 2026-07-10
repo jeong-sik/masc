@@ -176,6 +176,7 @@ max_output_tokens = 200000
 supports_tools = true
 supports_reasoning = true
 supports_extended_thinking = true
+preserve_thinking_control_format = "always_preserved"
 supports_native_streaming = true
 |}
 
@@ -393,8 +394,8 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       (Some true)
       thinking_policy.Driver.attempt_preserve_thinking;
     Alcotest.(check int)
-      "thinking candidate sizes from catalog ceiling"
-      32768
+      "thinking candidate sizes from OAS catalog ceiling"
+      200000
       thinking_policy.Driver.attempt_max_tokens;
     let non_thinking_policy =
       Driver.For_testing.attempt_inference_policy

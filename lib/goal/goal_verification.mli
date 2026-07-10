@@ -174,6 +174,16 @@ type state = {
     [version] increments on every write so concurrent readers
     can detect drift. *)
 
+type read_error =
+  | Corrupt_state of {
+      primary_err : string;
+      recovery_err : string option;
+    }
+
+val read_error_to_string : read_error -> string
+
+exception Corrupt_state_exn of read_error
+
 type goal_policy_node = {
   goal_id : string;
   parent_goal_id : string option;
@@ -210,11 +220,16 @@ val events_path : Workspace_utils.config -> string
 
 (** {1 State I/O} *)
 
+val read_state_result :
+  Workspace_utils.config -> (state, read_error) result
+(** Reads {!requests_path}. A missing file is a fresh empty state;
+    an unrecoverable present ledger is an error. A valid [.last-good]
+    snapshot is returned with a warning. *)
+
 val read_state : Workspace_utils.config -> state
-(** Reads {!requests_path}; returns the empty default state
-    if the file does not exist or fails to parse.  Parse
-    errors are silently absorbed — the JSONL events file is
-    the durable history if recovery is needed. *)
+(** Read-only convenience projection of {!read_state_result}. Raises
+    {!Corrupt_state_exn} for an unrecoverable present ledger instead of
+    silently returning an empty state. *)
 
 (** {1 Effective policy resolution} *)
 

@@ -23,6 +23,10 @@ let assoc_fields body =
   | `Assoc fields -> fields
   | json -> failf "body was not object: %s" (Yojson.Safe.to_string json)
 
+let check_field_absent fields name =
+  check bool (name ^ " absent") true
+    (Option.is_none (List.assoc_opt name fields))
+
 let test_build_post_message_request_url_and_headers () =
   let url, headers, _ =
     R.build_post_message_request ~token:"xoxb-secret" ~channel_id:"C123"
@@ -34,16 +38,23 @@ let test_build_post_message_request_url_and_headers () =
   check string "Content-Type" "application/json"
     (header_value headers "Content-Type");
   check bool "User-Agent present" true
-    (String.length (header_value headers "User-Agent") > 0)
+    (String.length (header_value headers "User-Agent") > 0);
+  check int "native markdown limit" 12_000 R.message_text_limit;
+  check (float 0.0) "streaming update interval" 3.0
+    R.streaming_update_min_interval_sec
 
 let test_build_post_message_request_body_with_thread () =
   let _, _, body =
     R.build_post_message_request ~token:"t" ~channel_id:"C123"
-      ~text:"hello \"world\"" ~thread_ts:"1710000000.123456" ()
+      ~text:"**hello** [world](https://example.com)"
+      ~thread_ts:"1710000000.123456" ()
   in
   let fields = assoc_fields body in
   check string "channel" "C123" (field_string fields "channel");
-  check string "text" "hello \"world\"" (field_string fields "text");
+  check string "markdown preserved" "**hello** [world](https://example.com)"
+    (field_string fields "markdown_text");
+  check_field_absent fields "text";
+  check_field_absent fields "blocks";
   check string "thread_ts" "1710000000.123456" (field_string fields "thread_ts")
 
 let test_parse_post_response_2xx_ok_returns_ts () =
@@ -82,7 +93,7 @@ let test_parse_post_response_2xx_non_json_is_other () =
 let test_build_update_request_body () =
   let url, headers, body =
     R.build_update_request ~token:"xoxb-secret" ~channel_id:"C123"
-      ~ts:"171.42" ~text:"updated" ()
+      ~ts:"171.42" ~text:"updated **bold**" ()
   in
   check string "url" "https://slack.com/api/chat.update" url;
   check string "Authorization" "Bearer xoxb-secret"
@@ -90,7 +101,10 @@ let test_build_update_request_body () =
   let fields = assoc_fields body in
   check string "channel" "C123" (field_string fields "channel");
   check string "ts" "171.42" (field_string fields "ts");
-  check string "text" "updated" (field_string fields "text")
+  check string "markdown preserved" "updated **bold**"
+    (field_string fields "markdown_text");
+  check_field_absent fields "text";
+  check_field_absent fields "blocks"
 
 let test_parse_update_response_2xx_ok () =
   match R.parse_update_response ~status:200 ~body:{|{"ok":true}|} with

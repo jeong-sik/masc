@@ -33,8 +33,8 @@
                           increments [meta.generation] — spec's
                           generation variable.  The new trace_id and
                           trace_history append happen there.
-      Checkpoint commit    preserves the spec's [ckpt_valid] /
-                          [ckpt_generation] parity invariant.
+      Checkpoint commit    preserves the spec's checkpoint-valid /
+                          checkpoint-generation parity invariant.
 
     Spec scope (line 4-8): same identity across generations,
     trace_id replacement, append-only ancestry, checkpoint lineage

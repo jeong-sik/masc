@@ -245,7 +245,7 @@ let keeper_health ~keepers_dir ~now keeper_id =
   }
 ;;
 
-let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
+let keeper_health_entry_to_json ((h : keeper_health), alerts) : Yojson.Safe.t =
   `Assoc
     [ "keeper_id", `String h.keeper_id
     ; "facts", `Int h.facts

@@ -27,6 +27,11 @@ let test_short_input_unchanged () =
   let preview = Observability_redact.redact_preview input in
   Alcotest.(check string) "short input preserved" "hello world" preview
 
+let test_search_tool_word_preserved () =
+  let input = "Use Grep to find the matching lines." in
+  let redacted = Observability_redact.redact_text input in
+  Alcotest.(check string) "search tool wording preserved" input redacted
+
 let test_redact_text_does_not_truncate () =
   let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz" in
   let input = String.make 300 'x' ^ " " ^ secret in
@@ -208,6 +213,8 @@ let () =
           Alcotest.test_case "URL credential redacted" `Quick test_url_credential_redacted;
           Alcotest.test_case "max length enforced" `Quick test_max_length_enforced;
           Alcotest.test_case "short input unchanged" `Quick test_short_input_unchanged;
+          Alcotest.test_case "search tool wording preserved" `Quick
+            test_search_tool_word_preserved;
           Alcotest.test_case "redact_text does not truncate" `Quick
             test_redact_text_does_not_truncate;
           Alcotest.test_case "redact_json_strings redacts sensitive keys"

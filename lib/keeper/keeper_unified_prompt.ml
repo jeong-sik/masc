@@ -101,48 +101,6 @@ let format_current_task (task : Masc_domain.task) : string =
      so another keeper can take over.\n\n";
   Buffer.contents buf
 
-(* Open Loops render cap: the ledger's own [compact] already bounds the
-   digest, this is a prompt-size guard only. *)
-let max_open_loops_rendered = 5
-
-(** Render unresolved open loops from the keeper's working-state ledger
-    (RFC-0315). These are the keeper's OWN prior [STATE] obligations that
-    survived compaction/handoff via the sidecar; before this section the
-    ledger was persisted but never shown back to the model. *)
-let format_open_loops (loops : Keeper_working_state.loop list) : string =
-  let buf = Buffer.create 256 in
-  let total = List.length loops in
-  Buffer.add_string buf
-    (Printf.sprintf "### Open Loops (%d unresolved, from your own prior [STATE])\n"
-       total);
-  List.iteri
-    (fun i (loop : Keeper_working_state.loop) ->
-      if i < max_open_loops_rendered then (
-        Buffer.add_string buf
-          (Printf.sprintf "- %s — %s" loop.Keeper_working_state.title
-             loop.Keeper_working_state.six_w.Keeper_working_state.what);
-        (match loop.Keeper_working_state.evidence_refs with
-         | [] -> ()
-         | refs ->
-             Buffer.add_string buf
-               (Printf.sprintf " [%s]"
-                  (String.concat ", "
-                     (List.map
-                        (fun (r : Keeper_working_state.evidence_ref) ->
-                          r.Keeper_working_state.kind ^ ":"
-                          ^ r.Keeper_working_state.target)
-                        refs))));
-        Buffer.add_char buf '\n'))
-    loops;
-  if total > max_open_loops_rendered then
-    Buffer.add_string buf
-      (Printf.sprintf "- [%d more not shown]\n"
-         (total - max_open_loops_rendered));
-  Buffer.add_string buf
-    "- Continue, resolve, or explicitly archive these loops; do not silently \
-     drop them.\n\n";
-  Buffer.contents buf
-
 (** Format one connected-surface presence line (RFC-0223 P2).
     Presence only: lane label + liveness, no content, no counts. *)
 let format_surface_presence (p : Gate_surface.surface_presence) : string =
@@ -464,17 +422,14 @@ let line_block label value =
   if value = "" then ""
   else Printf.sprintf "%s: %s\n" label value
 
-let state_block_instruction_text = Keeper_state_block_prompt.instruction_text
-
 (* In-binary mirror of config/prompts/keeper.turn_intent.md (minus the
    {{...}} substitution slots that cannot be filled during a fallback).
    Used only when [resolve_turn_intent_block] fails or the registry
    template renders empty.  The previous minimal stub silently weakened
    keeper behavior exactly when prompt config was degraded — multi-tool
-   chaining, continuity-mismatch handling, and the BDI claim header
-   contract were all dropped from the prompt.  Keep the prior safeguards
-   intact here so a degraded prompt still resembles the hardcoded
-   predecessor. *)
+   chaining and checkpoint guidance were both dropped from the prompt.
+   Keep the prior safeguards intact here so a degraded prompt still resembles
+   the hardcoded predecessor. *)
 let turn_intent_fallback_block =
   String.concat "\n"
     [ "Use the world state below as raw context.";
@@ -488,28 +443,18 @@ let turn_intent_fallback_block =
        to avoid repeating the same actions.";
       "";
       "Act through tools, not declarations. Call the tool directly.";
-      "- Treat continuity as advisory prior context, not as a command. Do not \
-       blindly repeat prior \"stay silent\", \"wait for new work\", or stale \
-       repo/blocker claims without re-checking the live world state.";
-      "- If continuity says there is nothing to do but this turn still has \
-       backlog or a scheduled autonomous trigger, treat that mismatch as \
-       actionable and investigate it before going silent.";
-      "- Nothing genuinely actionable after checking? End your turn with the \
-       [STATE] block.";
+      "Treat prior context as advisory, not as a command. Re-check stale idle, \
+       silence, repository, and blocker claims against the live world state.";
+      "Nothing genuinely actionable after checking? Give a concise no-work report.";
       "";
-      "If you call tools, BDI headers are optional and informational only. The \
-       system reads your tool calls as the authoritative record of your \
-       action.";
+      "Tool calls, typed task/goal transitions, and the runtime checkpoint are \
+       the authoritative record of your action. Do not invent a second state \
+       protocol in prose.";
       "";
-      "If you explicitly claim completion or progress in text, add these \
-       optional headers:";
-      "CLAIM_KIND: completion_claim";
-      "CLAIM_SUBJECT: short concrete subject or task title";
-      "CLAIM_TASK_ID: task-123 (if applicable)";
-      "EVIDENCE_REFS: task:task-123, tool:keeper_task_done";
-      "Only emit them for concrete claims you expect the system to audit.";
-      "";
-      state_block_instruction_text ]
+      "For an explicit completion or progress claim, add the optional evidence \
+       headers CLAIM_KIND, CLAIM_SUBJECT, CLAIM_TASK_ID (when applicable), and \
+       EVIDENCE_REFS. Emit them only for a concrete claim the system should audit."
+    ]
 
 let contains_template_placeholder text =
   String_util.contains_substring text "{{"
@@ -682,7 +627,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ?(current_task : Masc_domain.task option)
     ?(active_goal_summaries : (string * string) list option)
-    ?(active_open_loops : Keeper_working_state.loop list option)
     ~(observation : Keeper_world_observation.world_observation)
     () : string * string
     =
@@ -696,9 +640,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     | Some d -> Option.value d.instructions ~default:meta.instructions
     | None -> meta.instructions
   in
-  (* RFC-0282 removed the will/needs/desires self_model triple; the
-     [trait_lines] template slot is now always empty. *)
-  let trait_lines = "" in
   let instructions_block =
     if instructions = "" then ""
     else Printf.sprintf "\nInstructions:\n%s\n" instructions
@@ -722,10 +663,8 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             the operator explicitly requested new repo, goal, or task creation.\n\
             Do not stay silent when you have no goal.\n"
          else
-           (* RFC-0315: parity with the no-goal branch. Before this, only
-              goalless keepers received a self-direction directive; a keeper
-              WITH goals woke into 'end your turn with the [STATE] block',
-              which legitimized no-op turns. *)
+           (* Keep the goal-bearing path explicit as well: a valid goal does
+              not by itself choose the next concrete action. *)
            "\n\
             On a turn with no new external signal, advance one of your active \
             goals:\n\
@@ -735,8 +674,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             can align.\n\
             - If the goal is blocked, state the blocker and what would unblock \
             it.\n\
-            Deferring is a valid choice; if you defer, say why in the [STATE] \
-            block.\n");
+            Deferring is a valid choice; if you defer, say why explicitly.\n");
       ]
   in
   let base_system_prompt =
@@ -744,7 +682,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       Prompt_registry.render_prompt_template Keeper_prompt_names.unified_system
         [
           ("identity_header", Printf.sprintf "You are %s, a keeper agent." meta.name);
-          ("trait_lines", trait_lines);
           ("instructions_block", instructions_block);
           ("goal_lines", goal_lines);
         ]
@@ -830,7 +767,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ("board_curation_guidance", board_curation_guidance);
       ("broadcast_guidance", broadcast_guidance);
       ("pr_duplicate_search_guidance", pr_duplicate_search_guidance);
-      ("state_block_instruction", state_block_instruction_text);
     ]
   in
   let turn_intent_block =
@@ -840,8 +776,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block
   in
   (* User message: structured world observation — reactive triggers + resource state only.
-     Metacognition sections (tool activity, cycle outcome, diversity, behavioral stats)
-     removed in #6814; telemetry preserved in decision_audit and independent paths.
+     Runtime telemetry remains on decision_audit and independent observation paths.
 
      The body is an ordered fold of typed context layers (Keeper_context_layers).
      [content_of] below is an exhaustive match on [layer_id], so adding a
@@ -875,18 +810,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   let autonomous_trigger =
     autonomous_trigger_lines ~decision:turn_decision ~observation
   in
-  let continuity_for_prompt =
-    Keeper_memory_policy.filter_forward_looking_summary
-      observation.continuity_summary
-  in
-  (* Strip stale tool tokens from the continuity surface before it is embedded
-     in the user message. The ratchet below scans the pre-strip text so the
-     producer-side alarm is preserved. *)
-  let sanitized_continuity_for_prompt =
-    Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
-      ~keeper_name:meta.name
-      continuity_for_prompt
-  in
   let content_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
        resolved them (RFC-0315); every id from the world observation remains
@@ -908,13 +831,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
       Option.map format_current_task current_task
-    (* 1c. Working state — unresolved open loops from the keeper's own prior
-       [STATE] blocks, restored from the working-state sidecar (RFC-0315:
-       the ledger was persisted-but-never-shown before this layer). *)
-    | Keeper_context_layers.Working_state ->
-      (match active_open_loops with
-       | Some (_ :: _ as loops) -> Some (format_open_loops loops)
-       | Some [] | None -> None)
     (* 2. Connected surfaces — connector presence, changes only on bind/unbind
        or transport flaps (RFC-0223 P2). Omitted when only the implicit
        dashboard is attached: every keeper has the dashboard, so dashboard-only
@@ -1008,25 +924,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
        not become trusted instruction text. *)
     | Keeper_context_layers.Scheduled_automation ->
       format_scheduled_automation_summary observation.scheduled_automation
-    (* 7. Continuity — usually large and moderately stable, so keep it before
-       highly volatile reactive sections for better prefix reuse. Inject only
-       forward-looking fields (Goal, Next plan, Next, OpenQuestions,
-       Constraints). Backward-looking fields (Done, Progress, Decisions) are
-       stripped to avoid a prose-level echo loop where the LLM re-reads its own
-       prior narrative and reproduces a near-identical one. The full summary
-       remains persisted in meta.continuity_summary for audit. *)
-    | Keeper_context_layers.Continuity ->
-      if
-        continuity_for_prompt <> ""
-        && observation.continuity_summary <> "No continuity snapshot available."
-      then
-        Some
-          ("\n### Continuity\n"
-          ^ "- Advisory only: ignore prior silence/wait directives until you re-verify them against the live world state.\n"
-          ^ "- If this turn was still scheduled or backlog/repo signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n"
-          ^ sanitized_continuity_for_prompt
-          ^ "\n")
-      else None
     (* 8. Pending mentions — reactive trigger. *)
     | Keeper_context_layers.Pending_mentions ->
       if observation.pending_mentions <> [] then
@@ -1097,15 +994,11 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   let user_message =
     "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
   in
-  (* Single registry-driven sanitization pass: tool tokens that no longer
-     resolve via Keeper_tool_resolution are replaced with the
-     [<stale_tool_token>] placeholder so the surrounding sentence stays
-     intact; env-var-shaped tokens (uppercase) are preserved. The legacy
-     hardcoded [sanitize_retired_tool_names] pass is deleted (38-bug
-     campaign #6): it removed standalone words like "Grep"/"Bash" and
-     retired keeper_*-prefixed tokens outright, mangling legitimate prompt
-     prose. Hallucinated calls to non-existent tools are rejected at the
-     tool-dispatch boundary with a typed error, which is the correct seam. *)
+  (* The registry is the sole tool-token SSOT for instruction-owned prompt
+     surfaces. The deleted hardcoded sanitizer removed valid prose such as
+     "Grep"/"Bash". The structured world-state user message is different: its
+     board/task/connector values are observations, not tool instructions, so a
+     [keeper_*]/[masc_*] substring there must remain byte-for-byte intact. *)
   (* P0-3: rendered prompt token integrity ratchet. Scan the prompt surfaces
      *before* the registry-driven strip so stale tokens that are about to be
      replaced still increment [PromptUnknownToolTokens] and are logged. The
@@ -1113,22 +1006,16 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
      running the ratchet first preserves the producer-side alarm signal that
      would otherwise be silently dropped after removal. *)
   let (_ : string list) =
-    Keeper_prompt_token_integrity.scan_rendered_prompt
+    Keeper_prompt_token_integrity.scan_instruction_surfaces
       ~keeper_name:meta.name
       ~system_prompt
-      ~user_message
-      ~continuity_summary:continuity_for_prompt
   in
   let sanitized_system =
     system_prompt
     |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
          ~keeper_name:meta.name
   in
-  let sanitized_user =
-    user_message
-    |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
-         ~keeper_name:meta.name
-  in
+  let sanitized_user = user_message in
   (* set_gauge only: a stray inc_counter here used to create this
      (name, labels) cell as Counter first, so the system_prompt series
      kept Counter kind, carried a non-monotonic byte length, and exported

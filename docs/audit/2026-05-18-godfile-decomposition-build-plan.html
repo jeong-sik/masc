@@ -400,7 +400,7 @@
           <tr>
             <td class="rank-p2">P2</td><td class="num">2187</td>
             <td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td>
-            <td>Overview rows, trust/config projections, BDI, cost, K2 feeds</td>
+            <td>Overview rows, trust/config projections, cost, K2 feeds</td>
             <td>Dashboard projection weight is separable if compact/full behavior is pinned first.</td>
           </tr>
           <tr>
@@ -546,7 +546,7 @@
           <tr><td class="rank-p0">18</td><td>Server keeper runtime lens split</td><td><code>server_dashboard_http_keeper_api.ml</code></td><td>Runtime manifest scan and runtime lens modules; public <code>Keeper_api</code> entrypoints unchanged.</td></tr>
           <tr><td class="rank-p1">19</td><td>Server keeper actions/routes split</td><td><code>server_dashboard_http_keeper_api.ml</code></td><td>Checkpoints, config action, lifecycle action, directive, GET subroutes separated.</td></tr>
           <tr><td class="rank-p1">20</td><td>Dashboard core surface split</td><td><code>server_dashboard_http_core.ml</code></td><td>Operator, mission, shell, projection trace modules; cache keys and timeout fallback identical.</td></tr>
-          <tr><td class="rank-p2">21</td><td>Dashboard keeper projection split</td><td><code>dashboard_http_keeper.ml</code></td><td>Overview, trust, config, BDI, cost, K2 feeds; compact mode remains cheap.</td></tr>
+          <tr><td class="rank-p2">21</td><td>Dashboard keeper projection split</td><td><code>dashboard_http_keeper.ml</code></td><td>Overview, trust, config, cost, K2 feeds; compact mode remains cheap.</td></tr>
           <tr><td class="rank-p2">22</td><td>Dashboard goals helper split</td><td><code>dashboard_goals_types.ml</code></td><td>Accessors, attainment, health badges, timeline, builders split behind same JSON contract.</td></tr>
           <tr><td class="rank-p2">23</td><td>Runtime bootstrap phase split</td><td><code>server_runtime_bootstrap.ml</code></td><td>Config-root, auth/token, migrations, lazy startup, transports are ordered explicitly.</td></tr>
           <tr><td class="rank-p3">24</td><td>Route parity cleanup</td><td><code>server_routes_http_routes_dashboard.ml</code>, <code>server_h2_gateway.ml</code></td><td>H1/H2 routes share handler modules; no duplicate route behavior.</td></tr>

@@ -23,7 +23,7 @@
 \* Design intent
 \*   1. shared_measurement is the workspace collaboration hub (Context_measured event,
 \*      Keeper_state_machine.mli — [Context_measured] constructor of
-\*      [type event], auto_rules_summary). Cite by symbol — iter 64 N-2.a
+\*      [type event], context_actions_summary). Cite by symbol — iter 64 N-2.a
 \*      (line numbers drift on every edit; [type event] / [Context_measured]
 \*      are stable identifiers, the OCaml compiler keeps them honest).
 \*      Adjacent NoDrainTransition / GhostDispatch *.mli docstring callouts
@@ -79,7 +79,7 @@ VARIABLES
     kmc_compaction,     \* KMC projection. keeper-facing compaction lifecycle
                         \* Values: accumulating, compacting, done.
 
-    shared_measurement, \* Workspace hub. auto_rules_summary snapshot id
+    shared_measurement, \* Workspace hub. context_actions_summary snapshot id
                         \* (Nat); 0 means "no measurement yet this turn".
 
     measurement_turn,   \* Turn tick at which current shared_measurement

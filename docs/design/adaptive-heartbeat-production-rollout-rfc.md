@@ -120,7 +120,7 @@ Migration note:
 Stage 0 산출물:
 
 - read-path revalidation summary
-- keeper continuity summary
+- keeper checkpoint-validation receipt
 - quick-bench 결과
 - operator-visible keeper sample payload
 

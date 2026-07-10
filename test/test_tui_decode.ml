@@ -131,7 +131,6 @@ let test_parse_log_entry_success () =
          ("message_count", `Int 4);
          ("usage", `Assoc [("input_tokens", `Int 10); ("output_tokens", `Int 12)]);
          ("work_kind", `String "heartbeat");
-         ("guardrail_stop", `Bool false);
        ])
   in
   match Tui_decode.parse_log_entry line with

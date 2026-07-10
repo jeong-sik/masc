@@ -2,12 +2,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-type continuity_judgment = {
-  json : Yojson.Safe.t;
-  verdict : string;
-  similarity : float option;
-}
-
 let identity_fields : (string * (keeper_meta -> string)) list =
   [
     ("goal", (fun m -> m.goal));
@@ -64,37 +58,6 @@ let inheritance_delta_json ~(parent : keeper_meta) ~(child : keeper_meta) =
       ("dropped_fields", Json_util.json_string_list dropped_fields);
     ]
 
-let continuity_judgment ~(original : string) ~(received : string) =
-  if String.trim original = "" || String.trim received = "" then
-    {
-      json =
-        `Assoc
-          [
-            ("verdict", `String "unavailable");
-            ("passed", `Null);
-            ("similarity", `Null);
-            ("reason", `String "continuity_summary_missing");
-          ];
-      verdict = "unavailable";
-      similarity = None;
-    }
-  else
-    let result =
-      Drift_guard.verify_handoff ~original ~received ()
-    in
-    let verdict, similarity =
-      match result with
-      | Drift_guard.Verified summary ->
-          ("verified", Some summary.similarity)
-      | Drift_guard.Drift_detected details ->
-          ("drift_detected", Some details.similarity)
-    in
-    {
-      json = Drift_guard.result_to_json result;
-      verdict;
-      similarity;
-    }
-
 let manifest_json
     ~(parent : keeper_meta)
     ~(child : keeper_meta)
@@ -109,11 +72,6 @@ let manifest_json
   let parent_generation = parent.runtime.generation in
   let child_generation = child.runtime.generation in
   let inheritance_delta = inheritance_delta_json ~parent ~child in
-  let continuity =
-    continuity_judgment
-      ~original:parent.continuity_summary
-      ~received:child.continuity_summary
-  in
   `Assoc
     [
       ("schema_version", `String "keeper_generation_lineage_v1");
@@ -141,7 +99,6 @@ let manifest_json
       ("same_keeper_identity", `Bool true);
       ("identity_snapshot", identity_snapshot_json child);
       ("inheritance_delta", inheritance_delta);
-      ("continuity_judgment", continuity.json);
     ]
 
 let index_entry_json
@@ -158,11 +115,6 @@ let index_entry_json
   let child_trace_id = Keeper_id.Trace_id.to_string child.runtime.trace_id in
   let parent_generation = parent.runtime.generation in
   let child_generation = child.runtime.generation in
-  let continuity =
-    continuity_judgment
-      ~original:parent.continuity_summary
-      ~received:child.continuity_summary
-  in
   let inherited_fields, changed_fields, dropped_fields =
     classify_identity_fields
       ~previous:(identity_pairs parent)
@@ -192,8 +144,6 @@ let index_entry_json
       ("trigger_reason", `String trigger_reason);
       ("context_ratio", `Float context_ratio);
       ("to_model", `String model);
-      ("continuity_verdict", `String continuity.verdict);
-      ("continuity_similarity", Json_util.float_opt_to_json continuity.similarity);
       ("identity_inherited_fields", Json_util.json_string_list inherited_fields);
       ("identity_changed_fields", Json_util.json_string_list changed_fields);
       ("identity_dropped_fields", Json_util.json_string_list dropped_fields);

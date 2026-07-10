@@ -5,18 +5,10 @@ import type { KeeperCompositeSnapshot, KeeperCompositeInvariants } from '../api/
 import { invariantRows } from './fsm-hub-invariant-analysis'
 import type { InvariantViolationCounts } from './fsm-hub-types'
 
-/** Human-readable descriptions for MeasurementCard auto-rule flags.
+/** Human-readable descriptions for MeasurementCard context actions.
     Indexed by rule name -> { on: "this fires next turn", off: "nothing
     pending" } so the tooltip reflects the active half of the flag. */
 const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }> = {
-  reflect: {
-    on: '키퍼가 다음 턴 전에 일시 정지하고 최근 출력을 자기 평가합니다 (Reflexion loop).',
-    off: '예약된 reflection 없음 — 키퍼는 self-check 없이 다음 턴을 실행합니다.',
-  },
-  plan: {
-    on: '키퍼가 다음 행동 실행 전에 남은 단계를 재계획합니다.',
-    off: '예약된 재계획 없음 — 키퍼는 기존 계획을 따릅니다.',
-  },
   compact: {
     on: '컨텍스트 압축 예약됨 — 오래된 메시지를 요약해 토큰 예산을 회수합니다.',
     off: '예약된 압축 없음 — 컨텍스트 윈도우에 여유가 있습니다.',
@@ -24,10 +16,6 @@ const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }>
   handoff: {
     on: '키퍼가 동일 정체성을 유지하며 새 trace/generation 으로 이관됩니다.',
     off: '예약된 handoff 없음 — 현재 generation 이 같은 trace 에서 계속 실행됩니다.',
-  },
-  guardrail: {
-    on: 'guardrail 발동됨 — 키퍼가 운영자 개입 대기 상태로 멈춥니다.',
-    off: '활성 guardrail 없음 — 키퍼가 일반 safety envelope 안에서 실행됩니다.',
   },
 }
 
@@ -38,27 +26,15 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
       <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">
         측정
       </div>
-      ${m.captured && m.auto_rules ? html`
+      ${m.captured && m.context_actions ? html`
         <div class="flex flex-col gap-1.5 text-2xs text-[var(--color-fg-primary)]">
           <div class="flex flex-wrap gap-1.5 font-mono">
-            <${Flag} label="reflect" on=${m.auto_rules.reflect} />
-            <${Flag} label="plan" on=${m.auto_rules.plan} />
-            <${Flag} label="compact" on=${m.auto_rules.compact} />
-            <${Flag} label="handoff" on=${m.auto_rules.handoff} />
+            <${Flag} label="compact" on=${m.context_actions.compact} />
+            <${Flag} label="handoff" on=${m.context_actions.handoff} />
           </div>
-          <div class="flex items-center gap-2 font-mono">
-            <${Flag} label="guardrail" on=${m.auto_rules.guardrail_stop} tone="warn" />
-            <span
-              class="text-3xs text-[var(--color-fg-disabled)] cursor-help"
-              title="Goal drift: 0 = 키퍼가 목표와 정렬됨; 높을수록 키퍼 출력이 선언된 goal 에서 벗어남. 약 0.5 이상이면 보통 guardrail 발동."
-            >drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
-          </div>
-          ${m.auto_rules.guardrail_reason ? html`
-            <div class="text-3xs text-[var(--amber-bright)] mt-0.5">사유: ${m.auto_rules.guardrail_reason}</div>
-          ` : null}
         </div>
       ` : html`
-        <div class="text-3xs text-[var(--color-fg-disabled)]">키퍼가 첫 턴을 완료하면 auto-rules가 여기 표시됩니다</div>
+        <div class="text-3xs text-[var(--color-fg-disabled)]">키퍼가 첫 턴을 완료하면 context actions가 여기 표시됩니다</div>
       `}
     </div>
   `

@@ -69,9 +69,6 @@ val append_trait_clause : base:string -> clause:string -> string
 
 (** {1 Text Processing} *)
 
-(** Remove [STATE]..[/STATE] blocks from text. *)
-val strip_state_blocks_text : string -> string
-
 (** Extract user-visible reply text, stripping internal markup. *)
 val user_visible_reply_text : ?fallback:string -> string -> string
 

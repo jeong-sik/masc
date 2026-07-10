@@ -27,7 +27,6 @@ let conditions_to_json (c : conditions) =
     ; "stop_requested", `Bool c.stop_requested
     ; "restart_budget_remaining", `Bool c.restart_budget_remaining
     ; "backoff_elapsed", `Bool c.backoff_elapsed
-    ; "guardrail_triggered", `Bool c.guardrail_triggered
     ; "drain_complete", `Bool c.drain_complete
     ; "context_overflow", `Bool c.context_overflow
     ; "compact_retry_exhausted", `Bool c.compact_retry_exhausted
@@ -56,14 +55,10 @@ let event_to_json (ev : event) : Yojson.Safe.t =
       [ "context_ratio", `Float r.context_ratio
       ; "message_count", `Int r.message_count
       ; "token_count", `Int r.token_count
-      ; ( "auto_rules"
+      ; ( "context_actions"
         , `Assoc
-            [ "reflect", `Bool r.auto_rules.reflect
-            ; "plan", `Bool r.auto_rules.plan
-            ; "compact", `Bool r.auto_rules.compact
-            ; "handoff", `Bool r.auto_rules.handoff
-            ; "guardrail_stop", `Bool r.auto_rules.guardrail_stop
-            ; "goal_drift", `Float r.auto_rules.goal_drift
+            [ "compact", `Bool r.context_actions.compact
+            ; "handoff", `Bool r.context_actions.handoff
             ] )
       ]
   | Compaction_started -> obj "compaction_started" []
@@ -102,7 +97,6 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   | Restart_budget_exhausted -> obj "restart_budget_exhausted" []
   | Credential_archived -> obj "credential_archived" []
   | Zombie_timeout -> obj "zombie_timeout" []
-  | Guardrail_stop r -> obj "guardrail_stop" [ "reason", `String r.reason ]
   | Terminal_failure_detected r ->
     obj "terminal_failure_detected" [ "reason", `String r.reason ]
   | Context_overflow_detected r ->

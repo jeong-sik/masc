@@ -15,13 +15,11 @@
 type layer_id =
   | Active_goals
   | Current_task
-  | Working_state
   | Connected_surfaces
   | Namespace_state
   | Context_health
   | Autonomous_trigger
   | Scheduled_automation
-  | Continuity
   | Pending_mentions
   | Scope_messages
   | Claimable_work

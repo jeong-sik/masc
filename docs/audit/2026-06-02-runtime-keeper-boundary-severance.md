@@ -16,7 +16,7 @@ excluding comments/string literals, focusing on actual module calls (not variant
 |------|-----------------|--------|--------|
 | Tool → Keeper | 0 | DONE (ratchet baseline=0) | None |
 | **Runtime → Keeper** | **4 files, ~15 refs** | Real module calls | **Partially severed** |
-| Operator → Keeper | 7 files, ~70 refs | State snapshot (management) | Future |
+| Operator → Keeper | 7 files, ~70 refs | Typed keeper management records | Future |
 | Config → Keeper | 3 files, ~5 refs | Env config | Future |
 | Dashboard → Keeper | ~25 files | Display (reads state) | Future |
 | Server → Keeper | ~30 files | Wiring layer | Future |

@@ -104,7 +104,7 @@ flowchart TD
     J --> K[prepare_agent_setup: tool surface, hooks, reducer, memory hooks]
     K --> L[Keeper_turn_driver.run_named]
     L --> M[OAS Agent/Pipeline loop]
-    M --> N[post-run contracts, state snapshot, checkpoint, memory write, receipt]
+    M --> N[post-run contracts, checkpoint, typed domain receipts, memory write]
     N --> O[metrics snapshot + lifecycle/broadcast + keepalive wake + response JSON]
 ```
 

@@ -1839,7 +1839,7 @@ let test_extract_visible_reply_uses_typed_reply_field_only () =
         [
           ("runtime_class", `String "keeper");
           ("turn_outcome", `String "visible_reply");
-          ("reply", `String "Done.\n\n[STATE]\n{}\n[/STATE]");
+          ("reply", `String "Done.");
           ("runtime_note", `String "must not be user-visible");
         ])
   in

@@ -203,10 +203,7 @@ export function AgentDetailOverlay() {
   // Don't show koreanName if it's actually an agent runtime name, not Korean text
   const koreanName = rawKoreanName && rawKoreanName !== agentName && rawKoreanName !== displayName
     ? rawKoreanName : null
-  const continuitySummary =
-    trimText(continuityBrief?.continuity_summary, 160)
-    ?? trimText(continuityBrief?.skill_route_summary, 160)
-    ?? null
+  const skillRouteSummary = trimText(continuityBrief?.skill_route_summary, 160) ?? null
   const keeperIdentity = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   // Skip secondaryLabel when keeperIdentity already shows the agent runtime name
   const showSecondaryLabel = secondaryLabel && !keeperIdentity
@@ -278,7 +275,7 @@ export function AgentDetailOverlay() {
                 : null}
               ${lastSeenAt ? html`<span class="bg-[var(--color-bg-elevated)] px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)]">마지막 확인: <span class="text-[var(--color-fg-primary)]"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
             </div>
-            ${keeper || continuitySummary || missionBrief?.related_session_id
+            ${keeper || skillRouteSummary || missionBrief?.related_session_id
               ? html`
                   <div class="mt-1 flex gap-3 flex-wrap text-[var(--color-fg-secondary)] text-sm font-medium">
                     ${keeper
@@ -295,7 +292,7 @@ export function AgentDetailOverlay() {
                         </span>`
                       : null}
                     ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-[var(--color-fg-primary)] text-xs bg-[var(--color-bg-elevated)] px-1.5 rounded-[var(--r-1)]">${missionBrief.related_session_id}</strong></span>` : null}
-                    ${continuitySummary ? html`<span class="text-[var(--color-accent-fg)]/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--accent-10)]">${continuitySummary}</span>` : null}
+                    ${skillRouteSummary ? html`<span class="text-[var(--color-accent-fg)]/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-[var(--r-1)] border border-[var(--accent-10)]">${skillRouteSummary}</span>` : null}
                   </div>
                 `
               : null}

@@ -29,7 +29,6 @@ type phase =
   | Projection_tasks
   | Projection_keepers
   | Projection_configured_keepers
-  | Projection_meta_cognition
   | Projection_config_resolution
   | Projection_runtime_resolution
   | Project_snapshot_shell_refresh

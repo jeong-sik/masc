@@ -165,7 +165,6 @@ let collect_keepalive_board_events
           Keeper_world_observation.collect_board_events
             ~base_path:ctx.config.base_path
             ~meta:meta_current
-            ~continuity_summary:meta_current.continuity_summary
         in
         clear_collection_failure
           ~base_path:ctx.config.base_path

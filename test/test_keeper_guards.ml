@@ -881,7 +881,7 @@ let test_governance_approval_critical_code_blocks_with_legacy_exemption () =
     match !observed with
     | [ event ] ->
       check string "stage" "governance_approval" event.KG.stage;
-      check string "decision" "override"
+      check string "decision" "block"
         (KG.gate_decision_to_string event.KG.decision);
       check string "reason_code" "hard_forbidden" event.KG.reason_code;
       check string "tool_name" "tool_execute" event.KG.tool_name;
@@ -1124,7 +1124,7 @@ let () = run "Keeper_guards" [
       test_governance_approval_legacy_exemption_cannot_bypass_high;
     test_case "critical code blocks with legacy exemption" `Quick
       test_governance_approval_critical_code_blocks_with_legacy_exemption;
-    test_case "hard-forbidden overrides without HITL" `Quick
+    test_case "hard-forbidden blocks without HITL" `Quick
       test_governance_approval_hard_forbidden_blocks_without_hitl;
     test_case "serious last_blocker overrides without HITL" `Quick
       test_governance_approval_serious_blocker_overrides;

@@ -85,10 +85,8 @@ function CommsPlane({ branch, keepers }) {
         { id:"bd-tog",  label:"Board · direct/automation", render: () => <window.BoardHotAuto/> },
         { id:"ms-rm",   label:"Messages · Workspace",   render: () => <window.MessageWorkspaceTimeline/> },
         { id:"ms-inb",  label:"Messages · Mention inbox",   render: () => <window.MentionInbox/> },
-        { id:"ms-st",   label:"Messages · [STATE] block",   render: () => <window.StateBlockMessage/> },
         { id:"cm-bc",   label:"Composer · Broadcast",       render: () => <window.ComposerV2Broadcast/> },
         { id:"cm-mn",   label:"Composer · Mention",         render: () => <window.ComposerV2Mention/> },
-        { id:"cm-st",   label:"Composer · [STATE]",         render: () => <window.ComposerV2State/> },
       ]}
     />
   );
@@ -132,7 +130,6 @@ function CognitionPlane({ branch, keepers }) {
       popoutId="plane-cognition"
       branch={branch} keepers={keepers}
       tabs={[
-        { id:"ki-bdi",  label:"Keeper · BDI",         render: () => <window.KeeperBDIPanel/> },
         { id:"ki-acc",  label:"Keeper · Tool access", render: () => <window.KeeperToolAccess/> },
         { id:"ki-stat", label:"Keeper · Token stats", render: () => <window.KeeperTokenStats/> },
         { id:"dc-str",  label:"Decisions · Stream",   render: () => <window.DecisionsStream/> },

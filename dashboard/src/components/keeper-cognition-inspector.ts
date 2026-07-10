@@ -57,12 +57,6 @@ function listLabel(values: readonly string[] | null | undefined): string {
   return clean.length === 0 ? '-' : clean.join(' · ')
 }
 
-function socialRuntimeLabel(recognized: boolean | null | undefined): string {
-  if (recognized === false) return 'needs attention'
-  if (recognized === true) return 'recognized'
-  return 'unknown'
-}
-
 export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
   const policy = keeper.approval_policy_effective
   const recentTools = keeper.recent_tool_names?.length
@@ -96,10 +90,6 @@ export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
       value: policy
         ? `${policy.allow_rules ?? 0} allow · ${policy.deny_rules ?? 0} deny · ${policy.persisted_rules ?? 0} persisted`
         : '-',
-    },
-    {
-      label: 'social runtime',
-      value: socialRuntimeLabel(keeper.social_model_recognized),
     },
   ]
 }

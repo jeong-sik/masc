@@ -159,6 +159,8 @@ val dashboard_shell_cache_key :
   Workspace.config ->
   string
 
+val dashboard_shell_cache_prefix : Workspace.config -> string
+
 val dashboard_shell_payload_json :
   ?timing:Server_timing.t ->
   ?light:bool ->

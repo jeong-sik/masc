@@ -239,5 +239,5 @@ Phase A (typed schema)
 ## Memory & follow-up
 
 - `<MASC_BASE>/.masc/config/personas/verifier/profile.json` 의 denylist clear (2026-05-27) 는 본 RFC 와 *독립* 으로 즉시 효과
-- 본 RFC 머지 후 `verifier` persona 의 expected throughput 이 *판단 task* 만으로 줄어듦 → goal/horizon redefinition 동반 필요 (별도 issue)
+- 본 RFC 머지 후 `verifier` persona 의 expected throughput 이 *판단 task* 만으로 줄어듦 → active-goal assignment와 runtime policy 재검토 필요 (별도 issue)
 - RFC-0109 의 `cdal_evidence_gate.evidence_entry_satisfied:94-129` 의 dead Inconclusive arm (3일 fleet 0건) — 본 RFC 의 evaluator 가 *그 arm 을 활성화* (deterministic Inconclusive 가 새 source) → Issue #18840 의 priority 재평가 필요

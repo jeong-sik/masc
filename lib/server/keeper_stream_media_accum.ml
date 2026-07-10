@@ -17,6 +17,22 @@ type finalized = {
   data : string;
 }
 
+(* A generated media payload the wire cap rejected. Recorded the moment the
+   block is invalidated so the drop surfaces as a reload-visible placeholder
+   block instead of the media silently vanishing from the persisted turn. *)
+type dropped = {
+  index : int;
+  media_type : string;
+  encoded_bytes : int;
+}
+
+(* Why a block index stopped accepting media deltas. [Tool_block] indexes are
+   never media and are skipped without trace (mirrors the SSE bridge);
+   [Oversize] is a real generated payload the reader must still learn about. *)
+type invalid_reason =
+  | Tool_block
+  | Oversize
+
 type block_state =
   | Active_media of
       { media_type : string;
@@ -24,14 +40,24 @@ type block_state =
         chunks : string list;
         encoded_bytes : int
       }
-  | Invalid_block
+  | Invalid_block of invalid_reason
 
 type t = {
   mutable blocks_by_index : (int * block_state) list;
   mutable finalized_rev : finalized list;
+  mutable dropped_rev : dropped list;
 }
 
-let create () = { blocks_by_index = []; finalized_rev = [] }
+let create () = { blocks_by_index = []; finalized_rev = []; dropped_rev = [] }
+
+let record_oversize_drop t ~index ~media_type ~encoded_bytes =
+  Log.Keeper.warn
+    "generated media dropped index=%d media_type=%s: %d encoded bytes exceed the %d-byte wire cap"
+    index
+    media_type
+    encoded_bytes
+    (Keeper_chat_media_store.max_wire_bytes ());
+  t.dropped_rev <- { index; media_type; encoded_bytes } :: t.dropped_rev
 
 let stream_block_for_index t index = List.assoc_opt index t.blocks_by_index
 
@@ -70,7 +96,7 @@ let finalize_open_media t =
       match block with
       | Active_media { media_type; source_type; chunks; encoded_bytes } ->
           finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes
-      | Invalid_block -> ())
+      | Invalid_block (Tool_block | Oversize) -> ())
     blocks;
   t.blocks_by_index <- []
 
@@ -79,7 +105,7 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
   | Agent_sdk.Types.ContentBlockStart { index; content_type; tool_id; tool_name }
     when stream_start_is_tool ~index ~content_type ~tool_id ~tool_name
          || has_any_tool_identity ~tool_id ~tool_name ->
-      replace_block t index Invalid_block
+      replace_block t index (Invalid_block Tool_block)
   | Agent_sdk.Types.ContentBlockDelta
       { index; delta = Agent_sdk.Types.MediaDelta { media_type; source_type; data } } ->
       (match stream_block_for_index t index with
@@ -90,10 +116,13 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
                 ~encoded_bytes:m.encoded_bytes data
             with
             | Some block -> replace_block t index block
-            | None -> replace_block t index Invalid_block)
+            | None ->
+                record_oversize_drop t ~index ~media_type
+                  ~encoded_bytes:(m.encoded_bytes + String.length data);
+                replace_block t index (Invalid_block Oversize))
        | Some (Active_media _) ->
            ()
-       | Some Invalid_block ->
+       | Some (Invalid_block _) ->
            ()
        | None ->
            (match
@@ -101,20 +130,46 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
                 ~encoded_bytes:0 data
             with
             | Some block -> replace_block t index block
-            | None -> replace_block t index Invalid_block))
+            | None ->
+                record_oversize_drop t ~index ~media_type
+                  ~encoded_bytes:(String.length data);
+                replace_block t index (Invalid_block Oversize)))
   | Agent_sdk.Types.ContentBlockStop { index } -> (
       match stream_block_for_index t index with
       | Some (Active_media { media_type; source_type; chunks; encoded_bytes }) ->
           finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes
-      | Some Invalid_block ->
+      | Some (Invalid_block (Tool_block | Oversize)) ->
           remove_block t index
       | None -> ())
   | Agent_sdk.Types.MessageStop ->
       finalize_open_media t
   | _ -> ()
 
+(* Reload placeholder for an oversize drop: no payload to serve (src = None),
+   but the reader sees what was generated, its type, and how large it was
+   instead of the media silently missing from the persisted turn. *)
+let dropped_placeholder_block { index = _; media_type; encoded_bytes } =
+  Keeper_chat_blocks.Attach
+    { name =
+        Printf.sprintf
+          "generated media dropped: %s exceeded the %d-byte wire cap"
+          media_type
+          (Keeper_chat_media_store.max_wire_bytes ());
+      dims = None;
+      src = None;
+      svg = None;
+      ph = None;
+      via = None;
+      size = None;
+      data = None;
+      mime_type = Some media_type;
+      size_bytes = Some encoded_bytes;
+      kind = None
+    }
+
 let to_chat_blocks ~base_dir t =
-  List.rev t.finalized_rev
+  let dropped_blocks = List.rev_map dropped_placeholder_block t.dropped_rev in
+  (List.rev t.finalized_rev
   |> List.filter_map (fun { index; media_type; source_type; data } ->
          match
            Keeper_chat_media_store.persist_media_source_result ~base_dir
@@ -156,4 +211,5 @@ let to_chat_blocks ~base_dir t =
                         mime_type = Some media_type;
                         size_bytes = None;
                         kind = None
-                      }))
+                      })))
+  @ dropped_blocks

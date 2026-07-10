@@ -174,13 +174,12 @@ let test_metadata_drift_preserves_first_media_block () =
         src
   | _ -> fail "expected metadata drift to preserve the first image media block"
 
-let test_oversize_media_not_persisted () =
+let test_oversize_media_surfaces_as_dropped_placeholder () =
   with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
     let open Agent_sdk.Types in
     let accum = A.create () in
-    let oversized =
-      String.make (Masc.Keeper_chat_media_store.max_wire_bytes () + 1) 'A'
-    in
+    let oversized_len = Masc.Keeper_chat_media_store.max_wire_bytes () + 1 in
+    let oversized = String.make oversized_len 'A' in
     List.iter
       (A.on_event accum)
       [
@@ -194,8 +193,19 @@ let test_oversize_media_not_persisted () =
         ContentBlockStop { index = 0 };
       ];
     let base_dir = Filename.temp_dir "media_accum_test" "" in
-    check int "oversize media is not persisted" 0
-      (List.length (A.to_chat_blocks ~base_dir accum)))
+    match A.to_chat_blocks ~base_dir accum with
+    | [ Blocks.Attach { src = None; mime_type; size_bytes; name; _ } ] ->
+        check (option string) "placeholder carries the media type"
+          (Some "image/png") mime_type;
+        check (option int) "placeholder carries the observed byte count"
+          (Some oversized_len) size_bytes;
+        check bool "placeholder name states the drop" true
+          (String.length name > 0)
+    | [] ->
+        fail
+          "oversize media vanished: it must surface as a dropped placeholder \
+           block, never disappear silently"
+    | _ -> fail "expected exactly one dropped-placeholder Attach block")
 
 let () =
   run
@@ -211,7 +221,7 @@ let () =
             test_tool_block_media_not_persisted;
           test_case "metadata drift preserves first media block" `Quick
             test_metadata_drift_preserves_first_media_block;
-          test_case "oversize media not persisted" `Quick
-            test_oversize_media_not_persisted;
+          test_case "oversize media surfaces as dropped placeholder" `Quick
+            test_oversize_media_surfaces_as_dropped_placeholder;
         ] );
     ]

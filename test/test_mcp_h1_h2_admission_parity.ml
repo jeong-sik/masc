@@ -437,6 +437,54 @@ let test_h1_h2_delete_route_wiring_parity () =
       ("forgets session after termination", "forget_mcp_session session_id");
     ]
 
+(* /ws upgrade admission — token-or-same-origin gate parity with the /mcp
+   POST chain.  A base_path with no auth config resolves to
+   [default_auth_config], which is strict (enabled + require_token), so the
+   token leg deterministically fails without a bearer token and the decision
+   falls to the same-origin leg.  If the strict default ever flips, these
+   deny cases must fail loudly — that is a security posture change. *)
+let ws_absent_base_path () =
+  Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "ws-upgrade-auth-absent-%d" (Unix.getpid ()))
+
+let ws_upgrade_request headers =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/ws"
+
+let ws_gate headers =
+  Server_routes_http_routes_frontend.websocket_upgrade_authorized
+    ~base_path:(ws_absent_base_path ())
+    (ws_upgrade_request headers)
+
+let test_ws_upgrade_denied_without_token_or_origin () =
+  match ws_gate [ ("host", "127.0.0.1:8935") ] with
+  | Ok () -> fail "expected deny: no bearer token and no Origin header"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf "expected Auth error, got %s"
+      (Masc_domain.masc_error_to_string other)
+
+let test_ws_upgrade_allows_same_origin () =
+  match
+    ws_gate
+      [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+  with
+  | Ok () -> ()
+  | Error err ->
+    failf "expected same-origin upgrade to pass, got %s"
+      (Masc_domain.masc_error_to_string err)
+
+let test_ws_upgrade_denies_cross_origin () =
+  match
+    ws_gate
+      [ ("host", "127.0.0.1:8935"); ("origin", "http://evil.example:8935") ]
+  with
+  | Ok () -> fail "expected deny: cross-origin upgrade without token"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf "expected Auth error, got %s"
+      (Masc_domain.masc_error_to_string other)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -468,5 +516,14 @@ let () =
             test_h1_h2_post_route_wiring_parity;
           test_case "H1/H2 DELETE route uses the same admission gates" `Quick
             test_h1_h2_delete_route_wiring_parity;
+        ] );
+      ( "ws-upgrade-admission",
+        [
+          test_case "denies upgrade without token or Origin" `Quick
+            test_ws_upgrade_denied_without_token_or_origin;
+          test_case "allows same-origin upgrade" `Quick
+            test_ws_upgrade_allows_same_origin;
+          test_case "denies cross-origin upgrade without token" `Quick
+            test_ws_upgrade_denies_cross_origin;
         ] );
     ]

@@ -93,12 +93,7 @@ let websocket_auth_error message =
     (Masc_domain.Auth_error.Unauthorized
        { reason = Masc_domain.Auth_error.Generic; message })
 
-let websocket_upgrade_authorized request =
-  let base_path =
-    match current_server_state_opt () with
-    | Some state -> (Mcp_server.workspace_config state).base_path
-    | None -> Server_mcp_transport_http.default_base_path ()
-  in
+let websocket_upgrade_authorized ~base_path request =
   match verify_mcp_auth ~base_path request with
   | Ok _ -> Ok ()
   | Error token_error ->
@@ -117,7 +112,12 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
   if is_websocket_upgrade_request request then
     match websocket_upgrade_unavailable_reason () with
     | None ->
-      (match websocket_upgrade_authorized request with
+      let base_path =
+        match current_server_state_opt () with
+        | Some state -> (Mcp_server.workspace_config state).base_path
+        | None -> Server_mcp_transport_http.default_base_path ()
+      in
+      (match websocket_upgrade_authorized ~base_path request with
        | Error err -> respond_auth_error request reqd err
        | Ok () ->
          (match

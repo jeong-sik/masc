@@ -318,10 +318,11 @@ type atomic_orphan_recovery = Atomic_write.atomic_orphan_recovery =
   | Deleted_zero_length
   | Preserved_nonempty of string
 
-let recover_atomic_orphan ~path ~recovered_dir =
+let recover_atomic_orphan ~path ~recovered_root ~bucket =
   Atomic_write.recover_atomic_orphan
     ~path
-    ~recovered_dir
+    ~recovered_root
+    ~bucket
 ;;
 
 let cleanup_atomic_orphans ~base_path ?recovered_subdir () =
@@ -344,7 +345,9 @@ let append_file (path : string) (content : string) : unit =
 let append_file_durable path content =
   test_exec_home_guard ~op:"append_file_durable" path;
   match Atomic.get global_fs with
-  | Some _ -> Eio_unix.run_in_systhread (fun () -> append_file_durable_unix path content)
+  | Some _ ->
+    (try Eio_unix.run_in_systhread (fun () -> append_file_durable_unix path content) with
+     | Stdlib.Effect.Unhandled _ -> append_file_durable_unix path content)
   | None -> append_file_durable_unix path content
 ;;
 

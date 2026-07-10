@@ -63,11 +63,12 @@ type atomic_orphan_recovery =
 
 val recover_atomic_orphan
   :  path:string
-  -> recovered_dir:string
+  -> recovered_root:string
+  -> bucket:string
   -> (atomic_orphan_recovery, string) result
 (** Reconcile one recognized atomic-write orphan using the same policy as
-    {!cleanup_atomic_orphans}, while preserving failures as typed results. The
-    recovery directory must already exist and must be a real directory. *)
+    {!cleanup_atomic_orphans}, while preserving failures as typed results. Root
+    and bucket directories must already exist as real directories. *)
 
 (** #10130: boot-time sweep for [.atomic_*.tmp] orphans left
     behind when [save_file_atomic]'s with-handler never ran (the

@@ -8,7 +8,8 @@ let stop_reason_is_turn_budget_exhausted = function
   | Runtime_agent.TurnBudgetExhausted _ -> true
   | Runtime_agent.Completed
   | Runtime_agent.MutationBoundaryReached _
-  | Runtime_agent.Yielded_to_chat_waiting _ -> false
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_durable_stimulus _ -> false
 ;;
 
 let direct_assistant_source = "direct_assistant"

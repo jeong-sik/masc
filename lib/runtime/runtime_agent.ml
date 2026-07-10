@@ -65,6 +65,7 @@ type stop_reason =
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
   | Yielded_to_chat_waiting of { turns_used : int }
+  | Yielded_to_durable_stimulus of { turns_used : int }
 
 type config =
   Runtime_agent_context.config = {
@@ -996,6 +997,8 @@ let dashboard_status_of_stop_reason = function
       Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
   | Yielded_to_chat_waiting _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
+  | Yielded_to_durable_stimulus _ ->
+      Dashboard_oas_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
 
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =

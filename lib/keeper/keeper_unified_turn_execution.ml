@@ -26,6 +26,31 @@ type retry_loop_input =
   ; attempted_runtimes : string list
   }
 
+let autonomous_yield_request ~base_path ~keeper_name ~channel =
+  if
+    Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
+    || Keeper_chat_queue.length ~keeper_name > 0
+  then
+    let boundary =
+      match channel with
+      | Keeper_world_observation.Scheduled_autonomous ->
+        Keeper_agent_run.Yield_immediately
+      | Keeper_world_observation.Reactive ->
+        Keeper_agent_run.Yield_after_current_turn
+    in
+    Some Keeper_agent_run.{ reason = Chat_waiting; boundary }
+  else
+    let pending = Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+    if Keeper_event_queue.is_empty pending
+    then None
+    else
+      Some
+        Keeper_agent_run.
+          { reason = Durable_stimulus_waiting
+          ; boundary = Yield_after_current_turn
+          }
+;;
+
 (** [run] operates on the immutable [Keeper_unified_turn_types.turn_state]
     accumulator instead of casual [ref] cells. *)
 
@@ -205,18 +230,18 @@ let run (ctx : ctx)
                       reached via [Keeper_turn_admission.run_if_free]); the chat
                       lane runs [run_keeper_msg_turn_admitted] on a separate
                       path. So passing the yield hook here is inherently
-                      lane-gated: an idle-filler turn stops at the next boundary
-                      when a dashboard/connector chat is parked on the slot or
-                      already deferred in [Keeper_chat_queue], but a chat turn
-                      never yields to a later-queued chat. The queue-length
-                      half is what keeps a long autonomous turn from starving a
-                      busy Slack/Discord/Dashboard message that has not parked
-                      on the slot. *)
-                 ~yield_to_chat_waiting:(fun () ->
-                   Keeper_turn_admission.chat_waiting
+                      lane-gated. Scheduled-idle chat can take the slot
+                      immediately; reactive chat and a durable event waiting
+                      behind the event leased by this cycle cause a checkpointed
+                      yield after at least one provider turn. A chat turn receives
+                      neither preemption hook. Both signals are read from the
+                      exact queues their consumers drain, so no cadence, timeout, or
+                      inferred text state participates in the decision. *)
+                 ~autonomous_yield_requested:(fun () ->
+                   autonomous_yield_request
                      ~base_path:config.base_path
                      ~keeper_name:meta.name
-                   || Keeper_chat_queue.length ~keeper_name:meta.name > 0)
+                     ~channel)
                  ()))
     in
     result, turn_state

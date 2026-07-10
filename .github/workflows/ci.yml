@@ -1004,6 +1004,9 @@ jobs:
       - name: Run yojson option-field [@default None] lint
         run: python3 scripts/lint/yojson-option-default.py
 
+      - name: Run Masc.<unwrapped module> reference lint
+        run: python3 scripts/lint/no-masc-prefix-on-unwrapped-module.py
+
       - name: Run OCaml docstring bare escape-quote lint
         run: bash scripts/lint/no-docstring-escape-quote.sh
 

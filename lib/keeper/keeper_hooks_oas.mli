@@ -146,30 +146,6 @@ val emit_cost_event :
   ?model:string -> unit -> unit
 (** Append a structured cost-ledger event to [costs.jsonl]. *)
 
-(** {1 Idle-loop policy} *)
-
-val suggest_alternatives :
-  allowed_tools:string list ->
-  repeated_tools:string list -> max_suggestions:int -> string list
-(** Suggest alternative tools to break a repetition loop. *)
-
-val on_idle_decision_with_threshold :
-  skip_at:int ->
-  consecutive_idle_turns:int ->
-  allowed_tools:string list ->
-  tool_names:string list -> Agent_sdk.Hooks.hook_decision
-(** Idle-handler with explicit [skip_at] threshold for testing. *)
-
-val on_idle_decision :
-  consecutive_idle_turns:int ->
-  allowed_tools:string list ->
-  tool_names:string list -> Agent_sdk.Hooks.hook_decision
-(** Idle-handler with the production threshold. *)
-
-val recent_tool_streak_count :
-  ?within_sec:float -> tool_name:string -> Yojson.Safe.t list -> int
-(** Count consecutive recent calls of [tool_name] in trajectory events. *)
-
 (** PR-review / PR-work metric event types live in Keeper_hooks_oas_types
     (intra-library file split, 2026-05-16). Re-exported via include below. *)
 

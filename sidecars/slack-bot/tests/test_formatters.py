@@ -11,19 +11,7 @@ from src.formatters import (
     format_context_block,
     response_blocks,
     structured_response_blocks,
-    strip_state_blocks,
 )
-
-
-class TestStripStateBlocks:
-    def test_removes_state_block(self) -> None:
-        assert strip_state_blocks("Hi [STATE]data[/STATE] there") == "Hi  there"
-
-    def test_removes_unclosed_block(self) -> None:
-        assert strip_state_blocks("Hi [STATE]data") == "Hi"
-
-    def test_preserves_plain_text(self) -> None:
-        assert strip_state_blocks("plain") == "plain"
 
 
 class TestChunkText:

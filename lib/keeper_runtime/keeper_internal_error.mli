@@ -181,8 +181,7 @@ val cap_blocker_detail : string -> string
 (** [cap_blocker_detail s] bounds a keeper [blocker_info] detail string: a
     structured payload beginning with [masc_internal_error_prefix] (#9933) is
     preserved up to {!blocker_detail_structured_max_chars}; plain narrative
-    text is truncated to the narrative budget (~200). Idempotent. Re-homed
-    here from the purged keeper social model (RFC-0276 §3.3). *)
+    text is truncated to the narrative budget (~200). Idempotent. *)
 
 val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 

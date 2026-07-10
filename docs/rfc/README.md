@@ -61,7 +61,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0022 | Runtime Attempt Liveness Contract | Draft | 2eed0aa224 2026-06-21 | - |
 | 0024 | Ollama Runtime Integration + KV Cache Optimization | Draft | 2eed0aa224 2026-06-21 | - |
 | 0025 | Tiered Small-Model Runtime (4B → 9B → 70B+) | Draft | 2eed0aa224 2026-06-21 | - |
-| 0027 | Tension Type Safety and Configurable Severity | Draft | 2eed0aa224 2026-06-21 | - |
 | 0029 | Dashboard Fiber-Batched Aggregation | Active | 2eed0aa224 2026-06-21 | - |
 | 0032 | Environment Knob Unification | Draft | 2eed0aa224 2026-06-21 | - |
 | 0034 | d — release_stale_claims agent-side sync | Draft | 2eed0aa224 2026-06-21 | - |
@@ -113,7 +112,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0090 | Write-side success-model attribution — finish N-of-M migration | Implemented | 2eed0aa224 2026-06-21 | - |
 | 0091 | Execute tool: cmd string → typed Argv schema (lexer/validator 박멸) | Implemented | 2eed0aa224 2026-06-21 | - |
 | 0093 | Board persistence — path unification (snapshot vs append) | Implemented | 2eed0aa224 2026-06-21 | - |
-| 0094 | Compact cooldown semantics split — typed write anchor vs check anchor | Implemented | 2eed0aa224 2026-06-21 | - |
 | 0095 | Provider-D-compat provider streaming wire-up | Implemented | 2eed0aa224 2026-06-21 | - |
 | 0096 | Keeper Turn Contract — multi-turn reasoning + runtime SPOF root-fix | Withdrawn | 2eed0aa224 2026-06-21 | - |
 | 0097 | Keeper sandbox container reuse (long-running sandbox per keeper) | Active | 2eed0aa224 2026-06-21 | - |
@@ -242,7 +240,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0239 | Semantic-identity guards for keeper memory and anti-thrash | Draft | 2eed0aa224 2026-06-21 | - |
 | 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Draft | 2eed0aa224 2026-06-21 | - |
 | 0241 | external-attention store lifecycle: read-side bound, retention, and typed tai... | Draft | 2eed0aa224 2026-06-21 | - |
-| 0242 | Continuity state as system-of-record (retire the prose summary filter) | Draft | 2eed0aa224 2026-06-21 | - |
 | 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | 2eed0aa224 2026-06-21 | - |
 | 0244 | Memory OS recall: turn-seeded deterministic lexical retrieval, with provenanc... | Draft | 2eed0aa224 2026-06-21 | - |
 | 0245 | Exempt goalless tasks from the per-goal WIP claim cap | Withdrawn | 2eed0aa224 2026-06-21 | - |
@@ -275,26 +272,21 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0272 | Memory OS — Episode Log Retention (bounded append for events.jsonl / episodes) | Draft | f09d3015ed 2026-06-21 | - |
 | 0273 | Dashboard-driven keeper config & runtime persistence | Draft | 6a5e1ab7ff 2026-06-21 | - |
 | 0274 | Workspace base_path SSOT — retire env runtime read, thread Workspace.config | Draft | 115a872077 2026-06-21 | - |
-| 0275 | Excise the BDI triple (belief/desire/intention) from the keeper social model | Draft | ef5cde456e 2026-06-22 | - |
-| 0276 | Purge the keeper social model self-report protocol (Phase 2) | Draft | f3735a7614 2026-06-22 | - |
 | 0277 | Fusion: 이종 패널 그룹(heterogeneous panel groups) + 발동 예산 제거 | Draft | 6ae088381d 2026-06-22 | - |
 | 0278 | Fusion: 같은 model을 다른 prompt로 (same-model panels via panel labels) | Draft | 9052e25e02 2026-06-22 | - |
 | 0279 | Typed completion-contract reason — structured backend emit replacing colon-co... | Draft | bbbe57380c 2026-06-22 | - |
 | 0280 | Fusion: validated preset type (Parse, don't validate) | Draft | 60cca2c35e 2026-06-22 | - |
 | 0281 | WebSocket transport SSOT — separate upgrade-attachment from session-protocol,... | Draft | 7eaba002d2 2026-06-22 | - |
-| 0282 | De-structure keeper self_model (will/needs/desires) into general persona desc... | Draft | 0c540dd87d 2026-06-23 | - |
 | 0283 | Fusion: judge-of-judges 위상 (N개 1차 심판 + meta 심판) | Draft | 2579358d90 2026-06-23 | - |
 | 0284 | Keeper Guidance Visibility-Leg Drift Guard | Draft | 6c9029bcbf 2026-06-25 | - |
 | 0285 | Memory OS — Self-Observation Claim Volatility (closing RFC-0259's internal-st... | Draft | d643c403bb 2026-06-23 | - |
 | 0286 | exec/keeper 스택: redirect & turn-termination 경계 소유권 | Draft | f765863658 2026-06-23 | - |
 | 0287 | ws-direct — a single masc-owned WebSocket stack for server and client | Draft | 78f1c2fcf4 2026-06-23 | - |
-| 0288 | Purge keeper goal-horizon fields (short_goal / mid_goal / long_goal) | Draft | ed085ab5c2 2026-06-24 | - |
 | 0289 | Extract progress-classification into its own library for a single substantive... | Draft | 88996d4d8b 2026-06-24 | - |
 | 0290 | Generic keeper background-work tool (spawn → wake-on-completion) | Draft | a9dc2a8293 2026-06-24 | - |
 | 0291 | Closed SSE event-type sum + typed broadcast — RFC-0004 Phase A0 Wave 2 increment | Draft | db3cea7b4d 2026-06-24 | - |
 | 0292 | Complete lib/auth de-duplication — remove drifted Masc.Auth* test copies | Draft | 92f93e11de 2026-06-24 | - |
 | 0293 | Keeper execution-endpoint backend (host / ephemeral-docker / persistent-docke... | Draft | 0ba556bf42 2026-06-24 | - |
-| 0294 | Purge the workspace-goal horizon (short/mid/long) — dead cadence cohort + a s... | Draft | d7d30816c2 2026-06-24 | - |
 | 0296 | CI skip-gate main-push safety-net — always run Build and Test on non-PR events (fake-green hole, RFC-0270 4th) | Draft | - 2026-06-28 | - |
 | elim | Eliminate Substring Destructive Classifier in Favor of Typed Shell IR | Draft | 664f8aafe3 2026-06-25 | - |
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 55bab0404b 2026-06-25 | - |
@@ -421,7 +413,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 - [RFC-0090 — Write-side success-model attribution — finish N-of-M migration](RFC-0090-write-side-success-model-attribution.md)
 - [RFC-0091 — Execute tool: cmd string → typed Argv schema (lexer/validator 박멸)](RFC-0091-execute-typed-argv.md)
 - [RFC-0093 — Board persistence — path unification (snapshot vs append)](RFC-0093-board-persistence-path-unification.md)
-- [RFC-0094 — Compact cooldown semantics split — typed write anchor vs check anchor](RFC-0094-compact-cooldown-semantics-split.md)
 - [RFC-0095 — Provider-D-compat provider streaming wire-up](RFC-0095-provider-d-compat-streaming-wire-up.md)
 - [RFC-0096 — Keeper Turn Contract — multi-turn reasoning + runtime SPOF root-fix](RFC-0096-keeper-turn-contract-multi-turn-and-runtime-spof.md)
 - [RFC-0098 — Typed JSON-RPC error envelope & production-code silent-failure lint](RFC-0098-typed-jsonrpc-error-envelope.md)

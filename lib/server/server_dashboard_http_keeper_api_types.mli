@@ -93,10 +93,6 @@ val latest_preview_of_messages :
   Agent_sdk.Types.message list -> string option
 (** Latest assistant-text preview suitable for the dashboard list view. *)
 
-val continuity_summary_of_messages :
-  Agent_sdk.Types.message list -> string option
-(** Latest [STATE]-derived continuity summary in the message history. *)
-
 (** {1 Keeper name validation} *)
 
 val is_valid_keeper_name : String.t -> bool

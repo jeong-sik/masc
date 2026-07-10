@@ -121,7 +121,6 @@ type completed_turn_observation = {
     | `Failed of { reason : string }
     | `Cancelled
   ];
-  guard_passed : bool;  (* derived from auto_rules.guardrail_stop *)
 }
 
 type registry_entry = {

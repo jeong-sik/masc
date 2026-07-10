@@ -105,7 +105,6 @@ type world_observation =
   ; pending_scope_messages : (string * string) list
   ; idle_seconds : int
   ; active_goals : string list
-  ; continuity_summary : string
   ; context_ratio : float Lazy.t
   ; unclaimed_task_count : int
   ; claimable_task_count : int
@@ -250,10 +249,6 @@ let board_signal_wake_reason = Board_signal.wake_reason
 let compare_board_cursor_token = Board_signal.compare_cursor_token
 let board_cursor_token_of_post = Board_signal.cursor_token_of_post
 let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
-
-module Continuity = Keeper_world_observation_continuity
-
-let read_continuity_summary = Continuity.read_continuity_summary
 
 let scheduled_automation_item_limit = 5
 
@@ -437,14 +432,13 @@ let pending_board_event_kind_of_signal (signal : Board_dispatch.board_signal) =
 ;;
 
 let pending_board_event_of_board_signal
-      ~continuity_summary
       ~(meta : keeper_meta)
       ~(arrived_at : float)
       (signal : Board_dispatch.board_signal)
   : pending_board_event
   =
   let self_ids = self_ids meta in
-  let matched = board_signal_match ~continuity_summary ~meta ~signal in
+  let matched = board_signal_match ~meta ~signal in
   let post_snapshot =
     match Board_dispatch.get_post ~post_id:signal.post_id with
     | Ok post -> Some post
@@ -847,7 +841,6 @@ let pending_board_event_of_goal_stagnation
 ;;
 
 let pending_board_event_of_stimulus
-      ~continuity_summary
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
   : pending_board_event option
@@ -856,7 +849,6 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Board_signal bs ->
     Some
       (pending_board_event_of_board_signal
-         ~continuity_summary
          ~meta
          ~arrived_at:stimulus.arrived_at
          (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
@@ -910,7 +902,6 @@ let pending_board_event_of_stimulus
 let collect_board_events_with_cursor_policy
       ~advance_cursor
       ~(base_path : string)
-      ~(continuity_summary : string)
       ~(meta : keeper_meta)
   : pending_board_event list * int * int
   =
@@ -972,7 +963,7 @@ let collect_board_events_with_cursor_policy
              ; updated_at = Some p.updated_at
              }
            in
-           let matched = board_signal_match ~continuity_summary ~meta ~signal in
+           let matched = board_signal_match ~meta ~signal in
            if not matched.explicit_mention
            then (
              Log.Keeper.debug
@@ -1016,7 +1007,7 @@ let collect_board_events_with_cursor_policy
                ; updated_at = Some p.updated_at
                }
              in
-             let matched = board_signal_match ~continuity_summary ~meta ~signal in
+             let matched = board_signal_match ~meta ~signal in
              consume_posts
                
                (Some next_cursor)
@@ -1091,27 +1082,23 @@ let collect_board_events_with_cursor_policy
 
 let collect_board_events
       ~(base_path : string)
-      ~(continuity_summary : string)
       ~(meta : keeper_meta)
   : pending_board_event list * int * int
   =
   collect_board_events_with_cursor_policy
     ~advance_cursor:true
     ~base_path
-    ~continuity_summary
     ~meta
 ;;
 
 let collect_board_events_without_advancing_cursor
       ~(base_path : string)
-      ~(continuity_summary : string)
       ~(meta : keeper_meta)
   : pending_board_event list * int * int
   =
   collect_board_events_with_cursor_policy
     ~advance_cursor:false
     ~base_path
-    ~continuity_summary
     ~meta
 ;;
 
@@ -1152,13 +1139,12 @@ let observe
      (build_prompt, append_decision_record) force it exactly once per run
      cycle. Verified the gate never reads it. *)
   let context_ratio = Lazy.from_fun (fun () -> read_context_ratio ~config ~meta) in
-  let continuity_summary = read_continuity_summary ~config ~meta in
   let pending_board_events =
     match pending_board_events with
     | Some events -> events
     | None ->
       let events, _board_new_count, _board_mention_count =
-        collect_board_events ~base_path:config.base_path ~meta ~continuity_summary
+        collect_board_events ~base_path:config.base_path ~meta
       in
       events
   in
@@ -1167,7 +1153,6 @@ let observe
   ; pending_scope_messages
   ; idle_seconds
   ; active_goals = meta.active_goal_ids
-  ; continuity_summary
   ; context_ratio
   ; unclaimed_task_count
   ; claimable_task_count
@@ -1207,7 +1192,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; pending_scope_messages = []
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids
-  ; continuity_summary = read_continuity_summary ~config ~meta
   ; context_ratio = Lazy.from_fun (fun () -> read_context_ratio ~config ~meta)
   ; unclaimed_task_count
   ; claimable_task_count
@@ -1275,7 +1259,6 @@ let durable_signal_present
         collect_board_events_without_advancing_cursor
           ~base_path:config.base_path
           ~meta
-          ~continuity_summary:meta.continuity_summary
       in
       events
   in

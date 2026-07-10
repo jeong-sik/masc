@@ -1,15 +1,10 @@
 (** Keeper_unified_prompt — Build a single unified prompt from keeper identity
     and world observation.
 
-    Only reactive triggers and resource state are included in the user message.
-    Metacognition sections (tool activity, cycle outcome, diversity, behavioral
-    stats) removed in #6814; telemetry preserved via decision_audit.
+    Only reactive triggers and resource state are included in the user message;
+    runtime telemetry remains on the decision-audit path.
 
     @since Unified Keeper Loop *)
-
-val state_block_instruction_text : string
-(** Generic STATE formatting instruction for normal keeper turns. Turn-level
-    output guards can override this when continuity is runtime-managed. *)
 
 val format_board_event_text : Keeper_world_observation.pending_board_event -> string
 (** Render a single pending board event as its prompt line. Exposed for tests:
@@ -31,13 +26,12 @@ val build_prompt :
   ?turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   ?current_task:Masc_domain.task ->
   ?active_goal_summaries:(string * string) list ->
-  ?active_open_loops:Keeper_working_state.loop list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   string * string
-(** When [?profile_defaults] is omitted, personality fields fall back to
-    [meta.{will,needs,desires,instructions}] directly (legacy behavior).
-    Production hot path supplies it; tests can keep the bare call.
+(** When [?profile_defaults] is omitted, [instructions] falls back to
+    [meta.instructions]. Production hot path supplies profile defaults;
+    tests can keep the bare call.
 
     RFC-0315 wake-turn self-description:
     - [?turn_decision]: the scheduler's actual cycle decision. When present it
@@ -48,8 +42,4 @@ val build_prompt :
       holds ([meta.current_task_id] admits scheduled-autonomous turns, so the
       turn must see the work that admitted it). Omitted: layer absent.
     - [?active_goal_summaries]: renders goal titles next to ids in the Active
-      Goals layer. Omitted or empty: bare ids (legacy).
-    - [?active_open_loops]: renders an "Open Loops" layer for unresolved
-      working-state ledger entries (the keeper's own prior [STATE]
-      obligations restored from the sidecar). Omitted or empty: layer
-      absent. *)
+      Goals layer. Omitted or empty: bare ids. *)

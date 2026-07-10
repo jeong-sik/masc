@@ -587,7 +587,6 @@ type agent_runtime_state =
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
   ; last_handoff_ts : float
-  ; last_continuity_update_ts : float
   ; last_autonomous_action_at : string
   ; autonomous_action_count : int
   ; autonomous_turn_count : int
@@ -632,8 +631,7 @@ type keeper_meta =
   ; (* -- Performance & Limits -- *)
     max_context_override : int option
   ; (* -- Operational control (top-level, not runtime) -- *)
-    continuity_summary : string
-  ; active_goal_ids : string list
+    active_goal_ids : string list
   ; paused : bool
   ; latched_reason : Keeper_latched_reason.t option
     (** Typed companion to [paused]: {i why} this keeper is latched.

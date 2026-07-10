@@ -17,7 +17,6 @@ export type KeeperRuntimeProjectionSignalKind =
   | 'ksm_phase'
   | 'heartbeat'
   | 'context_ratio'
-  | 'social_model'
   | 'fiber_alive'
   | 'stop_requested'
   | 'runtime_trace'
@@ -75,10 +74,6 @@ export interface KeeperContextProjection {
   readonly threshold: number
 }
 
-export interface KeeperSocialModelProjection {
-  readonly recognized: boolean | null
-}
-
 export interface KeeperRuntimeTraceProjection {
   readonly value: string
   readonly detail: string
@@ -95,7 +90,6 @@ export interface KeeperRuntimeProjection {
   readonly stopRequested: boolean
   readonly heartbeat: KeeperHeartbeatProjection
   readonly context: KeeperContextProjection
-  readonly socialModel: KeeperSocialModelProjection
   readonly traceEvidence: KeeperRuntimeTraceProjection
   readonly runtimeWarnings: string[]
   readonly fsmLanes: KeeperRuntimeProjectionFsmLane[]
@@ -160,7 +154,6 @@ export function deriveKeeperRuntimeProjection({
     || composite?.phase_diagnosis?.conditions.stop_requested === true
   const heartbeat = deriveHeartbeatProjection(keeper, nowMs)
   const context = deriveContextProjection(keeper)
-  const socialModel = deriveSocialModelProjection(keeper)
   const traceEvidence = terminalEventLabel(runtimeTrace)
   const runtimeWarnings = runtimeWarningList(runtimeResolution)
   const fsmLanes = deriveFsmLanes(composite, opState)
@@ -188,7 +181,6 @@ export function deriveKeeperRuntimeProjection({
     opState,
     heartbeat,
     context,
-    socialModel,
     fiberAlive,
     stopRequested,
     traceEvidence,
@@ -224,7 +216,6 @@ export function deriveKeeperRuntimeProjection({
   const synchronizationDetail = [
     `hb ${heartbeat.stale ? 'stale' : heartbeat.lastHeartbeat ? 'fresh' : 'unknown'}`,
     `ctx ${context.breach ? 'breach' : context.ratio === null ? 'unknown' : 'ok'}`,
-    `social ${socialModel.recognized === false ? 'unrecognized' : socialModel.recognized === true ? 'recognized' : 'unknown'}`,
     `fiber ${fiberAlive.alive ? 'alive' : 'not_proven'}`,
     stopRequested ? 'stop requested' : 'stop clear',
     fsmLaneSummary(fsmLanes),
@@ -239,7 +230,6 @@ export function deriveKeeperRuntimeProjection({
     stopRequested,
     heartbeat,
     context,
-    socialModel,
     traceEvidence,
     runtimeWarnings,
     fsmLanes,
@@ -297,12 +287,6 @@ function deriveContextProjection(keeper: Keeper): KeeperContextProjection {
     breach: ratio !== null && ratio >= threshold,
     ratio,
     threshold,
-  }
-}
-
-function deriveSocialModelProjection(keeper: Keeper): KeeperSocialModelProjection {
-  return {
-    recognized: typeof keeper.social_model_recognized === 'boolean' ? keeper.social_model_recognized : null,
   }
 }
 
@@ -391,7 +375,6 @@ function buildProjectionSignals({
   opState,
   heartbeat,
   context,
-  socialModel,
   fiberAlive,
   stopRequested,
   traceEvidence,
@@ -402,7 +385,6 @@ function buildProjectionSignals({
   readonly opState: KeeperOperationalState
   readonly heartbeat: KeeperHeartbeatProjection
   readonly context: KeeperContextProjection
-  readonly socialModel: KeeperSocialModelProjection
   readonly fiberAlive: FiberAliveDecision
   readonly stopRequested: boolean
   readonly traceEvidence: KeeperRuntimeTraceProjection
@@ -415,12 +397,6 @@ function buildProjectionSignals({
   const heartbeatAge = heartbeat.ageMs === null ? 'age unknown' : `${Math.round(heartbeat.ageMs / 1000)}s old`
   const contextValue = context.ratio === null ? 'unknown' : `${Math.round(context.ratio * 100)}%`
   const contextThreshold = `${Math.round(context.threshold * 100)}%`
-  const socialValue =
-    socialModel.recognized === false
-      ? 'unrecognized'
-      : socialModel.recognized === true
-        ? 'recognized'
-        : 'unknown'
   const blockerHint = blockerAttention && runtimeReason !== 'no blocker reason' ? runtimeReason : null
   return [
     {
@@ -462,16 +438,6 @@ function buildProjectionSignals({
       state: context.breach ? 'attention' : context.ratio === null ? 'unknown' : 'ok',
       contributesToAttention: context.breach,
       hint: context.breach ? `컨텍스트 사용량이 ${contextValue}입니다.` : null,
-    },
-    {
-      kind: 'social_model',
-      label: 'social',
-      value: socialValue,
-      detail: 'social_model_recognized',
-      tone: socialModel.recognized === false ? 'warn' : 'neutral',
-      state: socialModel.recognized === false ? 'attention' : socialModel.recognized === true ? 'ok' : 'unknown',
-      contributesToAttention: socialModel.recognized === false,
-      hint: socialModel.recognized === false ? '미인식 대화 모델 설정이 감지됐습니다.' : null,
     },
     {
       kind: 'fiber_alive',

@@ -40,8 +40,8 @@ were written to prevent.
 
 PR #21116 removed the four **dashboard-HTTP** force-writes by routing them
 through `write_meta_with_merge` (`lib/keeper/keeper_meta_store.ml:330`). It
-deliberately left four **keeper-internal** force-writes untouched and escalated
-them here, because they edit runtime fields (continuity / identity) or sit on
+deliberately left three **keeper-internal** force-writes untouched and escalated
+them here, because they edit runtime identity/timestamp fields or sit on
 hot paths and warranted per-site analysis rather than a blanket swap.
 
 As long as `?force` exists on the signature, any future call site — written by a
@@ -50,34 +50,33 @@ rewind by passing `~force:true`. The counter is a cumulative invariant; the
 escape hatch makes that invariant violable from anywhere. This is an
 "Unknown → Permissive Default" surface (CLAUDE.md §AI 코드 생성 안티패턴 #2).
 
-## §2 The four remaining `~force:true` sites
+## §2 The three remaining `~force:true` sites
 
-All four were located by `rg -U 'write_meta[^)]*?~force:true' lib/` (exactly four
+All three were located by `rg -U 'write_meta[^)]*?~force:true' lib/` (exactly three
 matches; no `~force:false` explicit callers exist, so the default `force=false`
 CAS path is the only other shape).
 
 | # | site | edits (non-counter) | concurrency | counter-rewind hazard |
 |---|------|--------------------|-------------|----------------------|
-| 1 | `lib/keeper/keeper_tool_surface.ml:645` | `continuity_summary=""`, `paused`, `last_continuity_update_ts=0.0` (operator clear) | operator action vs live turn | yes |
-| 2 | `lib/keeper/keeper_tool_surface_ops.ml:136` | `agent_name`, `trace_id`, `trace_history`, `generation` (identity reseed on agent mismatch) | reseed vs live turn | yes |
-| 3 | `lib/keeper/keeper_keepalive.ml:311` | `usage.last_turn_ts=bootstrap_ts`, optional identity repair (`bootstrap_live_keeper_meta`) | server bootstrap, effectively single-writer | low (no live turn at bootstrap) |
-| 4 | `lib/keeper/keeper_heartbeat_loop_presence.ml:82` | `agent_name`, `trace_id`, `trace_history`, `generation` (identity drift repair) | **heartbeat loop runs concurrently with turns** | yes (highest) |
+| 1 | `lib/keeper/keeper_tool_surface_ops.ml:136` | `agent_name`, `trace_id`, `trace_history`, `generation` (identity reseed on agent mismatch) | reseed vs live turn | yes |
+| 2 | `lib/keeper/keeper_keepalive.ml:311` | `usage.last_turn_ts=bootstrap_ts`, optional identity repair (`bootstrap_live_keeper_meta`) | server bootstrap, effectively single-writer | low (no live turn at bootstrap) |
+| 3 | `lib/keeper/keeper_heartbeat_loop_presence.ml:82` | `agent_name`, `trace_id`, `trace_history`, `generation` (identity drift repair) | **heartbeat loop runs concurrently with turns** | yes (highest) |
 
-Key observation: **none of the four legitimately needs to rewind cumulative
-counters.** Each edits continuity / identity / timestamp fields and only uses
+Key observation: **none of the three legitimately needs to rewind cumulative
+counters.** Each edits identity/timestamp fields and only uses
 `~force` to avoid a CAS conflict. The counter rewind is an unwanted side effect,
 not the intent.
 
 ## §3 Proposal
 
-### 3.1 Route all four through CAS + monotonic merge
+### 3.1 Route all three through CAS + monotonic merge
 
 `monotonic_usage_counters` (`lib/keeper/keeper_meta_merge.ml:13`) takes the
-caller as the base — so the caller's continuity/identity edits survive — and
+caller as the base — so the caller's identity/timestamp edits survive — and
 takes `max(caller, latest)` for the five cumulative counters, so they never
-regress. It is the correct merge for all four sites.
+regress. It is the correct merge for all three sites.
 
-Before / after (site 4, the hottest):
+Before / after (site 3, the hottest):
 
 ```ocaml
 (* before *)
@@ -105,12 +104,12 @@ so it is unaffected. The initial-write case is still handled by the CAS path's
 
 This removes the escape hatch at the type level: a future `~force:true` becomes
 a compile error, not a silent counter rewind. This is the structural root fix —
-the alternative (leave `?force`, fix only the four sites) is an N-of-M patch that
+the alternative (leave `?force`, fix only the three sites) is an N-of-M patch that
 lets the next caller reintroduce the hazard.
 
-### 3.3 Bootstrap behavioural delta (site 3)
+### 3.3 Bootstrap behavioural delta (site 2)
 
-Converting site 3 introduces one new failure mode: `write_meta_with_merge` can
+Converting site 2 introduces one new failure mode: `write_meta_with_merge` can
 return `Error` after `max_retries` CAS conflicts, whereas `~force:true` never
 failed on conflict. At server bootstrap there is no concurrent turn writer, so a
 3-deep CAS conflict is not reachable in practice; the existing
@@ -119,7 +118,7 @@ This delta is accepted and called out for review rather than hidden.
 
 ## §4 Boundary
 
-In scope: the four `~force:true` call sites, the `write_meta` signature, and
+In scope: the three `~force:true` call sites, the `write_meta` signature, and
 their characterization tests. Out of scope: the `write_meta_with_merge` retry
 count / backoff (unchanged), and the dashboard-HTTP sites (already done in
 #21116).
@@ -133,7 +132,7 @@ count / backoff (unchanged), and the dashboard-HTTP sites (already done in
   demonstrated the rewind a force path produced) is replaced by
   `test_stale_write_conflicts_without_force`: it asserts a stale-snapshot plain
   write now returns a version conflict and the advanced disk counter survives.
-  The four sites share one merge function, so this single invariant plus
+  The three sites share one merge function, so this single invariant plus
   compiler-verified routing covers them — per-site copies would add no signal.
 - `test_monotonic_usage_counters_on_cas_retry` (existing) already proves the
   merge keeps the larger disk value on retry; the converted sites use that same
@@ -144,7 +143,7 @@ count / backoff (unchanged), and the dashboard-HTTP sites (already done in
 
 ## §6 Alternatives considered
 
-- **Leave `?force`, fix only the four sites.** Rejected: N-of-M patch; the next
+- **Leave `?force`, fix only the three sites.** Rejected: N-of-M patch; the next
   caller (human or AI) reintroduces the hazard. The whole point is to make the
   illegal write unrepresentable.
 - **Keep `~force` but rename to `~i_accept_counter_rewind`.** Rejected: a scary

@@ -123,9 +123,9 @@ val create_post_with_outcome :
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
     missing id, and [Validation_error] for empty/oversized content or invalid
     [new_author].  When provided, [new_author] transfers persisted ownership and
-    must parse through [Agent_id.of_string].  The body is normalized exactly as on
-    create: a [STATE] block in the edited content is lifted into [meta_json]
-    (merged onto the existing meta), so editing cannot silently drop state.
+    must parse through [Agent_id.of_string]. The body is normalized exactly as on
+    create and the existing [meta_json] is preserved independently, so editing
+    cannot silently drop metadata.
     [post_kind]/[visibility]/[hearth] are preserved. *)
 val update_post_with_outcome :
   store ->

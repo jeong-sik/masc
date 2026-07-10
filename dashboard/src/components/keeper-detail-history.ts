@@ -40,10 +40,10 @@ function formatCheckpointTime(timestamp: number): string {
 /**
  * Pure filter for OAS snapshot history rows.
  *
- * Case-insensitive substring match on `snapshot_id`, `source_kind`,
- * `latest_preview`, and `continuity_summary` so operators can locate a
- * snapshot by partial id, by the preview/summary text that described the
- * turn, or by its source kind (`oas_current` / `oas_history`).
+ * Case-insensitive substring match on `snapshot_id`, `source_kind`, and
+ * `latest_preview` so operators can locate a snapshot by partial id, by the
+ * preview text that described the turn, or by its source kind
+ * (`oas_current` / `oas_history`).
  *
  * Empty/whitespace query returns the input reference unchanged (no new
  * array allocation, preserves referential equality for memoisation).
@@ -60,7 +60,6 @@ export function filterCheckpointHistory(
     if (row.snapshot_id.toLowerCase().includes(needle)) return true
     if (row.source_kind && row.source_kind.toLowerCase().includes(needle)) return true
     if (row.latest_preview && row.latest_preview.toLowerCase().includes(needle)) return true
-    if (row.continuity_summary && row.continuity_summary.toLowerCase().includes(needle)) return true
     return false
   })
 }
@@ -96,9 +95,6 @@ function CheckpointSummaryCard({
       ${summary.latest_preview
         ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--color-fg-primary)]">${summary.latest_preview}</div>`
         : null}
-      ${summary.continuity_summary
-        ? html`<pre class="mt-2 whitespace-pre-wrap rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${summary.continuity_summary}</pre>`
-        : html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">continuity snapshot 없음</div>`}
     </div>
   `
 }
@@ -279,9 +275,6 @@ export function KeeperCheckpointPanel({
                         ${item.latest_preview
                           ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--color-fg-primary)]">${item.latest_preview}</div>`
                           : null}
-                        ${item.continuity_summary
-                          ? html`<pre class="mt-2 whitespace-pre-wrap rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)] v2-monitoring-detail">${item.continuity_summary}</pre>`
-                          : html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">continuity snapshot 없음</div>`}
                       </div>
                     </label>
                   `)}

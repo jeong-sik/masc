@@ -92,17 +92,4 @@ describe('MentionInbox', () => {
     expect(screen.getByLabelText('Other mentions')).toHaveTextContent('@sangsu')
   })
 
-  it('marks messages carrying state blocks', () => {
-    messages.value = [
-      message({
-        id: 'm-state',
-        content: '@dashboard [STATE]\nGoal: land C2 mention inbox\n[/STATE]\nready',
-      }),
-    ]
-
-    render(h(MentionInbox, null))
-
-    expect(screen.getByText('STATE')).toBeInTheDocument()
-    expect(screen.queryByText('Goal: land C2 mention inbox')).not.toBeInTheDocument()
-  })
 })

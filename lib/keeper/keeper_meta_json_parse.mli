@@ -41,7 +41,6 @@ type parsed_keeper_policy =
 type parsed_keeper_state =
   { ps_created_at_raw : string
   ; ps_updated_at_raw : string
-  ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
   ; ps_latched_reason : Keeper_latched_reason.t option
@@ -72,11 +71,6 @@ val parse_compaction_runtime : Yojson.Safe.t -> compaction_runtime
 
 (** Parse the runtime proactive_runtime record. *)
 val parse_proactive_runtime : Yojson.Safe.t -> proactive_runtime
-
-(** Heal [last_continuity_update_ts] when the persisted timestamp
-    is zero but [continuity_summary] is non-empty (legacy data). *)
-val parse_last_continuity_update_ts :
-  continuity_summary:string -> Yojson.Safe.t -> float
 
 (** Parse the keeper state slice. [trace_id] / [trace_history]
     are threaded from the identity step; [keeper_name] is used for

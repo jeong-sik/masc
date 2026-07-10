@@ -250,6 +250,19 @@ let run_with_setup_cleanup ~cleanup f =
       cleanup ();
       Printexc.raise_with_backtrace e backtrace
 
+type append_manifest_fn =
+  ?elapsed_ms:int ->
+  ?logical_seq:int ->
+  ?status:string ->
+  ?decision:Yojson.Safe.t ->
+  ?keeper_turn_id:int ->
+  ?oas_turn_count:int ->
+  ?checkpoint_path:string ->
+  ?compaction_source:string ->
+  site:string ->
+  Keeper_runtime_manifest.event_kind ->
+  unit
+
 let make_append_manifest
     ~config
     ~keeper_name
@@ -259,7 +272,7 @@ let make_append_manifest
     ~runtime_id
     ~(turn_start : Mtime.t)
     ~(seq_ref : int Atomic.t)
-  : Keeper_agent_run_sidecar.append_manifest_fn
+  : append_manifest_fn
   =
   fun ?elapsed_ms ?logical_seq ?status ?decision ?keeper_turn_id ->
   fun ?oas_turn_count ?checkpoint_path ?compaction_source ~site event ->

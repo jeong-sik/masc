@@ -23,9 +23,9 @@ function makeRow(overrides: Partial<KeeperCheckpointSummary> = {}): KeeperCheckp
 
 describe("filterCheckpointHistory", () => {
   const rows = [
-    makeRow({ snapshot_id: "abc-123", source_kind: "oas_current", latest_preview: "hello world", continuity_summary: "summary one" }),
-    makeRow({ snapshot_id: "def-456", source_kind: "oas_history", latest_preview: "foo bar", continuity_summary: "summary two" }),
-    makeRow({ snapshot_id: "ghi-789", source_kind: "manual", latest_preview: "baz qux", continuity_summary: "summary three" }),
+    makeRow({ snapshot_id: "abc-123", source_kind: "oas_current", latest_preview: "hello world" }),
+    makeRow({ snapshot_id: "def-456", source_kind: "oas_history", latest_preview: "foo bar" }),
+    makeRow({ snapshot_id: "ghi-789", source_kind: "manual", latest_preview: "baz qux" }),
   ]
 
   it("returns same reference for empty query", () => {
@@ -45,16 +45,12 @@ describe("filterCheckpointHistory", () => {
     expect(filterCheckpointHistory(rows, "world")).toHaveLength(1)
   })
 
-  it("filters by continuity_summary", () => {
-    expect(filterCheckpointHistory(rows, "two")).toHaveLength(1)
-  })
-
   it("returns empty when no match", () => {
     expect(filterCheckpointHistory(rows, "zzz")).toHaveLength(0)
   })
 
   it("treats null fields defensively", () => {
-    const sparse = [makeRow({ snapshot_id: "match", source_kind: null as any, latest_preview: null as any, continuity_summary: null as any })]
+    const sparse = [makeRow({ snapshot_id: "match", source_kind: null as any, latest_preview: null as any })]
     expect(filterCheckpointHistory(sparse, "match")).toHaveLength(1)
     expect(filterCheckpointHistory(sparse, "none")).toHaveLength(0)
   })

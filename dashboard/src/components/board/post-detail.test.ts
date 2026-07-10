@@ -17,10 +17,6 @@ const routerMock = vi.hoisted(() => {
 
 vi.mock('../../router', () => routerMock)
 
-vi.mock('../../keeper-message', () => ({
-  stripStateBlocks: (value: string) => value,
-}))
-
 vi.mock('../common/card', () => ({
   SectionCard: ({ children }: { children?: any }) => h('div', {}, children),
   SurfaceCard: ({ children }: { children?: any }) => h('div', {}, children),
@@ -808,7 +804,6 @@ describe('PostDetail', () => {
       comments: [],
       meta: {
         source: 'manual',
-        state_block: 'state only',
       },
     } as any
 

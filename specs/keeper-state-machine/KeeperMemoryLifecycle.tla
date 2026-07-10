@@ -25,22 +25,25 @@
 \*   long_mem         | rows with horizon = "long_term"                  | lib/keeper/keeper_memory_policy.ml — `long_term_horizon`
 \*   open_short       | unresolved short-term notes (open_question kind) | lib/keeper/keeper_memory_bank.ml
 \*   provenanced      | rows with non-empty trace_id / source            | lib/keeper/keeper_memory_bank.ml
-\*   generation       | snapshot.generation field                        | snapshot record
+\*   generation       | row.generation field                             | keeper_memory_row_raw
 \*   overflowed       | derived: short_mem cardinality > MaxShort        | runtime check
 \*
-\* Tier vocabulary (string-typed, intentionally not a variant today) —
-\* the horizon string constants in lib/keeper/keeper_memory_policy.ml:
+\* Tier wire vocabulary — horizon strings are decoded only at the JSON/storage
+\* boundary; memory-kind behavior uses the closed `memory_kind` variant in
+\* lib/keeper/keeper_memory_policy.ml:
 \*     `let short_term_horizon = "short_term"`
 \*     `let mid_term_horizon   = "mid_term"`
 \*     `let long_term_horizon  = "long_term"`
 \*
 \* Producer (kind -> tier classification):
-\*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind_opt  (strict)
-\*   lib/keeper/keeper_memory_bank.ml:memory_horizon_of_kind_exn  (strict write wrapper)
-\*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_json_opt  (JSON variant)
+\*   lib/keeper/keeper_memory_policy.ml:memory_kind_of_wire         (strict boundary parser)
+\*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind      (total typed mapping)
+\*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_json_opt  (horizon wire parser)
 \*
 \* Persistence / promotion sites:
-\*   lib/keeper/keeper_memory_bank.ml:append_memory_notes_from_reply   — writes via memory_horizon_of_kind_exn
+\*   lib/keeper/keeper_memory_bank.ml:append_explicit_memory_note      — explicit tool write with typed provenance
+\*   lib/keeper/keeper_memory_bank.ml:append_memory_notes_from_tool_results — typed artifact promotion
+\*   lib/keeper/keeper_memory_bank.ml:append_voice_output              — typed voice-output write
 \*   lib/keeper/keeper_memory_recall.ml:read_recent_memory_texts_result  — recall path, same horizon fn
 \*   lib/keeper/keeper_compact_policy.ml    overflow + handoff scheduling
 \*   lib/keeper/keeper_compact_audit.ml     ledger trail (provenance source)

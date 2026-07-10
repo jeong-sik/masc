@@ -151,19 +151,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     `Int
                       (runtime_lens_event_count scan
                          Keeper_runtime_manifest.Checkpoint_saved) );
-                  ( "state_snapshot_sidecar_saved_count",
-                    `Int
-                      (runtime_lens_event_count scan
-                         Keeper_runtime_manifest.State_snapshot_sidecar_saved)
-                  );
-                  ( "working_state_sidecar_saved_count",
-                    `Int
-                      (runtime_lens_event_count scan
-                         Keeper_runtime_manifest.Working_state_sidecar_saved)
-                  );
-                  ( "active_open_loop_count",
-                    `Int
-                      (Option.value scan.active_open_loop_count ~default:0) );
                   ( "last_compaction",
                     match scan.last_compaction with
                     | Some value -> value
@@ -208,8 +195,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                 ~events:
                   [
                     Keeper_runtime_manifest.Checkpoint_loaded;
-                    Keeper_runtime_manifest.State_snapshot_sidecar_saved;
-                    Keeper_runtime_manifest.Working_state_sidecar_saved;
                     Keeper_runtime_manifest.Checkpoint_saved;
                   ]
                 ~terminal_status:
@@ -252,8 +237,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Keeper_runtime_manifest.Event_bus_correlated;
                     Keeper_runtime_manifest.Checkpoint_loaded;
                     Keeper_runtime_manifest.Checkpoint_saved;
-                    Keeper_runtime_manifest.State_snapshot_sidecar_saved;
-                    Keeper_runtime_manifest.Working_state_sidecar_saved;
                   ]
                 ~terminal_status:(runtime_lens_memory_terminal_status scan)
                 ~synthetic_events:[] );

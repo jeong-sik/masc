@@ -150,19 +150,6 @@ export function deriveOperationalInsight(
       ],
     }
   }
-  if (snapshot.decision.stage === 'gate_rejected') {
-    return {
-      tone: 'warn',
-      headline: 'Guardrail 가 턴 차단',
-      detail: 'decision pipeline 이 gate_rejected 에 도달 — execution 은 provider work 진입 없이 unwind 되어야 함.',
-      nextStep: nextExpectedStep(snapshot),
-      evidence: [
-        `KDP ${snapshot.decision.stage}`,
-        `KTC ${snapshot.turn_phase}`,
-        snapshot.measurement.auto_rules?.guardrail_reason ?? 'no guardrail reason',
-      ],
-    }
-  }
   if (stalledLane) {
     return {
       tone: 'warn',

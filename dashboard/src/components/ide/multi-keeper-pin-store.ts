@@ -1,16 +1,12 @@
 import { computed, signal } from '@preact/signals'
 
 /**
- * RFC-0027 PR-α: multi-keeper pin store.
- *
  * Replaces the old single-pin inspector state with a bounded LRU collection
  * (max 4). Layout decisions about how many pins to render concurrently
- * belong to the consumer (`InspectorMultiKeeperBDI`),
+ * belong to the inspector consumer,
  * not the store.
  *
- * Cap = 4 ties to RFC-0027 §11 #1 (320px inspector rail + compact-fold). The
- * cap is a constant in the store rather than a runtime parameter so test
- * surface is small.
+ * The cap is a single store constant shared by pinning and rendering consumers.
  */
 
 export const PIN_CAP = 4
@@ -72,7 +68,7 @@ export function clearPins(): void {
 }
 
 /**
- * Move a pinned keeper to a specific index (RFC-0027 §4 drag reorder).
+ * Move a pinned keeper to a specific index.
  *
  *  - `fromName` is matched against the trimmed `keeperName`. Whitespace or
  *    unknown name is a no-op (no allocation).
@@ -105,8 +101,8 @@ export const headPinnedKeeper = computed<PinnedKeeperEntry | null>(
 )
 
 /**
- * Promote the pinned keeper at 1-based slot `idx` to the head (RFC-0027
- * PR-γ-2 keyboard `Mod+Shift+1..4`). Position-only change — `pinnedAtMs`
+ * Promote the pinned keeper at 1-based slot `idx` to the head. Position-only
+ * change — `pinnedAtMs`
  * and `line` are preserved so explicit promote does not steal recency
  * semantics from the next LRU eviction (same convention as `reorderPins`).
  *
@@ -125,7 +121,7 @@ export function promotePinAt(idx: number): void {
 }
 
 /**
- * Drop the head pin (RFC-0027 PR-γ-2 keyboard `Mod+Shift+W`). No-op when
+ * Drop the head pin (keyboard `Mod+Shift+W`). No-op when
  * nothing is pinned. Distinct from `clearPins()` which empties the whole
  * collection.
  */

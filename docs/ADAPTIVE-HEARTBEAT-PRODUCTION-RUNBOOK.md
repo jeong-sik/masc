@@ -72,7 +72,7 @@ curl -fsS http://127.0.0.1:8935/api/v1/dashboard/transport-health | jq '.project
 Save:
 
 - read-path summary json
-- keeper continuity summary
+- keeper checkpoint-validation receipt
 - benchmark result
 - keeper sample payload that shows current runtime fields
 

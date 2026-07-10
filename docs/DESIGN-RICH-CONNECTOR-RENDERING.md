@@ -75,7 +75,7 @@ external channel event
 | Outbound attachments | ✅ data-URL | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Fusion panels | ✅ card | ❌ raw text | ❌ raw text | ❌ | ❌ | ❌ | ❌ |
 | Tool results / blobs | ✅ trace card | ⚠️ embed | ⚠️ context | ❌ | ❌ | ❌ | ❌ |
-| Turn progress / status | ✅ | ❌ `[STATE]` raw | ❌ stripped | ❌ stripped | ❌ stripped | ❌ stripped | ❌ | ❌ status only |
+| Turn progress / status | ✅ typed receipt | ⚠️ text projection | ⚠️ text projection | ❌ | ❌ | ❌ | ⚠️ manual | ⚠️ status only |
 | Turn start / ack | ✅ | ⚠️ message only | ⚠️ message only | ⚠️ message only | ⚠️ message only | ⚠️ message only | ✅ | ⚠️ command only |
 | Wait / poll status | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ manual | ❌ |
 | Turn completion / failure identity | ✅ | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ status only |
@@ -130,7 +130,7 @@ Legend: ✅ supported · ⚠️ partial / degraded · ❌ silently dropped / uns
 
 ### 5.4 Telegram / iMessage / CLI sidecars
 
-**Finding:** All three consume only `GateResponse.reply` (plain text), strip `[STATE]` blocks, and ignore `GateResponse.structured`. Images embedded as `![alt](url)` are sent as text. Telegram chunking splits inside markdown entities. iMessage has no length guard. CLI prints raw text with no markdown awareness.
+**Finding:** All three consume only `GateResponse.reply` (plain text) and ignore `GateResponse.structured`. Images embedded as `![alt](url)` are sent as text. Telegram chunking splits inside markdown entities. iMessage has no length guard. CLI prints raw text with no markdown awareness.
 
 **Improvements:**
 - **Telegram** (`sidecars/telegram-bot/src/formatters.py`, `bot.py`)

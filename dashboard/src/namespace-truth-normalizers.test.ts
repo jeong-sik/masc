@@ -16,8 +16,7 @@ describe('normalizeNamespaceTruth', () => {
     expect(result.root.configured_keepers).toBeUndefined()
     expect(result.execution?.summary).toBeNull()
     expect(result.command?.active_operations).toBeUndefined()
-    expect(result.meta_cognition?.summary).toBeNull()
-    expect(result.operator?.health).toBeNull()
+    expect(result.operator?.pending_confirm_summary).toBeNull()
     expect(result.focus).toBeNull()
   })
 
@@ -278,85 +277,15 @@ describe('normalizeNamespaceTruth', () => {
     expect(result.command?.provenance).toBeNull()
   })
 
-  // ── meta_cognition block ──
-
-  it('extracts meta_cognition block', () => {
-    const result = normalizeNamespaceTruth({
-      meta_cognition: {
-        provenance: 'reflection',
-        latest_digest: {
-          post_id: 'p1',
-          title: 'Daily Digest',
-          created_at: '2026-04-17',
-        },
-      },
-    })
-    expect(result.meta_cognition?.provenance).toBe('reflection')
-    const digest = result.meta_cognition?.latest_digest
-    expect(digest).not.toBeNull()
-    expect(digest!.post_id).toBe('p1')
-    expect(digest!.title).toBe('Daily Digest')
-  })
-
-  it('returns null digest when required fields missing', () => {
-    const result = normalizeNamespaceTruth({
-      meta_cognition: {
-        latest_digest: { post_id: 'p1' }, // missing title, created_at
-      },
-    })
-    expect(result.meta_cognition?.latest_digest).toBeNull()
-  })
-
-  it('extracts digest with optional fields', () => {
-    const result = normalizeNamespaceTruth({
-      meta_cognition: {
-        latest_digest: {
-          post_id: 'p1',
-          title: 'Digest',
-          created_at: '2026-04-17',
-          updated_at: '2026-04-17T12:00:00Z',
-          hearth: 'active',
-          digest_key: 'dk-1',
-          matches_summary: true,
-          provenance: 'self',
-        },
-      },
-    })
-    const digest = result.meta_cognition?.latest_digest
-    expect(digest!.updated_at).toBe('2026-04-17T12:00:00Z')
-    expect(digest!.hearth).toBe('active')
-    expect(digest!.matches_summary).toBe(true)
-  })
-
   // ── operator block ──
 
-  it('extracts operator block', () => {
+  it('extracts operator provenance', () => {
     const result = normalizeNamespaceTruth({
       operator: {
-        health: 'ok',
         provenance: 'operator-daemon',
-        attention_summary: {
-          count: 10,
-          bad_count: 2,
-          warn_count: 3,
-          provenance: 'monitor',
-        },
-        recommendation_summary: {
-          count: 5,
-          provenance: 'advisor',
-        },
       },
     })
-    expect(result.operator?.health).toBe('ok')
     expect(result.operator?.provenance).toBe('operator-daemon')
-    expect(result.operator?.attention_summary?.count).toBe(10)
-    expect(result.operator?.attention_summary?.bad_count).toBe(2)
-    expect(result.operator?.recommendation_summary?.count).toBe(5)
-  })
-
-  it('defaults operator.health to null', () => {
-    const result = normalizeNamespaceTruth({})
-    expect(result.operator?.health).toBeNull()
   })
 
   // ── pending_confirm_summary ──
@@ -561,11 +490,7 @@ describe('normalizeNamespaceTruth', () => {
         active_operations: 1,
         bad_alerts: 0,
       },
-      meta_cognition: {
-        provenance: 'reflection',
-      },
       operator: {
-        health: 'healthy',
         provenance: 'operator',
       },
       focus: null,
@@ -575,7 +500,7 @@ describe('normalizeNamespaceTruth', () => {
     expect(result.root.configured_keepers).toBe(4)
     expect(result.execution?.provenance).toBe('runtime')
     expect(result.command?.active_operations).toBe(1)
-    expect(result.operator?.health).toBe('healthy')
+    expect(result.operator?.provenance).toBe('operator')
     expect(result.focus).toBeNull()
   })
 })

@@ -60,7 +60,7 @@ stateDiagram-v2
 | `stop_requested` | FALSE | false | false |
 | `restart_budget_remaining` | TRUE | **false** ← Dead-state marker | true |
 | `backoff_elapsed` | FALSE | false | false |
-| `guardrail_triggered` | FALSE | false | false |
+| retired semantic rule field | not modeled | not modeled | removed from the canonical FSM |
 | `drain_complete` | FALSE | false | false |
 | `context_overflow` | FALSE | false | false |
 | `compact_retry_exhausted` | FALSE | false | false |

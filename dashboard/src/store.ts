@@ -1136,7 +1136,6 @@ function canReuseBoardPost(previous: BoardPost, next: BoardPost): boolean {
     && previous.expires_at === next.expires_at
     && sameStringArray(previous.tags, next.tags)
     && (previous.meta?.source ?? null) === (next.meta?.source ?? null)
-    && (previous.meta?.state_block ?? null) === (next.meta?.state_block ?? null)
 }
 
 export function reconcileBoardPosts(prev: BoardPost[], next: BoardPost[]): BoardPost[] {

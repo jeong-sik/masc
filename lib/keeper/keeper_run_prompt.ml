@@ -520,9 +520,7 @@ let build_turn_context
   let user_msg = Agent_sdk.Types.user_msg user_message in
   let history_messages =
     Keeper_context_runtime.messages_of_context ctx_work
-    |> Keeper_memory_policy.drop_empty_replay_snapshot_suffix
     |> Keeper_context_core.repair_broken_tool_call_pairs
-    |> Keeper_memory_policy.drop_empty_replay_snapshot_suffix
   in
   let ctx_work =
     { ctx_work with

@@ -189,11 +189,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               let (env_ratio_gate, env_message_gate, env_token_gate) =
                 keeper_compaction_policy_from_env ()
               in
-              let continuity_compaction_cooldown_sec =
+              let compaction_cooldown_sec =
                 Option.value
-                  ~default:(keeper_continuity_compaction_cooldown_sec ())
-                  p.continuity_compaction_cooldown_sec_opt
-                |> normalize_continuity_compaction_cooldown_sec
+                  ~default:(keeper_compaction_cooldown_sec ())
+                  p.compaction_cooldown_sec_opt
+                |> normalize_compaction_cooldown_sec
               in
               let
                 ( compaction_profile,
@@ -339,7 +339,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ratio_gate = compaction_ratio_gate;
           message_gate = compaction_message_gate;
           token_gate = compaction_token_gate;
-          cooldown_sec = continuity_compaction_cooldown_sec;
+          cooldown_sec = compaction_cooldown_sec;
           (* Honour [Keeper_context_core.default_max_checkpoint_messages]
              instead of the 80 literal that used to ship here.  The
              literal shadowed the declared default (120) for 13/15
@@ -356,7 +356,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         created_at = now_iso ();
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
-        continuity_summary = "";
         active_goal_ids =
           active_goal_ids;
         paused = false;
@@ -402,7 +401,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;
-          last_continuity_update_ts = now_ts;
           last_autonomous_action_at = "";
           autonomous_action_count = 0;
           autonomous_turn_count = 0;

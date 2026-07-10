@@ -308,7 +308,6 @@ describe('KeeperDetailPage', () => {
       context_ratio: 0.000008,
       context_tokens: 8,
       context_max: 1000000,
-      last_speech_act: 'defer',
       recent_tool_names: ['keeper_board_post', 'keeper_tasks_list', 'Execute'],
       agent: {
         exists: true,
@@ -326,7 +325,6 @@ describe('KeeperDetailPage', () => {
       diagnostic: {
         summary: 'Keeper runtime is reconciling back into live presence.',
         continuity_state: 'recovering',
-        continuity_summary: 'Keeper runtime is reconciling back into live presence.',
         health_state: 'stale',
         quiet_reason: null,
         next_action_path: 'recover',
@@ -441,7 +439,6 @@ function makeSummary(overrides: Partial<KeeperCheckpointSummary> = {}): KeeperCh
     message_count: 10,
     system_prompt_present: true,
     latest_preview: null,
-    continuity_summary: null,
     file_stat: null,
     ...overrides,
   }
@@ -453,19 +450,16 @@ describe('filterCheckpointHistory', () => {
       snapshot_id: 'snap-abc123',
       source_kind: 'oas_history',
       latest_preview: '유저 질문에 답변 완료',
-      continuity_summary: 'Keeper heartbeat stable',
     }),
     makeSummary({
       snapshot_id: 'snap-def456',
       source_kind: 'oas_current',
       latest_preview: 'Compaction triggered',
-      continuity_summary: null,
     }),
     makeSummary({
       snapshot_id: 'snap-ghi789',
       source_kind: 'oas_history',
       latest_preview: null,
-      continuity_summary: null,
     }),
   ]
 
@@ -495,12 +489,6 @@ describe('filterCheckpointHistory', () => {
     expect(result[0]?.snapshot_id).toBe('snap-abc123')
   })
 
-  it('matches by continuity_summary', () => {
-    const result = filterCheckpointHistory(rows, 'heartbeat')
-    expect(result).toHaveLength(1)
-    expect(result[0]?.snapshot_id).toBe('snap-abc123')
-  })
-
   it('trims the query before matching', () => {
     const result = filterCheckpointHistory(rows, '  compaction  ')
     expect(result).toHaveLength(1)
@@ -517,9 +505,9 @@ describe('filterCheckpointHistory', () => {
     expect(rows.map(r => ({ ...r }))).toEqual(snapshot)
   })
 
-  it('handles rows with null preview and null continuity_summary without throwing', () => {
+  it('handles rows with null preview without throwing', () => {
     const onlyNulls: readonly KeeperCheckpointSummary[] = [
-      makeSummary({ snapshot_id: 'snap-null', latest_preview: null, continuity_summary: null }),
+      makeSummary({ snapshot_id: 'snap-null', latest_preview: null }),
     ]
     expect(() => filterCheckpointHistory(onlyNulls, 'missing')).not.toThrow()
     expect(filterCheckpointHistory(onlyNulls, 'missing')).toEqual([])

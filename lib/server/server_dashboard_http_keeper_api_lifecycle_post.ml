@@ -32,8 +32,7 @@ let tool_detail_json body =
    상태를 늦게 반영.
 
    Similarly, dashboard_shell_cache_prefix 로 묶이는 per-keeper shell surface
-   cache (60s TTL) 도 별도 무효화 — meta_cognition 경로가 명시적으로 같은
-   prefix 를 invalidate 하는 것과 대칭을 맞춘다.
+   cache (60s TTL) 도 별도 무효화한다.
 
    - Light cache + parameterized keys: [Dashboard_cache.invalidate_prefix "execution:"]
    - Per-keeper shell surface: [dashboard_shell_cache_prefix config]
@@ -52,8 +51,7 @@ let refresh_keeper_execution_surfaces ~config ~name event =
          name event (Printexc.to_string exn));
   (try
      Dashboard_cache.invalidate_prefix
-       (Server_dashboard_http_core_meta_cognition.dashboard_shell_cache_prefix
-          config)
+       (Server_dashboard_http_core.dashboard_shell_cache_prefix config)
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
@@ -78,8 +76,7 @@ let invalidate_keeper_execution_surfaces ~config () =
          (Printexc.to_string exn));
   (try
      Dashboard_cache.invalidate_prefix
-       (Server_dashboard_http_core_meta_cognition.dashboard_shell_cache_prefix
-          config)
+       (Server_dashboard_http_core.dashboard_shell_cache_prefix config)
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->

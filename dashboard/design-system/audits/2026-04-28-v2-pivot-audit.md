@@ -27,9 +27,9 @@ This file is the SSOT entry point for v2 Iter 0. Subsequent iter audits append t
 
 | Item | Status | Source |
 |---|---|---|
-| Phase 2 closure (G/C/O/K/I plane) | ✅ shipped 2026-04-29 | `audits/2026-04-29-phase2-closure.md` (#11580) |
-| Frontend remaining after closure | **0** until backend issues land | same |
-| Backend RFC issues filed | 11 (#11568–#11578) | same |
+| Phase 2 closure (G/C/O/K/I plane) | ✅ shipped 2026-04-29 | PR #11580 |
+| Frontend remaining after closure | **0** until backend issues land | PR #11580 |
+| Backend RFC issues filed | 11 (#11568–#11578) | PR #11580 |
 | E1–E5 Code IDE plane | 🔴 explicitly **deferred** by user 2026-04-28 in prior plan §A | `~/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-h-curious-dusk.md:32` |
 | **E1–E5 reactivation** | 🟢 user approved 2026-04-28 (today) via v2 plan Iter 21–26 | `~/me/planning/claude-plans/20m-keen-giraffe.md` |
 | DS-Drift Phase 0 hex audit | ✅ complete (90 unique hex, 75.6% token ratio) | `audits/2026-04-28-production-css-drift.md` |
@@ -186,10 +186,6 @@ Once this PR is in Draft and reviewed:
 |---|---|---|
 | `2026-04-28-production-css-drift.md` | 2026-04-27 | Iter 2/3 baseline numbers |
 | `2026-04-28-orphan-triage.md` | 2026-04-28 | none (orphans cleared) |
-| `2026-04-29-c1-board-zone-audit.md` | 2026-04-29 | none (C1 covered pre-v2) |
 | `2026-04-29-o4-cost-latency-availability.md` | 2026-04-29 | none (backend-blocked) |
 | `2026-04-29-phase-b-i0-backbone.md` | 2026-04-29 | none |
-| `2026-04-29-phase2-closure.md` | 2026-04-29 | §2 of this audit |
-| `2026-04-29-phase2-implementation-gap.md` | 2026-04-29 | none |
-| `2026-04-29-remaining-zones-audit.md` | 2026-04-29 | none |
 | `spec-compliance-2026-04*.md` | 2026-04 | Iter 16 sigil |

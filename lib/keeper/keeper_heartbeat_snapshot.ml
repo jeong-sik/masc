@@ -92,11 +92,8 @@ let write_heartbeat_snapshot
       ~primary_model_max_tokens:max_runtime_context
       ~base_dir
   in
-  (* Fallback: when OAS checkpoint is absent (e.g. after server restart
-     mid-turn), load messages from history.jsonl to recover continuity.
-     This prevents the "orphan user" problem where interrupted turns
-     leave user-only entries and continuity_summary stays empty forever.
-     Read is bounded to avoid large allocations during heartbeats. *)
+  (* When the OAS checkpoint is absent (for example after a restart during a
+     turn), load bounded message history for diagnostic metrics only. *)
   let messages_for_continuity = match ctx_opt with
     | Some c -> Keeper_context_runtime.messages_of_context c
     | None ->
@@ -188,77 +185,33 @@ let write_heartbeat_snapshot
        messages)
   in
   let c_messages = messages_for_continuity in
-  let latest_user_message =
-    latest_message_content_by_role ~role:Agent_sdk.Types.User c_messages
-  in
-  let latest_assistant_message =
-    latest_message_content_by_role ~role:Agent_sdk.Types.Assistant c_messages
-    in
-    let continuity_snapshot = latest_state_snapshot_from_messages c_messages in
-    let continuity_summary =
-      match continuity_snapshot with
-      | Some s -> keeper_state_snapshot_to_summary_text s
-      | None ->
-        continuity_fallback_summary_text
-          ~continuity_summary:meta_current.continuity_summary
-          ~last_continuity_update_ts:meta_current.runtime.last_continuity_update_ts
-    in
-    let repetition_risk =
-      repetition_risk_score ~messages:c_messages ~candidate_reply:None
-    in
-    let goal_alignment =
-      goal_alignment_score
-        ~meta:meta_current
-        ~user_message:latest_user_message
-        ~assistant_reply:latest_assistant_message
-    in
-    let response_alignment =
-      match latest_user_message, latest_assistant_message with
-      | Some user_message, Some assistant_message ->
-        jaccard_similarity user_message assistant_message
-      | _ ->
-        (* Unmeasurable (status_tick, heartbeat, empty reply): use the
-           marker [1.0] so the plan gate [<= 0.100] and guardrail gate
-           [<= floor] do NOT fire. [0.0] was a permissive default that
-           conflated "no alignment measurable" with "no alignment at
-           all", triggering auto_plan on every status_tick (#10012).
-           CLAUDE.md anti-pattern #2: Unknown → Permissive Default. *)
-        1.0
-    in
-    (* status_tick / heartbeat turns lack a user/assistant pair, so the 0.0
-       fallbacks above are markers, not measurements. Mark the snapshot
-       non-measurable and let Keeper_guard fail-closed on similarity gates. *)
-    let similarity_measurable =
-      Option.is_some latest_user_message
-      && Option.is_some latest_assistant_message
-    in
-    let context_ratio_v = match ctx_opt with
+  let context_ratio_v = match ctx_opt with
       | Some c -> Keeper_context_runtime.context_ratio c
       | None -> 0.0
-    in
-    let message_count_v = match ctx_opt with
+  in
+  let message_count_v = match ctx_opt with
       | Some c -> Keeper_context_runtime.message_count c
       | None -> List.length c_messages
-    in
-    let token_count_v = match ctx_opt with
+  in
+  let token_count_v = match ctx_opt with
       | Some c -> Keeper_context_runtime.token_count c
       | None -> 0
-    in
-    let turn_fail_count =
+  in
+  let turn_fail_count =
       Keeper_registry.get_turn_failures
         ~base_path:ctx.config.base_path
         meta_current.name
-    in
-    let since_last_compaction_sec =
+  in
+  let since_last_compaction_sec =
       if meta_current.runtime.compaction_rt.last_ts <= 0.0
       then now_ts
       else max 0.0 (now_ts -. meta_current.runtime.compaction_rt.last_ts)
-    in
-    let since_last_handoff_sec =
+  in
+  let since_last_handoff_sec =
       if meta_current.runtime.last_handoff_ts <= 0.0
       then now_ts
       else max 0.0 (now_ts -. meta_current.runtime.last_handoff_ts)
-    in
+  in
     (* RFC-0002: build measurement_snapshot via pure capture function.
        Timing/failure inputs now come from the live keepalive loop and
        registry so audit reflects the real runtime decision surface. *)
@@ -270,20 +223,6 @@ let write_heartbeat_snapshot
       ; handoff_threshold = meta_current.handoff_threshold
       ; handoff_cooldown_sec = meta_current.handoff_cooldown_sec
       ; auto_handoff_enabled = meta_current.auto_handoff
-      ; reflect_repetition_threshold =
-          0.86
-      ; plan_goal_alignment_threshold =
-          Keeper_config.keeper_rule_plan_goal_alignment_threshold ()
-      ; plan_response_alignment_threshold =
-          Keeper_config.keeper_rule_plan_response_alignment_threshold ()
-      ; guardrail_repetition_threshold =
-          Keeper_config.keeper_rule_guardrail_repetition_threshold ()
-      ; guardrail_goal_alignment_threshold =
-          Keeper_config.keeper_rule_guardrail_goal_alignment_threshold ()
-      ; guardrail_response_alignment_threshold =
-          Keeper_config.keeper_rule_guardrail_response_alignment_threshold ()
-      ; guardrail_context_threshold =
-          Keeper_config.keeper_rule_guardrail_context_threshold ()
       ; max_consecutive_hb_failures = max_consecutive_heartbeat_failures ()
       ; max_consecutive_turn_failures = max_consecutive_turn_failures ()
       ; model_ratio_multiplier = 1.0
@@ -307,10 +246,6 @@ let write_heartbeat_snapshot
           (match ctx_opt with
            | Some c -> Keeper_context_core.max_tokens_of_context c
            | None -> max_runtime_context)
-        ~repetition_risk
-        ~goal_alignment
-        ~response_alignment
-        ~similarity_measurable
         ~now_ts
         ~idle_seconds:0
         ~since_last_compaction_sec
@@ -321,9 +256,7 @@ let write_heartbeat_snapshot
         ()
     in
     let guard_events = Keeper_guard.evaluate measurement in
-    let auto_rules =
-      keeper_auto_rule_eval_of_measurement ~events:guard_events measurement
-    in
+    let context_actions = Keeper_guard.context_actions measurement in
     let selected_guard_event = Keeper_guard.prioritized_event guard_events in
     (* RFC-0002: dispatch Context_measured event through state machine *)
     let () =
@@ -337,33 +270,12 @@ let write_heartbeat_snapshot
           context_ratio = context_ratio_v;
           message_count = message_count_v;
           token_count = token_count_v;
-          auto_rules = {
-            Keeper_state_machine.reflect = auto_rules.reflect;
-            plan = auto_rules.plan;
-            compact = auto_rules.compact;
-            handoff = auto_rules.handoff;
-            guardrail_stop = auto_rules.guardrail_stop;
-            guardrail_reason = auto_rules.guardrail_reason;
-            goal_drift = auto_rules.goal_drift;
+          context_actions = {
+            Keeper_state_machine.compact = context_actions.compact;
+            handoff = context_actions.handoff;
           };
         })
     in
-    (* B1: Guard → Thompson bridge. When guardrail fires, record a negative
-       signal in Thompson β. Penalty cap 1/cycle is naturally enforced: guard
-       evaluates once per heartbeat call. Gated by MASC_DECISION_LAYER_LEVEL >= 2. *)
-    if auto_rules.guardrail_stop
-       && Keeper_decision_audit.decision_layer_level () >= 2
-    then
-      (try Thompson_sampling.record_guard_penalty ~agent_name:meta_current.name
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string HeartbeatFailures)
-           ~labels:[("keeper", meta_current.name); ("site", "thompson_penalty")]
-           ();
-         Log.Keeper.warn "guard→thompson penalty failed for %s: %s"
-           meta_current.name (Printexc.to_string exn));
     let snapshot =
       `Assoc
         [ "ts", `String (now_iso ())
@@ -406,11 +318,6 @@ let write_heartbeat_snapshot
              | Some c -> Keeper_context_core.max_tokens_of_context c
              | None -> max_runtime_context)
         ; "message_count", `Int message_count_v
-        ; ( "continuity_state"
-          , match continuity_snapshot with
-            | None -> `Null
-            | Some s -> keeper_state_snapshot_to_json s )
-        ; "continuity_summary", `String continuity_summary
         ; "compacted", `Bool false
         ; (* #9943: status_tick is a snapshot, not a compaction
              event. Emitting [before = after = token_count_v]
@@ -427,19 +334,11 @@ let write_heartbeat_snapshot
         ; "work_kind", `String "status_tick"
         ; "snapshot_source", `String "keeper_context_status"
         ; "memory_check", memory_check_default_json ()
-        ; "auto_rules", keeper_auto_rule_eval_to_json auto_rules
-        ; "reflection", keeper_reflection_payload_of_auto_rules auto_rules
-        ; "auto_reflect", `Bool auto_rules.reflect
-        ; "auto_plan", `Bool auto_rules.plan
-        ; "auto_compact", `Bool auto_rules.compact
-        ; "auto_handoff", `Bool auto_rules.handoff
-        ; "repetition_risk", `Float repetition_risk
-        ; "goal_alignment", `Float goal_alignment
-        ; "response_alignment", `Float response_alignment
-        ; "goal_drift", `Float auto_rules.goal_drift
-        ; "guardrail_stop", `Bool auto_rules.guardrail_stop
-        ; ( "guardrail_stop_reason"
-          , Json_util.string_opt_to_json auto_rules.guardrail_reason )
+        ; ( "context_actions"
+          , `Assoc
+              [ "compact", `Bool context_actions.compact
+              ; "handoff", `Bool context_actions.handoff
+              ] )
         ; "handoff", `Assoc [ "performed", `Bool false ]
         ; "stage_timing", Keeper_keepalive_signal.stage_timing_to_json ~ring:timing_ring ~count:timing_filled
         ]

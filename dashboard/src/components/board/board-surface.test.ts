@@ -11,7 +11,7 @@ import {
 } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
-import { createPost, sendBroadcast } from '../../api'
+import { createPost } from '../../api'
 import { requestBoardContextInference } from '../../api/board'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
 import { PAGE_SIZE, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, selectedBoardPostId, boardFilterMode, boardComposerMode } from './board-state'
@@ -662,23 +662,6 @@ describe('BoardSurface Component', () => {
     expect(screen.getByLabelText(/기여자 품질 100점/)).toHaveTextContent('품질 100')
   })
 
-  it('renders a state block panel when the post body contains one', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-state',
-        title: 'State transition',
-        body: '[STATE]\nfrom: idle\nto: running\nctx: ops\naction: start\n[/STATE]',
-        author: 'ani1999',
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByTestId('bd-stateblock')).toBeInTheDocument()
-    expect(screen.getByText('상태 전이')).toBeInTheDocument()
-    expect(screen.getByText(/idle/)).toBeInTheDocument()
-  })
-
   it('renders sub-board rail and filters posts by sub-board', () => {
     boardHearths.value = [
       { name: 'ops', count: 1 },
@@ -717,20 +700,18 @@ describe('BoardSurface Component', () => {
     expect(within(queue).queryByText('2')).not.toBeInTheDocument()
   })
 
-  it('renders filter chips for state and moderation', () => {
+  it('renders filter chips for all posts and moderation', () => {
     boardPosts.value = [
-      makePost({ id: 'post-state', title: 'State', body: '[STATE]\nGoal: x\n[/STATE]', author: 'keeper' }),
       makePost({ id: 'post-mod', title: 'Mod', body: 'mod', author: 'keeper', moderation_status: 'flagged' }),
     ]
 
     render(h(BoardSurface, null))
 
     expect(screen.getByTestId('bd-filter-all')).toBeInTheDocument()
-    expect(screen.getByTestId('bd-filter-state')).toBeInTheDocument()
     expect(screen.getByTestId('bd-filter-mod')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId('bd-filter-state'))
-    expect(boardFilterMode.value).toBe('state')
+    fireEvent.click(screen.getByTestId('bd-filter-mod'))
+    expect(boardFilterMode.value).toBe('mod')
   })
 
   it('changes the server-backed board sort mode from the feed head', () => {
@@ -789,8 +770,6 @@ describe('BoardSurface Component', () => {
     fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
     expect(boardComposerMode.value).toBe('mention')
 
-    fireEvent.click(screen.getByTestId('bd-comp-tab-state'))
-    expect(boardComposerMode.value).toBe('state')
   })
 
   it('starts the mobile composer shell collapsed and toggles it open', () => {
@@ -981,32 +960,6 @@ describe('BoardSurface Component', () => {
     expect(send).toBeDisabled()
   })
 
-  it('inserts a mobile state template before quick broadcast submit', () => {
-    const broadcastMock = vi.mocked(sendBroadcast)
-    render(h(BoardSurface, null))
-
-    fireEvent.click(screen.getByTestId('bd-comp-tab-state'))
-    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
-    const body = screen.getByTestId('bd-composer-mobile-body') as HTMLTextAreaElement
-    const send = screen.getByTestId('bd-composer-mobile-send')
-
-    fireEvent.click(screen.getByLabelText('Insert state block'))
-    expect(body.value).toContain('[STATE]')
-    expect(body.value).toContain('Goal: ')
-    expect(send).toBeDisabled()
-
-    fireEvent.input(screen.getByTestId('bd-composer-mobile-body'), {
-      target: { value: body.value.replace('Goal: ', 'Goal: mobile parity') },
-    })
-    expect(send).not.toBeDisabled()
-    fireEvent.click(send)
-
-    expect(broadcastMock).toHaveBeenCalledWith(
-      'dashboard-test',
-      '[STATE]\nGoal: mobile parity\nDONE: \nNEXT: \nDecisions: \nOpenQuestions: \nConstraints: \n[/STATE]',
-    )
-  })
-
   it('routes the mention inbox focus to the message surface', () => {
     route.value = { params: { focus: 'mention-inbox' } } as any
     messages.value = [{ id: 'm-1', from: 'sojin', content: '@dashboard needs review', timestamp: new Date().toISOString() }]
@@ -1023,15 +976,6 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.getByRole('heading', { name: 'Workspace timeline' })).toBeInTheDocument()
-  })
-
-  it('routes the state-block focus to the message surface', () => {
-    route.value = { params: { focus: 'state-block' } } as any
-    messages.value = [{ id: 'm-state', from: 'sangsu', content: '[STATE]\nGoal: keep context\n[/STATE]', timestamp: new Date().toISOString() }]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByRole('heading', { name: 'State-block messages' })).toBeInTheDocument()
   })
 
   it('routes the curation focus to the board curation surface', async () => {

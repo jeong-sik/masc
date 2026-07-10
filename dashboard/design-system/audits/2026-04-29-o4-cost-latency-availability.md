@@ -46,7 +46,6 @@ export interface DashboardShellResponse {
   counts?: { agents?, tasks?, keepers?, total_runtimes? }
   configured_keepers?: number
   providers?: Record<string, unknown>
-  meta_cognition?: ... | null
   auth?: ... | null
   config_resolution?: ... | null
   runtime_resolution?: ... | null

@@ -23,6 +23,10 @@ type stop_reason =
        Progress is checkpointed and the keeper resumes on the next cycle — the
        same disposition as [MutationBoundaryReached], but a distinct reason so
        receipts do not conflate an on-demand yield with a budget/mutation stop. *)
+  | Yielded_to_durable_stimulus of { turns_used : int }
+    (* The current autonomous cycle completed at least one OAS provider turn,
+       then released its lane because another durable stimulus was queued
+       behind the stimulus already leased by this cycle. *)
 
 type config =
   { name : string

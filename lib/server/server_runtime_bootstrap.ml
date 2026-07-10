@@ -554,7 +554,6 @@ let lazy_startup_plan () =
             "reconcile_active_agents";
             "prompt_bootstrap";
             "keeper_history_migration";
-            "keeper_meta_canonicalize";
           ];
       };
       {
@@ -995,8 +994,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "prompt_bootstrap" -> fun () -> bootstrap_prompt_state state
         | "keeper_history_migration" -> fun () ->
             startup_migrate_keeper_histories state
-        | "keeper_meta_canonicalize" -> fun () ->
-            startup_canonicalize_keeper_metas state
         | "telemetry_warmup" -> fun () ->
             warm_tool_registry_from_telemetry state
         | "tool_metrics_restore" -> fun () ->
@@ -1366,6 +1363,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
            cold-start diagnostics do not contend with the shell's first render. *)
         Server_routes_http_runtime.start_full_health_snapshot_refresh_loop ~sw ~clock);
       start_lazy_startup state;
+      (* Strip retired keys from persisted keeper meta before any keeper
+         loop starts writing meta: the pass rewrites files without CAS, so
+         it must run ahead of concurrent meta writers (it is a synchronous
+         one-shot over at most a few dozen small files). *)
+      startup_canonicalize_keeper_metas state;
       (* RFC-0206: runtime catalog startup validation removed; Runtime.init_default
          already fail-fasts on an invalid runtime config at boot. *)
       Server_bootstrap_loops.start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state

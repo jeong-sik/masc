@@ -14,9 +14,12 @@ open Alcotest
 open Masc
 
 let temp_dir () =
+  (* PID in the name isolates leftovers from a killed previous run —
+     unseeded Random repeats the same sequence every process start. *)
   let dir =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "test_meta_canonicalize_%d" (Random.int 1_000_000))
+      (Printf.sprintf "test_meta_canonicalize_%d_%d" (Unix.getpid ())
+         (Random.int 1_000_000))
   in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   dir
@@ -30,7 +33,9 @@ let cleanup_dir dir =
       end
       else Sys.remove path
   in
-  rm dir
+  (* Swallow cleanup failures: Fun.protect would otherwise wrap them in
+     Finally_raised and mask the assertion that actually failed. *)
+  try rm dir with _ -> ()
 
 let with_workspace f =
   Eio_main.run @@ fun env ->
@@ -64,8 +69,10 @@ let write_keeper config name =
   | Error msg -> fail ("write_meta failed: " ^ msg)
 
 (* Re-create the exact on-disk shape #23929 left behind: a valid meta
-   snapshot plus retired top-level keys the serializer no longer emits. *)
-let inject_retired_keys config name =
+   snapshot plus retired top-level keys the serializer no longer emits.
+   [extra] models parser-consumed TOML-owned keys (config_field_names)
+   that a legacy file may still carry — those must survive the pass. *)
+let inject_keys ?(extra = []) config name =
   let path = keeper_file config name in
   match Yojson.Safe.from_string (Fs_compat.load_file path) with
   | `Assoc fields ->
@@ -75,10 +82,18 @@ let inject_retired_keys config name =
          @ [
              ("last_continuity_update_ts", `Float 1780000000.0);
              ("continuity_summary", `String "legacy continuity prose");
-           ])
+           ]
+         @ extra)
     in
     Fs_compat.save_file path (Yojson.Safe.pretty_to_string polluted)
   | _ -> fail "persisted keeper meta is not a JSON object"
+
+let inject_retired_keys config name = inject_keys config name
+
+let assoc_field json key =
+  match json with
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
 
 let read_version config name =
   match Keeper_meta_store.read_meta config name with
@@ -105,11 +120,34 @@ let test_drops_retired_keys_and_preserves_canonical_fields () =
        meta.Keeper_meta_contract.name;
      check string "canonical agent_name preserved" "keeper-stale-agent"
        meta.Keeper_meta_contract.agent_name;
-     check int "rewrite went through the CAS path (version bumped)"
-       (version_before + 1)
+     check int "raw filter does not bump meta_version"
+       version_before
        meta.Keeper_meta_contract.meta_version
    | Ok None -> fail "keeper meta vanished after canonicalize"
    | Error msg -> fail ("read_meta after canonicalize failed: " ^ msg))
+
+(* P2 regression (verify workflow wf_9a9ec740): "unknown to the serializer"
+   is not "retired" — the parser still consumes TOML-owned keys the
+   serializer never emits. A legacy file carrying autoboot_enabled=false
+   plus retired continuity keys must lose ONLY the continuity keys. *)
+let test_parser_consumed_config_keys_survive_the_pass () =
+  with_workspace @@ fun config ->
+  write_keeper config "dormant";
+  inject_keys config "dormant" ~extra:[ ("autoboot_enabled", `Bool false) ];
+  Keeper_meta_store.canonicalize_persisted_meta_files config;
+  let json = raw_json config "dormant" in
+  check bool "retired continuity keys dropped" true
+    (assoc_field json "last_continuity_update_ts" = None
+     && assoc_field json "continuity_summary" = None);
+  (match assoc_field json "autoboot_enabled" with
+   | Some (`Bool false) -> ()
+   | Some other ->
+     fail
+       ("autoboot_enabled value changed: " ^ Yojson.Safe.to_string other)
+   | None ->
+     fail
+       "autoboot_enabled destroyed by canonicalize — dormant keeper would \
+        autoboot on next boot")
 
 let test_clean_files_are_not_rewritten () =
   with_workspace @@ fun config ->
@@ -168,8 +206,10 @@ let () =
     [
       ( "canonicalize_persisted_meta_files",
         [
-          test_case "drops retired keys, preserves canonical fields, CAS bump"
+          test_case "drops retired keys, preserves canonical fields"
             `Quick test_drops_retired_keys_and_preserves_canonical_fields;
+          test_case "parser-consumed config keys survive the pass" `Quick
+            test_parser_consumed_config_keys_survive_the_pass;
           test_case "clean files are not rewritten" `Quick
             test_clean_files_are_not_rewritten;
           test_case "second pass is a no-op" `Quick test_second_pass_is_a_no_op;

@@ -125,18 +125,23 @@ val write_meta :
 (** [true] iff [msg] matches [version_conflict_re]. *)
 val is_version_conflict_error : string -> bool
 
-(** Rewrite persisted keeper meta files whose raw JSON carries top-level
-    keys outside the canonical serializer key set — retired fields left
-    behind by schema removals (e.g. the #23929 continuity purge left
-    [last_continuity_update_ts]/[continuity_summary] in [.masc/keepers/],
-    re-warning on every read until the next save). The canonical key set
-    ([Keeper_meta_json.canonical_keeper_meta_key_names], derived from the
-    serializer) is the single source of truth, so there is no per-key
-    retirement list to forget. Rewrites go through {!write_meta} (CAS): a
-    version conflict means a concurrent writer already re-serialized the
-    file canonically, so the conflict is logged and skipped — both
-    outcomes converge. Unreadable or unparsable files are logged and
-    preserved untouched. Intended as a boot-time pass. *)
+(** Strip retired top-level keys from persisted keeper meta files —
+    fields left behind by schema removals (e.g. the #23929 continuity
+    purge left [last_continuity_update_ts]/[continuity_summary] in
+    [.masc/keepers/], re-warning on every read until the next save;
+    dormant keepers never save). A key is retired only when neither
+    codec side knows it: not in the serializer-derived canonical set
+    ([Keeper_meta_json.canonical_keeper_meta_key_names]) and not in the
+    parser-consumed TOML-owned set
+    ([Keeper_meta_json.config_field_names]) — the latter (e.g.
+    [autoboot_enabled]) must survive even though the serializer never
+    emits it. Retired keys are filtered out of the raw JSON in place
+    ([Keeper_fs.save_json_atomic]); no re-serialization, no
+    [meta_version] bump, every surviving field keeps its exact on-disk
+    value. Unreadable or parser-rejected files are logged and preserved
+    untouched. Call once at boot BEFORE keeper loops start — the write
+    is not CAS-guarded, so it relies on running ahead of concurrent
+    meta writers. *)
 val canonicalize_persisted_meta_files : Workspace.config -> unit
 
 (** Retry [write_meta] on CAS version conflicts using caller-declared

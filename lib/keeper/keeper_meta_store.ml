@@ -379,6 +379,18 @@ let is_version_conflict_error msg =
 
 (* ── Boot-time canonicalization ─────────────────────────── *)
 
+(* A key is retired only when neither side of the codec knows it: the
+   serializer does not emit it (not canonical) AND the parser does not
+   consume it. The parser-consumed-but-never-emitted set is exactly the
+   TOML-owned [config_field_names] (e.g. [autoboot_enabled], [goal],
+   [sandbox_profile]) — dropping those would destroy still-honored
+   values, so they are preserved even though the serializer ignores
+   them. *)
+let retired_keeper_meta_keys json =
+  unknown_keeper_meta_keys json
+  |> List.filter (fun key -> not (List.mem key config_field_names))
+;;
+
 let canonicalize_persisted_meta_files config =
   persisted_keeper_names config
   |> List.iter (fun name ->
@@ -387,31 +399,34 @@ let canonicalize_persisted_meta_files config =
     | Error msg ->
       Log.Keeper.warn "keeper meta canonicalize: unreadable %s: %s" path msg
     | Ok json ->
-      (match unknown_keeper_meta_keys json with
+      (match retired_keeper_meta_keys json with
        | [] -> ()
-       | unknown ->
+       | retired ->
          (match meta_of_json json with
           | Error msg ->
-            (* A file we cannot fully represent is preserved untouched for
-               operator repair; re-serializing it would destroy the canonical
-               fields alongside the unknown ones. *)
+            (* A file the strict parser rejects is preserved untouched for
+               operator repair; editing it could destroy whatever evidence
+               explains the rejection. *)
             Log.Keeper.warn
               "keeper meta canonicalize: parse failed for %s, leaving file untouched: %s"
               path
               msg
-          | Ok meta ->
-            (match write_meta config meta with
+          | Ok _ ->
+            (* Drop only the retired keys from the raw JSON instead of
+               re-serializing the parsed record: every other field —
+               including parser-consumed TOML-owned values the serializer
+               never emits — keeps its exact on-disk value, and
+               [meta_version] is not bumped. *)
+            let cleaned = drop_assoc_keys retired json in
+            (match Keeper_fs.save_json_atomic path cleaned with
              | Ok () ->
                Log.Keeper.info
                  "canonicalized keeper meta %s: dropped retired keys: %s"
                  path
-                 (String.concat ", " unknown)
+                 (String.concat ", " retired)
              | Error msg ->
-               (* A CAS conflict means a concurrent writer re-serialized the
-                  file first; write_meta always emits the canonical key set,
-                  so both outcomes converge on a clean file. *)
-               Log.Keeper.info
-                 "keeper meta canonicalize: skipped %s (concurrent writer wins): %s"
+               Log.Keeper.warn
+                 "keeper meta canonicalize: rewrite failed for %s (file unchanged, unknown-key warning persists): %s"
                  path
                  msg))))
 ;;

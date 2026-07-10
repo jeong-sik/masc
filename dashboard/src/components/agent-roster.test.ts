@@ -1216,6 +1216,125 @@ describe('AgentRoster live-only cards', () => {
     expect(presence.textContent).toContain('대기 중')
   })
 
+  // #16 (38-bug campaign PR-5): a keeper actively executing a *reactively
+  // woken* turn must render distinctly from one on its own proactive
+  // cadence — the whole point of exposing typed `run_state`.
+  it('surfaces known and future wake causes without a silent default', async () => {
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+    fleetCompositeSnapshot.value = {
+      generated_at: 1,
+      count: 1,
+      snapshots: [
+        makeCompositeSnapshot({
+          keeper: 'sangsu',
+          is_live: true,
+          turn_phase: 'executing',
+          live_turn: {
+            turn_id: 686,
+            started_at: 1_781_184_817,
+            last_progress_at: 1_781_184_843,
+            last_progress_kind: 'sse_thinking_delta',
+          },
+          run_state: {
+            kind: 'in_turn',
+            wake_kind: 'woken',
+            stimulus_kinds: ['board_signal'],
+            started_at: 1_781_184_817,
+            active_tool_count: 1,
+          },
+        }),
+      ],
+    }
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const presence = row.querySelector('[data-agent-presence]') as HTMLElement
+    expect(presence.dataset.presenceRawStatus).toBe('busy')
+    expect(presence.textContent).toContain('executing live')
+    expect(presence.textContent).toContain('반응형')
+
+    fleetCompositeSnapshot.value = {
+      ...fleetCompositeSnapshot.value,
+      snapshots: [
+        makeCompositeSnapshot({
+          keeper: 'sangsu',
+          is_live: true,
+          turn_phase: 'executing',
+          live_turn: {
+            turn_id: 687,
+            started_at: 1_781_184_900,
+            last_progress_at: 1_781_184_901,
+            last_progress_kind: 'sse_thinking_delta',
+          },
+          run_state: {
+            kind: 'in_turn',
+            wake_kind: 'future_scheduler_kind',
+            stimulus_kinds: [],
+            started_at: 1_781_184_900,
+            active_tool_count: 0,
+          },
+        }),
+      ],
+    }
+    await flushUi()
+
+    expect(presence.textContent).toContain('기원 future_scheduler_kind')
+    expect(presence.textContent).not.toContain('자율')
+  })
+
+  it('surfaces the queue depth from run_state for a waiting keeper', async () => {
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+    fleetCompositeSnapshot.value = {
+      generated_at: 1,
+      count: 1,
+      snapshots: [
+        makeCompositeSnapshot({
+          keeper: 'sangsu',
+          is_live: false,
+          turn_phase: 'idle',
+          live_turn: null,
+          run_state: { kind: 'waiting', queue_depth: 2, skip_reasons: ['cooldown_pending'] },
+        }),
+      ],
+    }
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const presence = row.querySelector('[data-agent-presence]') as HTMLElement
+    expect(presence.dataset.presenceRawStatus).toBe('idle')
+    expect(presence.textContent).toContain('큐 2')
+  })
+
   it('uses heartbeat and shared runtime labels for cards when action/model fallbacks disagree', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-24T18:00:00Z'))

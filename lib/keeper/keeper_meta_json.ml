@@ -191,27 +191,28 @@ let canonical_keeper_meta_key_names =
     fallback_canonical_keeper_meta_key_names
 ;;
 
-let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
+let unknown_keeper_meta_keys (json : Yojson.Safe.t) : string list =
   match json with
   | `Assoc fields ->
-    let unknown =
-      fields
-      |> List.filter_map (fun (key, _) ->
-        if List.mem key canonical_keeper_meta_key_names
-        then None
-        else Some key)
-      |> dedupe_keep_order
-    in
-    (match unknown with
-     | [] -> ()
-     | _ :: _ ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string MetaJsonFailures)
-         ~labels:[("site", "unknown_keys")]
-         ();
-       Log.Keeper.warn
-         "keeper meta %s has unknown keys: %s"
-         path
-         (String.concat ", " unknown))
-  | _ -> ()
+    fields
+    |> List.filter_map (fun (key, _) ->
+      if List.mem key canonical_keeper_meta_key_names
+      then None
+      else Some key)
+    |> dedupe_keep_order
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> []
+;;
+
+let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
+  match unknown_keeper_meta_keys json with
+  | [] -> ()
+  | unknown ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MetaJsonFailures)
+      ~labels:[("site", "unknown_keys")]
+      ();
+    Log.Keeper.warn
+      "keeper meta %s has unknown keys: %s"
+      path
+      (String.concat ", " unknown)
 ;;

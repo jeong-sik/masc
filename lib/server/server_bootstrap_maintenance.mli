@@ -2,8 +2,9 @@ val fork_logged_fiber :
   sw:Eio.Switch.t -> on_error:(exn -> unit) -> (unit -> unit) -> unit
 val log_server_fiber_crash : string -> exn -> unit
 
-val provider_cfg_for_memory_os_consolidation :
-  unit -> Llm_provider.Provider_config.t option
+val runtime_for_memory_os_consolidation : unit -> Runtime.t option
+(** Resolve the selected consolidation runtime without discarding its identity;
+    an unknown explicit selection is logged before falling back to the default. *)
 
 val run_memory_os_consolidation_tick :
   ?complete:Keeper_memory_os_consolidation_runtime.complete_fn ->
@@ -11,6 +12,7 @@ val run_memory_os_consolidation_tick :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  runtime_id:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   now:float ->
   unit ->

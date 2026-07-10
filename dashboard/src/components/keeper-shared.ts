@@ -19,6 +19,7 @@ import {
   hydrateKeeperStatus,
   hydrateKeeperChatHistory,
   loadFullKeeperHistory,
+  interruptKeeperTurn,
   isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
   recoverKeeperRuntime,
@@ -72,7 +73,14 @@ import {
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
+import { loadTools, toolsData, toolsLoading } from './tools/tool-state'
+import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
+
+// Mirrors `LANE_REFRESH_MS` in keeper-workspace/keeper-lane-strip.ts. That
+// const is module-local there, so we keep the same 15 s cadence here rather
+// than exporting it cross-file for a single consumer.
+const BUSY_REFRESH_MS = 15_000
 
 
 function GhostButton({
@@ -490,6 +498,28 @@ function QueueItemCard({ keeperName, msg, onMutate }: QueueItemCardProps) {
   `
 }
 
+// ── Busy toolbar (turn-interrupt affordance) ─────────────
+
+function BusyToolbar({
+  keeperName,
+  onInterrupt,
+}: {
+  keeperName: string
+  onInterrupt: () => void
+}) {
+  return html`
+    <div
+      class="mb-2 flex items-center justify-between gap-2 text-2xs v2-monitoring-row"
+      data-keeper-name=${keeperName}
+    >
+      <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 font-medium text-[var(--color-status-warn)]">
+        busy
+      </span>
+      <${GhostButton} onClick=${onInterrupt}>현재 턴 중단<//>
+    </div>
+  `
+}
+
 // ── Conversation Panel ───────────────────────────────────
 
 export function KeeperConversationPanel({
@@ -517,6 +547,24 @@ export function KeeperConversationPanel({
   const [queueVersion, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion(v => v + 1)
   const isDrainingRef = useRef(false)
+
+  // Keep the shared keeper waiting inventory live on surfaces that do NOT
+  // render KeeperLaneSection (which is what normally polls it every 15 s).
+  // Mirror the lane strip's visibility-aware auto-refresh: pause while the tab
+  // is hidden, refresh immediately on focus/return, and return the cleanup so
+  // the busy chip / interrupt button cannot freeze on a stale snapshot.
+  useEffect(() => {
+    if (!toolsData.value && !toolsLoading.value) void loadTools()
+    return setupVisibleAutoRefresh(() => {
+      void loadTools()
+    }, BUSY_REFRESH_MS)
+  }, [])
+
+  const inventoryEntry = useMemo(() => {
+    const inv = toolsData.value?.keeper_waiting_inventory
+    if (!inv) return null
+    return inv.keepers.find(k => k.keeper_name === keeperName) ?? null
+  }, [keeperName, toolsData.value])
 
   // External-system sync: merge the server-persisted transcript
   // (.masc/keeper_chat/<name>.jsonl) on mount so the conversation
@@ -551,6 +599,7 @@ export function KeeperConversationPanel({
   )
   const hiddenCount = rawThread.length - thread.length
   const sending = keeperSending.value[keeperName] ?? false
+  const isKeeperBusy = Boolean(inventoryEntry?.state === 'busy' && !sending)
   const visibleThread = useMemo(
     () =>
       sending && !thread.some(isActiveAssistantEntry)
@@ -628,6 +677,13 @@ export function KeeperConversationPanel({
   }
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   const composerDisabled = !keeperName || chatAccess.blocked
+  const composerPlaceholder = chatAccess.blocked
+    ? '현재 actor는 direct keeper chat 권한이 없습니다'
+    : isKeeperBusy
+      ? '현재 턴 실행 중 — 지금 보낸 메시지는 현재 턴 종료 후 대기열에서 처리됩니다'
+      : sending
+        ? '응답 중 — 지금 보낸 메시지는 대기열에 추가됩니다'
+        : placeholder
 
   // 1 s ticker while a stream is active so the stall badge can compare
   // against wall-clock time. External-system sync (timer), not data init.
@@ -749,6 +805,28 @@ export function KeeperConversationPanel({
     bumpQueue()
   }
 
+  // Busy/interrupt affordance shared by all three composer layouts. Defined
+  // here (not as a module-level helper) so it closes over keeperName/showToast/
+  // interruptKeeperTurn and the workspace/primary/default branches cannot drift
+  // apart again — the default branch previously dropped this entirely.
+  const renderBusyToolbar = () => html`
+    <${BusyToolbar}
+      keeperName=${keeperName}
+      onInterrupt=${() => {
+        void interruptKeeperTurn(keeperName)
+          .then(cancelled => {
+            showToast(
+              cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
+              cancelled ? 'success' : 'warning',
+            )
+          })
+          .catch(() => {
+            showToast('현재 턴 중단에 실패했습니다', 'error')
+          })
+      }}
+    />
+  `
+
   if (layout === 'workspace') {
     // 3-pane workspace: identity + lifecycle live in the ChatHeader above
     // this panel, so the workspace layout drops the panel's own header and
@@ -853,15 +931,12 @@ export function KeeperConversationPanel({
                   </div>
                 `
               : null}
+            ${isKeeperBusy ? renderBusyToolbar() : null}
             <${ChatComposer}
               key=${keeperName}
               draftPersistKey=${keeperName}
               keeperLabel=${keeperName}
-              placeholder=${chatAccess.blocked
-                ? '현재 actor는 direct keeper chat 권한이 없습니다'
-                : sending
-                  ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
-                  : placeholder}
+              placeholder=${composerPlaceholder}
               disabled=${composerDisabled}
               streaming=${sending}
               streamStartedAt=${streamStartedAt}
@@ -972,15 +1047,12 @@ export function KeeperConversationPanel({
                 </div>
               `
             : null}
+          ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}
             key=${keeperName}
             draftPersistKey=${keeperName}
             keeperLabel=${keeperName}
-            placeholder=${chatAccess.blocked
-              ? '현재 actor는 direct keeper chat 권한이 없습니다'
-              : sending
-                ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
-                : placeholder}
+            placeholder=${composerPlaceholder}
             disabled=${composerDisabled}
             streaming=${sending}
             streamStartedAt=${streamStartedAt}
@@ -1088,15 +1160,12 @@ export function KeeperConversationPanel({
                 </div>
               `
             : null}
+          ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}
             key=${keeperName}
             draftPersistKey=${keeperName}
             keeperLabel=${keeperName}
-            placeholder=${chatAccess.blocked
-              ? '현재 actor는 direct keeper chat 권한이 없습니다'
-              : sending
-                ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
-                : placeholder}
+            placeholder=${composerPlaceholder}
             disabled=${composerDisabled}
             streaming=${sending}
             streamStartedAt=${streamStartedAt}

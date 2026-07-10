@@ -849,6 +849,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
+      (* The retired-key migration performs a raw atomic rewrite without version CAS.
+         Run it before [server_state := Some state] publishes mutation routes,
+         and before connectors, maintenance, or keeper loops can write meta.
+         This makes writer exclusion structural instead of relying on a
+         best-effort boot timing window. *)
+      startup_migrate_retired_keeper_meta_keys state;
       sync_admin_token_env state;
       sync_internal_keeper_token_env state;
       sync_bootable_keeper_credentials state;

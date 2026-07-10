@@ -112,13 +112,15 @@ let test_timeout_invokes_on_worker_aborted_exactly_once () =
           fail (Printf.sprintf "request record unreadable: %s" reason))))
 ;;
 
-let test_operator_cancel_before_start_invokes_on_worker_aborted () =
+let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
   with_temp_base (fun base_path ->
     Eio_main.run (fun env ->
       Eio.Switch.run (fun sw ->
         let clock = Eio.Stdenv.clock env in
         let aborted = ref [] in
         let f_was_called = ref false in
+        let worker_started, worker_started_resolver = Eio.Promise.create () in
+        let never, _never_resolver = Eio.Promise.create () in
         let request_id =
           Keeper_msg_async.submit
             ~clock
@@ -129,18 +131,14 @@ let test_operator_cancel_before_start_invokes_on_worker_aborted () =
             ~keeper_name:"terminal-event-operator-cancel"
             ~f:(fun () ->
               f_was_called := true;
-              Keeper_types_profile.tool_result_ok "should-not-run")
+              Eio.Promise.resolve worker_started_resolver ();
+              Eio.Promise.await never;
+              Keeper_types_profile.tool_result_ok "unreachable")
             ()
         in
-        (* No Eio operation has run between [submit] returning and this
-           call, so the daemon fiber it forked has not been scheduled yet:
-           the request is still [Queued] with no [active_switches] entry.
-           [cancel] marks it Cancelled directly on the polling table; once
-           the daemon fiber is scheduled it observes that pre-existing
-           Cancelled status via its own should_abort check and raises
-           [CancelledByOperator] without ever calling [f]. *)
+        Eio.Promise.await worker_started;
         let cancelled = Keeper_msg_async.cancel ~base_path request_id in
-        check bool "cancel accepted the still-queued request" true cancelled;
+        check bool "cancel accepted the running request" true cancelled;
         let fired =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
             not (List.is_empty !aborted))
@@ -149,13 +147,14 @@ let test_operator_cancel_before_start_invokes_on_worker_aborted () =
         Eio.Time.sleep clock 0.05;
         (match !aborted with
          | [ Keeper_msg_async.Worker_cancelled { cancelled_by; _ } ] ->
-           check string "cancelled_by is operator" "operator" cancelled_by
+           check bool "cancel source is typed operator request" true
+             (cancelled_by = Keeper_msg_async.Operator_request)
          | [] -> fail "on_worker_aborted was never invoked"
          | reasons ->
            fail
              (Printf.sprintf "on_worker_aborted fired %d times, expected 1"
                 (List.length reasons)));
-        check bool "f was never invoked for a pre-cancelled request" false !f_was_called)))
+        check bool "f was running before cancellation" true !f_was_called)))
 ;;
 
 let test_normal_completion_never_invokes_on_worker_aborted () =
@@ -194,8 +193,8 @@ let () =
     [ ( "on_worker_aborted"
       , [ test_case "timeout invokes on_worker_aborted exactly once" `Quick
             test_timeout_invokes_on_worker_aborted_exactly_once
-        ; test_case "operator cancel before start invokes on_worker_aborted" `Quick
-            test_operator_cancel_before_start_invokes_on_worker_aborted
+        ; test_case "operator cancel running worker invokes on_worker_aborted" `Quick
+            test_operator_cancel_running_worker_invokes_on_worker_aborted
         ; test_case "normal completion never invokes on_worker_aborted" `Quick
             test_normal_completion_never_invokes_on_worker_aborted
         ] )

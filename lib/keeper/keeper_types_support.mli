@@ -69,7 +69,6 @@ val keeper_raw_trace_turn_path : Workspace.config -> string -> string
 val prune_keeper_raw_trace_turn_files : Workspace.config -> string -> int
 
 val keeper_memory_bank_path : Workspace.config -> string -> string
-val keeper_progress_path : Workspace.config -> string -> string
 val keeper_generation_index_path : Workspace.config -> string -> string
 
 (** Per-trace session directory under [.masc/traces/<trace_id>]. *)

@@ -61,15 +61,20 @@ let is_direct_completion_provider
   match provider_cfg.kind with
   | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm | DashScope -> true
 
-let provider_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
+let provider_for_summary ~runtime_id (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
     | Some n when n > 0 -> Some (min n summary_max_tokens)
     | _ -> Some summary_max_tokens
   in
+  let temperature =
+    Runtime_inference.resolve_temperature
+      ~runtime_id
+      ~fallback:(fun () -> Runtime_provider_defaults.deterministic_temperature)
+  in
   { provider_cfg with
     max_tokens;
-    temperature = Some 0.0;
+    temperature = Some temperature;
     tool_choice = None;
     disable_parallel_tool_use = true;
   }
@@ -192,14 +197,14 @@ let summarize_with_provider
     ?(complete : complete_fn = default_complete)
     ?clock
     ?(timeout_sec = Env_config_governance.Inference.timeout_seconds)
-    ?(runtime_id = "")
+    ~runtime_id
     ~sw
     ~net
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~trace_id
     ~texts
     () : string option =
-  let provider_cfg = provider_for_summary provider_cfg in
+  let provider_cfg = provider_for_summary ~runtime_id provider_cfg in
   let messages = messages_for_summary ~trace_id ~texts in
   let result, outcome =
     match
@@ -252,7 +257,7 @@ let summarize_with_providers
     ?complete
     ?clock
     ?timeout_sec
-    ?(runtime_id = "")
+    ~runtime_id
     ~sw
     ~net
     ~providers

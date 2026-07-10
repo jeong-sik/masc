@@ -16,8 +16,13 @@ type outcome =
   | Skipped_empty  (** no visible response text to deliver *)
   | Failed of { kind : string; error : string }  (** the connector send returned an error *)
 
-(** [describe_outcome o] is a stable one-line tag for logs/observability. *)
+(** [describe_outcome o] is a human-readable one-line description for logs. *)
 val describe_outcome : outcome -> string
+
+(** [outcome_metric_label o] is the closed, low-cardinality label for the
+    continuation outcome counter. It intentionally excludes connector names
+    and failure details. *)
+val outcome_metric_label : outcome -> string
 
 (** The pure delivery decision, separated from the I/O so it can be tested
     without a live connector. *)

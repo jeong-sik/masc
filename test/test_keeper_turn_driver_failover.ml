@@ -145,6 +145,7 @@ endpoint = "http://127.0.0.1:2"
 [models.reasoning_big]
 api-name = "reasoning-big-out"
 max-context = 1000000
+temperature = 1.0
 tools-support = true
 thinking-support = true
 preserve-thinking = true
@@ -360,6 +361,7 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       Driver.For_testing.attempt_inference_policy
         ~max_tokens_for_runtime
         ~runtime_id:"mixed"
+        ~fallback_temperature:0.25
         ~fallback_enable_thinking:None
         ~fallback_max_tokens:8192
         ()
@@ -368,6 +370,10 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       "lane id has no runtime thinking policy"
       None
       lane_policy.Driver.attempt_enable_thinking;
+    Alcotest.(check (float 0.0001))
+      "lane id keeps caller temperature fallback"
+      0.25
+      lane_policy.Driver.attempt_temperature;
     Alcotest.(check (option bool))
       "lane id has no preserve thinking policy"
       None
@@ -380,6 +386,7 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       Driver.For_testing.attempt_inference_policy
         ~max_tokens_for_runtime
         ~runtime_id:"thinking.reasoning_big"
+        ~fallback_temperature:0.25
         ~fallback_enable_thinking:(Some false)
         ~fallback_max_tokens:8192
         ()
@@ -388,6 +395,10 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       "thinking candidate enables thinking"
       (Some true)
       thinking_policy.Driver.attempt_enable_thinking;
+    Alcotest.(check (float 0.0001))
+      "thinking candidate uses runtime temperature"
+      1.0
+      thinking_policy.Driver.attempt_temperature;
     Alcotest.(check (option bool))
       "thinking candidate preserves thinking when configured"
       (Some true)
@@ -400,6 +411,7 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       Driver.For_testing.attempt_inference_policy
         ~max_tokens_for_runtime
         ~runtime_id:"plain.non_reasoning"
+        ~fallback_temperature:0.25
         ~fallback_enable_thinking:(Some true)
         ~fallback_max_tokens:8192
         ()
@@ -408,6 +420,10 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       "non-thinking candidate forces thinking off"
       (Some false)
       non_thinking_policy.Driver.attempt_enable_thinking;
+    Alcotest.(check (float 0.0001))
+      "plain candidate keeps caller temperature fallback"
+      0.25
+      non_thinking_policy.Driver.attempt_temperature;
     Alcotest.(check (option bool))
       "non-thinking candidate disables preserve thinking"
       (Some false)

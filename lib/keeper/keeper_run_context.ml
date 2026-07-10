@@ -126,12 +126,15 @@ let prepare_run_context
   in
   let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   (* 0. Resolve inference parameters via Runtime_inference *)
-  let temperature =
+  let fallback_temperature () =
     match temperature with
-    | Some t -> t
-    | None ->
-      Runtime_inference.resolve_temperature
-        ~runtime_id ~fallback:(fun () -> 0.3)
+    | Some value -> value
+    | None -> Keeper_config.keeper_unified_temperature ()
+  in
+  let temperature =
+    Runtime_inference.resolve_temperature
+      ~runtime_id
+      ~fallback:fallback_temperature
   in
   let max_tokens =
     resolve_max_tokens_for_runtime_with_profile

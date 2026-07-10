@@ -56,15 +56,21 @@ let completion_rejection_message ?(allow_force = false) reason =
 let placeholder_evidence_refs =
   [ "-"; "draft"; "n/a"; "na"; "none"; "null"; "pending"; "tbd"; "todo"; "unknown" ]
 
+(* RFC-0337 decision 4: shared element-level predicate for evidence-ref
+   boundary checks. The masc_transition handoff boundary rejects entries
+   this predicate flags instead of silently dropping them; the
+   keeper_task_done parser (keeper_tool_task_runtime.ml) enforces the same
+   semantics locally on raw JSON for keeper-vocabulary error messages. *)
+let blank_evidence_ref value = String.equal (String.trim value) ""
+
 let is_placeholder_evidence_ref value =
-  let value = value |> String.trim |> String.lowercase_ascii in
-  value = "" || List.mem value placeholder_evidence_refs
+  let normalized = value |> String.trim |> String.lowercase_ascii in
+  blank_evidence_ref value || List.mem normalized placeholder_evidence_refs
 
 let non_empty_trimmed_strings values =
   values
   |> List.filter_map (fun value ->
-         let value = String.trim value in
-         if String.equal value "" then None else Some value)
+         if blank_evidence_ref value then None else Some (String.trim value))
   |> List.sort_uniq String.compare
 
 (* Raw (uncleaned) evidence sources, shared by the flat [evidence_refs]
@@ -93,15 +99,13 @@ let submitted_evidence_sources ?(notes = "") ?handoff_context
     match resolved_handoff_context with
     | Some hc ->
       let trimmed = String.trim hc.summary in
-      if String.equal trimmed "" || is_placeholder_evidence_ref trimmed
-      then []
+      if is_placeholder_evidence_ref trimmed then []
       else [ trimmed ]
     | None -> []
   in
   let notes_refs =
     let trimmed = String.trim notes in
-    if String.equal trimmed "" || is_placeholder_evidence_ref trimmed
-    then []
+    if is_placeholder_evidence_ref trimmed then []
     else [ trimmed ]
   in
   submitted_evidence_refs @ handoff_refs @ summary_refs @ notes_refs

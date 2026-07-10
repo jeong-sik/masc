@@ -37,6 +37,28 @@ type keeper_ctx_sample = {
 }
 [@@deriving yojson { strict = false }]
 
+(** Total run-state classification (#16, 38-bug campaign PR-5). Mirrors
+    [Keeper_composite_observer.run_state]; see .mli for why this library
+    keeps its own copy instead of depending on that module. *)
+type keeper_run_state_kind =
+  | In_turn
+  | Waiting
+  | Suspended
+[@@deriving yojson]
+
+(** Per-kind fields are [None] / [[]] when not applicable to [kind]. *)
+type keeper_run_state = {
+  kind : keeper_run_state_kind;
+  wake_kind : string option;      [@default None]
+  stimulus_kinds : string list;   [@default []]
+  started_at : float option;      [@default None]
+  active_tool_count : int option; [@default None]
+  queue_depth : int option;       [@default None]
+  skip_reasons : string list;     [@default []]
+  phase : string option;          [@default None]
+}
+[@@deriving yojson { strict = false }]
+
 (** Per-keeper summary. *)
 type keeper = {
   name : string;
@@ -50,6 +72,7 @@ type keeper = {
   last_tool : string option;     [@default None]
   lane_frames : keeper_lane_frame list;   [@default []]
   ctx_history : keeper_ctx_sample list;   [@default []]
+  run_state : keeper_run_state;
 }
 [@@deriving yojson { strict = false }]
 

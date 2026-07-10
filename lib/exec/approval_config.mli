@@ -42,6 +42,19 @@ type agent_overlay = {
 (** Per-agent knobs.  Each risk class has an independent trust level,
     allowing fine-grained escalation without all-or-nothing overrides. *)
 
+type shell_ir_overlay_source =
+  | Default_autonomous
+  | Configured_overlay of string
+  | Invalid_overlay_fail_closed of string
+
+type shell_ir_overlay_resolution = {
+  effective : agent_overlay;
+  source : shell_ir_overlay_source;
+}
+(** Typed result of resolving the optional Shell IR overlay. An absent value
+    selects the documented autonomous default; an explicitly invalid value
+    selects [enforced_all] so configuration errors cannot become permissive. *)
+
 type t = {
   defaults : agent_overlay;
   per_agent : (Agent_id.t * agent_overlay) list;
@@ -85,6 +98,12 @@ val autonomous : agent_overlay
     autonomous keeper lane, where no human or resolver can answer an [Ask].
     The trust-independent catastrophic floor in [Approval_policy.decide]
     still applies above this overlay — RFC-0254 §5.5. *)
+
+val resolve_shell_ir_approval_overlay
+  :  string option
+  -> shell_ir_overlay_resolution
+(** Resolve one optional raw overlay through the parser and fail-closed policy.
+    This is the SSOT shared by execution and dashboard runtime truth. *)
 
 val empty : t
 (** [empty] has [defaults = enforced_all] and no per-agent entries.

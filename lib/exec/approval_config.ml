@@ -18,6 +18,16 @@ type agent_overlay = {
   privileged_trust : trust_level;
 }
 
+type shell_ir_overlay_source =
+  | Default_autonomous
+  | Configured_overlay of string
+  | Invalid_overlay_fail_closed of string
+
+type shell_ir_overlay_resolution = {
+  effective : agent_overlay;
+  source : shell_ir_overlay_source;
+}
+
 type t = {
   defaults : agent_overlay;
   per_agent : (Agent_id.t * agent_overlay) list;
@@ -221,6 +231,14 @@ let autonomous : agent_overlay =
     audited_trust = Observe;
     privileged_trust = Observe;
   }
+
+let resolve_shell_ir_approval_overlay = function
+  | None -> { effective = autonomous; source = Default_autonomous }
+  | Some raw ->
+    (match shell_ir_approval_overlay_of_string raw with
+     | Some effective -> { effective; source = Configured_overlay raw }
+     | None ->
+       { effective = enforced_all; source = Invalid_overlay_fail_closed raw })
 
 let empty : t = { defaults = enforced_all; per_agent = [] }
 

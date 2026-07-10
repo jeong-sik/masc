@@ -160,6 +160,7 @@ let mark_turn_finished ~base_path name =
             ; ct_ended_at = ended_at
             ; ct_decision_stage = obs.decision_stage
             ; ct_selected_model = obs.selected_model
+            ; ct_wake = obs.wake
             }
         | None -> e.last_completed_turn (* no live turn → preserve previous *)
       in

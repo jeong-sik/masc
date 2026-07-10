@@ -121,7 +121,6 @@ type t =
   | SnapshotWriteFailures
   | PromptUnknownToolTokens
   | PromptTokenStripped
-  | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
@@ -246,6 +245,7 @@ type t =
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
+  | ContinuationDeliveryOutcome
 
 val to_string : t -> string
 

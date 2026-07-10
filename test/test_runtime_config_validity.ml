@@ -1566,6 +1566,9 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
      base = \"ollama\"\n\
      max_context_tokens = 1024\n"
   in
+  (* [models.missing] intentionally has no max-context override. Degraded
+     startup must remove its missing catalog binding before validating the
+     surviving runtimes' effective context windows. *)
   let runtime_toml =
     "[providers.ollama]\n\
      protocol = \"ollama-http\"\n\
@@ -1577,7 +1580,6 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
      \n\
      [models.missing]\n\
      api-name = \"missing-from-oas-catalog\"\n\
-     max-context = 1024\n\
      \n\
      [ollama.good]\n\
      \n\

@@ -629,6 +629,27 @@ let test_discovery_isolates_malformed_keeper () =
 ;;
 
 let test_typed_boundaries_reject_invalid_values () =
+  List.iter
+    (fun keeper_name ->
+       match
+         Store.make_job
+           ~keeper_name
+           ~trace_id:"trace-k1"
+           ~generation:1
+           ~turn:1
+           ~oas_turn_count:1
+           ~enqueued_at:1.0
+           ~payload:`Null
+       with
+       | Error (Store.Invalid_keeper_name _) -> ()
+       | Error error ->
+         Alcotest.failf
+           "wrong keeper-name error for %S: %s"
+           keeper_name
+           (Store.error_to_string error)
+       | Ok _ ->
+         Alcotest.failf "reserved keeper path segment %S was accepted" keeper_name)
+    [ "."; ".." ];
   (match
      Store.make_job
        ~keeper_name:"k1"

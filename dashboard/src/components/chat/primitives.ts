@@ -4180,7 +4180,7 @@ export function ChatComposer({
                   <input
                     ref=${fileInputRef}
                     type="file"
-                    accept="image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg,text/plain,text/markdown,application/json,text/csv"
+                    accept="image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg,text/plain,text/markdown,text/html,application/json,text/csv,.md,.markdown,.html,.htm,.txt,.json,.csv"
                     multiple
                     class="hidden"
                     aria-label="파일 첨부"

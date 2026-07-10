@@ -760,7 +760,7 @@ let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
     (text_contains "old visible reply" texts);
   let thinking_preserved =
     patched.Agent_sdk.Checkpoint.messages
-    |> List.exists (fun message ->
+    |> List.exists (fun (message : Agent_sdk.Types.message) ->
       List.exists
         (function
           | Agent_sdk.Types.Thinking { content; _ } ->

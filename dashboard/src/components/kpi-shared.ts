@@ -1,9 +1,5 @@
-// Shared KPI primitives — pure types, constants, and helpers used by both
-// the Preact (`kpi-strip.ts` / `kpi-cell.ts`) and Solid
-// (`kpi-strip.solid.tsx` / `kpi-cell.solid.tsx`) implementations.
-//
-// Keeping these in one place removes the duplication that otherwise
-// drifts when one side is updated and the other is forgotten.
+// KPI primitives — pure types, constants, and helpers shared by the Preact
+// strip, cell, and data-driven strip view.
 
 // ── Strip ──
 

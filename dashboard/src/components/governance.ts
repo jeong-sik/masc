@@ -8,7 +8,7 @@ import { SECONDS_PER_DAY } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { SectionCard } from './common/card'
 import type { KpiCellKind } from './kpi-shared'
-import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
+import { KpiStripView, type KpiStripViewData } from './kpi-strip-view'
 import { EmptyState } from './common/feedback-state'
 import { StatusDot } from './common/status-dot'
 import { JsonViewerCard } from './common/json-viewer'
@@ -129,7 +129,7 @@ function GovernanceSummaryStrip() {
       </div>
     </div>
     <div class="v2-command-panel mb-5">
-      <${KpiStripIsland}
+      <${KpiStripView}
         ariaLabel="Governance summary"
         cols=${4}
         cells=${[
@@ -159,7 +159,7 @@ function GovernanceSummaryStrip() {
             caption: approvalCount > 0 ? 'review needed' : (judgeHealthy ? 'healthy' : 'live'),
             kind: (approvalCount > 0 ? 'warn' : (judgeHealthy ? 'ok' : undefined)) as KpiCellKind | undefined,
           },
-        ] satisfies KpiStripIslandData['cells']}
+        ] satisfies KpiStripViewData['cells']}
       />
     </div>
     <${JudgeStatusBar} />

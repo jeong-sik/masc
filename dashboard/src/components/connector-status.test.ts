@@ -209,9 +209,8 @@ async function loadComponentWithApi(api: {
   vi.doMock('./common/toast', () => ({
     showToast: api.showToast ?? vi.fn(),
   }))
-  // KpiStripIsland is now a plain synchronous Preact renderer (#66 unified
-  // the dashboard on Preact and removed the Solid island), so its real
-  // implementation runs directly under the Preact test runner — no shim.
+  // The data-driven KPI strip is plain Preact, so the caller test exercises
+  // its real implementation instead of substituting a framework shim.
   const module = await import('./connector-status')
   module.resetConnectorStatusState()
   return module

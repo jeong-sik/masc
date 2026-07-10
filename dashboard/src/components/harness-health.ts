@@ -8,7 +8,7 @@ import { assertExhaustive } from '../lib/exhaustive'
 import { SectionCard } from './common/card'
 import { SectionCap } from './common/section-cap'
 import { MermaidGraph } from './common/mermaid-graph'
-import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
+import { KpiStripView, type KpiStripViewData } from './kpi-strip-view'
 import {
   harness,
   loadHarnessHealth,
@@ -366,7 +366,7 @@ export function HarnessHealth() {
               </div>
             ` : null}
 
-            <${KpiStripIsland}
+            <${KpiStripView}
               ariaLabel="calibration 요약"
               cols=${4}
               cells=${[
@@ -379,7 +379,7 @@ export function HarnessHealth() {
                   value: `${agreementPct}%`,
                   caption: `FP:${cal.false_positive_count} FN:${cal.false_negative_count}`,
                 },
-              ] satisfies KpiStripIslandData['cells']}
+              ] satisfies KpiStripViewData['cells']}
             />
 
             <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs leading-loose text-[var(--color-fg-muted)]">
@@ -410,7 +410,7 @@ export function HarnessHealth() {
               status=${data.pre_compact.status}
               lastEventAt=${data.pre_compact.last_event_at}
             />
-            <${KpiStripIsland}
+            <${KpiStripView}
               ariaLabel="압축 전 상태 요약"
               variant="stacked"
               cells=${[
@@ -432,7 +432,7 @@ export function HarnessHealth() {
                   label: '상태',
                   value: railStatusLabel(data.pre_compact.status),
                 },
-              ] satisfies KpiStripIslandData['cells']}
+              ] satisfies KpiStripViewData['cells']}
             />
             <${PreCompactList} section=${data.pre_compact} />
           </div>
@@ -450,7 +450,7 @@ export function HarnessHealth() {
               status=${data.recent_handoffs.status}
               lastEventAt=${data.recent_handoffs.last_event_at}
             />
-            <${KpiStripIsland}
+            <${KpiStripView}
               ariaLabel="세대 교체 요약"
               variant="stacked"
               cells=${[
@@ -472,7 +472,7 @@ export function HarnessHealth() {
                   label: '상태',
                   value: railStatusLabel(data.recent_handoffs.status),
                 },
-              ] satisfies KpiStripIslandData['cells']}
+              ] satisfies KpiStripViewData['cells']}
             />
             <${HandoffList} section=${data.recent_handoffs} />
           </div>

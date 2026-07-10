@@ -19,16 +19,19 @@ let int_opt_json = Json_util.int_opt_to_json
 let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
   let effective_max_context, source =
     match Runtime.resolve_max_context_of_runtime rt with
-    | Some (n, source) -> Some n, Some source
-    | None -> None, None
+    | Some resolution -> resolution
+    | None ->
+      failwith
+        (Printf.sprintf
+           "runtime resolved projection invariant violated: runtime %S has no max-context resolution"
+           rt.id)
   in
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
     ; "model", `String rt.model.api_name
-    ; "effective_max_context", int_opt_json effective_max_context
-    ; ( "max_context_source"
-      , string_opt_json (Option.map Runtime.max_context_source_to_string source) )
+    ; "effective_max_context", `Int effective_max_context
+    ; "max_context_source", `String (Runtime.max_context_source_to_string source)
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)
     ; "is_local", `Bool (Runtime.is_local_runtime rt)
     ; "is_default", `Bool rt.binding.is_default

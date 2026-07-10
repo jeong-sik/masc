@@ -739,6 +739,7 @@ describe('SettingsSurface', () => {
     shellConfigResolution.value = null
     apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config unavailable'))
     stubRuntimeDefaults(makeRuntimeDefaults({ config_path: null }))
+    stubRuntimeResolved(makeRuntimeResolved({ config_path: null }))
     apiMock.fetchRuntimeProviders.mockResolvedValueOnce(makeRuntimeProviders({ config_path: null }))
 
     render(html`<${SettingsSurface} />`, container)
@@ -884,6 +885,16 @@ describe('SettingsSurface', () => {
   })
 
   it('runtime overview shows resolved defaults and the live provider catalog', async () => {
+    stubRuntimeDefaults(makeRuntimeDefaults({ default_model: 'stale-default-model' }))
+    const resolved = makeRuntimeResolved()
+    stubRuntimeResolved(makeRuntimeResolved({
+      default_runtime: {
+        ...resolved.default_runtime!,
+        model: 'resolved-default-model',
+        effective_max_context: 64_000,
+        max_context_source: 'capability',
+      },
+    }))
     apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders({
       providers: [
         makeRuntimeProvider({
@@ -1100,7 +1111,10 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => {
       expect((container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement | null)?.value).toBe('rt-a')
-      expect(container.querySelector('[data-testid="runtime-default-model"]')?.textContent).toBe('m1')
+      expect(container.querySelector('[data-testid="runtime-default-model"]')?.textContent).toBe('resolved-default-model')
+      expect(container.querySelector('[data-testid="runtime-default-context"]')?.textContent).toBe('64K ctx')
+      expect(container.querySelector('[data-testid="runtime-default-context-source"]')?.textContent)
+        .toContain('capability')
       expect(container.querySelector('[data-testid="runtime-settings-config-path"]')?.textContent).toContain('/cfg/runtime.toml')
       const cards = Array.from(container.querySelectorAll('[data-testid="runtime-catalog-card"]'))
       expect(cards.length).toBe(2)
@@ -1409,7 +1423,7 @@ describe('SettingsSurface', () => {
     })
   })
 
-  it('routing section reports no assignments when the resolved keeper registry is unavailable', async () => {
+  it('surfaces resolved-runtime failure without falling back to other projections', async () => {
     apiMock.fetchRuntimeResolved.mockReset()
     apiMock.fetchRuntimeResolved.mockRejectedValue(new Error('resolved runtime unavailable'))
     render(html`<${SettingsSurface} />`, container)
@@ -1417,9 +1431,14 @@ describe('SettingsSurface', () => {
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="routing-assignments-empty"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="routing-assignments-error"]')).not.toBeNull()
     })
+    expect(container.querySelector('[data-testid="routing-assignments-empty"]')).toBeNull()
     expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+    expect(container.querySelector('[data-testid="runtime-resolved-error"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="runtime-default-model"]')?.textContent).toBe('—')
+    expect(container.querySelector('[data-testid="runtime-default-context"]')?.textContent).toBe('ctx 미수집')
   })
 
   it('routing section shows a keeper riding [runtime].default with no explicit assignment (bug #14)', async () => {

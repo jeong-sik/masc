@@ -47,8 +47,9 @@ val drop_by_post_id :
     when durable removal fails so callers do not clear recovery state while a
     replayable stimulus remains on disk. *)
 
-(** Drain stimuli intended for board reactivity. [window_sec] caps the
-    age of stimuli returned to the caller. *)
+(** Drain every queued board-signal stimulus for the keeper (RFC-0334 W2:
+    turn-keyed digest — one turn consumes everything queued since the
+    keeper's last turn, however it arrived). *)
 val drain_board :
-  ?window_sec:float -> base_path:string -> string
+  base_path:string -> string
   -> Keeper_event_queue.stimulus list

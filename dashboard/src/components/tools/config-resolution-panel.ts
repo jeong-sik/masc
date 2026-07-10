@@ -469,9 +469,20 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
   `
 }
 
+function formatShellIrApproval(
+  approval: DashboardRuntimeResolution['shell_ir_approval'],
+): string {
+  if (!approval) return MISSING_DATA_DASH
+  const trust = approval.trust === null
+    ? 'unknown'
+    : `${approval.trust.safe}/${approval.trust.audited}/${approval.trust.privileged}`
+  return `${approval.enabled ? 'enabled' : 'disabled'} (trust: ${trust})`
+}
+
 function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: DashboardRuntimeResolution }) {
   const fd = runtimeResolution.fd_accountant
   const fleet = runtimeResolution.fleet_safety
+  const shellIr = runtimeResolution.shell_ir_approval
   const fdValue = fd
     ? `${fd.fd_open ?? MISSING_DATA_DASH} / ${fd.fd_limit ?? MISSING_DATA_DASH}`
     : MISSING_DATA_DASH
@@ -489,6 +500,8 @@ function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: Dashboard
         <${RuntimeMetaRow} label="effective .masc" value=${runtimeResolution.data_root.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="server repo" value=${runtimeResolution.server_repo_path?.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.commit ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="shell IR approval" value=${formatShellIrApproval(shellIr)} />
+        <${RuntimeMetaRow} label="shell IR raw" value=${shellIr?.raw_overlay ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="keeper fibers" value=${String(fleet?.keeper_fibers ?? MISSING_DATA_DASH)} />
         <${RuntimeMetaRow} label="fd pressure" value=${fd?.pressure_active == null ? MISSING_DATA_DASH : fd.pressure_active ? 'active' : 'clear'} />
       </div>

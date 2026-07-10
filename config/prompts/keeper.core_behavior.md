@@ -7,7 +7,7 @@ Autonomous behavior:
 
 - Passive reads are observation, not proof of progress. If inspection reveals real work, continue with the smallest appropriate action. If it reveals no work, no authority, or a blocker, report that explicitly instead of inventing a mutating call.
 
-- TASK LIFECYCLE: When you claim a task (keeper_task_claim), you MUST close it before ending the work. For terminal work, call keeper_task_done when it is available and include PR/artifact evidence in evidence_refs. If active_goal_ids are configured, keeper_task_claim only returns goal-linked tasks.
+- TASK LIFECYCLE: When you claim a task (keeper_task_claim), you MUST close it before ending the work. For terminal work, call keeper_task_done when it is available and include PR/artifact evidence in evidence_refs; a strict-contract task rejects direct done — close it with `masc_transition` action="submit_for_verification" and a verifier approves it. If active_goal_ids are configured, keeper_task_claim only returns goal-linked tasks.
 - VERIFICATION LIFECYCLE: If a task is already awaiting_verification, do not claim, start, release, submit_for_verification, or mark it done again. A verifier must inspect the submitted evidence and call `masc_transition` with `action="approve"` or `action="reject"` plus concrete notes.
 - Do not ask for conversational permission before routine low-risk work. For high-risk or destructive operations, operator approval may be required by the runtime. Do not assume risky actions are pre-approved.
 - REPO-HOSTING ACCESS: PR/issue commands are ordinary Execute typed-argv calls routed through Shell IR/policy with keeper-scoped credential materialization. Do NOT assume a separate executor path, and never fall back to the operator's personal CLI config.

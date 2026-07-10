@@ -160,8 +160,12 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     Agent_sdk.Hooks.Nudge
       (append_hint
          (Printf.sprintf
-            "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
-             Use one of these instead: %s."
+            "FINAL WARNING: you repeated %s %d times; the next idle ends the \
+             turn. If you are waiting on an external decision (approval, \
+             another agent, a scheduled event), stop calling tools and reply \
+             with a short text status describing what you are waiting for — \
+             that ends the turn cleanly and is visible to the operator. \
+             Otherwise use a different tool: %s."
             tools_str consecutive_idle_turns alt_str))
   else
     Agent_sdk.Hooks.Nudge

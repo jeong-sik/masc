@@ -201,12 +201,17 @@ let run (ctx : ctx)
                       lane runs [run_keeper_msg_turn_admitted] on a separate
                       path. So passing the yield hook here is inherently
                       lane-gated: an idle-filler turn stops at the next boundary
-                      when a dashboard/connector chat is parked, but a chat turn
-                      never yields to a later-queued chat. *)
+                      when a dashboard/connector chat is parked on the slot or
+                      already deferred in [Keeper_chat_queue], but a chat turn
+                      never yields to a later-queued chat. The queue-length
+                      half is what keeps a long autonomous turn from starving a
+                      busy Slack/Discord/Dashboard message that has not parked
+                      on the slot. *)
                  ~yield_to_chat_waiting:(fun () ->
                    Keeper_turn_admission.chat_waiting
                      ~base_path:config.base_path
-                     ~keeper_name:meta.name)
+                     ~keeper_name:meta.name
+                   || Keeper_chat_queue.length ~keeper_name:meta.name > 0)
                  ()))
     in
     result, turn_state

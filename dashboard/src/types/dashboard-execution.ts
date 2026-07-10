@@ -94,6 +94,22 @@ export interface DashboardRuntimeDiagnostic {
   message: string
 }
 
+export interface DashboardShellIrTrust {
+  safe: string
+  audited: string
+  privileged: string
+}
+
+export interface DashboardShellIrApproval {
+  schema: string
+  enabled: boolean
+  env_key: string
+  raw_overlay: string | null
+  trust: DashboardShellIrTrust | null
+  source: string | null
+  reason: string | null
+}
+
 export type KeeperRuntimeSource = 'env' | 'toml' | 'default' | 'derived'
 
 export interface KeeperRuntimeField<T> {
@@ -129,6 +145,7 @@ export interface DashboardRuntimeResolution {
   server_workspace_mismatch: boolean
   diagnostics: DashboardRuntimeDiagnostic[]
   build: ServerBuildIdentity
+  shell_ir_approval?: DashboardShellIrApproval | null
   keeper_runtime: KeeperRuntimeResolved | null
   fleet_safety: DashboardFleetSafetyHealth | null
   fd_accountant: DashboardFdAccountant | null

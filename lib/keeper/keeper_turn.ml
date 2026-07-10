@@ -624,7 +624,7 @@ let run_keeper_msg_turn_admitted
     let no_skill_route = get_bool args "no_skill_route" false in
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
-    let channel = get_string args "channel" "" in
+    let channel_name = get_string args "channel" "" in
     (match keeper_msg_timeout_override args with
     | Error e -> tool_result_error e
     | Ok keeper_msg_oas_timeout_s ->
@@ -796,7 +796,7 @@ let run_keeper_msg_turn_admitted
               let recent_direct_conversation_text =
                 direct_owner_conversation_context
                   ~config:ctx.config ~meta ~direct_reply ~channel_session_key
-                  ~channel
+                  ~channel:channel_name
               in
               (* 2. Skill route *)
               let skill_route_text =

@@ -74,7 +74,9 @@ let activate ~base_path job =
 
 let claim ~base_path ~keeper_name ~now =
   match Store.claim_all ~base_path ~keeper_name ~now with
-  | Ok report -> report
+  | Ok ({ blocked = None; _ } as report) -> report
+  | Ok { blocked = Some error; _ } ->
+    Alcotest.failf "claim blocked: %s" (Store.error_to_string error)
   | Error error ->
     Alcotest.failf "claim failed: %s" (Store.error_to_string error)
 ;;
@@ -280,12 +282,54 @@ let test_claim_does_not_overwrite_existing_lease () =
     in
     write_json pending pending_envelope;
     (match Store.claim_all ~base_path ~keeper_name:"k1" ~now:3.0 with
-     | Error (Store.Pending_already_inflight _) -> ()
+     | Ok
+         { leases = []
+         ; blocked = Some (Store.Pending_already_inflight _)
+         ; _
+         } -> ()
      | Error error ->
        Alcotest.failf "wrong duplicate claim error: %s" (Store.error_to_string error)
      | Ok _ -> Alcotest.fail "existing inflight lease was overwritten");
     let receipt = terminal_receipt first_lease in
     ignore (finish ~base_path receipt);
+    check_backlog ~base_path ~keeper_name:"k1" 0)
+;;
+
+let test_partial_claims_remain_owned_when_later_job_blocks () =
+  with_temp_dir "memory-job-partial-claim" (fun base_path ->
+    let first = make_job ~oas_turn_count:1 ~enqueued_at:1.0 1 in
+    let second = make_job ~oas_turn_count:2 ~enqueued_at:2.0 2 in
+    ignore (stage ~base_path second);
+    ignore (activate ~base_path second);
+    let second_pending = pending_path ~base_path second in
+    let second_envelope = read_json second_pending in
+    let second_lease =
+      match (claim ~base_path ~keeper_name:"k1" ~now:2.0).leases with
+      | [ lease ] -> lease
+      | _ -> Alcotest.fail "expected second job lease"
+    in
+    write_json second_pending second_envelope;
+    ignore (stage ~base_path first);
+    ignore (activate ~base_path first);
+    let report =
+      match Store.claim_all ~base_path ~keeper_name:"k1" ~now:3.0 with
+      | Ok report -> report
+      | Error error ->
+        Alcotest.failf "partial claim failed: %s" (Store.error_to_string error)
+    in
+    Alcotest.(check (list int))
+      "earlier lease returned"
+      [ 1 ]
+      (List.map (fun lease -> lease.Store.job.turn) report.leases);
+    (match report.blocked with
+     | Some (Store.Pending_already_inflight _) -> ()
+     | Some error ->
+       Alcotest.failf "wrong partial blocker: %s" (Store.error_to_string error)
+     | None -> Alcotest.fail "later inflight collision was not surfaced");
+    List.iter
+      (fun lease -> ignore (finish ~base_path (terminal_receipt lease)))
+      report.leases;
+    ignore (finish ~base_path (terminal_receipt second_lease));
     check_backlog ~base_path ~keeper_name:"k1" 0)
 ;;
 
@@ -688,6 +732,10 @@ let () =
             "claim preserves existing inflight lease"
             `Quick
             test_claim_does_not_overwrite_existing_lease
+        ; Alcotest.test_case
+            "partial claims remain owned"
+            `Quick
+            test_partial_claims_remain_owned_when_later_job_blocks
         ; Alcotest.test_case
             "receipt-backed inflight is not replayed"
             `Quick

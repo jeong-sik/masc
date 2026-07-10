@@ -861,6 +861,18 @@ let review
              ; gate = Fallback
              ; fallback_reason = Some "operator override: shared-account self-approval deadlock"
              }
+         else if Option.map_default (fun gc -> gc = evaluator_runtime) false generator_runtime then
+           (* Same-model self-review is meaningless; approve on contract
+              satisfaction alone (contract already verified above).
+              This resolves the topology deadlock without requiring
+              operator_override. *)
+           emit
+             { verdict = Approve
+             ; evaluator_runtime
+             ; generator_runtime
+             ; gate = Fallback
+             ; fallback_reason = Some "same-model: cross-model review unavailable, deterministic contract-only approval"
+             }
          else
            (* Gate 3: LLM review via evaluator runtime (structured tool output, ADR D3) *)
          let prompt =

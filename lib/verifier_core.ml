@@ -18,6 +18,10 @@ type verification_request = {
   action_result : string;
   goal : string;
   context_summary : string;
+  effect_class : Effect_class.t;
+      (* RFC-0331: the tool's declared effect class. [Read_only] skips
+         verification; [Mutating] (the default for unknown/undeclared tools)
+         runs it. Replaces the removed free-text skip classifier. *)
 }
 
 type verdict =
@@ -36,44 +40,12 @@ type grounded_verdict = {
   evidence : grounded_ref list;
 }
 
-(* ================================================================ *)
-(* Read-Only Detection                                              *)
-(* ================================================================ *)
-
-let read_only_patterns = [
-  "read"; "glob"; "grep";
-  "search"; "find"; "list"; "ls"; "cat"; "head"; "tail";
-  "git status"; "git log"; "git diff";
-  "status"; "view"; "get"; "fetch"; "query";
-]
-
-let is_word_char c =
-  match c with
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
-  | _ -> false
-
-let has_pattern_with_word_boundary ~text ~pat =
-  let tlen = String.length text in
-  let plen = String.length pat in
-  if plen = 0 || tlen < plen then false
-  else
-    let rec loop i =
-      if i > tlen - plen then false
-      else if String.sub text i plen = pat then
-        let before_ok = i = 0 || not (is_word_char text.[i - 1]) in
-        let after_idx = i + plen in
-        let after_ok = after_idx >= tlen || not (is_word_char text.[after_idx]) in
-        if before_ok && after_ok then true else loop (i + 1)
-      else
-        loop (i + 1)
-    in
-    loop 0
-
-let should_skip ~action_description =
-  let text = String.lowercase_ascii action_description in
-  List.exists (fun pat ->
-    has_pattern_with_word_boundary ~text ~pat
-  ) read_only_patterns
+(* RFC-0331 — the free-text read-only substring classifier (an 18-pattern
+   word-boundary matcher) was removed here. The skip decision now reads the
+   tool's declared {!Effect_class.t} (resolved at the boundary via
+   [Keeper_tool_descriptor_resolution.effect_class_for_tool_name]), never the
+   action description text. A mutating tool whose description happens to
+   contain "list"/"get"/"status" can no longer skip verification. *)
 
 (* ================================================================ *)
 (* Verdict Parsing                                                  *)
@@ -98,6 +70,13 @@ let verdict_constructor_name = function
   | Fail _ -> "FAIL"
 
 let valid_verdict_strings = [ "PASS"; "WARN"; "FAIL" ]
+
+(* Generic word-char predicate, shared by the verdict-prefix boundary check
+   below. (Formerly also used by the removed RFC-0331 read-only classifier.) *)
+let is_word_char c =
+  match c with
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
+  | _ -> false
 
 let has_keyword_boundary upper len =
   let tlen = String.length upper in

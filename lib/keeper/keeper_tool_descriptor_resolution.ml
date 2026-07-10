@@ -84,6 +84,17 @@ let capability_has kind tool_name =
        | _ -> false)
 ;;
 
+(* RFC-0331 — resolve a tool's typed effect class from its declared
+   registration (descriptor [readonly_hint] / [Tool_catalog] metadata via
+   [capability_has]). A tool is [Read_only] only if it declares itself so;
+   every unknown / undeclared tool is [Mutating] (fail-closed). This is the
+   SSOT the verifier consumes instead of substring-matching free text. *)
+let effect_class_for_tool_name tool_name : Effect_class.t =
+  if capability_has Tool_capability.Read_only tool_name
+  then Effect_class.Read_only
+  else Effect_class.Mutating
+;;
+
 let descriptor_and_input_for_tool_call ~tool_name ~input =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
   match Keeper_tool_descriptor.find_public stripped with

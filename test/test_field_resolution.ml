@@ -97,6 +97,13 @@ name = "bar"|} in
      | Missing -> true
      | _ -> false)
 
+let test_nested_path_scalar_parent_is_type_mismatch () =
+  let toml = toml_of_string {|repository = "not-a-table"|} in
+  Alcotest.(check bool) "scalar parent is not Missing" true
+    (match F.resolve_string toml [ "repository"; "name" ] with
+     | Type_mismatch { path = [ "repository" ]; expected = "table"; _ } -> true
+     | Present _ | Missing | Type_mismatch _ -> false)
+
 (* ── or_default / require ───────────────────────────────────── *)
 
 let test_or_default_present () =
@@ -166,6 +173,8 @@ let () =
           Alcotest.test_case "present" `Quick test_nested_path_present;
           Alcotest.test_case "missing different table" `Quick
             test_nested_path_missing;
+          Alcotest.test_case "scalar parent is type_mismatch" `Quick
+            test_nested_path_scalar_parent_is_type_mismatch;
         ] );
       ( "or_default"
       , [

@@ -1,6 +1,17 @@
 module Claim = Masc.Keeper_repo_claim_hitl
 module AQ = Masc.Keeper_approval_queue
 
+(* #23956 made nonblocking resolution fail closed when no delivery hook is
+   installed (the pre-bootstrap default is None). These tests resolve
+   approvals without a server bootstrap, so install the same no-op hook the
+   approval queue's own suite uses; delivery semantics are covered there,
+   not here. *)
+let () =
+  AQ.set_approval_resolution_wake_hook
+    (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      Ok (fun () -> ()))
+;;
+
 open Repo_manager_types
 
 let contains_substring s needle =

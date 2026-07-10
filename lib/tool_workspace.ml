@@ -230,7 +230,8 @@ let todo_task_has_completed_deliverable_conflict (ctx : context) (task : Masc_do
   | Masc_domain.InProgress _
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> false
+  | Masc_domain.Cancelled _
+  | Masc_domain.OperatorBlocked _ -> false
 ;;
 
 let todo_completed_deliverable_conflicts (ctx : context) tasks =
@@ -426,7 +427,8 @@ let status_summary_string (ctx : context) =
            , in_progress_cnt + 1
            , done_cnt
            , cancelled_cnt )
-         | Masc_domain.Cancelled _ ->
+         | Masc_domain.Cancelled _
+         | Masc_domain.OperatorBlocked _ ->
            active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt + 1)
       ([], 0, 0, 0, 0, 0)
       backlog.tasks

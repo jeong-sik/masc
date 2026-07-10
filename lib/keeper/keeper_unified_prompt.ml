@@ -79,6 +79,7 @@ let format_current_task (task : Masc_domain.task) : string =
     | Masc_domain.Todo -> "todo"
     | Masc_domain.Done _ -> "done"
     | Masc_domain.Cancelled _ -> "cancelled"
+    | Masc_domain.OperatorBlocked _ -> "operator-blocked"
   in
   let buf = Buffer.create 256 in
   Buffer.add_string buf "### Current Task (held by you)\n";

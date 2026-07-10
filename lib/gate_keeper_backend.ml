@@ -585,13 +585,10 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
                 connector message routed there is answered into the dashboard
                 transcript only and never reaches the channel — the RFC-connector-deferred-reply-via-chat-queue
                 root cause. *)
-             (* [receipt_id] is not surfaced on this path — unlike the
-                dashboard busy-ack (RFC-connector-deferred-reply-via-chat-queue), the connector reply
-                has no request envelope to carry a correlation token in (see
-                [`Queued_to_chat_lane]'s comment below) — the queue position
-                is the only durable handle a connector gets today. *)
-             (* fire-and-forget: receipt_id has no consumer on this path. *)
-             let receipt_id = Keeper_chat_queue.enqueue ~keeper_name
+             (* The returned receipt is the durable correlation handle for the
+                deferred connector reply.  It is surfaced in the immediate
+                acknowledgement below together with the current queue depth. *)
+            let receipt_id = Keeper_chat_queue.enqueue ~keeper_name
                { Keeper_chat_queue.content = String.trim content
                ; user_blocks = []
                ; attachments = []
@@ -669,11 +666,11 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
       in
       Gate_protocol.Reply { content = reply; structured; stats; message_request }
   | `Queued_to_chat_lane (in_flight, queue_length, receipt_id) ->
-      (* RFC-connector-deferred-reply-via-chat-queue: the message was enqueued onto [Keeper_chat_queue]; the
-         connector gets a busy ACK now and the deferred reply later via the
+      (* RFC-connector-deferred-reply-via-chat-queue: the message was enqueued onto
+         [Keeper_chat_queue]; the connector gets a busy ACK with its durable
+         receipt and current queue depth, then the deferred reply later via the
          serial consumer's outbound adapter. There is no [Keeper_msg_async]
-         request envelope, so [message_request] is [None] — the queue position is
-         the durable handle, not a poll request_id. *)
+         request envelope, so [message_request] remains [None]. *)
       let duration_ms =
         Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
         |> Int64.div 1_000_000L

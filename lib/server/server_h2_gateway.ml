@@ -701,9 +701,9 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, "/graphql" ->
           with_h2_read_auth h2_reqd (fun _state ->
             let nonce =
-              (* NDT-OK: nonce generation is a security boundary, not a decision input. *)
               let rng = Random.State.make_self_init () in
               let bytes =
+                (* NDT-OK: nonce generation is a security boundary, not a decision input. *)
                 Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256))
               in
               Base64.encode_string (Bytes.to_string bytes)

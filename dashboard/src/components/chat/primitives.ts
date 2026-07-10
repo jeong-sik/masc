@@ -5,7 +5,7 @@ import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { escapeHtml } from '../../lib/html-escape'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
-import { collectAttachments } from './attachments'
+import { ATTACHMENT_INPUT_ACCEPT, collectAttachments } from './attachments'
 import { linkifyHtmlReferences } from './chat-linkify'
 import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
 import { showToast } from '../common/toast'
@@ -4180,7 +4180,7 @@ export function ChatComposer({
                   <input
                     ref=${fileInputRef}
                     type="file"
-                    accept="image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg,text/plain,text/markdown,application/json,text/csv"
+                    accept=${ATTACHMENT_INPUT_ACCEPT}
                     multiple
                     class="hidden"
                     aria-label="파일 첨부"

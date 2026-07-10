@@ -335,6 +335,119 @@ let test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks () =
   | Ok _ -> fail "expected image then text OAS blocks"
   | Error err -> fail ("expected OAS block conversion: " ^ err)
 
+let document_input ~mime_type ~payload =
+  let attachment_id = "att-doc" in
+  let name = "notes.md" in
+  let attachments =
+    [
+      {
+        K.id = attachment_id;
+        att_type = "file";
+        name;
+        size = String.length payload;
+        mime_type;
+        data = Printf.sprintf "data:%s;base64,%s" mime_type payload;
+      };
+    ]
+  in
+  let media =
+    {
+      Keeper_multimodal_input.attachment_id;
+      name;
+      mime_type;
+      size = Some (String.length payload);
+    }
+  in
+  attachments, media
+
+let test_keeper_multimodal_input_projects_text_documents_as_text () =
+  let cases =
+    [ "text/plain", "plain body"
+    ; "text/markdown", "# heading"
+    ; "text/html", "<h1>heading</h1>"
+    ; "application/json", {|{"ok":true}|}
+    ; "text/csv", "name,value\nalpha,1"
+    ]
+  in
+  List.iter
+    (fun (mime_type, body) ->
+       let attachments, media =
+         document_input ~mime_type ~payload:(Base64.encode_string body)
+       in
+       match
+         Keeper_multimodal_input.to_oas_blocks ~attachments
+           [ Keeper_multimodal_input.User_document media ]
+       with
+       | Ok [ Agent_sdk.Types.Text projected ] ->
+           let metadata =
+             Yojson.Safe.to_string
+               (`Assoc
+                 [ "kind", `String "user_attachment"
+                 ; "name", `String "notes.md"
+                 ; "media_type", `String mime_type
+                 ])
+           in
+           check string (mime_type ^ " exact projection")
+             (Printf.sprintf
+                "User-provided attachment metadata: %s\n\n%s"
+                metadata
+                body)
+             projected
+       | Ok _ -> fail (mime_type ^ " should project as one text block")
+       | Error err -> fail (mime_type ^ " projection failed: " ^ err))
+    cases
+
+let test_keeper_multimodal_input_preserves_binary_document () =
+  let payload = Base64.encode_string "%PDF-1.7" in
+  let attachments, media = document_input ~mime_type:"application/pdf" ~payload in
+  match
+    Keeper_multimodal_input.to_oas_blocks ~attachments
+      [ Keeper_multimodal_input.User_document media ]
+  with
+  | Ok [ Agent_sdk.Types.Document { media_type; data; source_type } ] ->
+      check string "media type" "application/pdf" media_type;
+      check string "base64 payload" payload data;
+      check bool "source type" true (source_type = Agent_sdk.Types.Base64)
+  | Ok _ -> fail "PDF should remain one OAS document block"
+  | Error err -> fail ("PDF document projection failed: " ^ err)
+
+let test_keeper_multimodal_input_rejects_invalid_text_document_payload () =
+  let attachments, media =
+    document_input ~mime_type:"text/markdown" ~payload:"%%%"
+  in
+  (match
+     Keeper_multimodal_input.to_oas_blocks ~attachments
+       [ Keeper_multimodal_input.User_document media ]
+   with
+   | Ok _ -> fail "invalid textual document base64 should be rejected"
+   | Error err ->
+       check bool "base64 error is explicit" true
+         (string_contains err "invalid base64 payload"));
+  let invalid_utf8 = String.make 1 (Char.chr 0xff) |> Base64.encode_string in
+  let attachments, media =
+    document_input ~mime_type:"text/html" ~payload:invalid_utf8
+  in
+  match
+    Keeper_multimodal_input.to_oas_blocks ~attachments
+      [ Keeper_multimodal_input.User_document media ]
+  with
+  | Ok _ -> fail "invalid UTF-8 textual document should be rejected"
+  | Error err ->
+      check bool "UTF-8 error is explicit" true
+        (string_contains err "not valid UTF-8 text");
+      let unsupported_control = Base64.encode_string "before\x00after" in
+      let attachments, media =
+        document_input ~mime_type:"text/plain" ~payload:unsupported_control
+      in
+      match
+        Keeper_multimodal_input.to_oas_blocks ~attachments
+          [ Keeper_multimodal_input.User_document media ]
+      with
+      | Ok _ -> fail "text control characters should not be silently repaired"
+      | Error control_err ->
+          check bool "control character error is explicit" true
+            (string_contains control_err "unsupported control characters")
+
 let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
   let attachments =
     [
@@ -2684,6 +2797,12 @@ let () =
             test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type;
           test_case "multimodal input converts user blocks to OAS blocks" `Quick
             test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks;
+          test_case "multimodal input projects text documents as text" `Quick
+            test_keeper_multimodal_input_projects_text_documents_as_text;
+          test_case "multimodal input preserves binary documents" `Quick
+            test_keeper_multimodal_input_preserves_binary_document;
+          test_case "multimodal input rejects invalid text document payload" `Quick
+            test_keeper_multimodal_input_rejects_invalid_text_document_payload;
           test_case "multimodal input accepts mixed-case data URL" `Quick
             test_keeper_multimodal_input_accepts_mixed_case_data_url;
           test_case "multimodal input normalizes inferred data URL MIME" `Quick

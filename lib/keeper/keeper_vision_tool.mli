@@ -59,13 +59,15 @@ val message_of_request
     [data:<media_type>;base64,<data>]). *)
 
 val provider_for_vision
-  :  Llm_provider.Provider_config.t
+  :  runtime_id:string
+  -> Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
 (** A one-shot, non-thinking, structured-output vision config: thinking off (avoids the
     2026-06-25 gemma4 thinking-budget exhaustion that produced empty replies),
     [response_format = JsonSchema _], [output_schema = Some _],
-    [tool_choice = None], [temperature = 0], and a fallback [max_tokens] only
-    when the selected runtime has not configured one. *)
+    [tool_choice = None], the selected runtime's declared temperature (or the
+    deterministic subsystem fallback), and a fallback [max_tokens] only when
+    the selected runtime has not configured one. *)
 
 val vision_runtime_ids : unit -> string list
 (** Ordered schema-capable image runtime ids: [\[runtime\].media_failover] order

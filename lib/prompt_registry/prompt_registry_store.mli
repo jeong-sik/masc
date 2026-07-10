@@ -1,5 +1,5 @@
 (** Prompt_registry_store — process-wide prompt registry state +
-    its mutex.
+    its read/write and override-mutation mutexes.
 
     Owns the four Hashtbls and two refs that {!Prompt_registry}
     rebinds at the top level so the rest of the codebase can
@@ -18,11 +18,13 @@
 type t = {
   registry : (string, Prompt_registry_types.prompt_entry) Hashtbl.t;
   version_index : (string, string list) Hashtbl.t;
-  override_tbl : (string, string) Hashtbl.t;
+  override_tbl :
+    (string, Prompt_override_persistence.entry) Hashtbl.t;
   meta_tbl : (string, Prompt_registry_types.prompt_meta) Hashtbl.t;
   prompts_dir : string option ref;
   markdown_dir : string option ref;
   mutex : Eio.Mutex.t;
+  override_mutation_mutex : Eio.Mutex.t;
 }
 
 val default : unit -> t
@@ -36,3 +38,8 @@ val with_lock : t -> (unit -> 'a) -> 'a
     path including exceptions and ambient cancel; callers must
     not block on disk / network I/O inside [f] (the prompt
     registry mutex is hot-path). *)
+
+val with_override_mutation_lock : t -> (unit -> 'a) -> 'a
+(** Serialize override mutations and persistence transactions.  The dedicated
+    Eio mutex may be held across filesystem I/O; readers continue to use
+    [with_lock] and observe the old immutable snapshot until commit. *)

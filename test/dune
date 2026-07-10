@@ -121,6 +121,7 @@
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
   test_server_keeper_background
+  test_keeper_tool_inflight
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
   eval_memory_os_value
@@ -479,6 +480,7 @@
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
   test_server_keeper_background
+  test_keeper_tool_inflight
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
   eval_memory_os_value
@@ -955,7 +957,9 @@
  (names
   test_keeper_busy_connector_deferred
   test_keeper_busy_dashboard_deferred
+  test_keeper_turn_interrupt
   test_keeper_chat_consumer_delivery
+  test_keeper_continuation_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params
   test_config_dir_resolver
@@ -1151,7 +1155,9 @@
  (modules
   test_keeper_busy_connector_deferred
   test_keeper_busy_dashboard_deferred
+  test_keeper_turn_interrupt
   test_keeper_chat_consumer_delivery
+  test_keeper_continuation_delivery
   test_keeper_chat_consumer_dispatch
   test_runtime_params
   test_config_dir_resolver
@@ -2679,6 +2685,8 @@
 (include stanzas/test_tool_resource_gate.inc)
 
 (include stanzas/test_keeper_wire_capture_suppression.inc)
+
+(include stanzas/test_keeper_meta_canonicalize.inc)
 
 (test
  (name test_keeper_visible_path_projection)

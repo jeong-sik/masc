@@ -45,17 +45,7 @@ let normalize_response_text_for_finalization
       ~tool_names
       ()
   =
-  (* Surface the model's reasoning when the turn produced no final answer text,
-     so an empty-answer turn shows why (e.g. a keeper waiting on approval)
-     instead of a bare tool list. *)
-  let reasoning =
-    run_result.response.Agent_sdk.Types.content
-    |> List.filter_map (function
-         | Agent_sdk.Types.Thinking { content; _ } -> Some content
-         | _ -> None)
-    |> String.concat "\n"
-  in
-  match Keeper_tool_response.normalize_response_text ~text ~tool_names ~reasoning () with
+  match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
   | Error _ ->
     (* Finalization intentionally exposes the higher-level accept-rejected
@@ -210,8 +200,9 @@ end
     @param runtime_id Runtime profile name for model selection
      @param generation Current generation counter
      @param guardrails Optional OAS guardrails for tool safety gates
-    @param temperature MODEL temperature override; when omitted, resolved
-           from [Runtime_inference] with a 0.3 fallback
+    @param temperature Subsystem temperature fallback; a selected runtime model
+           declaration takes precedence. When omitted,
+           [Keeper_config.keeper_unified_temperature] is the fallback.
     @param max_tokens Maximum output tokens override; when omitted, resolved
            from [Runtime_inference] with a 8192 fallback
     @param is_retry When [true], replays the current user message into the
@@ -347,6 +338,9 @@ let run_turn
      children, so runtime attempts and tool invocations spawned inside
      the turn body all see [turn_sw] automatically. *)
   Eio.Switch.run @@ fun turn_sw ->
+  Keeper_registry.set_turn_switch ~base_path:config.base_path meta.name (Some turn_sw);
+  Eio.Switch.on_release turn_sw (fun () ->
+    Keeper_registry.clear_turn_switch ~base_path:config.base_path meta.name);
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
   let runtime_id_string = runtime_id in
@@ -1144,6 +1138,11 @@ let run_turn
           ());
        receipt_result)
 with
+| Eio.Cancel.Cancelled Keeper_registry.Operator_interrupt as ce ->
+  turn_cancelled := Some ce;
+  Keeper_registry.set_failure_reason
+    ~base_path:config.base_path meta.name (Some Keeper_registry.Operator_interrupt);
+  raise ce
 | Eio.Cancel.Cancelled _ as ce ->
   turn_cancelled := Some ce;
   raise ce

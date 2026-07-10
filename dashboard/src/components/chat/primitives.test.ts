@@ -20,7 +20,8 @@ import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
 
-vi.mock('./attachments', () => ({
+vi.mock('./attachments', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./attachments')>(),
   collectAttachments: vi.fn(),
 }))
 
@@ -1541,6 +1542,24 @@ describe('Keeper v2 chat blocks', () => {
     expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-source')).toBe('server_block')
     expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-kind')).toBeNull()
     expect(container.textContent).toContain('unsafe URL')
+  })
+
+  it('renders a server-provided attachment failure without claiming it is an image', () => {
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'generated media unavailable: storage write failed',
+        ph: 'Generated media is unavailable.',
+        mimeType: 'audio/mpeg',
+        size: '128 wire-carrier bytes observed',
+        sizeBytes: 128,
+      },
+    ])
+
+    const attach = container.querySelector('[data-chat-block="attach"]')
+    expect(attach?.textContent).toContain('Generated media is unavailable.')
+    expect(attach?.querySelector('.chat-block-attach-cap')?.textContent)
+      .toBe('첨부 · 128 wire-carrier bytes observed')
   })
 
   it('renders a voice memo with waveform bars and transcript', () => {

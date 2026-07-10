@@ -23,5 +23,11 @@ val on_event : t -> Agent_sdk.Types.sse_event -> unit
 val to_chat_blocks : base_dir:string -> t -> Keeper_chat_blocks.chat_block list
 (** Decode and persist each finalized media payload under [base_dir] via
     {!Keeper_chat_media_store.persist_media_source_result}, then return reload
-    chat blocks in completion order: [Image] for image media, [Voice] for audio,
-    [Attach] for documents / unrecognized types. *)
+    chat blocks in stream terminal order: [Image] for image media, [Voice] for
+    audio, [Attach] for documents / unrecognized types. Media rejected by the
+    wire cap or rejected while decoding/persisting becomes an in-order [Attach]
+    placeholder with [src = None], the media type, and a byte count whose label
+    states whether it measures the wire carrier or decoded payload. The wire
+    rejection also retains the decision-time cap, so later configuration changes
+    cannot rewrite the persisted explanation. Tool-owned block indexes stay
+    traceless. *)

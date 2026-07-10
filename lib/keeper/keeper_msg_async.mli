@@ -50,10 +50,17 @@ type load_result =
     [f] never returns. [worker_abort_reason] is what [on_worker_aborted]
     receives so such callers can push their own terminal signal instead of
     waiting forever on a channel [f] never got to finish. *)
+type worker_cancel_source =
+  | Operator_request
+  | Runtime_cancellation
+
+val worker_cancel_source_to_string : worker_cancel_source -> string
+(** Stable wire label for cancellation provenance. *)
+
 type worker_abort_reason =
   | Timeout of { timeout_sec : float }
   | Worker_cancelled of
-      { cancelled_by : string (** ["operator"] or ["runtime"] *)
+      { cancelled_by : worker_cancel_source
       ; reason : string
       }
 
@@ -76,7 +83,9 @@ type worker_abort_reason =
     already signaled its own completion on those paths. It runs from a fiber
     that is not itself under cancellation at the moment of the call (wrapped
     internally in {!Eio.Cancel.protect}), so it may safely perform blocking
-    Eio operations such as pushing to a caller-owned stream. *)
+    Eio operations such as pushing to a caller-owned stream. Callback
+    exceptions are logged and re-raised; they are never treated as successful
+    notification. *)
 val submit
   :  ?clock:_ Eio.Time.clock
   -> ?timeout_sec:float

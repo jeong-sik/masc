@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Prompt overrides now persist in a schema-versioned envelope bound to the SHA256 revision of each prompt body and template-variable contract. Legacy or malformed files and contract-drifted entries fail closed with observable fallback, writes use atomic replacement, and dashboard set/clear mutations commit to memory only after persistence succeeds.
+
 ## [0.20.1] - 2026-07-10
 
 ### Changed

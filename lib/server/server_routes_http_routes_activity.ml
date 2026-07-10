@@ -1071,34 +1071,49 @@ let add_routes ~sw ~clock router =
              let args = Yojson.Safe.from_string body_str in
              let key = Json_util.get_string args "key"
                |> Option.value ~default:"" in
-             let action = Json_util.get_string args "action"
-               |> Option.value ~default:"set" in
+             let action = Json_util.get_string args "action" in
              if key = "" then
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "key is required") ])
-             else begin
+             else match action with
+             | None ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd
+                 (`Assoc
+                    [
+                      ("ok", `Bool false);
+                      ("error", `String "action is required");
+                    ])
+             | Some action ->
                let result = match action with
                  | "clear" ->
-                   Prompt_registry.clear_prompt_override key;
-                   (try Prompt_registry.persist_overrides
+                   (match
+                      Prompt_registry.clear_prompt_override_persisted
+                        ~base_path:
                           (Mcp_server.workspace_config state).base_path
-                    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                      Log.Pages.warn "prompt override persist (clear) failed: %s"
-                        (Printexc.to_string exn));
-                   Ok "override cleared"
-                 | "set" | _ ->
+                        key
+                    with
+                    | Ok () -> Ok "override cleared"
+                    | Error message ->
+                        Error (`Persistence message))
+                 | "set" ->
                    let value = Json_util.get_string args "value"
                      |> Option.value ~default:"" in
-                   match Prompt_registry.set_override key value with
-                   | Ok () ->
-                     (try Prompt_registry.persist_overrides
-                            (Mcp_server.workspace_config state).base_path
-                      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                        Log.Pages.warn "prompt override persist (set) failed: %s"
-                          (Printexc.to_string exn));
-                     Ok "override set"
-                   | Error msg -> Error msg
+                   (match
+                      Prompt_registry.set_override_persisted
+                        ~base_path:
+                          (Mcp_server.workspace_config state).base_path
+                        key value
+                    with
+                    | Ok () -> Ok "override set"
+                    | Error (Prompt_registry.Validation_error message) ->
+                        Error (`Validation message)
+                    | Error (Prompt_registry.Persistence_error message) ->
+                        Error (`Persistence message))
+                 | unsupported ->
+                     Error
+                       (`Validation
+                         (Printf.sprintf "unsupported action: %s" unsupported))
                in
                match result with
                | Ok msg ->
@@ -1111,10 +1126,18 @@ let add_routes ~sw ~clock router =
                         ("source", `String (Prompt_registry.prompt_source key));
                         ("effective", `String (Prompt_registry.get_prompt key));
                       ])
-               | Error msg ->
+               | Error (`Validation msg) ->
                  respond_json_value_with_cors ~status:`Bad_request request reqd
                    (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
-             end
+               | Error (`Persistence msg) ->
+                 Log.Pages.error "prompt override persist failed: %s" msg;
+                 respond_json_value_with_cors ~status:`Internal_server_error
+                   request reqd
+                   (`Assoc
+                      [
+                        ("ok", `Bool false);
+                        ("error", `String "prompt override persistence failed");
+                      ])
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (`Assoc

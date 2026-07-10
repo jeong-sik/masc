@@ -1674,6 +1674,10 @@ let add_routes ~sw ~clock router =
            Keeper_api.handle_keeper_get_subroutes state req request reqd
          ) request reqd)
 
+  |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_msg" (fun state _req reqd ->
+         handle_keeper_turn_interrupt state request reqd) request reqd)
+
   (* Keeper config or tools update.  This prefix_post catches ALL POST
      /api/v1/keepers/* requests.  We check the suffix BEFORE auth so that
      /tools gets with_tool_auth (localhost-friendly) while /config keeps

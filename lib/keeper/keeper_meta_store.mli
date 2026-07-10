@@ -100,15 +100,8 @@ val read_meta_if_changed :
   last_mtime:float ->
   (Keeper_meta_contract.keeper_meta * float) option
 
-(** Refresh the [Updated:] line in the keeper progress markdown.
-    Best-effort: a missing progress file is a no-op; other failures
-    increment [metric_keeper_progress_updated_line_failures] and log a
-    warning. *)
-val refresh_progress_updated_line : Workspace.config -> string -> unit
-
 (** Atomic write of [persisted] to [path]; runs the
-    [runtime_meta_write_sync_hook] and refreshes the progress
-    timestamp on success. *)
+    [runtime_meta_write_sync_hook] on success. *)
 val persist_meta :
   Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
@@ -124,6 +117,27 @@ val write_meta :
 
 (** [true] iff [msg] matches [version_conflict_re]. *)
 val is_version_conflict_error : string -> bool
+
+(** Strip retired top-level keys from persisted keeper meta files —
+    fields left behind by schema removals (e.g. the #23929 continuity
+    purge left [last_continuity_update_ts]/[continuity_summary] in
+    [.masc/keepers/], re-warning on every read until the next save;
+    dormant keepers never save). Deletion is destructive, so the drop
+    set is an explicit in-code list ([retired_keeper_meta_key_names]),
+    not a set derived from the codec: parser-consumed keys the
+    serializer never emits ([autoboot_enabled], [compaction_mode],
+    [keeper_name], ...) must survive, and deriving the complement was
+    twice shown to misclassify them. Forgetting to extend the list is
+    fail-safe — the unknown-keys warning keeps firing until the key is
+    added. Retired keys are filtered out of the raw JSON in place
+    ([Keeper_fs.save_json_atomic]); no re-serialization, no
+    [meta_version] bump, every surviving field keeps its exact on-disk
+    value. Unreadable or parser-rejected files are logged and preserved
+    untouched. Call once at boot BEFORE keeper loops start; the write is
+    not CAS-guarded, so the only writers that can race it are external
+    request-driven mutations inside the per-file read/save span during
+    boot — a CAS-guarded loser self-heals on its retry path. *)
+val migrate_retired_keeper_meta_keys : Workspace.config -> unit
 
 (** Retry [write_meta] on CAS version conflicts using caller-declared
     field ownership via [merge]. Use [Keeper_meta_merge.caller_wins]

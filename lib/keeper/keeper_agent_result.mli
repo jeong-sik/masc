@@ -6,7 +6,10 @@ type tool_call_detail =
   ; outcome : string
       (** Progress-classification label retained for receipt compatibility. *)
   ; execution_outcome : Tool_result.tool_call_outcome
-      (** Typed [Tool_result.Ok]/[Error] truth captured at the OAS hook boundary. *)
+      (** Typed [Tool_result.Ok]/[Error] truth captured at the OAS hook boundary.
+          This turn-local delivery signal is intentionally not part of
+          [tool_call_detail_to_json]; durable tool-call audit uses
+          [Keeper_tool_call_log]. *)
   ; typed_outcome : Keeper_tool_outcome.t option
   ; latency_ms : float
   ; task_id : string option

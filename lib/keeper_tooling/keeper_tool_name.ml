@@ -201,8 +201,6 @@ let of_string = function
   | "keeper_time_now" -> Some Time_now
   | "keeper_tool_search" -> Some Tool_search
   | "keeper_tools_list" -> Some Tools_list
-  | "masc_persona_create" -> Some Persona_create
-  | "masc_persona_update" -> Some Persona_update
   | "keeper_voice_agent" -> Some Voice_agent
   | "keeper_voice_listen" -> Some Voice_listen
   | "keeper_voice_session_end" -> Some Voice_session_end

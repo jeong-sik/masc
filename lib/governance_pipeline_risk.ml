@@ -143,12 +143,11 @@ let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
   | Board_post_get | Board_list | Board_post | Board_search | Board_stats
   | Board_sub_board_get | Board_sub_board_list | Board_vote | Broadcast
   | Context_status | Handoff | Library_read | Library_search | Memory_search
-  | Memory_write | Search_files | Surface_read | Tasks_audit | Tasks_list | Time_now
-  | Tool_search | Tools_list | Voice_agent | Voice_listen
+  | Memory_write | Keeper_msg | Search_files | Surface_read | Tasks_audit | Tasks_list
+  | Time_now | Tool_search | Tools_list | Voice_agent | Voice_listen
   | Voice_session_end | Voice_session_start | Voice_sessions | Voice_speak -> Low
   | Board_sub_board_create | Board_sub_board_update | Task_claim | Task_create | Task_done
-  | Surface_post | Keeper_msg | Person_note_set | Persona_create | Persona_update
-    -> Medium
+  | Surface_post | Person_note_set | Persona_create | Persona_update -> Medium
   | Fs_edit | Fs_write | Fs_read | Ide_annotate -> High
   | Board_sub_board_delete -> Critical
 ;;

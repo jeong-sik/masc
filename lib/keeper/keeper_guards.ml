@@ -913,16 +913,6 @@ let destructive_guard
     the assessed risk level meets or exceeds the configured keeper
     confirm threshold. Relies on an approval callback wired into the
     agent Builder to resolve the decision. *)
-(* task-1806: per-keeper code tool exemption — when HITL approval is
-   required, authorized keepers bypass the approval gate to unblock code work.
-   PM accepted policy risk (albini, p-6e2a0927be). Replace with a proper
-   Env_config_core mechanism once one exists. *)
-let per_keeper_code_exemption keeper_name =
-  (* task-1807: operator-controlled exemption via MASC_CODE_EXEMPT_KEEPERS env var
-     as specified in RFC-0329 §4 (config-driven code exemption).
-     Replaces hardcoded per-keeper allowlist. *)
-  Env_config_core.code_exempt_keeper ~keeper_name
-
 let governance_approval_guard
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
@@ -963,7 +953,7 @@ let governance_approval_guard
              ~tool_name ~reason_code:"hard_forbidden"
              ~reason_text:"hard_forbidden: unconditional block regardless of HITL mode")
       end
-      else if needs_approval && not (per_keeper_code_exemption keeper_name) then begin
+      else if needs_approval then begin
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
         let source_path = keeper_guards_source_path in
         let source_line = __LINE__ in

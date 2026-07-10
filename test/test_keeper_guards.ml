@@ -143,6 +143,10 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+(* Retired security-sensitive knob retained only as a regression input: setting
+   it must not alter the governance decision. *)
+let retired_code_exempt_keepers_env_key = "MASC_CODE_EXEMPT_KEEPERS"
+
 let test_render_inline_skip_reason () =
   let s = KG.render_inline_skip_reason
     ~tool_name:"tool_read_file"
@@ -823,9 +827,10 @@ let test_custom_guard_passthrough () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"ok" ()) in
   check string "custom None -> Continue" "Continue" (decision_kind d)
 
-let test_governance_approval_notifies_gate_observer () =
+let test_governance_approval_legacy_exemption_cannot_bypass_high () =
   with_env "MASC_GOVERNANCE_LEVEL" "production" (fun () ->
   with_env "MASC_DISABLE_HITL" "false" (fun () ->
+  with_env retired_code_exempt_keepers_env_key "test_keeper" (fun () ->
     let meta_ref = make_meta_ref "test_keeper" in
     let observed = ref [] in
     let on_gate_decision event = observed := event :: !observed in
@@ -836,7 +841,7 @@ let test_governance_approval_notifies_gate_observer () =
            ~input:(`Assoc [ ("title", `String "follow up") ])
            ())
     in
-    check string "high-risk tool -> ApprovalRequired"
+    check string "legacy exemption cannot bypass high-risk approval"
       "ApprovalRequired" (decision_kind d);
     match !observed with
     | [ event ] ->
@@ -853,7 +858,39 @@ let test_governance_approval_notifies_gate_observer () =
          | Some line -> line > 0
          | None -> false)
   | events ->
-      failf "expected one observer event, got %d" (List.length events)))
+      failf "expected one observer event, got %d" (List.length events))))
+
+let test_governance_approval_critical_code_blocks_with_legacy_exemption () =
+  with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+  with_env retired_code_exempt_keepers_env_key "test_keeper" (fun () ->
+    let meta_ref = make_meta_ref "test_keeper" in
+    let observed = ref [] in
+    let on_gate_decision event = observed := event :: !observed in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let d =
+      invoke hook
+        (pre_tool_use_event ~tool_name:"tool_execute"
+           ~input:(`Assoc [ ("cmd", `String "git status") ])
+           ())
+    in
+    check string "legacy exemption cannot bypass critical code block"
+      "Block" (decision_kind d);
+    check bool "override carries hard-forbidden reason" true
+      (contains_substring (override_text d) "code=hard_forbidden");
+    match !observed with
+    | [ event ] ->
+      check string "stage" "governance_approval" event.KG.stage;
+      check string "decision" "override"
+        (KG.gate_decision_to_string event.KG.decision);
+      check string "reason_code" "hard_forbidden" event.KG.reason_code;
+      check string "tool_name" "tool_execute" event.KG.tool_name;
+      check (option string) "source_path"
+        (Some "lib/keeper/keeper_guards.ml")
+        event.KG.source_path
+    | events ->
+      failf "expected one hard-forbidden observer event, got %d"
+        (List.length events))))
 
 let test_governance_approval_hard_forbidden_blocks_without_hitl () =
   with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
@@ -1083,11 +1120,13 @@ let () = run "Keeper_guards" [
     test_case "user passes through" `Quick test_custom_guard_passthrough;
   ];
   "governance_approval_guard", [
-    test_case "notifies observer on approval required" `Quick
-      test_governance_approval_notifies_gate_observer;
-    test_case "hard-forbidden blocks without HITL" `Quick
+    test_case "legacy exemption cannot bypass high-risk approval" `Quick
+      test_governance_approval_legacy_exemption_cannot_bypass_high;
+    test_case "critical code blocks with legacy exemption" `Quick
+      test_governance_approval_critical_code_blocks_with_legacy_exemption;
+    test_case "hard-forbidden overrides without HITL" `Quick
       test_governance_approval_hard_forbidden_blocks_without_hitl;
-    test_case "serious last_blocker blocks without HITL" `Quick
+    test_case "serious last_blocker overrides without HITL" `Quick
       test_governance_approval_serious_blocker_overrides;
     test_case "transient last_blocker allows without HITL" `Quick
       test_governance_approval_transient_blocker_allows;

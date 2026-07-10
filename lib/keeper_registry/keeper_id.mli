@@ -2,6 +2,8 @@
     Implements "Parse, Don't Validate" by making IDs abstract or private. *)
 
 module Keeper_name : sig
+  (** One portable path segment. The reserved filesystem segments [.] and [..]
+      are rejected before a Keeper name can become a filesystem coordinate. *)
   type t = private string
   val of_string : string -> (t, string) result
   val to_string : t -> string

@@ -1,0 +1,59 @@
+# Merge Guard — fail-closed blocker-label / draft gate (issue #23966).
+#
+# Exits non-zero while the PR carries a blocker label (status:do-not-merge,
+# p0, p1) or is a draft. Listens to label and draft-state events so the
+# verdict re-computes the moment a blocker is added or removed, without
+# re-running the full CI matrix.
+#
+# This check only binds merges once two repository settings hold
+# (operator-approved, see #23966):
+#   1. "Merge Guard" is in the branch-protection required contexts.
+#   2. enforce_admins is enabled — otherwise any admin merge bypasses
+#      every required context including this one.
+name: Merge Guard
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
+      - unlabeled
+      - ready_for_review
+      - converted_to_draft
+
+permissions:
+  contents: read
+
+jobs:
+  merge-guard:
+    name: Merge Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail on blocker labels or draft state
+        env:
+          # Snapshot from the triggering event, not a later API read, so the
+          # verdict is tied to the state transition that fired this run.
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+          blocked=0
+          IFS=',' read -ra labels <<< "${PR_LABELS}"
+          for label in "${labels[@]:-}"; do
+            case "$label" in
+              status:do-not-merge|p0|p1)
+                echo "::error title=Merge blocked::blocker label present: $label"
+                blocked=1
+                ;;
+            esac
+          done
+          if [[ "${PR_DRAFT}" == "true" ]]; then
+            echo "::error title=Merge blocked::pull request is a draft"
+            blocked=1
+          fi
+          if [[ "$blocked" == "1" ]]; then
+            exit 1
+          fi
+          echo "no blocker labels, not a draft — merge guard clean"

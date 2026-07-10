@@ -121,8 +121,14 @@ and goal_of_yojson = function
             | Some status_json -> goal_status_of_yojson status_json
           in
           let phase =
+            (* Legacy rows (written before the phase field existed) carry only
+               [status]; the read path must map it the same way the update
+               path does (see the status→phase mapping near [set_status]).
+               #23710 dropped this mapping to an unconditional Active default
+               and #23845 sealed the compile without restoring it — a paused
+               legacy goal then decoded as Executing (main red #23901). *)
             match Json_util.assoc_member_opt "phase" json with
-            | None | Some `Null -> Ok (phase_of_goal_status Active)
+            | None | Some `Null -> Result.map phase_of_goal_status legacy_status
             | Some phase_json -> Goal_phase.of_yojson phase_json
           in
           let verifier_policy =

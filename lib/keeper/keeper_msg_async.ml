@@ -47,10 +47,19 @@ type load_result =
    an unqualified [Cancelled] constructor with the same field names in this
    module. A same-named constructor here would shadow it for every
    unqualified use below and risk silently constructing the wrong type. *)
+type worker_cancel_source =
+  | Operator_request
+  | Runtime_cancellation
+
+let worker_cancel_source_to_string = function
+  | Operator_request -> "operator"
+  | Runtime_cancellation -> "runtime"
+;;
+
 type worker_abort_reason =
   | Timeout of { timeout_sec : float }
   | Worker_cancelled of
-      { cancelled_by : string
+      { cancelled_by : worker_cancel_source
       ; reason : string
       }
 
@@ -496,13 +505,14 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~base_path
       | None -> ()
       | Some cb ->
         Eio.Cancel.protect (fun () ->
-          try cb reason with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Keeper.warn
+          match cb reason with
+          | () -> ()
+          | exception exn ->
+            Log.Keeper.error
               "keeper_msg_async: on_worker_aborted callback failed request_id=%s error=%s"
               request_id
-              (Printexc.to_string exn))
+              (Printexc.to_string exn);
+            raise exn)
     in
     let run_worker_with_timeout () =
       match clock with
@@ -536,7 +546,7 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~base_path
       | CancelledByOperator ->
         notify_aborted
           (Worker_cancelled
-             { cancelled_by = "operator"
+             { cancelled_by = Operator_request
              ; reason = "keeper_msg request was cancelled by operator"
              });
         operator_cancelled_status ()
@@ -544,7 +554,7 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~base_path
         set_status_protected ~preserve_terminal:true request_id (runtime_cancelled_status ());
         notify_aborted
           (Worker_cancelled
-             { cancelled_by = "runtime"
+             { cancelled_by = Runtime_cancellation
              ; reason =
                  "keeper_msg worker was cancelled by runtime before terminal result"
              });

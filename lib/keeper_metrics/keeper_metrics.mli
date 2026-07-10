@@ -155,7 +155,6 @@ type t =
   | MemoryLaneDropped
   | MemoryLanePending
   | MemoryLaneInFlight
-  | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
   | MemoryOsMaintenanceKeeperTimeout
   | WriteMetaCycleFailures
@@ -215,6 +214,7 @@ type t =
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures
+  | RetiredEnvIgnored
   | PostTurnWireinFailures
   | RecurringFailures
   | TurnCleanupFailures

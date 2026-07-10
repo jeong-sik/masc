@@ -237,7 +237,6 @@ module KeeperMemoryOs = struct
   let librarian_timeout_sec_default = 600.0
   let librarian_max_tokens_default = 4096
   let librarian_runtime_id_default = None
-  let librarian_global_slot_default = 1
   let gc_enabled_default = true
   let shared_consolidator_enabled_default = false
   let consolidation_enabled_default = false
@@ -254,7 +253,6 @@ module KeeperMemoryOs = struct
   let librarian_timeout_sec_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
   let librarian_max_tokens_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
   let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
-  let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
   let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
   let shared_consolidator_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATE"
   let consolidation_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
@@ -355,18 +353,6 @@ module KeeperMemoryOs = struct
       ~default:(optional_string_default librarian_runtime_id_default)
       librarian_runtime_id_env_key
     |> nonempty_string
-  ;;
-
-  (** Fleet-wide concurrency gate for librarian provider calls. Default: 1; 0
-      disables the gate.
-      @category Concurrency
-      @ops_class operator *)
-  let librarian_global_slot () =
-    max
-      0
-      (get_int_logged
-         librarian_global_slot_env_key
-         ~default:librarian_global_slot_default)
   ;;
 
   (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: true;

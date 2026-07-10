@@ -993,8 +993,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
   ; ( Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
     , fun () ->
         ignore (Env_config.KeeperMemoryOs.librarian_runtime_id () : string option) )
-  ; ( Env_config.KeeperMemoryOs.librarian_global_slot_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_global_slot () : int) )
   ; ( Env_config.KeeperMemoryOs.gc_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.gc_enabled () : bool) )
   ; ( Env_config.KeeperMemoryOs.shared_consolidator_env_key
@@ -4333,109 +4331,6 @@ let test_recall_waits_for_shared_fact_lock () =
                 (contains "locked recall shared fact" block)
             | None -> Alcotest.fail "expected recall block")))))
 ;;
-let test_librarian_provider_slot_gate_caps_at_capacity () =
-  with_env Env_config.KeeperMemoryOs.librarian_global_slot_env_key "1" (fun () ->
-    with_eio (fun ~sw ~net:_ ~clock ->
-      (* Capacity 1: while one entrant holds the slot, a concurrent entrant drops
-         ([None]) after [provider_slot_wait_sec] instead of blocking — the #21230
-         storm-guard the per-keeper lane keeps as an optional fleet-wide gate. *)
-      let entered, resolve_entered = Eio.Promise.create () in
-      let release, resolve_release = Eio.Promise.create () in
-      let first = ref None in
-      Eio.Fiber.fork ~sw (fun () ->
-        first
-        := Some
-             (Librarian_runtime.with_provider_slot
-                ~keeper_id:"keeper-a"
-                ~clock
-                (fun () ->
-                   Eio.Promise.resolve resolve_entered ();
-                   Eio.Promise.await release;
-                   "ran")));
-      Eio.Promise.await entered;
-      let second =
-        Librarian_runtime.with_provider_slot ~keeper_id:"keeper-a" ~clock (fun () -> "ran")
-      in
-      Eio.Promise.resolve resolve_release ();
-      wait_for_ref ~clock "first slot holder" first;
-      Alcotest.(check (option string))
-        "concurrent entrant drops at capacity 1"
-        None
-        second;
-      Alcotest.(check (option (option string)))
-        "slot holder ran"
-        (Some (Some "ran"))
-        !first))
-;;
-
-let test_librarian_provider_slot_gate_disabled_at_zero () =
-  with_env Env_config.KeeperMemoryOs.librarian_global_slot_env_key "0" (fun () ->
-    with_eio (fun ~sw ~net:_ ~clock ->
-      (* Capacity 0 disables the gate: a held slot does not cap a concurrent
-         entrant — both run ([Some]). *)
-      let entered, resolve_entered = Eio.Promise.create () in
-      let release, resolve_release = Eio.Promise.create () in
-      let first = ref None in
-      Eio.Fiber.fork ~sw (fun () ->
-        first
-        := Some
-             (Librarian_runtime.with_provider_slot
-                ~keeper_id:"keeper-a"
-                ~clock
-                (fun () ->
-                   Eio.Promise.resolve resolve_entered ();
-                   Eio.Promise.await release;
-                   "ran")));
-      Eio.Promise.await entered;
-      let second =
-        Librarian_runtime.with_provider_slot ~keeper_id:"keeper-a" ~clock (fun () -> "ran")
-      in
-      Eio.Promise.resolve resolve_release ();
-      wait_for_ref ~clock "first slot holder" first;
-      Alcotest.(check (option string))
-        "gate disabled: concurrent entrant also ran"
-        (Some "ran")
-        second;
-      Alcotest.(check (option (option string)))
-        "slot holder ran"
-        (Some (Some "ran"))
-        !first))
-;;
-
-let test_librarian_provider_slot_gate_is_per_keeper () =
-  with_env Env_config.KeeperMemoryOs.librarian_global_slot_env_key "1" (fun () ->
-    with_eio (fun ~sw ~net:_ ~clock ->
-      (* Capacity 1 is per keeper: a slot held by keeper-a must not block
-         keeper-b. This is the P0-4 isolation contract. *)
-      let entered, resolve_entered = Eio.Promise.create () in
-      let release, resolve_release = Eio.Promise.create () in
-      let first = ref None in
-      Eio.Fiber.fork ~sw (fun () ->
-        first
-        := Some
-             (Librarian_runtime.with_provider_slot
-                ~keeper_id:"keeper-a"
-                ~clock
-                (fun () ->
-                   Eio.Promise.resolve resolve_entered ();
-                   Eio.Promise.await release;
-                   "ran")));
-      Eio.Promise.await entered;
-      let other_keeper =
-        Librarian_runtime.with_provider_slot ~keeper_id:"keeper-b" ~clock (fun () -> "ran")
-      in
-      Eio.Promise.resolve resolve_release ();
-      wait_for_ref ~clock "first slot holder" first;
-      Alcotest.(check (option string))
-        "different keeper runs despite capacity 1 held"
-        (Some "ran")
-        other_keeper;
-      Alcotest.(check (option (option string)))
-        "slot holder ran"
-        (Some (Some "ran"))
-        !first))
-;;
-
 (* ---------- External refs are context-only ---------- *)
 
 let test_fact_valid_until_external_ref_is_context_only () =
@@ -6232,18 +6127,6 @@ let () =
             "unstructured fallback does not write facts"
             `Quick
             test_librarian_unstructured_fallback_does_not_write_facts
-        ; Alcotest.test_case
-            "provider slot gate caps concurrency at capacity (#21376/#21230)"
-            `Quick
-            test_librarian_provider_slot_gate_caps_at_capacity
-        ; Alcotest.test_case
-            "provider slot gate disabled at capacity 0"
-            `Quick
-            test_librarian_provider_slot_gate_disabled_at_zero
-        ; Alcotest.test_case
-            "provider slot gate isolates keepers (P0-4)"
-            `Quick
-            test_librarian_provider_slot_gate_is_per_keeper
         ] )
     ; ( "rfc-0259 volatile"
       , [ Alcotest.test_case

@@ -1,12 +1,16 @@
 (** Per-keeper memory execution lane. See keeper_memory_lane.mli (RFC-0257). *)
 
+(* Generative identity avoids a process-lifetime numeric counter for Keepers
+   that are expected to live indefinitely. Tokens are compared physically and
+   their contents are never mutated. *)
+type worker_token = unit ref
+
 type entry =
   { state_mu : Stdlib.Mutex.t
     (* Guards the FIFO and worker ownership. Critical sections never yield. *)
   ; jobs : (unit -> unit) Stdlib.Queue.t
   ; mutable pending : int
-  ; mutable next_worker_id : int
-  ; mutable active_worker_id : int option
+  ; mutable active_worker : worker_token option
   }
 
 type outcome =
@@ -42,7 +46,13 @@ let registry_mu = Stdlib.Mutex.create ()
 let executor_sw : Eio.Switch.t option ref = ref None
 
 let init ~sw =
-  Stdlib.Mutex.protect registry_mu (fun () -> executor_sw := Some sw)
+  Stdlib.Mutex.protect registry_mu (fun () ->
+    match !executor_sw with
+    | None -> executor_sw := Some sw
+    | Some current when current == sw -> ()
+    | Some _ ->
+      invalid_arg
+        "Keeper_memory_lane.init: executor switch already initialized")
 ;;
 
 let current_sw () = Stdlib.Mutex.protect registry_mu (fun () -> !executor_sw)
@@ -57,8 +67,7 @@ let entry_for ~base_path ~keeper_name =
         { state_mu = Stdlib.Mutex.create ()
         ; jobs = Stdlib.Queue.create ()
         ; pending = 0
-        ; next_worker_id = 0
-        ; active_worker_id = None
+        ; active_worker = None
         }
       in
       Hashtbl.add entries key entry;
@@ -137,23 +146,22 @@ let enqueue ~keeper_name entry job =
     Stdlib.Queue.add job entry.jobs;
     entry.pending <- entry.pending + 1;
     inc_pending ~keeper_name ();
-    match entry.active_worker_id with
+    match entry.active_worker with
     | Some _ -> None
     | None ->
-      entry.next_worker_id <- entry.next_worker_id + 1;
-      let worker_id = entry.next_worker_id in
-      entry.active_worker_id <- Some worker_id;
-      Some worker_id)
+      let worker = ref () in
+      entry.active_worker <- Some worker;
+      Some worker)
 ;;
 
-let take_next entry ~worker_id =
+let take_next entry ~worker =
   Stdlib.Mutex.protect entry.state_mu (fun () ->
-    match entry.active_worker_id with
-    | Some active when active = worker_id ->
+    match entry.active_worker with
+    | Some active when active == worker ->
       (match Stdlib.Queue.take_opt entry.jobs with
        | Some job -> Some job
        | None ->
-         entry.active_worker_id <- None;
+         entry.active_worker <- None;
          None)
     | Some _ | None -> None)
 ;;
@@ -174,20 +182,22 @@ let release_job ~keeper_name entry =
     Log.Keeper.error ~keeper_name "memory lane pending counter underflow prevented")
 ;;
 
-let worker_is_active entry ~worker_id =
+let worker_is_active entry ~worker =
   Stdlib.Mutex.protect entry.state_mu (fun () ->
-    entry.active_worker_id = Some worker_id)
+    match entry.active_worker with
+    | Some active -> active == worker
+    | None -> false)
 ;;
 
-let abandon_queued ~keeper_name entry ~worker_id ~reason =
+let abandon_queued ~keeper_name entry ~worker ~reason =
   let abandoned =
     Stdlib.Mutex.protect entry.state_mu (fun () ->
-      match entry.active_worker_id with
-      | Some active when active = worker_id ->
+      match entry.active_worker with
+      | Some active when active == worker ->
         let count = Stdlib.Queue.length entry.jobs in
         Stdlib.Queue.clear entry.jobs;
         entry.pending <- entry.pending - count;
-        entry.active_worker_id <- None;
+        entry.active_worker <- None;
         count
       | Some _ | None -> 0)
   in
@@ -237,20 +247,20 @@ let run_job ~keeper_name entry ~sw job =
           (Printexc.to_string exn))
 ;;
 
-let rec drain_worker ~keeper_name entry ~worker_id ~sw =
-  match take_next entry ~worker_id with
+let rec drain_worker ~keeper_name entry ~worker ~sw =
+  match take_next entry ~worker with
   | None -> ()
   | Some job ->
     run_job ~keeper_name entry ~sw job;
-    drain_worker ~keeper_name entry ~worker_id ~sw
+    drain_worker ~keeper_name entry ~worker ~sw
 ;;
 
-let start_worker ~keeper_name entry ~worker_id sw =
+let start_worker ~keeper_name entry ~worker sw =
   let release_from_switch () =
     abandon_queued
       ~keeper_name
       entry
-      ~worker_id
+      ~worker
       ~reason:Executor_switch_released
   in
   match Eio.Switch.get_error sw with
@@ -258,17 +268,24 @@ let start_worker ~keeper_name entry ~worker_id sw =
     abandon_queued
       ~keeper_name
       entry
-      ~worker_id
+      ~worker
       ~reason:Executor_switch_unavailable;
     false
   | None ->
     let hook =
       try Some (Eio.Switch.on_release_cancellable sw release_from_switch) with
+      | Eio.Cancel.Cancelled _ as exn ->
+        abandon_queued
+          ~keeper_name
+          entry
+          ~worker
+          ~reason:Worker_cancelled;
+        raise exn
       | exn ->
         abandon_queued
           ~keeper_name
           entry
-          ~worker_id
+          ~worker
           ~reason:Hook_registration_failed;
         Log.Keeper.warn ~keeper_name
           "memory lane worker release hook registration failed: %s"
@@ -278,48 +295,60 @@ let start_worker ~keeper_name entry ~worker_id sw =
     (match hook with
      | None -> false
      | Some hook ->
-       if not (worker_is_active entry ~worker_id)
+       if not (worker_is_active entry ~worker)
        then (
          disarm_switch_hook hook;
          false)
        else (
+         let worker_started = Atomic.make false in
          try
-           Eio.Fiber.fork ~sw (fun () ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+             Atomic.set worker_started true;
              Fun.protect
                ~finally:(fun () -> disarm_switch_hook hook)
                (fun () ->
                  try
-                   (* [Fiber.fork] runs the child immediately. Yield once so
+                   (* [Fiber.fork_daemon] runs the child immediately. Yield once so
                       [submit] returns before deterministic disk work or a
                       provider call begins on the memory worker. *)
                    Eio.Fiber.yield ();
-                   drain_worker ~keeper_name entry ~worker_id ~sw
+                   drain_worker ~keeper_name entry ~worker ~sw
                  with
                  | Eio.Cancel.Cancelled _ as exn ->
                    abandon_queued
                      ~keeper_name
                      entry
-                     ~worker_id
+                     ~worker
                      ~reason:Worker_cancelled;
                    raise exn
                  | exn ->
                    abandon_queued
                      ~keeper_name
                      entry
-                     ~worker_id
+                     ~worker
                      ~reason:Worker_failed;
                    record_counter ~keeper_name MemoryLaneUnitFailures;
                    Log.Keeper.error ~keeper_name
                      "memory lane worker failed: %s"
-                     (Printexc.to_string exn)));
-           true
+                     (Printexc.to_string exn));
+             `Stop_daemon);
+           let started = Atomic.get worker_started in
+           let active = worker_is_active entry ~worker in
+           if not started
+           then
+             abandon_queued
+               ~keeper_name
+               entry
+               ~worker
+               ~reason:Executor_switch_unavailable;
+           started && active
          with
          | Eio.Cancel.Cancelled _ as exn ->
            disarm_switch_hook hook;
            abandon_queued
              ~keeper_name
              entry
-             ~worker_id
+             ~worker
              ~reason:Worker_cancelled;
            raise exn
          | exn ->
@@ -327,7 +356,7 @@ let start_worker ~keeper_name entry ~worker_id sw =
            abandon_queued
              ~keeper_name
              entry
-             ~worker_id
+             ~worker
              ~reason:Fork_failed;
            Log.Keeper.error ~keeper_name
              "memory lane worker fork failed: %s"
@@ -352,12 +381,12 @@ let submit ~base_path ~keeper_name job =
     Ran_inline
   | Some sw ->
     let entry = entry_for ~base_path ~keeper_name in
-    let worker_id = enqueue ~keeper_name entry job in
+    let worker = enqueue ~keeper_name entry job in
     record_counter ~keeper_name MemoryLaneSubmitted;
-    (match worker_id with
+    (match worker with
      | None -> Submitted
-     | Some worker_id ->
-       if start_worker ~keeper_name entry ~worker_id sw then Submitted else Dropped)
+     | Some worker ->
+       if start_worker ~keeper_name entry ~worker sw then Submitted else Dropped)
 ;;
 
 module For_testing = struct

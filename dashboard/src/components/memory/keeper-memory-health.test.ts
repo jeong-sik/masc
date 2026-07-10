@@ -34,7 +34,6 @@ function makeEntry(
     events_to_facts_ratio: 0,
     ttl_expired_on_disk: 0,
     near_duplicate: 0,
-    provider_slot_busy: 0,
     alerts: [],
     ...overrides,
   }
@@ -55,7 +54,6 @@ function makeResponse(
       events_bytes: 0,
       ttl_expired_on_disk: 0,
       near_duplicate: 0,
-      provider_slot_busy: 0,
       ...totalsOverrides,
     },
     alert_summary: alertSummary ?? makeAlertSummary(),
@@ -72,12 +70,10 @@ function makeAlertSummary(
     ttl_expired_keepers: 0,
     near_duplicate_keepers: 0,
     high_event_ratio_keepers: 0,
-    provider_slot_busy_keepers: 0,
     thresholds: {
       ttl_expired_on_disk: 0,
       near_duplicate: 0,
       events_to_facts_ratio: 0,
-      provider_slot_busy: 0,
     },
     ...overrides,
   }
@@ -195,16 +191,15 @@ describe('KeeperMemoryHealth', () => {
       expect(screen.getByText('TTL')).not.toBeNull()
     })
 
-    it('does not style raw ttl or provider-slot counts as warnings without backend alerts', async () => {
+    it('does not style a raw ttl count as a warning without a backend alert', async () => {
       mockFetch.mockResolvedValue(
         makeResponse([
           makeEntry({
             keeper_id: 'raw-counts',
             ttl_expired_on_disk: 4,
-            provider_slot_busy: 3,
             alerts: [],
           }),
-        ], { ttl_expired_on_disk: 4, provider_slot_busy: 3 }),
+        ], { ttl_expired_on_disk: 4 }),
       )
       const { container } = render(html`<${KeeperMemoryHealth} />`)
       await waitFor(() => expect(screen.getByText('raw-counts')).not.toBeNull())
@@ -212,9 +207,7 @@ describe('KeeperMemoryHealth', () => {
       expect(container.querySelector('.kmh-row--warn')).toBeNull()
       expect(container.querySelector('.kmh-badge--warn')).toBeNull()
       expect(container.querySelector('[data-stat-key="ttl-expired"] .kmh-stat-value--warn')).toBeNull()
-      expect(container.querySelector('[data-stat-key="provider-slot-busy"] .kmh-stat-value--warn')).toBeNull()
       expect(statValue(container, 'ttl-expired')).toContain('4')
-      expect(statValue(container, 'provider-slot-busy')).toContain('3')
     })
   })
 
@@ -247,37 +240,6 @@ describe('KeeperMemoryHealth', () => {
       await waitFor(() => expect(screen.getByText('alerted')).not.toBeNull())
 
       expect(statValue(container, 'alerts')).toBe('1')
-    })
-
-    it('surfaces provider slot busy alerts per keeper', async () => {
-      mockFetch.mockResolvedValue({
-        ...makeResponse([
-          makeEntry({
-            keeper_id: 'slot-busy',
-            provider_slot_busy: 3,
-            alerts: [{
-              code: 'provider_slot_busy',
-              severity: 'warn',
-              target: 'provider_slot_busy',
-              label: '슬롯',
-              message: 'Memory OS librarian provider slot was busy',
-              value: 3,
-              threshold: 0,
-            }],
-          }),
-        ], { provider_slot_busy: 3 }),
-        alert_summary: makeAlertSummary({
-          total_alerts: 1,
-          warn_alerts: 1,
-          keepers_with_alerts: 1,
-          provider_slot_busy_keepers: 1,
-        }),
-      })
-      const { container } = render(html`<${KeeperMemoryHealth} />`)
-      await waitFor(() => expect(screen.getByText('slot-busy')).not.toBeNull())
-
-      expect(screen.getByText('슬롯')).not.toBeNull()
-      expect(statValue(container, 'provider-slot-busy')).toBe('3')
     })
 
   })

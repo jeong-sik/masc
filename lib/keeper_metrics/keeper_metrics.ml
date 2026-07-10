@@ -164,7 +164,6 @@ type t =
   | MemoryLaneDropped
   | MemoryLanePending
   | MemoryLaneInFlight
-  | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
   | MemoryOsMaintenanceKeeperTimeout
   | WriteMetaCycleFailures
@@ -224,6 +223,7 @@ type t =
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures
+  | RetiredEnvIgnored
   | PostTurnWireinFailures
   | RecurringFailures
   | TurnCleanupFailures
@@ -429,7 +429,6 @@ let to_string = function
   | MemoryLaneDropped -> "masc_keeper_memory_lane_dropped_total"
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
-  | MemoryLaneProviderSlotBusy -> "masc_keeper_memory_lane_provider_slot_busy_total"
   | MemoryBankCompactionFailures -> "masc_keeper_memory_bank_compaction_failures_total"
   | MemoryOsMaintenanceKeeperTimeout -> "masc_keeper_memory_os_maintenance_keeper_timeout_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
@@ -493,6 +492,7 @@ let to_string = function
   | UsageTrust -> "masc_keeper_usage_trust_total"
   | UsageAnomalyReason -> "masc_keeper_usage_anomaly_reason_total"
   | ConfigEnvParseFailures -> "masc_keeper_config_env_parse_failures_total"
+  | RetiredEnvIgnored -> "masc_keeper_retired_env_ignored_total"
   | PostTurnWireinFailures -> "masc_keeper_post_turn_wirein_failures_total"
   | RecurringFailures -> "masc_keeper_recurring_failures_total"
   | TurnCleanupFailures -> "masc_keeper_turn_cleanup_failures_total"
@@ -581,7 +581,7 @@ let all : t list =
     MemoryLlmSummaryOutcomes; MemoryLlmSummaryChainExhausted; HitlSummaryOutcomes; UserVisibleReplySource;
     OasEnvKeyRejections;
     MemoryWriteFailures; MemoryLaneUnitFailures; MemoryConsolidations; MemoryLaneSubmitted; MemoryLaneRanInline; MemoryLaneDropped;
-    MemoryLanePending; MemoryLaneInFlight; MemoryLaneProviderSlotBusy; MemoryBankCompactionFailures; MemoryOsMaintenanceKeeperTimeout; WriteMetaCycleFailures; AlertPersistFailures;
+    MemoryLanePending; MemoryLaneInFlight; MemoryBankCompactionFailures; MemoryOsMaintenanceKeeperTimeout; WriteMetaCycleFailures; AlertPersistFailures;
     MetricsSseFailures; ChatStoreFailures; ChatTransportFailures; PersonNoteStoreFailures; KeeperMaterializationFailures; ObservationQueryFailures; OasOnStop;
     InvariantViolations; FsmEdgeTransitions; TurnFsmTransitions;
     TurnPhaseDuration; LifecycleTransitions; LifecycleCallbackFailures; CompactionCallbackRecoveries;
@@ -594,7 +594,7 @@ let all : t list =
     OasRunTimeout; RuntimeSaturationSignal; RuntimeSelected; RuntimeRotation; ToolUseFailure; ToolNotAllowed;
     TurnGateRejectedTerminal; ReceiptUnmappedDisposition; ExecuteNetworkUpgrade; ExecuteLocalExecution;
     DockerRuntimeDiscarded; ProactiveSkip; NoProgressLoopDetected; NoProgressStreak; UsageTrust;
-    UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
+    UsageAnomalyReason; ConfigEnvParseFailures; RetiredEnvIgnored; PostTurnWireinFailures; RecurringFailures;
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; MemoryOsReobserveEchoSuppressed; RuntimeHttpProbeJsonParseFailures;
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal; ToolExecutePrActionTotal;

@@ -2,18 +2,15 @@
 
 - Status: Draft
 - Date: 2026-06-19
-- Related: RFC-0257 (per-keeper memory lane / fleet-wide librarian provider gate), RFC-0153 (runtime backpressure and admission)
+- Related: RFC-0257 (per-keeper memory lane), RFC-0153 (runtime backpressure and admission)
 - Origin: 2026-06-19 product adversarial audit — re-verification of P0-1 (runtime provider control) and P0-4 (librarian).
 
 ## Why this exists (and why it is NOT a librarian RFC)
 
-The 2026-06-19 audit raised P0-4 "librarian not trustable." Re-verification found the librarian's
-concurrency/slot concern is already owned and implemented by RFC-0257
-(`lib/keeper/keeper_memory_lane.ml`; the `with_provider_slot` capacity gate in
-`keeper_librarian_runtime.ml` is deliberately retained as a fleet-wide provider gate, not a bug).
-The `slot busy (capacity=1)` drop is an **accepted consequence** documented in RFC-0257
-§"Accepted consequence" (unbounded concurrency spiked empty-response to 62%, #21230). A new
-librarian RFC would duplicate RFC-0257.
+The 2026-06-19 audit raised P0-4 "librarian not trustable." RFC-0257 owns Keeper-local ordering
+through `Keeper_memory_lane`. It does not own provider-fleet admission: the later per-Keeper
+`with_provider_slot` gate duplicated the lane and discarded extraction after a hardcoded wait, so
+it was retired. Provider capacity, health, and fallback belong to this runtime/provider boundary.
 
 What is NOT owned anywhere is the **provider-availability** axis that actually produced the live
 residual. After the 2026-06-19 dawn RunPod outage and the 12:25 restart, librarian routing was
@@ -36,8 +33,8 @@ provider health and failover, not the librarian.
 
 3. **Failover overloads the shared librarian pool.** Routing the whole fleet onto `ollama_cloud`
    put every keeper's librarian round-trip onto one provider. Even after `librarian=minimax-m3`
-   went live, librarian still logged empty/timeout — a provider-availability symptom the RFC-0257
-   slot gate can backpressure but cannot cure.
+   went live, librarian still logged empty/timeout. A Keeper-local gate cannot represent provider
+   capacity; the runtime must expose and enforce that capacity without coupling Keeper lanes.
 
 Net: provider outages are (a) undetected, (b) recovered by untracked manual edits with no audit
 trail, (c) followed by degraded dependent subsystems (librarian) until the operator manually
@@ -45,7 +42,7 @@ reverts.
 
 ## Non-goals
 
-- Librarian concurrency / lane / slot — owned by RFC-0257 (implemented). Do not re-touch.
+- Keeper-local librarian ordering — owned by RFC-0257. Do not add a second MASC lane or slot.
 - Librarian model JSON capability — already fixed (`deepseek-flash` JSON gap → `minimax-m3`, #21521).
 - Mutex poison hardening — separate latent-defect concern, scoped out by RFC-0256.
 

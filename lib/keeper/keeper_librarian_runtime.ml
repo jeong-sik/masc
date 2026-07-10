@@ -31,74 +31,6 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 ;;
 
-(* RFC-0257 / P0-4 adversarial hardening: per-keeper librarian provider slot.
-   The previous process-global slot allowed one slow keeper to starve the fleet.
-   Capacity is still read from [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT]
-   (default 1), but the semaphore is now keyed by [keeper_id] so each keeper
-   gets its own concurrency budget. A capacity of 0 disables the gate entirely. *)
-let per_keeper_slot_capacity () =
-  Env_config.KeeperMemoryOs.librarian_global_slot ()
-;;
-
-let memory_os_librarian_provider_slot_site = "memory_os_librarian_provider_slot"
-
-let provider_slot_wait_sec = 0.25
-
-type provider_slot =
-  { capacity : int
-  ; sem : Eio.Semaphore.t option
-  }
-
-let provider_slots_mu = Eio.Mutex.create ()
-let provider_slots : (string, provider_slot) Hashtbl.t = Hashtbl.create 64
-
-let provider_slot_for_keeper ~keeper_id capacity =
-  Eio_guard.with_mutex provider_slots_mu (fun () ->
-    match Hashtbl.find_opt provider_slots keeper_id with
-    | Some slot when slot.capacity = capacity -> slot
-    | _ ->
-      let slot =
-        { capacity
-        ; sem =
-            (match capacity with
-             | 0 -> None
-             | n -> Some (Eio.Semaphore.make n))
-        }
-      in
-      Hashtbl.replace provider_slots keeper_id slot;
-      slot)
-;;
-
-let with_provider_slot ~keeper_id ~clock f =
-  let capacity = per_keeper_slot_capacity () in
-  let slot = provider_slot_for_keeper ~keeper_id capacity in
-  match slot.sem with
-  | None -> Some (f ())
-  | Some sem ->
-    let acquired = ref false in
-    (try
-       (try
-          Eio.Time.with_timeout_exn clock provider_slot_wait_sec (fun () ->
-            Eio.Semaphore.acquire sem);
-         acquired := true
-        with
-        | Eio.Time.Timeout -> ())
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.warn
-         "librarian provider slot acquisition failed keeper=%s: %s"
-         keeper_id
-         (Printexc.to_string exn));
-    if !acquired
-    then
-      Some
-        (Eio.Switch.run (fun cleanup_sw ->
-           Eio.Switch.on_release cleanup_sw (fun () -> Eio.Semaphore.release sem);
-           f ()))
-    else None
-;;
-
 let enabled () =
   (* Default on: a keeper without conversation ingestion is the pathology
      the Memory OS exists to fix (2026-06-12 diagnosis, issue #20909).
@@ -777,37 +709,26 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  "memory os librarian failed runtime=%s: %s"
                  runtime_id
                  librarian_provider_clock_unavailable_error
-             | Some clock -> (
-             match
-               with_provider_slot ~keeper_id ~clock (fun () ->
-                 extract_and_append_with_provider_classified
-                   ?complete
-                   ~clock
-                   ~timeout_sec
-                   ~sw
-                   ~net
-                   ~keeper_id
-                   ~provider_cfg
-                   inp)
-             with
-             | None ->
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
-                ~labels:
-                  [ "keeper", keeper_id; "site", memory_os_librarian_provider_slot_site ]
-                 ();
-               Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian skipped runtime=%s: per-keeper provider slot busy (capacity=%d)"
-                 runtime_id
-                 (per_keeper_slot_capacity ())
-             | Some (Ok episode) ->
+             | Some clock ->
+               (match
+                  extract_and_append_with_provider_classified
+                    ?complete
+                    ~clock
+                    ~timeout_sec
+                    ~sw
+                    ~net
+                    ~keeper_id
+                    ~provider_cfg
+                    inp
+                with
+                | Ok episode ->
                cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
                Log.Keeper.info ~keeper_name:keeper_id
                  "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
                  episode.Keeper_memory_os_types.trace_id
                  episode.generation
                  (List.length episode.claims)
-             | Some (Error err) ->
+                | Error err ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)
                  ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]

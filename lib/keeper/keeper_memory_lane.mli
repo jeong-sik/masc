@@ -2,8 +2,9 @@
 
     Detaches post-turn memory work (deterministic write, librarian extraction,
     compaction) from the keeper turn lane. Each keeper has one FIFO drain
-    worker, so memory work is serialized within a keeper and runs independently
-    across keepers. This replaces the process-global [Eio.Semaphore.make 1] in
+    daemon, so memory work is serialized within a keeper and runs independently
+    across keepers without keeping the server executor switch alive during
+    shutdown. This replaces the process-global [Eio.Semaphore.make 1] in
     [Keeper_librarian_runtime] that previously serialized every keeper's
     librarian work fleet-wide — the opposite of the lane-per-keeper model
     (RFC-0225).
@@ -28,7 +29,7 @@
 
 type outcome =
   | Submitted
-      (** Accepted by the keeper's FIFO and owned by its drain worker. *)
+      (** Accepted by the keeper's FIFO and owned by its drain daemon. *)
   | Ran_inline
       (** Executor switch not initialized; the unit ran synchronously in the
           caller so no work is lost (tests, or startup before {!init}). A
@@ -41,7 +42,9 @@ type outcome =
 
 val init : sw:Eio.Switch.t -> unit
 (** Record the long-lived switch that owns detached memory fibers. Call once at
-    server startup, after [Eio_context.set_switch]. *)
+    server startup, after [Eio_context.set_switch]. Repeating [init] with the
+    same switch is idempotent; replacing it with another switch is an explicit
+    programming error. *)
 
 val submit
   :  base_path:string
@@ -50,7 +53,7 @@ val submit
   -> outcome
 (** [submit ~base_path ~keeper_name f] runs [f] on [keeper_name]'s memory lane.
     When the executor switch is set, [f] is appended to that keeper's FIFO and
-    drained by one worker. The caller does not wait for earlier work. When the
+    drained by one daemon. The caller does not wait for earlier work. When the
     executor is not initialized, [f] runs inline and any exception is contained
     and counted rather than escaping. Outcomes and per-keeper pending/in-flight
     state are exported as metrics. *)

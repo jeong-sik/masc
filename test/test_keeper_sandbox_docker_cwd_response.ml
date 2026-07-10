@@ -266,7 +266,10 @@ let test_retired_path_jail_env_detection () =
   let configured value =
     Retired_env_warnings.For_testing.shell_ir_path_jail_env_configured
       ~getenv:(fun name ->
-        if String.equal name "MASC_SHELL_IR_PATH_JAIL_ENABLED"
+        if
+          String.equal
+            name
+            Retired_env_warnings.For_testing.shell_ir_path_jail_env_key
         then value
         else None)
       ()
@@ -274,6 +277,23 @@ let test_retired_path_jail_env_detection () =
   check bool "absent retired path jail env" false (configured None);
   check bool "blank retired path jail env" false (configured (Some "  "));
   check bool "non-empty retired path jail env" true (configured (Some "false"))
+
+let test_retired_memory_librarian_global_slot_env_detection () =
+  let configured value =
+    Retired_env_warnings.For_testing.memory_os_librarian_global_slot_env_configured
+      ~getenv:(fun name ->
+        if
+          String.equal
+            name
+            Retired_env_warnings.For_testing.memory_os_librarian_global_slot_env_key
+        then value
+        else None)
+      ()
+  in
+  check bool "absent retired librarian slot env" false (configured None);
+  check bool "blank retired librarian slot env" false (configured (Some "  "));
+  check bool "non-empty retired librarian slot env" true (configured (Some "1"))
+;;
 
 (* Source-level pin: assert that no [("cwd", `String <ident>)]
    literal remains in keeper_sandbox_docker.ml. The four sites
@@ -353,5 +373,9 @@ let () =
           test_case
             "path jail retired env detection ignores blanks"
             `Quick test_retired_path_jail_env_detection
+        ; test_case
+            "librarian slot retired env detection ignores blanks"
+            `Quick
+            test_retired_memory_librarian_global_slot_env_detection
         ] )
     ]

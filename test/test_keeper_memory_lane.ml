@@ -1,7 +1,7 @@
 (** Tests for Keeper_memory_lane (RFC-0257).
 
     The lane detaches post-turn memory work from the keeper turn lane:
-    serialized within a keeper, independent across keepers, bounded, and
+    serialized within a keeper, independent across keepers, queued, and
     leak-safe on a raising unit. *)
 
 module Lane = Masc.Keeper_memory_lane
@@ -37,8 +37,25 @@ let test_inline_contains_raise () =
   | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
 ;;
 
+let test_init_rejects_switch_replacement () =
+  Lane.For_testing.reset ();
+  let rejected = ref false in
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun owner_sw ->
+      Lane.init ~sw:owner_sw;
+      Lane.init ~sw:owner_sw;
+      Eio.Switch.run (fun replacement_sw ->
+        try Lane.init ~sw:replacement_sw with
+        | Invalid_argument _ -> rejected := true)));
+  Alcotest.(check bool)
+    "a live lane registry has one executor switch"
+    true
+    !rejected
+;;
+
 (* [submit] must return control to the keeper turn before the detached memory
-   unit begins. Eio.Fiber.fork runs the child immediately unless it yields. *)
+   unit begins. Eio.Fiber.fork_daemon runs the child immediately unless it
+   yields. *)
 let test_submit_detaches_before_job_runs () =
   Lane.For_testing.reset ();
   let submit_returned = ref false in
@@ -46,15 +63,18 @@ let test_submit_detaches_before_job_runs () =
   Eio_main.run (fun _env ->
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
+      let completed, set_completed = Eio.Promise.create () in
       let outcome =
         Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
-          job_observed_submit_returned := !submit_returned)
+          job_observed_submit_returned := !submit_returned;
+          Eio.Promise.resolve set_completed ())
       in
       (match outcome with
        | Lane.Submitted -> ()
        | Lane.Ran_inline -> Alcotest.fail "detachment test ran inline"
        | Lane.Dropped -> Alcotest.fail "detachment test was dropped");
-      submit_returned := true));
+      submit_returned := true;
+      Eio.Promise.await completed));
   Alcotest.(check bool)
     "job began after submit returned"
     true
@@ -72,6 +92,7 @@ let test_serializes_within_keeper () =
       Lane.init ~sw;
       let p_started, set_started = Eio.Promise.create () in
       let p_release, set_release = Eio.Promise.create () in
+      let b_done, set_b_done = Eio.Promise.create () in
       let oa =
         Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
           add "a-start";
@@ -81,12 +102,13 @@ let test_serializes_within_keeper () =
       in
       Eio.Promise.await p_started;
       let ob =
-        Lane.submit ~base_path ~keeper_name:"k1" (fun () -> add "b")
+        Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
+          add "b";
+          Eio.Promise.resolve set_b_done ())
       in
-      (* Let B attempt (and fail) to acquire the keeper mutex held by A. *)
-      Eio.Fiber.yield ();
       add "before-release";
       Eio.Promise.resolve set_release ();
+      Eio.Promise.await b_done;
       (match oa with
        | Lane.Submitted -> ()
        | _ -> Alcotest.fail "unit A not submitted");
@@ -109,21 +131,26 @@ let test_independent_across_keepers () =
       Lane.init ~sw;
       let p_started, set_started = Eio.Promise.create () in
       let p_release, set_release = Eio.Promise.create () in
+      let k1_done, set_k1_done = Eio.Promise.create () in
+      let k2_done, set_k2_done = Eio.Promise.create () in
       let _ =
         Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
           Eio.Promise.resolve set_started ();
           Eio.Promise.await p_release;
-          add "k1")
+          add "k1";
+          Eio.Promise.resolve set_k1_done ())
       in
       Eio.Promise.await p_started;
       let _ =
-        Lane.submit ~base_path ~keeper_name:"k2" (fun () -> add "k2")
+        Lane.submit ~base_path ~keeper_name:"k2" (fun () ->
+          add "k2";
+          Eio.Promise.resolve set_k2_done ())
       in
       (* k2 runs to completion while k1 is still holding its own lane. *)
-      Eio.Fiber.yield ();
-      Eio.Fiber.yield ();
+      Eio.Promise.await k2_done;
       Alcotest.(check bool) "k2 ran while k1 blocked" true (List.mem "k2" !order);
-      Eio.Promise.resolve set_release ()));
+      Eio.Promise.resolve set_release ();
+      Eio.Promise.await k1_done));
   Alcotest.(check (list string)) "k2 before k1" [ "k2"; "k1" ] (List.rev !order)
 ;;
 
@@ -138,6 +165,7 @@ let test_backlog_is_queued_without_loss () =
       Lane.init ~sw;
       let p_started, set_started = Eio.Promise.create () in
       let p_release, set_release = Eio.Promise.create () in
+      let drained, set_drained = Eio.Promise.create () in
       let o1 =
         Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
           Eio.Promise.resolve set_started ();
@@ -151,14 +179,16 @@ let test_backlog_is_queued_without_loss () =
       in
       let o3 =
         Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
-          order := "c" :: !order)
+          order := "c" :: !order;
+          Eio.Promise.resolve set_drained ())
       in
       outcomes := [ o1; o2; o3 ];
       Alcotest.(check (option int))
         "all three units remain pending"
         (Some 3)
         (Lane.For_testing.pending ~base_path ~keeper_name:"k1");
-      Eio.Promise.resolve set_release ()))
+      Eio.Promise.resolve set_release ();
+      Eio.Promise.await drained))
   ;
   List.iter
     (function
@@ -186,6 +216,7 @@ let test_releases_on_raise () =
       Lane.init ~sw;
       let started, set_started = Eio.Promise.create () in
       let release, set_release = Eio.Promise.create () in
+      let finished, set_finished = Eio.Promise.create () in
       let first =
         Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
           Eio.Promise.resolve set_started ();
@@ -194,12 +225,15 @@ let test_releases_on_raise () =
       in
       Eio.Promise.await started;
       let second =
-        Lane.submit ~base_path ~keeper_name:"k1" (fun () -> ran_after := true)
+        Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
+          ran_after := true;
+          Eio.Promise.resolve set_finished ())
       in
       (match first, second with
        | Lane.Submitted, Lane.Submitted -> ()
        | _ -> Alcotest.fail "raising unit backlog was not submitted");
-      Eio.Promise.resolve set_release ()));
+      Eio.Promise.resolve set_release ();
+      Eio.Promise.await finished));
   Alcotest.(check bool) "lane recovered after raise" true !ran_after;
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
   | Some 0 -> ()
@@ -253,8 +287,8 @@ let test_releases_on_cancel () =
 ;;
 
 (* Submitting against a finished executor switch must not leak the pending
-   reservation. Eio.Fiber.fork does not raise to the caller for an off switch, so
-   the lane needs its own executor-switch release fallback. *)
+   reservation. Eio.Fiber.fork_daemon does not raise to the caller for an off
+   switch, so the lane needs its own executor-switch release fallback. *)
 let test_finished_switch_drops_without_leak () =
   Lane.For_testing.reset ();
   let finished_sw = ref None in
@@ -293,6 +327,10 @@ let () =
             "inline contains raise"
             `Quick
             test_inline_contains_raise
+        ; Alcotest.test_case
+            "init rejects switch replacement"
+            `Quick
+            test_init_rejects_switch_replacement
         ; Alcotest.test_case
             "submit detaches before job runs"
             `Quick

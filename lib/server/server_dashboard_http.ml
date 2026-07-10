@@ -382,7 +382,10 @@ let approval_resolve_http_error_to_string = function
   | Unavailable err -> Keeper_approval_queue.resolve_error_to_string err
 ;;
 
-let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.Safe.t)
+let dashboard_governance_approval_resolve_http_json
+      ~base_path
+      ~actor
+      ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, approval_resolve_http_error) result
   =
   match Safe_ops.json_string_opt "id" args with
@@ -408,7 +411,7 @@ let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.S
             ~decision
             ~base_path
             ~remember_rule
-            ~created_by:"dashboard"
+            ~created_by:actor
             ()
         with
         | Ok result ->
@@ -731,15 +734,10 @@ let dashboard_goal_detail_http_json ~(config : Workspace.config) ~goal_id : Yojs
     `Assoc [ "ok", `Bool false; "error", `String message; "goal_id", `String goal_id ]
 ;;
 
-let operator_action_http_json ~state ~sw ~clock request ~args =
-  let actor =
-    Server_auth.dashboard_actor_for_request
-      ~base_path:(Mcp_server.workspace_config state).base_path
-      request
-  in
+let operator_action_http_json ~state ~sw ~clock ~actor ~args =
   let ctx : _ Operator_control.context =
     { config = (Mcp_server.workspace_config state)
-    ; agent_name = Option.value ~default:"dashboard" actor
+    ; agent_name = actor
     ; sw
     ; clock
     ; proc_mgr = state.Mcp_server.proc_mgr
@@ -747,18 +745,13 @@ let operator_action_http_json ~state ~sw ~clock request ~args =
     ; mcp_session_id = None
     }
   in
-  Operator_control.action_json ?actor_hint:actor ctx args
+  Operator_control.action_json ~actor_hint:actor ctx args
 ;;
 
-let operator_confirm_http_json ~state ~sw ~clock request ~args =
-  let actor =
-    Server_auth.dashboard_actor_for_request
-      ~base_path:(Mcp_server.workspace_config state).base_path
-      request
-  in
+let operator_confirm_http_json ~state ~sw ~clock ~actor ~args =
   let ctx : _ Operator_control.context =
     { config = (Mcp_server.workspace_config state)
-    ; agent_name = Option.value ~default:"dashboard" actor
+    ; agent_name = actor
     ; sw
     ; clock
     ; proc_mgr = state.Mcp_server.proc_mgr
@@ -766,7 +759,7 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
     ; mcp_session_id = None
     }
   in
-  Operator_control.confirm_json ?actor_hint:actor ctx args
+  Operator_control.confirm_json ~actor_hint:actor ctx args
 ;;
 
 let operator_error_json message =

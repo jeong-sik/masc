@@ -16,8 +16,7 @@
       projection for each clean / buggy cfg.
     - [POST /api/v1/verification/resolve] — dashboard-initiated approve/reject
       for a pending verification request. Requires bearer token auth; the
-      verifier identity is derived from the authenticated dashboard actor
-      when present (otherwise the request hint) and
+      verifier identity is derived only from the authenticated credential and
       namespaced under "operator:" to distinguish from peer-agent verdicts. *)
 
 open Server_auth
@@ -32,15 +31,10 @@ let trimmed_query_param req key =
 let verification_error_json msg : Yojson.Safe.t =
   `Assoc [("ok", `Bool false); ("error", `String msg)]
 
-(* Compose the operator verifier identity. We always prefix with
-   "operator:" so attribution/audit can distinguish dashboard verdicts
-   from peer-agent verdicts. The actor is canonicalized to the bearer
-   owner for authenticated dashboard requests, then sanitized
-   (alnum + '_' + '-' only). *)
-let verifier_of_request ~base_path request =
-  match sanitized_dashboard_actor_for_request ~base_path request with
-  | Some hint -> "operator:" ^ hint
-  | None -> "operator:dashboard"
+(* Compose the operator verifier identity from the authenticated credential.
+   We always prefix with "operator:" so attribution/audit can distinguish
+   dashboard verdicts from peer-agent verdicts. *)
+let verifier_of_authenticated_actor actor = "operator:" ^ actor
 
 let add_routes router =
   router
@@ -81,12 +75,14 @@ let add_routes router =
        ) request reqd)
   |> Http.Router.post "/api/v1/verification/resolve" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_operator_confirm"
-         (fun state req reqd ->
+         (fun state authenticated_actor _req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              try
                let args = Yojson.Safe.from_string body_str in
                let config = (Mcp_server.workspace_config state) in
-               let verifier = verifier_of_request ~base_path:config.base_path req in
+               let verifier =
+                 verifier_of_authenticated_actor authenticated_actor
+               in
                match
                  Server_dashboard_http.dashboard_verification_resolve_http_json
                    ~config ~verifier ~args

@@ -324,8 +324,9 @@ val authorize_read_request :
 
 val authorize_tool_request :
   base_path:string ->
-  tool_name:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
-(** Check that the request is allowed to call [tool_name]. *)
+  tool_name:string -> Httpun.Request.t -> (string, Masc_domain.masc_error) result
+(** Check that the request is allowed to call [tool_name] and return the
+    authenticated credential actor. *)
 
 val authorize_token_bound_permission_request :
   base_path:string ->
@@ -371,9 +372,10 @@ val with_permission_auth :
 val with_tool_auth :
   tool_name:string ->
   (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Tool-call auth combinator. *)
+(** Tool-call auth combinator. The authenticated credential actor is threaded
+    into the handler and must be used for mutation attribution. *)
 
 val with_token_permission_auth :
   permission:Masc_domain.permission ->

@@ -1081,27 +1081,30 @@ let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
 let test_authorize_tool_v2_destructive_catalog_requires_admin () =
-  (match
-     Auth.authorize_tool_for_role
-       ~agent_name:"dashboard"
-       ~role:Masc_domain.Worker
-       ~tool_name:"masc_operator_action"
-   with
-   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
-   | Ok () -> fail "Worker must not authorize a catalog-destructive tool"
-   | Error e ->
-       fail
-         (Printf.sprintf
-            "wrong error: %s"
-            (Masc_domain.masc_error_to_string e)));
-  (match
-     Auth.authorize_tool_for_role
-       ~agent_name:"operator"
-       ~role:Masc_domain.Admin
-       ~tool_name:"masc_operator_action"
-   with
-   | Ok () -> ()
-   | Error e -> fail (Masc_domain.masc_error_to_string e))
+  [ "masc_operator_action"; "masc_operator_confirm" ]
+  |> List.iter (fun tool_name ->
+    (match
+       Auth.authorize_tool_for_role
+         ~agent_name:"dashboard"
+         ~role:Masc_domain.Worker
+         ~tool_name
+     with
+     | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+     | Ok () ->
+         failf "Worker must not authorize catalog-destructive %s" tool_name
+     | Error e ->
+         fail
+           (Printf.sprintf
+              "wrong error: %s"
+              (Masc_domain.masc_error_to_string e)));
+    match
+      Auth.authorize_tool_for_role
+        ~agent_name:"operator"
+        ~role:Masc_domain.Admin
+        ~tool_name
+    with
+    | Ok () -> ()
+    | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_tool_auth_strict_env_cannot_disable_fail_closed () =
   let result =

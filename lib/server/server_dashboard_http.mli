@@ -94,6 +94,7 @@ val dashboard_proof_http_json :
 
 val dashboard_governance_approval_resolve_http_json :
   base_path:string ->
+  actor:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, approval_resolve_http_error) result
 
@@ -152,7 +153,7 @@ val operator_action_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Httpun.Request.t ->
+  actor:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 
@@ -160,7 +161,7 @@ val operator_confirm_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Httpun.Request.t ->
+  actor:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 

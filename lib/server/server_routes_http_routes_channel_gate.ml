@@ -368,7 +368,7 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
         (Channel_gate.error_json "name is required")
 
 (** Shared bind handler: parse body, validate keeper, dispatch to connector. *)
-let handle_bind_for_connector ~sw ~clock state request reqd
+let handle_bind_for_connector ~sw ~clock ~actor_name state request reqd
     ~(bind_fn :
        channel_id:string ->
        keeper_name:string ->
@@ -402,12 +402,6 @@ let handle_bind_for_connector ~sw ~clock state request reqd
             respond_json_value_with_cors ~status:`Not_found request reqd
               (Channel_gate.error_json ("unknown keeper: " ^ keeper_name))
         | Ok true -> (
-            let actor_name =
-              sanitized_dashboard_actor_for_request
-                ~base_path:(Mcp_server.workspace_config state).base_path request
-              |> Option.value ~default:"dashboard"
-              |> String.trim
-            in
             match bind_fn ~channel_id ~keeper_name ~actor_name with
             | Ok payload ->
                 respond_json_value_with_cors ~status:`OK request reqd payload
@@ -419,7 +413,7 @@ let handle_bind_for_connector ~sw ~clock state request reqd
         (Channel_gate.error_json "invalid json"))
 
 (** Shared unbind handler: parse body, dispatch to connector. *)
-let handle_unbind_for_connector state request reqd
+let handle_unbind_for_connector ~actor_name request reqd
     ~(unbind_fn :
        channel_id:string ->
        actor_name:string ->
@@ -436,12 +430,6 @@ let handle_unbind_for_connector state request reqd
         respond_json_value_with_cors ~status:`Bad_request request reqd
           (Channel_gate.error_json "channel_id is required")
       else
-        let actor_name =
-          sanitized_dashboard_actor_for_request
-            ~base_path:(Mcp_server.workspace_config state).base_path request
-          |> Option.value ~default:"dashboard"
-          |> String.trim
-        in
         match unbind_fn ~channel_id ~actor_name with
         | Ok payload ->
             respond_json_value_with_cors ~status:`OK request reqd payload
@@ -459,7 +447,7 @@ let handle_unbind_for_connector state request reqd
 
     Generic connector bind.  Dispatches to the registered connector's
     [bind] function.  Validates keeper existence before binding. *)
-let handle_gate_connector_bind ~sw ~clock state request reqd =
+let handle_gate_connector_bind ~sw ~clock ~actor_name state request reqd =
   let connector_name =
     query_param request "name"
     |> Option.map String.trim
@@ -474,13 +462,13 @@ let handle_gate_connector_bind ~sw ~clock state request reqd =
         respond_json_value_with_cors ~status:`Not_found request reqd
           (Channel_gate.error_json ("unknown connector: " ^ connector_name))
     | Some (module C) ->
-        handle_bind_for_connector ~sw ~clock state request reqd
+        handle_bind_for_connector ~sw ~clock ~actor_name state request reqd
           ~bind_fn:C.bind
 
 (** POST /api/v1/gate/connector/unbind?name=<connector>
 
     Generic connector unbind. *)
-let handle_gate_connector_unbind _state request reqd =
+let handle_gate_connector_unbind ~actor_name request reqd =
   let connector_name =
     query_param request "name"
     |> Option.map String.trim
@@ -495,27 +483,28 @@ let handle_gate_connector_unbind _state request reqd =
         respond_json_value_with_cors ~status:`Not_found request reqd
           (Channel_gate.error_json ("unknown connector: " ^ connector_name))
     | Some (module C) ->
-        handle_unbind_for_connector _state request reqd
+        handle_unbind_for_connector ~actor_name request reqd
           ~unbind_fn:C.unbind
 
 (** Register all gate routes on the router. *)
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/gate/message" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"channel_gate"
+         (fun state _authenticated_actor _req reqd ->
          handle_gate_message ~sw ~clock state request reqd
        ) request reqd)
 
   |> Http.Router.prefix_get "/api/v1/gate/message/requests/" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg_result"
-         (fun state _req reqd ->
+         (fun state _authenticated_actor _req reqd ->
            Server_routes_http_keeper_stream.handle_keeper_chat_request_result
              state request reqd)
          request reqd)
 
   |> Http.Router.prefix_post "/api/v1/gate/message/requests/" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg_cancel"
-         (fun state _req reqd ->
+         (fun state _authenticated_actor _req reqd ->
            Server_routes_http_keeper_stream.handle_keeper_chat_request_cancel
              state request reqd)
          request reqd)
@@ -546,22 +535,24 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/keepers" (fun request reqd ->
-        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+        with_tool_auth ~tool_name:"channel_gate"
+          (fun state _authenticated_actor _req reqd ->
          handle_gate_keepers ~sw ~clock state request reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/keeper-status" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"channel_gate"
+         (fun state _authenticated_actor _req reqd ->
          handle_gate_keeper_status_by_name ~sw ~clock state request reqd
        ) request reqd)
 
   (* Generic connector routes — dispatch by ?name=<connector> *)
   |> Http.Router.post "/api/v1/gate/connector/bind" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
-         handle_gate_connector_bind ~sw ~clock state request reqd
+       with_tool_auth ~tool_name:"channel_gate" (fun state actor_name _req reqd ->
+         handle_gate_connector_bind ~sw ~clock ~actor_name state request reqd
        ) request reqd)
 
   |> Http.Router.post "/api/v1/gate/connector/unbind" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun _state _req reqd ->
-         handle_gate_connector_unbind _state request reqd
+       with_tool_auth ~tool_name:"channel_gate" (fun _state actor_name _req reqd ->
+         handle_gate_connector_unbind ~actor_name request reqd
        ) request reqd)

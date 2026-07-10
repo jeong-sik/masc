@@ -875,7 +875,7 @@ let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) r
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
 
 let authorize_tool_request ~base_path ~tool_name request :
-    (unit, Masc_domain.masc_error) result =
+    (string, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   let* () =
@@ -892,7 +892,8 @@ let authorize_tool_request ~base_path ~tool_name request :
   in
   let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
   let* agent_name = require_resolved_authorization_actor agent_name_opt in
-  Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name
+  let+ () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
+  agent_name
 
 let authorize_token_bound_permission_request ~base_path ~permission request :
     (string, Masc_domain.masc_error) result =
@@ -1003,9 +1004,9 @@ and with_tool_auth ~tool_name handler request reqd =
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_tool_request ~base_path ~tool_name request with
-      | Ok () ->
+      | Ok agent_name ->
           (match check_agent_rate_limit request reqd with
-          | Ok () -> handler state request reqd
+          | Ok () -> handler state agent_name request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
 

@@ -19,11 +19,21 @@ let with_temp_workspace f =
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> f path)
 
-let request ?host () =
+let request ?host ?bearer ?agent () =
   let headers =
-    match host with
-    | None -> []
-    | Some value -> [ "host", value ]
+    []
+    |> (fun headers ->
+         match host with
+         | None -> headers
+         | Some value -> ("host", value) :: headers)
+    |> (fun headers ->
+         match bearer with
+         | None -> headers
+         | Some value -> ("authorization", "Bearer " ^ value) :: headers)
+    |> (fun headers ->
+         match agent with
+         | None -> headers
+         | Some value -> ("x-masc-agent", value) :: headers)
   in
   Httpun.Request.create
     ~headers:(Httpun.Headers.of_list headers)
@@ -212,6 +222,38 @@ let test_token_read_failure_does_not_mint () =
    | _ -> fail "token read failure must be explicit and fail closed");
   check int "no credential minted" 0 (List.length (Auth.list_credentials base_path))
 
+let test_http_tool_auth_binds_actor_and_requires_admin_for_confirm () =
+  with_temp_workspace @@ fun base_path ->
+  let _, admin_token =
+    Auth.enable_auth base_path ~require_token:true ~agent_name:"operator"
+  in
+  let admin_token =
+    match admin_token with
+    | Some token -> token
+    | None -> fail "bootstrap Admin token must be created"
+  in
+  let worker_token =
+    match
+      Auth.create_token base_path ~agent_name:"dashboard" ~role:Masc_domain.Worker
+    with
+    | Ok (token, _) -> token
+    | Error err -> fail (Masc_domain.masc_error_to_string err)
+  in
+  let authorize token agent tool_name =
+    Server_auth.authorize_tool_request ~base_path ~tool_name
+      (request ~bearer:token ~agent ())
+  in
+  (match authorize worker_token "forged-admin" "masc_operator_confirm" with
+   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+   | Ok actor -> failf "Worker unexpectedly confirmed as %s" actor
+   | Error err -> fail (Masc_domain.masc_error_to_string err));
+  (match authorize admin_token "forged-worker" "masc_operator_confirm" with
+   | Ok actor -> check string "Admin credential actor" "operator" actor
+   | Error err -> fail (Masc_domain.masc_error_to_string err));
+  match authorize worker_token "forged-worker" "masc_board_post" with
+  | Ok actor -> check string "Worker credential actor" "dashboard" actor
+  | Error err -> fail (Masc_domain.masc_error_to_string err)
+
 let () =
   Alcotest.run
     "dashboard-dev-token-auth"
@@ -233,5 +275,9 @@ let () =
             test_token_write_failure_resumes_without_remint
         ; test_case "read failure does not mint" `Quick
             test_token_read_failure_does_not_mint
+        ] )
+    ; ( "http-tool-auth",
+        [ test_case "credential actor and Admin confirm boundary" `Quick
+            test_http_tool_auth_binds_actor_and_requires_admin_for_confirm
         ] )
     ]

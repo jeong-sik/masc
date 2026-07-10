@@ -1008,7 +1008,8 @@ let add_routes ~sw:_ ~clock:_ router =
   |> Http.Router.get "/api/v1/sidecar/logs" (fun request reqd ->
     with_tool_auth
       ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_logs state request reqd)
+      (fun state _authenticated_actor _req reqd ->
+        handle_logs state request reqd)
       request
       reqd)
   (* Schema is field-shape metadata, not values, so it's safe under
@@ -1022,13 +1023,15 @@ let add_routes ~sw:_ ~clock:_ router =
   |> Http.Router.post "/api/v1/sidecar/start" (fun request reqd ->
     with_tool_auth
       ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_start state request reqd)
+      (fun state _authenticated_actor _req reqd ->
+        handle_start state request reqd)
       request
       reqd)
   |> Http.Router.post "/api/v1/sidecar/stop" (fun request reqd ->
     with_tool_auth
       ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_stop state request reqd)
+      (fun state _authenticated_actor _req reqd ->
+        handle_stop state request reqd)
       request
       reqd)
   (* Writes user-supplied values (potentially containing tokens) to disk,
@@ -1037,7 +1040,8 @@ let add_routes ~sw:_ ~clock:_ router =
   |> Http.Router.post "/api/v1/sidecar/config" (fun request reqd ->
     with_tool_auth
       ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_put_config state request reqd)
+      (fun state _authenticated_actor _req reqd ->
+        handle_put_config state request reqd)
       request
       reqd)
   (* Read current runtime TOML so the dashboard form prefills with what's
@@ -1045,7 +1049,8 @@ let add_routes ~sw:_ ~clock:_ router =
   |> Http.Router.get "/api/v1/sidecar/config" (fun request reqd ->
     with_tool_auth
       ~tool_name:"sidecar"
-      (fun state _req reqd -> handle_get_config state request reqd)
+      (fun state _authenticated_actor _req reqd ->
+        handle_get_config state request reqd)
       request
       reqd)
 ;;

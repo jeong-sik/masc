@@ -1366,7 +1366,7 @@ let test_dashboard_resolve_and_delete_rules_use_workspace_base_path () =
       let rule_id =
         match
           SDH.dashboard_governance_approval_resolve_http_json ~base_path:workspace_base
-            ~args:resolve_args
+            ~actor:"dashboard" ~args:resolve_args
         with
         | Ok json ->
             let open Yojson.Safe.Util in
@@ -1416,7 +1416,7 @@ let test_approval_resolve_missing_decision_is_rejected () =
       let args = `Assoc [ ("id", `String id) ] in
       (match
          SDH.dashboard_governance_approval_resolve_http_json
-           ~base_path:workspace_base ~args
+           ~base_path:workspace_base ~actor:"dashboard" ~args
        with
        | Error (SDH.Bad_request msg) ->
          Alcotest.(check string)
@@ -1458,7 +1458,7 @@ let test_approval_delivery_failure_is_unavailable () =
        (match
           SDH.dashboard_governance_approval_resolve_http_json
             ~base_path:workspace_base
-            ~args
+            ~actor:"dashboard" ~args
         with
         | Error (SDH.Unavailable (AQ.Delivery_failed failure)) ->
           Alcotest.(check string)

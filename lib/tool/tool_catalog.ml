@@ -265,7 +265,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_get_metrics", read_state_tool);
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
-    ("masc_operator_confirm", actor_broadcast_tool);
+    ( "masc_operator_confirm",
+      with_semantic_flags ~destructive:true actor_broadcast_tool );
     ("masc_surface_audit", read_state_tool);
     ("masc_persona_list", read_state_tool);
     ("masc_persona_create", broadcast_tool);

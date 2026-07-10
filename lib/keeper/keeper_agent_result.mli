@@ -4,6 +4,9 @@ type tool_call_detail =
   { tool_name : string
   ; provider : string
   ; outcome : string
+      (** Progress-classification label retained for receipt compatibility. *)
+  ; execution_outcome : Tool_result.tool_call_outcome
+      (** Typed [Tool_result.Ok]/[Error] truth captured at the OAS hook boundary. *)
   ; typed_outcome : Keeper_tool_outcome.t option
   ; latency_ms : float
   ; task_id : string option

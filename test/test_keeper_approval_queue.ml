@@ -762,6 +762,62 @@ let test_w3c_continuation_delivery_gate () =
        (D.gate_decision ~channel:dashboard ~already_replied:false ~content:"hi"))
 ;;
 
+let reply_tool_call ?typed_outcome ~execution_outcome tool_name
+  : Masc.Keeper_agent_result.tool_call_detail
+  =
+  { tool_name
+  ; provider = "test"
+  ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
+  ; execution_outcome
+  ; typed_outcome
+  ; latency_ms = 1.0
+  ; task_id = None
+  ; route_evidence = None
+  ; input_fingerprint = None
+  ; output_fingerprint = None
+  }
+;;
+
+let test_w3c_reply_delivery_effect_requires_success () =
+  let module F = Masc.Keeper_agent_run_finalize_response in
+  let is_delivered detail =
+    match F.For_testing.reply_delivery_effect_of_tool_call detail with
+    | F.Reply_delivered -> true
+    | F.No_reply_delivery -> false
+  in
+  Alcotest.(check bool) "failed surface post has no delivery effect" false
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Error
+          "keeper_surface_post"));
+  Alcotest.(check bool) "successful surface post has delivery effect" true
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Ok
+          "keeper_surface_post"));
+  Alcotest.(check bool) "typed semantic error cannot claim delivery" false
+    (is_delivered
+       (reply_tool_call
+          ~typed_outcome:(Keeper_tool_outcome.Error { reason = "send failed" })
+          ~execution_outcome:Tool_result.Ok
+          "keeper_surface_post"));
+  Alcotest.(check bool) "successful keeper message has delivery effect" true
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Ok
+          "masc_keeper_msg"));
+  Alcotest.(check bool) "failed keeper message has no delivery effect" false
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Error
+          "masc_keeper_msg"));
+  Alcotest.(check bool) "unrelated successful tool has no delivery effect" false
+    (is_delivered
+       (reply_tool_call
+          ~execution_outcome:Tool_result.Ok
+          "keeper_tasks_list"))
+;;
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
@@ -800,6 +856,10 @@ let () =
             "W3c continuation delivery gate is fail-closed"
             `Quick
             test_w3c_continuation_delivery_gate
+        ; Alcotest.test_case
+            "W3c reply delivery effect requires success"
+            `Quick
+            test_w3c_reply_delivery_effect_requires_success
         ] )
     ; ( "summary"
       , [ Alcotest.test_case

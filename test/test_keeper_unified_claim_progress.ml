@@ -211,6 +211,7 @@ let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
   { tool_name
   ; provider = "test"
   ; outcome
+  ; execution_outcome = Tool_result.Ok
   ; typed_outcome = None
   ; latency_ms = 1.0
   ; task_id = None

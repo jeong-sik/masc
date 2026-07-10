@@ -113,15 +113,18 @@ type atomic_orphan_recovery =
   | Deleted_zero_length
   | Preserved_nonempty of string
 
+let is_single_path_segment value =
+  (not (String.equal value ""))
+  && not (String.equal value ".")
+  && not (String.equal value "..")
+  && String.equal (Stdlib.Filename.basename value) value
+;;
+
 let recover_atomic_orphan ~path ~recovered_root ~bucket =
   let name = Stdlib.Filename.basename path in
   if not (is_atomic_orphan_name name)
   then Error (Printf.sprintf "not an atomic-write orphan: %s" path)
-  else if
-    String.equal bucket ""
-    || String.equal bucket "."
-    || String.equal bucket ".."
-    || not (String.equal (Stdlib.Filename.basename bucket) bucket)
+  else if not (is_single_path_segment bucket)
   then Error (Printf.sprintf "invalid atomic-write recovery bucket: %S" bucket)
   else
     try
@@ -202,6 +205,12 @@ let cleanup_atomic_orphans
   ()
   : int * int
   =
+  if not (is_single_path_segment recovered_subdir)
+  then
+    invalid_arg
+      (Printf.sprintf
+         "cleanup_atomic_orphans: recovered_subdir must be one path segment: %S"
+         recovered_subdir);
   let recovered_dir = Stdlib.Filename.concat base_path recovered_subdir in
   let deleted = ref 0 in
   let preserved = ref 0 in

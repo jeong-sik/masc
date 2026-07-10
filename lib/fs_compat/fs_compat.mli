@@ -85,7 +85,9 @@ val recover_atomic_orphan
 
     Returns [(deleted, preserved)]:
     - [deleted]: zero-byte orphans removed.
-    - [preserved]: non-zero orphans moved to [recovered_subdir]. *)
+    - [preserved]: non-zero orphans moved to [recovered_subdir].
+
+    @raise Invalid_argument when [recovered_subdir] is not one path segment. *)
 val cleanup_atomic_orphans
   :  base_path:string
   -> ?recovered_subdir:string

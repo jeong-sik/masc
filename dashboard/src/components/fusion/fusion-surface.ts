@@ -410,10 +410,16 @@ type MergedRun =
   | { kind: 'board'; runId: string; sortTime: number; running: boolean; view: FusionRunView }
   | { kind: 'registry'; runId: string; sortTime: number; running: boolean; record: FusionRunRecord }
 
+// Master-list page size: rows rendered initially and added per "더 보기" click.
+const FUSION_LIST_PAGE_SIZE = 30
+
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
 // (it carries the detail), so the registry duplicate is dropped. Running rows pin
-// to the top (the live work), then recency — registry startedAt is unix seconds,
-// board updatedAt is an ISO string, so both are normalized to ms before sorting.
+// to the top (the live work), then recency on a SINGLE time axis: creation/start
+// time (board createdAt ISO, registry startedAt unix seconds — both normalized
+// to ms). Sorting board rows by updatedAt while registry rows sorted by
+// startedAt let an old run leapfrog newer ones whenever its board post was
+// touched, which read as a jumbled list (38-bug campaign #34).
 function buildMergedRuns(
   boardRuns: readonly FusionRunView[],
   registryRuns: readonly FusionRunRecord[],
@@ -423,7 +429,7 @@ function buildMergedRuns(
     ...boardRuns.map((view): MergedRun => ({
       kind: 'board',
       runId: view.runId,
-      sortTime: timeValue(view.updatedAt),
+      sortTime: timeValue(view.createdAt),
       running: view.status === 'running',
       view,
     })),
@@ -1313,6 +1319,17 @@ export function FusionSurface() {
   const selected = merged.find(run => run.runId === selectedRunId) ?? merged[0] ?? null
   const registryRunning = registryRuns.filter(run => run.status === 'running').length
   const registryFailed = registryRuns.filter(run => run.status === 'failed').length
+  // Paged master list (38-bug campaign #34): render a page of rows instead of
+  // the full history. The page grows by FUSION_LIST_PAGE_SIZE on demand and
+  // always extends far enough to include the routed selection so the active
+  // row never disappears from the list.
+  const [visibleCount, setVisibleCount] = useState(FUSION_LIST_PAGE_SIZE)
+  const selectedIndex = selected
+    ? merged.findIndex(run => run.runId === selected.runId)
+    : -1
+  const effectiveCount = Math.max(visibleCount, selectedIndex + 1)
+  const visibleRuns = merged.slice(0, effectiveCount)
+  const hiddenCount = merged.length - visibleRuns.length
 
   return html`
     <main class="surf fus v2-fusion-surface" data-testid="fusion-surface" data-screen-label="Fusion">
@@ -1376,7 +1393,7 @@ export function FusionSurface() {
             ? html`<div class="fus-list-scroll"><div class="ov-empty">심의 런이 없습니다</div></div>`
             : html`
                 <div class="fus-list-scroll">
-                  ${merged.map(run => run.kind === 'board'
+                  ${visibleRuns.map(run => run.kind === 'board'
                     ? html`<${FusionRunRow}
                         key=${run.runId}
                         run=${run.view}
@@ -1387,6 +1404,14 @@ export function FusionSurface() {
                         record=${run.record}
                         active=${selected?.runId === run.runId}
                       />`)}
+                  ${hiddenCount > 0
+                    ? html`<button
+                        type="button"
+                        class=${`fus-link inline fus-list-more ${ringFocusClasses()}`}
+                        data-testid="fusion-list-more"
+                        onClick=${() => setVisibleCount(count => count + FUSION_LIST_PAGE_SIZE)}
+                      >더 보기 (${hiddenCount}개 남음)</button>`
+                    : null}
                 </div>
               `}
         </aside>

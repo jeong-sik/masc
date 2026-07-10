@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { h, render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost } from '../../types'
 import { route } from '../../router'
@@ -1048,6 +1049,66 @@ describe('FusionSurface', () => {
     const rationale = container.querySelector('.fus-rec-rationale')
     expect(rationale?.querySelector('.markdown-content')).not.toBeNull()
     expect(rationale?.textContent).toContain('rollback')
+  })
+
+  const minimalFusionPost = (runId: string, createdAt: string, updatedAt: string) =>
+    boardPost({
+      id: `post-${runId}`,
+      title: `Fusion deliberation (run ${runId})`,
+      created_at: createdAt,
+      updated_at: updatedAt,
+      meta: {
+        source: 'fusion',
+        run_id: runId,
+        question: `Question for ${runId}?`,
+        panel: [],
+        judge: { status: 'synthesized', decision: 'answer', synthesis: 's', resolved_answer: 'r' },
+      },
+    })
+
+  it('orders the master list by creation time, not board update time (#34)', () => {
+    // fus-old was CREATED first but its board post was touched later;
+    // fus-new must still render above it.
+    fusionBoardPosts.value = [
+      minimalFusionPost('fus-old', '2026-06-19T01:00:00Z', '2026-06-19T09:00:00Z'),
+      minimalFusionPost('fus-new', '2026-06-19T05:00:00Z', '2026-06-19T05:01:00Z'),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const ids = Array.from(container.querySelectorAll('.fus-run-row .fus-run-id')).map(
+      el => el.textContent,
+    )
+    expect(ids).toEqual(['fus-new', 'fus-old'])
+  })
+
+  it('pages the master list and reveals more rows on demand (#34)', async () => {
+    const posts = []
+    for (let i = 0; i < 33; i += 1) {
+      const minute = String(i).padStart(2, '0')
+      posts.push(
+        minimalFusionPost(
+          `fus-${minute}`,
+          `2026-06-19T01:${minute}:00Z`,
+          `2026-06-19T01:${minute}:30Z`,
+        ),
+      )
+    }
+    fusionBoardPosts.value = posts
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelectorAll('.fus-run-row').length).toBe(30)
+    const more = container.querySelector<HTMLButtonElement>('[data-testid="fusion-list-more"]')
+    expect(more).not.toBeNull()
+    expect(more?.textContent).toContain('3개 남음')
+
+    more?.click()
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.fus-run-row').length).toBe(33)
+    })
+    expect(container.querySelector('[data-testid="fusion-list-more"]')).toBeNull()
   })
 })
 

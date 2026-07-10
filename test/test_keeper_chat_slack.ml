@@ -42,6 +42,15 @@ let test_escape_mrkdwn_control_chars () =
     "&lt;@U123&gt; &amp; &lt;b&gt;"
     (S.escape_mrkdwn_text "<@U123> & <b>")
 
+let test_markdown_projects_to_slack_mrkdwn () =
+  let rendered =
+    S.markdown_to_mrkdwn
+      "# Title\n**bold** and [docs](https://example.com)\n- item"
+  in
+  check string "markdown projection"
+    "*Title*\n*bold* and <https://example.com|docs>\n• item"
+    rendered
+
 let test_link_block_escapes_mrkdwn_fields () =
   let json =
     S.link_block_json ~url:"https://example.com/?a=1&b=2"
@@ -222,6 +231,8 @@ let () =
       , [ test_case "link block renders section" `Quick test_link_block_renders_section
         ; test_case "escapes mrkdwn control chars" `Quick
             test_escape_mrkdwn_control_chars
+        ; test_case "markdown projects to Slack mrkdwn" `Quick
+            test_markdown_projects_to_slack_mrkdwn
         ; test_case "link block escapes mrkdwn fields" `Quick
             test_link_block_escapes_mrkdwn_fields
         ; test_case "image block renders image" `Quick test_image_block_renders_image

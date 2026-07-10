@@ -49,6 +49,49 @@ let escape_mrkdwn_text s =
     s;
   Buffer.contents buf
 
+(* Slack accepts mrkdwn, not CommonMark.  Keep this conversion deliberately
+   structural: it only projects the markdown constructs supported by the
+   connector and leaves code/fallback text unchanged. *)
+let markdown_link_re =
+  Re.compile
+    (Re.seq
+       [ Re.char '['; Re.group (Re.rep1 (Re.compl [ Re.char ']' ])); Re.str "](";
+         Re.group (Re.rep1 (Re.compl [ Re.char ')' ]))); Re.char ')' ])
+
+let markdown_bold_re =
+  Re.compile (Re.seq [ Re.str "**"; Re.group (Re.rep1 (Re.compl [ Re.char '*' ])); Re.str "**" ])
+
+let markdown_to_mrkdwn_inline text =
+  let text =
+    Re.replace markdown_link_re ~f:(fun group ->
+      Printf.sprintf "<%s|%s>" (Re.Group.get group 2) (Re.Group.get group 1)) text
+  in
+  Re.replace markdown_bold_re ~f:(fun group ->
+    Printf.sprintf "*%s*" (Re.Group.get group 1)) text
+
+let markdown_to_mrkdwn text =
+  text
+  |> String.split_on_char '\n'
+  |> List.map (fun line ->
+       let line = String.trim line in
+       let line =
+         if String.length line >= 2 && String.sub line 0 2 = "- "
+         then "• " ^ String.sub line 2 (String.length line - 2)
+         else line
+       in
+       let line =
+         if String.length line > 0 && line.[0] = '#'
+         then
+           let first_space = String.index_opt line ' ' in
+           match first_space with
+           | Some i when i + 1 < String.length line ->
+               "*" ^ String.sub line (i + 1) (String.length line - i - 1) ^ "*"
+           | _ -> line
+         else line
+       in
+       markdown_to_mrkdwn_inline line)
+  |> String.concat "\n"
+
 let truncate_block_text s = truncate_to_limit s slack_block_text_limit
 
 let redacted_http_url_opt url =
@@ -217,7 +260,7 @@ let limit_blocks_for_slack blocks =
 
 let send_message_with_blocks ~token ~channel ~content ~blocks =
   let content =
-    redact content |> escape_mrkdwn_text |> fun s ->
+    redact content |> markdown_to_mrkdwn |> escape_mrkdwn_text |> fun s ->
     truncate_to_limit s slack_message_limit
   in
   let blocks = limit_blocks_for_slack blocks in
@@ -341,6 +384,7 @@ let adapter_loop ~token ~channel ~events ?base_url
 
 module For_testing = struct
   let escape_mrkdwn_text = escape_mrkdwn_text
+  let markdown_to_mrkdwn = markdown_to_mrkdwn
   let truncate_to_limit = truncate_to_limit
   let limit_blocks_for_slack = limit_blocks_for_slack
   let public_voice_audio_url = public_voice_audio_url

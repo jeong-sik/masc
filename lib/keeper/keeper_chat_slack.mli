@@ -67,6 +67,7 @@ val adapter_loop :
 
 module For_testing : sig
   val escape_mrkdwn_text : string -> string
+  val markdown_to_mrkdwn : string -> string
 
   val truncate_to_limit : string -> int -> string
 

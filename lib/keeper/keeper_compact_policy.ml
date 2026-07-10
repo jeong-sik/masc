@@ -415,21 +415,41 @@ let compact_if_needed_typed
         | Keeper_config.Deterministic -> deterministic_compact ()
         | Keeper_config.Llm ->
           let emergency = ratio >= emergency_compact_ratio_threshold in
-          let runtime_id =
-            try Keeper_meta_contract.runtime_id_of_meta meta with Failure _ -> ""
-          in
-          if emergency || String.equal runtime_id "" then deterministic_compact ()
-          else begin
-            match
-              Keeper_compaction_llm_summarizer.make ~runtime_id ~keeper_name:meta.name ()
-            with
-            | None -> deterministic_compact ()
-            | Some summarizer ->
-              let msgs = messages_of_context ctx in
-              (match summarizer ~messages:msgs with
-               | Some plan -> Keeper_compaction_llm_summarizer.apply plan ~messages:msgs
-               | None -> deterministic_compact ())
-          end
+          if emergency
+          then deterministic_compact ()
+          else
+            let runtime_id =
+              try
+                let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+                if String.trim runtime_id = ""
+                then (
+                  Log.Keeper.warn ~keeper_name:meta.name
+                    "compaction LLM summarizer skipped: runtime identity resolved +                     to an empty id; using deterministic fallback";
+                  None)
+                else Some runtime_id
+              with
+              | Failure reason ->
+                Log.Keeper.warn ~keeper_name:meta.name
+                  "compaction LLM summarizer runtime identity failed: %s; using +                   deterministic fallback"
+                  reason;
+                None
+            in
+            (match runtime_id with
+             | None -> deterministic_compact ()
+             | Some runtime_id ->
+               (match
+                  Keeper_compaction_llm_summarizer.make
+                    ~runtime_id
+                    ~keeper_name:meta.name
+                    ()
+                with
+                | None -> deterministic_compact ()
+                | Some summarizer ->
+                  let msgs = messages_of_context ctx in
+                  (match summarizer ~messages:msgs with
+                   | Some plan ->
+                     Keeper_compaction_llm_summarizer.apply plan ~messages:msgs
+                   | None -> deterministic_compact ())))
       in
       (* Apply keeper-private fold after standard strategies *)
       let msgs_after_fold =

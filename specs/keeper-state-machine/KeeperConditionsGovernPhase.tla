@@ -38,7 +38,7 @@
 \*   phase \in {"Running", "HandingOff"} | lib/keeper_registry/keeper_state_machine.ml:phase    | type phase = ... | Running | ... | HandingOff | ...
 \*                                | (full 13-phase variant; this spec projects to 2)  |
 \*   handoff_needed (boolean)     | lib/keeper_registry/keeper_state_machine.ml:context_handoff_needed | conditions.context_handoff_needed : bool
-\*                                | lib/keeper_registry/keeper_state_machine.ml:update_conditions | set from auto_rules.handoff at update_conditions
+\*                                | lib/keeper_registry/keeper_state_machine.ml:update_conditions | set from context_actions.handoff at update_conditions
 \*
 \* Producer side (where conditions are stamped).  Cited by function name,
 \* not line number — iter 64 N-2.a convention; the previous "line 351"
@@ -54,7 +54,7 @@
 \* previous "line 634" / "line 620" anchors had both drifted; symbol
 \* anchors don't rot):
 \*   lib/keeper_registry/keeper_state_machine.ml — update_conditions stamps
-\*     `context_handoff_needed = auto_rules.handoff`, and the conditions
+\*     `context_handoff_needed = context_actions.handoff`, and the conditions
 \*     json export carries the
 \*     `"context_handoff_needed", \`Bool c.context_handoff_needed` field,
 \*     read by dashboard/src/components/keeper-conditions-divergent.ts

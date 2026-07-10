@@ -14,7 +14,7 @@ The likely fleet-stop mechanism is FD exhaustion plus write/spawn fanout, not a
 single classical deadlock. The live log sequence at 2026-05-15T03:52:50Z shows
 `fstatat`, `openat`, `mkdirat`, and `execve` failing with "Too many open files
 in system". Once that starts, runtime manifests, coverage gaps, cost events,
-tool logs, OAS events, activity events, keeper meta reads, progress snapshots,
+tool logs, OAS events, activity events, keeper meta reads, checkpoint receipts,
 and docker subprocess checks all fail in the same window.
 
 ## Code-Level Remediation

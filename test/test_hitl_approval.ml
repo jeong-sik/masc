@@ -1668,6 +1668,188 @@ let test_callback_auto_mode_high_queues_for_operator () =
       | Some (Agent_sdk.Hooks.Edit _) -> Alcotest.fail "expected operator approval, got edit"
       | None -> Alcotest.fail "approval callback did not return")
 
+(* Production Keeper runs use the nonblocking callback mode: an approval is a
+   durable continuation and the current OAS turn receives a terminal tool
+   rejection, so the lane can return to its heartbeat and handle unrelated
+   board/chat work. Resolution wakes a later Keeper cycle. *)
+let test_callback_nonblocking_high_returns_without_suspending () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let keeper_name = "nonblocking-high-floor-keeper" in
+  let tool_name = "masc_create_task" in
+  let input =
+    `Assoc
+      [ "title", `String "nonblocking high-risk task"
+      ; "description", `String "exact approval continuation"
+      ]
+  in
+  let reordered_input =
+    `Assoc
+      [ "description", `String "exact approval continuation"
+      ; "title", `String "nonblocking high-risk task"
+      ]
+  in
+  let different_input =
+    `Assoc
+      [ "description", `String "exact approval continuation"
+      ; "title", `String "different high-risk task"
+      ]
+  in
+  let base_path = temp_dir () in
+  let captured_resolution = ref None in
+  AQ.set_approval_resolution_wake_hook
+    (fun ~base_path:_ ~keeper_name:_ ~approval_id ~decision ~channel ->
+       captured_resolution :=
+         Some
+           Keeper_event_queue.
+             { approval_id
+             ; decision
+             ; channel =
+                 Option.value
+                   channel
+                   ~default:
+                     (Keeper_continuation_channel.unrouted
+                        "test: no approval continuation channel")
+             });
+  AQ.For_testing.reset_audit_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.set_approval_resolution_wake_hook
+        (fun
+          ~base_path:_
+          ~keeper_name:_
+          ~approval_id:_
+          ~decision:_
+          ~channel:_ ->
+          ());
+      AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = Mcp_server.workspace_config state in
+      set_approval_mode_or_fail config OA.Auto_low_risk;
+      let initial_pending = AQ.pending_count () in
+      let callback =
+        GP.to_oas_approval_callback
+          ~config
+          ~governance_level:"enterprise"
+          ~keeper_name
+          ~lane_policy:AQ.Nonblocking
+          ()
+      in
+      let decision = callback ~tool_name ~input in
+      (match decision with
+       | Agent_sdk.Hooks.Reject reason ->
+         Alcotest.(check bool)
+           "rejection identifies pending HITL continuation"
+           true
+           (contains_substring reason "HITL approval pending")
+       | Agent_sdk.Hooks.Approve ->
+         Alcotest.fail "nonblocking high-risk approval unexpectedly approved"
+       | Agent_sdk.Hooks.Edit _ ->
+         Alcotest.fail "nonblocking high-risk approval unexpectedly edited");
+      Alcotest.(check int)
+        "nonblocking callback returns while approval remains queued"
+        (initial_pending + 1)
+        (AQ.pending_count ());
+      Alcotest.(check bool)
+        "nonblocking approval does not own the Keeper lane"
+        false
+        (AQ.has_blocking_pending_for_keeper ~keeper_name);
+      let id =
+        match pending_id_for_keeper ~keeper_name with
+        | Some id -> id
+        | None -> Alcotest.fail "nonblocking approval was not queued"
+      in
+      resolve_pending_or_fail ~id ~decision:Agent_sdk.Hooks.Approve;
+      Alcotest.(check int)
+        "resolution clears the continuation entry"
+        initial_pending
+        (AQ.pending_count ());
+      let grant =
+        match !captured_resolution with
+        | Some resolution ->
+          (match GP.hitl_approval_grant_of_resolution resolution with
+           | Some grant -> grant
+           | None -> Alcotest.fail "approved resolution did not create a grant")
+        | None -> Alcotest.fail "approved resolution did not emit a durable wake"
+      in
+      let resumed_callback =
+        GP.to_oas_approval_callback
+          ~config
+          ~governance_level:"enterprise"
+          ~keeper_name
+          ~lane_policy:AQ.Nonblocking
+          ~hitl_approval_grant:grant
+          ()
+      in
+      (match resumed_callback ~tool_name ~input:different_input with
+       | Agent_sdk.Hooks.Reject reason ->
+         Alcotest.(check bool)
+           "different action stays on the approval path"
+           true
+           (contains_substring reason "HITL approval pending")
+       | Agent_sdk.Hooks.Approve ->
+         Alcotest.fail "grant authorized a different action"
+       | Agent_sdk.Hooks.Edit _ ->
+         Alcotest.fail "different action unexpectedly returned Edit");
+      let different_id =
+        match pending_id_for_keeper ~keeper_name with
+        | Some pending_id -> pending_id
+        | None -> Alcotest.fail "different action was not queued"
+      in
+      resolve_pending_or_fail
+        ~id:different_id
+        ~decision:(Agent_sdk.Hooks.Reject "different action test cleanup");
+      Alcotest.(check int)
+        "different action cleanup restores pending count"
+        initial_pending
+        (AQ.pending_count ());
+      (match resumed_callback ~tool_name ~input:reordered_input with
+       | Agent_sdk.Hooks.Approve -> ()
+       | Agent_sdk.Hooks.Reject reason ->
+         Alcotest.fail ("exact approved action was rejected: " ^ reason)
+       | Agent_sdk.Hooks.Edit _ ->
+         Alcotest.fail "exact approved action unexpectedly returned Edit");
+      Alcotest.(check int)
+        "exact approved action executes without creating a new approval"
+        initial_pending
+        (AQ.pending_count ());
+      (match resumed_callback ~tool_name ~input with
+       | Agent_sdk.Hooks.Reject reason ->
+         Alcotest.(check bool)
+           "consumed grant returns to the nonblocking approval path"
+           true
+           (contains_substring reason "HITL approval pending")
+       | Agent_sdk.Hooks.Approve ->
+         Alcotest.fail "one-shot approval grant authorized the action twice"
+       | Agent_sdk.Hooks.Edit _ ->
+         Alcotest.fail "second exact action unexpectedly returned Edit");
+      Alcotest.(check int)
+        "second exact action creates a fresh approval"
+        (initial_pending + 1)
+        (AQ.pending_count ());
+      let second_id =
+        match pending_id_for_keeper ~keeper_name with
+        | Some pending_id -> pending_id
+        | None -> Alcotest.fail "second exact action was not queued"
+      in
+      resolve_pending_or_fail
+        ~id:second_id
+        ~decision:(Agent_sdk.Hooks.Reject "test cleanup");
+      Alcotest.(check int)
+        "test cleanup restores pending count"
+        initial_pending
+        (AQ.pending_count ());
+      Alcotest.(check bool)
+        "one-shot grant consumption is audited"
+        true
+        (List.exists
+           (String.equal "approved_continuation_consumed")
+           (audit_event_names ~base_path ~keeper_name)))
+
 let test_callback_manual_mode_preserves_remembered_medium_policy () =
   with_eio_base_path @@ fun base_path ->
   Eio.Switch.run @@ fun sw ->
@@ -2318,6 +2500,9 @@ let () =
           test_callback_production_claimed_worktree_write_auto_approved;
         Alcotest.test_case "Auto_low_risk high band queues for operator" `Quick
           test_callback_auto_mode_high_queues_for_operator;
+        Alcotest.test_case
+          "nonblocking high approval returns without suspending"
+          `Quick test_callback_nonblocking_high_returns_without_suspending;
         Alcotest.test_case "Manual preserves remembered medium policy" `Quick
           test_callback_manual_mode_preserves_remembered_medium_policy;
         Alcotest.test_case "Manual preserves remembered soft rule" `Quick

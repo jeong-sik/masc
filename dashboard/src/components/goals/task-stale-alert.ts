@@ -3,9 +3,7 @@
 // Phase 2 spec (`design-system/preview/cb-group-d.jsx:TaskStaleAlert`)
 // surfaces tasks whose claim has gone cold so the operator can nudge,
 // force-release, or reassign. Backend `Task` does not expose
-// `claim_age` directly, but the audit
-// (`design-system/audits/2026-04-29-phase2-implementation-gap.md`)
-// authorises a frontend derivation: any task in `claimed` or
+// `claim_age` directly, so the frontend derives it for tasks in `claimed` or
 // `in_progress` whose `updated_at` is older than the stale threshold.
 
 import { html } from 'htm/preact'

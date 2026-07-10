@@ -29,7 +29,7 @@ let prompt_metadata key =
   match key with
   | "keeper.unified.system" ->
       ("test prompt for " ^ key,
-       [ "identity_header"; "trait_lines"; "instructions_block"; "goal_lines" ])
+       [ "identity_header"; "instructions_block"; "goal_lines" ])
   | "keeper.deliberation" ->
       ("test prompt for " ^ key,
        [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
@@ -64,7 +64,7 @@ let fixtures =
     ("keeper.constitution", "Continuity rules from file");
     ("keeper.world", "MASC world from markdown");
     ("keeper.capabilities", "Capabilities from markdown");
-    ("keeper.unified.system", "{{identity_header}}\n{{trait_lines}}{{instructions_block}}{{goal_lines}}");
+    ("keeper.unified.system", "{{identity_header}}\n{{instructions_block}}{{goal_lines}}");
     ("keeper.deliberation", "Keeper {{keeper_name}} {{soul_profile}} {{goal}} {{triggers}} {{world_state}}");
     ("governance.deliberation", "governance deliberation prompt");
     ("governance.dry_run", "DRY RUN governance prompt");
@@ -153,7 +153,6 @@ let () =
                 Prompt_registry.render_prompt_template "keeper.unified.system"
                   [
                     ("identity_header", "TestKeeper");
-                    ("trait_lines", "trait1");
                     ("instructions_block", "do things");
                     ("goal_lines", "goal1");
                   ]

@@ -8,7 +8,6 @@ but comparisons to external-ref parsing/GitHub grounding are historical context.
 **Renumbered from 0283/0284**: 0283 taken by `RFC-0283-fusion-judge-of-judges.md` (#22093, merged); 0284 contended by `RFC-0284-keeper-guidance-visibility-drift-guard.md` (#22121, open). Moved to 0285 to separate at the filename level. See PR review thread.
 **Verified against base main**: `08c4ccd50d`
 **Builds on**: [RFC-0259](./RFC-0259-memory-os-volatile-claim-grounding-retraction-decay.md) (volatile external claim grounding/retraction/decay — this RFC is its internal-state symmetric pair), [RFC-0247](./RFC-0247-memory-os-associative-graph-forgetting-brain.md) ("a fact's value is the librarian's judgment, not a number"; exhaustive classification), [RFC-0244](./RFC-0244-memory-os-recall-turn-seeded-lexical-retrieval.md) (Tier-2 shared store / promotability)
-**Related**: [RFC-0276](./RFC-0276-purge-keeper-social-model-self-report-protocol.md) (social model purge left fact-store residue)
 
 ## 1. Summary
 
@@ -30,7 +29,7 @@ Reproduced against the live store at `<base-path>/.masc` (canonical runtime root
 | idealist episode g0170 | `validated_approach` | None (durable) | "The agent determined the correct action when facing a structural block" |
 
 - `recall_injections/2026-06/{19..23}.jsonl`: self-observation facts (`id:agent-loop-avoidance`, `claim:the agent entered an idle state because no unclaimed tasks were available`) re-injected deterministically every turn.
-- albini trace-1781224572742: `claim:removing social_model fields ... breaks the bdi speech model loop` re-injected **101×**, `id:pr-22065-fix-bdi-loop` **117×**, over 200 turns / ~5 hours.
+- albini trace-1781224572742: one stale implementation claim was re-injected **101×** and its stable claim id **117×** over 200 turns / ~5 hours.
 
 The exact mechanism, traced to source:
 
@@ -105,9 +104,7 @@ In `fact_valid_until` (`keeper_memory_os_types.ml:235`), add a `claim_kind` arm:
 ## 5. Non-goals
 
 - Cleaning up existing residue (stale `[SYNTHETIC]` progress.md, durable self-observation rows already on disk) is separate operational work. The code fix only changes newly minted claims; a legacy durable row (`valid_until = None`) is inherited whole by `reobserve_fact` and stays durable until the cleanup. See §7.
-- The continuity / forward-looking summary channel (`keeper_memory_policy_summary_filter.ml`) is text-based and does NOT honor `valid_until`. It carries prose, not fact rows, so it is not a fact re-injection vector — but if self-narrative leaks into that prose, decay won't touch it. Separate concern.
 - Anti-thrash `User_facing` exemption (`keeper_unified_turn_success.ml`) is a separate RFC.
-- `[STATE]` prose-block ceremony (typed continuity schema) is a separate concern.
 
 ## 6. Rejected first draft (workaround-signature avoidance)
 

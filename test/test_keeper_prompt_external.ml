@@ -142,7 +142,6 @@ let task_create_observation : WO.world_observation =
     pending_scope_messages = [];
     idle_seconds = 1;
     active_goals = [ "goal-test-task-create" ];
-    continuity_summary = "";
     context_ratio = lazy 0.0;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
@@ -197,8 +196,8 @@ let with_task_create_prompt_missing f =
   in
   write_prompt Keeper_prompt_names.unified_system
     ~template_variables:
-      [ "identity_header"; "trait_lines"; "instructions_block"; "goal_lines" ]
-    "{{identity_header}}\n{{trait_lines}}{{instructions_block}}{{goal_lines}}";
+      [ "identity_header"; "instructions_block"; "goal_lines" ]
+    "{{identity_header}}\n{{instructions_block}}{{goal_lines}}";
   write_prompt Keeper_prompt_names.turn_intent
     ~template_variables:[ "task_create_guidance" ]
     "{{task_create_guidance}}";
@@ -257,30 +256,7 @@ let test_system_prompt_includes_continuity_contract () =
         "constitution still present" true
         (contains_substring prompt "PR merge rules"))
 
-let test_system_prompt_includes_state_block_template_anchor () =
-  with_repo_root_cwd (fun () ->
-      Lib.Keeper_prompt_external.reset_cache ();
-      let prompt =
-        Lib.Keeper_prompt.build_keeper_system_prompt
-          ~goal:"verify prompt anchors"
-          ~instructions:""
-          ()
-      in
-      Alcotest.(check bool)
-        "state block template anchor present" true
-        (contains_substring prompt "State block template");
-      Alcotest.(check bool)
-        "normal prompt does not need recovery fallback" false
-        (contains_substring prompt "Recovery guard"))
-
-(* RFC-0282 self_model de-structure folded will/needs/desires into the persona
-   `instructions` channel. This pins that channel end-to-end at the render
-   boundary: the [instructions] argument must reach the built system prompt
-   verbatim. Without this, a future template change that drops the instructions
-   render would silently strip persona content (the deleted
-   test_keeper_prompt_personality_field_aggregation used to guard the old
-   will/needs/desires block). Field-level IO tests don't cover propagation;
-   this is the minimal channel pin (not an LLM-behavior A/B). *)
+(* Pin the persona [instructions] channel end-to-end at the render boundary. *)
 let test_system_prompt_includes_instructions () =
   with_repo_root_cwd (fun () ->
       Lib.Keeper_prompt_external.reset_cache ();
@@ -368,15 +344,8 @@ let test_source_has_no_generic_behavior_fallbacks () =
         (contains_substring src
            "Maintain high standard of reasoning, factual grounding, and clear communication.");
       Alcotest.(check bool)
-        "continuity generic fallback removed" false
-        (contains_substring src
-           "Continuity and any end-of-reply STATE formatting requirements apply");
-      Alcotest.(check bool)
         "missing behavior marker present" true
         (contains_substring src "Behavior prompt config drift");
-      (* RFC-0282 removed the will/needs/desires self_model triple and the
-         per-field personality config-drift marker along with it; only the
-         behavior-prompt drift marker above remains. *)
       Alcotest.(check bool)
         "connected surface behavior fallback removed" false
         (contains_substring unified_prompt_src
@@ -402,9 +371,6 @@ let () =
             test_loads_connected_surface_discretion;
           Alcotest.test_case "system prompt includes continuity_contract"
             `Quick test_system_prompt_includes_continuity_contract;
-          Alcotest.test_case
-            "system prompt includes state block template anchor" `Quick
-            test_system_prompt_includes_state_block_template_anchor;
           Alcotest.test_case "system prompt includes persona instructions"
             `Quick test_system_prompt_includes_instructions;
           Alcotest.test_case

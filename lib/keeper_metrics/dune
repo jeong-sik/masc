@@ -10,8 +10,6 @@
   keeper_prompt_names
   keeper_token_count
   keeper_timing
-  keeper_memory_policy_summary_filter
-  keeper_continuity_summary_source
   keeper_memory_llm_summary_outcome
   keeper_memory_recall_exn_class
   keeper_user_visible_reply_source

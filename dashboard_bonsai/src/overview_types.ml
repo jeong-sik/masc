@@ -30,18 +30,6 @@ type counts =
   ; keepers : int
   }
 
-type belief =
-  { claim : string
-  ; status : string           (* "corroborated" | "contested" | ... *)
-  }
-
-type meta_cognition =
-  { stagnation_score : float
-  ; belief_count : int
-  ; contested_belief_count : int
-  ; dominant_belief : belief option
-  }
-
 type fetch_status =
   | Fetch_pending
   | Fetch_fresh
@@ -55,7 +43,6 @@ type response =
   ; status : status
   ; counts : counts
   ; configured_keepers : int
-  ; meta_cognition : meta_cognition
   ; base_path : string
   ; fetch_status : fetch_status
   }
@@ -76,20 +63,11 @@ let fixture_status : status =
 
 let fixture_counts : counts = { agents = 0; tasks = 0; keepers = 0 }
 
-let fixture_meta : meta_cognition =
-  { stagnation_score = 0.0
-  ; belief_count = 0
-  ; contested_belief_count = 0
-  ; dominant_belief = None
-  }
-;;
-
 let fixture : response =
   { generated_at = ""
   ; status = fixture_status
   ; counts = fixture_counts
   ; configured_keepers = 0
-  ; meta_cognition = fixture_meta
   ; base_path = ""
   ; fetch_status = Fetch_pending
   }
@@ -150,27 +128,6 @@ let counts_of_yojson json : counts =
   }
 ;;
 
-let belief_of_yojson json : belief option =
-  match json with
-  | `Null -> None
-  | _ ->
-    Some
-      { claim = string_field json "claim"
-      ; status = string_field json "status"
-      }
-;;
-
-let meta_cognition_of_yojson json : meta_cognition =
-  let dominant =
-    belief_of_yojson (Yojson.Safe.Util.member "dominant_belief" json)
-  in
-  { stagnation_score = float_field json "stagnation_score"
-  ; belief_count = int_field json "belief_count"
-  ; contested_belief_count = int_field json "contested_belief_count"
-  ; dominant_belief = dominant
-  }
-;;
-
 let response_of_yojson json : response =
   let base_path =
     match Yojson.Safe.Util.member "paths" json with
@@ -181,9 +138,6 @@ let response_of_yojson json : response =
   ; status = status_of_yojson (Yojson.Safe.Util.member "status" json)
   ; counts = counts_of_yojson (Yojson.Safe.Util.member "counts" json)
   ; configured_keepers = int_field json "configured_keepers"
-  ; meta_cognition =
-      meta_cognition_of_yojson
-        (Yojson.Safe.Util.member "meta_cognition" json)
   ; base_path
   ; fetch_status = Fetch_fresh
   }

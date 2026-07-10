@@ -199,27 +199,6 @@ let test_run_dashboard_compute_with_pool_uses_executor_domain () =
   check bool "non-PG backend offloads to executor pool domain" true
     (result_domain <> caller_domain)
 
-let test_meta_cognition_cold_cache_worker_domain_skips_root_switch () =
-  with_test_env @@ fun ~env ~sw ~config ->
-  let exec_pool =
-    Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
-  in
-  let key =
-    Server_dashboard_http_core_meta_cognition.meta_cognition_summary_key config
-  in
-  Dashboard_cache.invalidate key;
-  Server_dashboard_http_core_meta_cognition.clear_meta_cognition_warm_flag key;
-  let json =
-    Eio.Executor_pool.submit_exn exec_pool ~weight:1.0 (fun () ->
-      Server_dashboard_http_core_meta_cognition.meta_cognition_summary_cached
-        config)
-  in
-  check bool "cold worker call returns placeholder" true (json = `Null);
-  check bool "worker fork failure clears warm slot" true
-    (Server_dashboard_http_core_meta_cognition.Mc_cache.try_acquire_warm_slot
-       key);
-  Server_dashboard_http_core_meta_cognition.clear_meta_cognition_warm_flag key
-
 let test_dashboard_shell_http_json_includes_paths () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let json = Server_dashboard_http_core.dashboard_shell_http_json config in
@@ -1693,8 +1672,6 @@ let () =
             test_run_dashboard_compute_without_pool_stays_in_current_domain;
           test_case "pool uses executor domain" `Quick
             test_run_dashboard_compute_with_pool_uses_executor_domain;
-          test_case "meta-cognition cold worker skips root switch" `Quick
-            test_meta_cognition_cold_cache_worker_domain_skips_root_switch;
           test_case "shell payload includes paths diagnostics" `Quick
             test_dashboard_shell_http_json_includes_paths;
           test_case "shell runtime base_path prefers preserved input" `Quick

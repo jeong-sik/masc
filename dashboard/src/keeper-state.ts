@@ -798,7 +798,6 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     summary: asString(raw.summary),
     keepalive_running: typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
     continuity_state: membershipParse(KEEPER_CONTINUITY_STATES, asString(raw.continuity_state)),
-    continuity_summary: asString(raw.continuity_summary) ?? null,
   }
 }
 

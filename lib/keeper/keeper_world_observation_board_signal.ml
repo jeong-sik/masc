@@ -90,7 +90,6 @@ let text (signal : Board_dispatch.board_signal) =
 ;;
 
 let match_signal
-      ~continuity_summary:(_ : string)
       ~(meta : keeper_meta)
       ~(signal : Board_dispatch.board_signal)
   : match_result
@@ -117,8 +116,8 @@ let match_signal
 (** Check whether this keeper has commented on a post, and whether new
     external comments arrived after the keeper's latest comment.
     Uses actual comment stream as ground truth (no proxy like reply_count
-    or updated_at). Based on BDI commitment reconsideration: a committed
-    response is only re-evaluated when new external beliefs arrive. *)
+    or updated_at). A prior response is reconsidered only when a new external
+    comment arrives. *)
 let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
   match Board_dispatch.get_comments ~post_id with
   | Error _ -> `Never
@@ -214,12 +213,11 @@ let reaction_touches_self_activity ~self_ids ~(signal : Board_dispatch.board_sig
 ;;
 
 let wake_reason
-      ~continuity_summary
       ~(meta : keeper_meta)
       ~(signal : Board_dispatch.board_signal)
   : wake_reason option
   =
-  let matched = match_signal ~continuity_summary ~meta ~signal in
+  let matched = match_signal ~meta ~signal in
   if matched.explicit_mention
   then Some Explicit_mention
   else (

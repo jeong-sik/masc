@@ -32,7 +32,6 @@ VARIABLES
     stop_requested,
     restart_budget_remaining,
     backoff_elapsed,
-    guardrail_triggered,
     drain_complete,
     context_overflow,
     compact_retry_exhausted,
@@ -43,7 +42,7 @@ vars == <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
           context_within_budget, context_handoff_needed,
           compaction_active, handoff_active, operator_paused,
           stop_requested, restart_budget_remaining, backoff_elapsed,
-          guardrail_triggered, drain_complete,
+          drain_complete,
           context_overflow, compact_retry_exhausted,
           restart_count, terminal_failure_latched>>
 
@@ -59,7 +58,6 @@ DerivePhase ==
     ELSE IF ~fiber_alive /\ restart_budget_remaining /\ backoff_elapsed THEN "Restarting"
     ELSE IF ~fiber_alive /\ restart_budget_remaining THEN "Crashed"
     ELSE IF stop_requested THEN "Draining"
-    ELSE IF guardrail_triggered THEN "Failing"
     \* Overflow with retry latched promotes directly to Paused
     \* so operator intervention is required; else use Overflowed as a
     \* transient carrier for auto-compact dispatch.
@@ -92,7 +90,6 @@ Init ==
     /\ stop_requested = FALSE
     /\ restart_budget_remaining = TRUE
     /\ backoff_elapsed = FALSE
-    /\ guardrail_triggered = FALSE
     /\ drain_complete = FALSE
     /\ context_overflow = FALSE
     /\ compact_retry_exhausted = FALSE
@@ -109,9 +106,9 @@ HeartbeatOk ==
                    compaction_active,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
-                   restart_count, terminal_failure_latched>>
+                   terminal_failure_latched, restart_count>>
 
 HeartbeatFailed ==
     /\ NotTerminal /\ fiber_alive
@@ -121,7 +118,7 @@ HeartbeatFailed ==
                    compaction_active,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    restart_count, terminal_failure_latched>>
 
@@ -132,7 +129,7 @@ TurnSucceeded ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -143,14 +140,13 @@ TurnFailed ==
                    context_within_budget, context_handoff_needed, compaction_active,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
 ContextMeasured ==
     /\ NotTerminal /\ fiber_alive
     /\ context_handoff_needed' \in BOOLEAN
-    /\ guardrail_triggered' \in BOOLEAN
     /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
                    context_within_budget, compaction_active, handoff_active,
                    operator_paused, stop_requested, restart_budget_remaining,
@@ -166,7 +162,7 @@ CompactionStarted ==
                    context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -184,7 +180,8 @@ CompactionCompletedWithSavings ==
                    context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, terminal_failure_latched, restart_count>>
+                   drain_complete,
+                   terminal_failure_latched, restart_count>>
 
 \* Noop completion (saved_tokens <= 0) — clears only [compaction_active];
 \* [context_overflow] and [compact_retry_exhausted] are preserved so the
@@ -202,7 +199,7 @@ CompactionCompletedNoSavings ==
                    context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -221,7 +218,7 @@ CompactionFailed ==
                    context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -233,7 +230,7 @@ HandoffStarted ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -244,7 +241,7 @@ HandoffCompleted ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -259,7 +256,7 @@ HandoffFailed ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -270,7 +267,7 @@ OperatorPause ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -281,7 +278,7 @@ OperatorResume ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -292,7 +289,7 @@ StopRequested ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -310,7 +307,7 @@ OperatorStop ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -322,7 +319,6 @@ DrainCompleteEv ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -333,7 +329,7 @@ FiberTerminated ==
                    context_within_budget, context_handoff_needed, compaction_active,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -346,7 +342,6 @@ FiberStarted ==
     /\ compaction_active' = FALSE
     /\ handoff_active' = FALSE
     /\ backoff_elapsed' = FALSE
-    /\ guardrail_triggered' = FALSE
     /\ drain_complete' = FALSE
     /\ stop_requested' = FALSE  \* TLA+ liveness fix: restart contradicts stop
     /\ context_overflow' = FALSE
@@ -370,7 +365,7 @@ SupervisorRestartAttempt ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched>>
 
@@ -381,20 +376,9 @@ RestartBudgetExhausted ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
-                   context_overflow, compact_retry_exhausted,
-                   terminal_failure_latched, restart_count>>
-
-GuardrailStop ==
-    /\ NotTerminal /\ fiber_alive
-    /\ guardrail_triggered' = TRUE
-    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
-                   context_within_budget, context_handoff_needed,
-                   compaction_active, handoff_active, operator_paused,
-                   stop_requested, restart_budget_remaining, backoff_elapsed,
                    drain_complete,
                    context_overflow, compact_retry_exhausted,
-                   restart_count, terminal_failure_latched>>
+                   terminal_failure_latched, restart_count>>
 
 TerminalFailureDetected ==
     /\ NotTerminal
@@ -403,7 +387,7 @@ TerminalFailureDetected ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    restart_count>>
 
@@ -422,8 +406,8 @@ ContextOverflowDetected ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
-                   compact_retry_exhausted, terminal_failure_latched, restart_count>>
+                   drain_complete, compact_retry_exhausted,
+                   terminal_failure_latched, restart_count>>
 
 \* Entry-action for Overflowed: promotes the keeper into Compacting
 \* by flipping compaction_active.  No buffer op may already be in
@@ -437,7 +421,7 @@ AutoCompactTriggered ==
                    context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -453,8 +437,8 @@ CompactRetryExhausted ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
-                   context_overflow, terminal_failure_latched, restart_count>>
+                   drain_complete, context_overflow,
+                   terminal_failure_latched, restart_count>>
 
 \* Operator-driven compaction.  Same shape as AutoCompactTriggered but
 \* also clears the retry latch so a fresh compaction sequence begins.
@@ -467,8 +451,8 @@ OperatorCompactRequested ==
                    context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
-                   context_overflow, terminal_failure_latched, restart_count>>
+                   drain_complete, context_overflow,
+                   terminal_failure_latched, restart_count>>
 
 \* Last-resort: operator drops the keeper's context entirely via
 \* [masc_keeper_clear].  Resets the overflow flags in-place without
@@ -481,7 +465,8 @@ OperatorClearRequested ==
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, terminal_failure_latched, restart_count>>
+                   drain_complete,
+                   terminal_failure_latched, restart_count>>
 
 \* ── Next State ────────────────────────────────────────────
 
@@ -498,7 +483,6 @@ Next ==
     \/ FiberTerminated  \/ FiberStarted
     \/ SupervisorRestartAttempt
     \/ RestartBudgetExhausted
-    \/ GuardrailStop
     \/ TerminalFailureDetected
     \/ ContextOverflowDetected
     \/ AutoCompactTriggered
@@ -666,7 +650,6 @@ TypeOK ==
     /\ stop_requested \in BOOLEAN
     /\ restart_budget_remaining \in BOOLEAN
     /\ backoff_elapsed \in BOOLEAN
-    /\ guardrail_triggered \in BOOLEAN
     /\ drain_complete \in BOOLEAN
     /\ context_overflow \in BOOLEAN
     /\ compact_retry_exhausted \in BOOLEAN
@@ -698,7 +681,7 @@ BuggyCompactionCompleted ==
                    context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+                   drain_complete,
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
@@ -721,7 +704,6 @@ NextBuggy ==
     \/ FiberTerminated  \/ FiberStarted
     \/ SupervisorRestartAttempt
     \/ RestartBudgetExhausted
-    \/ GuardrailStop
     \/ TerminalFailureDetected
     \/ ContextOverflowDetected
     \/ AutoCompactTriggered

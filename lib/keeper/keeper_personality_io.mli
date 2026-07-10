@@ -1,9 +1,7 @@
 (** Keeper_personality_io — symmetric I/O for the keeper [instructions]
     persona field.
 
-    SSOT for read, write, and compare paths. RFC-0282 removed the
-    [will]/[needs]/[desires] BDI-state triple; the harness now carries
-    the single surviving free-text persona field. The field is kept
+    SSOT for read, write, and compare paths. The field is kept
     separate from the rest of [keeper_meta] so the I/O harness can reason
     about it without dragging the full record schema into every test. *)
 

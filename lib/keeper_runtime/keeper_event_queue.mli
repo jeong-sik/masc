@@ -82,11 +82,11 @@ type stimulus_payload =
           Edge-triggered: dequeued once, re-armed only by a new ambient
           message. Dormant until [handle_ambient] enqueues it (P3). *)
   | Hitl_resolved of hitl_resolution
-      (** A HITL approval this keeper enqueued — and skipped cycles on via
-          [has_pending_for_keeper -> Skip Approval_pending] — was resolved.
-          Wakes the keeper so it re-evaluates immediately instead of stalling
-          until an unrelated stimulus, no-progress recovery, or the 30-minute
-          approval janitor. Mirrors [Fusion_completed]/[Bg_completed]. *)
+      (** A nonblocking HITL approval this keeper enqueued was resolved. Wakes
+          the keeper so it re-evaluates immediately instead of waiting for an
+          unrelated stimulus, no-progress recovery, or the 30-minute approval
+          janitor. Blocking approvals resume their resolver directly and do not
+          emit this duplicate wake. Mirrors [Fusion_completed]/[Bg_completed]. *)
   | Goal_verification_failed of goal_verification_failure
       (** A goal completion verification was rejected for a goal assigned to
           this keeper. Wakes the keeper lane so it resumes work on the goal
@@ -138,8 +138,17 @@ and bg_job_outcome =
   | Bg_ok of string  (** result payload *)
   | Bg_failed of string  (** failure label *)
 
+and hitl_approved_action = {
+  keeper_name : string;
+  tool_name : string;
+  input_hash : string;
+}
+(** Exact action identity authorized by an operator. [input_hash] is the
+    canonical full-input fingerprint produced by [Keeper_approval_queue]; it
+    is not an action-name heuristic or a persistent approval rule. *)
+
 and hitl_resolution_decision =
-  | Hitl_approved
+  | Hitl_approved of hitl_approved_action
   | Hitl_rejected
   | Hitl_edited
 
@@ -149,10 +158,10 @@ and hitl_resolution = {
   channel : Keeper_continuation_channel.t;
 }
 (** Payload for [Hitl_resolved]: [approval_id] correlates to the resolved
-    pending-approval queue entry; [decision] is the resolved label
-    ("approve" | "reject" | ...), carried for observability. The keeper
-    re-evaluates from its own state once the approval leaves the queue, so the
-    decision is not itself control flow. *)
+    pending-approval queue entry. An approved decision carries the exact action
+    identity authorized by the operator; rejected and edited decisions carry no
+    grant. The action is consumed at most once in the independent Keeper cycle
+    opened by this durable wake. *)
 
 and connector_attention = {
   event_id : string;

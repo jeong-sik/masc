@@ -9,8 +9,7 @@
 
 - `../design/inventory-gap-analysis-rfc.md`
 - `../design/contract-driven-agent-loop-rfc.md`
-- `../design/handoff-ssot-adr.md`
-- `../design/keeper-social-model-inventory.md`
+- `../KEEPER-STATE-OWNERSHIP.md`
 - `../SUPERVISOR-MODE.md`
 - `../BENCHMARK-RUNBOOK.md`
 - `../COMMAND-PLANE-RUNBOOK.md`
@@ -387,7 +386,7 @@ and stress_context = {
 | Runtime_params | Phase 3 파라미터 등록 | 파라미터 20개 등록 (additive) |
 | Governance_registry | Phase 3 surface 등록 | surface group 추가 (additive) |
 | thompson_sampling | Phase 4 rehabilitation | record_quality_signal 확장 (non-breaking) |
-| keeper_auto_rules | Phase 0.2 stress, Phase 4.4 | auto_rule_eval 레코드 확장 |
+| keeper_context_actions | Phase 0.2 stress, Phase 4.4 | context_action_eval 레코드 확장 |
 | keeper_agent_run | Phase 4.5 stress injection | build_turn_prompt 콜백 내부 변경 |
 
 Breaking change 없음. `Uncertain.t` 도입에 따른 `.mli` 시그니처 변경만이 의도적 컴파일 에러를 유발.

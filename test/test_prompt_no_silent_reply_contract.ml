@@ -63,8 +63,7 @@ let test_no_work_prompts_do_not_request_silent_finish () =
          text
          "without a visible reply or tool call";
        assert_not_contains ~prompt text "stay_silent";
-       assert_contains ~prompt text "short no-work report";
-       assert_contains ~prompt text "state block")
+       assert_contains ~prompt text "short no-work report")
     [ "keeper.core_behavior.md"; "keeper.unified.system.md" ]
 ;;
 

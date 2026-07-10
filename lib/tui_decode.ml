@@ -55,9 +55,6 @@ type log_entry = {
   le_work_kind : string option;
   le_tools_used : string list;
   le_compacted : bool option;
-  le_goal_alignment : float option;
-  le_repetition_risk : float option;
-  le_guardrail_stop : bool option;
 }
 
 let ( let* ) = Result.bind
@@ -303,9 +300,6 @@ let parse_log_entry line =
   in
   let* le_tools_used = le_tools_used in
   let* le_compacted = optional_bool json "compacted" in
-  let* le_goal_alignment = optional_float json "goal_alignment" in
-  let* le_repetition_risk = optional_float json "repetition_risk" in
-  let* le_guardrail_stop = optional_bool json "guardrail_stop" in
   Ok
     {
       le_ts;
@@ -322,9 +316,6 @@ let parse_log_entry line =
       le_work_kind;
       le_tools_used;
       le_compacted;
-      le_goal_alignment;
-      le_repetition_risk;
-      le_guardrail_stop;
     }
 
 let trim = String.trim

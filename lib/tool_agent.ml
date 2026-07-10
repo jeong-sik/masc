@@ -400,7 +400,6 @@ let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0)
             ("selections", `Int ts.Thompson_sampling.selections);
             ("total_votes_up", `Int ts.Thompson_sampling.total_votes_up);
             ("total_votes_down", `Int ts.Thompson_sampling.total_votes_down);
-            ("guard_penalties_total", `Int ts.Thompson_sampling.guard_penalties_total);
           ]);
           ("metrics", Metrics_store_eio.agent_metrics_to_yojson metrics);
         ]

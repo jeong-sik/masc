@@ -57,7 +57,7 @@ The plan's **intent** (give board posts a media surface and automate analysis) i
 | API dispatch | `lib/board_dispatch.ml`, `lib/board.ml`, `lib/board_core.ml` |
 | AI provider abstraction | `lib/provider_adapter.ml` (1626 LOC + 397 mli) — `runtime_kind` (Local / Cli_agent / Direct_api), `auth_mode`, `model_family`, `model_policy` |
 | Provider-D compat surface | `lib/server/server_openai_compat.ml` — receives Provider-D-style requests but is not vision-aware today |
-| Frontend board components | 12 files in `dashboard/src/components/board/` — board-state, board-surface (863 LOC), post-detail (538 LOC), mention-inbox, message-workspace-timeline, board-curation-panel, board-karma-panel, reaction-bar, state-block-messages, sub-board-surface, index, plus tests |
+| Frontend board components | `dashboard/src/components/board/` — board-state, board-surface, post-detail, mention-inbox, message-workspace-timeline, board-curation-panel, board-karma-panel, reaction-bar, sub-board-surface, plus tests |
 
 ## 4. Phased proposal
 

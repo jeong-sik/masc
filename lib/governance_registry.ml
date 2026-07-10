@@ -557,19 +557,6 @@ let surfaces =
       ];
     };
     {
-      id = "keeper_rules";
-      description = "Keeper rule engine thresholds (reflect, plan, guardrail)";
-      risk = "low";
-      param_keys = [
-        "keeper.rule.plan_goal_alignment_max";
-        "keeper.rule.plan_response_alignment_max";
-        "keeper.rule.guardrail_repetition";
-        "keeper.rule.guardrail_goal_alignment_max";
-        "keeper.rule.guardrail_response_alignment_max";
-        "keeper.rule.guardrail_context_min";
-      ];
-    };
-    {
       id = "dashboard";
       description = "Dashboard rendering — truncation lengths, row limits, borders, status thresholds";
       risk = "low";

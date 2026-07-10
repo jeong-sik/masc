@@ -134,9 +134,6 @@ type world_observation = {
   active_goals : string list;
   (** Goal IDs currently assigned to this keeper. *)
 
-  continuity_summary : string;
-  (** Latest continuity snapshot text (empty if unavailable). *)
-
   context_ratio : float Lazy.t;
   (** Current context window utilization [0.0, 1.0]. *)
 
@@ -276,24 +273,20 @@ type board_signal_match = {
     in keepalive to populate board-related triggers. *)
 val collect_board_events :
   base_path:string ->
-  continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
 val collect_board_events_without_advancing_cursor :
   base_path:string ->
-  continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
 val board_signal_match :
-  continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   signal:Board_dispatch.board_signal ->
   board_signal_match
 
 val board_signal_wake_reason :
-  continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   signal:Board_dispatch.board_signal ->
   Keeper_world_observation_board_signal.wake_reason option
@@ -353,17 +346,9 @@ val pending_board_event_of_goal_verification_failure :
     [Goal_verification_failed] produce [Some];
     [Bootstrap]/[No_progress_recovery] return [None] (no prompt injection). *)
 val pending_board_event_of_stimulus :
-  continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
   pending_board_event option
-
-(** Read the best available continuity summary for a keeper.
-    Recovery order is progress log -> checkpoint snapshot -> meta summary. *)
-val read_continuity_summary :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  string
 
 val read_scheduled_automation_observation :
   keeper_name:string option ->

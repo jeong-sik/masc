@@ -48,7 +48,7 @@ pending mentions, scope messages, claimable work guidance, and board activity.
 
 Code anchors:
 
-- `lib/keeper/keeper_unified_prompt.ml:467` - primary/short/mid/long goal lines
+- `lib/keeper/keeper_unified_prompt.ml:920` - active goal section
 - `lib/keeper/keeper_unified_prompt.ml:567` - active goals section
 - `lib/keeper/keeper_unified_prompt.ml:574` - namespace task counts
 - `lib/keeper/keeper_unified_prompt.ml:652` - continuity filtering
@@ -82,18 +82,18 @@ runtime manifest stores digests rather than raw memory text. That is good for
 privacy and size, but weak for operator reconstruction of exactly what the
 Keeper remembered without reading the backing memory/checkpoint files.
 
-Post-turn memory writes happen after response finalization:
+Durable memory writes have explicit typed producers:
 
-- reply-derived memory notes;
-- tool-result memory notes when tool emission is enabled;
+- `keeper_memory_write` tool operations;
+- tool-result memory notes after response finalization when tool emission is enabled;
 - memory-bank compaction if needed;
 - post-turn recall/goal-alignment evaluation.
 
 Code anchors:
 
-- `lib/keeper/keeper_agent_run_post_turn_memory.ml:23` - memory notes from reply
-- `lib/keeper/keeper_agent_run_post_turn_memory.ml:40` - memory notes from tool results
-- `lib/keeper/keeper_agent_run_post_turn_memory.ml:80` - memory-bank compaction
+- `lib/keeper/keeper_tool_memory_runtime.ml:626` - explicit memory write
+- `lib/keeper/keeper_agent_run_post_turn_memory.ml:46` - memory notes from tool results
+- `lib/keeper/keeper_agent_run_post_turn_memory.ml:165` - memory-bank compaction
 
 ### 4. Tool surface selection
 

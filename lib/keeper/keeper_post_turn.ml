@@ -1,9 +1,8 @@
 (** Keeper_post_turn — post-turn lifecycle: compaction, handoff rollover,
-    continuity summary, and overflow retry recovery.
+    and overflow retry recovery.
 
     Orchestrates the end-of-turn pipeline that decides whether to compact
-    the context, roll over to a new generation, and update the continuity
-    summary from the latest state snapshot.
+    the context and roll over to a new generation.
 
     This module owns only the checkpoint/lineage tail of a keeper turn.
     Memory bank append, episode flush, and Hebbian learning are recorded
@@ -34,10 +33,8 @@
                           increments [meta.generation] — spec's
                           generation variable.  The new trace_id and
                           trace_history append happen there.
-      Continuity summary  refreshes the [meta.continuity_summary] /
-                          checkpoint pair after rollover, preserving
-                          the spec's [ckpt_valid] / [ckpt_generation]
-                          parity invariant.
+      Checkpoint commit    preserves the spec's checkpoint-valid /
+                          checkpoint-generation parity invariant.
 
     Spec scope (line 4-8): same identity across generations,
     trace_id replacement, append-only ancestry, checkpoint lineage
@@ -51,7 +48,6 @@
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_memory
 open Keeper_context_core
 
 type compaction_event = {
@@ -92,47 +88,6 @@ type overflow_retry_recovery = {
   compaction : compaction_event;
   turn_generation : int;
 } [@@warning "-69"]
-
-let invalid_snapshot_goal_log_dedupe_limit = 512
-let invalid_snapshot_goal_log_dedupe : (string, unit) Hashtbl.t = Hashtbl.create 64
-let invalid_snapshot_goal_log_dedupe_mutex = Stdlib.Mutex.create ()
-
-let short_digest text =
-  let hex = Digest.string text |> Digest.to_hex in
-  String.sub hex 0 (min 12 (String.length hex))
-
-let invalid_snapshot_goal_fingerprint goal_id = short_digest goal_id
-
-let invalid_snapshot_goal_dedupe_key ~keeper_name ~goal_id =
-  keeper_name ^ "\x00" ^ invalid_snapshot_goal_fingerprint goal_id
-
-let should_log_invalid_snapshot_goal ~keeper_name ~goal_id =
-  let key = invalid_snapshot_goal_dedupe_key ~keeper_name ~goal_id in
-  Stdlib.Mutex.protect invalid_snapshot_goal_log_dedupe_mutex (fun () ->
-    if Hashtbl.mem invalid_snapshot_goal_log_dedupe key
-    then false
-    else (
-      if Hashtbl.length invalid_snapshot_goal_log_dedupe
-         >= invalid_snapshot_goal_log_dedupe_limit
-      then Hashtbl.clear invalid_snapshot_goal_log_dedupe;
-      Hashtbl.add invalid_snapshot_goal_log_dedupe key ();
-      true))
-
-let invalid_snapshot_goal_warning_message ~keeper_name ~goal_id =
-  Printf.sprintf
-    "keeper:%s snapshot goal invalid_goal_hash=%s not in active_goal_ids, clearing"
-    keeper_name
-    (invalid_snapshot_goal_fingerprint goal_id)
-
-let record_invalid_snapshot_goal ~keeper_name ~goal_id =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string StateSnapshotInvalidGoal)
-    ~labels:[("keeper", keeper_name)]
-    ();
-  if should_log_invalid_snapshot_goal ~keeper_name ~goal_id
-  then
-    Log.Keeper.warn "%s"
-      (invalid_snapshot_goal_warning_message ~keeper_name ~goal_id)
 
 let log_tool_pair_repair
     ~keeper_name
@@ -442,113 +397,6 @@ let apply_multimodal_wirein
             ();
           lifecycle)
 
-(* Must stay under [Keeper_memory_policy.default_max_item_chars] (200) and
-   contain no ';' — open questions round-trip through progress.md as a
-   single "; "-joined line, so a longer or semicolon-bearing note would be
-   truncated or split and the dedupe-by-membership check below would stop
-   holding. Pinned by test_keeper_post_turn_interruption_note. *)
-let no_state_interruption_note =
-  "Previous turn left no persisted [STATE] snapshot. Re-verify held task, \
-   backlog, and messages against live state, then act or defer with a \
-   stated reason."
-
-type interruption_progress_snapshot =
-  | No_existing_progress_snapshot
-  | Existing_progress_snapshot of Keeper_memory_policy.keeper_state_snapshot
-  | Existing_progress_snapshot_read_failed of string
-  | Existing_progress_snapshot_parse_failed
-
-let read_existing_interruption_progress_snapshot ~(progress_path : string) =
-  if not (Fs_compat.file_exists progress_path) then
-    No_existing_progress_snapshot
-  else
-    match Fs_compat.load_file progress_path with
-    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-    | exception exn ->
-        Existing_progress_snapshot_read_failed (Printexc.to_string exn)
-    | text -> (
-        match Keeper_memory_policy.progress_snapshot_cache_of_text text with
-        | Some (cache : Keeper_memory_policy.progress_snapshot_cache) ->
-            Existing_progress_snapshot cache.snapshot
-        | None -> Existing_progress_snapshot_parse_failed)
-
-let record_interruption_progress_snapshot_read_failure
-    ~(keeper_name : string)
-    ~(reason : string)
-    ~(detail : string) : unit =
-  Log.Keeper.warn
-    "keeper:%s interruption-note snapshot read failed (%s): %s"
-    keeper_name reason detail;
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string SnapshotReadFailures)
-    ~labels:[("keeper", keeper_name); ("phase", "interruption_note"); ("reason", reason)]
-    ()
-
-(* RFC-0315 P2a: a no-[STATE] turn is exactly the turn whose replay suffix
-   the checkpoint layer prunes (synthetic-empty / requires-attention), and
-   it also writes zero memory-bank notes — so without a note the next turn
-   opens on "No continuity snapshot available." and re-derives the world
-   from scratch. Augment progress.md in place: keep whatever forward-looking
-   snapshot already exists and add one open question stating that the
-   previous turn left no persisted state. Constant text + membership check
-   keep consecutive no-[STATE] turns from stacking duplicates. *)
-let augment_progress_with_interruption_note
-    ~(progress_path : string)
-    ~(generation : int)
-    ~(updated_at : string)
-    ~(keeper_name : string) : unit =
-  let base_snapshot =
-    match read_existing_interruption_progress_snapshot ~progress_path with
-    | No_existing_progress_snapshot ->
-        Some Keeper_memory_policy.empty_keeper_state_snapshot
-    | Existing_progress_snapshot snapshot -> Some snapshot
-    | Existing_progress_snapshot_read_failed detail ->
-        record_interruption_progress_snapshot_read_failure
-          ~keeper_name
-          ~reason:"read_failed"
-          ~detail;
-        None
-    | Existing_progress_snapshot_parse_failed ->
-        record_interruption_progress_snapshot_read_failure
-          ~keeper_name
-          ~reason:"parse_failed"
-          ~detail:progress_path;
-        None
-  in
-  match base_snapshot with
-  | None -> ()
-  | Some base_snapshot ->
-      if
-        not
-          (List.mem no_state_interruption_note
-             base_snapshot.Keeper_memory_policy.open_questions)
-      then (
-        let augmented =
-          Keeper_memory_policy.cap_snapshot
-            {
-              base_snapshot with
-              Keeper_memory_policy.open_questions =
-                no_state_interruption_note
-                :: base_snapshot.Keeper_memory_policy.open_questions;
-            }
-        in
-        match
-          Keeper_memory_policy.write_progress_snapshot_path
-            ~path:progress_path
-            ~generation
-            ~updated_at
-            (Keeper_memory_policy.forward_looking_snapshot augmented)
-        with
-        | Ok () -> ()
-        | Error err ->
-            Log.Keeper.warn
-              "keeper:%s interruption-note snapshot write failed: %s"
-              keeper_name err;
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string SnapshotWriteFailures)
-              ~labels:[("keeper", keeper_name)]
-              ())
-
 let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)
     ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
@@ -576,103 +424,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
    | _ -> ());
   let now_ts = Time_compat.now () in
   let no_checkpoint_decision = Keeper_compact_policy.Skipped_no_checkpoint in
-  let apply_continuity_summary
-      ~(meta : keeper_meta)
-      ~(ctx : working_context)
-      ~(oas_checkpoint : Agent_sdk.Checkpoint.t option) : keeper_meta =
-    let progress_path =
-      Filename.concat
-        (Filename.concat (Filename.concat (Filename.dirname base_dir) "keepers") meta.name)
-        "progress.md"
-    in
-    let structured_snapshot =
-      match oas_checkpoint with
-      | Some cp -> (
-          match cp.Agent_sdk.Checkpoint.working_context with
-          | Some json ->
-              Keeper_memory_policy.snapshot_of_structured_working_context json
-          | None -> None)
-      | None -> None
-    in
-    let snapshot =
-      match latest_state_snapshot_from_messages (messages_of_context ctx) with
-      | Some _ as snapshot -> snapshot
-      | None -> structured_snapshot
-    in
-    match snapshot with
-    | None ->
-        (* No state captured this turn — neither LLM [STATE] block nor OAS
-           checkpoint working_context produced a snapshot.  Still advance the
-           continuity cooldown timestamp so the compaction cooldown gate in
-           Keeper_compact_policy treats this as an attempted reflection;
-           otherwise keepers that never emit [STATE] would bypass the
-           cooldown every turn while only emergency ratio (0.8) acts as a
-           safety net.  Record a counter so prompt / runtime drift becomes
-           observable.  (ContinuityNoState was an exact duplicate of this
-           counter — same site, same labels — and was removed.) *)
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string StateSnapshotSkippedNoState)
-          ~labels:[("keeper", meta.name)]
-          ();
-        augment_progress_with_interruption_note
-          ~progress_path
-          ~generation:meta.runtime.generation
-          ~updated_at:(now_iso ())
-          ~keeper_name:meta.name;
-        {
-          meta with
-          runtime =
-            {
-              meta.runtime with
-              last_continuity_update_ts = now_ts;
-            };
-        }
-    | Some snapshot ->
-        (* Gen7: sanitize snapshot goal against validated active_goal_ids.
-           Prevents ghost goals from persisting into progress.md. *)
-        let snapshot =
-          match snapshot.goal with
-          | Some goal_id when not (List.mem goal_id meta.active_goal_ids) ->
-              record_invalid_snapshot_goal ~keeper_name:meta.name ~goal_id;
-              { snapshot with goal = None }
-          | _ -> snapshot
-        in
-        (* Gen7: cap snapshot size before rendering + persisting.
-           Bounds string prose and list items so meta.continuity_summary
-           cannot grow unboundedly even when the LLM produces a longer
-           [STATE] block each turn. *)
-        let snapshot = Keeper_memory_policy.cap_snapshot snapshot in
-        let progress_snapshot =
-          Keeper_memory_policy.forward_looking_snapshot snapshot
-        in
-        (match
-           Keeper_memory_policy.write_progress_snapshot_path
-             ~path:progress_path
-             ~generation:meta.runtime.generation
-             ~updated_at:(now_iso ())
-             progress_snapshot
-         with
-         | Ok () -> ()
-         | Error err ->
-             Log.Keeper.warn
-               "keeper:%s progress snapshot write failed: %s"
-               meta.name err;
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string SnapshotWriteFailures)
-               ~labels:[("keeper", meta.name)]
-               ());
-        {
-          meta with
-          continuity_summary =
-            keeper_state_snapshot_to_summary_text snapshot
-            |> Keeper_memory_policy.cap_continuity_summary_text;
-          runtime =
-            {
-              meta.runtime with
-              last_continuity_update_ts = now_ts;
-            };
-        }
-  in
   let body = match checkpoint with
   | None ->
       let updated_meta =
@@ -857,14 +608,8 @@ let apply_post_turn_lifecycle_with_resilience_handles
           ~current_turn_blocker_info
           ~checkpoint
       in
-      let continuity_meta =
-        apply_continuity_summary
-          ~meta:rollover.updated_meta
-          ~ctx:effective_ctx
-          ~oas_checkpoint:checkpoint
-      in
       {
-        updated_meta = continuity_meta;
+        updated_meta = rollover.updated_meta;
         checkpoint;
         handoff_json = rollover.handoff_json;
         handoff_attempted = rollover.attempted;
@@ -920,17 +665,12 @@ let forced_overflow_retry_meta
   {
     (map_runtime
        (fun rt ->
-         let last_continuity_update_ts =
-           if rt.last_continuity_update_ts > 0.0
-           then rt.last_continuity_update_ts
-           else now_ts
-         in
          let proactive_rt =
            if rt.proactive_rt.last_ts > 0.0
            then rt.proactive_rt
            else { rt.proactive_rt with last_ts = now_ts }
          in
-         { rt with last_continuity_update_ts; proactive_rt })
+         { rt with proactive_rt })
        base_meta)
     with
     compaction =
@@ -1102,13 +842,3 @@ let recover_latest_checkpoint_for_overflow_retry
               ~label:"overflow retry checkpoint save exception"
               exn;
             None
-
-module For_testing = struct
-  let invalid_snapshot_goal_fingerprint = invalid_snapshot_goal_fingerprint
-  let invalid_snapshot_goal_warning_message = invalid_snapshot_goal_warning_message
-  let should_log_invalid_snapshot_goal = should_log_invalid_snapshot_goal
-
-  let reset_invalid_snapshot_goal_log_dedupe () =
-    Stdlib.Mutex.protect invalid_snapshot_goal_log_dedupe_mutex (fun () ->
-      Hashtbl.clear invalid_snapshot_goal_log_dedupe)
-end

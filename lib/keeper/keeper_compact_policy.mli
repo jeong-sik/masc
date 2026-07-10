@@ -55,9 +55,9 @@ val checkpoint_compaction_strategies
   :  mode:Keeper_config.compaction_mode
   -> Context_compact_oas.strategy list
 (** OAS strategy chain for checkpoint compaction, selected by the
-    per-keeper [compaction_mode]. [Deterministic] returns the extractive
-    chain; [Llm] delegates to the same chain in W1 (no summarizer wired
-    yet) and is replaced by the librarian-lane call in W2. *)
+    per-keeper [compaction_mode]. Both modes expose the extractive chain as
+    the deterministic floor; [Llm] selects its provider-backed plan in
+    [compact_if_needed_typed] when the compaction is not an emergency. *)
 
 (** [compact_if_needed_typed ~meta ~now_ts ctx] evaluates the compaction
     gates and either returns [ctx] unchanged or applies the OAS

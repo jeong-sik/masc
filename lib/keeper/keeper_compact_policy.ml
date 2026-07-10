@@ -259,21 +259,15 @@ let deterministic_checkpoint_strategies =
     [ PruneToolOutputs; MergeContiguous; SummarizeOld; DropLowImportance ]
 ;;
 
-(* RFC-0313-adjacent W1: strategy selection now reads the per-keeper
-   [compaction_mode]. [Deterministic] returns the extractive OAS chain
-   (unchanged behavior, the fail-closed default).
-
-   [Llm] is the opt-in provider-backed summarizer on the librarian lane.
-   In W1 it has no summarizer wired yet, so it DELEGATES to the same
-   deterministic chain — behavior is identical to today for every keeper.
-   The exhaustive match (no catch-all) forces W2 to replace this arm with
-   the real librarian-lane call site; until then the delegation keeps the
-   [Llm] mode safe rather than silently doing nothing. *)
+(* RFC-0313-adjacent: expose the extractive OAS chain used for checkpoint
+   observability and as the deterministic floor. In [Llm] mode the actual
+   provider-backed plan is selected in [compact_if_needed_typed] when the
+   compaction is not an emergency; unavailable or invalid provider plans
+   fall back to this chain. *)
 let checkpoint_compaction_strategies ~(mode : Keeper_config.compaction_mode) =
   match mode with
   | Keeper_config.Deterministic -> deterministic_checkpoint_strategies
   | Keeper_config.Llm ->
-    (* W2 wires the librarian-lane summarizer here. W1: delegate. *)
     deterministic_checkpoint_strategies
 ;;
 
@@ -424,13 +418,15 @@ let compact_if_needed_typed
                 if String.trim runtime_id = ""
                 then (
                   Log.Keeper.warn ~keeper_name:meta.name
-                    "compaction LLM summarizer skipped: runtime identity resolved +                     to an empty id; using deterministic fallback";
+                    "compaction LLM summarizer skipped: runtime identity resolved to an empty \
+                     id; using deterministic fallback";
                   None)
                 else Some runtime_id
               with
               | Failure reason ->
                 Log.Keeper.warn ~keeper_name:meta.name
-                  "compaction LLM summarizer runtime identity failed: %s; using +                   deterministic fallback"
+                  "compaction LLM summarizer runtime identity failed: %s; using \
+                   deterministic fallback"
                   reason;
                 None
             in

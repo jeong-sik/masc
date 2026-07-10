@@ -10,6 +10,7 @@ module Agent_sdk_response = Masc.Agent_sdk_response
 module Atypes = Agent_sdk.Types
 
 let now = 1_000_000.0
+let unconfigured_runtime_id = "test.unconfigured"
 
 let contains substring s =
   let sub_len = String.length substring in
@@ -125,6 +126,7 @@ let test_consolidate_applies_plan () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -160,6 +162,7 @@ let test_consolidate_skips_too_few () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -190,6 +193,7 @@ let test_consolidate_dry_run_preserves_store () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -231,6 +235,7 @@ let test_consolidate_rejects_stale_snapshot () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -279,6 +284,7 @@ let test_consolidate_rejects_malformed_fact_store () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -308,6 +314,7 @@ let test_consolidate_classifies_empty_provider_response () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -333,6 +340,7 @@ let test_consolidate_classifies_invalid_structured_response () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -376,6 +384,7 @@ let test_consolidate_requires_clock_before_provider_call () =
             ~timeout_sec:1.0
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ~keeper_id
@@ -440,6 +449,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ~max_tokens:512 ())
             ~now
             ~keeper_id

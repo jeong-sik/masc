@@ -210,8 +210,9 @@ end
     @param runtime_id Runtime profile name for model selection
      @param generation Current generation counter
      @param guardrails Optional OAS guardrails for tool safety gates
-    @param temperature MODEL temperature override; when omitted, resolved
-           from [Runtime_inference] with a 0.3 fallback
+    @param temperature Subsystem temperature fallback; a selected runtime model
+           declaration takes precedence. When omitted,
+           [Keeper_config.keeper_unified_temperature] is the fallback.
     @param max_tokens Maximum output tokens override; when omitted, resolved
            from [Runtime_inference] with a 8192 fallback
     @param is_retry When [true], replays the current user message into the

@@ -8,6 +8,7 @@ module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Runtime_resolution = Masc.Keeper_memory_runtime_resolution
 module Memory_summary = Masc.Keeper_memory_llm_summary
+module Consolidation_runtime = Masc.Keeper_memory_os_consolidation_runtime
 module Structured_schema = Masc.Keeper_structured_output_schema
 (* Domain_pool_ref lives in the unwrapped masc_core sublibrary (re_export'd by
    masc_test_deps), so it is referenced bare — there is no Masc.Domain_pool_ref. *)
@@ -18,6 +19,8 @@ module Consolidator = Masc.Keeper_memory_os_consolidator
 module Metrics = Masc.Otel_metric_store
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 module Keeper_user_model = Masc.Keeper_user_model
+
+let unconfigured_runtime_id = "test.unconfigured"
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -780,6 +783,7 @@ endpoint = "https://p0.example/v1"
 [models.default]
 api-name = "default"
 max-context = 4096
+temperature = 1.0
 
 [p0.default]
 |}
@@ -811,7 +815,41 @@ let test_librarian_provider_for_runtime_errors_on_missing_id () =
       Alcotest.(check bool)
         "error names missing runtime"
         true
-        (contains "missing.runtime" msg))
+      (contains "missing.runtime" msg))
+;;
+
+let test_memory_provider_configs_use_runtime_temperature () =
+  with_runtime_config_toml memory_runtime_resolution_toml (fun () ->
+    match Runtime.get_default_runtime () with
+    | None -> Alcotest.fail "default memory runtime should resolve"
+    | Some runtime ->
+      let summary =
+        Memory_summary.provider_for_summary
+          ~runtime_id:runtime.Runtime.id
+          runtime.Runtime.provider_config
+      in
+      let librarian =
+        Librarian_runtime.provider_for_librarian
+          ~runtime_id:runtime.Runtime.id
+          runtime.Runtime.provider_config
+      in
+      let consolidation =
+        Consolidation_runtime.For_testing.provider_for_consolidation
+          ~runtime_id:runtime.Runtime.id
+          runtime.Runtime.provider_config
+      in
+      Alcotest.(check (option (float 0.0001)))
+        "memory summary keeps runtime.toml temperature"
+        (Some 1.0)
+        summary.temperature;
+      Alcotest.(check (option (float 0.0001)))
+        "librarian keeps runtime.toml temperature"
+        (Some 1.0)
+        librarian.temperature;
+      Alcotest.(check (option (float 0.0001)))
+        "memory consolidation keeps runtime.toml temperature"
+        (Some 1.0)
+        consolidation.temperature)
 ;;
 
 let with_memory_os_env name value f =
@@ -1137,7 +1175,9 @@ let test_librarian_max_tokens_override_env () =
      before the knob was wired to a reader, setting the env var was a silent
      no-op while the config snapshot reported source=env. *)
   let effective_cap () =
-    (Librarian_runtime.provider_for_librarian (test_provider_cfg ()))
+    (Librarian_runtime.provider_for_librarian
+       ~runtime_id:unconfigured_runtime_id
+       (test_provider_cfg ()))
       .Llm_provider.Provider_config.max_tokens
   in
   Fun.protect
@@ -1332,7 +1372,11 @@ let test_librarian_rejects_invalid_claims () =
 ;;
 
 let test_memory_llm_summary_provider_requests_json_schema () =
-  let provider_cfg = Memory_summary.provider_for_summary (test_provider_cfg ()) in
+  let provider_cfg =
+    Memory_summary.provider_for_summary
+      ~runtime_id:unconfigured_runtime_id
+      (test_provider_cfg ())
+  in
   let expected_schema = Structured_schema.memory_bank_summary_output_schema in
   Alcotest.(check (option int))
     "summary max tokens capped"
@@ -1492,6 +1536,7 @@ let test_librarian_runtime_appends_episode_bundle () =
              ~sw
              ~net
              ~keeper_id
+             ~runtime_id:unconfigured_runtime_id
              ~provider_cfg:(test_provider_cfg ())
              inp
          with
@@ -1584,6 +1629,7 @@ let test_librarian_runtime_falls_back_when_schema_unavailable () =
             ~timeout_sec:1.0
             ~sw
             ~net
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(invalid_schema_provider_cfg ())
             ~generation:1
             inp
@@ -1628,6 +1674,7 @@ let test_librarian_runtime_requires_clock_for_provider_call () =
              ~sw
              ~net
              ~keeper_id
+             ~runtime_id:unconfigured_runtime_id
              ~provider_cfg:(test_provider_cfg ())
              inp
          with
@@ -1680,6 +1727,7 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
             ~sw
             ~net
             ~keeper_id
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(test_provider_cfg ())
             inp
         in
@@ -1754,6 +1802,7 @@ let test_librarian_runtime_rejects_unparseable_output_across_empty_retries () =
             ~sw
             ~net
             ~keeper_id
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(test_provider_cfg ())
             inp
         with
@@ -1817,6 +1866,7 @@ let test_librarian_unstructured_fallback_does_not_write_facts () =
               ~sw
               ~net
               ~keeper_id
+              ~runtime_id:unconfigured_runtime_id
               ~provider_cfg:(test_provider_cfg ())
               inp
           with
@@ -1872,6 +1922,7 @@ let test_librarian_runtime_reports_fact_upsert_failure () =
             ~sw
             ~net
             ~keeper_id
+            ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(test_provider_cfg ())
             inp
         with
@@ -5808,6 +5859,10 @@ let () =
             "librarian provider resolution rejects missing runtime id"
             `Quick
             test_librarian_provider_for_runtime_errors_on_missing_id
+        ; Alcotest.test_case
+            "memory provider configs use runtime temperature"
+            `Quick
+            test_memory_provider_configs_use_runtime_temperature
         ; Alcotest.test_case
             "memory os bool env accepts enabled disabled"
             `Quick

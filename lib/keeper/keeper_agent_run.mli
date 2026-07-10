@@ -135,7 +135,8 @@ val per_provider_timeout_for_turn
     @param history_user_source Source label for user messages in history
     @param history_assistant_source Source label for assistant messages in history
     @param guardrails Optional OAS guardrails for tool safety gates
-    @param temperature MODEL temperature override
+    @param temperature Subsystem temperature fallback; a selected runtime model
+           declaration takes precedence
     @param max_tokens Maximum output tokens override
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording

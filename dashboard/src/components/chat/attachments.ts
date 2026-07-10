@@ -19,12 +19,10 @@ export const ALLOWED_FILE_TYPES = [
 ]
 export const ALLOWED_AUDIO_TYPES = ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg']
 
-// Browsers report File.type from platform MIME tables, which commonly leave
-// .md/.markdown (and sometimes .html) EMPTY or map them to vendor variants —
-// exact-matching file.type alone therefore rejected markdown attachments
-// outright (38-bug campaign #38). When the declared type is not already in an
-// allow-list, fall back to this closed extension map; an extension outside the
-// map keeps the declared type and fails validation as before.
+// File API permits an EMPTY File.type when the user agent cannot determine a
+// MIME type. Only that absence may use the closed extension catalog. A present
+// but unsupported MIME type is authoritative and must never be overwritten by
+// the filename (for example, application/x-msdownload + renamed .md).
 const EXTENSION_MIME_FALLBACK: Record<string, string> = {
   md: 'text/markdown',
   markdown: 'text/markdown',
@@ -35,18 +33,19 @@ const EXTENSION_MIME_FALLBACK: Record<string, string> = {
   csv: 'text/csv',
 }
 
+export const ATTACHMENT_INPUT_ACCEPT = [
+  ...ALLOWED_IMAGE_TYPES,
+  ...ALLOWED_AUDIO_TYPES,
+  ...ALLOWED_FILE_TYPES,
+  ...Object.keys(EXTENSION_MIME_FALLBACK).map(extension => `.${extension}`),
+].join(',')
+
 export function resolveAttachmentMimeType(file: File): string {
   const declared = file.type
-  if (
-    ALLOWED_IMAGE_TYPES.includes(declared) ||
-    ALLOWED_AUDIO_TYPES.includes(declared) ||
-    ALLOWED_FILE_TYPES.includes(declared)
-  ) {
-    return declared
-  }
+  if (declared !== '') return declared
   const dot = file.name.lastIndexOf('.')
   const ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : ''
-  return EXTENSION_MIME_FALLBACK[ext] ?? declared
+  return EXTENSION_MIME_FALLBACK[ext] ?? ''
 }
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 export const MAX_FILE_SIZE = 2 * 1024 * 1024

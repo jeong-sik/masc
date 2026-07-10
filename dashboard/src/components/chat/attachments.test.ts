@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ATTACHMENT_INPUT_ACCEPT,
   MAX_FILE_SIZE,
   MAX_IMAGE_SIZE,
   resolveAttachmentMimeType,
@@ -86,6 +87,22 @@ describe('resolveAttachmentMimeType', () => {
   it('keeps the declared type when the extension is unmapped', () => {
     expect(resolveAttachmentMimeType(fileOfSize('archive.zip', 'application/zip', 10)))
       .toBe('application/zip')
+  })
+
+  it('never overrides an explicit unsupported MIME type from the extension', () => {
+    expect(resolveAttachmentMimeType(fileOfSize('renamed.md', 'application/x-msdownload', 10)))
+      .toBe('application/x-msdownload')
+    expect(validateFile(fileOfSize('renamed.md', 'application/x-msdownload', 10)))
+      .toContain('지원하지 않는 파일 형식')
+  })
+
+  it('derives the file-picker accept contract from the MIME catalog', () => {
+    expect(ATTACHMENT_INPUT_ACCEPT.split(',')).toEqual(expect.arrayContaining([
+      'text/markdown',
+      'text/html',
+      '.md',
+      '.html',
+    ]))
   })
 })
 

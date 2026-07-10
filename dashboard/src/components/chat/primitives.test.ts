@@ -20,7 +20,8 @@ import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
 
-vi.mock('./attachments', () => ({
+vi.mock('./attachments', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./attachments')>(),
   collectAttachments: vi.fn(),
 }))
 

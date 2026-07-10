@@ -1,5 +1,5 @@
-module Types = Keeper_memory_os_types
-module Memory_io = Keeper_memory_os_io
+module Types = Masc.Keeper_memory_os_types
+module Memory_io = Masc.Keeper_memory_os_io
 
 let with_temp_roots f =
   let root = Filename.temp_file "keeper-memory-explicit-root-" ".tmp" in

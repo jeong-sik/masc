@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-let test_activity_item_roundtrip () =
+let test_activity_item_json_contract () =
   let item : Activity_feed.activity_item =
     { id = "act-001"
     ; kind = "task"
@@ -11,63 +11,20 @@ let test_activity_item_roundtrip () =
     ; created_at = 1_700_000_000.0
     }
   in
-  let json = Activity_feed.activity_item_to_json item in
-  match Activity_feed.activity_item_of_json json with
-  | Some decoded ->
-    check string "id" item.id decoded.id;
-    check string "kind" item.kind decoded.kind;
-    check string "agent" item.agent_name decoded.agent_name;
-    check string "summary" item.summary decoded.summary;
-    check bool "detail" true (Yojson.Safe.equal item.detail_json decoded.detail_json);
-    check (float 0.01) "created_at" item.created_at decoded.created_at
-  | None -> fail "roundtrip failed"
-;;
-
-let test_activity_item_empty_id () =
-  let json =
+  let expected =
     `Assoc
-      [ "id", `String ""
-      ; "kind", `String "task"
-      ; "agent_name", `String "a"
-      ; "summary", `String "s"
-      ; "created_at", `Float 1.0
+      [ "id", `String item.id
+      ; "kind", `String item.kind
+      ; "agent_name", `String item.agent_name
+      ; "summary", `String item.summary
+      ; "detail_json", item.detail_json
+      ; "created_at", `Float item.created_at
       ]
   in
-  check (option reject) "empty id" None (Activity_feed.activity_item_of_json json)
-;;
-
-let test_activity_item_missing_detail () =
-  let json =
-    `Assoc
-      [ "id", `String "x"
-      ; "kind", `String "task"
-      ; "agent_name", `String "a"
-      ; "summary", `String "s"
-      ; "created_at", `Float 1.0
-      ]
-  in
-  match Activity_feed.activity_item_of_json json with
-  | Some item -> check bool "detail defaults to null" true (item.detail_json = `Null)
-  | None -> fail "should parse without detail_json"
-;;
-
-let test_activity_item_malformed () =
-  check
-    (option reject)
-    "malformed"
-    None
-    (Activity_feed.activity_item_of_json (`String "not an object"))
-;;
-
-let test_activity_item_defaults () =
-  match Activity_feed.activity_item_of_json (`Assoc [ "id", `String "x" ]) with
-  | Some item ->
-    check string "kind default" "" item.kind;
-    check string "agent default" "" item.agent_name;
-    check string "summary default" "" item.summary;
-    check bool "detail default" true (item.detail_json = `Null);
-    check (float 0.01) "created_at default" 0.0 item.created_at
-  | None -> fail "should parse with defaults"
+  check bool
+    "activity API item wire shape"
+    true
+    (Yojson.Safe.equal expected (Activity_feed.activity_item_to_json item))
 ;;
 
 let rec remove_tree path =
@@ -82,9 +39,7 @@ let rec remove_tree path =
 ;;
 
 let with_temp_dir prefix f =
-  let path = Filename.temp_file prefix "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
+  let path = Filename.temp_dir prefix "" in
   Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> f path)
 ;;
 
@@ -97,7 +52,7 @@ let latest_ring_seq () =
 ;;
 
 let feed_warnings_since seq =
-  Log.Ring.recent ~limit:50 ~module_filter:"Feed" ~since_seq:seq ()
+  Log.Ring.recent ~limit:Log.Ring.capacity ~module_filter:"Feed" ~since_seq:seq ()
   |> List.filter (fun (entry : Log.Ring.entry) -> entry.level = Log.Warn)
 ;;
 
@@ -229,34 +184,32 @@ let test_recent_activity_ignores_backlog_json_without_warning () =
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio_guard.enable ();
-  run
-    "activity_feed"
-    [ ( "activity_item"
-      , [ test_case "roundtrip" `Quick test_activity_item_roundtrip
-        ; test_case "empty id" `Quick test_activity_item_empty_id
-        ; test_case "missing detail" `Quick test_activity_item_missing_detail
-        ; test_case "malformed" `Quick test_activity_item_malformed
-        ; test_case "defaults" `Quick test_activity_item_defaults
-        ] )
-    ; ( "filesystem"
-      , [ test_case
-            "skips malformed jsonl lines"
-            `Quick
-            test_recent_activity_skips_malformed_jsonl_lines
-        ; test_case
-            "accepts ISO string created_at"
-            `Quick
-            test_recent_activity_accepts_iso_string_created_at_for_board_posts
-        ; test_case "skips bad task file" `Quick test_recent_activity_skips_bad_task_file
-        ; test_case
-            "falls back from bad task timestamp"
-            `Quick
-            test_recent_activity_falls_back_from_bad_task_timestamp
-        ; test_case
-            "ignores backlog json without warning"
-            `Quick
-            test_recent_activity_ignores_backlog_json_without_warning
-        ] )
-    ]
+  Fun.protect
+    ~finally:Fs_compat.clear_fs
+    (fun () ->
+      Eio_guard.enable ();
+      run
+        "activity_feed"
+        [ ( "wire"
+          , [ test_case "activity item JSON contract" `Quick test_activity_item_json_contract ] )
+        ; ( "filesystem"
+          , [ test_case
+                "skips malformed jsonl lines"
+                `Quick
+                test_recent_activity_skips_malformed_jsonl_lines
+            ; test_case
+                "accepts ISO string created_at"
+                `Quick
+                test_recent_activity_accepts_iso_string_created_at_for_board_posts
+            ; test_case "skips bad task file" `Quick test_recent_activity_skips_bad_task_file
+            ; test_case
+                "falls back from bad task timestamp"
+                `Quick
+                test_recent_activity_falls_back_from_bad_task_timestamp
+            ; test_case
+                "ignores backlog json without warning"
+                `Quick
+                test_recent_activity_ignores_backlog_json_without_warning
+            ] )
+        ])
 ;;

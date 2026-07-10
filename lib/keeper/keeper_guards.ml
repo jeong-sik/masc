@@ -173,16 +173,18 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
 
 type gate_decision =
   | Gate_override
+  | Gate_block
   | Gate_continue
   | Gate_approval_required
 
 let gate_decision_to_string = function
   | Gate_override -> "override"
+  | Gate_block -> "block"
   | Gate_continue -> "continue"
   | Gate_approval_required -> "approval_required"
 
 let gate_decision_is_rejection = function
-  | Gate_override -> true
+  | Gate_override | Gate_block -> true
   | Gate_continue | Gate_approval_required -> false
 
 type gate_rejection_log_severity =
@@ -305,7 +307,7 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
 
     Payload schema:
     - [stage]               snake_case stage identifier
-    - [decision]            "override" | "continue" | "approval_required"
+    - [decision]            "override" | "block" | "continue" | "approval_required"
     - [reason_code]         machine-classifiable short code
     - [tool_name]           the tool the gate was evaluating
     - [agent_name]          keeper name
@@ -315,7 +317,8 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
     - [reason_text]         human-readable detail
     - [source]              "hook" (distinguishes from legacy paths) *)
 (* Spec mapping: GateRejected action — KeeperTurnCycle.tla lines 189-200.
-   Gate_override routes to Keeper_registry.mark_turn_gate_rejected_by_name,
+   Gate_override and Gate_block route to
+   Keeper_registry.mark_turn_gate_rejected_by_name,
    which fires the decision_stage = "gate_rejected" / turn_phase =
    "finalizing" transition. Gate_approval_required is not terminal: OAS
    suspends in the approval callback and may still execute the tool after
@@ -330,14 +333,14 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
    the narrative is observable. *)
 
 (** Otel_metric_store metric: turns terminated by a pre_tool_use gate rejection
-    (Override or ApprovalRequired) without ever attempting a runtime
+    (Override or Block) without ever attempting a runtime
     tier.  See [emit_gate_event] for the firing site.
 
     Labels stay bounded:
     - [keeper]   ∈ keeper agent names (finite per fleet)
     - [tool]     ∈ tool names (finite, registry-controlled)
     - [reason]   ∈ guard reason_code strings (finite, defined by guards)
-    - [decision] ∈ {override} *)
+    - [decision] ∈ {override, block} *)
 let gate_rejected_terminal_metric =
   Keeper_metrics.(to_string TurnGateRejectedTerminal)
 
@@ -346,7 +349,7 @@ let () =
     ~name:gate_rejected_terminal_metric
     ~help:
       "Total turns terminated by a pre_tool_use gate rejection \
-       (Override or ApprovalRequired) without ever attempting a \
+       (Override or Block) without ever attempting a \
        runtime tier.  A non-zero rate on a keeper indicates \
        pre_tool_use guards short-circuit before the runtime ever \
        runs — useful for distinguishing 'all gates rejected, \
@@ -399,7 +402,7 @@ let emit_gate_event
       , `Bool
           (match decision with
            | Gate_continue -> true
-           | Gate_override | Gate_approval_required -> false) );
+           | Gate_override | Gate_block | Gate_approval_required -> false) );
       ("source_path", Json_util.string_opt_to_json source_path);
       ("source_line", Json_util.int_opt_to_json source_line);
     ] in
@@ -824,7 +827,7 @@ let deny_guard
         let source_line = __LINE__ in
         report_gate_decision on_gate_decision
           ~source_path:(Some source_path) ~source_line:(Some source_line)
-          ~stage:"keeper_deny" ~decision:Gate_override
+          ~stage:"keeper_deny" ~decision:Gate_block
           ~reason_code:"keeper_deny" ~reason_text
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms;
@@ -895,7 +898,7 @@ let destructive_guard
            let source_line = __LINE__ in
            report_gate_decision on_gate_decision
              ~source_path:(Some source_path) ~source_line:(Some source_line)
-             ~stage:"destructive_guard" ~decision:Gate_override
+             ~stage:"destructive_guard" ~decision:Gate_block
              ~reason_code:"destructive_guard" ~reason_text
              ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
              ~stage_latency_ms:latency_ms;
@@ -939,7 +942,7 @@ let governance_approval_guard
         let source_line = __LINE__ in
         report_gate_decision on_gate_decision
           ~source_path:(Some source_path) ~source_line:(Some source_line)
-          ~stage:"governance_approval" ~decision:Gate_override
+          ~stage:"governance_approval" ~decision:Gate_block
           ~reason_code:"hard_forbidden"
           ~reason_text:"hard_forbidden: unconditional block regardless of HITL mode"
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd

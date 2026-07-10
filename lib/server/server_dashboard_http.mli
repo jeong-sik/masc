@@ -41,6 +41,7 @@ end
 type approval_resolve_http_error =
   | Bad_request of string
   | Gone of Keeper_approval_queue.resolve_error
+  | Unavailable of Keeper_approval_queue.resolve_error
 
 val approval_resolve_http_error_to_string :
   approval_resolve_http_error -> string

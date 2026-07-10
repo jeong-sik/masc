@@ -895,6 +895,17 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                 meta.updated_at
                 latched_reason_detail)
              ();
+           (* The durable record is gone; a surviving registry entry would be
+              a ghost — still a board-wake candidate (Paused is accepted by
+              [board_signal_entry_is_wakeup_candidate]), and any later
+              [write_meta] through it resurrects the pruned file at
+              meta_version=1. [keeper_down]'s remove_meta branch pairs
+              [Sys.remove] with [unregister]; mirror that here (RFC-0334 W3
+              census #23837, freshness caveat 1). *)
+           Keeper_registry.unregister ~base_path name;
+           (* K4c — keeper fully forgotten: reclaim its accumulator slot,
+              matching the unregister sites above. *)
+           Keeper_tool_emission_hook.drop_keeper_accumulator name;
            Log.Keeper.info "%s: stale paused meta pruned" name
          with
          | Eio.Cancel.Cancelled _ ->

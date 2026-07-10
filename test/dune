@@ -1119,7 +1119,6 @@
   test_build_identity
   test_economy
   test_lifecycle
-  test_auto_recall_activity_coverage
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect
@@ -1315,7 +1314,6 @@
   test_build_identity
   test_economy
   test_lifecycle
-  test_auto_recall_activity_coverage
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect
@@ -2679,6 +2677,8 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_tool_resource_gate.inc)
+
+(include stanzas/test_keeper_wire_capture_suppression.inc)
 
 (test
  (name test_keeper_visible_path_projection)

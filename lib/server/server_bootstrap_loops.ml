@@ -550,11 +550,11 @@ let start_keeper_loops
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
       ~config:(Mcp_server.workspace_config state)
       signal);
-  (* Wake a keeper when one of its pending HITL approvals resolves/expires.
-     Registered here (composition root) rather than in Keeper_approval_queue to
-     break the Keeper_approval_queue -> Keeper_keepalive_signal ->
-     Keeper_world_observation -> Keeper_approval_queue dependency cycle. Mirrors
-     the Fusion_completed/Bg_completed async-completion wakes. *)
+  (* Commit a resolved HITL decision to the keeper's durable lane, then signal
+     the live fiber as a hint. Registered here (composition root) rather than in
+     Keeper_approval_queue to break the Keeper_approval_queue ->
+     Keeper_keepalive_signal -> Keeper_world_observation ->
+     Keeper_approval_queue dependency cycle. *)
   Keeper_approval_queue.set_approval_resolution_wake_hook
     (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
        let resolution =
@@ -562,12 +562,7 @@ let start_keeper_loops
            {
              approval_id;
              decision;
-             channel =
-               Option.value
-                 channel
-                 ~default:
-                   (Keeper_continuation_channel.unrouted
-                      "legacy: no approval continuation channel");
+             channel;
            }
        in
        let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
@@ -578,12 +573,22 @@ let start_keeper_loops
          ; payload = Keeper_event_queue.Hitl_resolved resolution
          }
        in
-       Log.Keeper.info
-         "hitl resolution wake: keeper=%s approval=%s decision=%s"
-         keeper_name
-         approval_id
-         decision_label;
-       Keeper_keepalive_signal.wakeup_keeper ~base_path ~stimulus keeper_name);
+       match
+         Keeper_registry_event_queue.enqueue_durable_result
+           ~base_path
+           keeper_name
+           stimulus
+       with
+       | Error _ as err -> err
+       | Ok () ->
+         Ok
+           (fun () ->
+            Log.Keeper.info
+              "hitl resolution committed and signaling: keeper=%s approval=%s decision=%s"
+              keeper_name
+              approval_id
+              decision_label;
+            Keeper_keepalive_signal.wakeup_keeper ~base_path keeper_name));
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
     Sse.broadcast

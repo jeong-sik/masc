@@ -9,7 +9,7 @@ import {
   type SettingsRouteSectionId,
 } from '../config/navigation'
 import { navigate, route } from '../router'
-import { fetchDashboardConfig, fetchDashboardTools, fetchLogs, fetchRuntimeDefaults, fetchRuntimeProviders } from '../api/dashboard.js'
+import { fetchDashboardConfig, fetchDashboardTools, fetchLogs, fetchRuntimeDefaults, fetchRuntimeProviders, fetchRuntimeResolved } from '../api/dashboard.js'
 import type {
   ConfigEntry,
   DashboardConfigResponse,
@@ -17,8 +17,8 @@ import type {
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
   LogEntry,
-  RuntimeEntry,
   RuntimeDefaultsResponse,
+  RuntimeResolvedResponse,
 } from '../api/dashboard.js'
 import {
   patchRuntimeMediaFailover,
@@ -108,7 +108,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     section: 'runtime',
     label: 'Default runtime',
     kind: 'live-write',
-    source: 'GET /api/v1/dashboard/runtime-defaults + runtime provider catalog',
+    source: 'GET /api/v1/dashboard/runtime-defaults + /api/v1/runtime/resolved + runtime provider catalog',
     action: 'PATCH /api/v1/runtime/routing lane=default',
   },
   {
@@ -116,7 +116,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     section: 'runtime',
     label: 'Runtime catalog cards',
     kind: 'live-read',
-    source: 'GET /api/v1/dashboard/runtime-providers, fallback runtime-defaults projection',
+    source: 'GET /api/v1/dashboard/runtime-providers',
     action: 'read-only projection',
   },
   {
@@ -384,15 +384,6 @@ function runtimeCatalogKey(item: DashboardRuntimeProviderSnapshot): string {
   return item.runtime_id?.trim() || item.provider.trim()
 }
 
-function findRuntimeCatalogSnapshot(
-  catalog: readonly DashboardRuntimeProviderSnapshot[],
-  runtimeId: string | null | undefined,
-): DashboardRuntimeProviderSnapshot | null {
-  const needle = runtimeId?.trim() ?? ''
-  if (needle === '') return null
-  return catalog.find(item => runtimeCatalogKey(item) === needle || item.provider_id === needle) ?? null
-}
-
 function RuntimeCatalogCapability({ label, value }: { label: string; value: boolean | undefined }) {
   if (value === undefined) {
     return html`<span class="rt-cap unknown" title="capability not reported">? ${label}</span>`
@@ -426,28 +417,6 @@ function RuntimeCatalogDiagnostics({ facts }: { facts: readonly RuntimeCatalogFa
       </div>
     </details>
   `
-}
-
-function runtimeCatalogFromDefaults(defaults: RuntimeDefaultsResponse | null): DashboardRuntimeProviderSnapshot[] {
-  if (!defaults) return []
-  return defaults.runtimes.map((entry: RuntimeEntry) => ({
-    provider: entry.id,
-    runtime_id: entry.id,
-    provider_display_name: entry.provider,
-    model_id: entry.model,
-    model_api_name: entry.model,
-    transport: 'runtime-defaults',
-    kind: 'resolved',
-    runtime_kind: 'runtime',
-    status: entry.is_default ? 'default' : 'resolved',
-    is_default_runtime: entry.is_default,
-    max_context: entry.max_context,
-    model_count: 1,
-    models: [entry.model],
-    source: defaults.source ?? 'runtime-defaults',
-    endpoint_url: null,
-    note: 'fallback from /api/v1/dashboard/runtime-defaults',
-  }))
 }
 
 function RuntimeCatalogCard({
@@ -522,19 +491,13 @@ function uniqueRuntimeSelectOptions(options: RuntimeSelectOption[]): RuntimeSele
   return result
 }
 
-function runtimeSelectOptionsFromDefaults(entries: readonly RuntimeEntry[]): RuntimeSelectOption[] {
+function runtimeSelectOptionsFromResolved(
+  entries: RuntimeResolvedResponse['runtimes'],
+): RuntimeSelectOption[] {
   return uniqueRuntimeSelectOptions(entries.map(entry => ({
     id: entry.id,
     label: `${entry.id} · ${entry.model}`,
   })))
-}
-
-function runtimeSelectOptionsFromCatalog(entries: readonly DashboardRuntimeProviderSnapshot[]): RuntimeSelectOption[] {
-  return uniqueRuntimeSelectOptions(entries.map(entry => {
-    const id = runtimeCatalogKey(entry)
-    const model = entry.model_api_name ?? entry.model_id ?? entry.models[0] ?? 'model 미수집'
-    return { id, label: `${id} · ${model}` }
-  }))
 }
 
 function RuntimeRoutingSelect({
@@ -1042,6 +1005,11 @@ export function SettingsSurface() {
 
   // runtime defaults / model routing — resolved from runtime.toml (SSOT)
   const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
+  // single resolved-runtime document (bugs #14/#15/#36) — effective
+  // max-context + source, and the full keeper fleet joined against
+  // [runtime.assignments] with the [runtime].default rider made explicit.
+  const [runtimeResolved, setRuntimeResolved] = useState<RuntimeResolvedResponse | null>(null)
+  const [runtimeResolvedStatus, setRuntimeResolvedStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [runtimeProviders, setRuntimeProviders] = useState<DashboardRuntimeProvidersResponse | null>(null)
   const [runtimeCatalogStatus, setRuntimeCatalogStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [runtimeRoutingStatus, setRuntimeRoutingStatus] = useState<RuntimeRoutingSaveState>('idle')
@@ -1057,6 +1025,24 @@ export function SettingsSurface() {
       } catch {
         if (!active) return
         setRuntimeDefaults(null)
+      }
+    })()
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    setRuntimeResolvedStatus('loading')
+    void (async () => {
+      try {
+        const resp = await fetchRuntimeResolved()
+        if (!active) return
+        setRuntimeResolved(resp)
+        setRuntimeResolvedStatus('ready')
+      } catch {
+        if (!active) return
+        setRuntimeResolved(null)
+        setRuntimeResolvedStatus('error')
       }
     })()
     return () => { active = false }
@@ -1090,6 +1076,19 @@ export function SettingsSurface() {
     }
   }
 
+  async function reloadRuntimeResolvedSnapshot(): Promise<void> {
+    setRuntimeResolvedStatus('loading')
+    try {
+      const resp = await fetchRuntimeResolved()
+      setRuntimeResolved(resp)
+      setRuntimeResolvedStatus('ready')
+    } catch (err) {
+      setRuntimeResolved(null)
+      setRuntimeResolvedStatus('error')
+      throw err
+    }
+  }
+
   async function reloadRuntimeProvidersSnapshot(): Promise<void> {
     setRuntimeCatalogStatus('loading')
     try {
@@ -1106,6 +1105,7 @@ export function SettingsSurface() {
   async function refreshRuntimeSettingsSnapshot(): Promise<void> {
     await Promise.all([
       reloadRuntimeDefaultsSnapshot(),
+      reloadRuntimeResolvedSnapshot(),
       reloadRuntimeProvidersSnapshot(),
     ])
   }
@@ -1174,34 +1174,27 @@ export function SettingsSurface() {
   }
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
 
-  // Resolved runtime options (de-duplicated, derived from the live registry).
-  const runtimeEntries = runtimeDefaults?.runtimes ?? []
-  const richRuntimeCatalogEntries = runtimeProviders?.providers ?? []
-  const fallbackRuntimeCatalogEntries = runtimeCatalogFromDefaults(runtimeDefaults)
-  const runtimeCatalogEntries = richRuntimeCatalogEntries.length > 0
-    ? richRuntimeCatalogEntries
-    : fallbackRuntimeCatalogEntries
-  const runtimeCatalogIsFallback =
-    runtimeCatalogStatus === 'error' && richRuntimeCatalogEntries.length === 0 && fallbackRuntimeCatalogEntries.length > 0
-  const runtimeConfigPath = runtimeProviders?.config_path ?? runtimeDefaults?.config_path ?? null
-  const defaultRuntimeId = runtimeDefaults?.default_runtime_id ?? runtimeProviders?.summary?.default_runtime_id ?? null
-  const defaultCatalogEntry = findRuntimeCatalogSnapshot(runtimeCatalogEntries, defaultRuntimeId)
-  const keeperAssignments = runtimeDefaults?.model_routing.keeper_assignments ?? []
-  const runtimeCount = runtimeEntries.length > 0
-    ? runtimeEntries.length
-    : runtimeProviders?.summary?.runtimes ?? runtimeCatalogEntries.length
-  const keeperAssignmentCount = keeperAssignments.length > 0
-    ? keeperAssignments.length
-    : runtimeProviders?.assignment_governance?.assignment_count ?? 0
+  // Resolved runtime identity, model, context, and fleet counts come from one
+  // response generation. Runtime defaults remain the write-policy document;
+  // provider catalog remains the capability detail document. Neither is a
+  // fallback for failed resolved truth.
+  const runtimeCatalogEntries = runtimeProviders?.providers ?? []
+  const runtimeConfigPath = runtimeResolved?.config_path ?? null
+  const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
+  // bug #14: the full keeper fleet joined against [runtime.assignments],
+  // including keepers riding [runtime].default with no explicit entry
+  // (assignment_source: "explicit" | "default") — not an assignments-only
+  // listing.
+  const keeperAssignments = runtimeResolved?.assignments ?? []
+  const runtimeCount = runtimeResolved?.runtimes.length ?? 0
+  const keeperAssignmentCount = keeperAssignments.length
   const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
   const structuredJudgeRuntime = runtimeDefaults?.model_routing.structured_judge_runtime_id ?? null
   const hitlSummaryRuntime = runtimeDefaults?.model_routing.hitl_summary_runtime_id ?? null
   const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
-  const runtimeSelectOptions = runtimeEntries.length > 0
-    ? runtimeSelectOptionsFromDefaults(runtimeEntries)
-    : runtimeSelectOptionsFromCatalog(runtimeCatalogEntries)
-  const runtimeRoutingSaving = runtimeRoutingStatus === 'saving'
+  const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
+  const runtimeRoutingDisabled = runtimeRoutingStatus === 'saving' || runtimeResolvedStatus !== 'ready'
   const runtimeResolution = shellRuntimeResolution.value
   const configResolution = shellConfigResolution.value
   const shellIrApproval = runtimeResolution?.shell_ir_approval
@@ -1343,6 +1336,11 @@ export function SettingsSurface() {
                 <div class="settings-runtime-live-source mono" data-testid="runtime-settings-config-path">
                   ${runtimeConfigPath ?? 'runtime.toml 경로 미확인'}
                 </div>
+                ${runtimeResolvedStatus === 'loading'
+                  ? html`<div class="set-hint" data-testid="runtime-resolved-loading">resolved runtime 불러오는 중...</div>`
+                  : runtimeResolvedStatus === 'error'
+                    ? html`<div class="set-hint" data-testid="runtime-resolved-error">resolved runtime을 불러오지 못했습니다. 이전 projection으로 대체하지 않습니다.</div>`
+                    : null}
 
                 <div class="set-rt-launch" data-testid="runtime-settings-summary">
                   <div class="set-rt-launch-stats">
@@ -1366,7 +1364,7 @@ export function SettingsSurface() {
                         hint="[runtime].default · 새 keeper 가 시작될 런타임 id (provider.model)"
                         value=${defaultRuntimeId}
                         options=${runtimeSelectOptions}
-                        disabled=${runtimeRoutingSaving}
+                        disabled=${runtimeRoutingDisabled}
                         testId="runtime-default-runtime"
                         required=${true}
                         onChange=${(runtimeId: string | null) => {
@@ -1382,22 +1380,20 @@ export function SettingsSurface() {
                       <//>
                     `}
                   <${SetRow} label="Default model" hint="Resolved model API name">
-                    <span class="mono" data-testid="runtime-default-model">${runtimeDefaults?.default_model ?? defaultCatalogEntry?.model_api_name ?? '—'}</span>
+                    <span class="mono" data-testid="runtime-default-model">${runtimeResolved?.default_runtime?.model ?? '—'}</span>
                   <//>
                   <${SetRow} label="Default context" hint="Resolved context window">
                     <span class="mono" data-testid="runtime-default-context">
-                      ${formatRuntimeContext(runtimeDefaults?.default_max_context ?? defaultCatalogEntry?.max_context ?? null)}
+                      ${formatRuntimeContext(runtimeResolved?.default_runtime?.effective_max_context ?? null)}
                     </span>
+                    ${runtimeResolved?.default_runtime?.max_context_source
+                      ? html`<span class="set-hint mono" data-testid="runtime-default-context-source">source: ${runtimeResolved.default_runtime.max_context_source}</span>`
+                      : null}
                   <//>
                 </div>
 
                 <div class="settings-runtime-section" data-runtime-section="catalog" data-testid="runtime-catalog-section">
                   <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
-                  ${runtimeCatalogIsFallback ? html`
-                    <div class="set-hint" data-testid="runtime-catalog-fallback">
-                      provider 카탈로그를 불러오지 못해 live runtime defaults projection으로 표시합니다.
-                    </div>
-                  ` : null}
                   ${runtimeCatalogStatus === 'loading' && runtimeCatalogEntries.length === 0
                     ? html`<div class="set-hint" data-testid="runtime-catalog-loading">runtime catalog 불러오는 중...</div>`
                     : runtimeCatalogStatus === 'error' && runtimeCatalogEntries.length === 0
@@ -1439,7 +1435,7 @@ export function SettingsSurface() {
                       hint="[runtime].default · 기본 — keeper 채팅, 미할당 keeper 가 상속"
                       value=${defaultRuntimeId}
                       options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingSaving}
+                      disabled=${runtimeRoutingDisabled}
                       testId="runtime-routing-default"
                       required=${true}
                       onChange=${(runtimeId: string | null) => {
@@ -1452,7 +1448,7 @@ export function SettingsSurface() {
                       value=${librarianRuntime}
                       fallbackLabel="default runtime"
                       options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingSaving}
+                      disabled=${runtimeRoutingDisabled}
                       testId="runtime-routing-librarian"
                       onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('librarian', runtimeId)}
                     />
@@ -1462,7 +1458,7 @@ export function SettingsSurface() {
                       value=${structuredJudgeRuntime}
                       fallbackLabel="librarian/default fallback"
                       options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingSaving}
+                      disabled=${runtimeRoutingDisabled}
                       testId="runtime-routing-structured-judge"
                       onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('structured_judge', runtimeId)}
                     />
@@ -1472,7 +1468,7 @@ export function SettingsSurface() {
                       value=${hitlSummaryRuntime}
                       fallbackLabel="structured_judge/librarian/default fallback"
                       options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingSaving}
+                      disabled=${runtimeRoutingDisabled}
                       testId="runtime-routing-hitl-summary"
                       onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('hitl_summary', runtimeId)}
                     />
@@ -1482,14 +1478,14 @@ export function SettingsSurface() {
                       value=${crossVerifierRuntime}
                       fallbackLabel="default runtime"
                       options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingSaving}
+                      disabled=${runtimeRoutingDisabled}
                       testId="runtime-routing-cross-verifier"
                       onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('cross_verifier', runtimeId)}
                     />
                     <${RuntimeMediaFailoverEditor}
                       value=${mediaFailover}
                       options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingSaving}
+                      disabled=${runtimeRoutingDisabled}
                       onChange=${(runtimeIds: string[]) => void applyMediaFailoverPatch(runtimeIds)}
                     />
                     ${runtimeRoutingStatus === 'saving'
@@ -1502,14 +1498,19 @@ export function SettingsSurface() {
 
                 <div class="settings-runtime-section" data-runtime-section="assignments" data-testid="runtime-assignments-section">
                   <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
-                  ${keeperAssignments.length === 0
-                    ? html`<div class="set-hint" data-testid="routing-assignments-empty">명시적 keeper 할당이 없습니다 — 모두 기본 런타임을 사용합니다.</div>`
-                    : html`<div class="settings-runtime-routing" data-testid="routing-assignments-list">
+                  ${runtimeResolvedStatus === 'loading'
+                    ? html`<div class="set-hint" data-testid="routing-assignments-loading">resolved assignments 불러오는 중...</div>`
+                    : runtimeResolvedStatus === 'error'
+                      ? html`<div class="set-hint" data-testid="routing-assignments-error">resolved assignments를 불러오지 못했습니다.</div>`
+                      : keeperAssignments.length === 0
+                        ? html`<div class="set-hint" data-testid="routing-assignments-empty">등록된 keeper assignment가 없습니다.</div>`
+                        : html`<div class="settings-runtime-routing" data-testid="routing-assignments-list">
                       ${keeperAssignments.map(a => html`
                         <div class="set-routing-row" key=${a.keeper}>
                           <span class="mono">${a.keeper}</span>
+                          <span class="set-hint" data-testid="routing-assignment-source">${a.assignment_source}</span>
                           <span class="set-routing-arrow">→</span>
-                          <span class="mono" data-testid="routing-assignment">${a.runtime_id}</span>
+                          <span class="mono" data-testid="routing-assignment">${a.resolved.id ?? '—'}</span>
                         </div>
                       `)}
                     </div>`}

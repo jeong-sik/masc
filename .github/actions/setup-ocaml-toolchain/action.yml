@@ -36,6 +36,30 @@ runs:
         restore-keys: |
           opam-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
 
+    # The opam cache above only restores the toolchain/switch; every dune
+    # build of masc itself still started cold (~50 min Build and Test).
+    # Cache dune's content-addressed artifact store so an unchanged module
+    # graph rebuilds incrementally. Keyed by run id so each run REWRITES the
+    # cache with its newest artifacts (a stable key would freeze the first
+    # upload forever); restore always hits the newest same-prefix entry.
+    - name: Cache dune build artifacts (Linux)
+      if: runner.os == 'Linux' && inputs.dune-cache == 'true'
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/dune
+        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.run_id }}
+        restore-keys: |
+          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
+
+    - name: Enable dune cache (Linux)
+      if: runner.os == 'Linux' && inputs.dune-cache == 'true'
+      shell: bash
+      run: |
+        {
+          echo "DUNE_CACHE=enabled"
+          echo "DUNE_CACHE_STORAGE_MODE=copy"
+        } >> "$GITHUB_ENV"
+
     - name: Bootstrap local opam switch (Linux)
       if: runner.os == 'Linux'
       shell: bash

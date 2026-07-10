@@ -312,6 +312,7 @@ val submit_and_await :
   ?disposition:string ->
   ?disposition_reason:string ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?channel:Keeper_continuation_channel.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
   ?critical_escalation_after_s:float ->
@@ -342,6 +343,7 @@ val submit_pending :
   ?disposition:string ->
   ?disposition_reason:string ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?channel:Keeper_continuation_channel.t ->
   ?lane_policy:lane_policy ->
   on_resolution:(Agent_sdk.Hooks.approval_decision -> unit) ->
   unit ->

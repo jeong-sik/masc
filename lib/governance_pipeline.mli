@@ -154,6 +154,7 @@ val to_oas_approval_callback :
   ?meta:Keeper_meta_contract.keeper_meta ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?channel:Keeper_continuation_channel.t ->
   ?lane_policy:Keeper_approval_queue.lane_policy ->
   ?hitl_approval_grant:hitl_approval_grant ->
   unit ->

@@ -5,6 +5,7 @@ module Request_context = Server_mcp_request_context
 module Headers = Server_mcp_transport_http_headers
 module Negotiation = Mcp_transport_protocol.Http_negotiation
 module Mcp_store = Masc.Session.McpSessionStore
+module Auth = Masc.Auth
 
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -437,6 +438,96 @@ let test_h1_h2_delete_route_wiring_parity () =
       ("forgets session after termination", "forget_mcp_session session_id");
     ]
 
+(* /ws upgrade admission — token-or-same-origin gate parity with the /mcp
+   POST chain.  A base_path with no auth config resolves to
+   [default_auth_config], which is strict (enabled + require_token), so the
+   token leg deterministically fails without a bearer token and the decision
+   falls to the same-origin leg.  If the strict default ever flips, these
+   deny cases must fail loudly — that is a security posture change. *)
+let ws_absent_base_path () =
+  Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "ws-upgrade-auth-absent-%d" (Unix.getpid ()))
+
+let ws_upgrade_request headers =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/ws"
+
+let ws_gate_on ~base_path headers =
+  Server_routes_http_routes_frontend.websocket_upgrade_authorized
+    ~base_path
+    (ws_upgrade_request headers)
+
+let ws_gate headers = ws_gate_on ~base_path:(ws_absent_base_path ()) headers
+
+let test_ws_upgrade_denied_without_token_or_origin () =
+  match ws_gate [ ("host", "127.0.0.1:8935") ] with
+  | Ok () -> fail "expected deny: no bearer token and no Origin header"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf "expected Auth error, got %s"
+      (Masc_domain.masc_error_to_string other)
+
+let test_ws_upgrade_allows_same_origin () =
+  match
+    ws_gate
+      [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+  with
+  | Ok () -> ()
+  | Error err ->
+    failf "expected same-origin upgrade to pass, got %s"
+      (Masc_domain.masc_error_to_string err)
+
+let test_ws_upgrade_denies_cross_origin () =
+  match
+    ws_gate
+      [ ("host", "127.0.0.1:8935"); ("origin", "http://evil.example:8935") ]
+  with
+  | Ok () -> fail "expected deny: cross-origin upgrade without token"
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf "expected Auth error, got %s"
+      (Masc_domain.masc_error_to_string other)
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then (
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+
+let with_temp_auth_workspace f =
+  let path = Filename.temp_file "masc-ws-upgrade-auth" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf path) (fun () ->
+    Auth.save_auth_config path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    f path)
+
+let test_ws_upgrade_allows_authenticated_cross_origin () =
+  with_temp_auth_workspace (fun base_path ->
+    let token =
+      match
+        Auth.create_token base_path ~agent_name:"ws-auth-test"
+          ~role:Masc_domain.Worker
+      with
+      | Ok (raw_token, _) -> raw_token
+      | Error err ->
+        failf "expected test token creation to pass, got %s"
+          (Masc_domain.masc_error_to_string err)
+    in
+    match
+      ws_gate_on ~base_path
+        [ ("host", "127.0.0.1:8935");
+          ("origin", "http://evil.example:8935");
+          ("authorization", "Bearer " ^ token) ]
+    with
+    | Ok () -> ()
+    | Error err ->
+      failf "expected authenticated cross-origin upgrade to pass, got %s"
+        (Masc_domain.masc_error_to_string err))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -468,5 +559,16 @@ let () =
             test_h1_h2_post_route_wiring_parity;
           test_case "H1/H2 DELETE route uses the same admission gates" `Quick
             test_h1_h2_delete_route_wiring_parity;
+        ] );
+      ( "ws-upgrade-admission",
+        [
+          test_case "denies upgrade without token or Origin" `Quick
+            test_ws_upgrade_denied_without_token_or_origin;
+          test_case "allows same-origin upgrade" `Quick
+            test_ws_upgrade_allows_same_origin;
+          test_case "denies cross-origin upgrade without token" `Quick
+            test_ws_upgrade_denies_cross_origin;
+          test_case "allows authenticated cross-origin upgrade" `Quick
+            test_ws_upgrade_allows_authenticated_cross_origin;
         ] );
     ]

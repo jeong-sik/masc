@@ -532,6 +532,20 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)
          request reqd)
+  |> Http.Router.get "/api/v1/runtime/resolved" (fun request reqd ->
+       (* Single resolved-runtime document (bugs #14/#15/#36): effective
+          max-context + source per runtime, configured lanes, and the full
+          keeper fleet joined against [runtime.assignments] with the
+          [runtime].default rider made explicit. Read-only projection, same
+          public-read posture as /api/v1/dashboard/runtime-defaults. *)
+       with_public_read (fun state req reqd ->
+         let json =
+           Server_dashboard_runtime_resolved_json.build
+             ~generated_at_iso:(Masc_domain.now_iso ())
+             ~config:(Mcp_server.workspace_config state)
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->

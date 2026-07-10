@@ -34,6 +34,8 @@ describe('dashboard schema bundle boundary', () => {
 
     expect(runtime).toContain("await import('./schemas/runtime-defaults')")
     expectNoStaticParserImport(runtime, 'parseRuntimeDefaultsResponse', './schemas/runtime-defaults')
+    expect(runtime).toContain("await import('./schemas/runtime-resolved')")
+    expectNoStaticParserImport(runtime, 'parseRuntimeResolvedResponse', './schemas/runtime-resolved')
 
     expect(barrel).not.toContain('SchemaDriftError')
   })

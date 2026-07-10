@@ -1,64 +1,98 @@
-# RFC-0337 — Evidence Gate (Gate 0) Semantics SSOT
+# RFC-0337 — Evidence Gate Semantics SSOT (rev 2)
 
 - **Status:** Draft
 - **Authors:** Vincent (yousleepwhen)
-- **Created:** 2026-07-10
-- **Related:** RFC-0323 (verification matrix; G-2 workspace gate, G-5 default-on flag), #23886 (thrash-chain radius analysis), #23775 (scoping repair)
-- **Supersedes:** per-PR gate semantics improvisation across #23666/#23738/#23750/#23840/#23881/#23882
+- **Created:** 2026-07-10 (rev 2: same day, after structural review on PR #23888)
+- **Related:** RFC-0311 (L1 evidence gate, Phase 1), RFC-0109 (Phase D hard cut), RFC-0323 (verification matrix; G-2, G-5), #23886 (thrash-chain radius), #23775 (Anti Gate 0 scoping)
+- **Supersedes:** per-PR gate semantics improvisation across #23666/#23738/#23750/#23840/#23881/#23882; rev 1 of this document (which misstated live topology)
 
 ## TL;DR
 
-The empty-evidence reject has exactly one home (`Anti_rationalization.review`, Gate 0), one scoping
-predicate (`Masc_domain.task_requires_verification`), one action scope (completion-path actions only),
-and one failure shape (`Workflow_rejection`, named field). Callers thread evidence; they never
-hardcode `[]` and never pre-empt or disable the gate. Gate-region changes cite this RFC.
+Completion evidence has one deterministic owner — `Task_completion_gate.decide` (L1) — and one LLM
+reviewer — `Anti_rationalization.review` (L2). L2's duplicate deterministic Gate 0 is removed after
+#23775 lands. Advisory tasks keep the L1 trusted-ref requirement (RFC-0311 tripwire preserved);
+`strict` adds contract-specified evidence and LLM verification. Callers thread evidence end to end
+and never hardcode `[]`. Gate-region changes cite this RFC.
 
-## Why
+## Live topology (measured, current main)
 
-Between 2026-07-09 and 07-10, seven PRs pulled Gate 0 in opposing directions (full chain: #23886).
-Two merged (#23666 introduced the gate with an unwired `[]` call site; #23738 wired evidence and
-re-enabled it), five were closed unmerged after adversarial review: a done-action duplicate (#23750),
-a second entry point (#23840), an action-unscoped clone that would have rejected every
-`masc_transition` (#23881), and a `if false &&` dead-code disable resting on a premise #23738 had
-already fixed (#23882). The root cause is not any single PR: the gate's semantics were never
-specified, so each keeper inferred a different contract and shipped it.
+Rev 1 claimed a single gate site; live code has **three** evidence checks on the completion path:
 
-## Decision
+| # | Site | Kind | Scope today |
+|---|---|---|---|
+| 1 | `workspace_task_transitions.ml:91-114` strict precheck | deterministic | scoped by `task_requires_verification` |
+| 2 | `Task_completion_gate.decide` via `Workspace_hooks.task_completion_gate_decide_fn` (`tool_task.ml:459-498`) | deterministic, trust-validating | **unscoped** — every `Done_action`/`Submit_for_verification`, rejects unless a trusted ref is present (RFC-0311 Phase 1) |
+| 3 | `Anti_rationalization.review` Gate 0 (`tool_task.ml:416-436` → `review_completion_notes`) | deterministic pre-check inside the LLM reviewer | runs only on `Done_action && not force`; scoped by `~requires_evidence` after #23775 |
 
-1. **Single gate site.** The policy decision "is empty evidence acceptable for this task" is made
-   only in `Anti_rationalization.review` (verdict gate `Evidence`). Tool boundaries
-   (`tool_task.ml`, `keeper_tool_task_runtime.ml`) keep argument-shape validation only — when
-   `evidence_refs` is provided it must be a non-empty array of non-empty strings — and never make
-   the policy call. No pre-checks, no second gates.
-2. **Single scoping predicate.** `Masc_domain.task_requires_verification` decides which tasks the
-   gate applies to, threaded into `review` as `~requires_evidence` (#23775). The same predicate
-   drives the RFC-0323 G-2 workspace gate; the two must never diverge. Analysis-only and
-   advisory-contract tasks complete without evidence.
-3. **Action scope.** The gate evaluates only on completion-path actions (`Done_action`,
-   `Submit_for_verification`). It never runs on claim/release/block/todo transitions. A transition
-   that carries no `handoff_context` and is not a completion is not the gate's business.
-4. **Evidence sources.** `masc_transition` threads `handoff_context.evidence_refs`;
-   `keeper_task_done` threads typed claims rendered via `Evidence_claim.to_human_string`. Call
-   sites must thread the field end to end; a hardcoded `[]` at any call site is the #23666 defect
-   class and is rejected on review.
-5. **Failure semantics.** A gate reject is a `Reject` verdict surfaced as
-   `Tool_result.Workflow_rejection` whose message names the missing field. The gate is never
-   silent, never demoted to a log line, and never disabled via dead code (`if false && …`). If the
-   gate is wrong, revert the commit that made it wrong or amend this RFC — those are the only two
-   moves.
-6. **Change control.** Any PR touching the gate region (`anti_rationalization.ml` Gate 0,
-   `tool_task_handlers.ml` review call, the `~requires_evidence` threading) cites this RFC in its
-   body. Gate-behavior changes without an RFC amendment are rejected on review, per the workspace
-   workaround-rejection bar.
+Consequences rev 1 missed: (a) #2 subsumes #3 — anything Gate 0 rejects (empty refs), `decide`
+also rejects (empty ⇒ no trusted ref), so #23775 alone changes the rejection's *source*, not the
+*outcome*; (b) the Anti reviewer never sees `Submit_for_verification` or `force=true` completions.
 
-## Non-goals
+## The policy fork (decided here)
 
-- **Evidence validity.** Whether a cited ref is real (fabrication detection, snapshot digests) is
-  the board claim gate and RFC-0323 Phase-A territory, not Gate 0.
-- **Verification default-on rollout.** `MASC_VERIFICATION_DEFAULT_ON` staging is RFC-0323 G-5.
+The thrash chain was fueled by an unresolved conflict between two RFC lineages:
+
+- **RFC-0311/0109:** every completion needs one trusted, reviewer-inspectable evidence ref —
+  notes alone never complete a task (fake-done tripwire, pinned by
+  `test_task_completion_gate.ml` on contract-less tasks).
+- **RFC-0323 Phase A:** verification is a `strict` opt-in; advisory tasks must not be blocked by
+  verification machinery.
+
+**Decision: tiered evidence.** These do not actually conflict once "evidence" and "verification"
+are separated:
+
+| Task kind | L1 `decide` (deterministic) | L2 LLM review | Verification FSM |
+|---|---|---|---|
+| advisory (default) | **one trusted ref required** (RFC-0311 preserved) | length/quality gates only — no evidence re-check | not entered |
+| `strict` | one trusted ref required | full review incl. contract evidence obligations | entered per RFC-0323 |
+
+Rationale: dropping the L1 trusted-ref requirement for advisory tasks would reopen fleet-wide
+fake-done (advisory is the fleet default; "see notes" would complete tasks again). The #23738
+complaint is resolved not by unscoping L1 but by removing the *duplicate* L2 deterministic reject
+(#23775) and by keeping L1's failure payload actionable (`handoff_context.evidence_refs` named,
+`rule_id` stable).
+
+## Decisions
+
+1. **L1 owner.** `Task_completion_gate.decide` is the only deterministic evidence decision. It
+   stays unscoped across advisory/strict (one trusted ref for everyone), fail-closed on a missing
+   task. RFC-0311 remains in force; this RFC does not supersede it.
+2. **L2 owner.** `Anti_rationalization.review` owns LLM-judged completion quality. Its Gate 0
+   (deterministic empty-evidence reject) is redundant with L1 and is **removed** once #23775's
+   scoping lands (removal is a follow-up PR citing this RFC; `if false &&` dead-code disables
+   remain forbidden — delete, don't disable).
+3. **Action scope.** L1 runs on `Done_action` and `Submit_for_verification`, never on
+   claim/start/cancel/release/approve/reject transitions (already encoded in `needs_gate`,
+   `tool_task.ml:461-474`). L2 runs on `Done_action && not force`; `force=true` still passes L1
+   (evidence is a safety invariant, not a business rule — comment at `tool_task.ml:455-458`).
+4. **Evidence threading.** `masc_transition` threads `handoff_context.evidence_refs`;
+   `keeper_task_done` parses refs at the API boundary (`parse_keeper_task_done_evidence_refs`) and
+   maps typed claims to display strings for the review request. A hardcoded `[]` at any call site
+   is the #23666 defect class and is rejected on review. Boundary schemas should declare
+   `minItems: 1` and item `minLength: 1` where the field is required (gap: `masc_transition`
+   schema today trims/drops silently — follow-up).
+5. **Failure semantics.** L1 rejects with stable `rule_id` + payload naming
+   `handoff_context.evidence_refs`; L2 rejects surface as `Workflow_rejection`. Gates are never
+   silent, never demoted to logs, never disabled via dead code. If a gate is wrong, revert it or
+   amend this RFC — those are the only two moves.
+6. **Change control.** Any PR touching the gate region (`task_completion_gate.ml`,
+   `anti_rationalization.ml` gates, the `needs_gate`/`review_gate_rejection` blocks in
+   `tool_task.ml`, `workspace_task_transitions.ml` precheck) cites this RFC in its body.
+   Gate-behavior changes without an RFC amendment are rejected on review.
 
 ## Migration
 
-#23775 lands the `~requires_evidence` scoping and is the only open gate PR; it becomes the first
-implementation of this RFC. The closed thrash PRs are historical context, enumerated in #23886, and
-stay closed.
+1. #23775 (Anti Gate 0 `~requires_evidence` scoping) lands as-is — its effect is removing the L2
+   duplicate reject; its body should stop claiming it unblocks advisory completions (L1 still
+   requires one trusted ref for them, by design).
+2. Follow-up PR deletes Anti Gate 0 entirely (decision 2), citing this RFC.
+3. Follow-up PR fixes the `tool_task.ml` comment "Analysis-only tasks (no contract) bypass the
+   gate" — false today (decide has no such bypass) and false under this RFC (advisory tasks are
+   not bypassed; they need one trusted ref).
+4. Follow-up PR adds `minItems`/`minLength` to boundary schemas (decision 4 gap).
+
+## Non-goals
+
+- **Evidence validity beyond trust-shape.** Fabrication detection and snapshot digests are the
+  board claim gate / RFC-0323 Phase-A territory.
+- **Verification default-on rollout.** `MASC_VERIFICATION_DEFAULT_ON` staging is RFC-0323 G-5.

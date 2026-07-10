@@ -1,4 +1,4 @@
-type tool_profile =
+type tool_profile = Server_mcp_tool_profile.t =
   | Full
   | Managed_agent
   | Operator_remote

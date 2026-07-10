@@ -55,7 +55,7 @@ let escape_mrkdwn_text s =
 let markdown_link_re =
   Re.compile
     (Re.seq
-       [ Re.char '['; Re.group (Re.rep1 (Re.compl [ Re.char ']' ])); Re.str "](";
+       [ Re.char '['; Re.group (Re.rep1 (Re.compl [ Re.char ']' ]))); Re.str "](";
          Re.group (Re.rep1 (Re.compl [ Re.char ')' ]))); Re.char ')' ])
 
 let markdown_bold_re =

@@ -4,7 +4,7 @@ module SSet = Set_util.StringSet
 type session =
   { session_id : string
   ; protocol_version : string
-  ; tool_profile : Server_mcp_transport_http_types.tool_profile
+  ; tool_profile : Server_mcp_tool_profile.t
   ; owner : Server_transport_admission.identity
   ; started_at : float
   ; transport_context : Otel_dispatch_hook.transport_context option

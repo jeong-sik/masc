@@ -19,6 +19,7 @@ import type {
   DashboardToolInventoryItem,
   LogEntry,
   RuntimeDefaultsResponse,
+  RuntimeResolvedResponse,
 } from '../api/dashboard'
 import { DashboardMain } from './dashboard-shell'
 import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
@@ -36,6 +37,7 @@ const apiMock = vi.hoisted(() => ({
   fetchLogs: vi.fn(),
   fetchDashboardTools: vi.fn(),
   fetchRuntimeDefaults: vi.fn(),
+  fetchRuntimeResolved: vi.fn(),
   fetchRuntimeProviders: vi.fn(),
   fetchRuntimeTomlConfig: vi.fn(),
   patchRuntimeMediaFailover: vi.fn(),
@@ -85,6 +87,7 @@ vi.mock('../api/dashboard.js', async () => {
     fetchLogs: apiMock.fetchLogs,
     fetchDashboardTools: apiMock.fetchDashboardTools,
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
+    fetchRuntimeResolved: apiMock.fetchRuntimeResolved,
     fetchRuntimeProviders: apiMock.fetchRuntimeProviders,
     fetchRuntimeTomlConfig: apiMock.fetchRuntimeTomlConfig,
     patchRuntimeMediaFailover: apiMock.patchRuntimeMediaFailover,
@@ -169,6 +172,43 @@ function makeRuntimeDefaults(
       cross_verifier_runtime_id: null,
       media_failover: [],
     },
+    ...overrides,
+  }
+}
+
+function makeRuntimeResolved(
+  overrides: Partial<RuntimeResolvedResponse> = {},
+): RuntimeResolvedResponse {
+  return {
+    generated_at_iso: '2026-06-21T00:00:00Z',
+    source: '/api/v1/runtime/resolved',
+    config_path: '/cfg/runtime.toml',
+    default_runtime: {
+      id: 'rt-a', provider: 'P', model: 'm1',
+      effective_max_context: 128000, max_context_source: 'override',
+      max_output_tokens: null, is_local: false, is_default: true,
+    },
+    runtimes: [
+      {
+        id: 'rt-a', provider: 'P', model: 'm1',
+        effective_max_context: 128000, max_context_source: 'override',
+        max_output_tokens: null, is_local: false, is_default: true,
+      },
+      {
+        id: 'rt-b', provider: 'P', model: 'm2',
+        effective_max_context: 128000, max_context_source: 'override',
+        max_output_tokens: null, is_local: false, is_default: false,
+      },
+      {
+        id: 'rt-c', provider: 'P', model: 'm3',
+        effective_max_context: 128000, max_context_source: 'override',
+        max_output_tokens: null, is_local: false, is_default: false,
+      },
+    ],
+    lanes: [],
+    assignments: [
+      { keeper: 'analyst', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'rt-b' } },
+    ],
     ...overrides,
   }
 }
@@ -291,11 +331,16 @@ function stubRuntimeDefaults(value: RuntimeDefaultsResponse = makeRuntimeDefault
   apiMock.fetchRuntimeDefaults.mockResolvedValue(value)
 }
 
+function stubRuntimeResolved(value: RuntimeResolvedResponse = makeRuntimeResolved()) {
+  apiMock.fetchRuntimeResolved.mockResolvedValue(value)
+}
+
 function stubEmptyApi() {
   apiMock.fetchDashboardConfig.mockResolvedValue(makeDashboardConfig())
   apiMock.fetchLogs.mockResolvedValue({ total: 0, entries: [] })
   apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
   stubRuntimeDefaults()
+  stubRuntimeResolved()
   apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders())
   apiMock.fetchRuntimeTomlConfig.mockResolvedValue({
     ok: true,
@@ -349,6 +394,7 @@ describe('SettingsSurface', () => {
     apiMock.fetchLogs.mockReset()
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.fetchRuntimeResolved.mockReset()
     apiMock.fetchRuntimeProviders.mockReset()
     apiMock.fetchRuntimeTomlConfig.mockReset()
     apiMock.patchRuntimeMediaFailover.mockReset()
@@ -1121,7 +1167,11 @@ describe('SettingsSurface', () => {
     expect(container.textContent).not.toContain('oas·seoul-1')
   })
 
-  it('runtime overview falls back to runtime-defaults when the rich provider catalog is unavailable', async () => {
+  it('runtime overview shows its own error state when the provider catalog is unavailable, without fabricating catalog cards', async () => {
+    // PR-6 (bug #14/#15/#36): the settings surface no longer re-projects
+    // /api/v1/dashboard/runtime-defaults into a fake runtime-provider-catalog
+    // shape when /api/v1/dashboard/runtime-providers fails — it shows the
+    // catalog's own error state instead.
     apiMock.fetchRuntimeProviders.mockRejectedValueOnce(new Error('provider catalog unavailable'))
 
     render(html`<${SettingsSurface} />`, container)
@@ -1129,26 +1179,12 @@ describe('SettingsSurface', () => {
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-catalog-fallback"]')?.textContent)
-        .toContain('runtime defaults')
-      const cards = Array.from(container.querySelectorAll('[data-testid="runtime-catalog-card"]'))
-      expect(cards.length).toBe(3)
-      expect(cards.map(card => card.textContent)).toEqual([
-        expect.stringContaining('rt-a'),
-        expect.stringContaining('rt-b'),
-        expect.stringContaining('rt-c'),
-      ])
-      expect(cards[0]?.textContent).toContain('P')
-      expect(cards[0]?.textContent).toContain('m1')
-      expect(cards[0]?.textContent).toContain('128K ctx')
-      expect(cards[0]?.textContent).toContain('? tools')
-      expect(cards[0]?.textContent).toContain('? thinking')
-      expect(cards[0]?.textContent).toContain('? streaming')
+      expect(container.querySelector('[data-testid="runtime-catalog-error"]')).not.toBeNull()
+      expect(container.querySelectorAll('[data-testid="runtime-catalog-card"]').length).toBe(0)
     })
-    expect(container.querySelector('[data-testid="runtime-catalog-error"]')).toBeNull()
   })
 
-  it('runtime overview does not show the fallback warning while provider catalog is still loading', async () => {
+  it('runtime overview shows a loading state while the provider catalog is still loading', async () => {
     apiMock.fetchRuntimeProviders.mockReturnValueOnce(new Promise(() => {}))
 
     render(html`<${SettingsSurface} />`, container)
@@ -1156,10 +1192,9 @@ describe('SettingsSurface', () => {
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
 
     await waitFor(() => {
-      const cards = Array.from(container.querySelectorAll('[data-testid="runtime-catalog-card"]'))
-      expect(cards.length).toBe(3)
+      expect(container.querySelector('[data-testid="runtime-catalog-loading"]')).not.toBeNull()
     })
-    expect(container.querySelector('[data-testid="runtime-catalog-fallback"]')).toBeNull()
+    expect(container.querySelectorAll('[data-testid="runtime-catalog-card"]').length).toBe(0)
   })
 
   it('routing section shows resolved model routing controls and keeper assignments', async () => {
@@ -1173,6 +1208,13 @@ describe('SettingsSurface', () => {
           cross_verifier_runtime_id: 'rt-a',
           media_failover: [],
         },
+      }),
+    )
+    stubRuntimeResolved(
+      makeRuntimeResolved({
+        assignments: [
+          { keeper: 'analyst', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'rt-b' } },
+        ],
       }),
     )
     render(html`<${SettingsSurface} />`, container)
@@ -1367,19 +1409,9 @@ describe('SettingsSurface', () => {
     })
   })
 
-  it('routing section reports no assignments without fabricating rows', async () => {
-    stubRuntimeDefaults(
-      makeRuntimeDefaults({
-        model_routing: {
-          keeper_assignments: [],
-          librarian_runtime_id: null,
-          structured_judge_runtime_id: null,
-          hitl_summary_runtime_id: null,
-          cross_verifier_runtime_id: null,
-          media_failover: [],
-        },
-      }),
-    )
+  it('routing section reports no assignments when the resolved keeper registry is unavailable', async () => {
+    apiMock.fetchRuntimeResolved.mockReset()
+    apiMock.fetchRuntimeResolved.mockRejectedValue(new Error('resolved runtime unavailable'))
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
@@ -1388,6 +1420,31 @@ describe('SettingsSurface', () => {
       expect(container.querySelector('[data-testid="routing-assignments-empty"]')).not.toBeNull()
     })
     expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
+  })
+
+  it('routing section shows a keeper riding [runtime].default with no explicit assignment (bug #14)', async () => {
+    stubRuntimeResolved(
+      makeRuntimeResolved({
+        assignments: [
+          { keeper: 'analyst', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'rt-b' } },
+          { keeper: 'unassigned-keeper', assignment_source: 'default', resolved: { kind: 'single_runtime', id: 'rt-a' } },
+        ],
+      }),
+    )
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+
+    await waitFor(() => {
+      const sources = Array.from(
+        container.querySelectorAll('[data-testid="routing-assignment-source"]'),
+      ).map(n => n.textContent)
+      expect(sources).toEqual(['explicit', 'default'])
+      const targets = Array.from(
+        container.querySelectorAll('[data-testid="routing-assignment"]'),
+      ).map(n => n.textContent)
+      expect(targets).toEqual(['rt-b', 'rt-a'])
+    })
   })
 
   it('renders prompt settings from the live prompt registry instead of prototype placeholders', async () => {

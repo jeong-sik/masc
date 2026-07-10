@@ -734,7 +734,7 @@ let evidence_refs =
                (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
                  ~task_id ~verifier:ctx.agent_name ~verification_id
                  ~decision:(`Reject reason))
-        | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
+        | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release | Masc_domain.Operator_block | Masc_domain.Operator_unblock -> ())
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)
@@ -774,7 +774,7 @@ let evidence_refs =
           ~reason:(Some "task_cancelled");
         ()
    | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
+            | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release | Masc_domain.Operator_block | Masc_domain.Operator_unblock)
    | Error _, _ -> ());
   result_to_response ~tool_name ~start_time result
 

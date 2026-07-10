@@ -306,17 +306,19 @@ let dispatch_error_deterministic_retry_fields error =
   | None -> []
 
 let shell_ir_approval_overlay () =
-  let default_overlay = Masc_exec.Approval_config.autonomous in
-  match Env_config_runtime.Shell_ir_approval.raw_overlay () with
-  | None -> default_overlay
-  | Some raw ->
-    (match Masc_exec.Approval_config.shell_ir_approval_overlay_of_string raw with
-     | Some overlay -> overlay
-     | None ->
-       Log.Dashboard.warn
-         "invalid MASC_SHELL_IR_APPROVAL value %S; using autonomous overlay"
-         raw;
-       default_overlay)
+  let resolution =
+    Env_config_runtime.Shell_ir_approval.raw_overlay ()
+    |> Masc_exec.Approval_config.resolve_shell_ir_approval_overlay
+  in
+  (match resolution.source with
+   | Masc_exec.Approval_config.Invalid_overlay_fail_closed raw ->
+     Log.Dashboard.warn
+       "invalid MASC_SHELL_IR_APPROVAL value %S; using fail-closed enforced overlay"
+       raw
+   | Masc_exec.Approval_config.Default_autonomous
+   | Masc_exec.Approval_config.Configured_overlay _ ->
+     ());
+  resolution.effective
 
 let pr_action_status_label = function
   | Unix.WEXITED 0 -> "success"

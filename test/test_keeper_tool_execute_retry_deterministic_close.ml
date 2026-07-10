@@ -124,8 +124,8 @@ let test_shell_ir_approval_overlay_resolves_live () =
     set_shell_ir_approval_env (Some "not-a-valid-overlay");
     Alcotest.check
       overlay_testable
-      "invalid overlay falls back to autonomous"
-      Approval.autonomous
+      "invalid overlay fails closed"
+      Approval.enforced_all
       (Execute_runtime.shell_ir_approval_overlay ());
     set_shell_ir_approval_env None;
     Alcotest.check
@@ -849,7 +849,7 @@ let () =
         ] )
     ; ( "shell_ir_approval_queue"
       , [ Alcotest.test_case
-            "overlay_resolves_live_with_autonomous_fallback"
+            "overlay_resolves_live_and_invalid_fails_closed"
             `Quick
             test_shell_ir_approval_overlay_resolves_live
         ; Alcotest.test_case

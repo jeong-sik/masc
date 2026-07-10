@@ -7,7 +7,7 @@
 open Alcotest
 
 module D = Masc.Keeper_continuation_delivery
-module C = Masc.Keeper_continuation_channel
+module C = Keeper_continuation_channel
 
 let test_gate_unrouted_channel_skips_fail_closed () =
   match D.gate_decision ~channel:(C.unrouted "test no channel") ~already_replied:false ~content:"hi" with

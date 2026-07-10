@@ -72,7 +72,7 @@ let test_phase_token_total_and_lowercase () =
   let all_phases : Server_timing.phase list = [
     Cache_lookup; Cache_compute;
     Projection_status; Projection_agents; Projection_tasks;
-    Projection_keepers; Projection_configured_keepers; Projection_meta_cognition;
+    Projection_keepers; Projection_configured_keepers;
     Projection_config_resolution; Projection_runtime_resolution;
     Project_snapshot_shell_refresh; Project_snapshot_runtime;
     Tools_compute;

@@ -54,11 +54,10 @@ function memoryFocusTargetClasses(focused: boolean): string {
 
 export const ARCHITECTURE_FLOW = `graph LR
     subgraph Keeper["키퍼 턴"]
-      K1[LLM 응답 생성] --> K2["[STATE] 파싱"]
-      K2 --> K3{STATE 있음?}
+      K1[LLM 응답 생성] --> K2[턴 증거 수집]
     end
 
-    K3 -->|Yes| M1[store_episode_from_snapshot]
+    K2 --> M1[에피소드 기록]
     M1 --> M2[Memory.t in-memory]
     M2 --> M3[flush_incremental]
     M3 --> F1[(institution_episodes.jsonl)]
@@ -1238,7 +1237,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
             ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-4 text-center">
                 ${hasFilter
                   ? '필터 조건에 맞는 에피소드가 없습니다.'
-                  : '에피소드 없음. keeper [STATE] 출력 시 자동 기록됩니다.'}
+                  : '에피소드가 아직 없습니다.'}
               </div>`
             : html`
                 <div class="space-y-1">

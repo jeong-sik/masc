@@ -8,20 +8,6 @@ import { flagTooltip, invariantDescription } from './fsm-hub-health-panels'
 describe('flagTooltip', () => {
   // ── known flags with on=true ──
 
-  it('returns reflect active tooltip', () => {
-    const result = flagTooltip('reflect', true)
-    expect(result).toContain('reflect')
-    expect(result).toContain('active')
-    expect(result).toContain('Reflexion loop')
-  })
-
-  it('returns plan active tooltip', () => {
-    const result = flagTooltip('plan', true)
-    expect(result).toContain('plan')
-    expect(result).toContain('active')
-    expect(result).toContain('재계획')
-  })
-
   it('returns compact active tooltip', () => {
     const result = flagTooltip('compact', true)
     expect(result).toContain('compact')
@@ -36,27 +22,7 @@ describe('flagTooltip', () => {
     expect(result).toContain('이관')
   })
 
-  it('returns guardrail active tooltip', () => {
-    const result = flagTooltip('guardrail', true)
-    expect(result).toContain('guardrail')
-    expect(result).toContain('active')
-    expect(result).toContain('guardrail 발동됨')
-  })
-
   // ── known flags with on=false ──
-
-  it('returns reflect inactive tooltip', () => {
-    const result = flagTooltip('reflect', false)
-    expect(result).toContain('reflect')
-    expect(result).toContain('inactive')
-    expect(result).toContain('예약된 reflection 없음')
-  })
-
-  it('returns plan inactive tooltip', () => {
-    const result = flagTooltip('plan', false)
-    expect(result).toContain('inactive')
-    expect(result).toContain('예약된 재계획 없음')
-  })
 
   it('returns compact inactive tooltip', () => {
     const result = flagTooltip('compact', false)
@@ -68,12 +34,6 @@ describe('flagTooltip', () => {
     const result = flagTooltip('handoff', false)
     expect(result).toContain('inactive')
     expect(result).toContain('예약된 handoff 없음')
-  })
-
-  it('returns guardrail inactive tooltip', () => {
-    const result = flagTooltip('guardrail', false)
-    expect(result).toContain('inactive')
-    expect(result).toContain('활성 guardrail 없음')
   })
 
   // ── unknown flag ──
@@ -93,10 +53,10 @@ describe('flagTooltip', () => {
   // ── format structure ──
 
   it('includes newline between status and description for known flag', () => {
-    const result = flagTooltip('reflect', true)
+    const result = flagTooltip('compact', true)
     const parts = result.split('\n')
     expect(parts).toHaveLength(2)
-    expect(parts[0]).toContain('reflect (active)')
+    expect(parts[0]).toContain('compact (active)')
     expect(parts[1]!.length).toBeGreaterThan(0)
   })
 

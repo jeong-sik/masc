@@ -20,7 +20,7 @@
 
 The rest of the preamble's OCaml refs were already symbol-anchored and verified accurate:
 - `memory_horizon_of_kind_opt` (strict, line 207), `memory_horizon_of_kind` (back-compat wrapper, line 218 — still has `| None -> mid_term_horizon`), `memory_horizon_of_json_opt` (line 230) — all by name ✓
-- `keeper_memory_bank.ml:append_memory_notes_from_reply`, `keeper_memory_recall.ml:read_recent_memory_texts`, `keeper_compact_policy.ml`, `keeper_compact_audit.ml` — by name/file ✓
+- `keeper_memory_bank.ml:append_memory_notes_from_tool_results`, `keeper_memory_recall.ml:read_recent_memory_texts`, `keeper_compact_policy.ml`, `keeper_compact_audit.ml` — by name/file ✓
 - The "SCOPE DRIFT" note (`memory_horizon_of_kind` routes unknown kinds to `mid_term_horizon` via `| None -> mid_term_horizon`; tracked for the `#8605` strict-`_opt`-plus-warn-wrapper template) — still accurate (the wrapper still defaults; the strict `_opt` exists, the wrapper still doesn't reject) ✓
 
 ## Line-ref drift class — survey across the spec corpus (the reason this iteration was a "sweep candidate")

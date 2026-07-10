@@ -413,8 +413,30 @@ let list_recent_resolved_json ~base_path ?(n = recent_resolved_history_limit) ()
 
 let generate_id () = make_generated_id "appr"
 
+let rec canonical_exact_input = function
+  | `Assoc fields ->
+    fields
+    |> List.map (fun (key, value) -> key, canonical_exact_input value)
+    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
+    |> fun normalized -> `Assoc normalized
+  | `List items -> `List (List.map canonical_exact_input items)
+  | other -> other
+;;
+
 let normalized_input_hash (input : Yojson.Safe.t) =
-  Digestif.SHA256.(digest_string (Yojson.Safe.to_string input) |> to_hex)
+  let canonical = canonical_exact_input input |> Yojson.Safe.to_string in
+  Digestif.SHA256.(digest_string canonical |> to_hex)
+;;
+
+let approved_action_matches_request
+      (approved : Keeper_event_queue.hitl_approved_action)
+      ~keeper_name
+      ~tool_name
+      ~input
+  =
+  String.equal approved.keeper_name keeper_name
+  && String.equal approved.tool_name tool_name
+  && String.equal approved.input_hash (normalized_input_hash input)
 ;;
 
 let first_cmd_token (cmd : string) =
@@ -495,6 +517,7 @@ let create_entry
             closed" (#23716). #23845 reworded it in passing (main red #23901,
             family B). *)
          Keeper_continuation_channel.unrouted "no originating connector")
+      ~lane_policy
       ~audit_base_path
       ~resolver
       ~on_resolution
@@ -531,6 +554,7 @@ let create_entry
   ; disposition
   ; disposition_reason
   ; phase = Awaiting_operator
+  ; lane_policy
   ; continuation_channel
   ; audit_base_path
   ; resolver
@@ -577,6 +601,7 @@ let pending_entry_json_fields
   ; "sandbox_target", `String entry.sandbox_target
   ; "risk_level", `String (risk_level_to_string entry.risk_level)
   ; "phase", `String (pending_phase_to_string entry.phase)
+  ; "lane_policy", `String (lane_policy_to_string entry.lane_policy)
   ; "requested_at", `Float entry.requested_at
   ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
@@ -652,11 +677,12 @@ let broadcast_pending entry =
 
 let record_pending (entry : pending_approval) =
   Log.Keeper.info
-    "HITL_APPROVAL_PENDING: id=%s keeper=%s tool=%s risk=%s"
+    "HITL_APPROVAL_PENDING: id=%s keeper=%s tool=%s risk=%s lane_policy=%s"
     entry.id
     entry.keeper_name
     entry.tool_name
-    (risk_level_to_string entry.risk_level);
+    (risk_level_to_string entry.risk_level)
+    (lane_policy_to_string entry.lane_policy);
   audit_approval_event
     ~base_path:entry.audit_base_path
     ~event_type:approval_audit_pending_event
@@ -836,20 +862,19 @@ let spawn_hitl_summary_worker_on_root_switch ~(entry : pending_approval) =
        record_summary_failure ~id:entry.id ~reason ~retryable:false)
 ;;
 
-(* Wake the keeper that was waiting on this approval. A keeper that enqueued an
-   approval and is now skipping cycles via [has_pending_for_keeper -> Skip
-   Approval_pending] (keeper_world_observation) has no in-process fiber blocked
-   on the resolver promise, so resolving the promise does not resume it. The
-   composition root registers a hook that enqueues a [Hitl_resolved] wake
+(* Wake an independent-cycle Keeper after its approval resolves. A
+   [Nonblocking] approval does not own a suspended fiber or a lifecycle pause,
+   so the composition root registers a hook that enqueues a [Hitl_resolved]
    stimulus — the same async-completion-wake mechanism [Fusion_completed]
    (RFC-0266) and [Bg_completed] (RFC-0290) use — so the keeper re-evaluates
-   immediately instead of stalling until an unrelated stimulus, no-progress
-   recovery, or the 30-minute approval janitor.
+   immediately instead of waiting for an unrelated stimulus, no-progress
+   recovery, or the 30-minute approval janitor. [Blocking] entries resume their
+   own resolver or lifecycle callback and do not call this hook.
 
    Injected as a hook rather than a direct call to break a dependency cycle:
    this module sits below [Keeper_keepalive_signal], which depends on
    [Keeper_world_observation], which depends back on this module for
-   [has_pending_for_keeper]. The default is a no-op so unit tests and
+   [has_blocking_pending_for_keeper]. The default is a no-op so unit tests and
    pre-bootstrap contexts stay wake-free; [Server_bootstrap] installs the real
    [Keeper_keepalive_signal]-backed wake. *)
 let approval_resolution_wake_hook :
@@ -883,8 +908,15 @@ let wake_keeper_on_approval_resolution
       (Printexc.to_string exn)
 ;;
 
-let hitl_resolution_decision_of_approval_decision = function
-  | Agent_sdk.Hooks.Approve -> Keeper_event_queue.Hitl_approved
+let hitl_resolution_decision_of_approval_decision
+      (entry : pending_approval)
+  = function
+  | Agent_sdk.Hooks.Approve ->
+    Keeper_event_queue.Hitl_approved
+      { keeper_name = entry.keeper_name
+      ; tool_name = entry.tool_name
+      ; input_hash = entry.input_hash
+      }
   | Agent_sdk.Hooks.Reject _ -> Keeper_event_queue.Hitl_rejected
   | Agent_sdk.Hooks.Edit _ -> Keeper_event_queue.Hitl_edited
 ;;
@@ -935,19 +967,17 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
            (Printexc.to_string exn))
        (fun () -> f decision)
    | None -> ());
-  (* Blocking approvals (live resolver) resume through the promise above;
-     firing the wake too would double-stimulate the keeper. Only non-blocking
-     approvals (no suspended fiber) need the [Hitl_resolved] wake. #23681
-     collaterally dropped this guard while rewiring channel provenance
-     (main red #23901, family B). *)
-  (match entry.resolver with
-   | Some _ -> ()
-   | None ->
+  (* [Blocking] entries own their continuation: [submit_and_await] resumes its
+     resolver, while lifecycle callbacks resume their paused keeper explicitly.
+     Only [Nonblocking] entries need the durable resolution stimulus. *)
+  (match entry.lane_policy with
+   | Blocking -> ()
+   | Nonblocking ->
      wake_keeper_on_approval_resolution
        ~base_path
        ~keeper_name:entry.keeper_name
        ~approval_id:entry.id
-       ~decision:(hitl_resolution_decision_of_approval_decision decision)
+       ~decision:(hitl_resolution_decision_of_approval_decision entry decision)
        ~channel:entry.channel);
   try
     Sse.broadcast
@@ -985,12 +1015,14 @@ let pending_entry_matches
       ~task_id
       ~goal_id
       ~sandbox_target
+      ~lane_policy
   =
   String.equal entry.keeper_name keeper_name
   && String.equal entry.tool_name tool_name
   && String.equal entry.action_key action_key
   && String.equal entry.input_hash input_hash
   && String.equal entry.sandbox_target sandbox_target
+  && entry.lane_policy = lane_policy
   && entry.task_id = task_id
   && entry.goal_id = goal_id
 ;;
@@ -1004,6 +1036,7 @@ let find_pending_id_in_map
       ~task_id
       ~goal_id
       ~sandbox_target
+      ~lane_policy
   =
   SMap.fold
     (fun id (entry : pending_approval) acc ->
@@ -1020,6 +1053,7 @@ let find_pending_id_in_map
              ~task_id
              ~goal_id
              ~sandbox_target
+             ~lane_policy
          then Some id
          else None)
     map
@@ -1094,6 +1128,7 @@ let submit_and_await
       ?disposition
       ?disposition_reason
       ?continuation_channel
+      ~lane_policy:Blocking
       ~audit_base_path:base_path
       ~resolver:(Some resolver)
       ~on_resolution:None
@@ -1225,6 +1260,7 @@ let submit_pending
       ?disposition
       ?disposition_reason
       ?continuation_channel
+      ?(lane_policy = Nonblocking)
       ~on_resolution
       ()
   : string
@@ -1248,6 +1284,7 @@ let submit_pending
         ~task_id
         ~goal_id
         ~sandbox_target
+        ~lane_policy
     with
     | Some id -> id
     | None ->
@@ -1267,14 +1304,15 @@ let submit_pending
           ?sandbox_profile
           ?backend
           ?runtime_contract
-      ?selected_model
-      ?disposition
-      ?disposition_reason
-      ?continuation_channel
-      ~audit_base_path:base_path
-      ~resolver:None
-      ~on_resolution:(Some on_resolution)
-      ()
+          ?selected_model
+          ?disposition
+          ?disposition_reason
+          ?continuation_channel
+          ~lane_policy
+          ~audit_base_path:base_path
+          ~resolver:None
+          ~on_resolution:(Some on_resolution)
+          ()
       in
       let updated = SMap.add id entry map in
       if Atomic.compare_and_set pending map updated
@@ -1453,6 +1491,25 @@ let pending_count_for_keeper ~keeper_name : int =
     0
 ;;
 
+(* [lane_policy] is explicit because a non-suspending callback can still own a
+   lifecycle continuation (for example, a persisted partial-commit gate).
+   Keep that distinction typed at the queue boundary instead of inferring lane
+   ownership from a resolver or from tool names. *)
+let blocking_pending_count_for_keeper ~keeper_name : int =
+  SMap.fold
+    (fun _ (entry : pending_approval) count ->
+       if String.equal entry.keeper_name keeper_name
+          && entry.lane_policy = Blocking
+       then count + 1
+       else count)
+    (Atomic.get pending)
+    0
+;;
+
+let has_blocking_pending_for_keeper ~keeper_name : bool =
+  blocking_pending_count_for_keeper ~keeper_name > 0
+;;
+
 let has_pending_for_keeper ~keeper_name : bool =
   SMap.fold
     (fun _ (entry : pending_approval) acc ->
@@ -1534,14 +1591,13 @@ let expire_stale ~max_wait_s =
          ?disposition_reason:entry.disposition_reason
          ~decision:(Approval_expired reason)
          ();
-       (* Expiry clears the [Approval_pending] skip just like a resolution.
-          Blocking entries resume via the resolver promise below; only
-          non-blocking entries (no suspended fiber) need the wake, or the
-          keeper stays stalled until an unrelated stimulus. #23681 dropped
-          this resolver guard (main red #23901, family B). *)
-       (match entry.resolver with
-        | Some _ -> ()
-        | None ->
+       (* Expiry clears the [Approval_pending] skip for [Nonblocking] entries,
+          so those keepers need the same wake or they stay stalled until an
+          unrelated stimulus. A [Blocking] resolver/callback receives
+          [Reject reason] through its own continuation. *)
+       (match entry.lane_policy with
+        | Blocking -> ()
+        | Nonblocking ->
           wake_keeper_on_approval_resolution
             ~base_path:entry.audit_base_path
             ~keeper_name:entry.keeper_name

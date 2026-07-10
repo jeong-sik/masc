@@ -129,7 +129,6 @@ export interface Message {
 
 type BoardPostMeta = Record<string, unknown> & {
   source?: string | null
-  state_block?: string | null
   classification_reason?: string | null
   judgment?: unknown
 }
@@ -708,7 +707,6 @@ export interface KeeperDiagnostic {
   summary?: string
   keepalive_running?: boolean
   continuity_state?: KeeperContinuityState | null
-  continuity_summary?: string | null
 }
 
 export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
@@ -771,7 +769,6 @@ export interface KeeperConversationDetails {
   usage?: KeeperConversationUsage | null
   skillPrimary?: string | null
   skillReason?: string | null
-  stateBlock?: string | null
   replyText?: string | null
   turnOutcome?: KeeperTurnOutcome | null
   rawPayload?: unknown
@@ -1099,36 +1096,9 @@ export interface MetricsWindow {
   intervention_share?: number
   intervention_per_turn?: number
 
-  // -- Automation counts & rates --
-  auto_reflect_count?: number
-  auto_plan_count?: number
-  auto_compact_count?: number
-  auto_handoff_count?: number
-  guardrail_stop_count?: number
-  auto_reflect_rate?: number
-  auto_plan_rate?: number
-  auto_compact_rate?: number
-  auto_handoff_rate?: number
-  guardrail_stop_rate?: number
-
   // -- Drift --
   drift_applied_count?: number
   drift_applied_rate?: number
-
-  // -- Alignment quality --
-  repetition_risk_avg?: number
-  goal_alignment_avg?: number
-  response_alignment_avg?: number
-  goal_drift_avg?: number
-
-  // -- Proactive preview similarity --
-  proactive_preview_sample_count?: number
-  proactive_preview_pair_count?: number
-  proactive_preview_similarity_avg?: number
-  proactive_preview_similarity_max?: number
-  proactive_preview_similarity_warn?: boolean
-  proactive_preview_similarity_method?: string
-  proactive_preview_similarity_window?: number
 
   // -- Tool --
   tool_call_count?: number
@@ -1277,13 +1247,7 @@ export interface Keeper {
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null
-  social_model?: string | null
-  configured_social_model?: string | null
-  social_model_recognized?: boolean | null
-  social_model_fallback?: string | null
-  last_speech_act?: string | null
   last_blocker?: string | null
-  last_need?: string | null
   last_drift_reason?: string | null
   drift_count_total?: number
   runtime_warning_ctx_ratio?: number | null
@@ -1437,7 +1401,6 @@ export interface KeeperConditions {
   stop_requested: boolean
   restart_budget_remaining: boolean
   backoff_elapsed: boolean
-  guardrail_triggered: boolean
   drain_complete: boolean
   context_overflow: boolean
   compact_retry_exhausted: boolean

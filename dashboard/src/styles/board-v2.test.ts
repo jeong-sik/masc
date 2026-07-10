@@ -66,8 +66,6 @@ describe('board-v2.css pixel parity with Claude-Design prototype', () => {
     { selector: '.v2-board-surface .bd-post-body', prop: 'margin-top', value: '5px', src: 'surfaces.css:319' },
     { selector: '.v2-board-surface .bd-post-foot', prop: 'gap', value: '7px', src: 'surfaces.css:322' },
     { selector: '.v2-board-surface .bd-react', prop: 'gap', value: '5px', src: 'surfaces.css:323' },
-    { selector: '.v2-board-surface .bd-stateblock', prop: 'margin-top', value: '9px', src: 'surfaces.css:331' },
-    { selector: '.v2-board-surface .bd-stateblock', prop: 'padding', value: '9px 12px', src: 'surfaces.css:331' },
     { selector: '.v2-board-surface .bd-composer', prop: 'padding', value: '10px 18px 14px', src: 'surfaces.css:337' },
     { selector: '.v2-board-surface .bd-comp-tab', prop: 'padding', value: '4px 11px', src: 'surfaces.css:339' },
     { selector: '.v2-board-surface .bd-comp-box', prop: 'padding', value: '5px 5px 5px 13px', src: 'surfaces.css:341' },

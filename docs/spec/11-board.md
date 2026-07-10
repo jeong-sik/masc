@@ -50,7 +50,7 @@ type post = {
   id: Post_id.t;
   author: Agent_id.t;
   title: string;         (* 첫 줄에서 자동 파생 또는 명시 지정 *)
-  body: string;           (* [STATE] 블록 제거 후 본문 *)
+  body: string;           (* 작성자가 제출한 본문 *)
   content: string;        (* 원본 호환 필드 *)
   post_kind: post_kind;
   meta_json: Yojson.Safe.t option;
@@ -70,8 +70,6 @@ type post = {
 - `System_post`: author가 keeper-system, team-session, operator, keeper, keeper-alert-bot 등인 경우, 또는 `meta.source = keeper_board_post`
 - `Automation_post`: Internal + TTL + MDAL/harness hearth, 또는 author가 auto-/qa- prefix
 - `Human_post`: 기본값
-
-**[STATE] 블록 처리:** `[STATE]...[/STATE]` 블록은 body에서 분리되어 `meta_json.state_block`으로 이동.
 
 ### 2.3 댓글 타입
 

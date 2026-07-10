@@ -73,7 +73,6 @@ VARIABLES
     stop_requested,
     restart_budget_remaining,
     backoff_elapsed,
-    guardrail_triggered,
     drain_complete,
     restart_count
 
@@ -81,7 +80,7 @@ vars == <<fiber_alive, heartbeat_healthy, turn_healthy,
           manual_reconcile_required,
           compaction_active, handoff_active, operator_paused,
           stop_requested, restart_budget_remaining, backoff_elapsed,
-          guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 \* ── Phase Derivation (matching OCaml derive_phase) ──────
 
@@ -92,7 +91,6 @@ DerivePhase ==
     ELSE IF ~fiber_alive /\ restart_budget_remaining /\ backoff_elapsed THEN "Restarting"
     ELSE IF ~fiber_alive /\ restart_budget_remaining THEN "Crashed"
     ELSE IF stop_requested THEN "Draining"
-    ELSE IF guardrail_triggered THEN "Failing"
     ELSE IF operator_paused THEN "Paused"
     ELSE IF handoff_active THEN "HandingOff"
     ELSE IF compaction_active THEN "Compacting"
@@ -143,7 +141,6 @@ Init ==
     /\ stop_requested = FALSE
     /\ restart_budget_remaining = TRUE
     /\ backoff_elapsed = FALSE
-    /\ guardrail_triggered = FALSE
     /\ drain_complete = FALSE
     /\ restart_count = 0
 
@@ -155,7 +152,7 @@ HeartbeatOk ==
     /\ UNCHANGED <<fiber_alive, turn_healthy, manual_reconcile_required,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 HeartbeatFailed ==
     /\ NotTerminal /\ fiber_alive
@@ -163,7 +160,7 @@ HeartbeatFailed ==
     /\ UNCHANGED <<fiber_alive, turn_healthy, manual_reconcile_required,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 \* CRITICAL DIFFERENCE from KeeperStateMachine.tla:
 \* TurnSucceeded does NOT clear manual_reconcile_required.
@@ -174,7 +171,7 @@ TurnSucceeded ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, manual_reconcile_required,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 TurnFailed ==
     /\ NotTerminal /\ fiber_alive
@@ -182,7 +179,7 @@ TurnFailed ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, manual_reconcile_required,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 ManualReconcileRequired ==
     /\ NotTerminal /\ fiber_alive
@@ -190,7 +187,7 @@ ManualReconcileRequired ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 \* Explicit clear of manual_reconcile_required.
 \* OCaml: Manual_reconcile_cleared -> { c with manual_reconcile_required = false }
@@ -200,7 +197,7 @@ ManualReconcileCleared ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 \* HeartbeatRecovery: the FIXED code path from keeper_heartbeat_snapshot.ml:write_heartbeat_snapshot.
 \* Dispatches Heartbeat_ok + Turn_succeeded + Manual_reconcile_cleared atomically.
@@ -214,7 +211,7 @@ HeartbeatRecovery ==
     /\ manual_reconcile_required' = FALSE
     /\ UNCHANGED <<fiber_alive, compaction_active, handoff_active,
                    operator_paused, stop_requested, restart_budget_remaining,
-                   backoff_elapsed, guardrail_triggered, drain_complete,
+                   backoff_elapsed, drain_complete,
                    restart_count>>
 
 \* BugHeartbeatRecovery: the OLD code (pre-fix).
@@ -228,7 +225,7 @@ BugHeartbeatRecovery ==
     /\ manual_reconcile_required' = TRUE  \* BUG: not cleared
     /\ UNCHANGED <<fiber_alive, compaction_active, handoff_active,
                    operator_paused, stop_requested, restart_budget_remaining,
-                   backoff_elapsed, guardrail_triggered, drain_complete,
+                   backoff_elapsed, drain_complete,
                    restart_count>>
 
 CompactionStarted ==
@@ -238,7 +235,7 @@ CompactionStarted ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 CompactionCompleted ==
     /\ NotTerminal /\ compaction_active
@@ -246,7 +243,7 @@ CompactionCompleted ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 HandoffStarted ==
     /\ NotTerminal /\ fiber_alive
@@ -255,7 +252,7 @@ HandoffStarted ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, compaction_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 HandoffCompleted ==
     /\ NotTerminal /\ handoff_active
@@ -263,7 +260,7 @@ HandoffCompleted ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, compaction_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 OperatorPause ==
     /\ NotTerminal /\ fiber_alive
@@ -271,7 +268,7 @@ OperatorPause ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, compaction_active, handoff_active,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 OperatorResume ==
     /\ NotTerminal /\ operator_paused
@@ -279,7 +276,7 @@ OperatorResume ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, compaction_active, handoff_active,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 StopRequested ==
     /\ NotTerminal /\ ~stop_requested
@@ -287,7 +284,7 @@ StopRequested ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, compaction_active, handoff_active,
                    operator_paused, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 DrainCompleteEv ==
     /\ NotTerminal /\ stop_requested /\ ~drain_complete
@@ -296,7 +293,8 @@ DrainCompleteEv ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, compaction_active, handoff_active,
                    operator_paused, stop_requested, restart_budget_remaining,
-                   backoff_elapsed, guardrail_triggered, restart_count>>
+                   backoff_elapsed,
+                   restart_count>>
 
 FiberTerminated ==
     /\ NotTerminal /\ fiber_alive
@@ -304,7 +302,7 @@ FiberTerminated ==
     /\ UNCHANGED <<heartbeat_healthy, turn_healthy, manual_reconcile_required,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 FiberStarted ==
     /\ NotTerminal /\ ~fiber_alive /\ restart_budget_remaining
@@ -315,7 +313,6 @@ FiberStarted ==
     /\ compaction_active' = FALSE
     /\ handoff_active' = FALSE
     /\ backoff_elapsed' = FALSE
-    /\ guardrail_triggered' = FALSE
     /\ drain_complete' = FALSE
     /\ stop_requested' = FALSE
     /\ UNCHANGED <<operator_paused, restart_budget_remaining, restart_count>>
@@ -329,7 +326,7 @@ SupervisorRestartAttempt ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, compaction_active, handoff_active,
                    operator_paused, stop_requested, restart_budget_remaining,
-                   guardrail_triggered, drain_complete>>
+                   drain_complete>>
 
 RestartBudgetExhausted ==
     /\ NotTerminal /\ restart_budget_remaining
@@ -337,15 +334,7 @@ RestartBudgetExhausted ==
     /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
                    manual_reconcile_required, compaction_active, handoff_active,
                    operator_paused, stop_requested, backoff_elapsed,
-                   guardrail_triggered, drain_complete, restart_count>>
-
-GuardrailStop ==
-    /\ NotTerminal /\ fiber_alive
-    /\ guardrail_triggered' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required, compaction_active, handoff_active,
-                   operator_paused, stop_requested, restart_budget_remaining,
-                   backoff_elapsed, drain_complete, restart_count>>
+                   drain_complete, restart_count>>
 
 \* ── Next State (FIXED code) ──────────────────────────────
 
@@ -362,7 +351,6 @@ Next ==
     \/ FiberTerminated    \/ FiberStarted
     \/ SupervisorRestartAttempt
     \/ RestartBudgetExhausted
-    \/ GuardrailStop
 
 \* Buggy Next: HeartbeatRecovery replaced with BugHeartbeatRecovery
 \* and ManualReconcileCleared is removed (old code had no explicit clear
@@ -380,7 +368,6 @@ NextBuggy ==
     \/ FiberTerminated    \/ FiberStarted
     \/ SupervisorRestartAttempt
     \/ RestartBudgetExhausted
-    \/ GuardrailStop
 
 \* ── Fairness ──────────────────────────────────────────────
 
@@ -485,7 +472,6 @@ TypeOK ==
     /\ stop_requested \in BOOLEAN
     /\ restart_budget_remaining \in BOOLEAN
     /\ backoff_elapsed \in BOOLEAN
-    /\ guardrail_triggered \in BOOLEAN
     /\ drain_complete \in BOOLEAN
     /\ restart_count \in 0..MaxRestarts+1
     /\ Phase \in {"Offline", "Running", "Failing", "Compacting",

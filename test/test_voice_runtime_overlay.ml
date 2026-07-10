@@ -407,7 +407,7 @@ let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
     rows
     |> List.find_opt (fun row ->
       row.Masc.Keeper_memory_bank.source = Masc.Keeper_memory_bank.Voice_output
-      && String.equal row.kind "progress"
+      && row.kind = Masc.Keeper_memory_bank.Progress
       && String.equal row.text message)
   in
   match row with

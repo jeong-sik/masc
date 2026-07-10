@@ -205,7 +205,7 @@ let blueprint_of_route : Route.t -> blueprint = function
       title = "social board";
       tail = "· speech";
       signal = "claim · block · ask · note";
-      source = "board posts · keeper social model";
+      source = "board posts · task ownership";
       cadence = "live stream";
       vow =
         "Agent speech should surface urgency, blockers, and accountable claims \

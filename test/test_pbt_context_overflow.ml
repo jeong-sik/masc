@@ -711,6 +711,65 @@ let test_checkpoint_save_repair_drops_unpaired_tool_blocks () =
     false
     (text_contains "unpaired tool use elided" texts)
 
+let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
+  let assistant : Agent_sdk.Types.message =
+    { role = Agent_sdk.Types.Assistant
+    ; content =
+        [ Agent_sdk.Types.Text "old visible reply"
+        ; Agent_sdk.Types.Thinking
+            { signature = Some "sig"; content = "typed reasoning block" }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let context =
+    KC.create ~eio:false ~system_prompt:"system" ~max_tokens:4096
+    |> fun ctx -> KC.append_many ctx [ user_text "question"; assistant ]
+  in
+  let checkpoint = KC.checkpoint_of_context context in
+  let checkpoint =
+    { checkpoint with
+      Agent_sdk.Checkpoint.working_context =
+        Some (`Assoc [ "runtime_payload", `String "stale" ])
+    }
+  in
+  let patched =
+    KC.patch_checkpoint_last_assistant
+      checkpoint
+      ~session_id:"unified-session"
+      ~response_text:"final visible reply"
+  in
+  Alcotest.(check string)
+    "session id"
+    "unified-session"
+    patched.Agent_sdk.Checkpoint.session_id;
+  Alcotest.(check bool)
+    "working context is cleared after finalization"
+    true
+    (Option.is_none patched.Agent_sdk.Checkpoint.working_context);
+  let texts = text_blocks patched.Agent_sdk.Checkpoint.messages in
+  Alcotest.(check bool)
+    "final visible reply replaces prior assistant text"
+    true
+    (text_contains "final visible reply" texts);
+  Alcotest.(check bool)
+    "prior assistant text removed"
+    false
+    (text_contains "old visible reply" texts);
+  let thinking_preserved =
+    patched.Agent_sdk.Checkpoint.messages
+    |> List.exists (fun message ->
+      List.exists
+        (function
+          | Agent_sdk.Types.Thinking { content; _ } ->
+            String.equal content "typed reasoning block"
+          | _ -> false)
+        message.Agent_sdk.Types.content)
+  in
+  Alcotest.(check bool) "typed non-text block preserved" true thinking_preserved
+
 let test_pair_repair_drops_empty_structural_messages_with_stats () =
   let messages =
     [ user_text "q"
@@ -840,6 +899,10 @@ let () =
         test_checkpoint_sanitize_preserves_pair_repair_stats;
       Alcotest.test_case "checkpoint save repair drops unpaired tool blocks" `Quick
         test_checkpoint_save_repair_drops_unpaired_tool_blocks;
+      Alcotest.test_case
+        "checkpoint patch keeps typed blocks and visible reply"
+        `Quick
+        test_checkpoint_patch_updates_visible_text_and_clears_working_context;
       Alcotest.test_case "pair repair drops empty structural messages with stats" `Quick
         test_pair_repair_drops_empty_structural_messages_with_stats;
       Alcotest.test_case "pair repair caps diagnostic sample strings" `Quick

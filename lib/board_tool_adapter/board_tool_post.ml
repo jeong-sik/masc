@@ -50,9 +50,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "Title must not be empty or whitespace-only"
   | _ ->
-    let body_arg =
-      get_string_opt args "body" |> Option.map Board_tool_format.strip_state_blocks_text
-    in
+    let body_arg = get_string_opt args "body" in
     let raw_content =
       match body_arg with
       | Some value -> value
@@ -60,26 +58,25 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
     in
     let sources = Board_tool_format.source_entries_arg args in
     let content =
-      let stripped = Board_tool_format.strip_state_blocks_text raw_content in
       let content =
-        match Board_tool_format.detect_truncated_markdown_with_reason stripped with
+        match Board_tool_format.detect_truncated_markdown_with_reason raw_content with
         | Some reason ->
           let author_label =
             match get_string_opt args "author" |> Option.map String.trim with
             | Some a when not (String.equal a "") -> a
             | _ -> "unknown"
           in
-          (* #9777: body_len is the LLM's own output length AFTER state-block
-             stripping, not a MASC-imposed limit. The signal name explains
+          (* #9777: body_len is the model's own output length, not a MASC-imposed
+             limit. The signal name explains
              which structural pattern triggered the marker. *)
           Log.BoardLog.warn
             "board_post: detected truncated markdown (author=%s body_len=%d signal=%s) — \
              appending 잘림 marker"
             author_label
-            (String.length stripped)
+            (String.length raw_content)
             (Board_tool_format.truncation_signal_to_string reason);
-          stripped ^ "\n\n_…[잘림 — LLM 출력이 중간에 끊겼습니다]_"
-        | None -> stripped
+          raw_content ^ "\n\n_…[잘림 — LLM 출력이 중간에 끊겼습니다]_"
+        | None -> raw_content
       in
       match sources with
       | Some entries when not (String.equal (String.trim content) "") ->
@@ -230,19 +227,14 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
 
 let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
-  (* Mirror create's body/content handling: strip [STATE] blocks at the tool
-     boundary (an LLM output artifact) and let [body] win over [content]. The
-     core then re-normalizes against the existing meta; via this tool path the
-     body carries no state block, so meta is preserved. *)
-  let body_arg =
-    get_string_opt args "body" |> Option.map Board_tool_format.strip_state_blocks_text
-  in
+  (* Mirror create's body/content handling and let [body] win over [content]. *)
+  let body_arg = get_string_opt args "body" in
   let raw_content =
     match body_arg with
     | Some value -> value
     | None -> get_string args "content" ""
   in
-  let content = Board_tool_format.strip_state_blocks_text raw_content in
+  let content = raw_content in
   let body = Option.map (fun _ -> content) body_arg in
   (* A blank/absent title means "re-derive from the new body"; only a non-empty
      title overrides. *)

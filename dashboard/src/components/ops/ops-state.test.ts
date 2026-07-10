@@ -20,11 +20,7 @@ import {
   selectedKeeperName,
   keeperMessage,
   hydratedWorkflowId,
-  ensureStateBlockDraft,
-  hasStateBlock,
   persistActorName,
-  stateBlockKeys,
-  STATE_BLOCK_TEMPLATE,
 } from './ops-state'
 
 describe('ops-state', () => {
@@ -65,30 +61,4 @@ describe('ops-state', () => {
     expect(actorName.value).toBe('persisted-actor')
   })
 
-  it('extracts structured state block keys', () => {
-    const message = '[STATE]\nGoal: ship\nPhase: review\nNEXT: watch CI\nBlocker: none\nOpenQuestions: risk?\nConstraints: no downtime\n[/STATE]'
-    expect(stateBlockKeys(message)).toEqual(['Goal', 'NEXT', 'OpenQuestions', 'Constraints'])
-    expect(hasStateBlock(message)).toBe(true)
-    expect(hasStateBlock(STATE_BLOCK_TEMPLATE)).toBe(false)
-    expect(hasStateBlock('[STATE]\nPhase: review\nBlocker: none\n[/STATE]')).toBe(false)
-    expect(hasStateBlock('Goal: ship')).toBe(false)
-  })
-
-  it('rejects state labels the backend parser does not understand', () => {
-    const message = '[STATE]\nGoal : ship\nOpen Questions: risk?\nOpenQuestions: accepted\n[/STATE]'
-    expect(stateBlockKeys(message)).toEqual(['OpenQuestions'])
-  })
-
-  it('appends the state template without duplicating an existing block', () => {
-    expect(ensureStateBlockDraft('')).toBe(STATE_BLOCK_TEMPLATE)
-    expect(ensureStateBlockDraft('Heads up')).toBe(`Heads up\n\n${STATE_BLOCK_TEMPLATE}`)
-    expect(ensureStateBlockDraft(STATE_BLOCK_TEMPLATE)).toBe(STATE_BLOCK_TEMPLATE)
-  })
-
-  it('requires canonical uppercase state block tags', () => {
-    const lower = '[state]\nGoal: ship\n[/state]'
-    expect(stateBlockKeys(lower)).toEqual([])
-    expect(hasStateBlock(lower)).toBe(false)
-    expect(ensureStateBlockDraft(lower)).toBe(`${lower}\n\n${STATE_BLOCK_TEMPLATE}`)
-  })
 })

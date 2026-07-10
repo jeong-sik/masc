@@ -41,7 +41,7 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired su
 | Workspace and task hygiene | Done | Front door | `docs/spec/C-implementation-status.md`, `README.md` | docs were too spread out | keep as default entry path |
 | Worktree and collision control | Done | Front door | README, workspace/tool coverage, live usage | onboarding clarity | keep in front-door docs |
 | Supervised execution + Supervisor | Working | Advanced | `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
-| Keeper continuity | Not done for product promise | Advanced | `docs/design/keeper-continuity-product-rfc.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | checkpoint truth and bounded contract are not productized yet | ship as bounded same-trace continuity with explicit runbook |
+| Keeper continuity | Working | Advanced | `docs/KEEPER-STATE-OWNERSHIP.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | live restore and independent-lane evidence must remain observable | validate typed checkpoint restore and domain receipts with the runbook |
 | Dashboard core read models | Working | Supporting | — | transport truth and config visibility gaps | harden read truth and config introspection |
 | Remote-safe operator | Working | Supporting | `docs/spec/09-server-transport.md`, `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` | auth and release posture still need tightening | keep surface reduced and explicit |
 | Multi-transport matrix | Working but not front-door | Experimental | implementation status appendix, live transport issues | reachable state and reported state can diverge | fix health truth before promotion |

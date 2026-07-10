@@ -111,16 +111,6 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
       slot
         ~active:true
         ~source:"keeper_hooks_oas"
-        ~features:[ "repeated_tool_nudge"; "idle_skip" ]
-        "on_idle";
-      slot
-        ~active:true
-        ~source:"keeper_hooks_oas"
-        ~effects:[ "idle_escalation_metric" ]
-        "on_idle_escalated";
-      slot
-        ~active:true
-        ~source:"keeper_hooks_oas"
         ~effects:[ "wirein_failure_metric"; "keeper_error_log" ]
         "on_error";
       slot

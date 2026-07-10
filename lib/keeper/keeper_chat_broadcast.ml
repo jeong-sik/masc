@@ -106,3 +106,24 @@ let chat_appended ~keeper_name ~source ?content () =
 let chat_appended_with_audio ~keeper_name ~source ~audio ?content () =
   do_broadcast ~keeper_name ~source ~audio:(Some audio) ?content ()
 
+let queue_changed ~keeper_name ~depth () =
+  try
+    Sse.broadcast
+      (`Assoc
+        [ ("type", `String "keeper_chat_queue_changed");
+          ("name", `String keeper_name);
+          ("depth", `Int depth);
+          ("ts_unix", `Float (Time_compat.now ()));
+        ])
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string SseBroadcastFailures)
+      ~labels:[ ("keeper", keeper_name); ("site", "queue_changed") ]
+      ();
+    Log.Keeper.warn
+      "keeper_chat_broadcast: queue_changed name=%s failed: %s"
+      keeper_name
+      (Printexc.to_string exn)
+

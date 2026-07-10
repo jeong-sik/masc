@@ -580,13 +580,13 @@ function normalizeMetricsWindow(raw: unknown): Keeper['metrics_window'] | undefi
       continue
     }
 
-    // Booleans (e.g. proactive_preview_similarity_warn)
+    // Booleans
     if (typeof value === 'boolean') {
       normalized[key] = value
       continue
     }
 
-    // Strings (e.g. primary_model, proactive_preview_similarity_method)
+    // Strings
     if (typeof value === 'string' && value.trim() !== '') {
       normalized[key] = value
     }
@@ -773,13 +773,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         live_activity: normalizeKeeperLiveActivity(row.live_activity),
         current_gate: normalizeKeeperCurrentGate(row.current_gate),
         last_proactive_preview: asString(row.last_proactive_preview) ?? null,
-        social_model: null,
-        configured_social_model: null,
-        social_model_recognized: asBoolean(row.social_model_recognized) ?? null,
-        social_model_fallback: null,
-        last_speech_act: asString(row.last_speech_act) ?? null,
         last_blocker: asString(row.last_blocker) ?? null,
-        last_need: asString(row.last_need) ?? null,
         runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
         context_ratio: contextRatio,
         context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),

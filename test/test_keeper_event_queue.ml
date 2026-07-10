@@ -1,6 +1,12 @@
 let temp_dir prefix =
   Filename.temp_dir prefix ""
 
+let approved_action : Keeper_event_queue.hitl_approved_action =
+  { keeper_name = "keeper-hitl-test"
+  ; tool_name = "keeper_continue_after_reconcile"
+  ; input_hash = String.make 64 'a'
+  }
+
 let rec rm_rf path =
   if Sys.file_exists path
   then
@@ -271,17 +277,27 @@ let () =
        (stimulus_to_yojson
           { post_id =
               hitl_resolution_post_id
-                { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
+                { approval_id = "appr-9"
+                ; decision = Hitl_approved approved_action
+                ; channel = Keeper_continuation_channel.unrouted "test"
+                }
           ; urgency = Immediate
           ; arrived_at = 4.0
-          ; payload = Hitl_resolved { approval_id = "appr-9"; decision = Hitl_approved; channel = Keeper_continuation_channel.unrouted "test" }
+          ; payload =
+              Hitl_resolved
+                { approval_id = "appr-9"
+                ; decision = Hitl_approved approved_action
+                ; channel = Keeper_continuation_channel.unrouted "test"
+                }
           })
    with
    | Ok s ->
      (match s.payload with
-      | Hitl_resolved { approval_id; decision } ->
+      | Hitl_resolved { approval_id; decision = Hitl_approved action } ->
         assert (String.equal approval_id "appr-9");
-        assert (decision = Hitl_approved);
+        assert (String.equal action.keeper_name approved_action.keeper_name);
+        assert (String.equal action.tool_name approved_action.tool_name);
+        assert (String.equal action.input_hash approved_action.input_hash);
         assert (String.equal s.post_id "hitl-approval:appr-9")
       | _ -> Alcotest.fail "Hitl_resolved codec round-trip changed payload shape")
   | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));
@@ -1094,7 +1110,7 @@ let () =
      ; payload =
          Hitl_resolved
            { approval_id = "a"
-           ; decision = Hitl_approved
+           ; decision = Hitl_approved approved_action
            ; channel = Keeper_continuation_channel.unrouted "seed"
            }
      }

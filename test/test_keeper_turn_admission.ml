@@ -406,13 +406,15 @@ let test_autonomous_yields_to_queued_connector_message () =
      without parking on the admission slot, so [chat_waiting] stays false. The
      autonomous lane must still yield, or a long/back-to-back autonomous turn
      busy-ACKs the connector forever (the starvation this pins). *)
-  Keeper_chat_queue.enqueue ~keeper_name
-    { Keeper_chat_queue.content = "deferred slack mention"
-    ; user_blocks = []
-    ; attachments = []
-    ; timestamp = 1.0
-    ; source = Keeper_chat_queue.Slack { channel = "C-test"; user_id = "U-test" }
-    };
+  ignore
+    (Keeper_chat_queue.enqueue ~keeper_name
+       { Keeper_chat_queue.content = "deferred slack mention"
+       ; user_blocks = []
+       ; attachments = []
+       ; timestamp = 1.0
+       ; source = Keeper_chat_queue.Slack { channel = "C-test"; user_id = "U-test" }
+       }
+      : string);
   check "queue depth is 1 after enqueue" (Keeper_chat_queue.length ~keeper_name = 1);
   check
     "a queued connector message is not a parked chat"
@@ -423,8 +425,13 @@ let test_autonomous_yields_to_queued_connector_message () =
    | `Ran () ->
      check "run_if_free must not admit while a connector message is queued" false);
   (* Draining the queue (what the consumer does in the yielded window) lets the
-     autonomous lane run again. *)
-  ignore (Keeper_chat_queue.dequeue_batch ~keeper_name);
+     autonomous lane run again. [length] excludes a leased-but-unacked batch
+     just like it excluded a dequeued one, so leasing alone (no ack needed)
+     is enough to reproduce that window here. *)
+  (match Keeper_chat_queue.lease_batch ~keeper_name with
+   | `Leased _ -> ()
+   | `Empty | `Already_leased _ | `Persist_failed _ ->
+     check "lease_batch drains the queued connector message" false);
   check "queue empty after drain" (Keeper_chat_queue.length ~keeper_name = 0);
   match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "ok") with
   | `Ran "ok" -> check "run_if_free admits again once the queue is drained" true

@@ -17,6 +17,19 @@ module Metrics = Masc.Otel_metric_store
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
+(* #23956 makes nonblocking approval resolution fail closed when no delivery
+   hook is installed. This suite drives [AQ.resolve] to exercise the retry
+   classifier, not to assert on delivery, so install a no-op wake hook.
+   Delivery semantics are covered in [test_keeper_approval_queue.ml].
+   (WORKAROUND: per-file install mirrors [test_keeper_repo_claim_hitl.ml] and
+   [test_keeper_event_queue.ml] from #23989; the root fix is a shared default
+   hook in [test_common], tracked as N-of-M debt in the consolidation PR.) *)
+let () =
+  AQ.set_approval_resolution_wake_hook
+    (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
+      Ok (fun () -> ()))
+;;
+
 let reason_testable =
   let pp ppf reason = Format.pp_print_string ppf (D.to_telemetry_key reason) in
   Alcotest.testable pp ( = )

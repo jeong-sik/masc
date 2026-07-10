@@ -16,7 +16,6 @@ type sort_order = Board_dispatch.sort_order =
   | Updated
   | Discussed
 
-val strip_state_blocks_text : string -> string
 val raw_agent_name_meta_key : field:string -> string
 val author_raw_agent_name_meta_key : string
 val format_timestamp_relative : float -> string

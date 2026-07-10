@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
-import { AtSign, Braces, Mic, Paperclip, Sparkles, Square, Trophy, X } from 'lucide-preact'
+import { AtSign, Mic, Paperclip, Sparkles, Square, Trophy, X } from 'lucide-preact'
 import { ActionButton } from '../common/button'
 import { SectionCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
@@ -12,7 +12,6 @@ import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
 import { RichContent } from '../common/rich-content'
 import { CursorPagination } from '../common/pagination'
-import { stripStateBlocks } from '../../keeper-message'
 import { route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
 import { votePost } from '../../api/board'
@@ -29,7 +28,6 @@ import { PostDetail, CommentThread, CommentForm } from './post-detail'
 import { FusionBoardEvidence } from './fusion-evidence'
 import { ReactionBar } from './reaction-bar'
 import { PostShareActions } from './post-share-actions'
-import { StateBlockMessages } from './state-block-messages'
 import {
   appendVoiceTranscriptDraft,
   composerAttachmentDeliveryReason,
@@ -42,7 +40,6 @@ import {
 import type { ComposerAttachmentDraft, ComposerV2Mode } from './composer-v2'
 import { stableAttachmentId } from '../chat/attachments'
 import { useVoiceInput } from '../chat/voice-input'
-import { ensureStateBlockDraft, stateBlockKeys } from '../ops/ops-state'
 import { navigateBoard } from './board-route'
 import {
   boardActorDisplayName,
@@ -96,10 +93,8 @@ import {
   boardSortMode,
   boardComposerMode,
   SORT_MODES,
-  postHasStateBlock,
-  getPostStateBlock,
 } from './board-state'
-import type { BoardPost, BoardSortMode, ContentCategory, ParsedStateBlock } from './board-state'
+import type { BoardPost, BoardSortMode, ContentCategory } from './board-state'
 
 export const BOARD_DETAIL_WIDTH_STORAGE_KEY = 'dashboard:board-detail-width'
 export const BOARD_DETAIL_WIDTH_DEFAULT = 360
@@ -362,22 +357,10 @@ function BdAuthor({ label, size = 24 }: { label: string; size?: number }) {
   return html`<span class=${`bd-sigil ${isOperator ? 'op' : ''}`} style=${{ width: size, height: size }}>${sigil}</span>`
 }
 
-// ── State block chip (v2) ──────────────────────────────────────────
-function BdStateBlock({ block }: { block: ParsedStateBlock }) {
-  return html`
-    <div class="bd-stateblock" data-testid="bd-stateblock">
-      ${block.from ? html`<span class="sk">상태 전이</span><span class="sv">${block.from} → <span class="hl">${block.to}</span></span>` : null}
-      ${!block.from && block.to ? html`<span class="sk">다음 상태</span><span class="sv"><span class="hl">${block.to}</span></span>` : null}
-      ${block.ctx ? html`<span class="sk">컨텍스트</span><span class="sv">${block.ctx}</span>` : null}
-      ${block.action ? html`<span class="sk">조치</span><span class="sv">${block.action}</span>` : null}
-    </div>
-  `
-}
-
 // ── Post card (v2 list item) ───────────────────────────────────────
 function PostCard({ post }: { post: BoardPost }) {
   const isDeleting = deletingPostId.value === post.id
-  const previewBody = dedupeLeadingHeading(post.title, stripStateBlocks(post.body))
+  const previewBody = dedupeLeadingHeading(post.title, post.body)
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorSigilLabel = boardActorSigilLabel(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
@@ -385,8 +368,6 @@ function PostCard({ post }: { post: BoardPost }) {
   const downvoteActive = post.current_vote === 'down'
   const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
   const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
-  const stateBlock = getPostStateBlock(post)
-  const hasState = stateBlock !== null
   const isMod = post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved'
   const qualityPercent = contributorQualityPercent(post.contributor_quality)
   const qualityTitle = qualityPercent === null
@@ -473,7 +454,6 @@ function PostCard({ post }: { post: BoardPost }) {
           }}
         >${authorLabel}</a>
         ${post.pinned ? html`<span class="bd-badge pin" title="고정된 게시글">고정</span>` : null}
-        ${hasState ? html`<span class="bd-badge state">상태 블록</span>` : null}
         ${isMod ? html`<span class="bd-badge mod">모더레이션 대기</span>` : null}
         ${post.flair ? html`<span class="bd-badge">flair:${post.flair}</span>` : null}
         ${qualityPercent !== null ? html`<span class="bd-badge ${contributorQualityBadgeClass(post.contributor_quality)}" aria-label=${qualityTitle} title=${qualityTitle}>품질 ${qualityPercent}</span>` : null}
@@ -494,7 +474,6 @@ function PostCard({ post }: { post: BoardPost }) {
         />
       </div>
       <div class="bd-post-title">${stripInlineMarkdown(post.title)}</div>
-      ${stateBlock ? html`<${BdStateBlock} block=${stateBlock} />` : null}
       <div class="bd-post-body">
         <${RichContent} text=${previewBody} previewLimit=${1} />
       </div>
@@ -617,8 +596,8 @@ function BdRail({ activeSub, onSub, onMentions }: {
 }
 
 function BdFeedHead({ activeFilter, onFilter, count, contentQuery, onContentQuery, sortMode, onSort }: {
-  activeFilter: 'all' | 'state' | 'mod'
-  onFilter: (filter: 'all' | 'state' | 'mod') => void
+  activeFilter: 'all' | 'mod'
+  onFilter: (filter: 'all' | 'mod') => void
   count: number
   contentQuery: string
   onContentQuery: (value: string) => void
@@ -629,9 +608,8 @@ function BdFeedHead({ activeFilter, onFilter, count, contentQuery, onContentQuer
   // Prototype board.jsx:158 renders the bare hearth label (e.g. "core/scheduler")
   // with no "#" prefix; the hearth name already carries its namespace path.
   const title = activeHearth === '' ? '전체 피드' : activeHearth
-  const filters: Array<{ key: 'all' | 'state' | 'mod'; label: string }> = [
+  const filters: Array<{ key: 'all' | 'mod'; label: string }> = [
     { key: 'all', label: '전체' },
-    { key: 'state', label: '상태 블록' },
     { key: 'mod', label: '모더레이션' },
   ]
 
@@ -764,7 +742,7 @@ function BdThreadDetail({
             <div class="bd-th-body">
               <div class="text-sm font-semibold mb-1">${stripInlineMarkdown(post.title)}</div>
               <div class="mb-2"><${PostShareActions} post=${post} /></div>
-              <${RichContent} text=${stripStateBlocks(post.body)} previewLimit=${4} />
+              <${RichContent} text=${post.body} previewLimit=${4} />
               <${FusionBoardEvidence} post=${evidencePost} class="mt-3" />
             </div>
           </div>
@@ -847,20 +825,17 @@ function BdComposer() {
     }
   }, [boardHearthFilter.value])
 
-  const tabs: Array<{ key: 'post' | 'mention' | 'state'; label: string }> = [
+  const tabs: Array<{ key: 'post' | 'mention'; label: string }> = [
     { key: 'post', label: '게시' },
     { key: 'mention', label: '멘션' },
-    { key: 'state', label: '상태 블록' },
   ]
   const activeModeLabel = tabs.find(tab => tab.key === mode)?.label ?? '게시'
 
   const placeholder = mode === 'post'
     ? `${boardHearthFilter.value ? `#${boardHearthFilter.value}` : '보드'}에 게시…`
-    : mode === 'mention'
-      ? '@keeper 를 멘션해 직접 지시…'
-      : '상태 블록 발행 — 상태 키:값 형식'
+    : '@keeper 를 멘션해 직접 지시…'
 
-  const composerMode: ComposerV2Mode = mode === 'post' ? 'broadcast' : mode === 'mention' ? 'dm' : 'state-block'
+  const composerMode: ComposerV2Mode = mode === 'post' ? 'broadcast' : 'dm'
   const mobileMention = useOperatorMentionContext({
     message: localBody,
     target: mobileKeeperTarget,
@@ -888,7 +863,6 @@ function BdComposer() {
     && !!typedMobileMention
     && !mobileMentionTarget
     && mobileMentionOptions.length > 0
-  const mobileStateKeys = mode === 'state' ? stateBlockKeys(localBody) : []
   const mobileQuickBusy = submitting || operatorActionBusy.value
   const mobileAttachmentDeliveryReason = mode === 'mention'
     ? composerAttachmentDeliveryReason(mobileAttachments)
@@ -901,7 +875,6 @@ function BdComposer() {
     || !mobileQuickHasDraft
     || mobileAttachmentDeliveryReason !== null
     || (mode === 'mention' && (!mobileMentionTarget || mobileMentionUnresolved))
-    || (mode === 'state' && mobileStateKeys.length === 0)
 
   useEffect(() => {
     if (mode !== 'mention') return
@@ -1209,19 +1182,6 @@ function BdComposer() {
             }}
             data-testid="bd-composer-mobile-body"
           />
-          ${mode === 'state' ? html`
-            <button
-              type="button"
-              class="bd-mobile-state-template"
-              title="Insert state block"
-              aria-label="Insert state block"
-              disabled=${mobileQuickBusy}
-              onClick=${() => setLocalBody(current => ensureStateBlockDraft(current))}
-              data-testid="bd-composer-mobile-state-template"
-            >
-              <${Braces} size=${15} strokeWidth=${2.2} aria-hidden="true" />
-            </button>
-          ` : null}
           ${mode === 'mention' ? html`
             <input
               ref=${mobileFileInputRef}
@@ -1313,7 +1273,7 @@ function BdComposer() {
               workspaceId=${localHearth || 'default'}
               mode=${composerMode}
               showModeSelector=${false}
-              modeLabels=${{ broadcast: '게시', dm: '멘션', 'state-block': '상태 블록' }}
+              modeLabels=${{ broadcast: '게시', dm: '멘션' }}
             />
           </div>
         `}
@@ -1329,10 +1289,10 @@ function BdMobileQueues({
   onFilter,
   onMentions,
 }: {
-  activeFilter: 'all' | 'state' | 'mod'
+  activeFilter: 'all' | 'mod'
   mentionCount: number
   modCount: number
-  onFilter: (filter: 'all' | 'state' | 'mod') => void
+  onFilter: (filter: 'all' | 'mod') => void
   onMentions: () => void
 }) {
   return html`
@@ -1378,7 +1338,6 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
   const modeFilteredGroups = useMemo(() => visibleGroups.groups.map(g => ({
     ...g,
     posts: g.posts.filter(post => {
-      if (boardFilterMode.value === 'state') return postHasStateBlock(post)
       if (boardFilterMode.value === 'mod') return post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved'
       return true
     }),
@@ -1389,7 +1348,7 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
     <section class="bd-feed">
       <${BdFeedHead}
         activeFilter=${boardFilterMode.value}
-        onFilter=${(filter: 'all' | 'state' | 'mod') => { boardFilterMode.value = filter }}
+        onFilter=${(filter: 'all' | 'mod') => { boardFilterMode.value = filter }}
         count=${filteredByMode.length}
         contentQuery=${contentQuery}
         onContentQuery=${setContentQuery}
@@ -1411,7 +1370,7 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
         activeFilter=${boardFilterMode.value}
         mentionCount=${mentionCount}
         modCount=${modCount}
-        onFilter=${(filter: 'all' | 'state' | 'mod') => { boardFilterMode.value = filter }}
+        onFilter=${(filter: 'all' | 'mod') => { boardFilterMode.value = filter }}
         onMentions=${onMentions}
       />
       <div class="bd-list">
@@ -1498,15 +1457,6 @@ export function BoardSurface() {
       <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
         <${BoardSummary} />
         <${MessageWorkspaceTimeline} />
-      </div>
-    `
-  }
-
-  if (focus === 'state-block') {
-    return html`
-      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
-        <${BoardSummary} />
-        <${StateBlockMessages} />
       </div>
     `
   }

@@ -117,14 +117,14 @@ let keeper_compact_max_tokens () : int =
 (** Cooldown between compaction attempts.  Previous default (90s) exceeded
     the proactive heartbeat interval (30s), permanently blocking compaction
     for proactive keepers.  15s allows compaction to fire every other cycle. *)
-let keeper_continuity_compaction_cooldown_sec_rp =
+let keeper_compaction_cooldown_sec_rp =
   _rp_int ~key:"keeper.compaction.cooldown_sec"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_CONTINUITY_COMPACTION_COOLDOWN_SEC"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_COMPACTION_COOLDOWN_SEC"
                           ~default:15 ~min_v:0 ~max_v:two_days_seconds_int)
     ~min_v:0 ~max_v:two_days_seconds_int
     ~description:"Compaction cooldown (seconds)" ()
-let keeper_continuity_compaction_cooldown_sec () : int =
-  Runtime_params.get keeper_continuity_compaction_cooldown_sec_rp
+let keeper_compaction_cooldown_sec () : int =
+  Runtime_params.get keeper_compaction_cooldown_sec_rp
 
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
@@ -246,7 +246,7 @@ let normalize_compaction_message_gate (v : int) : int =
 let normalize_compaction_token_gate (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:5000000
 
-let normalize_continuity_compaction_cooldown_sec (v : int) : int =
+let normalize_compaction_cooldown_sec (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:two_days_seconds_int
 
 (** Default number of recent tool results to keep verbatim during
@@ -292,16 +292,20 @@ let default_compaction_profile = "custom"
    checkpoint is summarized. Orthogonal axes, so a separate closed variant
    rather than another [profile] string.
 
-   [Deterministic] = the extractive OAS strategy chain
-   ([Keeper_compact_policy.checkpoint_compaction_strategies]); this is the
-   fail-closed default (no provider spend, no latency, no re-arming loop).
-   [Llm] = opt-in provider-backed summarizer on the librarian lane (W2);
-   until W2 it delegates to the deterministic chain. *)
+   [Llm] = provider-backed summarizer on the librarian lane; the default,
+   because what to keep/summarize/drop is a judgment call and judgment goes
+   through an LLM boundary (project principle). Emergency compaction and any
+   summarizer failure (no Eio context, no schema-capable provider, invalid
+   plan) still fall back to the deterministic chain, so the extractive floor
+   is always guaranteed.
+   [Deterministic] = the extractive OAS strategy chain only
+   ([Keeper_compact_policy.checkpoint_compaction_strategies]); opt-out for
+   no provider spend / no latency. *)
 type compaction_mode =
   | Deterministic
   | Llm
 
-let default_compaction_mode = Deterministic
+let default_compaction_mode = Llm
 
 let compaction_mode_to_string = function
   | Deterministic -> "deterministic"
@@ -437,8 +441,6 @@ let keeper_llm_rerank_runtime () : string =
   match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_RUNTIME" with
   | Some v when String.trim v <> "" -> String.trim v
   | _ -> default_runtime_id ()
-
-include Keeper_config_rule_thresholds
 
 (* ================================================================ *)
 (* Keeper execution — previously hardcoded magic numbers             *)

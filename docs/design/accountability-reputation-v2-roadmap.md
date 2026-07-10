@@ -19,7 +19,7 @@ code_refs:
 
 - `../DASHBOARD-INTEGRATION.md`
 - `../rfc/RFC-0001-det-nondet-boundary-harness.md`
-- `./oas-masc-state-boundary.md`
+- `../OAS-MASC-BOUNDARY.md`
 - `../VERSIONED-ROADMAP.md`
 
 ## 1. Why This Document Exists

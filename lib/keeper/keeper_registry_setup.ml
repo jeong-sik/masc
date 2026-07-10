@@ -373,7 +373,7 @@ let register_with_state
     ; tool_usage = StringMap.empty
     ; transition_seq = 0
     ; waiting_for_inference = Atomic.make false
-    ; last_auto_rules = None
+    ; last_context_actions = None
     ; last_event_bus_correlation = None
     ; pending_turn_measurement = None
     ; current_turn_observation = None
@@ -468,7 +468,7 @@ let register_restarting ~base_path name meta
     ; tool_usage = StringMap.empty
     ; transition_seq = 0
     ; waiting_for_inference = Atomic.make false
-    ; last_auto_rules = None
+    ; last_context_actions = None
     ; last_event_bus_correlation = None
     ; pending_turn_measurement = None
     ; current_turn_observation = None

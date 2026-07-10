@@ -42,7 +42,7 @@ let slot_active slot_name =
   | Some active -> active
   | None -> failwith ("introspection slot missing active bool: " ^ slot_name)
 
-(* The 11 slots the introspection claims are wired, and the 3 it claims are
+(* The 9 slots the introspection claims are wired, and the 3 it claims are
    not (compaction is handled by keeper_post_turn, not the SDK hooks). *)
 let expected_active =
   [ "before_turn"
@@ -52,8 +52,6 @@ let expected_active =
   ; "post_tool_use"
   ; "post_tool_use_failure"
   ; "on_stop"
-  ; "on_idle"
-  ; "on_idle_escalated"
   ; "on_error"
   ; "on_tool_error"
   ]
@@ -63,7 +61,7 @@ let expected_inactive = [ "pre_compact"; "post_compact"; "on_context_compacted" 
 let test_slot_set () =
   let names = List.map fst (slots_of json) |> List.sort compare in
   let expected = List.sort compare (expected_active @ expected_inactive) in
-  check (list string) "introspection exposes exactly the 14 known hook slots" expected names
+  check (list string) "introspection exposes exactly the 12 known hook slots" expected names
 
 let test_active_split () =
   List.iter
@@ -120,8 +118,6 @@ let runtime_slots_of (hooks : Agent_sdk.Hooks.hooks) =
     "post_tool_use", Option.is_some hooks.post_tool_use;
     "post_tool_use_failure", Option.is_some hooks.post_tool_use_failure;
     "on_stop", Option.is_some hooks.on_stop;
-    "on_idle", Option.is_some hooks.on_idle;
-    "on_idle_escalated", Option.is_some hooks.on_idle_escalated;
     "on_error", Option.is_some hooks.on_error;
     "on_tool_error", Option.is_some hooks.on_tool_error;
     "pre_compact", Option.is_some hooks.pre_compact;
@@ -164,8 +160,8 @@ let test_cost_telemetry_never_enforced () =
 let () =
   Alcotest.run "Keeper_hooks_oas_introspection"
     [ ( "slot contract"
-      , [ test_case "exactly the 14 known slots" `Quick test_slot_set
-        ; test_case "11 active / 3 inactive" `Quick test_active_split
+      , [ test_case "exactly the 12 known slots" `Quick test_slot_set
+        ; test_case "9 active / 3 inactive" `Quick test_active_split
         ; test_case "slot sources" `Quick test_sources
         ; test_case "make_hooks active claims match runtime record" `Quick
             test_runtime_active_claims_match_make_hooks

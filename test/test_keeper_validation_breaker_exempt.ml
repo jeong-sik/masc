@@ -14,7 +14,6 @@ module Task = Masc.Keeper_tool_task_runtime
 module Dispatch = Masc.Keeper_tool_dispatch_runtime
 module Boundary = Masc.Keeper_tools_oas_failure_boundary
 module Response_text = Masc.Keeper_agent_run_response_text
-module State = Masc.Keeper_memory_policy
 module Receipt = Masc.Keeper_execution_receipt
 module U = Yojson.Safe.Util
 (* Tool_result lives in the leaf [masc_tool_types] lib (wrapped false), so
@@ -119,40 +118,28 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 
-let test_state_block_reply_returns_state_snapshot () =
-  let raw_response_text =
-    "[STATE]\n\
-     Goal: Keep runtime visible\n\
-     Next: Check main CI\n\
-     Constraints: Use worktrees\n\
-     [/STATE]"
-  in
-  let
-    { Response_text.state_snapshot
-    ; state_snapshot_source
-    ; response_text
-    }
-    =
+let test_response_finalization_keeps_visible_reply_only () =
+  let finalized =
     Response_text.finalize
-      ~reported_state_snapshot:None
-      ~keeper_name:"keeper-task-create-test"
-      ~goal:"Keep runtime visible"
-      ~actual_keeper_tool_names:[]
       ~completion_contract_result:Receipt.Contract_satisfied_completion
       ~stop_reason:Runtime_agent.Completed
-      ~raw_response_text
+      ~raw_response_text:"Completed with typed tool evidence."
       ()
   in
-  check string "state block source" "model_state_block"
-    (State.state_snapshot_source_to_string state_snapshot_source);
-  check (option string) "state keeps goal" (Some "Keep runtime visible")
-    state_snapshot.goal;
-  check (list string) "state keeps next items" [ "Check main CI" ]
-    state_snapshot.next_items;
-  check (list string) "state keeps constraints" [ "Use worktrees" ]
-    state_snapshot.constraints;
-  check string "state-only block is not a visible response" ""
-    response_text
+  check string
+    "visible assistant reply is preserved"
+    "Completed with typed tool evidence."
+    finalized.response_text;
+  let suppressed =
+    Response_text.finalize
+      ~completion_contract_result:Receipt.Contract_satisfied_completion
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text:"Internal completion text"
+      ~suppress_response_text:true
+      ()
+  in
+  check string "explicit suppression is empty" "" suppressed.response_text
+;;
 
 (* RFC-0239 / audit D1: a rejected keeper_task_done must carry a typed
    [Error] outcome so the no-progress loop detector demotes it (PR #22127
@@ -253,8 +240,8 @@ let () =
             "keeper_task_create treats ambiguous active_goal_ids as advisory"
             `Quick
             test_task_create_multi_active_goals_without_goal_id_is_unscoped
-        ; test_case "state block reply returns state snapshot" `Quick
-            test_state_block_reply_returns_state_snapshot
+        ; test_case "response finalization keeps visible reply only" `Quick
+            test_response_finalization_keeps_visible_reply_only
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"
             `Quick test_done_missing_task_id_emits_typed_error
         ; test_case "rejected done (missing evidence_refs) emits typed Error (D1)"

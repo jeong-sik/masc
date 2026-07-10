@@ -491,7 +491,6 @@
 .bd-post .body { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-secondary); line-height: 1.4; white-space: pre-wrap; max-height: 70px; overflow: hidden; position: relative; }
 .bd-post .body.expand { max-height: none; }
 .bd-post .body.clip::after { content:''; position: absolute; left:0; right:0; bottom:0; height: 18px; background: linear-gradient(transparent, var(--color-bg-surface)); }
-.bd-post .state-block { font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.06); border: 1px dashed var(--brass-2); padding: 3px 5px; margin-top: 4px; white-space: pre-wrap; }
 .bd-post .ft { display:flex; gap: 8px; font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-disabled); letter-spacing: .04em; text-transform: uppercase; }
 .bd-post .ft button { background: transparent; border: none; color: inherit; font-family: inherit; font-size: inherit; letter-spacing: inherit; cursor: pointer; padding: 0; }
 .bd-post .ft button:hover { color: var(--color-accent-fg); }
@@ -535,7 +534,6 @@
 .ms-msg .h .at { margin-left: auto; color: var(--color-fg-disabled); font-size: var(--fs-9); }
 .ms-msg .text { color: var(--color-fg-primary); line-height: 1.45; word-break: break-word; }
 .ms-msg .text .mention { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.1); padding: 0 3px; border-radius: 0; }
-.ms-msg .state-block { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.06); border-left: 2px solid var(--brass-2); padding: 3px 6px; margin-top: 3px; white-space: pre-wrap; font-size: var(--fs-10); }
 
 /* mention inbox */
 .ms-inbox { display:flex; flex-direction:column; gap: 4px; }
@@ -547,7 +545,7 @@
 .ms-inbox .mn .text { color: var(--color-fg-primary); line-height: 1.4; }
 .ms-inbox .mn .text .mention { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.15); padding: 0 3px; }
 
-/* ═════ C3 · COMPOSER V2 (broadcast / mention / state-block) ═════ */
+/* ═════ C3 · COMPOSER V2 (broadcast / mention) ═════ */
 .cm2 { background: var(--color-bg-surface); border: 1px solid var(--color-border-strong); border-top: 2px solid var(--brass-2); padding: 8px 10px; display:flex; flex-direction:column; gap: 6px; }
 .cm2 .toolbar { display:flex; align-items:center; gap: 4px; font-family: var(--font-mono); font-size: var(--fs-10); }
 .cm2 .toolbar .seg { display:flex; border: 1px solid var(--color-border-strong); border-radius: 0; }
@@ -560,7 +558,6 @@
 .cm2 .toolbar .send { padding: 3px 10px; background: var(--brass-2); color: var(--color-bg-page); border: none; font-family: inherit; font-size: inherit; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; font-weight: 600; }
 .cm2 .ed { background: var(--color-bg-page); border: 1px solid var(--color-border-default); padding: 6px 8px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-primary); min-height: 60px; line-height: 1.5; cursor: text; white-space: pre-wrap; }
 .cm2 .ed .mention { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.1); padding: 0 3px; }
-.cm2 .ed .state-block { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.06); border-left: 2px solid var(--brass-2); padding: 3px 6px; margin: 3px 0; display: block; }
 .cm2 .ed .caret { color: var(--color-accent-fg); animation: anim-blink 1s step-end infinite; }
 @keyframes anim-blink { 50% { opacity: 0; } }
 .cm2 .targets { display:flex; gap: 4px; flex-wrap: wrap; padding: 3px 0; border-top: 1px dashed var(--color-border-default); font-family: var(--font-mono); font-size: var(--fs-9); align-items: center; color: var(--color-fg-disabled); letter-spacing: .04em; text-transform: uppercase; }
@@ -699,14 +696,6 @@
 .ki-tabs button.on { background:var(--color-bg-panel-alt); color:var(--color-accent-fg); }
 .ki-tabs button:hover { background:var(--color-bg-panel-alt); color:var(--color-fg-primary); }
 
-.ki-bdi { display:flex; flex-direction:column; gap:1px; }
-.ki-bdi .row { display:grid; grid-template-columns:64px 1fr; gap:8px; padding:5px 8px; background:var(--color-bg-surface); border:1px solid var(--color-border-default); align-items:flex-start; }
-.ki-bdi .lbl { font-family:var(--font-mono); font-size:var(--fs-10); color:var(--color-accent-fg); letter-spacing:.06em; text-transform:uppercase; padding-top:1px; }
-.ki-bdi .v { font-family:var(--font-mono); font-size:var(--fs-11); color:var(--color-fg-primary); line-height:1.45; }
-.ki-bdi .hz { display:grid; grid-template-columns:72px 1fr; gap:3px 8px; padding:5px 8px; background:var(--color-bg-page); border:1px solid var(--color-border-default); margin-top:1px; }
-.ki-bdi .hz .lbl { font-family:var(--font-mono); font-size:var(--fs-9); color:var(--color-fg-disabled); letter-spacing:.06em; text-transform:uppercase; white-space:nowrap; padding-top:1px; }
-.ki-bdi .hz .v { font-family:var(--font-mono); font-size:var(--fs-11); color:var(--color-fg-secondary); }
-
 .ki-access { display:flex; flex-direction:column; gap:1px; }
 .ki-access .row { display:grid; grid-template-columns:130px 1fr; gap:8px; padding:4px 8px; background:var(--color-bg-surface); border:1px solid var(--color-border-default); align-items:center; }
 .ki-access .lbl { font-family:var(--font-mono); font-size:var(--fs-10); color:var(--color-fg-muted); }
@@ -735,7 +724,7 @@
 .dec-row .body { display:flex; flex-direction:column; gap:2px; }
 .dec-row .body .act { font-family:var(--font-mono); font-size:var(--fs-11); color:var(--color-fg-primary); }
 .dec-row .body .blk { font-family:var(--font-mono); font-size:var(--fs-10); color:var(--err-fg); }
-.dec-row .body .bel { font-family:var(--font-mono); font-size:var(--fs-10); color:var(--color-fg-muted); }
+.dec-row .body .summary { font-family:var(--font-mono); font-size:var(--fs-10); color:var(--color-fg-muted); }
 .dec-row .body .lat { font-family:var(--font-mono); font-size:var(--fs-9); color:var(--color-fg-disabled); }
 
 .mem-row { display:grid; grid-template-columns:68px 90px 68px 1fr; gap:6px; align-items:flex-start; padding:5px 8px; background:var(--color-bg-surface); border-bottom:1px solid var(--color-border-default); }

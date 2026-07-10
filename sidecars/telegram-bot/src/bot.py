@@ -38,7 +38,6 @@ from .formatters import (
     format_footer,
     format_footer_html,
     render_response_text,
-    strip_state_blocks,
 )
 from .gate_client import GateClient
 
@@ -289,7 +288,7 @@ class TelegramGateBot:
                     now - last_edit_time >= edit_interval
                     and new_chars >= char_threshold
                 ):
-                    display = strip_state_blocks(accumulated)
+                    display = accumulated.strip()
                     if display:
                         try:
                             await thinking_msg.edit_text(display)
@@ -305,7 +304,7 @@ class TelegramGateBot:
             return False
 
         # Final edit with complete text
-        final = strip_state_blocks(accumulated)
+        final = accumulated.strip()
         if final:
             try:
                 await thinking_msg.edit_text(final)
@@ -362,7 +361,7 @@ class TelegramGateBot:
         )
 
         if response.ok and response_text(response):
-            reply = strip_state_blocks(response.reply)
+            reply = response.reply.strip()
             rendered_reply, parse_mode = render_response_text(
                 reply,
                 response.structured,

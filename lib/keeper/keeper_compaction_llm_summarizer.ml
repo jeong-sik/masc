@@ -94,7 +94,7 @@ let messages_for_plan ~(messages : Agent_sdk.Types.message list) =
      indices. Prefer keeping recent messages and any with concrete code paths, \
      commands, decisions, or unresolved blockers. Write one durable [summary] \
      prose block that stands in for the summarized messages. Do not invent \
-     facts. Do not include [STATE] blocks or markdown fences."
+     facts. Do not include markdown fences."
   in
   let user =
     Printf.sprintf
@@ -280,43 +280,45 @@ let run_plan
 let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) ()
   : summarizer option
   =
-  if not (Keeper_memory_bank.memory_llm_summary_enabled ()) then None
-  else
-    match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-    | Some sw, Some net ->
-      let clock = Eio_context.get_clock_opt () in
-      let provider_runtime_id =
-        Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id
-      in
-      (match
-         Keeper_memory_runtime_resolution.provider_for_runtime
-           ~runtime_id:provider_runtime_id
-       with
-       | Error err ->
-         Log.Keeper.warn ~keeper_name
-           "compaction LLM summarizer provider resolution failed runtime=%s: %s"
-           provider_runtime_id err;
-         None
-       | Ok provider ->
-         let providers =
-           [ provider ]
-           |> List.filter is_direct_completion_provider
-           |> List.filter plan_schema_supported
-         in
-         (match providers with
-          | [] ->
-            Log.Keeper.warn ~keeper_name
-              "compaction LLM summarizer has no schema-capable direct completion \
-               provider runtime=%s"
-              provider_runtime_id;
-            None
-          | provider_cfg :: _ ->
-            Some
-              (fun ~messages ->
-                run_plan ?complete ?clock ?timeout_sec ~keeper_name
-                  ~runtime_id:provider_runtime_id ~sw ~net ~provider_cfg ~messages ())))
-    | _ ->
-      Log.Keeper.warn ~keeper_name
-        "compaction LLM summarizer skipped: Eio context unavailable runtime=%s"
-        runtime_id;
-      None
+  (* Gating lives in the caller's [meta.compaction.mode] (Llm vs
+     Deterministic). The memory-bank MASC_KEEPER_MEMORY_LLM_SUMMARY flag is a
+     different subsystem's opt-in and must not silence compaction (38-bug
+     campaign #3: the double gate kept the LLM path permanently dead). *)
+  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+  | Some sw, Some net ->
+    let clock = Eio_context.get_clock_opt () in
+    let provider_runtime_id =
+      Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id
+    in
+    (match
+       Keeper_memory_runtime_resolution.provider_for_runtime
+         ~runtime_id:provider_runtime_id
+     with
+     | Error err ->
+       Log.Keeper.warn ~keeper_name
+         "compaction LLM summarizer provider resolution failed runtime=%s: %s"
+         provider_runtime_id err;
+       None
+     | Ok provider ->
+       let providers =
+         [ provider ]
+         |> List.filter is_direct_completion_provider
+         |> List.filter plan_schema_supported
+       in
+       (match providers with
+        | [] ->
+          Log.Keeper.warn ~keeper_name
+            "compaction LLM summarizer has no schema-capable direct completion \
+             provider runtime=%s"
+            provider_runtime_id;
+          None
+        | provider_cfg :: _ ->
+          Some
+            (fun ~messages ->
+              run_plan ?complete ?clock ?timeout_sec ~keeper_name
+                ~runtime_id:provider_runtime_id ~sw ~net ~provider_cfg ~messages ())))
+  | _ ->
+    Log.Keeper.warn ~keeper_name
+      "compaction LLM summarizer skipped: Eio context unavailable runtime=%s"
+      runtime_id;
+    None

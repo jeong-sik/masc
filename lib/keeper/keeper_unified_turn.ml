@@ -29,7 +29,7 @@ let run_keeper_cycle
       ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
       ?shared_context
       ?event_bus
-      ?hitl_delivery_channel
+      ?hitl_resolution
       ()
   : (keeper_meta, Agent_sdk.Error.sdk_error) result
   =
@@ -47,6 +47,16 @@ let run_keeper_cycle
      so dashboards/tests can inspect the same routing contract for blocked
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
+  let hitl_delivery_channel =
+    Option.map
+      (fun (resolution : Keeper_event_queue.hitl_resolution) -> resolution.channel)
+      hitl_resolution
+  in
+  let hitl_approval_grant =
+    Option.bind
+      hitl_resolution
+      Governance_pipeline.hitl_approval_grant_of_resolution
+  in
   (* Decide turn_id at function entry so phase-gate / runtime-routing /
      livelock skip paths can include it in the receipt and observability
      stream.  Previously this was [let turn_id = ...] only after several
@@ -275,26 +285,6 @@ let run_keeper_cycle
                      | None -> (goal_id, ""))
                    meta.active_goal_ids
                in
-               (* RFC-0315: surface the working-state ledger's unresolved
-                  loops. The sidecar has persisted (and resume-merged) them
-                  since KeeperWorkingStateLifecycle landed, but no prompt ever
-                  read them back — persisted-but-never-shown. *)
-               let active_open_loops =
-                 let session_dir =
-                   Filename.concat
-                     (session_base_dir config)
-                     (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                 in
-                 match
-                   Keeper_agent_run_sidecar.read_persisted_working_state
-                     ~keeper_name:meta.name
-                     ~latest_path:
-                       (Keeper_agent_run_sidecar.latest_working_state_path
-                          ~session_dir)
-                 with
-                 | None -> []
-                 | Some state -> state.Keeper_working_state.active_loops
-               in
                let system_prompt, user_message =
                  Keeper_unified_prompt.build_prompt
                    ~meta
@@ -303,7 +293,6 @@ let run_keeper_cycle
                    ?turn_decision
                    ?current_task
                    ~active_goal_summaries
-                   ~active_open_loops
                    ~observation
                    ()
                in
@@ -512,6 +501,7 @@ let run_keeper_cycle
                            ; build_turn_prompt
                            ; channel
                            ; hitl_delivery_channel
+                           ; hitl_approval_grant
                            ; cleanup
                            ; committed_mutating_tools_snapshot
                            ; config

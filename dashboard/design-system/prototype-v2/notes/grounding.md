@@ -18,12 +18,12 @@
   - observe: runtime → monitoring/runtime; audit → monitoring/runtime/audit; safety → command/operations/safety; cost → monitoring/runtime/cost
   - cognition: keeper-cognition → monitoring/cognition/keeper
   - ide: source → code/ide-shell/source
-- Legacy subtabs incl.: accountability-ledger/matrix, board-thread, mention-inbox, state-block, composer-broadcast/mention/state, audit-by-actor/summary, safe-auto-*, cost-per-agent/matrix/latency, keeper-bdi/tool-access/token-stats, decisions-stream, memory-entries, episodes-cards/learnings, ide: edit/review(pr-thread)/merge(split-diff)/search(find).
+- Legacy subtabs incl.: accountability-ledger/matrix, board-thread, mention-inbox, composer-broadcast/mention, audit-by-actor/summary, safe-auto-*, cost-per-agent/matrix/latency, tool-access/token-stats, decisions-stream, memory-entries, episodes-cards/learnings, ide: edit/review(pr-thread)/merge(split-diff)/search(find).
 
 ## Board (components/board/*)
 Comms board, NOT task kanban: board-surface (feed), sub-board-surface, post-detail (threads),
 reaction-bar, board-karma-panel, board-curation-panel, board-moderation-surface (+moderation-badge),
-mention-inbox, composer-v2, state-block-messages, message-workspace-timeline.
+mention-inbox, composer-v2, message-workspace-timeline.
 
 ## IDE (components/ide/*, api/ide.ts)
 - api: annotations (kind, file_path, line_start/end, keeper_id, linked goal/task/board_post/pr/git_ref), regions, presence, cursors, events.

@@ -23,6 +23,10 @@ type stop_reason =
        Progress is checkpointed and the keeper resumes on the next cycle — the
        same disposition as [MutationBoundaryReached], but a distinct reason so
        receipts do not conflate an on-demand yield with a budget/mutation stop. *)
+  | Yielded_to_durable_stimulus of { turns_used : int }
+    (* The current autonomous cycle completed at least one OAS provider turn,
+       then released its lane because another durable stimulus was queued
+       behind the stimulus already leased by this cycle. *)
 
 type config =
   { name : string
@@ -81,9 +85,7 @@ type config =
   ; exit_condition_result : (int -> stop_reason * string option) option
   ; summarizer : (Agent_sdk.Types.message list -> string) option
     (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
-          Emergency-phase compaction. Defaults to OAS's extractive
-          default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
-          to scrub [STATE] blocks before the 100-char truncation. *)
+          Emergency-phase compaction. Defaults to OAS's extractive default. *)
   ; execution_idle_timeout_s : float option
     (** Per-run inactivity deadline forwarded to OAS
         [Builder.with_execution_idle_timeout]. Resets on each unit of

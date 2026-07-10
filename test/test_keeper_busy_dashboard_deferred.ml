@@ -138,13 +138,15 @@ let test_existing_backlog_defers_new_dashboard_message () =
   Printf.printf "Test: existing dashboard backlog keeps newer messages queued\n%!";
   with_env
   @@ fun ~base ~clock ->
-  Keeper_chat_queue.enqueue ~keeper_name
-    { Keeper_chat_queue.content = "older queued message"
-    ; user_blocks = []
-    ; attachments = []
-    ; timestamp = Eio.Time.now clock
-    ; source = Dashboard
-    };
+  ignore
+    (Keeper_chat_queue.enqueue ~keeper_name
+       { Keeper_chat_queue.content = "older queued message"
+       ; user_blocks = []
+       ; attachments = []
+       ; timestamp = Eio.Time.now clock
+       ; source = Dashboard
+       }
+      : string);
   (match
      Server_routes_http_keeper_stream.For_testing.defer_dashboard_payload_if_busy
        ~base_path:base

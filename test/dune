@@ -57,7 +57,7 @@
   test_board_collect_pause_gate
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
-  test_keeper_idle_threshold_contract
+  test_keeper_idle_observation_liveness
   test_provider_tool_support_caps
   test_runtime_request_config_merge
   test_keeper_context_layers
@@ -166,7 +166,6 @@
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
-  test_keeper_idle_metric
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
   test_boundary_redaction_runtime_lane
@@ -256,7 +255,6 @@
   test_keeper_unified_context_overflow
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
-  test_keeper_unified_metacognition
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -265,7 +263,6 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
-  test_keeper_post_turn_interruption_note
   test_keeper_unified_verification_surface
   test_keeper_observation_provenance
   test_keeper_fsm_guard_actions
@@ -328,7 +325,6 @@
   test_adversarial_eval
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
-  test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_tool_execute_descriptor_variant
@@ -418,7 +414,7 @@
   test_board_collect_pause_gate
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
-  test_keeper_idle_threshold_contract
+  test_keeper_idle_observation_liveness
   test_provider_tool_support_caps
   test_runtime_request_config_merge
   test_keeper_context_layers
@@ -528,7 +524,6 @@
   test_masc_oas_bridge_timeout_guard
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
-  test_keeper_idle_metric
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
   test_boundary_redaction_runtime_lane
@@ -618,7 +613,6 @@
   test_keeper_unified_context_overflow
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
-  test_keeper_unified_metacognition
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -627,7 +621,6 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
-  test_keeper_post_turn_interruption_note
   test_keeper_unified_verification_surface
   test_keeper_observation_provenance
   test_keeper_fsm_guard_actions
@@ -693,7 +686,6 @@
   test_adversarial_eval
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
-  test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_tool_execute_descriptor_variant
@@ -1128,12 +1120,10 @@
   test_build_identity
   test_economy
   test_lifecycle
-  test_auto_recall_activity_coverage
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect
   test_keeper_guards
-  test_keeper_working_state
   test_keeper_stale_claim_release
   test_eval_gate_evasion
   test_prompt_registry_defaults
@@ -1326,12 +1316,10 @@
   test_build_identity
   test_economy
   test_lifecycle
-  test_auto_recall_activity_coverage
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect
   test_keeper_guards
-  test_keeper_working_state
   test_keeper_stale_claim_release
   test_eval_gate_evasion
   test_prompt_registry_defaults
@@ -1874,8 +1862,6 @@
 
 (include stanzas/test_context_max_observed_9953.inc)
 
-(include stanzas/test_continuity_forward_filter.inc)
-
 (include stanzas/test_destructive_floor_differential.inc)
 
 (include stanzas/test_otel_runtime_observables.inc)
@@ -1933,8 +1919,6 @@
 (include stanzas/test_env_config_keeper_poll_intervals.inc)
 
 (include stanzas/test_env_config_nonneg.inc)
-
-(include stanzas/test_env_config_code_exempt_keepers.inc)
 
 (include stanzas/test_env_config_sandbox.inc)
 
@@ -2056,6 +2040,8 @@
 
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
 
+(include stanzas/test_keeper_msg_async_terminal_event.inc)
+
 (include stanzas/test_keeper_msg_cancel.inc)
 
 (include stanzas/test_turn_record.inc)
@@ -2084,8 +2070,6 @@
 
 (include stanzas/test_keeper_post_turn_wirein_order.inc)
 
-(include stanzas/test_keeper_post_turn_snapshot_goal_log.inc)
-
 (include stanzas/test_keeper_readonly_hints.inc)
 
 (include stanzas/test_keeper_receipt_authoritative.inc)
@@ -2098,9 +2082,7 @@
 
 (include stanzas/test_keeper_sandbox_docker_cwd_response.inc)
 
-(include stanzas/test_keeper_state_snapshot_json.inc)
-
-(include stanzas/test_keeper_summarizer.inc)
+(include stanzas/test_keeper_replay_checkpoint.inc)
 
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
@@ -2182,7 +2164,6 @@
 
 (include stanzas/test_mcp_tool_matrix.inc)
 
-(include stanzas/test_meta_cognition_snapshot.inc)
 
 (include stanzas/test_normalized_actor.inc)
 
@@ -2245,8 +2226,6 @@
 (include stanzas/test_shell_parse_site_ratchet.inc)
 
 (include stanzas/test_smart_heartbeat_keepalive.inc)
-
-(include stanzas/test_snapshot_size_cap.inc)
 
 (include stanzas/test_sse_retry_ssot.inc)
 

@@ -21,7 +21,7 @@ type compaction_decision =
   | Applied of Compaction_trigger.t
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
-  | Skipped_continuity_reflection of
+  | Skipped_cooldown of
       { hold_s : float
       ; cooldown_sec : int
       }
@@ -40,8 +40,7 @@ val decide_compaction
   -> message_gate:int
   -> token_gate:int
   -> cooldown_sec:int
-  -> last_continuity_update_ts:float
-  -> last_proactive_ts:float
+  -> last_compaction_ts:float
   -> now_ts:float
   -> compaction_decision
 
@@ -55,9 +54,9 @@ val checkpoint_compaction_strategies
   :  mode:Keeper_config.compaction_mode
   -> Context_compact_oas.strategy list
 (** OAS strategy chain for checkpoint compaction, selected by the
-    per-keeper [compaction_mode]. [Deterministic] returns the extractive
-    chain; [Llm] delegates to the same chain in W1 (no summarizer wired
-    yet) and is replaced by the librarian-lane call in W2. *)
+    per-keeper [compaction_mode]. Both modes expose the extractive chain as
+    the deterministic floor; [Llm] selects its provider-backed plan in
+    [compact_if_needed_typed] when the compaction is not an emergency. *)
 
 (** [compact_if_needed_typed ~meta ~now_ts ctx] evaluates the compaction
     gates and either returns [ctx] unchanged or applies the OAS

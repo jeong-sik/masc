@@ -186,6 +186,7 @@ type dashboard_deferred_chat =
   { in_flight : Keeper_turn_admission.in_flight_info option
   ; chat_waiting : bool
   ; queue_length : int
+  ; receipt_id : string
   }
 
 let dashboard_busy_queue_state ~base_path ~keeper_name =
@@ -206,7 +207,7 @@ let dashboard_deferred_ack_text ~keeper_name =
     keeper_name
 
 let dashboard_deferred_chat_to_json ~keeper_name
-    ({ in_flight; chat_waiting; queue_length } : dashboard_deferred_chat) =
+    ({ in_flight; chat_waiting; queue_length; receipt_id } : dashboard_deferred_chat) =
   let in_flight_fields =
     match in_flight with
     | None -> []
@@ -223,21 +224,23 @@ let dashboard_deferred_chat_to_json ~keeper_name
      ; ("queue", `String "keeper_chat_queue")
      ; ("queue_length", `Int queue_length)
      ; ("chat_waiting", `Bool chat_waiting)
+     ; ("receipt_id", `String receipt_id)
      ]
      @ in_flight_fields)
 
 let enqueue_dashboard_payload ~clock payload ~in_flight ~chat_waiting =
-  Keeper_chat_queue.enqueue ~keeper_name:payload.name
-    { Keeper_chat_queue.content = payload.message
-    ; user_blocks = payload.user_blocks
-    ; attachments = payload.attachments
-    ; timestamp = Eio.Time.now clock
-    ; source = Keeper_chat_queue.Dashboard
-    };
-  { in_flight
-  ; chat_waiting
-  ; queue_length = Keeper_chat_queue.length ~keeper_name:payload.name
-  }
+  let receipt_id =
+    Keeper_chat_queue.enqueue ~keeper_name:payload.name
+      { Keeper_chat_queue.content = payload.message
+      ; user_blocks = payload.user_blocks
+      ; attachments = payload.attachments
+      ; timestamp = Eio.Time.now clock
+      ; source = Keeper_chat_queue.Dashboard
+      }
+  in
+  let queue_length = Keeper_chat_queue.length ~keeper_name:payload.name in
+  Keeper_chat_broadcast.queue_changed ~keeper_name:payload.name ~depth:queue_length ();
+  { in_flight; chat_waiting; queue_length; receipt_id }
 
 let dashboard_deferred_chat_of_rejection ~clock payload
     ({ Keeper_turn_admission.waiting; in_flight } : Keeper_turn_admission.rejection) =
@@ -617,7 +620,6 @@ let parse_keeper_chat_stream_request body_str =
 let strip_keeper_visible_reply (reply : string) =
   reply
   |> Keeper_skill_routing.strip_skill_route_lines
-  |> Keeper_execution.strip_state_blocks_text
   |> String.trim
 
 let split_keeper_reply_chunks (text : string) : string list =
@@ -1035,11 +1037,14 @@ type translated_keeper_stream_event =
 let empty_keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.empty_state
 let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
 
-(* [connector_user_line_recorded_upstream] is a required labelled argument: the
-   function ends in labelled args with no positional terminator, so a leading
-   optional could not be erased (warning 16). Every caller states explicitly
-   whether the gate inbound boundary already owns the user line. *)
-let process_single_turn ~connector_user_line_recorded_upstream
+(* [connector_user_line_recorded_upstream] and [queued_turn] are required
+   labelled arguments, not optional with the "default" their .mli doc
+   comments describe: the function ends in labelled args with no positional
+   terminator, so a leading optional could not be erased (warning 16). Every
+   caller states explicitly whether the gate inbound boundary already owns
+   the user line, and whether this turn was dispatched from the queue
+   consumer. *)
+let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     ~state ~clock ~sw ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name
@@ -1207,8 +1212,28 @@ let process_single_turn ~connector_user_line_recorded_upstream
   let dashboard_direct_stream =
     (not connector_user_line_recorded_upstream) && not (has_external_speaker payload)
   in
+  (* masc#23924: [f] below pushes its own [Stream_terminal] once it reaches a
+     completion arm, but a timeout/cancellation cuts [f] off before any of
+     those arms run — nothing would ever push to [worker_events], and
+     [consume_worker_events]'s [Eio.Stream.take] would block forever.
+     [on_worker_aborted] fires from Keeper_msg_async.submit's own catch
+     sites (never inside the cancelled [f]) so this turn still gets exactly
+     one terminal event via the same CAS-guarded [push_worker_event]. *)
+  let on_worker_aborted (reason : Keeper_msg_async.worker_abort_reason) =
+    let status, body =
+      match reason with
+      | Keeper_msg_async.Timeout { timeout_sec } ->
+          ( "timeout"
+          , Printf.sprintf
+              "keeper_msg request exceeded timeout_sec=%.3f before completion"
+              timeout_sec )
+      | Keeper_msg_async.Worker_cancelled { cancelled_by; reason } ->
+          "cancelled", Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
+    in
+    push_worker_event (Stream_terminal { ok = false; status; body })
+  in
   let request_id =
-    Keeper_msg_async.submit ?timeout_sec ~clock ~sw
+    Keeper_msg_async.submit ?timeout_sec ~clock ~sw ~on_worker_aborted
       ~base_path
       ~keeper_name:payload.name
       ~f:(fun () ->
@@ -1356,6 +1381,19 @@ let process_single_turn ~connector_user_line_recorded_upstream
                      if has_visible_blocks then (
                        persist_assistant_reply ~assistant_content:"";
                        broadcast_chat_appended ())
+                     else if queued_turn then
+                       (* RFC-connector-deferred-reply-via-chat-queue: a queued message was already
+                          dequeued off [Keeper_chat_queue] before this turn ran,
+                          so [persist_user_message_only]'s "the keeper answers on
+                          its next turn" contract does not hold here — there is
+                          no next turn this message rides along with. Record a
+                          typed failure row instead of leaving the queued
+                          message permanently unanswered. The interactive HTTP
+                          stream ([queued_turn = false]) keeps the original
+                          behaviour: that user line is still live in the
+                          conversation and legitimately may be answered later. *)
+                       persist_failure_reply
+                         "no visible reply was produced for this queued message"
                      else persist_user_message_only ()
                  | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                      (* RFC-connector-deferred-reply-via-chat-queue §3.4: gate-recorded connector message → the user
@@ -1543,6 +1581,65 @@ let process_single_turn ~connector_user_line_recorded_upstream
   | exception exn ->
       signal_stream_projection_done ();
       raise exn
+
+(* Failure-lifecycle shape for a turn that never reached a normal terminal
+   event — mirrors the [errored_stream_lifecycle] local binding inside
+   [process_single_turn] (Run_error in place of Run_finished). Small enough,
+   and different enough in scope (this fires with no live event stream to
+   have derived it from), that duplicating the 4-element list here reads
+   clearer than threading it out as a shared value. *)
+let stalled_stream_lifecycle =
+  [ Keeper_chat_store.Run_started
+  ; Keeper_chat_store.Text_message_start
+  ; Keeper_chat_store.Text_message_end
+  ; Keeper_chat_store.Run_error
+  ]
+
+(* [Keeper_chat_consumer]'s dispatch watchdog calls this — via
+   [Server_bootstrap_loops]'s [on_stalled] wiring — when a queued turn's
+   [handle_turn] (== [process_single_turn]) never reaches a terminal
+   outcome within [dispatch_deadline_sec]. That happens when the turn's own
+   [Keeper_msg_async.submit] cancels the in-flight work on ITS internal
+   timeout: the cancelled fiber never reaches the [persist_assistant_reply]/
+   [persist_failure_reply] calls inside [process_single_turn], so nothing is
+   ever durably recorded for the message — L1/L2 of the busy-queue root
+   cause. This mirrors [persist_failure_reply]'s dashboard/connector split
+   without a live [payload]/closure to call into (the turn's own closures
+   died with the cancelled fiber), so [payload] and
+   [connector_user_line_recorded_upstream] are passed in directly instead. *)
+let persist_queued_turn_stalled ~base_path ~connector_user_line_recorded_upstream ~payload =
+  let chat_surface = chat_surface_of_request payload in
+  let chat_source = Surface_ref.lane_label chat_surface in
+  let chat_speaker = chat_speaker_of_request payload in
+  let content =
+    persisted_error_reply
+      "queued turn did not complete within the dispatch watchdog deadline"
+  in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ChatTransportFailures)
+    ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
+    ();
+  (if connector_user_line_recorded_upstream then
+     Keeper_chat_store.append_assistant_message
+       ~base_dir:base_path
+       ~keeper_name:payload.name
+       ~content
+       ~surface:chat_surface
+       ~stream_lifecycle:stalled_stream_lifecycle
+       ()
+   else
+     Keeper_chat_store.append_turn
+       ~base_dir:base_path
+       ~keeper_name:payload.name
+       ~user_content:payload.message
+       ~user_attachments:payload.attachments
+       ~surface:chat_surface
+       ~speaker:chat_speaker
+       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+       ~assistant_content:content
+       ~stream_lifecycle:stalled_stream_lifecycle
+       ());
+  Keeper_chat_broadcast.chat_appended ~keeper_name:payload.name ~source:chat_source ~content ()
 
 let keeper_chat_stream_headers origin =
   Httpun.Headers.of_list
@@ -1864,6 +1961,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
              (* Dashboard stream route: no gate inbound boundary recorded this
                 user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
 	             process_single_turn ~connector_user_line_recorded_upstream:false
+	               ~queued_turn:false
 	               ~state ~clock ~sw
 	               ~auth_token:(auth_token_from_request request)
 	               ~thread_id ~continuation_channel ~closed

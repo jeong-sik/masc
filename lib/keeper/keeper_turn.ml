@@ -622,7 +622,6 @@ let run_keeper_msg_turn_admitted
           | _ -> None)
     in
     let no_skill_route = get_bool args "no_skill_route" false in
-    let no_state_block = get_bool args "no_state_block" false in
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
     let channel = get_string args "channel" "" in
@@ -742,60 +741,21 @@ let run_keeper_msg_turn_admitted
               | _ -> root
             in
             let effective_no_skill_route = no_skill_route || direct_reply in
-            let effective_no_state_block = no_state_block || direct_reply in
             let fallback_skill_route =
               route_keeper_skill  ~message
             in
             let live_worktree_change = None in
-            let build_turn_prompt ~base_system_prompt ~messages
+            let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
-              (* 1. Recovery + tiered memory context *)
-              let continuity_snapshot = latest_state_snapshot_from_messages messages in
-              let progress_cache =
-                Keeper_memory_policy.read_progress_snapshot_cache
-                  ~config:ctx.config ~name:meta.name
-              in
-              let recovery_snapshot, recovery_generation, recovery_source =
-                match
-                  progress_cache
-                with
-                | Some cache ->
-                    (Some cache.snapshot, cache.generation, "progress_log")
-                | None ->
-                    (match continuity_snapshot with
-                     | Some snapshot -> (Some snapshot, Some meta.runtime.generation, "checkpoint")
-                     | None ->
-                         (match
-                            Keeper_memory_policy.state_snapshot_of_summary_text
-                              meta.continuity_summary
-                          with
-                          | Some snapshot ->
-                              (Some snapshot, None, "meta_summary")
-                          | None -> (None, None, "none")))
-              in
-              let continuity_text =
-                let recovery_sections =
-                  match recovery_snapshot with
-                  | None -> []
-                  | Some snapshot ->
-                      Keeper_memory_policy.prompt_memory_sections_of_snapshot
-                        ~current_generation:meta.runtime.generation
-                        ?source_generation:recovery_generation
-                        snapshot
-                in
-                (* RFC-0149 §3.1 — route through typed Result resolver
-                   so a memory bank IO fault is rendered as an explicit
-                   [unavailable] marker in the prompt context instead of
-                   collapsing into an empty block indistinguishable from
-                   "no long-term notes recorded". *)
-                let durable_text =
+              (* RFC-0149 §3.1 — route through typed Result resolver so a
+                 memory-bank IO fault stays explicit instead of collapsing
+                 into the same empty block as "no durable notes". *)
+              let durable_memory_text =
                   (* RFC keeper-memory-consolidation Stage 1: memory_bank long-term
                      inject를 kill-switch 뒤로 둔다. off 시 Memory OS facts
                      (keeper_run_tools_hooks.render_if_enabled, default-ON) 단독
-                     주입이 되어 durable 기억의 double-coverage를 제거한다.
-                     continuity 복구는 .memory.jsonl이 아니라 snapshot cache
-                     (read_progress_snapshot_cache, :533-553) 경유라 무영향. *)
+                     주입이 되어 durable 기억의 double-coverage를 제거한다. *)
                   if not (Keeper_memory_bank_env.bank_longterm_inject_enabled ())
                   then ""
                   else
@@ -832,33 +792,6 @@ let run_keeper_msg_turn_admitted
                       Printf.sprintf
                         "Long-term memory: [unavailable: %s]"
                         (Keeper_memory_recall_exn_class.to_label exn_class)
-                in
-                let recovery_fallback =
-                  if recovery_sections <> [] then []
-                  else
-                    let summary =
-                      match continuity_snapshot with
-                      | Some s -> keeper_state_snapshot_to_summary_text s
-                      | None ->
-                          continuity_fallback_summary_text
-                            ~continuity_summary:meta.continuity_summary
-                            ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
-                    in
-                    if summary = "" || summary = "No continuity snapshot available."
-                    then []
-                    else [ summary ]
-                in
-                let blocks =
-                  (if recovery_sections = [] then recovery_fallback else recovery_sections)
-                  @ (if String.trim durable_text = "" then [] else [ durable_text ])
-                in
-                match blocks with
-                | [] -> ""
-                | _ ->
-                    Printf.sprintf
-                      "Recent continuity snapshot (%s):\n%s"
-                      recovery_source
-                      (String.concat "\n\n" blocks)
               in
               let recent_direct_conversation_text =
                 direct_owner_conversation_context
@@ -916,7 +849,7 @@ let run_keeper_msg_turn_admitted
               in
               let soft_parts = List.filter
                 (fun s -> String.trim s <> "")
-                [ continuity_text;
+                [ durable_memory_text;
                   recent_direct_conversation_text;
                   skill_route_text;
                   worktree_text;
@@ -938,8 +871,6 @@ let run_keeper_msg_turn_admitted
                 let policy_guards = [
                   (effective_no_skill_route,
                    "Output guard: NEVER output lines starting with SKILL: or SKILL_REASON:.");
-                  (effective_no_state_block,
-                   Keeper_prompt.state_block_output_guard_text);
                 ] in
                 let policy_lines =
                   List.filter_map
@@ -1165,12 +1096,9 @@ let run_keeper_msg_turn_admitted
 		                                ~runtime_id
 		                                ~world_observation
 		                                ~turn_affordances
-		                                (* A kmsg turn is user-triggered, i.e.
-		                                   reactive: it must use the reactive
-		                                   idle budget so the graduated idle hook
-		                                   (nudge -> final warning -> graceful
-		                                   Skip) can run its course before the
-		                                   OAS loop guard aborts the run. *)
+			                                (* A kmsg turn is user-triggered, so it
+			                                   uses the reactive OAS loop-guard
+			                                   setting resolved by the caller. *)
 		                                ~max_idle_turns
 		                                ?oas_timeout_s:keeper_msg_oas_timeout_s
 		                                ~generation:meta.runtime.generation

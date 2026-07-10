@@ -21,11 +21,6 @@ import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './kee
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
 import {
-  SYNTHETIC_SCOPE_LABEL,
-  SYNTHETIC_TOOLTIP,
-  stripSyntheticMarker,
-} from '../lib/synthetic-marker'
-import {
   attentionReasonLabel,
   canonicalAttentionReason,
   canonicalNextHumanAction,
@@ -33,30 +28,6 @@ import {
   type AttentionReason,
   type NextHumanAction,
 } from '../lib/keeper-attention-labels'
-
-/**
- * Render a text field that *might* carry the backend `[SYNTHETIC]`
- * prefix. Synthesized values render with a side chip + tooltip so
- * operators don't mistake a backend fallback for ground-truth model
- * output. Phase 4 surface fix for the §1.6 asymmetry: memory search
- * already rejected synthetic rows, but the dashboard rendered them
- * verbatim until now.
- */
-function SyntheticAwareText({ text }: { text: string }) {
-  const { stripped, synthesized } = stripSyntheticMarker(text)
-  if (!synthesized) return html`<span>${stripped}</span>`
-  return html`
-    <span class="inline-flex flex-wrap items-baseline gap-1.5">
-      <span
-        class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--warn-30)] bg-[var(--warn-10)] px-1.5 py-px text-[10px] font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-status-warn)]"
-        title=${SYNTHETIC_TOOLTIP}
-      >
-        ${SYNTHETIC_SCOPE_LABEL}
-      </span>
-      <span>${stripped}</span>
-    </span>
-  `
-}
 
 // attention_reason / next_human_action humanization (closed-sum unions,
 // Korean label records, canonical folds) lives in
@@ -117,7 +88,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const continueGate = keeper.runtime_blocker_continue_gate === true
-  const socialFallbackActive = keeper.social_model_recognized === false
   const attentionReason = canonicalAttentionReason(keeper.attention_reason?.trim() || null)
   const nextHumanAction = canonicalNextHumanAction(keeper.next_human_action?.trim() || null)
   // RFC-0135 PR-13: canonical paused predicate. SSOT also covers
@@ -294,7 +264,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     }
   }
 
-  const toneClass = isPaused || socialFallbackActive || runtimeBlocker || blocker || hbStale
+  const toneClass = isPaused || runtimeBlocker || blocker || hbStale
     ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
     : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
   const runtimeBlockerLabelText = keeperRuntimeBlockerLabel(runtimeBlockerClass)
@@ -362,13 +332,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               </${RuntimeBadge}>
               ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             `
-          : socialFallbackActive
-          ? html`
-              <${RuntimeBadge} tone="warn">
-                소셜 폴백
-              </${RuntimeBadge}>
-              ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
-            `
           : runtimeBlockerClass
           ? html`
               <${RuntimeBadge} tone=${pausedRuntimeBlocker ? 'warn' : 'bad'}>
@@ -384,9 +347,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${blocker
           ? html`<span><${StrongSecondary}>차단 요인</${StrongSecondary}> · ${blocker}</span>`
-          : null}
-        ${keeper.last_need
-          ? html`<span><${StrongSecondary}>최근 필요</${StrongSecondary}> · ${keeper.last_need}</span>`
           : null}
         ${attentionReason === 'approval_pending' && isBlockedBeforeWorktree
           ? html`<${RuntimeBadge} tone="warn">워크트리 전 차단</${RuntimeBadge}>`
@@ -406,16 +366,16 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanActionText}</span>`
           : null}
         ${stopCause && stopCauseCode && isTurnTerminalFailureCode(stopCauseCode)
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCauseCode}${stopCauseSummary ? html` · <${SyntheticAwareText} text=${stopCauseSummary} />` : null}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCauseCode}${stopCauseSummary ? ` · ${stopCauseSummary}` : ''}</span>`
           : null}
         ${latestTerminalCode && latestTerminalCode !== stopCauseCode && !suppressStaleLatestTerminal
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · <${SyntheticAwareText} text=${latestTerminalSummary} />` : null}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? ` · ${latestTerminalSummary}` : ''}</span>`
           : null}
         ${latestNextAction && !duplicatesAttentionReason(latestNextAction)
           ? html`<span title=${latestNextAction}><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${nextHumanActionLabel(latestNextAction)}</span>`
           : null}
         ${shouldShowOperatorDispositionReason && operatorDispositionReason
-          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · <${SyntheticAwareText} text=${operatorDispositionReason} /></span>`
+          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`
           : null}
         ${trustDisposition
           ? html`

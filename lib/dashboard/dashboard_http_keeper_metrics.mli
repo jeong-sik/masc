@@ -62,23 +62,6 @@ val count_table_incr :
     [models] / [tools] counters inside
     {!keeper_gen_window_stats}. *)
 
-(** {1 Preview similarity (runtime-visible)} *)
-
-val proactive_preview_similarity_stats :
-  ?window:int ->
-  ?warn_threshold:float ->
-  string list ->
-  int * int * float * float * bool
-(** [proactive_preview_similarity_stats ?window ?warn_threshold
-      previews] computes the rolling Jaccard similarity stats
-    over the last [window] previews (default 8) and returns
-    [(samples, comparisons, mean_similarity,
-       max_similarity, exceeded_warn_threshold)].
-
-    [exceeded_warn_threshold] is [max_similarity >= warn_threshold]
-    (default 0.90).  Used to detect "keeper repeats itself" loops
-    in proactive output. *)
-
 (** {1 Top-count rendering (runtime-visible)} *)
 
 val top_counts_json :
@@ -137,13 +120,3 @@ val contains_ci : string -> string -> bool
 (** [contains_ci haystack needle] is a case-insensitive substring
     check.  Returns [false] when [needle] is empty or longer than
     [haystack]. *)
-
-val normalize_similarity_text : string -> string
-(** [normalize_similarity_text s] lowercases ASCII, replaces
-    non-word characters with spaces, collapses whitespace and
-    trims.  Used as the input normaliser for Jaccard similarity. *)
-
-val jaccard_similarity_text : string -> string -> float
-(** [jaccard_similarity_text a b] is the Jaccard index over the
-    token sets of {!normalize_similarity_text} [a] / [b].  Returns
-    [0.0] when either side has no tokens. *)

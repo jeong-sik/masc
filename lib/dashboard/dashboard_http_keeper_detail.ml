@@ -15,19 +15,7 @@ type metrics_acc = {
   ma_heartbeat_points : int;
   ma_proactive_points : int;
   ma_drift_applied_count : int;
-  ma_auto_reflect_count : int;
-  ma_auto_plan_count : int;
-  ma_auto_compact_count : int;
-  ma_auto_handoff_count : int;
-  ma_guardrail_stop_count : int;
-  ma_repetition_risk_sum : float;
-  ma_repetition_risk_points : int;
-  ma_goal_alignment_sum : float;
-  ma_goal_alignment_points : int;
-  ma_response_alignment_sum : float;
-  ma_response_alignment_points : int;
-  ma_goal_drift_sum : float;
-  ma_goal_drift_points : int;
+
   ma_memory_checks : int;
   ma_memory_passed : int;
   ma_memory_corrections : int;
@@ -41,7 +29,7 @@ type metrics_acc = {
   ma_memory_compaction_before_notes : int;
   ma_memory_compaction_dropped_notes : int;
   ma_memory_compaction_invalid_dropped : int;
-  ma_proactive_previews_rev : string list;
+
   ma_last_handoff : Yojson.Safe.t option;
   ma_last_compaction : Yojson.Safe.t option;
 }
@@ -58,19 +46,7 @@ let init_acc = {
   ma_heartbeat_points = 0;
   ma_proactive_points = 0;
   ma_drift_applied_count = 0;
-  ma_auto_reflect_count = 0;
-  ma_auto_plan_count = 0;
-  ma_auto_compact_count = 0;
-  ma_auto_handoff_count = 0;
-  ma_guardrail_stop_count = 0;
-  ma_repetition_risk_sum = 0.0;
-  ma_repetition_risk_points = 0;
-  ma_goal_alignment_sum = 0.0;
-  ma_goal_alignment_points = 0;
-  ma_response_alignment_sum = 0.0;
-  ma_response_alignment_points = 0;
-  ma_goal_drift_sum = 0.0;
-  ma_goal_drift_points = 0;
+
   ma_memory_checks = 0;
   ma_memory_passed = 0;
   ma_memory_corrections = 0;
@@ -84,7 +60,7 @@ let init_acc = {
   ma_memory_compaction_before_notes = 0;
   ma_memory_compaction_dropped_notes = 0;
   ma_memory_compaction_invalid_dropped = 0;
-  ma_proactive_previews_rev = [];
+
   ma_last_handoff = None;
   ma_last_compaction = None;
 }
@@ -176,11 +152,7 @@ let compute_metrics_window
         let memory_expected_topic = Safe_ops.json_string_opt "expected_topic" memory_check in
         let proactive_obj = j |> m "proactive" in
         let proactive_fallback_applied_now = Safe_ops.json_bool ~default:false "fallback_applied" proactive_obj in
-        let proactive_preview_now =
-          Safe_ops.json_string_opt "preview" proactive_obj
-          |> Option.map String.trim
-          |> function Some s when s <> "" -> Some s | _ -> None
-        in
+
         let drift_obj = j |> m "drift" in
         let drift_applied_now = Safe_ops.json_bool ~default:false "applied" drift_obj in
         let drift_reason_now =
@@ -188,16 +160,6 @@ let compute_metrics_window
           |> Option.map String.trim
           |> function Some s when s <> "" -> Some s | _ -> None
         in
-        let auto_rules_obj = j |> m "auto_rules" in
-        let auto_reflect_now = Safe_ops.json_bool ~default:(Safe_ops.json_bool ~default:false "reflect" auto_rules_obj) "auto_reflect" j in
-        let auto_plan_now = Safe_ops.json_bool ~default:(Safe_ops.json_bool ~default:false "plan" auto_rules_obj) "auto_plan" j in
-        let auto_compact_now = Safe_ops.json_bool ~default:(Safe_ops.json_bool ~default:false "compact" auto_rules_obj) "auto_compact" j in
-        let auto_handoff_now = Safe_ops.json_bool ~default:(Safe_ops.json_bool ~default:false "handoff" auto_rules_obj) "auto_handoff" j in
-        let guardrail_stop_now = Safe_ops.json_bool ~default:(Safe_ops.json_bool ~default:false "guardrail_stop" auto_rules_obj) "guardrail_stop" j in
-        let repetition_risk_opt = Safe_ops.json_float_opt "repetition_risk" j in
-        let goal_alignment_opt = Safe_ops.json_float_opt "goal_alignment" j in
-        let response_alignment_opt = Safe_ops.json_float_opt "response_alignment" j in
-        let goal_drift_opt = Safe_ops.json_float_opt "goal_drift" j in
         let memory_notes_added_now = Safe_ops.json_int ~default:0 "memory_notes_added" j in
         let memory_top_kind_now = Safe_ops.json_string_opt "memory_top_kind" j in
         let memory_note_kinds =
@@ -282,35 +244,7 @@ let compute_metrics_window
           else acc
         in
         let acc =
-          if is_scheduled_autonomous then
-            match proactive_preview_now with
-            | Some preview -> { acc with ma_proactive_previews_rev = preview :: acc.ma_proactive_previews_rev }
-            | None -> acc
-          else acc
-        in
-        let acc =
           if is_interaction then begin
-            let acc = if auto_reflect_now then { acc with ma_auto_reflect_count = acc.ma_auto_reflect_count + 1 } else acc in
-            let acc = if auto_plan_now then { acc with ma_auto_plan_count = acc.ma_auto_plan_count + 1 } else acc in
-            let acc = if auto_compact_now then { acc with ma_auto_compact_count = acc.ma_auto_compact_count + 1 } else acc in
-            let acc = if auto_handoff_now then { acc with ma_auto_handoff_count = acc.ma_auto_handoff_count + 1 } else acc in
-            let acc = if guardrail_stop_now then { acc with ma_guardrail_stop_count = acc.ma_guardrail_stop_count + 1 } else acc in
-            let acc = match repetition_risk_opt with
-              | Some v -> { acc with ma_repetition_risk_sum = acc.ma_repetition_risk_sum +. v; ma_repetition_risk_points = acc.ma_repetition_risk_points + 1 }
-              | None -> acc
-            in
-            let acc = match goal_alignment_opt with
-              | Some v -> { acc with ma_goal_alignment_sum = acc.ma_goal_alignment_sum +. v; ma_goal_alignment_points = acc.ma_goal_alignment_points + 1 }
-              | None -> acc
-            in
-            let acc = match response_alignment_opt with
-              | Some v -> { acc with ma_response_alignment_sum = acc.ma_response_alignment_sum +. v; ma_response_alignment_points = acc.ma_response_alignment_points + 1 }
-              | None -> acc
-            in
-            let acc = match goal_drift_opt with
-              | Some v -> { acc with ma_goal_drift_sum = acc.ma_goal_drift_sum +. v; ma_goal_drift_points = acc.ma_goal_drift_points + 1 }
-              | None -> acc
-            in
             let acc =
               if drift_applied_now then begin
                 (match drift_reason_now with Some reason -> count_table_incr drift_reason_counts reason | None -> ());
@@ -438,19 +372,9 @@ let compute_metrics_window
               ("tool_call_count", `Int tool_call_count_now);
               ("tools_used", `List (List.map (fun s -> `String s) tools_used));
               ("proactive_fallback_applied", `Bool proactive_fallback_applied_now);
-              ("proactive_preview", Json_util.string_opt_to_json proactive_preview_now);
+
               ("drift_applied", `Bool drift_applied_now);
               ("drift_reason", Json_util.string_opt_to_json drift_reason_now);
-              ("auto_reflect", `Bool auto_reflect_now);
-              ("auto_plan", `Bool auto_plan_now);
-              ("auto_compact", `Bool auto_compact_now);
-              ("auto_handoff", `Bool auto_handoff_now);
-              ("guardrail_stop", `Bool guardrail_stop_now);
-              ("repetition_risk", Json_util.float_opt_to_json repetition_risk_opt);
-              ("goal_alignment", Json_util.float_opt_to_json goal_alignment_opt);
-              ("response_alignment", Json_util.float_opt_to_json response_alignment_opt);
-              ("goal_drift", Json_util.float_opt_to_json goal_drift_opt);
-              ("reflection", j |> m "reflection");
               ("memory_performed", `Bool memory_performed);
               ("memory_query_kind", `String memory_query_kind);
               ("memory_passed", `Bool memory_passed_now);
@@ -506,39 +430,7 @@ let compute_metrics_window
     if interaction_points_int = 0 then 0.0
     else float_of_int acc.ma_drift_applied_count /. float_of_int interaction_points_int
   in
-  let auto_reflect_rate =
-    if interaction_points_int = 0 then 0.0
-    else float_of_int acc.ma_auto_reflect_count /. float_of_int interaction_points_int
-  in
-  let auto_plan_rate =
-    if interaction_points_int = 0 then 0.0
-    else float_of_int acc.ma_auto_plan_count /. float_of_int interaction_points_int
-  in
-  let auto_compact_rate =
-    if interaction_points_int = 0 then 0.0
-    else float_of_int acc.ma_auto_compact_count /. float_of_int interaction_points_int
-  in
-  let auto_handoff_rate =
-    if interaction_points_int = 0 then 0.0
-    else float_of_int acc.ma_auto_handoff_count /. float_of_int interaction_points_int
-  in
-  let guardrail_stop_rate =
-    if interaction_points_int = 0 then 0.0
-    else float_of_int acc.ma_guardrail_stop_count /. float_of_int interaction_points_int
-  in
-  let proactive_previews = List.rev acc.ma_proactive_previews_rev in
-  let proactive_similarity_warn_threshold = 0.90 in
-  let proactive_similarity_window = 8 in
-  let ( proactive_preview_sample_count,
-        proactive_preview_pair_count,
-        proactive_preview_similarity_avg,
-        proactive_preview_similarity_max,
-        proactive_preview_similarity_warn ) =
-    proactive_preview_similarity_stats
-      ~window:proactive_similarity_window
-      ~warn_threshold:proactive_similarity_warn_threshold
-      proactive_previews
-  in
+
   let compaction_saved_ratio =
     if acc.ma_compaction_before_tokens = 0 then 0.0 else
       float_of_int acc.ma_compaction_saved_tokens /. float_of_int acc.ma_compaction_before_tokens
@@ -572,22 +464,7 @@ let compute_metrics_window
     if acc.ma_memory_weather_checks = 0 then 0.0
     else float_of_int acc.ma_memory_weather_passed /. float_of_int acc.ma_memory_weather_checks
   in
-  let repetition_risk_avg =
-    if acc.ma_repetition_risk_points = 0 then 0.0
-    else acc.ma_repetition_risk_sum /. float_of_int acc.ma_repetition_risk_points
-  in
-  let goal_alignment_avg =
-    if acc.ma_goal_alignment_points = 0 then 0.0
-    else acc.ma_goal_alignment_sum /. float_of_int acc.ma_goal_alignment_points
-  in
-  let response_alignment_avg =
-    if acc.ma_response_alignment_points = 0 then 0.0
-    else acc.ma_response_alignment_sum /. float_of_int acc.ma_response_alignment_points
-  in
-  let goal_drift_avg =
-    if acc.ma_goal_drift_points = 0 then 0.0
-    else acc.ma_goal_drift_sum /. float_of_int acc.ma_goal_drift_points
-  in
+
   let top_work_kinds =
     top_counts_json ~limit:5 ~name_key:"kind" work_kind_counts
   in
@@ -679,29 +556,9 @@ let compute_metrics_window
     ("proactive_template_fallback_denominator", `Int proactive_points_int);
     ("intervention_share", `Float intervention_share);
     ("intervention_per_turn", `Float intervention_per_turn);
-    ("auto_reflect_count", `Int acc.ma_auto_reflect_count);
-    ("auto_plan_count", `Int acc.ma_auto_plan_count);
-    ("auto_compact_count", `Int acc.ma_auto_compact_count);
-    ("auto_handoff_count", `Int acc.ma_auto_handoff_count);
-    ("guardrail_stop_count", `Int acc.ma_guardrail_stop_count);
-    ("auto_reflect_rate", `Float auto_reflect_rate);
-    ("auto_plan_rate", `Float auto_plan_rate);
-    ("auto_compact_rate", `Float auto_compact_rate);
-    ("auto_handoff_rate", `Float auto_handoff_rate);
-    ("guardrail_stop_rate", `Float guardrail_stop_rate);
     ("drift_applied_count", `Int acc.ma_drift_applied_count);
     ("drift_applied_rate", `Float drift_applied_rate);
-    ("repetition_risk_avg", `Float repetition_risk_avg);
-    ("goal_alignment_avg", `Float goal_alignment_avg);
-    ("response_alignment_avg", `Float response_alignment_avg);
-    ("goal_drift_avg", `Float goal_drift_avg);
-    ("proactive_preview_sample_count", `Int proactive_preview_sample_count);
-    ("proactive_preview_pair_count", `Int proactive_preview_pair_count);
-    ("proactive_preview_similarity_avg", `Float proactive_preview_similarity_avg);
-    ("proactive_preview_similarity_max", `Float proactive_preview_similarity_max);
-    ("proactive_preview_similarity_warn", `Bool proactive_preview_similarity_warn);
-    ("proactive_preview_similarity_method", `String "jaccard_adjacent_preview");
-    ("proactive_preview_similarity_window", `Int proactive_similarity_window);
+
     ("tool_call_count", `Int acc.ma_tool_call_count);
     ("memory_checks", `Int acc.ma_memory_checks);
     ("memory_passed", `Int acc.ma_memory_passed);

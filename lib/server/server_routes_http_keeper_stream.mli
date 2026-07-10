@@ -159,6 +159,7 @@ val handle_keeper_chat_stream :
 
 val process_single_turn :
   connector_user_line_recorded_upstream:bool ->
+  queued_turn:bool ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   sw:Eio.Switch.t ->
@@ -190,7 +191,31 @@ val process_single_turn :
     the user line — set by the queue consumer for connector ([Discord]/[Slack])
     sources whose busy message was enqueued after the gate already recorded it
     (RFC-connector-deferred-reply-via-chat-queue §3.4). [false] keeps the dashboard-route behaviour of recording
-    both sides. *)
+    both sides.
+
+    [queued_turn] (default [false], set [true] only by
+    [Server_bootstrap_loops]'s queue-consumer [handle_turn] wiring) changes
+    ONLY the [No_visible_reply]/empty-[Visible_reply] outcome: the
+    interactive HTTP stream keeps recording the user line only
+    ([persist_user_message_only]), matching its existing "the keeper will
+    answer on the next turn" semantics; a queued turn instead persists a
+    typed failure row via [persist_failure_reply]. A queued message was
+    already dequeued off [Keeper_chat_queue] — there is no "next turn" for
+    it to ride along with, so silence here is terminal, not merely
+    deferred. *)
+
+val persist_queued_turn_stalled :
+  base_path:string ->
+  connector_user_line_recorded_upstream:bool ->
+  payload:keeper_chat_stream_request ->
+  unit
+(** Durably records that a queued turn never reached a terminal outcome
+    within [Keeper_chat_consumer]'s dispatch watchdog deadline: a typed
+    failure row (mirroring [persist_failure_reply]'s dashboard/connector
+    split), a [ChatTransportFailures] counter increment, and a
+    [Keeper_chat_broadcast.chat_appended] broadcast. Called from
+    [Server_bootstrap_loops]'s [on_stalled] wiring — see
+    [Keeper_chat_consumer.start] for when this fires and why. *)
 
 (** {1 Testing helpers} *)
 

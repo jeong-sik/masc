@@ -65,7 +65,7 @@ code_refs:
 
 ### 왜 `/agents/:id`는 mini strip만
 
-MASC `agent`와 OAS `keeper`는 다른 개념이다 (`docs/design/oas-masc-state-boundary.md`). agent detail에 keeper composite FSM 전체를 복제하면 layer boundary를 흐린다. 대신 "이 agent가 연결된 keeper의 현재 parent phase"만 작은 strip으로 보이고 클릭 시 `/keepers/:name`으로 이동.
+MASC `agent`와 OAS runtime은 다른 계층이다 (`docs/OAS-MASC-BOUNDARY.md`). agent detail에 keeper composite FSM 전체를 복제하면 layer boundary를 흐린다. 대신 "이 agent가 연결된 keeper의 현재 parent phase"만 작은 strip으로 보이고 클릭 시 `/keepers/:name`으로 이동.
 
 ## 3. Runtime 하드코딩 제거 경로
 

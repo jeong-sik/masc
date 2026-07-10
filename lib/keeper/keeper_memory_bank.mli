@@ -1,64 +1,11 @@
-(** Keeper Memory Bank — durable note storage and compaction over the
-    [STATE]-derived snapshots produced by [Keeper_memory_policy].
-
-    Re-exports the policy types so callers can stay against this module
-    alone, then adds bank-specific selection (per-kind cap + total cap),
-    semantic dedup (Jaccard over normalised text), parse/write of the
-    [memory_bank.jsonl] row schema, and the compaction pass that runs
-    when the file crosses the size trigger. *)
+(** Keeper Memory Bank -- durable note storage, provenance, recall-row
+    validation, and compaction. *)
 
 (** {1 Re-exports from [Keeper_memory_policy]}
 
     Type equalities are preserved so policy and bank can share values
     without conversion.  See [Keeper_memory_policy] for full
     documentation; brief intent only here. *)
-
-val state_start_re : Re.re
-val state_end_re : Re.re
-
-type alert_channel_result =
-  Keeper_memory_policy.alert_channel_result = {
-  channel : string;
-  attempted : bool;
-  success : bool;
-  attempts : int;
-  detail : string option;
-}
-(** @see [Keeper_memory_policy.alert_channel_result] *)
-
-type interesting_alert_result =
-  Keeper_memory_policy.interesting_alert_result = {
-  enabled : bool;
-  triggered : bool;
-  score : float;
-  threshold : float;
-  reasons : string list;
-  keywords : string list;
-  alert_id : string option;
-  channels : alert_channel_result list;
-  retry_queued : bool;
-  deadlettered : bool;
-}
-(** @see [Keeper_memory_policy.interesting_alert_result] *)
-
-val empty_interesting_alert_result : interesting_alert_result
-val alert_channel_result_to_json : alert_channel_result -> Yojson.Safe.t
-
-type keeper_state_snapshot =
-  Keeper_memory_policy.keeper_state_snapshot = {
-  priority : int option;
-  goal : string option;
-  progress : string option;
-  done_summary : string option;
-  next_summary : string option;
-  next_items : string list;
-  decisions : string list;
-  open_questions : string list;
-  constraints : string list;
-}
-(** @see [Keeper_memory_policy.keeper_state_snapshot] *)
-
-val empty_keeper_state_snapshot : keeper_state_snapshot
 
 type keeper_memory_line =
   Keeper_memory_policy.keeper_memory_line = {
@@ -102,115 +49,32 @@ type memory_bank_compaction =
 
 val no_memory_bank_compaction : memory_bank_compaction
 val keeper_memory_schema_version : int
-val replay_metadata_key : string
-val replay_metadata_kind : string
-val replay_metadata_version : int
 val short_term_horizon : string
 val mid_term_horizon : string
 val long_term_horizon : string
-val memory_horizon_of_kind_opt : string -> string option
-val memory_horizon_of_json_opt : Yojson.Safe.t -> string option
-val split_state_items : string -> string list
-val strip_prefix_ci : prefix:string -> string -> string option
-val find_state_block : string -> string option
-val state_snapshot_of_lines : string list -> keeper_state_snapshot option
-val parse_state_snapshot_from_reply : string -> keeper_state_snapshot option
-val state_snapshot_of_summary_text : string -> keeper_state_snapshot option
-val forward_looking_snapshot : keeper_state_snapshot -> keeper_state_snapshot
-val keeper_state_snapshot_to_summary_text : keeper_state_snapshot -> string
-val default_max_string_chars : int
-val default_max_list_items : int
-val default_max_item_chars : int
-val cap_string : max_chars:int -> string option -> string option
-val cap_list :
-  max_items:int -> max_item_chars:int -> string list -> string list
-val cap_snapshot :
-  ?max_string_chars:int ->
-  ?max_list_items:int ->
-  ?max_item_chars:int -> keeper_state_snapshot -> keeper_state_snapshot
-val filter_forward_looking_summary : string -> string
-val progress_markdown_of_snapshot :
-  ?generation:int -> ?updated_at:string -> keeper_state_snapshot -> string
-val short_term_prompt_text_of_snapshot : keeper_state_snapshot -> string
-val mid_term_prompt_text_of_snapshot : keeper_state_snapshot -> string
 
-type progress_snapshot_cache =
-  Keeper_memory_policy.progress_snapshot_cache = {
-  generation : int option;
-  snapshot : keeper_state_snapshot;
-}
-(** @see [Keeper_memory_policy.progress_snapshot_cache] *)
+type memory_kind =
+  Keeper_memory_policy.memory_kind =
+  | Goal
+  | Progress
+  | Decision
+  | Open_question
+  | Long_term
 
-val progress_generation_of_text : string -> int option
-val progress_snapshot_cache_of_text :
-  string -> progress_snapshot_cache option
-val prompt_memory_sections_of_snapshot :
-  current_generation:int ->
-  ?source_generation:int -> keeper_state_snapshot -> string list
-val read_progress_snapshot :
-  config:Workspace.config -> name:string -> keeper_state_snapshot option
-val read_progress_snapshot_cache :
-  config:Workspace.config ->
-  name:string -> progress_snapshot_cache option
-val write_progress_snapshot_path :
-  path:string ->
-  ?generation:int ->
-  ?updated_at:string -> keeper_state_snapshot -> (unit, string) result
-val continuity_fallback_summary_text :
-  continuity_summary:string -> last_continuity_update_ts:float -> string
-val keeper_state_snapshot_to_json : keeper_state_snapshot -> Yojson.Safe.t
-val keeper_state_snapshot_of_json :
-  Yojson.Safe.t -> keeper_state_snapshot option
-val structured_working_context_of_snapshot :
-  keeper_state_snapshot -> Yojson.Safe.t
-val replay_metadata_of_snapshot :
-  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
-  keeper_state_snapshot ->
-  Yojson.Safe.t
-val snapshot_of_replay_metadata :
-  Yojson.Safe.t -> keeper_state_snapshot option
-val with_snapshot_metadata :
-  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
-  Agent_sdk.Types.message ->
-  keeper_state_snapshot -> Agent_sdk.Types.message
-val snapshot_of_message_metadata :
-  Agent_sdk.Types.message -> keeper_state_snapshot option
-val snapshot_of_message :
-  Agent_sdk.Types.message -> keeper_state_snapshot option
-val snapshot_of_structured_working_context :
-  Yojson.Safe.t -> keeper_state_snapshot option
-val latest_state_snapshot_from_messages :
-  Agent_sdk.Types.message list -> keeper_state_snapshot option
-val priority_for_kind : kind:string -> int
-val tuned_priority_for_candidate : kind:string -> text:string -> int
-val total_cap : unit -> int
-val kind_caps : unit -> (string * int) list
+val memory_kind_to_wire : memory_kind -> string
+val memory_kind_of_wire : string -> memory_kind option
+val all_memory_kinds : memory_kind list
+val memory_kind_is_writable : memory_kind -> bool
+val writable_memory_kinds : memory_kind list
 val valid_memory_kind_strings : string list
-val cap_for_kind : (string * int) list -> string -> int
-val synthesize_state_from_run_result :
-  goal:string ->
-  tools_used:string list ->
-  stop_reason:string -> response_text:string -> keeper_state_snapshot
-
-(** {1 Bank-specific: candidate selection} *)
-
-type candidate_selection_result = {
-  selected : (string * string * int) list;
-      (** [(kind, text, priority)] entries kept after caps. *)
-  dropped_by_kind : (string * int) list;
-      (** Drops attributed to per-kind caps, by kind. *)
-  dropped_by_total_cap : int;
-      (** Drops attributed to the global [total_cap]. *)
-  suppressed_synthetic_candidates : int;
-      (** Otherwise valid candidates intentionally suppressed because the
-          snapshot was synthetic rather than model-authored. *)
-}
-(** Outcome of [select_memory_candidates]. *)
-
-val select_memory_candidates :
-  (string * string * int) list -> candidate_selection_result
-(** Apply per-kind caps and the total cap to a candidate list,
-    preferring higher priority within each kind. *)
+val writable_memory_kind_strings : string list
+val memory_horizon_of_kind : memory_kind -> string
+val memory_horizon_of_json_opt : Yojson.Safe.t -> string option
+val priority_for_kind : kind:memory_kind -> int
+val tuned_priority_for_candidate : kind:memory_kind -> text:string -> int
+val total_cap : unit -> int
+val kind_caps : unit -> (memory_kind * int) list
+val cap_for_kind : (memory_kind * int) list -> memory_kind -> int
 
 (** {1 Bank-specific: dedup} *)
 
@@ -220,14 +84,6 @@ val dedup_by_key : ('a -> string) -> 'a list -> 'a list
 val jaccard_similarity : string -> string -> float
 (** Token-set Jaccard similarity over normalised words; used as the
     semantic-dedup distance metric. *)
-
-val semantic_dedup_similarity_threshold : unit -> float
-(** Threshold above which two notes are considered duplicates
-    (env-overridable). *)
-
-val dedup_memory_candidates :
-  (string * string * int) list -> (string * string * int) list
-(** Apply [jaccard_similarity] dedup on top of exact-key dedup. *)
 
 (** {1 Bank-specific: text normalisation} *)
 
@@ -262,26 +118,12 @@ val is_meaningful_memory_text : string -> bool
 (** Reject empty / placeholder / over-long candidates before they
     enter the bank. *)
 
-val memory_candidates_from_snapshot :
-  keeper_state_snapshot -> candidate_selection_result
-(** Lift snapshot fields into candidate triples and run the cap +
-    selection pipeline. *)
-
-val memory_candidates_from_snapshot_gated :
-  is_synthetic:bool ->
-  keeper_state_snapshot ->
-  candidate_selection_result
-  (** Gated variant used by post-turn persistence. When [is_synthetic] (the
-      snapshot was fabricated from run metadata, not model-authored), no durable
-      memory candidates are produced — synthetic snapshots are resume aids only.
-      [suppressed_synthetic_candidates] records how many otherwise valid
-      candidates were intentionally suppressed by this gate. *)
-
 (** {1 Bank wire format} *)
 
 type memory_row_source =
   | Progress_consolidation
   | Cross_trace_recurrence
+  | Explicit_memory_write
   | Tool_result
   | Voice_output
   | Other of string
@@ -299,7 +141,7 @@ val memory_row_source_to_string : memory_row_source -> string
 
 type keeper_memory_row_raw = {
   json : Yojson.Safe.t;
-  kind : string;
+  kind : memory_kind;
   horizon : string;
   source : memory_row_source;
   generation : int;
@@ -342,7 +184,7 @@ val memory_compaction_trigger_bytes : target_notes:int -> int
 (** File size that triggers a compaction pass for the given target. *)
 
 val memory_kind_caps_for_compaction :
-  target_notes:int -> (string, int) Hashtbl.t
+  target_notes:int -> (memory_kind, int) Hashtbl.t
 (** Per-kind caps used inside the compaction pass; tighter than
     [kind_caps] because compaction is a recovery action. *)
 
@@ -366,16 +208,20 @@ val compact_memory_bank_if_needed :
     byte trigger or note-count target; returns
     [no_memory_bank_compaction] when nothing happened. *)
 
-(** {1 Append-from-reply} *)
+type explicit_memory_write_error =
+  | Explicit_memory_kind_not_writable of memory_kind
+  | Rejected_explicit_memory_text
+  | Explicit_memory_write_failed of string
 
-val append_memory_notes_from_reply :
+val append_explicit_memory_note :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
-  ?snapshot:keeper_state_snapshot ->
-  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
-  turn:int -> reply:string -> unit -> int * string list
-(** Persist new memory rows derived from a turn's [reply] (and
-    optional [snapshot]); returns [(rows_written, drop_reasons)]. *)
+  turn:int ->
+  kind:memory_kind ->
+  text:string ->
+  (unit, explicit_memory_write_error) result
+(** Persist one note produced by the explicit memory tool. The result carries
+    validation and persistence failures instead of silently dropping the note. *)
 
 (** Promote explicitly tagged tool results into durable [long_term]
     memory-bank rows. Only results carrying the existing

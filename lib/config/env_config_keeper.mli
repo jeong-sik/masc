@@ -277,7 +277,6 @@ module KeeperKeepalive : sig
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
 
-  val idle_skip_threshold : int
 end
 
 (** {1 gRPC heartbeat reconnect} *)

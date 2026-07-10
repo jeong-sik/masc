@@ -105,31 +105,6 @@ let is_workspace_message (msg : Masc_domain.message) =
   | _ -> not (String.starts_with ~prefix:"lifecycle_" msg_type)
 ;;
 
-let block_kind_of_message (msg : Masc_domain.message) =
-  (* Restrict block_kind to messages whose msg_type explicitly carries
-     a [state_block:<kind>] / [state-block:<kind>] discriminator. The
-     previous fall-through (`else Some lower`) surfaced operational
-     msg_types like "cache_invalidated" as block_kind, which clients
-     interpreted as a structural state-block name and rendered as a
-     fake panel. An empty suffix (e.g. "state_block:") returns None
-     too — a missing discriminator is no signal at all, not a
-     [block_kind: ""] field that downstream consumers cannot decode. *)
-  let msg_type = String.trim msg.msg_type in
-  let lower = String.lowercase_ascii msg_type in
-  let extract_suffix prefix =
-    let n = String.length prefix in
-    String.sub msg_type n (String.length msg_type - n)
-    |> String.trim
-    |> String.lowercase_ascii
-  in
-  let prefixes = [ "state_block:"; "state-block:" ] in
-  match List.find_opt (fun p -> String.starts_with ~prefix:p lower) prefixes with
-  | None -> None
-  | Some prefix ->
-    let suffix = extract_suffix prefix in
-    if suffix = "" then None else Some suffix
-;;
-
 let message_json (msg : Masc_domain.message) =
   let body = decode_message_entities msg.content in
   let mentions = mentions_of_message msg in
@@ -145,12 +120,7 @@ let message_json (msg : Masc_domain.message) =
     ; "relevance", `String msg.relevance
     ]
   in
-  let fields =
-    match block_kind_of_message msg with
-    | None -> base
-    | Some kind -> base @ [ "block_kind", `String kind ]
-  in
-  `Assoc fields
+  `Assoc base
 ;;
 
 let snippet text =

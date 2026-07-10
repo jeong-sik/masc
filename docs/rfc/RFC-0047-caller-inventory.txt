@@ -8,7 +8,6 @@ docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04.md:96:Oas_worker
 docs/design/dashboard-fsm-redesign.md:43:Oas_worker_named
 docs/design/dashboard-fsm-redesign.md:78:Oas_worker_named
 docs/design/dashboard-fsm-redesign.md:84:Oas_model_resolve
-docs/design/oas-masc-state-boundary.md:168:Oas_worker
 docs/observability/runtime-metrics.md:15:Oas_worker_named
 docs/spec/05-keeper-agent.md:277:Oas_worker
 docs/spec/10-dashboard.md:257:Oas_worker

@@ -163,7 +163,10 @@ type model_spec =
   { id : string
   ; api_name : string
   ; tools_support : bool
-  ; max_context : int
+  ; max_context : int option
+      (** [models.<id>.max-context] operator override. [None] means the OAS
+          capability catalog's max-context is the sole source; resolved via
+          {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool
   ; preserve_thinking : bool option
   ; max_thinking_budget : int option

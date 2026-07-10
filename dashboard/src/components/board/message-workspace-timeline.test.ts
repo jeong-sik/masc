@@ -23,13 +23,12 @@ describe('message workspace timeline helpers', () => {
     const model = buildMessageWorkspaceModel([
       message({ id: 'm-1', workspace: 'ops', content: 'ops note', seq: 2 }),
       message({ id: 'm-2', content: 'runtime note', seq: 1 }),
-      message({ id: 'm-3', workspace: '#ops', content: '@dashboard [STATE]\nGoal: ship\n[/STATE]', seq: 3 }),
+      message({ id: 'm-3', workspace: '#ops', content: '@dashboard ship', seq: 3 }),
     ])
 
     expect(model.workspaces.map(workspace => workspace.workspace)).toEqual(['execution', 'ops'])
     expect(model.workspaces.find(workspace => workspace.workspace === 'ops')?.rows.map(row => row.message.id)).toEqual(['m-1', 'm-3'])
     expect(model.totalMentions).toBe(1)
-    expect(model.totalStateBlocks).toBe(1)
   })
 })
 
@@ -60,13 +59,4 @@ describe('MessageWorkspaceTimeline', () => {
     expect(screen.getByText('@dashboard')).toBeInTheDocument()
   })
 
-  it('shows state counts on timeline rows', () => {
-    messages.value = [
-      message({ id: 'm-state', workspace: 'ops', content: '[STATE]\nGoal: keep context\n[/STATE]', seq: 1 }),
-    ]
-
-    render(h(MessageWorkspaceTimeline, null))
-
-    expect(screen.getByText('STATE 1')).toBeInTheDocument()
-  })
 })

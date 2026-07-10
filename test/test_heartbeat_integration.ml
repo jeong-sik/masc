@@ -111,7 +111,6 @@ let base_observation : WO.world_observation =
   ; pending_scope_messages = []
   ; idle_seconds = 0
   ; active_goals = []
-  ; continuity_summary = ""
   ; context_ratio = lazy 0.0
   ; unclaimed_task_count = 0
   ; claimable_task_count = 0
@@ -948,6 +947,24 @@ let test_pacing_block_delays_requested_turn () =
   in
   check bool "default pacing closure never blocks" true admitted.should_run_turn
 
+let test_blocking_approval_is_classified_before_intake () =
+  (match
+     KHL.classify_turn_intake_admission
+       ~pressure:Keeper_pressure_admission.Admitted
+       ~blocking_approval_pending:true
+   with
+   | KHL.Intake_blocking_approval_pending -> ()
+   | KHL.Intake_admitted | KHL.Intake_pressure_blocked _ ->
+     fail "blocking approval must stop intake before durable dequeue");
+  match
+    KHL.classify_turn_intake_admission
+      ~pressure:Keeper_pressure_admission.Admitted
+      ~blocking_approval_pending:false
+  with
+  | KHL.Intake_admitted -> ()
+  | KHL.Intake_blocking_approval_pending | KHL.Intake_pressure_blocked _ ->
+    fail "no blocking approval should leave intake admitted"
+
 let test_crashed_cycle_records_health_failure () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1031,6 +1048,8 @@ let () =
         test_keeper_health_backpressure_uses_keeper_name;
       test_case "pacing block delays requested turn (RFC-0313 W3)" `Quick
         test_pacing_block_delays_requested_turn;
+      test_case "blocking approval is classified before intake" `Quick
+        test_blocking_approval_is_classified_before_intake;
       test_case "crashed cycles feed agent health breaker" `Quick
         test_crashed_cycle_records_health_failure;
     ];

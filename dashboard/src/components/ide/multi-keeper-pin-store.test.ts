@@ -142,7 +142,7 @@ describe('multi-keeper-pin-store', () => {
   })
 })
 
-describe('multi-keeper-pin-store — reorderPins (RFC-0027 PR-γ §4)', () => {
+describe('multi-keeper-pin-store — reorderPins', () => {
   function seed4(): void {
     pinKeeper('a', 1)
     pinKeeper('b', 2)
@@ -220,7 +220,7 @@ describe('multi-keeper-pin-store — reorderPins (RFC-0027 PR-γ §4)', () => {
   })
 })
 
-describe('multi-keeper-pin-store — promotePinAt (RFC-0027 PR-γ-2 keyboard)', () => {
+describe('multi-keeper-pin-store — promotePinAt keyboard shortcut', () => {
   function seed4(): void {
     pinKeeper('a')
     pinKeeper('b')
@@ -282,7 +282,7 @@ describe('multi-keeper-pin-store — promotePinAt (RFC-0027 PR-γ-2 keyboard)', 
   })
 })
 
-describe('multi-keeper-pin-store — unpinHead (RFC-0027 PR-γ-2 keyboard)', () => {
+describe('multi-keeper-pin-store — unpinHead keyboard shortcut', () => {
   it('removes the head entry, leaving the rest in order', () => {
     pinKeeper('a')
     pinKeeper('b')

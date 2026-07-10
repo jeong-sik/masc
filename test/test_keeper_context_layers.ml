@@ -13,13 +13,11 @@ let all_layers =
   [
     L.Active_goals;
     L.Current_task;
-    L.Working_state;
     L.Connected_surfaces;
     L.Namespace_state;
     L.Context_health;
     L.Autonomous_trigger;
     L.Scheduled_automation;
-    L.Continuity;
     L.Pending_mentions;
     L.Scope_messages;
     L.Claimable_work;
@@ -52,7 +50,7 @@ let test_order_index_is_injective () =
     (List.length all_layers) (List.length sorted)
 
 let test_assemble_concatenates_present_in_order () =
-  (* Render a label for three layers spread across the order (positions 0, 4, 11)
+  (* Render a label for three layers spread across the order (positions 0, 4, 10)
      and nothing for the rest; assemble must yield them in ordered order. *)
   let content_of = function
     | L.Active_goals -> Some "A"
@@ -67,9 +65,9 @@ let test_assemble_empty_when_all_absent () =
   check string "no layers -> empty body" "" (L.assemble ~content_of:(fun _ -> None))
 
 let test_assemble_all_present_follows_ordered () =
-  (* Each layer renders its own order index; the result must read 0..12. *)
+  (* Each layer renders its own order index; the result must read 0..10. *)
   let content_of id = Some (string_of_int (L.order_index id)) in
-  check string "every layer present -> indices in order" "0123456789101112"
+  check string "every layer present -> indices in order" "012345678910"
     (L.assemble ~content_of)
 
 let () =

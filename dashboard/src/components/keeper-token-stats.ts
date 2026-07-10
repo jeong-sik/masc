@@ -7,7 +7,6 @@
 // renders a sorted aggregate so the operator can see relative load
 // without opening each keeper detail page.
 //
-// Audit: `dashboard/design-system/audits/2026-04-29-phase2-implementation-gap.md`
 // Decision: derive from `keepers` signal (no new fetch). In/out split
 // is omitted because per-keeper in/out values live behind separate
 // `KeeperConfigPanel` fetches; the spec's primary intent is rank +

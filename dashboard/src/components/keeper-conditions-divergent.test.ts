@@ -17,7 +17,6 @@ const allHealthy: KeeperConditions = {
   stop_requested: false,
   restart_budget_remaining: true,
   backoff_elapsed: true,
-  guardrail_triggered: false,
   drain_complete: false,
   context_overflow: false,
   compact_retry_exhausted: false,
@@ -107,16 +106,6 @@ describe("computeDivergences", () => {
     expect(divs.some(d => d.field === "operator_paused")).toBe(false)
   })
 
-  it("detects guardrail_triggered when not Paused/Failing", () => {
-    const divs = computeDivergences({ ...allHealthy, guardrail_triggered: true }, "Running")
-    expect(divs.some(d => d.field === "guardrail_triggered")).toBe(true)
-  })
-
-  it("ignores guardrail_triggered when phase is Paused", () => {
-    const divs = computeDivergences({ ...allHealthy, guardrail_triggered: true }, "Paused")
-    expect(divs.some(d => d.field === "guardrail_triggered")).toBe(false)
-  })
-
   it("detects turn_healthy=false when not Failing", () => {
     const divs = computeDivergences({ ...allHealthy, turn_healthy: false }, "Running")
     expect(divs.some(d => d.field === "turn_healthy")).toBe(true)
@@ -158,7 +147,6 @@ describe("computeDivergences", () => {
       context_handoff_needed: true,
       context_overflow: true,
       stop_requested: true,
-      guardrail_triggered: true,
       turn_healthy: false,
       heartbeat_healthy: false,
       fiber_alive: false,

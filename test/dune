@@ -2052,6 +2052,8 @@
 
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
 
+(include stanzas/test_keeper_msg_async_terminal_event.inc)
+
 (include stanzas/test_keeper_msg_cancel.inc)
 
 (include stanzas/test_turn_record.inc)

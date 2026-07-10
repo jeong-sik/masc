@@ -3086,11 +3086,15 @@ let test_prune_stale_paused_meta_unregisters_entry () =
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "stale-paused-prune" in
       write_keeper_toml config_dir ~name;
-      (* Two days ago: past the 24h [paused_cleanup_ttl_sec] default, and
+      (* Just beyond the configured cleanup TTL, and
          [auto_resume_after_sec = None] keeps Phase 3.5 auto-resume out of
          the picture (operator pauses are never auto-resumed). *)
-      let two_days_ago =
-        let t = Unix.gmtime (Unix.time () -. 172800.0) in
+      let stale_timestamp =
+        let t =
+          Unix.gmtime
+            (Unix.time () -. Env_config.KeeperSupervisor.paused_cleanup_ttl_sec
+             -. 1.0)
+        in
         Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
           (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
           t.tm_hour t.tm_min t.tm_sec
@@ -3099,7 +3103,7 @@ let test_prune_stale_paused_meta_unregisters_entry () =
         { (make_meta name) with
           paused = true;
           auto_resume_after_sec = None;
-          updated_at = two_days_ago;
+          updated_at = stale_timestamp;
         }
       in
       (match Keeper_meta_store.write_meta config stale_meta with

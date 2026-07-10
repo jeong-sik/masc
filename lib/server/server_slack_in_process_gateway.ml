@@ -144,8 +144,6 @@ let slack_conversation_id ~channel_id = Printf.sprintf "slack:channel:%s" channe
 (* Streaming reply projection                                       *)
 (* ---------------------------------------------------------------- *)
 
-let streaming_edit_interval_s = 1.0
-
 type slack_stream_reply =
   { channel_id : string
   ; reply_to_thread_ts : string
@@ -213,7 +211,7 @@ let publish_slack_stream_snapshot ~clock state snapshot =
           log_stream_error "initial send" state error)
       | Some ts ->
         let elapsed = now -. state.last_edit_time in
-        if elapsed >= streaming_edit_interval_s then
+        if elapsed >= Slack_rest_client.streaming_update_min_interval_sec then
           match
             State.edit_message ~clock ~channel_id:state.channel_id ~message_id:ts
               ~content ()

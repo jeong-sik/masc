@@ -746,7 +746,11 @@ let done_status assignee =
     { assignee; completed_at = Masc_domain.now_iso (); notes = Some "completed" }
 ;;
 
-let test_claim_next_reclaims_done_allow_reclaim () =
+(* RFC-0323 G-10 (#23731): a Done task is terminal for every actor regardless
+   of reclaim_policy — re-running completed work creates a NEW task linked via
+   predecessor_task_id (types_core.ml Claim_block_not_todo arm). This test
+   previously pinned the retired #23632 Done-reclaim mechanism. *)
+let test_claim_next_done_allow_reclaim_is_terminal () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ =
@@ -758,22 +762,24 @@ let test_claim_next_reclaims_done_allow_reclaim () =
       ; reclaim_policy = Some Masc_domain.Allow_reclaim
       });
     match Workspace.claim_next_r config ~agent_name:claude () with
-    | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "completed task claimed" "task-001" task_id;
-      assert_claimed_by config "task-001" claude;
-      let task = task_by_id config "task-001" in
-      Alcotest.(check (option string))
-        "allow_reclaim policy cleared"
-        None
-        (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "completed Allow_reclaim task should be eligible"
     | Workspace.Claim_next_no_unclaimed ->
-      Alcotest.fail "completed Allow_reclaim task should not be treated as absent"
+      let task = task_by_id config "task-001" in
+      Alcotest.(check string)
+        "completed task stays done"
+        "done"
+        (Masc_domain.task_status_to_string task.task_status)
+    | Workspace.Claim_next_claimed { task_id; _ } ->
+      Alcotest.failf "Done task must be terminal (RFC-0323 G-10), got claim of %s" task_id
+    | Workspace.Claim_next_no_eligible _ ->
+      Alcotest.fail "Done task must not be counted as blocked — reclaim gate is retired"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
-let test_claim_next_blocks_done_block_reclaim () =
+(* RFC-0323 G-10: Block_reclaim on a Done task is equally moot — Done is
+   terminal, and the blocked-by-reclaim scan is a literal empty list
+   (workspace_task_schedule.ml [blocked_reclaim]), so the task is simply
+   invisible to claim_next rather than "blocked". *)
+let test_claim_next_done_block_reclaim_is_terminal () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ =
@@ -786,17 +792,17 @@ let test_claim_next_blocks_done_block_reclaim () =
       ; do_not_reclaim_reason = Some "completed upstream scope"
       });
     match Workspace.claim_next_r config ~agent_name:claude () with
-    | Workspace.Claim_next_no_eligible { blocked_count; _ } ->
-      Alcotest.(check int) "blocked completed task counted" 1 blocked_count;
+    | Workspace.Claim_next_no_unclaimed ->
       let task = task_by_id config "task-001" in
       Alcotest.(check string)
-        "blocked completed task preserved"
+        "completed task preserved"
         "done"
         (Masc_domain.task_status_to_string task.task_status)
     | Workspace.Claim_next_claimed { task_id; _ } ->
       Alcotest.failf "Block_reclaim completed task must not be claimed, got %s" task_id
-    | Workspace.Claim_next_no_unclaimed ->
-      Alcotest.fail "Block_reclaim completed task should be reported as blocked"
+    | Workspace.Claim_next_no_eligible _ ->
+      Alcotest.fail
+        "Done task must not be counted as blocked — the reclaim claim gate is retired (RFC-0323 G-10)"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
@@ -2049,7 +2055,10 @@ let test_claim_task_r_blocks_done_default_policy () =
     | Ok _ -> Alcotest.fail "completed default-policy task must not be claimable")
 ;;
 
-let test_claim_task_r_reclaims_done_allow_reclaim () =
+(* RFC-0323 G-10 (#23731): even Allow_reclaim does not make Done claimable —
+   completed work is terminal for every actor and the caller is pointed at the
+   predecessor_task_id re-run path (workspace_task_claim.ml `Terminal arm). *)
+let test_claim_task_r_done_allow_reclaim_is_terminal () =
   with_test_env (fun config ->
     let _ =
       Workspace.add_task config ~title:"Completed allow-reclaim task" ~priority:1 ~description:""
@@ -2060,21 +2069,22 @@ let test_claim_task_r_reclaims_done_allow_reclaim () =
       ; reclaim_policy = Some Masc_domain.Allow_reclaim
       });
     match Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () with
-    | Ok outcome ->
+    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)) ->
       Alcotest.(check bool)
-        "direct completed-task reclaim succeeds"
+        "terminal rejection points at the linked re-run path"
         true
-        (str_contains outcome.message "claimed");
-      assert_claimed_by config "task-001" "claude";
+        (str_contains msg "predecessor_task_id");
       let task = task_by_id config "task-001" in
-      Alcotest.(check (option string))
-        "allow_reclaim policy cleared"
-        None
-        (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
+      Alcotest.(check string)
+        "completed task stays done"
+        "done"
+        (Masc_domain.task_status_to_string task.task_status)
     | Error e ->
       Alcotest.fail
-        ("completed allow-reclaim task should be claimable: "
-         ^ Masc_domain.masc_error_to_string e))
+        ("expected InvalidState terminal rejection, got: "
+         ^ Masc_domain.masc_error_to_string e)
+    | Ok _ ->
+      Alcotest.fail "Done task must not be claimable (RFC-0323 G-10)")
 ;;
 
 let test_claim_task_r_already_claimed () =
@@ -2636,13 +2646,13 @@ let () =
             `Quick
             test_release_hard_stop_allows_direct_todo_reclaim
         ; Alcotest.test_case
-            "completed allow-reclaim task is scheduled"
+            "completed allow-reclaim task is terminal (RFC-0323 G-10)"
             `Quick
-            test_claim_next_reclaims_done_allow_reclaim
+            test_claim_next_done_allow_reclaim_is_terminal
         ; Alcotest.test_case
-            "completed block-reclaim task is skipped"
+            "completed block-reclaim task is terminal (RFC-0323 G-10)"
             `Quick
-            test_claim_next_blocks_done_block_reclaim
+            test_claim_next_done_block_reclaim_is_terminal
         ; Alcotest.test_case
             "legacy auto-cycle text is ignored"
             `Quick
@@ -2784,9 +2794,9 @@ let () =
             `Quick
             test_claim_task_r_blocks_done_default_policy
         ; Alcotest.test_case
-            "claim_task_r reclaims allow-reclaim completed task"
+            "claim_task_r treats allow-reclaim completed task as terminal"
             `Quick
-            test_claim_task_r_reclaims_done_allow_reclaim
+            test_claim_task_r_done_allow_reclaim_is_terminal
         ; Alcotest.test_case
             "claim_task_r already claimed"
             `Quick

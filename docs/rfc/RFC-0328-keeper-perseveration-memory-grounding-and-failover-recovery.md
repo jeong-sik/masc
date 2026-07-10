@@ -4,7 +4,7 @@
 - Date: 2026-07-08
 - Type: Incident RFC (owns the perseveration-engine fixes: memory Gap C, failover/stagnation Gap D)
 - Scope: `lib/keeper/keeper_memory_bank.ml`, keeper runtime routing (`config/runtime.toml [runtime.assignments]`), provider health, stagnation detection.
-- Companion: RFC-0329 owns the operative-gate fixes (Gap A payload-blind Execute governance, Gap B hardcoded-false shell exemption). This RFC and RFC-0329 come from the same incident; each is independently landable.
+- Companion: RFC-0329 owns the operative-gate fixes (Gap A payload-blind Execute governance and Gap B's typed-exemption acceptance bar). This RFC and RFC-0329 come from the same incident; each is independently landable.
 - Relates to / activates: RFC-0207 Part B (Draft, deferred), RFC-0260 (Draft, unimplemented), RFC-keeper-memory-consolidation (Draft, unimplemented).
 - Cross-references: RFC-0082, RFC-0126, RFC-0207, RFC-0211, RFC-0216, RFC-0239, RFC-0246, RFC-0257, RFC-0259, RFC-0260, RFC-0271, RFC-0285, RFC-0302, RFC-0312, RFC-0315, RFC-0326.
 
@@ -53,7 +53,7 @@ The incident is one symptom over four distinct systemic gaps. Two form the *oper
 | Gap | One-line | Layer | Owner |
 |-----|----------|-------|-------|
 | A | Governance Execute risk is payload-blind and pre-empts the typed Shell-IR read-only classifier | governance PreToolUse | RFC-0329 |
-| B | `per_keeper_code_exemption` is a hardcoded `false` placeholder — no keeper can run shell Execute at all | keeper guard | RFC-0329 |
+| B | No active typed exemption exists; the removed raw keeper-name bypass neither scoped code effects nor opened the earlier Critical Execute block | keeper guard | RFC-0329 |
 | **C** | Durable memory promotion is gated by repetition frequency, not grounding — a repeated false claim becomes priority-90 durable memory, and there is no active purge of already-consolidated residue | memory_bank | **this RFC** |
 | **D** | No persisted health-driven per-keeper failover, and no semantic-stagnation detector — a keeper on a dead provider with zero-effect "successful" turns is invisible to every existing loop-break | runtime routing + stagnation | **this RFC** |
 

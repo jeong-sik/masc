@@ -54,7 +54,6 @@ describe('KeeperCognitionInspector', () => {
       mention_reactive_turn_count: 4,
       recent_tool_names: ['Execute', 'SearchWeb'],
       approval_policy_effective: { allow_rules: 3, deny_rules: 1, persisted_rules: 2 },
-      configured_social_model: 'reactive',
     }))
 
     expect(rows.map(row => row.label)).toContain('runtime')
@@ -63,25 +62,6 @@ describe('KeeperCognitionInspector', () => {
     expect(rows.find(row => row.label === 'proactive idle')?.value).toContain('off')
     expect(rows.find(row => row.label === 'observed tools')?.value).toContain('Execute')
     expect(rows.find(row => row.label === 'approval policy')?.value).toBe('3 allow · 1 deny · 2 persisted')
-  })
-
-  it('does not fabricate social runtime success while recognition is missing', () => {
-    expect(
-      toolAccessRowsForKeeper(keeper({ social_model_recognized: null }))
-        .find(row => row.label === 'social runtime')?.value,
-    ).toBe('unknown')
-    expect(
-      toolAccessRowsForKeeper(keeper({}))
-        .find(row => row.label === 'social runtime')?.value,
-    ).toBe('unknown')
-    expect(
-      toolAccessRowsForKeeper(keeper({ social_model_recognized: true }))
-        .find(row => row.label === 'social runtime')?.value,
-    ).toBe('recognized')
-    expect(
-      toolAccessRowsForKeeper(keeper({ social_model_recognized: false }))
-        .find(row => row.label === 'social runtime')?.value,
-    ).toBe('needs attention')
   })
 
   it('renders the tool access focus surface from the cognition keeper route', () => {

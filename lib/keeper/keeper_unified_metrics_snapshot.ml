@@ -131,7 +131,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("context_max", `Int context_max);
         ("message_count", `Int message_count);
         ("continuity_state", `Null);
-        ("continuity_summary", `String meta.continuity_summary);
         ("compacted", `Bool compaction.applied);
         ("compaction_before_tokens", `Int compaction.before_tokens);
         ("compaction_after_tokens", `Int compaction.after_tokens);

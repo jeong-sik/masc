@@ -4,7 +4,7 @@
 - Audit finding: KLV-1 (P1) — structural root of "keepers keep stalling and never resume"
 - Source: keeper-runtime deep audit (2026-06-29), §1a/§3/§6/§7
 - Target repo: `~/me/workspace/yousleepwhen/masc` (OCaml 5.x + Eio)
-- Related RFC/issues: RFC-0239 (no-progress predicate), RFC-0246 (wake tombstone), RFC-0294 (self-cadence), RFC-0042 (closed-sum over string classifiers), #9926, #10765
+- Related RFC/issues: RFC-0239 (no-progress predicate), RFC-0246 (wake tombstone), RFC-0042 (closed-sum over string classifiers), #9926, #10765
 - Author: keeper-runtime audit (draft for review)
 
 ---
@@ -277,4 +277,4 @@ During dual-write, the legacy store and `liveness` could diverge if a writer upd
 - Eio.Switch (structured cancellation / `Switch.fail` cascade): https://ocaml-multicore.github.io/eio/eio/Eio/Switch/index.html
 - Eio.Fiber (`fork` fail-fast, `fork_daemon`): https://ocaml-multicore.github.io/eio/eio/Eio/Fiber/index.html
 - Source: keeper-runtime deep audit (2026-06-29) — §1a (8-store map), §3 (KLV-2 fail-closed resume), §6 (migration), §7 (constraint-hell / one-stop-all-stop risk)
-- Internal: RFC-0239 (no-progress predicate), RFC-0246 (wake tombstone), RFC-0294 (self-cadence), RFC-0042 (closed-sum over string classifiers)
+- Internal: RFC-0239 (no-progress predicate), RFC-0246 (wake tombstone), RFC-0042 (closed-sum over string classifiers)

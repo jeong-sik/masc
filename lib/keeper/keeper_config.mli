@@ -44,10 +44,9 @@ val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
 val default_goal_max_chars : int
-val default_drift_max_clauses : int
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.
-    Drives [normalize_self_model_text] when called from prompt rendering.
+    Drives [normalize_prompt_text] when called from prompt rendering.
     NOTE: persistence layer does NOT enforce this — disk JSON may hold
     longer values; the cap applies at prompt build time. *)
 val prompt_render_max_bytes : int
@@ -113,20 +112,10 @@ val utf8_repair_string : string -> string
 
 (** {1 Text Normalization} *)
 
-(** Trim and truncate self-model text (will/needs/desires) to [max_bytes]
-    on a UTF-8 character boundary. Caller MUST pass [max_bytes] explicitly so
-    the unit (bytes, not chars) is visible at every call site. *)
-val normalize_self_model_text : max_bytes:int -> string -> string
+(** Trim and truncate prompt text to [max_bytes] on a UTF-8 character
+    boundary. Caller MUST pass [max_bytes] explicitly so the unit is visible. *)
+val normalize_prompt_text : max_bytes:int -> string -> string
 val normalize_goal_text : ?max_len:int -> string -> string
-
-val split_semicolon_clauses : string -> string list
-val take_last : int -> 'a list -> 'a list
-
-(** Compact self-model text: take last N clauses, truncate to [max_bytes]. *)
-val compact_self_model_text :
-  ?max_clauses:int -> max_bytes:int -> string -> string
-
-val parse_self_model_opt : Yojson.Safe.t -> string -> string option
 
 (** {1 Compaction Configuration} *)
 
@@ -174,7 +163,7 @@ val resolve_compaction_policy :
 val normalize_compaction_ratio_gate : float -> float
 val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
-val normalize_continuity_compaction_cooldown_sec : int -> int
+val normalize_compaction_cooldown_sec : int -> int
 
 (** Default number of recent tool results to keep verbatim during
     OAS context compaction.  Preserves prior hardcoded [keep_recent:2]
@@ -202,7 +191,7 @@ val normalize_proactive_cooldown_sec : int -> int
 val keeper_compact_ratio : unit -> float
 val keeper_compact_max_messages : unit -> int
 val keeper_compact_max_tokens : unit -> int
-val keeper_continuity_compaction_cooldown_sec : unit -> int
+val keeper_compaction_cooldown_sec : unit -> int
 val keeper_compaction_policy_from_env : unit -> float * int * int
 
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
@@ -227,13 +216,6 @@ val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_runtime : unit -> string
 (** Reranker runtime profile. Defaults through [routes.llm_rerank]; env
     overrides may be either a concrete profile name or a logical route key. *)
-
-val keeper_rule_plan_goal_alignment_threshold : unit -> float
-val keeper_rule_plan_response_alignment_threshold : unit -> float
-val keeper_rule_guardrail_repetition_threshold : unit -> float
-val keeper_rule_guardrail_goal_alignment_threshold : unit -> float
-val keeper_rule_guardrail_response_alignment_threshold : unit -> float
-val keeper_rule_guardrail_context_threshold : unit -> float
 
 val keeper_unified_temperature : unit -> float
 val keeper_unified_max_tokens : unit -> int

@@ -6,7 +6,6 @@
 // but no surface that flattens it into a wall view; per-keeper filtering
 // today only surfaces inside `KeeperToolActivity` strips.
 //
-// Audit: `dashboard/design-system/audits/2026-04-29-phase2-implementation-gap.md`.
 // `cancelled` and `done` tasks are excluded — the wall is meant to show
 // what each keeper is *currently* responsible for, not historical load.
 

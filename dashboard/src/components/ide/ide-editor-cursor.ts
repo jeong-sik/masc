@@ -23,7 +23,7 @@ export function keepersWithCursorInFile(
   const matches: ActiveCursorInfo[] = []
   for (const cursor of cursors.values()) {
     // Cursor stream defaults missing line numbers to 0; filter them so
-    // the header chip never renders 'file:0' (BDI inspector applies the
+    // the header chip never renders 'file:0' (the inspector applies the
     // same 1-based guard).
     if (cursor.file_path === filePath && cursor.line >= 1) {
       matches.push({

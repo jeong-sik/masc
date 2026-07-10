@@ -572,24 +572,6 @@ function formatCurrency(value?: number | null): string | null {
   return formatCost(value) ?? null
 }
 
-function stateRows(stateBlock?: string | null): Array<{ label: string; value: string }> {
-  if (!stateBlock) return []
-  const labels = ['Goal', 'Progress', 'Next', 'Decisions', 'OpenQuestions', 'Constraints'] // state block parsing keys — keep English (API contract)
-  return stateBlock
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const match = labels.find(label => line.startsWith(`${label}:`))
-      if (!match) return null
-      return {
-        label: match,
-        value: line.slice(match.length + 1).trim(),
-      }
-    })
-    .filter((row): row is { label: string; value: string } => Boolean(row && row.value))
-}
-
 function overviewRows(details: KeeperConversationDetails): Array<{ label: string; value: string }> {
   return [
     typeof details.latencyMs === 'number' ? { label: '지연', value: `${details.latencyMs} ms` } : null,
@@ -2359,7 +2341,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const detailItems = detailSummary(entry.details)
   const canExpand = showMetadata && !!entry.details
   const overview = entry.details ? overviewRows(entry.details) : []
-  const state = stateRows(entry.details?.stateBlock)
   const delivery = deliveryLabel(entry)
   const timestamp = timeLabel(entry.timestamp)
   const sourceBadge = showSourceBadge ? sourceBadgeInfo(entry) : null
@@ -2622,21 +2603,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                       ${entry.details.skillReason
                         ? html`<div class="mt-1 text-sm leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
                         : null}
-                    </div>
-                  `
-                : null}
-              ${state.length > 0
-                ? html`
-                    <div class="flex flex-col gap-2">
-                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">상태 스냅샷</div>
-                      <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
-                        ${state.map(item => html`
-                          <div class="rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-6)] px-3 py-2.5">
-                            <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
-                            <div class="mt-1 text-sm leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
-                          </div>
-                        `)}
-                      </div>
                     </div>
                   `
                 : null}

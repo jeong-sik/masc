@@ -3,19 +3,14 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::game::events::NarrativeReceived;
-use crate::game::state::{WorkspaceState, TurnProgressState};
+use crate::game::state::{TurnProgressState, WorkspaceState};
 
 use super::dm_voice;
 use super::escape::{sanitize_text, scroll_to_bottom, trim_log};
 use super::session_history::sync_history_focus_from_dashboard;
 
 fn truncate_before_meta_markers(raw: &str) -> &str {
-    const MARKERS: [&str; 4] = [
-        "visible_state_json:",
-        "\n[STATE]",
-        "\n[/STATE]",
-        "반드시 한국어로 응답하세요",
-    ];
+    const MARKERS: [&str; 2] = ["visible_state_json:", "반드시 한국어로 응답하세요"];
     let mut cut = raw.len();
     for marker in MARKERS {
         if let Some(idx) = raw.find(marker) {
@@ -41,37 +36,10 @@ fn strip_fenced_code_blocks(raw: &str) -> String {
     out
 }
 
-fn strip_state_block(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut in_state = false;
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.eq_ignore_ascii_case("[STATE]") {
-            in_state = true;
-            continue;
-        }
-        if trimmed.eq_ignore_ascii_case("[/STATE]") {
-            in_state = false;
-            continue;
-        }
-        if !in_state {
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
-    out
-}
-
 fn is_meta_line(line: &str) -> bool {
     let lower = line.trim().to_ascii_lowercase();
     lower.starts_with("skill:")
         || lower.starts_with("skill_reason:")
-        || lower.starts_with("goal:")
-        || lower.starts_with("progress:")
-        || lower.starts_with("next:")
-        || lower.starts_with("decisions:")
-        || lower.starts_with("openquestions:")
-        || lower.starts_with("constraints:")
         || lower.contains("structured_action")
 }
 
@@ -85,9 +53,7 @@ fn is_prompt_recall_artifact(raw: &str) -> bool {
         lower.contains("trpg 실행 요청입니다") || lower.contains("반드시 한국어로 응답하세요");
     let has_reply_blob = lower.contains("\"reply\":") && lower.contains("skill:");
 
-    (has_visible_state && (has_state_dump || has_prompt_directive))
-        || has_reply_blob
-        || (has_prompt_directive && lower.contains("[state]"))
+    (has_visible_state && (has_state_dump || has_prompt_directive)) || has_reply_blob
 }
 
 fn normalize_narrative_text(raw: &str) -> String {
@@ -97,11 +63,10 @@ fn normalize_narrative_text(raw: &str) -> String {
 
     let truncated = truncate_before_meta_markers(raw);
     let no_code = strip_fenced_code_blocks(truncated);
-    let no_state = strip_state_block(&no_code);
 
     let mut lines: Vec<String> = Vec::new();
     let mut pending_blank = false;
-    for line in no_state.lines() {
+    for line in no_code.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             if !lines.is_empty() {
@@ -451,11 +416,6 @@ SKILL_REASON: test
 ```json
 {"structured_action":{"action_type":"narrative_setup"}}
 ```
-
-[STATE]
-Goal: test
-Progress: test
-[/STATE]
 "#;
 
         assert_eq!(

@@ -130,12 +130,8 @@ val run_turn
   -> ?turn_affordances:string list
   -> generation:int
   -> max_idle_turns:int
-       (* Required, no default: the OAS loop guard kills the run at this
-          count, so every caller must pick the channel-appropriate threshold
-          ([Keeper_runtime_resolved.reactive_max_idle_turns] /
-          [autonomous_max_idle_turns]). A silent default of 3 sat below the
-          graduated idle hook's skip threshold (4), making graceful Skip
-          unreachable — user chat turns died as IdleDetected errors. *)
+       (* Required, no default: forwarded to the OAS loop guard from the
+          caller's channel-specific runtime setting. *)
   -> ?history_user_source:string
   -> ?history_assistant_source:string
   -> ?guardrails:Agent_sdk.Guardrails.t

@@ -267,12 +267,9 @@ val load_context_from_checkpoint :
 
 (** {1 Checkpoint patching} *)
 
-(** Patch the last assistant message in [cp] with a unified
-    [session_id] + replay-snapshot metadata + visible response
-    text (state blocks stripped). *)
+(** Patch the last assistant message in [cp] with a unified [session_id] and
+    visible response text. *)
 val patch_checkpoint_last_assistant :
-  ?snapshot:Keeper_memory_policy.keeper_state_snapshot ->
-  ?snapshot_source:Keeper_memory_policy.state_snapshot_source ->
   Agent_sdk.Checkpoint.t ->
   session_id:string ->
   response_text:string ->

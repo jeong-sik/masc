@@ -119,7 +119,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_failure_taxonomy",
     "masc.keeper_world_observation_turn_types",
     "masc.keeper_memory_taxonomy",
-    "masc.keeper_memory_policy_summary_filter",
     "masc.keeper_outcome_taxonomy",
     "masc.keeper_metrics",
     "masc.keeper_types",

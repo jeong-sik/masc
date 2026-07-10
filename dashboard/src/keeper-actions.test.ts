@@ -1353,7 +1353,6 @@ describe('sendKeeperThreadMessage stream outcome', () => {
         usage: null,
         skillPrimary: null,
         skillReason: null,
-        stateBlock: null,
         replyText: null,
         turnOutcome: 'no_visible_reply',
         rawPayload: {

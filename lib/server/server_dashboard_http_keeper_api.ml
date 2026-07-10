@@ -1857,7 +1857,6 @@ let handle_keeper_get_subroutes state req request reqd =
       let decision_pipeline_mermaid =
         Keeper_decision_audit.decision_pipeline_to_mermaid
           ?turn_outcome
-          ~guard_penalty_total:stats.guard_penalties_total
           ~phase:current
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta
@@ -1904,9 +1903,10 @@ let handle_keeper_get_subroutes state req request reqd =
           List.assoc_opt k used_by_kind |> Option.value ~default:0
         in
         `List (List.map (fun (kind, cap) ->
+          let kind_wire = Keeper_memory_policy.memory_kind_to_wire kind in
           `Assoc [
-            "kind", `String kind;
-            "used", `Int (lookup_used kind);
+            "kind", `String kind_wire;
+            "used", `Int (lookup_used kind_wire);
             "cap", `Int cap;
             "priority", `Int (Keeper_memory_policy.priority_for_kind ~kind);
           ]) caps)

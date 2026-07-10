@@ -7,7 +7,6 @@
 // editable form. Production has all the data on `KeeperConfig` but only
 // surfaces it through the editable `KeeperConfigPanel` form.
 //
-// Audit: `dashboard/design-system/audits/2026-04-29-phase2-implementation-gap.md`.
 // This panel is intentionally read-only — mutations go through the existing
 // editable form below it. The intent is "what are the current tool/exec
 // settings for this keeper?" answered without scrolling.

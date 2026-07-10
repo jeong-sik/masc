@@ -3,8 +3,8 @@ import type { KeyboardShortcutManager } from '../../../design-system/headless-co
 import { promotePinAt, unpinHead } from './multi-keeper-pin-store'
 
 /**
- * RFC-0027 PR-γ-2: register the 5 multi-keeper-pin keyboard shortcuts on
- * the supplied manager and dispose them on unmount.
+ * Register the 5 multi-keeper-pin keyboard shortcuts on the supplied manager
+ * and dispose them on unmount.
  *
  * Chord choices avoid RFC-0012 §4 default IDE set:
  *   - `Mod+1..9` is reserved for `ide.tab.switch.1..9` → use `Mod+Shift+1..4`

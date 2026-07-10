@@ -1070,15 +1070,10 @@ let render_keeper_logs (state : state) =
               " " ^ Ansi.dim ^ (String.concat "," (List.filteri (fun i _ -> i < 2) e.le_tools_used)) ^ Ansi.reset
             else ""
           in
-          let guardrail_str =
-            match e.le_guardrail_stop with
-            | Some true -> Ansi.red ^ " STOP" ^ Ansi.reset
-            | _ -> ""
-          in
           let work_kind = Option.value ~default:"" e.le_work_kind in
-          let line = Printf.sprintf "  %s %s %s %s %s %s %s  %-10s%s%s"
+          let line = Printf.sprintf "  %s %s %s %s %s %s %s  %-10s%s"
             time_str (channel_color e.le_channel) ctx_str tokens_str
-            io_str lat_str cost_str work_kind tools_str guardrail_str
+            io_str lat_str cost_str work_kind tools_str
           in
           box_line buf cols line
         end else

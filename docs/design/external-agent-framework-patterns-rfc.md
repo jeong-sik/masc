@@ -83,7 +83,8 @@ What to change:
 Primary landing:
 
 - `docs/spec/13-oas-integration.md`
-- `docs/design/oas-masc-state-boundary.md`
+- `docs/OAS-MASC-BOUNDARY.md`
+- `docs/KEEPER-STATE-OWNERSHIP.md`
 
 Implementation anchors:
 
@@ -110,7 +111,7 @@ What to change:
 Primary landing:
 
 - `docs/design/contract-driven-agent-loop-rfc.md`
-- `docs/design/handoff-ssot-adr.md`
+- `docs/KEEPER-STATE-OWNERSHIP.md`
 - `docs/design/proof-bundle-check-mapping.md`
 
 Implementation anchors:

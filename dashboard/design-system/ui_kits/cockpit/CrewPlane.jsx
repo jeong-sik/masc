@@ -131,7 +131,7 @@ function DecisionRow({ d }) {
       <div className="cp-dc-row1">
         <span className="cp-dc-channel">{d.channel || "turn"}</span>
         <span className="cp-dc-arrow">→</span>
-        <span className={`cp-dc-mode mode-${d.selected_mode || "n"}`}>{d.selected_mode || d.speech_act || "—"}</span>
+        <span className={`cp-dc-mode mode-${d.selected_mode || "n"}`}>{d.selected_mode || "—"}</span>
         <span className="cp-dc-time">{timeAgo(d.ts)}</span>
       </div>
       {(d.signals || []).length > 0 && (
@@ -202,13 +202,6 @@ function KeeperStage({ id, compact = false }) {
         )}
       </div>
 
-      {!compact && k.continuity_summary && (
-        <div className="cp-stage-continuity" title="continuity_summary">
-          <span className="cp-cs-lbl">memo</span>
-          <span className="cp-cs-text">{k.continuity_summary}</span>
-        </div>
-      )}
-
       {!compact && k.last_blocker && (
         <div className="cp-stage-blocker">
           <span className="lbl">blocked</span>
@@ -244,9 +237,6 @@ function KeeperStage({ id, compact = false }) {
         )}
         {tab === "instructions" && !compact && (
           <div className="cp-persona">
-            <section><h4>will</h4><p>{k.will || "—"}</p></section>
-            <section><h4>needs</h4><p>{k.needs || "—"}</p></section>
-            <section><h4>desires</h4><p>{k.desires || "—"}</p></section>
             <section><h4>goal</h4><p>{k.goal || "—"}</p></section>
             <section><h4>instructions</h4><p className="instr">{k.instructions_preview || "—"}</p></section>
             <section className="cp-persona-meta">

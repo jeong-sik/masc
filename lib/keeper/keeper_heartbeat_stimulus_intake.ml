@@ -24,7 +24,6 @@ let stimulus_urgency_to_string = function
 
 let pending_board_event_of_stimulus ~meta_after_triage stim =
   Keeper_world_observation.pending_board_event_of_stimulus
-    ~continuity_summary:meta_after_triage.continuity_summary
     ~meta:meta_after_triage
     stim
 ;;

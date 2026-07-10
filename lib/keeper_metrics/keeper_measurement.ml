@@ -10,13 +10,6 @@ type threshold_params = {
   handoff_threshold : float;
   handoff_cooldown_sec : int;
   auto_handoff_enabled : bool;
-  reflect_repetition_threshold : float;
-  plan_goal_alignment_threshold : float;
-  plan_response_alignment_threshold : float;
-  guardrail_repetition_threshold : float;
-  guardrail_goal_alignment_threshold : float;
-  guardrail_response_alignment_threshold : float;
-  guardrail_context_threshold : float;
   max_consecutive_hb_failures : int;
   max_consecutive_turn_failures : int;
   model_ratio_multiplier : float;
@@ -28,13 +21,6 @@ type context_measurement = {
   message_count : int;
   token_count : int;
   max_tokens : int;
-}
-
-type similarity_measurement = {
-  repetition_risk : float;
-  goal_alignment : float;
-  response_alignment : float;
-  similarity_measurable : bool;
 }
 
 type timing_measurement = {
@@ -57,7 +43,6 @@ type measurement_snapshot = {
   timestamp : float;
   thresholds : threshold_params;
   context : context_measurement;
-  similarity : similarity_measurement;
   timing : timing_measurement;
   failures : failure_measurement;
 }
@@ -71,13 +56,6 @@ let threshold_params_to_json (t : threshold_params) : Yojson.Safe.t =
     "handoff_threshold", `Float t.handoff_threshold;
     "handoff_cooldown_sec", `Int t.handoff_cooldown_sec;
     "auto_handoff_enabled", `Bool t.auto_handoff_enabled;
-    "reflect_repetition_threshold", `Float t.reflect_repetition_threshold;
-    "plan_goal_alignment_threshold", `Float t.plan_goal_alignment_threshold;
-    "plan_response_alignment_threshold", `Float t.plan_response_alignment_threshold;
-    "guardrail_repetition_threshold", `Float t.guardrail_repetition_threshold;
-    "guardrail_goal_alignment_threshold", `Float t.guardrail_goal_alignment_threshold;
-    "guardrail_response_alignment_threshold", `Float t.guardrail_response_alignment_threshold;
-    "guardrail_context_threshold", `Float t.guardrail_context_threshold;
     "max_consecutive_hb_failures", `Int t.max_consecutive_hb_failures;
     "max_consecutive_turn_failures", `Int t.max_consecutive_turn_failures;
     "model_ratio_multiplier", `Float t.model_ratio_multiplier;
@@ -94,10 +72,6 @@ let capture
       ~message_count
       ~token_count
       ~max_tokens
-      ~repetition_risk
-      ~goal_alignment
-      ~response_alignment
-      ?(similarity_measurable = true)
       ~now_ts
       ~idle_seconds
       ~since_last_compaction_sec
@@ -118,12 +92,6 @@ let capture
       ; message_count
       ; token_count
       ; max_tokens
-      }
-  ; similarity =
-      { repetition_risk
-      ; goal_alignment
-      ; response_alignment
-      ; similarity_measurable
       }
   ; timing =
       { now_ts
@@ -150,12 +118,6 @@ let measurement_snapshot_to_json (s : measurement_snapshot) : Yojson.Safe.t =
       "message_count", `Int s.context.message_count;
       "token_count", `Int s.context.token_count;
       "max_tokens", `Int s.context.max_tokens;
-    ];
-    "similarity", `Assoc [
-      "repetition_risk", `Float s.similarity.repetition_risk;
-      "goal_alignment", `Float s.similarity.goal_alignment;
-      "response_alignment", `Float s.similarity.response_alignment;
-      "similarity_measurable", `Bool s.similarity.similarity_measurable;
     ];
     "timing", `Assoc [
       "now_ts", `Float s.timing.now_ts;

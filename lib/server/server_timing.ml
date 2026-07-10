@@ -8,7 +8,6 @@ type phase =
   | Projection_tasks
   | Projection_keepers
   | Projection_configured_keepers
-  | Projection_meta_cognition
   | Projection_config_resolution
   | Projection_runtime_resolution
   | Project_snapshot_shell_refresh
@@ -41,7 +40,6 @@ let phase_token = function
   | Projection_tasks -> "projection_tasks"
   | Projection_keepers -> "projection_keepers"
   | Projection_configured_keepers -> "projection_configured_keepers"
-  | Projection_meta_cognition -> "projection_meta_cognition"
   | Projection_config_resolution -> "projection_config_resolution"
   | Projection_runtime_resolution -> "projection_runtime_resolution"
   | Project_snapshot_shell_refresh -> "project_snapshot_shell_refresh"

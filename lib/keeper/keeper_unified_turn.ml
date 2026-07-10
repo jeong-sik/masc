@@ -285,26 +285,6 @@ let run_keeper_cycle
                      | None -> (goal_id, ""))
                    meta.active_goal_ids
                in
-               (* RFC-0315: surface the working-state ledger's unresolved
-                  loops. The sidecar has persisted (and resume-merged) them
-                  since KeeperWorkingStateLifecycle landed, but no prompt ever
-                  read them back — persisted-but-never-shown. *)
-               let active_open_loops =
-                 let session_dir =
-                   Filename.concat
-                     (session_base_dir config)
-                     (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                 in
-                 match
-                   Keeper_agent_run_sidecar.read_persisted_working_state
-                     ~keeper_name:meta.name
-                     ~latest_path:
-                       (Keeper_agent_run_sidecar.latest_working_state_path
-                          ~session_dir)
-                 with
-                 | None -> []
-                 | Some state -> state.Keeper_working_state.active_loops
-               in
                let system_prompt, user_message =
                  Keeper_unified_prompt.build_prompt
                    ~meta
@@ -313,7 +293,6 @@ let run_keeper_cycle
                    ?turn_decision
                    ?current_task
                    ~active_goal_summaries
-                   ~active_open_loops
                    ~observation
                    ()
                in

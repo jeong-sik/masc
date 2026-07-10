@@ -17,6 +17,7 @@ type status_kind =
   | AwaitingVerification_kind
   | Done_kind
   | Cancelled_kind
+  | OperatorBlocked_kind
 
 type transition_action =
   | Claim
@@ -62,6 +63,7 @@ let status_kind_to_string = function
   | AwaitingVerification_kind -> "awaiting_verification"
   | Done_kind -> "done"
   | Cancelled_kind -> "cancelled"
+  | OperatorBlocked_kind -> "operator_blocked"
 
 let transition_action_to_string = function
   | Claim -> "claim"
@@ -98,6 +100,7 @@ let all_status_kinds : status_kind list =
   ; AwaitingVerification_kind
   ; Done_kind
   ; Cancelled_kind
+  ; OperatorBlocked_kind
   ]
 
 let all_transition_actions : transition_action list =

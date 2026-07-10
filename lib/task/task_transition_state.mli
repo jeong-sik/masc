@@ -81,6 +81,7 @@ type status_kind =
   | AwaitingVerification_kind
   | Done_kind
   | Cancelled_kind
+  | OperatorBlocked_kind
 
 (** Closed-enum mirror of [Types_core.task_action]. Adding a new action
     upstream forces an arm here. Used for both fingerprinting and the

@@ -150,7 +150,7 @@ let rec json_contains_string needle = function
 let operation_path ~base_path job =
   match
     Store.operation_stage_path_for_keepers_dir
-      ~keepers_dir:(Masc.Common.keepers_runtime_dir_of_base ~base_path)
+      ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)
       ~keeper_name:job.Store.keeper_name
       ~operation_id:job.id
   with
@@ -488,7 +488,7 @@ let test_symlinked_store_boundaries_are_rejected () =
       let job = make_job 1 in
       Unix.symlink
         external_masc
-        (Masc.Common.masc_dir_from_base_path ~base_path);
+        (Common.masc_dir_from_base_path ~base_path);
       (match Store.stage_awaiting_turn_commit ~base_path job with
        | Error (Store.Io_error { operation = Store.Inspect; _ }) -> ()
        | Error error ->
@@ -521,7 +521,7 @@ let test_symlinked_store_boundaries_are_rejected () =
       (Array.length (Sys.readdir target)));
   with_temp_dir "memory-job-keeper-symlink" (fun base_path ->
     let job = make_job 1 in
-    let keepers_root = Masc.Common.keepers_runtime_dir_of_base ~base_path in
+    let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
     let keeper_dir = Filename.concat keepers_root "k1" in
     let target = Filename.concat base_path "outside-keeper" in
     Fs_compat.mkdir_p keepers_root;
@@ -601,7 +601,7 @@ let test_discovery_isolates_malformed_keeper () =
     let malformed =
       Filename.concat
         (Filename.concat
-           (Masc.Common.keepers_runtime_dir_of_base ~base_path)
+           (Common.keepers_runtime_dir_of_base ~base_path)
            "bad.name")
         "memory-jobs"
     in
@@ -623,10 +623,10 @@ let test_discovery_isolates_malformed_keeper () =
       ignore (stage ~base_path:external_base external_job);
       let external_keeper =
         Filename.concat
-          (Masc.Common.keepers_runtime_dir_of_base ~base_path:external_base)
+          (Common.keepers_runtime_dir_of_base ~base_path:external_base)
           "k2"
       in
-      let keepers_root = Masc.Common.keepers_runtime_dir_of_base ~base_path in
+      let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
       Fs_compat.mkdir_p keepers_root;
       Unix.symlink external_keeper (Filename.concat keepers_root "k2");
       match Store.discover_keeper_names ~base_path with

@@ -104,12 +104,21 @@ type execution_evidence =
 (** How many due occurrences one approval covers. [Grant_occurrence] is
     the single [due_at] captured in the grant evidence. [Grant_standing]
     covers every future occurrence whose [payload_digest] and
-    [risk_class] still match the evidence — the digest is the identity
-    of the approved action, so the grant stops matching exactly when the
-    schedule starts doing something different. *)
+    [risk_class] still match the evidence until a schedule update or explicit
+    revocation permanently invalidates the grant. *)
 type grant_scope =
   | Grant_occurrence
   | Grant_standing
+
+type grant_revocation_reason =
+  | Operator_revoked
+  | Schedule_updated
+
+type grant_revocation =
+  { revoked_by : actor
+  ; revoked_at : float
+  ; reason : grant_revocation_reason
+  }
 
 type execution_grant =
   { grant_id : string
@@ -119,6 +128,7 @@ type execution_grant =
   ; decision : execution_decision
   ; scope : grant_scope
   ; evidence : execution_evidence
+  ; revocation : grant_revocation option
   }
 
 type execution_status =
@@ -149,6 +159,7 @@ type grant_error =
   | Evidence_payload_digest_mismatch
   | Evidence_due_at_mismatch
   | Evidence_risk_class_mismatch
+  | Standing_scope_requires_recurring
 
 val create_request :
   schedule_id:string ->
@@ -219,6 +230,8 @@ val execution_status_to_string : execution_status -> string
 val execution_status_of_string : string -> (execution_status, string) result
 val grant_scope_to_string : grant_scope -> string
 val grant_scope_of_string : string -> (grant_scope, string) result
+val grant_revocation_reason_to_string : grant_revocation_reason -> string
+val grant_revocation_reason_of_string : string -> (grant_revocation_reason, string) result
 val grant_error_to_string : grant_error -> string
 
 val actor_to_yojson : actor -> Yojson.Safe.t

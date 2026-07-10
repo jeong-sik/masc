@@ -1,6 +1,7 @@
 type schedule_decision =
   | Approve
   | Reject
+  | Revoke_standing
   | Cancel
   | Update
 
@@ -42,14 +43,19 @@ let decision_of_json json =
   match String.lowercase_ascii raw with
   | "approve" -> Ok Approve
   | "reject" -> Ok Reject
+  | "revoke_standing" -> Ok Revoke_standing
   | "cancel" -> Ok Cancel
   | "update" -> Ok Update
-  | _ -> Error "decision must be 'approve', 'reject', 'cancel', or 'update'"
+  | _ ->
+    Error
+      "decision must be 'approve', 'reject', 'revoke_standing', 'cancel', or \
+       'update'"
 ;;
 
 let decision_to_string = function
   | Approve -> "approve"
   | Reject -> "reject"
+  | Revoke_standing -> "revoke_standing"
   | Cancel -> "cancel"
   | Update -> "update"
 ;;
@@ -64,7 +70,7 @@ let grant_scope_of_json (json : Yojson.Safe.t) =
     | _ -> None
   in
   match field with
-  | None | Some `Null -> Ok Schedule_domain.Grant_occurrence
+  | None -> Ok Schedule_domain.Grant_occurrence
   | Some (`String raw) ->
     (match
        Schedule_domain.grant_scope_of_string
@@ -108,6 +114,7 @@ let resolve_http_json ~config ~operator_name ~(args : Yojson.Safe.t)
         let* scope = grant_scope_of_json args in
         Schedule_service.approve config ~schedule_id ~approved_by ~scope ()
         |> map_service_error
+        |> Result.map (fun schedule -> schedule, [])
       | Reject ->
         let reason =
           match string_opt "reason" args with
@@ -119,25 +126,37 @@ let resolve_http_json ~config ~operator_name ~(args : Yojson.Safe.t)
         in
         Schedule_service.reject config ~schedule_id ~approved_by ~reason ()
         |> map_service_error
+        |> Result.map (fun schedule -> schedule, [])
+      | Revoke_standing ->
+        Schedule_service.revoke_standing config ~schedule_id
+          ~revoked_by:approved_by ()
+        |> map_service_error
+        |> Result.map (fun (schedule, revoked_count) ->
+          schedule, [ "revoked_grant_count", `Int revoked_count ])
       | Cancel ->
-        Schedule_service.cancel config ~schedule_id |> map_service_error
+        Schedule_service.cancel config ~schedule_id
+        |> map_service_error
+        |> Result.map (fun schedule -> schedule, [])
       | Update ->
         let* due_at = required_number "due_at" args in
         let expires_at = number_opt "expires_at" args in
         let* payload_json = required_payload "payload" args in
         let* payload = Schedule_domain.payload_of_yojson payload_json in
         Schedule_service.update config ~schedule_id ~due_at ~expires_at ~payload
+          ~updated_by:approved_by
         |> map_service_error
+        |> Result.map (fun schedule -> schedule, [])
     in
     service_result
-    |> Result.map (fun schedule ->
+    |> Result.map (fun (schedule, extra_fields) ->
       `Assoc
-        [ "ok", `Bool true
-        ; "schedule_id", `String schedule_id
-        ; "decision", `String (decision_to_string decision)
-        ; "approved_by", Schedule_domain.actor_to_yojson approved_by
-        ; "schedule", Schedule_domain.schedule_request_to_yojson schedule
-        ])
+        ([ "ok", `Bool true
+         ; "schedule_id", `String schedule_id
+         ; "decision", `String (decision_to_string decision)
+         ; "approved_by", Schedule_domain.actor_to_yojson approved_by
+         ; "schedule", Schedule_domain.schedule_request_to_yojson schedule
+         ]
+         @ extra_fields))
   in
   result
 ;;

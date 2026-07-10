@@ -16,6 +16,9 @@ type store_error =
   | Invalid_status_transition of string
   | Schedule_not_due_candidate
   | Schedule_not_running
+  | No_active_standing_grant
+  | Revoker_not_human
+  | Revoker_id_empty
   | Grant_validation_failed of Schedule_domain.grant_error
   | Persistence_failed of string
   | Corrupt_ledger of
@@ -78,6 +81,9 @@ let store_error_to_string = function
   | Invalid_status_transition reason -> "invalid schedule status transition: " ^ reason
   | Schedule_not_due_candidate -> "schedule is not an approved due candidate"
   | Schedule_not_running -> "schedule is not running"
+  | No_active_standing_grant -> "schedule has no active standing grant"
+  | Revoker_not_human -> "standing grant revoker must be a human operator"
+  | Revoker_id_empty -> "standing grant revoker id must be non-empty"
   | Grant_validation_failed err ->
     "grant validation failed: " ^ Schedule_domain.grant_error_to_string err
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
@@ -302,9 +308,9 @@ let grant_matches_current_request (request : schedule_request) (grant : executio
   let expected = Schedule_domain.evidence_of_request request in
   String.equal grant.schedule_id request.schedule_id
   &&
-  match grant.decision with
-  | Reject _ -> false
-  | Approve ->
+  match grant.revocation, grant.decision with
+  | Some _, _ | None, Reject _ -> false
+  | None, Approve ->
     String.equal grant.evidence.schedule_id expected.schedule_id
     && String.equal grant.evidence.payload_digest expected.payload_digest
     && grant.evidence.risk_class = expected.risk_class
@@ -312,10 +318,32 @@ let grant_matches_current_request (request : schedule_request) (grant : executio
     (* [Grant_standing] covers every occurrence of the digest-identical
        action; [Grant_occurrence] stays bound to the single due_at it was
        approved for. Digest and risk_class are compared for BOTH scopes
-       above, so a payload or risk edit always re-blocks on approval. *)
+       above, and explicit revocation above prevents an old digest from
+       becoming authorized again after an update is reverted. *)
     (match grant.scope with
      | Schedule_domain.Grant_standing -> true
      | Schedule_domain.Grant_occurrence -> grant.evidence.due_at = expected.due_at)
+;;
+
+let newer_grant (left : execution_grant) (right : execution_grant) =
+  match Float.compare left.approved_at right.approved_at with
+  | 0 -> String.compare left.grant_id right.grant_id > 0
+  | comparison -> comparison > 0
+;;
+
+let active_standing_grant state (request : schedule_request) =
+  List.fold_left
+    (fun latest (grant : execution_grant) ->
+       if grant.scope = Grant_standing && grant_matches_current_request request grant
+       then
+         match latest with
+         | None -> Some grant
+         | Some current when newer_grant grant current -> Some grant
+         | Some _ -> latest
+       else
+         latest)
+    None
+    state.grants
 ;;
 
 let has_current_approved_grant state (request : schedule_request) =
@@ -323,6 +351,30 @@ let has_current_approved_grant state (request : schedule_request) =
     (fun (grant : execution_grant) ->
       grant_matches_current_request request grant)
     state.grants
+;;
+
+let revoke_active_standing_grants
+      grants
+      ~schedule_id
+      ~revoked_by
+      ~revoked_at
+      ~reason
+  =
+  let revocation : Schedule_domain.grant_revocation =
+    { revoked_by; revoked_at; reason }
+  in
+  List.fold_right
+    (fun (grant : execution_grant) (updated, count) ->
+       match grant.decision, grant.scope, grant.revocation with
+       | Approve, Grant_standing, None
+         when String.equal grant.schedule_id schedule_id ->
+         { grant with revocation = Some revocation } :: updated, count + 1
+       | Approve, Grant_occurrence, _
+       | Approve, Grant_standing, Some _
+       | Reject _, _, _ ->
+         grant :: updated, count)
+    grants
+    ([], 0)
 ;;
 
 let is_due_execution_candidate state (request : schedule_request) =
@@ -483,7 +535,42 @@ let cancel_request config ~schedule_id =
         Ok updated_request)
 ;;
 
-let update_request config ~schedule_id ~due_at ~expires_at ~payload =
+let revoke_standing_grants config ~schedule_id ~revoked_by ~revoked_at () =
+  if revoked_by.Schedule_domain.kind <> Schedule_domain.Human_operator then
+    Error Revoker_not_human
+  else if String.equal (String.trim revoked_by.id) "" then
+    Error Revoker_id_empty
+  else
+    Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+      let* state = load_for_mutation config in
+      match find_schedule state schedule_id with
+      | None -> Error Schedule_not_found
+      | Some request ->
+        let grants, revoked_count =
+          revoke_active_standing_grants state.grants ~schedule_id ~revoked_by
+            ~revoked_at ~reason:Schedule_domain.Operator_revoked
+        in
+        if revoked_count = 0 then
+          Error No_active_standing_grant
+        else
+          let next_state =
+            bump_state state ~schedules:state.schedules ~grants
+              ~executions:state.executions
+          in
+          let* () = write_state config next_state in
+          Ok (request, revoked_count))
+;;
+
+let update_request
+      config
+      ~schedule_id
+      ~due_at
+      ~expires_at
+      ~payload
+      ~updated_by
+      ~updated_at
+      ()
+  =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -504,12 +591,22 @@ let update_request config ~schedule_id ~due_at ~expires_at ~payload =
           ; payload
           }
         in
+        let grants, invalidated_count =
+          revoke_active_standing_grants state.grants ~schedule_id
+            ~revoked_by:updated_by ~revoked_at:updated_at
+            ~reason:Schedule_domain.Schedule_updated
+        in
         let schedules = replace_schedule state.schedules updated_request in
         let next_state =
-          bump_state state ~schedules ~grants:state.grants
+          bump_state state ~schedules ~grants
             ~executions:state.executions
         in
         let* () = write_state config next_state in
+        if invalidated_count > 0 then
+          Log.Misc.info
+            "schedule_store: update invalidated %d standing grant(s) for %s"
+            invalidated_count
+            schedule_id;
         Ok updated_request)
 ;;
 

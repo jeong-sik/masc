@@ -39,6 +39,11 @@ let schedules_recovery_path config = schedules_path config ^ ".last-good"
 
 let human ?display_name id = { id; kind = Human_operator; display_name }
 
+let update_request config ~schedule_id ~due_at ~expires_at ~payload =
+  Schedule_store.update_request config ~schedule_id ~due_at ~expires_at ~payload
+    ~updated_by:(human "updater") ~updated_at:175.0 ()
+;;
+
 let payload_json () =
   `Assoc
     [ "kind", `String "consumer.note"
@@ -577,12 +582,9 @@ let test_recurring_grant_is_scoped_to_current_due_at () =
     (List.length (due_execution_candidates (read_state config)))
 ;;
 
-(* The standing counterpart of the test above: one approval covers every
-   later occurrence of the SAME payload digest, and stops covering as soon
-   as the payload (and therefore the digest) changes. This is the fix for
-   the live friction where a recurring workspace_write wake re-blocked on a
-   human click for every single occurrence of an unchanged action. *)
-let test_standing_grant_covers_recurrences_until_payload_changes () =
+(* One standing approval covers later occurrences until an explicit schedule
+   update revokes it. Reverting the payload must not reactivate the old grant. *)
+let test_standing_grant_covers_recurrences_until_schedule_changes () =
   with_workspace
   @@ fun config ->
   let req =
@@ -614,6 +616,8 @@ let test_standing_grant_covers_recurrences_until_payload_changes () =
   in
   check bool "standing grant still current on second occurrence" true
     (has_current_approved_grant state due);
+  check bool "active standing grant is projected" true
+    (Option.is_some (active_standing_grant state due));
   check int "second occurrence dispatches without a fresh grant" 1
     (List.length (due_execution_candidates state));
   (match start_due_candidate config ~now:261.0 ~schedule_id:req.schedule_id with
@@ -622,9 +626,8 @@ let test_standing_grant_covers_recurrences_until_payload_changes () =
   (match complete_running config ~now:262.0 ~schedule_id:req.schedule_id () with
    | Ok stored -> check_status "rescheduled again" Scheduled stored.status
    | Error err -> fail (store_error_to_string err));
-  (* Change the action while Scheduled (update_request rejects Due/Running):
-     the digest moves, so the standing grant must stop matching and the next
-     occurrence must re-block on approval. *)
+  (* Change the action while Scheduled (update_request rejects Due/Running).
+     The update records a typed revocation before the next occurrence. *)
   let scheduled =
     match get_schedule config ~schedule_id:req.schedule_id with
     | Some scheduled -> scheduled
@@ -633,6 +636,30 @@ let test_standing_grant_covers_recurrences_until_payload_changes () =
   (match
      update_request config ~schedule_id:req.schedule_id ~due_at:scheduled.due_at
        ~expires_at:None ~payload:(updated_payload ())
+   with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let after_update = read_state config in
+  let invalidated =
+    match
+      List.find_opt
+        (fun (grant : execution_grant) -> String.equal grant.grant_id "grant-1")
+        after_update.grants
+    with
+    | None -> fail "standing grant disappeared after update"
+    | Some grant -> grant
+  in
+  (match invalidated.revocation with
+   | None -> fail "schedule update did not revoke standing grant"
+   | Some revocation ->
+     check string "update revoker" "updater" revocation.revoked_by.id;
+     check string "update revocation reason" "schedule_updated"
+       (grant_revocation_reason_to_string revocation.reason));
+  (* Restore the exact original payload before due. The revoked grant must stay
+     dead even though its old digest matches again. *)
+  (match
+     update_request config ~schedule_id:req.schedule_id ~due_at:scheduled.due_at
+       ~expires_at:None ~payload:(payload_exn (payload_json ()))
    with
    | Ok _ -> ()
    | Error err -> fail (store_error_to_string err));
@@ -645,10 +672,70 @@ let test_standing_grant_covers_recurrences_until_payload_changes () =
     | Some updated -> updated
     | None -> fail "updated request missing"
   in
-  check bool "standing grant dies with the payload digest" false
+  check bool "revoked standing grant cannot reactivate after payload revert" false
     (has_current_approved_grant state updated);
-  check int "changed payload re-blocks the next occurrence" 0
+  check bool "no active standing grant remains" true
+    (Option.is_none (active_standing_grant state updated));
+  check int "updated schedule re-blocks the next occurrence" 0
     (List.length (due_execution_candidates state))
+;;
+
+let test_revoke_standing_grant_is_durable_and_explicit () =
+  with_workspace
+  @@ fun config ->
+  let req =
+    make_request ~schedule_id:"write-loop-revoke" ~risk_class:Workspace_write
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config req);
+  (match record_grant config (grant ~scope:Grant_standing req) with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let automated_revoker : actor =
+    { id = "scheduler-bot"; kind = Automated_actor; display_name = None }
+  in
+  check_error "automated revocation rejected" Revoker_not_human
+    (revoke_standing_grants config ~schedule_id:req.schedule_id
+       ~revoked_by:automated_revoker ~revoked_at:174.0 ());
+  check_error "blank revoker rejected" Revoker_id_empty
+    (revoke_standing_grants config ~schedule_id:req.schedule_id
+       ~revoked_by:(human " ") ~revoked_at:174.0 ());
+  let revoker = human "security-operator" in
+  (match
+     revoke_standing_grants config ~schedule_id:req.schedule_id
+       ~revoked_by:revoker ~revoked_at:175.0 ()
+   with
+   | Error err -> fail (store_error_to_string err)
+   | Ok (stored, count) ->
+     check_status "schedule remains scheduled" Scheduled stored.status;
+     check int "one grant revoked" 1 count);
+  let state = read_state config in
+  let stored =
+    match get_schedule config ~schedule_id:req.schedule_id with
+    | Some stored -> stored
+    | None -> fail "schedule missing after revocation"
+  in
+  check bool "revoked grant is inactive" true
+    (Option.is_none (active_standing_grant state stored));
+  (match List.hd state.grants with
+   | { revocation = None; _ } -> fail "revocation evidence was not persisted"
+   | { revocation = Some revocation; _ } ->
+     check string "revoker persisted" revoker.id revocation.revoked_by.id;
+     check (float 0.001) "revoked_at persisted" 175.0 revocation.revoked_at;
+     check string "operator reason persisted" "operator_revoked"
+       (grant_revocation_reason_to_string revocation.reason));
+  let before_repeat = state.version in
+  check_error "repeat revocation fails explicitly" No_active_standing_grant
+    (revoke_standing_grants config ~schedule_id:req.schedule_id
+       ~revoked_by:revoker ~revoked_at:176.0 ());
+  check int "failed repeat does not bump version" before_repeat
+    (read_state config).version;
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  check int "revoked schedule is blocked at due" 0
+    (List.length (due_execution_candidates (read_state config)))
 ;;
 
 let test_load_corrupt_when_both_unparseable () =
@@ -831,8 +918,10 @@ let () =
             test_fail_due_candidate_records_failed_execution;
           test_case "recurring grant is scoped to current due_at" `Quick
             test_recurring_grant_is_scoped_to_current_due_at;
-          test_case "standing grant covers recurrences until payload changes"
-            `Quick test_standing_grant_covers_recurrences_until_payload_changes;
+          test_case "standing grant survives recurrences but not schedule changes"
+            `Quick test_standing_grant_covers_recurrences_until_schedule_changes;
+          test_case "standing grant revocation is durable and explicit" `Quick
+            test_revoke_standing_grant_is_durable_and_explicit;
         ] );
     ]
 ;;

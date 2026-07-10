@@ -184,6 +184,33 @@ describe('resolveScheduleApproval', () => {
       decision: 'approve',
     })
   })
+
+  it('sends standing scope only for approval and sends explicit revocation', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true, schedule_id: 'sched-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await resolveScheduleApproval('sched-1', 'approve', undefined, 'standing')
+    await resolveScheduleApproval('sched-1', 'revoke_standing', undefined, 'standing')
+
+    const approveInit = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(JSON.parse(String(approveInit.body))).toEqual({
+      schedule_id: 'sched-1',
+      decision: 'approve',
+      scope: 'standing',
+    })
+    const revokeInit = fetchMock.mock.calls[1]?.[1] as RequestInit
+    expect(JSON.parse(String(revokeInit.body))).toEqual({
+      schedule_id: 'sched-1',
+      decision: 'revoke_standing',
+    })
+  })
 })
 
 describe('fetchDashboardExecutionTrust', () => {

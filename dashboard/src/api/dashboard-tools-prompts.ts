@@ -164,6 +164,15 @@ export interface DashboardScheduledAutomationActor {
   display_name?: string | null
 }
 
+export interface DashboardScheduledAutomationStandingGrant {
+  grant_id: string
+  scope: 'standing'
+  approved_by: DashboardScheduledAutomationActor
+  approved_at: number
+  approved_at_iso?: string | null
+  payload_digest: string
+}
+
 export interface DashboardScheduledAutomationSignal {
   signal_id: string
   kind: string
@@ -218,6 +227,7 @@ export interface DashboardScheduledAutomationRequest {
   recurrence_summary?: string | null
   requires_separate_human_grant?: boolean
   approval_policy?: string | null
+  active_standing_grant?: DashboardScheduledAutomationStandingGrant | null
   last_execution?: DashboardScheduledAutomationExecution | null
   dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
   keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null

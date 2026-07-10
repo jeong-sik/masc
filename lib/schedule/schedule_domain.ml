@@ -95,13 +95,22 @@ type execution_evidence =
 (* How many due occurrences one approval covers. [Grant_occurrence] is the
    single due_at captured in the grant evidence. [Grant_standing] covers
    every future occurrence whose payload_digest and risk_class still match
-   the evidence: the digest is the identity of the approved action, so the
-   grant dies exactly when the schedule starts doing something different.
-   Without it, a recurring side-effecting schedule re-blocks on a human
-   click for every occurrence of an unchanged action. *)
+   the evidence until a schedule update or explicit revocation permanently
+   invalidates it. Without it, a recurring side-effecting schedule re-blocks
+   on a human click for every occurrence of an unchanged action. *)
 type grant_scope =
   | Grant_occurrence
   | Grant_standing
+
+type grant_revocation_reason =
+  | Operator_revoked
+  | Schedule_updated
+
+type grant_revocation =
+  { revoked_by : actor
+  ; revoked_at : float
+  ; reason : grant_revocation_reason
+  }
 
 type execution_grant =
   { grant_id : string
@@ -111,6 +120,7 @@ type execution_grant =
   ; decision : execution_decision
   ; scope : grant_scope
   ; evidence : execution_evidence
+  ; revocation : grant_revocation option
   }
 
 type execution_status =
@@ -141,6 +151,7 @@ type grant_error =
   | Evidence_payload_digest_mismatch
   | Evidence_due_at_mismatch
   | Evidence_risk_class_mismatch
+  | Standing_scope_requires_recurring
 
 let ( let* ) = Result.bind
 
@@ -257,6 +268,8 @@ let grant_error_to_string = function
   | Evidence_payload_digest_mismatch -> "grant evidence payload_digest mismatch"
   | Evidence_due_at_mismatch -> "grant evidence due_at mismatch"
   | Evidence_risk_class_mismatch -> "grant evidence risk_class mismatch"
+  | Standing_scope_requires_recurring ->
+    "standing approval requires a recurring schedule"
 ;;
 
 let is_terminal = function
@@ -796,6 +809,36 @@ let grant_scope_of_string = function
   | other -> Error ("unknown grant_scope: " ^ other)
 ;;
 
+let grant_revocation_reason_to_string = function
+  | Operator_revoked -> "operator_revoked"
+  | Schedule_updated -> "schedule_updated"
+;;
+
+let grant_revocation_reason_of_string = function
+  | "operator_revoked" -> Ok Operator_revoked
+  | "schedule_updated" -> Ok Schedule_updated
+  | other -> Error ("unknown grant_revocation_reason: " ^ other)
+;;
+
+let grant_revocation_to_yojson (revocation : grant_revocation) =
+  `Assoc
+    [ "revoked_by", actor_to_yojson revocation.revoked_by
+    ; "revoked_at", float_to_yojson revocation.revoked_at
+    ; "reason", `String (grant_revocation_reason_to_string revocation.reason)
+    ]
+;;
+
+let grant_revocation_of_yojson = function
+  | `Assoc fields ->
+    let* revoked_by_json = assoc_field "revoked_by" fields in
+    let* revoked_by = actor_of_yojson revoked_by_json in
+    let* revoked_at = float_field "revoked_at" fields in
+    let* reason_name = string_field "reason" fields in
+    let* reason = grant_revocation_reason_of_string reason_name in
+    Ok { revoked_by; revoked_at; reason }
+  | _ -> Error "expected grant_revocation object"
+;;
+
 let execution_evidence_to_yojson (evidence : execution_evidence) =
   `Assoc
     [ "schedule_id", `String evidence.schedule_id
@@ -825,6 +868,7 @@ let execution_grant_to_yojson (grant : execution_grant) =
     ; "decision", execution_decision_to_yojson grant.decision
     ; "scope", `String (grant_scope_to_string grant.scope)
     ; "evidence", execution_evidence_to_yojson grant.evidence
+    ; "revocation", option_to_yojson grant_revocation_to_yojson grant.revocation
     ]
 ;;
 
@@ -849,7 +893,22 @@ let execution_grant_of_yojson = function
     in
     let* evidence_json = assoc_field "evidence" fields in
     let* evidence = execution_evidence_of_yojson evidence_json in
-    Ok { grant_id; schedule_id; approved_by; approved_at; decision; scope; evidence }
+    let* revocation =
+      match List.assoc_opt "revocation" fields with
+      | None | Some `Null -> Ok None
+      | Some json ->
+        Result.map (fun revocation -> Some revocation) (grant_revocation_of_yojson json)
+    in
+    Ok
+      { grant_id
+      ; schedule_id
+      ; approved_by
+      ; approved_at
+      ; decision
+      ; scope
+      ; evidence
+      ; revocation
+      }
   | _ -> Error "expected execution_grant object"
 ;;
 
@@ -1023,6 +1082,7 @@ let create_execution_grant
   ; decision
   ; scope
   ; evidence = evidence_of_request request
+  ; revocation = None
   }
 ;;
 
@@ -1038,6 +1098,8 @@ let validate_execution_grant (request : schedule_request) (grant : execution_gra
   else if expired_at ~now:grant.approved_at request then Error Schedule_terminal
   else if request.status <> Pending_approval && request.status <> Due then
     Error Schedule_not_pending_approval
+  else if grant.scope = Grant_standing && not (is_recurring request.recurrence) then
+    Error Standing_scope_requires_recurring
   else if requires_separate_human_grant request && grant.approved_by.kind <> Human_operator
   then Error Approver_not_human
   else if requires_separate_human_grant request

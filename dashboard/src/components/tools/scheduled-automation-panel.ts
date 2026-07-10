@@ -820,6 +820,11 @@ function isApprovalActionable(request: DashboardScheduledAutomationRequest): boo
     || request.effective_status === 'awaiting_approval'
 }
 
+function isRecurringSchedule(request: DashboardScheduledAutomationRequest): boolean {
+  const recurrenceKind = request.recurrence?.kind ?? request.recurrence_kind ?? 'one_shot'
+  return recurrenceKind !== 'one_shot'
+}
+
 function ApprovalCell({
   request,
   onResolved,
@@ -830,11 +835,9 @@ function ApprovalCell({
   const [pendingDecision, setPendingDecision] = useState<DashboardScheduleDecision | null>(null)
   const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
   const actionable = isApprovalActionable(request)
+  const activeStandingGrant = request.active_standing_grant ?? null
   const busy = pendingDecision !== null
-  // A standing grant only means something for recurring schedules: a
-  // one-shot's single occurrence is already covered by a plain approve.
-  const recurrenceKind = request.recurrence?.kind ?? request.recurrence_kind ?? 'one_shot'
-  const isRecurring = recurrenceKind !== 'one_shot'
+  const isRecurring = isRecurringSchedule(request)
 
   async function decide(
     decision: DashboardScheduleDecision,
@@ -850,8 +853,10 @@ function ApprovalCell({
       )
       showToast(
         decision === 'approve'
-          ? `${request.schedule_id} approved${scope === 'standing' ? ' (standing: covers recurrences until the payload changes)' : ''}`
-          : `${request.schedule_id} rejected`,
+          ? `${request.schedule_id} approved${scope === 'standing' ? ' (standing: active until update or revocation)' : ''}`
+          : decision === 'revoke_standing'
+            ? `${request.schedule_id} standing grant revoked`
+            : `${request.schedule_id} rejected`,
         'success',
       )
       await onResolved?.()
@@ -865,6 +870,24 @@ function ApprovalCell({
   return html`
     <div class="grid gap-1">
       <span>${enumLabel(approval)}</span>
+      ${activeStandingGrant
+        ? html`
+            <div
+              class="flex flex-wrap items-center gap-1 text-3xs text-[var(--color-fg-muted)]"
+              data-testid=${`schedule-active-standing-${request.schedule_id}`}
+            >
+              <span>standing · ${actorLabel(activeStandingGrant.approved_by)}</span>
+              <${ActionButton}
+                variant="danger"
+                size="sm"
+                disabled=${busy}
+                ariaBusy=${pendingDecision === 'revoke_standing'}
+                testId=${`schedule-revoke-standing-${request.schedule_id}`}
+                onClick=${() => { void decide('revoke_standing') }}
+              >Revoke recurring<//>
+            </div>
+          `
+        : null}
       ${actionable
         ? html`
             <div class="flex flex-wrap gap-1">
@@ -884,7 +907,7 @@ function ApprovalCell({
                       disabled=${busy}
                       ariaBusy=${pendingDecision === 'approve'}
                       testId=${`schedule-approve-standing-${request.schedule_id}`}
-                      title="Covers every future occurrence while the payload stays unchanged; a payload edit re-blocks on approval"
+                      title="Covers future occurrences until the schedule is updated or the grant is explicitly revoked"
                       onClick=${() => { void decide('approve', 'standing') }}
                     >Approve recurring<//>
                   `
@@ -2041,6 +2064,13 @@ export function SchDetail({
               <div class="sch-kv"><span class="k">approval_policy</span><span class="v mono">${enumLabel(approval)}</span></div>
               <div class="sch-kv"><span class="k">운영자 조치</span><span class="v mono">${enumLabel(request.operator_action)}</span></div>
               <div class="sch-kv"><span class="k">실행 준비</span><span class="v mono">${enumLabel(request.execution_readiness)}</span></div>
+              ${request.active_standing_grant
+                ? html`
+                    <div class="sch-kv"><span class="k">standing grant</span><span class="v mono">${request.active_standing_grant.grant_id}</span></div>
+                    <div class="sch-kv"><span class="k">standing 승인자</span><span class="v mono">${actorLabel(request.active_standing_grant.approved_by)}</span></div>
+                    <div class="sch-kv"><span class="k">standing 승인 시각</span><span class="v mono">${formatDateTimeKo(request.active_standing_grant.approved_at_iso ?? null)}</span></div>
+                  `
+                : null}
             </div>
           </div>
 
@@ -2125,18 +2155,32 @@ function SchDetailActions({
   onClose: () => void
 }) {
   const [pendingDecision, setPendingDecision] = useState<DashboardScheduleDecision | null>(null)
-  if (!onResolved || !isApprovalActionable(request)) return null
+  const actionable = isApprovalActionable(request)
+  const activeStandingGrant = request.active_standing_grant ?? null
+  if (!onResolved || (!actionable && !activeStandingGrant)) return null
   const busy = pendingDecision !== null
+  const isRecurring = isRecurringSchedule(request)
 
-  async function decide(decision: DashboardScheduleDecision) {
+  async function decide(
+    decision: DashboardScheduleDecision,
+    scope?: DashboardScheduleGrantScope,
+  ) {
     setPendingDecision(decision)
     try {
       await resolveScheduleApproval(
         request.schedule_id,
         decision,
         decision === 'reject' ? 'rejected from dashboard' : undefined,
+        scope,
       )
-      showToast(`${request.schedule_id} ${decision === 'approve' ? 'approved' : 'rejected'}`, 'success')
+      showToast(
+        decision === 'approve'
+          ? `${request.schedule_id} approved${scope === 'standing' ? ' (standing)' : ''}`
+          : decision === 'revoke_standing'
+            ? `${request.schedule_id} standing grant revoked`
+            : `${request.schedule_id} rejected`,
+        'success',
+      )
       await onResolved?.()
       onClose()
     } catch (err) {
@@ -2148,24 +2192,54 @@ function SchDetailActions({
 
   return html`
     <div class="turn-sec sch-detail-actions">
-      <button
-        type="button"
-        class="sch-act approve"
-        data-schedule-mutation="approve"
-        data-testid=${`schedule-approve-${request.schedule_id}`}
-        disabled=${busy}
-        aria-busy=${pendingDecision === 'approve' ? 'true' : 'false'}
-        onClick=${() => { void decide('approve') }}
-      >승인 — grant 발급</button>
-      <button
-        type="button"
-        class="sch-act deny"
-        data-schedule-mutation="reject"
-        data-testid=${`schedule-reject-${request.schedule_id}`}
-        disabled=${busy}
-        aria-busy=${pendingDecision === 'reject' ? 'true' : 'false'}
-        onClick=${() => { void decide('reject') }}
-      >거부</button>
+      ${activeStandingGrant
+        ? html`
+            <button
+              type="button"
+              class="sch-act deny"
+              data-schedule-mutation="revoke-standing"
+              data-testid=${`schedule-revoke-standing-${request.schedule_id}`}
+              disabled=${busy}
+              aria-busy=${pendingDecision === 'revoke_standing' ? 'true' : 'false'}
+              onClick=${() => { void decide('revoke_standing') }}
+            >반복 승인 철회</button>
+          `
+        : null}
+      ${actionable
+        ? html`
+            <button
+              type="button"
+              class="sch-act approve"
+              data-schedule-mutation="approve"
+              data-testid=${`schedule-approve-${request.schedule_id}`}
+              disabled=${busy}
+              aria-busy=${pendingDecision === 'approve' ? 'true' : 'false'}
+              onClick=${() => { void decide('approve') }}
+            >${isRecurring ? '이번 발생만 승인' : '승인 — grant 발급'}</button>
+            ${isRecurring
+              ? html`
+                  <button
+                    type="button"
+                    class="sch-act approve"
+                    data-schedule-mutation="approve-standing"
+                    data-testid=${`schedule-approve-standing-${request.schedule_id}`}
+                    disabled=${busy}
+                    aria-busy=${pendingDecision === 'approve' ? 'true' : 'false'}
+                    onClick=${() => { void decide('approve', 'standing') }}
+                  >반복 승인</button>
+                `
+              : null}
+            <button
+              type="button"
+              class="sch-act deny"
+              data-schedule-mutation="reject"
+              data-testid=${`schedule-reject-${request.schedule_id}`}
+              disabled=${busy}
+              aria-busy=${pendingDecision === 'reject' ? 'true' : 'false'}
+              onClick=${() => { void decide('reject') }}
+            >거부</button>
+          `
+        : null}
     </div>
   `
 }

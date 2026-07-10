@@ -3072,6 +3072,19 @@ let schedule_request_dashboard_json
   let keeper_next_tool =
     Schedule_projection.keeper_next_tool_for_execution_readiness execution_readiness
   in
+  let active_standing_grant =
+    match Schedule_store.active_standing_grant state request with
+    | None -> `Null
+    | Some grant ->
+      `Assoc
+        [ "grant_id", `String grant.grant_id
+        ; "scope", `String (Schedule_domain.grant_scope_to_string grant.scope)
+        ; "approved_by", Schedule_domain.actor_to_yojson grant.approved_by
+        ; "approved_at", `Float grant.approved_at
+        ; "approved_at_iso", unix_iso_json grant.approved_at
+        ; "payload_digest", `String grant.evidence.payload_digest
+        ]
+  in
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
@@ -3110,6 +3123,7 @@ let schedule_request_dashboard_json
           (if requires_grant
            then "separate_human_grant_required"
            else "no_separate_grant_required") )
+    ; "active_standing_grant", active_standing_grant
     ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
     ; ( "payload_kind"
       , match Schedule_payload_projection.kind request with

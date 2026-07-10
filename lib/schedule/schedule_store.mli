@@ -19,6 +19,9 @@ type store_error =
   | Invalid_status_transition of string
   | Schedule_not_due_candidate
   | Schedule_not_running
+  | No_active_standing_grant
+  | Revoker_not_human
+  | Revoker_id_empty
   | Grant_validation_failed of Schedule_domain.grant_error
   | Persistence_failed of string
   | Corrupt_ledger of
@@ -102,16 +105,31 @@ val cancel_request :
   schedule_id:string ->
   (Schedule_domain.schedule_request, store_error) result
 
+val revoke_standing_grants :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  revoked_by:Schedule_domain.actor ->
+  revoked_at:float ->
+  unit ->
+  (Schedule_domain.schedule_request * int, store_error) result
+(** Revokes every still-active standing grant for [schedule_id] in one durable
+    mutation. The approval records remain in the ledger with typed revocation
+    evidence, so a later payload reversion cannot reactivate them. *)
+
 val update_request :
   Workspace_utils.config ->
   schedule_id:string ->
   due_at:float ->
   expires_at:float option ->
   payload:Schedule_domain.payload ->
+  updated_by:Schedule_domain.actor ->
+  updated_at:float ->
+  unit ->
   (Schedule_domain.schedule_request, store_error) result
 (** Replaces [due_at], [expires_at], and [payload] of a pending or scheduled
-    request. Returns [Invalid_status_transition] for due, terminal, or [Running]
-    requests. *)
+    request and revokes all active standing grants with [Schedule_updated]
+    evidence. Returns [Invalid_status_transition] for due, terminal, or
+    [Running] requests. *)
 
 val refresh_due :
   Workspace_utils.config ->
@@ -177,8 +195,15 @@ val has_current_approved_grant :
     occurrence-scoped grant additionally requires the evidence [due_at] to
     equal the request's current [due_at], so recurring requests need fresh
     approval for each occurrence; a standing-scoped grant skips the [due_at]
-    comparison and keeps covering occurrences until the payload digest or
-    risk class changes. *)
+    comparison while its evidence still matches and no update or explicit
+    revocation has invalidated it. *)
+
+val active_standing_grant :
+  state ->
+  Schedule_domain.schedule_request ->
+  Schedule_domain.execution_grant option
+(** The newest non-revoked standing grant matching the request's current
+    schedule id, payload digest, and risk class. *)
 
 val prune_completed :
   Workspace_utils.config ->

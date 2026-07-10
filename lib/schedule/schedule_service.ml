@@ -115,8 +115,21 @@ let cancel config ~schedule_id =
   Schedule_store.cancel_request config ~schedule_id |> map_store
 ;;
 
-let update config ~schedule_id ~due_at ~expires_at ~payload =
+let revoke_standing config ?revoked_at ~schedule_id ~revoked_by () =
+  (* NDT-OK: service mutation boundary timestamp. Callers may provide it for
+     deterministic replay/tests; the store receives and persists the value. *)
+  let revoked_at = Option.value revoked_at ~default:(now ()) in
+  Schedule_store.revoke_standing_grants config ~schedule_id ~revoked_by
+    ~revoked_at ()
+  |> map_store
+;;
+
+let update config ?updated_at ~schedule_id ~due_at ~expires_at ~payload ~updated_by =
+  (* NDT-OK: service mutation boundary timestamp. The deterministic store never
+     samples time and records this explicit value in any grant invalidation. *)
+  let updated_at = Option.value updated_at ~default:(now ()) in
   Schedule_store.update_request config ~schedule_id ~due_at ~expires_at ~payload
+    ~updated_by ~updated_at ()
   |> map_store
 ;;
 

@@ -240,11 +240,11 @@ export function setApprovalMode(mode: ApprovalMode): Promise<SetApprovalModeResp
   return post('/api/v1/dashboard/governance/approval-mode', { mode })
 }
 
-export type DashboardScheduleDecision = 'approve' | 'reject'
+export type DashboardScheduleDecision = 'approve' | 'reject' | 'revoke_standing'
 
 // Mirror of the server grant_scope: 'occurrence' approves only the current
 // due occurrence; 'standing' keeps covering future occurrences while the
-// schedule's payload digest and risk class stay unchanged.
+// schedule remains unchanged and the operator has not revoked the grant.
 export type DashboardScheduleGrantScope = 'occurrence' | 'standing'
 
 export interface DashboardScheduleResolveResponse {
@@ -253,6 +253,7 @@ export interface DashboardScheduleResolveResponse {
   decision: DashboardScheduleDecision
   approved_by?: unknown
   schedule?: unknown
+  revoked_grant_count?: number
 }
 
 export function resolveScheduleApproval(

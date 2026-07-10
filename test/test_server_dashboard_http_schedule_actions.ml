@@ -45,12 +45,17 @@ let payload_json text =
     ]
 ;;
 
-let create_ok ?(risk_class = Schedule_domain.Read_only) ~schedule_id config =
+let create_ok
+      ?(risk_class = Schedule_domain.Read_only)
+      ?recurrence
+      ~schedule_id
+      config
+  =
   match
     Schedule_service.create config ~schedule_id ~requested_at:100.0
       ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
       ~due_at:200.0 ~payload:(payload_json "before") ~risk_class
-      ~source:Schedule_domain.Operator_request ()
+      ~source:Schedule_domain.Operator_request ?recurrence ()
   with
   | Ok request -> request
   | Error err -> fail (Schedule_service.service_error_to_string err)
@@ -165,6 +170,136 @@ let test_cancel_decision_marks_cancelled () =
          (Schedule_domain.schedule_status_to_string stored.status))
 ;;
 
+let test_standing_scope_is_strict_and_requires_recurrence () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    create_ok ~schedule_id:"http-standing-strict"
+      ~risk_class:Schedule_domain.Workspace_write config
+  in
+  let approve_with scope =
+    resolve config
+      (`Assoc
+        [ "schedule_id", `String request.schedule_id
+        ; "decision", `String "approve"
+        ; "scope", scope
+        ])
+  in
+  check_resolve_error "null scope" "scope must be 'occurrence' or 'standing'"
+    (approve_with `Null);
+  check_resolve_error "blank scope" "scope must be 'occurrence' or 'standing'"
+    (approve_with (`String " "));
+  check_resolve_error "numeric scope" "scope must be 'occurrence' or 'standing'"
+    (approve_with (`Int 1));
+  check_resolve_error "one-shot standing scope"
+    "grant validation failed: standing approval requires a recurring schedule"
+    (approve_with (`String "standing"))
+;;
+
+let test_standing_approval_projects_and_revokes () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    create_ok ~schedule_id:"http-standing-revoke"
+      ~risk_class:Schedule_domain.Workspace_write
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let approve =
+    `Assoc
+      [ "schedule_id", `String request.schedule_id
+      ; "decision", `String "approve"
+      ; "scope", `String "standing"
+      ]
+  in
+  (match resolve config approve with
+   | Error message -> fail message
+   | Ok _ -> ());
+  let open Yojson.Safe.Util in
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let row =
+    dashboard
+    |> member "requests"
+    |> to_list
+    |> List.find (fun row ->
+      String.equal
+        (row |> member "schedule_id" |> to_string)
+        request.schedule_id)
+  in
+  let active = row |> member "active_standing_grant" in
+  check string "projected scope" "standing" (active |> member "scope" |> to_string);
+  check string "projected approver" "dashboard-admin"
+    (active |> member "approved_by" |> member "id" |> to_string);
+  let revoke =
+    `Assoc
+      [ "schedule_id", `String request.schedule_id
+      ; "decision", `String "revoke_standing"
+      ]
+  in
+  (match resolve config revoke with
+   | Error message -> fail message
+   | Ok json ->
+     check string "decision" "revoke_standing"
+       (json |> member "decision" |> to_string);
+     check int "revoked count" 1 (json |> member "revoked_grant_count" |> to_int));
+  let state = Schedule_store.read_state config in
+  let stored =
+    match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+    | None -> fail "schedule missing after revoke"
+    | Some stored -> stored
+  in
+  check bool "standing grant no longer active" true
+    (Option.is_none (Schedule_store.active_standing_grant state stored));
+  (match List.hd state.grants with
+   | { revocation = None; _ } -> fail "revoke evidence missing"
+   | { revocation = Some revocation; _ } ->
+     check string "revoker identity" "dashboard-admin" revocation.revoked_by.id);
+  check_resolve_error "repeat revoke is explicit"
+    "schedule has no active standing grant"
+    (resolve config revoke)
+;;
+
+let test_update_revokes_standing_grant_with_operator_identity () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    create_ok ~schedule_id:"http-standing-update"
+      ~risk_class:Schedule_domain.Workspace_write
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  (match
+     resolve config
+       (`Assoc
+         [ "schedule_id", `String request.schedule_id
+         ; "decision", `String "approve"
+         ; "scope", `String "standing"
+         ])
+   with
+   | Error message -> fail message
+   | Ok _ -> ());
+  (match
+     resolve config
+       (`Assoc
+         [ "schedule_id", `String request.schedule_id
+         ; "decision", `String "update"
+         ; "due_at", `Float 260.0
+         ; "payload", payload_json "after"
+         ])
+   with
+   | Error message -> fail message
+   | Ok _ -> ());
+  let state = Schedule_store.read_state config in
+  match List.hd state.grants with
+  | { revocation = None; _ } -> fail "update did not revoke standing grant"
+  | { revocation = Some revocation; _ } ->
+    check string "update actor" "dashboard-admin" revocation.revoked_by.id;
+    check string "update reason" "schedule_updated"
+      (Schedule_domain.grant_revocation_reason_to_string revocation.reason)
+;;
+
 let () =
   run "Server_dashboard_http_schedule_actions"
     [ ( "update",
@@ -180,6 +315,15 @@ let () =
         [
           test_case "decision marks cancelled" `Quick
             test_cancel_decision_marks_cancelled;
+        ] );
+      ( "standing",
+        [
+          test_case "scope is strict and requires recurrence" `Quick
+            test_standing_scope_is_strict_and_requires_recurrence;
+          test_case "approval projects and revokes" `Quick
+            test_standing_approval_projects_and_revokes;
+          test_case "update revokes with operator identity" `Quick
+            test_update_revokes_standing_grant_with_operator_identity;
         ] );
     ]
 ;;

@@ -426,6 +426,116 @@ describe('ScheduledAutomationPanel approval actions', () => {
     )
     expect(onResolved).toHaveBeenCalledTimes(1)
   })
+
+  it('offers standing approval from the production v2 detail surface', async () => {
+    mocks.resolveScheduleApproval.mockResolvedValue({
+      ok: true,
+      schedule_id: 'sched-1',
+      decision: 'approve',
+    })
+    const onResolved = vi.fn()
+    const auto = approvalAutomationFixture()
+    const first = auto.requests[0]
+    if (first == null) throw new Error('fixture has no requests')
+    first.recurrence = { kind: 'interval', interval_sec: 60 }
+    first.recurrence_kind = 'interval'
+
+    render(
+      html`<${ScheduledAutomationPanel}
+        automation=${auto}
+        variant="v2"
+        onResolved=${onResolved}
+      />`,
+      container,
+    )
+
+    const openDetail = container.querySelector(
+      '[data-schedule-detail="sched-1"]',
+    ) as HTMLButtonElement | null
+    expect(openDetail).not.toBeNull()
+    openDetail?.click()
+    await flush()
+
+    const standing = container.querySelector(
+      '[data-testid="schedule-approve-standing-sched-1"]',
+    ) as HTMLButtonElement | null
+    expect(standing).not.toBeNull()
+    standing?.click()
+    await flush()
+
+    expect(mocks.resolveScheduleApproval).toHaveBeenCalledWith(
+      'sched-1',
+      'approve',
+      undefined,
+      'standing',
+    )
+    expect(onResolved).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows and revokes an active standing grant from the v2 detail surface', async () => {
+    mocks.resolveScheduleApproval.mockResolvedValue({
+      ok: true,
+      schedule_id: 'sched-1',
+      decision: 'revoke_standing',
+      revoked_grant_count: 1,
+    })
+    const onResolved = vi.fn()
+    const auto = approvalAutomationFixture()
+    const first = auto.requests[0]
+    if (first == null) throw new Error('fixture has no requests')
+    first.status = 'scheduled'
+    first.effective_status = 'scheduled'
+    first.execution_readiness = 'approved'
+    first.operator_action = null
+    first.recurrence = { kind: 'interval', interval_sec: 60 }
+    first.recurrence_kind = 'interval'
+    first.active_standing_grant = {
+      grant_id: 'grant-standing-1',
+      scope: 'standing',
+      approved_by: { id: 'dashboard-admin', kind: 'human_operator' },
+      approved_at: 1000,
+      approved_at_iso: '2026-06-21T00:00:00Z',
+      payload_digest: 'sha256:standing',
+    }
+
+    render(
+      html`<${ScheduledAutomationPanel}
+        automation=${auto}
+        variant="v2"
+        onResolved=${onResolved}
+      />`,
+      container,
+    )
+
+    const scheduledTab = container.querySelector(
+      '[data-schedule-filter="scheduled"]',
+    ) as HTMLButtonElement | null
+    scheduledTab?.click()
+    await flush()
+    const openDetail = container.querySelector(
+      '[data-schedule-detail="sched-1"]',
+    ) as HTMLButtonElement | null
+    openDetail?.click()
+    await flush()
+
+    const detail = container.querySelector('[data-schedule-detail-panel="sched-1"]')
+    expect(detail?.textContent).toContain('grant-standing-1')
+    expect(detail?.textContent).toContain('dashboard-admin')
+    const revoke = container.querySelector(
+      '[data-testid="schedule-revoke-standing-sched-1"]',
+    ) as HTMLButtonElement | null
+    expect(revoke).not.toBeNull()
+    revoke?.click()
+    await flush()
+
+    expect(mocks.resolveScheduleApproval).toHaveBeenCalledWith(
+      'sched-1',
+      'revoke_standing',
+      undefined,
+      undefined,
+    )
+    expect(onResolved).toHaveBeenCalledTimes(1)
+  })
 })
 
 function sampleAutomation(): DashboardScheduledAutomation {

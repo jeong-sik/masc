@@ -171,6 +171,14 @@ let test_terminal_schedule_blocks_grant () =
     (validate_execution_grant req grant)
 ;;
 
+let test_standing_scope_requires_recurring_schedule () =
+  let req = request () in
+  check_error
+    "one-shot standing grant"
+    Standing_scope_requires_recurring
+    (apply_execution_grant req (grant ~scope:Grant_standing req))
+;;
+
 let test_mark_due_only_scheduled () =
   let scheduled = request ~risk_class:Read_only () in
   let due = mark_due ~now:201.0 scheduled in
@@ -358,13 +366,18 @@ let test_grant_scope_codec () =
   (match grant ~scope:Grant_occurrence req |> execution_grant_to_yojson with
    | `Assoc fields ->
      let without_scope =
-       `Assoc (List.filter (fun (key, _) -> key <> "scope") fields)
+       `Assoc
+         (List.filter
+            (fun (key, _) -> key <> "scope" && key <> "revocation")
+            fields)
      in
      (match execution_grant_of_yojson without_scope with
       | Error msg -> fail msg
       | Ok decoded ->
         check string "absent scope decodes as occurrence" "occurrence"
-          (grant_scope_to_string decoded.scope))
+          (grant_scope_to_string decoded.scope);
+        check bool "absent revocation decodes as active" true
+          (Option.is_none decoded.revocation))
    | _ -> fail "grant json is not an object");
   (* A present-but-unknown scope is an explicit decode error, never a
      silent default. *)
@@ -383,6 +396,31 @@ let test_grant_scope_codec () =
        check bool "unknown scope is an explicit error" true
          (String.length msg > 0))
   | _ -> fail "grant json is not an object"
+;;
+
+let test_grant_revocation_roundtrip () =
+  let req = request ~recurrence:(Interval { interval_sec = 60 }) () in
+  let revoked_by = human "revoker" in
+  let original =
+    { (grant ~scope:Grant_standing req) with
+      revocation =
+        Some
+          { revoked_by
+          ; revoked_at = 175.0
+          ; reason = Operator_revoked
+          }
+    }
+  in
+  match execution_grant_to_yojson original |> execution_grant_of_yojson with
+  | Error msg -> fail msg
+  | Ok decoded ->
+    (match decoded.revocation with
+     | None -> fail "revocation disappeared during roundtrip"
+     | Some revocation ->
+       check string "revoker" revoked_by.id revocation.revoked_by.id;
+       check (float 0.001) "revoked_at" 175.0 revocation.revoked_at;
+       check string "reason" "operator_revoked"
+         (grant_revocation_reason_to_string revocation.reason))
 ;;
 
 let test_execution_record_roundtrip () =
@@ -459,6 +497,8 @@ let () =
           test_case "evidence mismatch rejected" `Quick test_evidence_mismatch_rejected;
           test_case "terminal schedule blocks grant" `Quick
             test_terminal_schedule_blocks_grant;
+          test_case "standing scope requires recurring schedule" `Quick
+            test_standing_scope_requires_recurring_schedule;
         ] );
       ( "codec",
         [
@@ -470,6 +510,8 @@ let () =
           test_case "grant roundtrip" `Quick test_grant_roundtrip;
           test_case "grant scope codec: roundtrip, absent, unknown" `Quick
             test_grant_scope_codec;
+          test_case "grant revocation roundtrip" `Quick
+            test_grant_revocation_roundtrip;
           test_case "execution record roundtrip" `Quick
             test_execution_record_roundtrip;
         ] );

@@ -3742,7 +3742,7 @@ export function ChatComposer({
   layout = 'default',
   draftPersistKey,
   keeperLabel,
-  showFooter = true,
+  footerMode = 'always',
 }: {
   draft?: string
   placeholder: string
@@ -3770,7 +3770,7 @@ export function ChatComposer({
   /** `activity` keeps queue/stall evidence but removes the idle instruction
    * row, allowing the dense keeper-v2 workspace to match its single-row
    * composer. Other chat layouts retain the footer by default. */
-  showFooter?: boolean | 'activity'
+  footerMode?: 'always' | 'activity'
   /** When set (and uncontrolled), the composer persists its unsent draft
    *  per key across remounts via keeper-chat-store, so switching keepers
    *  keeps each keeper's own half-typed message without leaking it to
@@ -4242,7 +4242,7 @@ export function ChatComposer({
                 </div>
               `}
         </div>
-        ${showFooter === true || (showFooter === 'activity' && (isStalled || queueCount > 0))
+        ${footerMode === 'always' || (footerMode === 'activity' && (isStalled || queueCount > 0))
           ? html`
               <div class="composer-foot">
                 <span class="hint">

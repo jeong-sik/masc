@@ -3449,7 +3449,7 @@ describe('ChatComposer v2 prototype surface', () => {
         disabled=${false}
         streaming=${false}
         layout="primary"
-        showFooter="activity"
+        footerMode="activity"
         onDraftChange=${() => {}}
         onSend=${() => {}}
       />`,
@@ -3468,7 +3468,7 @@ describe('ChatComposer v2 prototype surface', () => {
         streaming=${false}
         queueCount=${2}
         layout="primary"
-        showFooter="activity"
+        footerMode="activity"
         onDraftChange=${() => {}}
         onSend=${() => {}}
       />`,

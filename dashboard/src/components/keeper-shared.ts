@@ -953,7 +953,7 @@ export function KeeperConversationPanel({
               onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
               onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
               layout="primary"
-              showFooter="activity"
+              footerMode="activity"
             />
             ${renderError()}
           </div>

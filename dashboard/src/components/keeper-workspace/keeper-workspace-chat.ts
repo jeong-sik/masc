@@ -65,7 +65,7 @@ const COMMAND_GLYPHS: Partial<Record<WorkspaceCommandId, string>> = {
   boot: '⏻',
   shutdown: '■',
   search: '⌕',
-  turn: '⌕',
+  turn: '↳',
   artifacts: '▣',
   detail: 'ⓘ',
   config: '⚙',
@@ -480,6 +480,9 @@ function TurnInspectorDrawer({
 }
 
 
+// RFC keeper-conversation-hitl-flow §4.1-A: the compact header badge is
+// read-only and links to Approvals, which remains the single approve/reject
+// act-point with the complete risk and input evidence.
 // Pending approval queue scoped to this keeper. Reads governance
 // approval_queue (the HITL SSOT) directly instead of keeper.trust.
 // approval_state, which is a separate payload field and diverges from the

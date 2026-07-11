@@ -374,7 +374,7 @@ let atomic_replace dir ~name ~perm content =
             dir
             (segment_value name)
         with
-        | exception Eio.Cancel.Cancelled _ as exn ->
+        | exception (Eio.Cancel.Cancelled _ as exn) ->
           let cleanup_error = cleanup_temp dir temp_name in
           (match cleanup_error with
            | None -> ()
@@ -397,7 +397,7 @@ let atomic_replace dir ~name ~perm content =
 let unlink_if_exists dir name =
   match unlink_at dir (segment_value name) with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok `Missing
-  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception cause ->
     Error (Not_committed { cause; cleanup_error = None })
   | () ->
@@ -414,7 +414,7 @@ let rename ~src_dir ~src ~dst_dir ~dst =
       dst_dir
       (segment_value dst)
   with
-  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception cause ->
     Error (Not_committed { cause; cleanup_error = None })
   | () ->
@@ -434,7 +434,7 @@ let link_no_replace ~src_dir ~src ~dst_dir ~dst =
       dst_dir
       (segment_value dst)
   with
-  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception cause ->
     Error (Not_committed { cause; cleanup_error = None })
   | () ->

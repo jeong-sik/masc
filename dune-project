@@ -60,7 +60,7 @@
   ;; typed empty-completion, and Hooks.Block 0.209 public boundary.
   ;; Exact pin sha lives
   ;; in scripts/oas-agent-sdk-pin.sh (SSOT); see check-oas-pin.sh.
-  (agent_sdk (>= 0.209.1))
+  (agent_sdk (>= 0.210.0))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

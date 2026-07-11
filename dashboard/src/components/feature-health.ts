@@ -13,7 +13,7 @@ import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
-import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
+import { KpiStripView, type KpiStripViewData } from './kpi-strip-view'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
 type StatusFilter = FeatureStatus | 'all'
@@ -236,7 +236,7 @@ export function FeatureHealth() {
                   </div>
 
                   <div class="mt-4">
-                    <${KpiStripIsland}
+                    <${KpiStripView}
                       ariaLabel="기능 상태 요약"
                       variant="standard"
                       cells=${[
@@ -246,7 +246,7 @@ export function FeatureHealth() {
                         { variant: 'stacked', label: '실험적', value: overview.warning_count, kind: 'warn' },
                         { variant: 'stacked', label: '비활성', value: overview.inactive_count },
                         { variant: 'stacked', label: '폐기 예정', value: overview.deprecated_count, kind: 'err' },
-                      ] satisfies KpiStripIslandData['cells']}
+                      ] satisfies KpiStripViewData['cells']}
                     />
                   </div>
 

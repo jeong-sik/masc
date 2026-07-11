@@ -1084,7 +1084,13 @@ let test_authorize_tool_v2_explicit_catalog_permission_requires_admin () =
   (* Exercise the production registration order. [Operator_tool] writes the
      canonical Tool_spec metadata after the seed catalog is initialized. *)
   ignore Operator_tool.force_link;
-  [ "masc_operator_action"; "masc_operator_confirm" ]
+  [ "masc_operator_action"
+  ; "masc_operator_confirm"
+  ; "masc_reset"
+  ; "masc_set_param"
+  ; "masc_keeper_down"
+  ; "masc_board_cleanup"
+  ]
   |> List.iter (fun tool_name ->
     (match
        Auth.authorize_tool_for_role
@@ -1108,6 +1114,30 @@ let test_authorize_tool_v2_explicit_catalog_permission_requires_admin () =
     with
     | Ok () -> ()
     | Error e -> fail (Masc_domain.masc_error_to_string e))
+
+let test_authorize_tool_v2_destructive_risk_is_not_implicit_admin () =
+  let tool_name = "masc_board_delete" in
+  let metadata = Tool_catalog.metadata tool_name in
+  check (option bool)
+    "board delete remains actor-bound"
+    (Some true)
+    metadata.requires_actor_binding;
+  check (option bool)
+    "board delete remains destructive"
+    (Some true)
+    metadata.destructive;
+  check bool
+    "destructive risk does not imply an admin permission"
+    true
+    (Option.is_none metadata.required_permission);
+  match
+    Auth.authorize_tool_for_role
+      ~agent_name:"board-author"
+      ~role:Masc_domain.Worker
+      ~tool_name
+  with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_tool_auth_strict_env_cannot_disable_fail_closed () =
   let result =
@@ -1239,6 +1269,8 @@ let () =
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
       test_case "strict v2 explicit catalog permission requires admin"
         `Quick test_authorize_tool_v2_explicit_catalog_permission_requires_admin;
+      test_case "strict v2 destructive risk is not implicit admin"
+        `Quick test_authorize_tool_v2_destructive_risk_is_not_implicit_admin;
       test_case "tool auth strict env cannot disable fail-closed"
         `Quick test_tool_auth_strict_env_cannot_disable_fail_closed;
     ];

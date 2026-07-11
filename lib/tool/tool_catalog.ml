@@ -171,7 +171,11 @@ let actor_broadcast_tool = actor_bound_masc_workspace_tool
 let add_task_tool = masc_workspace_tool
 let claim_task_tool = actor_bound_masc_workspace_tool
 let complete_task_tool = actor_bound_masc_workspace_tool
-let reset_tool = destructive_tool
+let admin_destructive_tool =
+  with_semantic_flags ~destructive:true
+    ~required_permission:Masc_domain.CanAdmin default_metadata
+
+let reset_tool = admin_destructive_tool
 
 let hidden_runtime_tool reason meta =
   {
@@ -238,6 +242,7 @@ let explicit_metadata : (string * metadata) list =
         (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
     ( "masc_set_param",
       with_semantic_flags ~destructive:true
+        ~required_permission:Masc_domain.CanAdmin
         (hidden_active
            "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface.") );
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
@@ -260,6 +265,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_up", broadcast_tool);
     ( "masc_keeper_down",
       with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace
+        ~required_permission:Masc_domain.CanAdmin
         default_metadata );
     ("masc_plan_get_task", read_state_tool);
     ("masc_plan_clear_task", actor_broadcast_tool);
@@ -298,8 +304,10 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_create", broadcast_tool);
     ("masc_board_sub_board_update", broadcast_tool);
     ("masc_board_sub_board_delete", broadcast_tool);
-    ("masc_board_cleanup", destructive_tool);
-    ("masc_board_delete", destructive_tool);
+    ("masc_board_cleanup", admin_destructive_tool);
+    ( "masc_board_delete",
+      with_semantic_flags ~destructive:true ~requires_actor_binding:true
+        default_metadata );
     ("masc_tool_stats", read_state_tool);
     ("masc_pause", broadcast_tool);
     ("masc_resume", broadcast_tool);

@@ -824,9 +824,10 @@ export async function fetchKeeperChatHistory(
   // keeper-actions.ts) is responsible for surfacing the failure to
   // the operator.  Per-item safeParse drift remains
   // tolerant — only network / HTTP / shape errors throw.
-  const resp = await fetch(
+  const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,
     { headers: jsonHeaders() },
+    DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) {
     throw new Error(`fetchKeeperChatHistory: HTTP ${resp.status} ${resp.statusText}`)

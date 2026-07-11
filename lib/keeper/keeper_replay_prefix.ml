@@ -17,6 +17,8 @@ type projection =
 
 let unchanged = Unchanged
 
+(* TEL-OK: pure typed projection constructor; provider dispatch and checkpoint
+   persistence callers own telemetry at their action boundaries. *)
 let media_degraded ~canonical_prefix ~dispatch_prefix =
   Media_degraded { canonical_prefix; dispatch_prefix }
 ;;

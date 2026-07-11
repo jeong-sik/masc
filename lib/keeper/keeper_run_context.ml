@@ -79,7 +79,7 @@ let max_tokens_override ~keeper_name profile_defaults =
     profile_defaults.oas_env
 
 let resolve_max_tokens_for_runtime_with_profile ~keeper_name ~profile_defaults
-      ?max_tokens ~runtime_id:_ ()
+    ~runtime_id:(_ : string) ?max_tokens ()
   =
   match max_tokens with
   (* Explicit caller override passes through unchanged; the OAS provider

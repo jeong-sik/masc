@@ -122,7 +122,7 @@ let rec remove_paths_strict = function
     (match remove_path_strict path with
      | Error _ as error -> error
      | Ok outcome ->
-       Log.Misc.info
+       Log.Misc.debug
          "[dashboard_purge] artifact path=%s outcome=%s"
          path
          (match outcome with Path_absent -> "absent" | Path_removed -> "removed");
@@ -428,7 +428,7 @@ let purge_dashboard_keeper_artifacts config operation =
                | Keeper_dataset_export_artifact
                | Keeper_configuration_artifact
                | Agent_artifact_bundle _ -> ());
-              Log.Keeper.info
+              Log.Keeper.debug
                 "dashboard Keeper purge artifact: keeper=%s path=%s outcome=%s"
                 operation.keeper_name
                 path

@@ -37,6 +37,15 @@ type dashboard_dev_token_candidate =
   | Reusable of string
   | Rotate
 
+let default_dashboard_dev_token_load path = Fs_compat.load_file path
+let dashboard_dev_token_load = Atomic.make default_dashboard_dev_token_load
+
+let set_dashboard_dev_token_load_for_testing load =
+  Atomic.set dashboard_dev_token_load load
+
+let reset_dashboard_dev_token_load_for_testing () =
+  Atomic.set dashboard_dev_token_load default_dashboard_dev_token_load
+
 let classify_dashboard_dev_token_candidate ~base_path raw :
     (dashboard_dev_token_candidate, string) result =
   let trimmed = String.trim raw in
@@ -60,17 +69,16 @@ let read_reusable_dashboard_dev_token ~base_path path :
   else
     try
       match classify_dashboard_dev_token_candidate ~base_path
-              (Fs_compat.load_file path) with
+              ((Atomic.get dashboard_dev_token_load) path) with
       | Ok (Reusable raw) -> Ok (Some raw)
       | Ok Rotate -> Ok None
       | Error msg -> Error msg
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        Log.Server.warn
-          "dashboard dev-token read skipped for %s: %s"
-          path (Printexc.to_string exn);
-        Ok None
+        Error
+          (Printf.sprintf "read dev-token %s: %s"
+             path (Printexc.to_string exn))
 
 let persist_dashboard_dev_token ~base_path raw : (unit, string) result =
   let token_path = dashboard_dev_token_path base_path in

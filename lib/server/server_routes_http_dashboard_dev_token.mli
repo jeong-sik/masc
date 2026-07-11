@@ -10,6 +10,12 @@ val request_error_code : request_error -> string
 val request_error_to_string : request_error -> string
 val ensure_dashboard_dev_token : string -> (string, string) result
 
+val set_dashboard_dev_token_load_for_testing : (string -> string) -> unit
+(** Replace the dev-token file reader for focused failure-path tests. *)
+
+val reset_dashboard_dev_token_load_for_testing : unit -> unit
+(** Restore the production dev-token file reader. *)
+
 val ensure_dashboard_dev_token_for_authority :
   request_authority:Server_request_authority.authority ->
   base_path:string ->

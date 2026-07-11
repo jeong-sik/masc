@@ -24,6 +24,11 @@ type docker_failure_class =
   | Docker_hardening_error
   | Image_required_command_missing
 
+type container_reference_failure =
+  | Container_absent
+  | Container_not_running
+  | Container_reference_error
+
 let docker_failure_class_to_string = function
   | Docker_daemon_timeout -> "docker_daemon_timeout"
   | Docker_daemon_unavailable -> "docker_daemon_unavailable"
@@ -64,15 +69,25 @@ let output_looks_docker_daemon_unavailable output =
   || lower_contains output "docker daemon is not running"
 ;;
 
+let output_looks_object_missing output = lower_contains output "no such object"
+
 let output_looks_image_missing output =
-  lower_contains output "no such image"
-  || lower_contains output "no such object"
+  lower_contains output "no such image" || output_looks_object_missing output
 ;;
 
 let output_looks_timeout output =
   lower_contains output "timeout after"
   || lower_contains output "timed out"
   || lower_contains output "i/o timeout"
+;;
+
+let classify_container_reference_failure output =
+  if lower_contains output "no such container"
+     || output_looks_object_missing output
+  then Container_absent
+  else if lower_contains output "is not running"
+  then Container_not_running
+  else Container_reference_error
 ;;
 
 let docker_output_looks_oci_mount_failure output =

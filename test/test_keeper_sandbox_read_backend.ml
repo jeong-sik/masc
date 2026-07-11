@@ -911,6 +911,45 @@ esac\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+let fake_docker_cleanup_disappeared_script =
+  "#!/bin/sh\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+case \"$1\" in\n\
+  ps)\n\
+    printf 'inspect-gone\\nrm-gone\\n'\n\
+    exit 0\n\
+    ;;\n\
+  inspect)\n\
+    last=''\n\
+    for arg in \"$@\"; do last=\"$arg\"; done\n\
+    case \"$last\" in\n\
+      inspect-gone)\n\
+        printf 'Error response from daemon: No such object: inspect-gone\\n' >&2\n\
+        exit 1\n\
+        ;;\n\
+      rm-gone)\n\
+        printf '\\t100.000\\tfalse\\t600\\n'\n\
+        exit 0\n\
+        ;;\n\
+    esac\n\
+    printf 'unexpected inspect target: %s\\n' \"$last\" >&2\n\
+    exit 2\n\
+    ;;\n\
+  rm)\n\
+    if [ \"$2\" = \"-f\" ] && [ \"$3\" = \"-v\" ] && [ \"$4\" = \"rm-gone\" ]; then\n\
+      printf 'Error response from daemon: No such container: rm-gone\\n' >&2\n\
+      exit 1\n\
+    fi\n\
+    printf 'unexpected rm target\\n' >&2\n\
+    exit 2\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
 let test_sandbox_container_label_args_include_owner_scope () =
   let args =
     Keeper_sandbox_runtime.docker_label_args
@@ -1148,6 +1187,24 @@ let test_docker_failure_class_is_typed_and_serializes_stable_string () =
          ~output:"process error: timeout after 5s"
      with
      | Docker_daemon_timeout -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "container classifier recognizes an absent object"
+    true
+    (match classify_container_reference_failure "Error: No such object: abc" with
+     | Container_absent -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "container classifier recognizes a stopped container"
+    true
+    (match classify_container_reference_failure "Container abc is not running" with
+     | Container_not_running -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "container classifier preserves unrelated failures"
+    true
+    (match classify_container_reference_failure "permission denied" with
+     | Container_reference_error -> true
      | _ -> false)
 
 let test_docker_workspace_state_mount_args_expose_safe_subset () =
@@ -1212,12 +1269,73 @@ let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   in
   Alcotest.(check int) "scanned labeled containers" 2 result.scanned;
   Alcotest.(check int) "removed stale container" 1 result.removed;
+  Alcotest.(check int) "no concurrent disappearance" 0 result.already_absent;
   Alcotest.(check (list string)) "no cleanup errors" [] result.errors;
   let log = read_file log_path in
   Alcotest.(check bool) "removes old container" true
     (contains_substring log "rm -f -v old-container");
   Alcotest.(check bool) "keeps fresh container" false
     (contains_substring log "rm -f -v fresh-container")
+
+let test_cleanup_stale_containers_accepts_concurrent_disappearance () =
+  with_fake_docker fake_docker_cleanup_disappeared_script @@ fun () ->
+  let base = temp_dir () in
+  let log_path = Filename.concat base "docker.log" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let result =
+    Keeper_sandbox_runtime.cleanup_stale_containers
+      ~now:1000.0
+      ~max_age_sec:60.0
+      ~base_path:base
+      ~timeout_sec:5.0 ()
+  in
+  Alcotest.(check int) "scanned snapshot containers" 2 result.scanned;
+  Alcotest.(check int) "no container removed by this sweep" 0 result.removed;
+  Alcotest.(check int) "both disappearance races observed" 2 result.already_absent;
+  Alcotest.(check (list string)) "disappearance is not an error" [] result.errors;
+  let log = read_file log_path in
+  Alcotest.(check bool)
+    "inspect-absent container is not removed again"
+    false
+    (contains_substring log "rm -f -v inspect-gone");
+  Alcotest.(check bool)
+    "remove race reaches docker rm"
+    true
+    (contains_substring log "rm -f -v rm-gone")
+
+let test_maybe_cleanup_disappearance_does_not_activate_backoff () =
+  with_fake_docker fake_docker_cleanup_disappeared_script @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+      cleanup_dir base)
+  @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
+  Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+  let first =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1000.0
+      ~base_path:base
+      ~timeout_sec:5.0 ()
+  in
+  (match first with
+   | Some result ->
+     Alcotest.(check int) "first sweep records both races" 2 result.already_absent;
+     Alcotest.(check (list string)) "first sweep has no errors" [] result.errors
+   | None -> Alcotest.fail "expected first cleanup sweep to run");
+  let second =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1011.0
+      ~base_path:base
+      ~timeout_sec:5.0 ()
+  in
+  Alcotest.(check bool)
+    "normal interval remains eligible after disappearance"
+    true
+    (Option.is_some second)
 
 let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
@@ -2481,6 +2599,10 @@ let run_tests ~clock () =
             test_sandbox_container_label_args_include_owner_scope;
           Alcotest.test_case "cleanup removes stale scoped containers" `Quick
             test_cleanup_stale_containers_removes_only_stale_masc_scope;
+          Alcotest.test_case "cleanup accepts concurrent disappearance" `Quick
+            test_cleanup_stale_containers_accepts_concurrent_disappearance;
+          Alcotest.test_case "cleanup disappearance does not back off" `Quick
+            test_maybe_cleanup_disappearance_does_not_activate_backoff;
           Alcotest.test_case "cleanup CAS runs once per interval" `Quick
             test_maybe_cleanup_stale_containers_runs_once_per_interval;
           Alcotest.test_case "cleanup failure activates backoff" `Quick

@@ -32,6 +32,7 @@ type docker_preflight =
 type cleanup_result =
   { scanned : int
   ; removed : int
+  ; already_absent : int
   ; errors : string list
   }
 
@@ -303,7 +304,8 @@ val stop_containers
 
 (** Best-effort cleanup for stale MASC keeper sandbox containers under the
     same base path. Only containers with the keeper sandbox labels are
-    considered. *)
+    considered. [already_absent] counts containers that disappeared after the
+    labeled Docker snapshot and before inspect/removal completed. *)
 val cleanup_stale_containers
   :  ?now:float
   -> ?max_age_sec:float

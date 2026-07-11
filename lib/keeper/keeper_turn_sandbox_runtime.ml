@@ -202,8 +202,10 @@ let format_docker_exec_error ~head_program ~st ~out =
 ;;
 
 let container_missing_error out =
-  String_util.contains_substring_ci out "no such container"
-  || String_util.contains_substring_ci out "is not running"
+  match Keeper_sandbox_runtime_classify.classify_container_reference_failure out with
+  | Keeper_sandbox_runtime_classify.Container_absent
+  | Keeper_sandbox_runtime_classify.Container_not_running -> true
+  | Keeper_sandbox_runtime_classify.Container_reference_error -> false
 ;;
 
 let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_error) =

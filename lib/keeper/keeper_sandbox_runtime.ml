@@ -41,6 +41,14 @@ type stop_result =
   ; errors : string list
   }
 
+type cleanup_inspect_outcome =
+  | Cleanup_inspected of inspected_container
+  | Cleanup_inspect_already_absent
+
+type cleanup_remove_outcome =
+  | Cleanup_removed
+  | Cleanup_remove_already_absent
+
 (* #10488: previously used [String.trim] which strips ALL trailing
    whitespace including [\t]. Docker inspect templates emit tab-
    separated fields and a trailing-empty-field shows up as [...\t].
@@ -218,15 +226,21 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
       argv
   in
   if st <> Unix.WEXITED 0
-  then
-    Error
-      (Printf.sprintf
-         "docker inspect failed for cleanup container %s: %s"
-         container_id
-         (Exec_policy.truncate_for_log out))
+  then (
+    match Keeper_sandbox_runtime_classify.classify_container_reference_failure out with
+    | Keeper_sandbox_runtime_classify.Container_absent ->
+      Ok Cleanup_inspect_already_absent
+    | Keeper_sandbox_runtime_classify.Container_not_running
+    | Keeper_sandbox_runtime_classify.Container_reference_error ->
+      Error
+        (Printf.sprintf
+           "docker inspect failed for cleanup container %s: %s"
+           container_id
+           (Exec_policy.truncate_for_log out)))
   else (
     match nonempty_lines out with
-    | line :: _ -> parse_inspect_line line
+    | line :: _ ->
+      Result.map (fun inspected -> Cleanup_inspected inspected) (parse_inspect_line line)
     | [] ->
       Error
         (Printf.sprintf
@@ -248,13 +262,18 @@ let remove_cleanup_container ~container_id ~timeout_sec =
       argv
   in
   if st = Unix.WEXITED 0
-  then Ok ()
-  else
-    Error
-      (Printf.sprintf
-         "docker rm -fv failed for cleanup container %s: %s"
-         container_id
-         (Exec_policy.truncate_for_log out))
+  then Ok Cleanup_removed
+  else (
+    match Keeper_sandbox_runtime_classify.classify_container_reference_failure out with
+    | Keeper_sandbox_runtime_classify.Container_absent ->
+      Ok Cleanup_remove_already_absent
+    | Keeper_sandbox_runtime_classify.Container_not_running
+    | Keeper_sandbox_runtime_classify.Container_reference_error ->
+      Error
+        (Printf.sprintf
+           "docker rm -fv failed for cleanup container %s: %s"
+           container_id
+           (Exec_policy.truncate_for_log out)))
 ;;
 
 let cleanup_stale_containers
@@ -285,6 +304,7 @@ let cleanup_stale_containers
     then
       { scanned = 0
       ; removed = 0
+      ; already_absent = 0
       ; errors =
           [ Printf.sprintf
               "docker ps failed during keeper sandbox cleanup: %s"
@@ -294,27 +314,32 @@ let cleanup_stale_containers
     else (
       let container_ids = nonempty_lines out in
       let scanned = List.length container_ids in
-      let removed, errors =
+      let removed, already_absent, errors =
         List.fold_left
-          (fun (removed, errors) container_id ->
+          (fun (removed, already_absent, errors) container_id ->
              match inspect_cleanup_container ~container_id ~timeout_sec with
-             | Error err -> removed, err :: errors
-             | Ok inspected ->
+             | Error err -> removed, already_absent, err :: errors
+             | Ok Cleanup_inspect_already_absent ->
+               removed, already_absent + 1, errors
+             | Ok (Cleanup_inspected inspected) ->
                if should_remove_container ~now ~max_age_sec inspected
                then (
                  match remove_cleanup_container ~container_id ~timeout_sec with
-                 | Ok () -> removed + 1, errors
-                 | Error err -> removed, err :: errors)
-               else removed, errors)
-          (0, [])
+                 | Ok Cleanup_removed -> removed + 1, already_absent, errors
+                 | Ok Cleanup_remove_already_absent ->
+                   removed, already_absent + 1, errors
+                 | Error err -> removed, already_absent, err :: errors)
+               else removed, already_absent, errors)
+          (0, 0, [])
           container_ids
       in
-      { scanned; removed; errors = List.rev errors })
+      { scanned; removed; already_absent; errors = List.rev errors })
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     { scanned = 0
     ; removed = 0
+    ; already_absent = 0
     ; errors =
         [ Printf.sprintf "keeper sandbox cleanup failed: %s" (Printexc.to_string exn) ]
     }
@@ -464,7 +489,8 @@ let stop_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
       List.fold_left
         (fun (removed, errors) container_id ->
            match remove_cleanup_container ~container_id ~timeout_sec with
-           | Ok () -> removed + 1, errors
+           | Ok Cleanup_removed | Ok Cleanup_remove_already_absent ->
+             removed + 1, errors
            | Error err -> removed, err :: errors)
         (0, [])
         ids

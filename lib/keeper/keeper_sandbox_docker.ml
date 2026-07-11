@@ -185,8 +185,10 @@ let docker_oneshot_ttl_sec ~timeout_sec =
 ;;
 
 let docker_rm_no_such_container text =
-  String_util.contains_substring_ci text "no such container"
-  || String_util.contains_substring_ci text "no such object"
+  match Keeper_sandbox_runtime_classify.classify_container_reference_failure text with
+  | Keeper_sandbox_runtime_classify.Container_absent -> true
+  | Keeper_sandbox_runtime_classify.Container_not_running
+  | Keeper_sandbox_runtime_classify.Container_reference_error -> false
 ;;
 
 let cleanup_oneshot_container ~container_name =

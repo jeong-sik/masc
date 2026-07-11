@@ -339,6 +339,7 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
               [
                 ("scanned", `Int cleanup.scanned);
                 ("removed", `Int cleanup.removed);
+                ("already_absent", `Int cleanup.already_absent);
                 ("errors",
                  `List (List.map (fun err -> `String err) cleanup.errors));
               ]

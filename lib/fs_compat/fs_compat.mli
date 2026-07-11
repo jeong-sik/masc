@@ -10,6 +10,10 @@
     [MASC_TEST_ALLOW_HOME_BASE_PATH=1]. *)
 exception Test_isolation_breach of string
 
+(** Typed descriptor-owned durable mutation core. The path API below is a
+    compatibility adapter until its callers are migrated under #24084. *)
+module Durable_mutation : module type of Durable_mutation
+
 (** Set global Eio filesystem. Call at server startup. *)
 val set_fs : Eio.Fs.dir_ty Eio.Path.t -> unit
 
@@ -35,19 +39,20 @@ val load_file_opt : string -> string option
 val save_file : string -> string -> unit
 
 (** Write content to path via temp file + rename.
-    Returns [Error msg] on I/O failure instead of raising. *)
+    Returns [Error msg] on I/O failure instead of raising. Until #24084 migrates
+    callers, the message names whether the mutation was not committed, committed
+    but not durable, or durable with a descriptor-cleanup diagnostic. Callers
+    must not infer retry safety by matching this text. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
-(** [true] iff [name] matches the [.atomic_*.tmp] pattern produced
-    by [Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp"] inside
-    {!save_file_atomic}.  Exposed for tests and for a potential
-    periodic sweep. *)
+(** [true] iff [name] matches the [.atomic_*.tmp] pattern minted by
+    {!Durable_mutation}. Exposed for recovery and tests. *)
 val is_atomic_orphan_name : string -> bool
 
 (** #10130: boot-time sweep for [.atomic_*.tmp] orphans left
     behind when [save_file_atomic]'s with-handler never ran (the
-    owning process was SIGKILL'd, or [Filename.temp_file] itself
-    raised ENFILE/EMFILE before the cleanup was registered).
+    owning process was SIGKILL'd after its exclusive temporary entry
+    was created).
 
     Scans [base_path] and its immediate subdirectories (skipping
     [recovered_subdir] and anything that isn't a directory).

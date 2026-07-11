@@ -151,9 +151,13 @@ let rec resolve_arg = function
 
 let resolve_env env_bindings =
   List.map
-    (fun (k, v) -> k ^ "=" ^ resolve_arg v)
+    (fun (key, value) ->
+      { Sandbox_target.key; value = resolve_arg value })
     env_bindings
   |> Array.of_list
+
+let render_env_binding (binding : Sandbox_target.env_binding) =
+  binding.key ^ "=" ^ binding.value
 
 let env_key entry =
   match String.index_opt entry '=' with
@@ -164,7 +168,9 @@ let resolve_host_env ?base_host_env = function
   | [] -> base_host_env
   | env_bindings ->
       let overrides = resolve_env env_bindings |> Array.to_list in
-      let override_keys = List.map env_key overrides in
+      let override_keys =
+        List.map (fun (binding : Sandbox_target.env_binding) -> binding.key) overrides
+      in
       let base =
         match base_host_env with
         | Some env -> env
@@ -176,7 +182,7 @@ let resolve_host_env ?base_host_env = function
         |> List.filter (fun entry ->
           not (List.mem (env_key entry) override_keys))
       in
-      Some (Array.of_list (inherited @ overrides))
+      Some (Array.of_list (inherited @ List.map render_env_binding overrides))
 
 (* --- simple command execution --- *)
 

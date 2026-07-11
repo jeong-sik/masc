@@ -333,11 +333,51 @@ let docker_sandbox_reserved_env_keys =
   ]
 ;;
 
-(* Keeper-supplied env entries ("K=V", already resolved by the Shell IR
-   dispatch) as [docker exec] argv flags. Callers must reject entries
-   whose key is in [docker_sandbox_reserved_env_keys] first. *)
+type docker_keeper_env_error =
+  | Invalid_key of string
+  | Duplicate_key of string
+  | Reserved_key of string
+
+let docker_keeper_env_error_to_string = function
+  | Invalid_key key ->
+    Printf.sprintf "invalid Docker keeper env key %S" key
+  | Duplicate_key key ->
+    Printf.sprintf "duplicate Docker keeper env key %S" key
+  | Reserved_key key ->
+    Printf.sprintf
+      "typed Shell IR Docker dispatch rejects env key %s: the sandbox exec boundary owns it"
+      key
+;;
+
+let docker_env_key_is_valid key =
+  let valid_start = function
+    | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
+    | _ -> false
+  in
+  let valid_char = function
+    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
+    | _ -> false
+  in
+  String.length key > 0 && valid_start key.[0] && String.for_all valid_char key
+;;
+
+(* This is the final argv-construction boundary, so validation lives here
+   rather than relying on a particular caller. Structured bindings make the
+   Docker bare-key host import form unrepresentable. *)
 let docker_keeper_env_args entries =
-  List.concat_map (fun entry -> [ "--env"; entry ]) entries
+  let rec loop seen acc = function
+    | [] -> Ok (List.rev acc |> List.concat)
+    | ({ Masc_exec.Sandbox_target.key; value } : Masc_exec.Sandbox_target.env_binding)
+      :: rest ->
+      if not (docker_env_key_is_valid key)
+      then Error (Invalid_key key)
+      else if List.mem key seen
+      then Error (Duplicate_key key)
+      else if List.mem key docker_sandbox_reserved_env_keys
+      then Error (Reserved_key key)
+      else loop (key :: seen) ([ "--env"; key ^ "=" ^ value ] :: acc) rest
+  in
+  loop [] [] entries
 ;;
 
 let docker_user_env_args () =

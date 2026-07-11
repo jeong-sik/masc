@@ -1,15 +1,14 @@
 (** Tests for typed Shell IR docker env passthrough.
 
-    Keeper env entries flow into [docker exec --env] flags
-    ([Keeper_turn_sandbox_runtime.run_exec_with_status_split ~env] /
-    [exec_pipeline_stage.env]). These tests cover the pure policy layer:
-    the sandbox-reserved key gate ([reserved_env_collision]) and the
-    [--env] argv shaping ([docker_keeper_env_args]), plus a drift guard
-    asserting every key the sandbox exec boundary injects is listed in
-    [docker_sandbox_reserved_env_keys]. *)
+    Keeper env bindings flow into [docker exec --env] flags. These tests cover
+    the final argv boundary: structured rendering and typed rejection of
+    reserved, duplicate, and invalid keys, plus a drift guard asserting every
+    sandbox-owned injected key is reserved. *)
 
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
-module Keeper_sandbox_shell_ir_target = Masc.Keeper_sandbox_shell_ir_target
+module Sandbox_target = Masc_exec.Sandbox_target
+
+let binding key value : Sandbox_target.env_binding = { key; value }
 
 let env_arg_keys args =
   (* args shape: ["--env"; "K=V"; "--env"; "K2=V2"; ...] *)
@@ -26,52 +25,60 @@ let env_arg_keys args =
   in
   loop [] args
 
-let test_no_collision_on_plain_keys () =
-  Alcotest.(check (option string))
-    "unreserved keys pass"
-    None
-    (Keeper_sandbox_shell_ir_target.reserved_env_collision
-       [| "DUNE_CACHE=disabled"; "GIT_PAGER=cat"; "PATH_EXTRA=/x" |])
-
-let test_collision_on_reserved_key () =
-  Alcotest.(check (option string))
-    "HOME is reserved"
-    (Some "HOME")
-    (Keeper_sandbox_shell_ir_target.reserved_env_collision [| "HOME=/evil" |])
-
-let test_collision_reports_first_reserved_key () =
-  Alcotest.(check (option string))
-    "first reserved entry wins"
-    (Some "MASC_CONFIG_DIR")
-    (Keeper_sandbox_shell_ir_target.reserved_env_collision
-       [| "DUNE_CACHE=enabled"; "MASC_CONFIG_DIR=/elsewhere"; "USER=root" |])
-
-let test_collision_on_bare_key () =
-  (* An entry without '=' is treated as its own key: [docker exec --env K]
-     forwards the docker CLI process's own K, which for reserved keys is
-     just as much a shadow as an explicit value. *)
-  Alcotest.(check (option string))
-    "bare reserved token collides"
-    (Some "SHELL")
-    (Keeper_sandbox_shell_ir_target.reserved_env_collision [| "SHELL" |])
-
-let test_empty_env_never_collides () =
-  Alcotest.(check (option string))
-    "empty env passes"
-    None
-    (Keeper_sandbox_shell_ir_target.reserved_env_collision [||])
-
 let test_keeper_env_args_shape () =
-  Alcotest.(check (list string))
-    "entries interleave with --env flags"
-    [ "--env"; "A=1"; "--env"; "B=two words" ]
-    (Keeper_sandbox_runtime.docker_keeper_env_args [ "A=1"; "B=two words" ])
+  match
+    Keeper_sandbox_runtime.docker_keeper_env_args
+      [ binding "A" "1"; binding "B" "two words" ]
+  with
+  | Ok args ->
+    Alcotest.(check (list string))
+      "entries interleave with --env flags"
+      [ "--env"; "A=1"; "--env"; "B=two words" ]
+      args
+  | Error error ->
+    Alcotest.fail
+      (Keeper_sandbox_runtime.docker_keeper_env_error_to_string error)
 
 let test_keeper_env_args_empty () =
-  Alcotest.(check (list string))
-    "no entries, no flags"
-    []
-    (Keeper_sandbox_runtime.docker_keeper_env_args [])
+  match Keeper_sandbox_runtime.docker_keeper_env_args [] with
+  | Ok args -> Alcotest.(check (list string)) "no entries, no flags" [] args
+  | Error error ->
+    Alcotest.fail
+      (Keeper_sandbox_runtime.docker_keeper_env_error_to_string error)
+
+let test_reserved_key_rejected () =
+  match
+    Keeper_sandbox_runtime.docker_keeper_env_args [ binding "HOME" "/evil" ]
+  with
+  | Error (Keeper_sandbox_runtime.Reserved_key "HOME") -> ()
+  | Error error ->
+    Alcotest.failf
+      "unexpected error: %s"
+      (Keeper_sandbox_runtime.docker_keeper_env_error_to_string error)
+  | Ok _ -> Alcotest.fail "reserved HOME unexpectedly accepted"
+
+let test_duplicate_key_rejected () =
+  match
+    Keeper_sandbox_runtime.docker_keeper_env_args
+      [ binding "TOKEN" "first"; binding "TOKEN" "second" ]
+  with
+  | Error (Keeper_sandbox_runtime.Duplicate_key "TOKEN") -> ()
+  | Error error ->
+    Alcotest.failf
+      "unexpected error: %s"
+      (Keeper_sandbox_runtime.docker_keeper_env_error_to_string error)
+  | Ok _ -> Alcotest.fail "duplicate TOKEN unexpectedly accepted"
+
+let test_invalid_key_rejected () =
+  match
+    Keeper_sandbox_runtime.docker_keeper_env_args [ binding "1TOKEN" "value" ]
+  with
+  | Error (Keeper_sandbox_runtime.Invalid_key "1TOKEN") -> ()
+  | Error error ->
+    Alcotest.failf
+      "unexpected error: %s"
+      (Keeper_sandbox_runtime.docker_keeper_env_error_to_string error)
+  | Ok _ -> Alcotest.fail "invalid 1TOKEN unexpectedly accepted"
 
 let test_user_env_keys_are_reserved () =
   let emitted = env_arg_keys (Keeper_sandbox_runtime.docker_user_env_args ()) in
@@ -117,19 +124,12 @@ let test_config_env_keys_are_reserved () =
 let () =
   Alcotest.run
     "keeper_sandbox_docker_env"
-    [ ( "reserved_env_collision"
-      , [ Alcotest.test_case "unreserved keys pass" `Quick test_no_collision_on_plain_keys
-        ; Alcotest.test_case "reserved key collides" `Quick test_collision_on_reserved_key
-        ; Alcotest.test_case
-            "first reserved key reported"
-            `Quick
-            test_collision_reports_first_reserved_key
-        ; Alcotest.test_case "bare reserved token collides" `Quick test_collision_on_bare_key
-        ; Alcotest.test_case "empty env passes" `Quick test_empty_env_never_collides
-        ] )
-    ; ( "docker_keeper_env_args"
+    [ ( "docker_keeper_env_args"
       , [ Alcotest.test_case "interleaved --env flags" `Quick test_keeper_env_args_shape
         ; Alcotest.test_case "empty entries" `Quick test_keeper_env_args_empty
+        ; Alcotest.test_case "reserved key rejected" `Quick test_reserved_key_rejected
+        ; Alcotest.test_case "duplicate key rejected" `Quick test_duplicate_key_rejected
+        ; Alcotest.test_case "invalid key rejected" `Quick test_invalid_key_rejected
         ] )
     ; ( "reserved list drift guard"
       , [ Alcotest.test_case

@@ -82,7 +82,7 @@ val run_exec_with_status_split :
   ?stdin_content:string ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
-  ?env:string array ->
+  ?env:Masc_exec.Sandbox_target.env_binding array ->
   timeout_sec:float ->
   t ->
   cwd:string ->
@@ -92,18 +92,16 @@ val run_exec_with_status_split :
     stdout/stderr without applying success-code policy. This is the argv-level
     entrypoint used by Shell IR dispatch.
 
-    [env] carries resolved keeper "K=V" entries injected as [docker exec
-    --env] flags on top of the container environment (additive override,
-    mirroring the Host dispatch path). Entries get the same host-root ->
-    container-root rewriting as [command_argv]. Callers must reject keys in
-    [Keeper_sandbox_runtime.docker_sandbox_reserved_env_keys] first. *)
+    [env] carries structured, resolved keeper bindings. Values get the same
+    host-root -> container-root rewriting as [command_argv]. The final Docker
+    argv builder rejects reserved, duplicate, and invalid keys. *)
 
 type exec_pipeline_stage = {
   command_argv : string list;
   cwd : string option;
-  env : string list;
-      (** Resolved "K=V" entries for this stage, same contract as the [env]
-          argument of {!run_exec_with_status_split}. *)
+  env : Masc_exec.Sandbox_target.env_binding array;
+      (** Structured resolved bindings for this stage, same contract as [env]
+          in {!run_exec_with_status_split}. *)
 }
 
 val run_exec_pipeline_with_status :

@@ -683,7 +683,8 @@ let typed_validation_recovery_fields
   | Keeper_tool_execute_typed_input.Cwd_not_absolute _
   | Keeper_tool_execute_typed_input.Pipeline_empty
   | Keeper_tool_execute_typed_input.Pipeline_too_short
-  | Keeper_tool_execute_typed_input.Env_key_invalid _ -> []
+  | Keeper_tool_execute_typed_input.Env_key_invalid _
+  | Keeper_tool_execute_typed_input.Env_key_duplicate _ -> []
 
 let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path

@@ -495,7 +495,7 @@ let test_anchored_lock_file_rejects_symlink () =
   let module Dir = Fs_compat.Anchored_dir in
   let outside = Filename.concat base_path "outside.lock" in
   let link = Filename.concat base_path "managed.lock" in
-  Fs_compat.save_file_unix outside "sentinel";
+  Fs_compat.save_file outside "sentinel";
   Unix.symlink outside link;
   Dir.with_open_root base_path @@ fun root ->
   (match

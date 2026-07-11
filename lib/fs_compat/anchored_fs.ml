@@ -49,6 +49,15 @@ type directory_identity =
   ; inode : int64
   }
 
+type lock_file
+
+exception Descriptor_cleanup_failed of
+  { operation : string
+  ; primary : exn
+  ; primary_backtrace : Printexc.raw_backtrace
+  ; close_error : exn
+  }
+
 type mutation_error =
   | Not_committed of
       { cause : exn
@@ -108,6 +117,11 @@ external stat_at_raw
   -> (int * int64 * int64 * int64 * int64) option
   = "masc_anchored_stat"
 
+external fstat_raw
+  :  Unix.file_descr
+  -> int * int64 * int64 * int64 * int64
+  = "masc_anchored_fstat"
+
 external fdopendir : Unix.file_descr -> Unix.dir_handle = "masc_anchored_fdopendir"
 
 let segment_value = Segment.to_string
@@ -122,6 +136,18 @@ let mutation_error_to_string = function
       (Printexc.to_string cleanup_error)
   | Committed_not_durable cause ->
     Printf.sprintf "committed but not durable: %s" (Printexc.to_string cause)
+;;
+
+let kind_of_int = function
+  | 0 -> Regular_file
+  | 1 -> Directory
+  | 2 -> Symbolic_link
+  | 3 -> Other
+  | value -> invalid_arg (Printf.sprintf "anchored stat returned invalid kind: %d" value)
+;;
+
+let stat_of_raw (kind, size, device, inode, link_count) =
+  { kind = kind_of_int kind; size; device; inode; link_count }
 ;;
 
 let combine_close ~operation fd f =
@@ -140,14 +166,10 @@ let combine_close ~operation fd f =
   | Ok value, Ok () -> value
   | Error (exn, backtrace), Ok () -> Printexc.raise_with_backtrace exn backtrace
   | Ok _, Error close_error -> raise close_error
-  | Error (primary, _), Error close_error ->
+  | Error (primary, primary_backtrace), Error close_error ->
     raise
-      (Failure
-         (Printf.sprintf
-            "%s failed (%s); descriptor close also failed (%s)"
-            operation
-            (Printexc.to_string primary)
-            (Printexc.to_string close_error)))
+      (Descriptor_cleanup_failed
+         { operation; primary; primary_backtrace; close_error })
 ;;
 
 let with_open_root path f =
@@ -156,15 +178,18 @@ let with_open_root path f =
 ;;
 
 let identity fd =
-  let metadata = Unix.fstat fd in
-  if metadata.Unix.st_kind <> Unix.S_DIR
+  let metadata = stat_of_raw (fstat_raw fd) in
+  if metadata.kind <> Directory
   then raise (Unix.Unix_error (Unix.ENOTDIR, "anchored_identity", ""));
-  { device = Int64.of_int metadata.Unix.st_dev
-  ; inode = Int64.of_int metadata.Unix.st_ino
-  }
+  { device = metadata.device; inode = metadata.inode }
 ;;
 
-let with_lock_file dir ~name ~perm f =
+type lock_file =
+  { descriptor : Unix.file_descr
+  ; metadata : stat
+  }
+
+let open_lock_file dir ~name ~perm =
   let name_value = segment_value name in
   let created, fd =
     match create_exclusive_fd dir name_value perm with
@@ -172,9 +197,9 @@ let with_lock_file dir ~name ~perm f =
     | exception Unix.Unix_error (Unix.EEXIST, _, _) ->
       false, open_write_fd dir name_value
   in
-  combine_close ~operation:"anchored lock-file transaction" fd (fun () ->
-    let metadata = Unix.fstat fd in
-    if metadata.Unix.st_kind <> Unix.S_REG
+  try
+    let metadata = stat_of_raw (fstat_raw fd) in
+    if metadata.kind <> Regular_file
     then
       raise
         (Unix.Unix_error
@@ -183,7 +208,29 @@ let with_lock_file dir ~name ~perm f =
     then (
       Unix.fsync fd;
       Unix.fsync dir);
-    f fd)
+    { descriptor = fd; metadata }
+  with
+  | exn ->
+    let primary_backtrace = Printexc.get_raw_backtrace () in
+    (match Unix.close fd with
+     | () -> Printexc.raise_with_backtrace exn primary_backtrace
+     | exception close_error ->
+       raise
+         (Descriptor_cleanup_failed
+            { operation = "anchored lock-file acquisition"
+            ; primary = exn
+            ; primary_backtrace
+            ; close_error
+            }))
+;;
+
+let lock_file_descriptor file = file.descriptor
+
+let lock_file_identity file =
+  { device = file.metadata.device; inode = file.metadata.inode }
+;;
+
+let close_lock_file file = Unix.close file.descriptor
 ;;
 
 let with_open_dir parent name f =
@@ -421,6 +468,9 @@ let write_all fd content =
 let temp_counter = Atomic.make 0
 
 let rec create_temporary dir =
+  (* NDT-OK: PID and process-local sequence only mint an exclusive temporary
+     entry name. Correctness comes from [O_EXCL] and retries on [EEXIST]; no
+     policy, ordering, or replay decision depends on the generated spelling. *)
   let sequence = Atomic.fetch_and_add temp_counter 1 in
   let raw = Printf.sprintf ".atomic_%x_%x.tmp" (Unix.getpid ()) sequence in
   let name =

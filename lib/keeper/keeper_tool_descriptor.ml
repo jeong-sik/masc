@@ -492,7 +492,9 @@ let descriptor_with_public_aliases
       ()
   =
   let capability_id =
-    Option.value capability_id ~default:(Tool_capability_id.route internal_name)
+    match capability_id with
+    | Some capability_id -> capability_id
+    | None -> Tool_capability_id.route internal_name
   in
   (match policy.maintenance_only, keeper_model_projection with
    | true, Dispatch_only | false, _ -> ()
@@ -1122,7 +1124,9 @@ let in_process_descriptor
       ~handler
   =
   let capability_id =
-    Option.value capability_id ~default:(Tool_capability_id.route name)
+    match capability_id with
+    | Some capability_id -> capability_id
+    | None -> Tool_capability_id.route name
   in
   descriptor
     ~capability_id

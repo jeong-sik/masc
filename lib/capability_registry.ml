@@ -501,8 +501,9 @@ let validate_projection_seeds seeds =
         match seed.projection.surface with
         | Keeper_standard | Keeper_privileged ->
           let current =
-            CapabilityMap.find_opt seed.capability_id by_capability
-            |> Option.value ~default:[]
+            match CapabilityMap.find_opt seed.capability_id by_capability with
+            | Some names -> names
+            | None -> []
           in
           CapabilityMap.add
             seed.capability_id

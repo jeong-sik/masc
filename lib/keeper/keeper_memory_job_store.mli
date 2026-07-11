@@ -1,9 +1,13 @@
 (** Durable per-keeper post-turn memory jobs.
 
     The store is rooted exclusively from [base_path], which must be an existing
-    real directory. Every managed descendant component from the MASC directory
-    through the per-keeper queues is created one segment at a time and checked
-    with [lstat]; symlink and non-directory components fail explicitly. A job moves through
+    trusted real directory supplied by the BasePath SSOT. Every managed
+    descendant is a typed single segment opened relative to a directory file
+    descriptor with [O_NOFOLLOW]; symlink and non-directory components fail
+    explicitly. Ancestor descriptors are closed while walking, and queue
+    transactions retain only the [memory-jobs] leaf plus the queue descriptors
+    needed by that transaction. Diagnostic absolute paths are never syscall
+    authority. A job moves through
     [awaiting-turn-commit -> pending -> inflight -> terminal receipt]. The
     execution receipt gates the first transition; the terminal memory receipt
     gates acknowledgement. Recovery requeues only inflight jobs that have no

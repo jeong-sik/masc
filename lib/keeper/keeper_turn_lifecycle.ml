@@ -52,14 +52,24 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
     match Keeper_registry.get ~base_path:ctx.config.base_path requested_name with
     | None ->
       (match active_operation ~config:ctx.config requested_name with
-       | Error detail -> tool_result_error detail
+       | Error detail ->
+         Log.Keeper.error
+           "Keeper shutdown inventory failed: keeper=%s error=%s"
+           requested_name
+           detail;
+         tool_result_error detail
        | Ok (Some operation) ->
+         Log.Keeper.info
+           "Keeper shutdown operation observed: keeper=%s operation=%s"
+           requested_name
+           (Keeper_shutdown_types.Operation_id.to_string operation.operation_id);
          tool_result_ok
            (Yojson.Safe.to_string (operation_json ~accepted:false operation))
        | Ok None ->
          (match Keeper_meta_store.read_meta_resolved ctx.config requested_name with
           | Error detail -> tool_result_error detail
           | Ok None ->
+            Log.Keeper.info "Keeper shutdown found already absent: keeper=%s" requested_name;
             tool_result_ok
               (Yojson.Safe.to_string
                  (`Assoc
@@ -67,6 +77,9 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
                     ; "already_absent", `Bool true
                     ]))
           | Ok (Some _) ->
+            Log.Keeper.error
+              "Keeper shutdown refused metadata-only identity: keeper=%s"
+              requested_name;
             tool_result_error
               "Keeper metadata exists without a live lane; refusing untracked cleanup"))
     | Some entry ->
@@ -86,8 +99,16 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
            ~request
        with
        | Error error ->
+         Log.Keeper.error
+           "Keeper shutdown submission failed: keeper=%s error=%s"
+           requested_name
+           (Keeper_shutdown_runtime.submit_error_to_string error);
          tool_result_error (Keeper_shutdown_runtime.submit_error_to_string error)
        | Ok operation ->
+         Log.Keeper.info
+           "Keeper shutdown operation accepted: keeper=%s operation=%s"
+           requested_name
+           (Keeper_shutdown_types.Operation_id.to_string operation.operation_id);
          tool_result_ok
            (Yojson.Safe.to_string (operation_json ~accepted:true operation)))
 ;;

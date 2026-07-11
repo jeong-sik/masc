@@ -1388,8 +1388,17 @@ let keeper_fleet_safety_health_json
   let low_running_fiber_margin =
     target_count > 1 && phase_counts.running < minimum_running_fibers
   in
+  (* Recovering lanes are deliberately capacity-bearing for the fleet verdict:
+     they already own an executable lane and the supervisor is actively
+     restoring them. Keep that policy in one value so the advertised
+     effective count and its derived shortfall cannot diverge. Actual healthy
+     execution remains available separately as
+     [healthy_running_keeper_fiber_count]. *)
+  let effective_reaction_capacity_count =
+    phase_counts.running + phase_counts.recovering
+  in
   let reaction_capacity_shortfall_count =
-    max 0 (target_count - phase_counts.running - phase_counts.recovering)
+    max 0 (target_count - effective_reaction_capacity_count)
   in
   let reaction_capacity_below_target =
     target_count > 0 && reaction_capacity_shortfall_count > 0
@@ -1534,7 +1543,7 @@ let keeper_fleet_safety_health_json
     ; "executable_keeper_fiber_count", `Int phase_counts.executable
     ; ( "executable_keeper_names"
       , `List (List.map (fun name -> `String name) executable_names) )
-    ; "effective_reaction_capacity_count", `Int phase_counts.running
+    ; "effective_reaction_capacity_count", `Int effective_reaction_capacity_count
     ; "executable_reaction_capacity_count", `Int phase_counts.executable
     ; "target_reaction_capacity_count", `Int target_count
     ; "minimum_running_fibers", `Int minimum_running_fibers

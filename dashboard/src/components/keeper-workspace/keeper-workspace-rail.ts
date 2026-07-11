@@ -34,7 +34,6 @@ import {
   runtimeCatalogState,
   type RuntimeCatalogEntryResolution,
 } from '../../lib/runtime-catalog-resource'
-import type { DashboardRuntimeThinkingControlFormat } from '../../api/dashboard'
 import {
   runtimeCatalogDeclaredSpec,
   runtimeCatalogEffectiveCapabilities,
@@ -153,27 +152,10 @@ type RuntimeEffortState =
   | { readonly status: 'unknown'; readonly reason: string }
   | {
       readonly status: 'ready'
-      readonly mode: DashboardRuntimeThinkingControlFormat
-      readonly controlled: boolean
+      readonly mode: string
       readonly adjustable: boolean
       readonly acceptedEfforts: readonly string[]
     }
-
-function thinkingControlEnabled(mode: DashboardRuntimeThinkingControlFormat): boolean {
-  switch (mode) {
-    case 'none':
-      return false
-    case 'thinking-object':
-    case 'thinking-object-adaptive':
-    case 'thinking-object-only':
-    case 'chat-template-kwargs':
-    case 'chat-template-token':
-    case 'ollama-think':
-    case 'reasoning-effort':
-    case 'enable-thinking':
-      return true
-  }
-}
 
 function resolveRuntimeEffortState(
   catalogEntry: RuntimeCatalogEntryResolution,
@@ -198,7 +180,6 @@ function resolveRuntimeEffortState(
       return {
         status: 'ready',
         mode,
-        controlled: thinkingControlEnabled(mode),
         adjustable:
           capabilities.supports_reasoning_budget === true
           || acceptedEfforts.length > 0,
@@ -219,9 +200,7 @@ function RuntimeEffortValue({ state }: { state: RuntimeEffortState }): VNode {
     case 'unknown':
       return html`<span class="rtc-eff-na" data-effort-status="unknown">${state.reason}</span>`
     case 'ready':
-      return state.controlled
-        ? html`<span class="rtc-eff-na" data-effort-status="ready" data-effort-mode=${state.mode}>${state.mode} · ${state.adjustable ? '조정 가능' : '고정'}${state.acceptedEfforts.length > 0 ? ` (${state.acceptedEfforts.join(', ')})` : ''}</span>`
-        : html`<span class="rtc-eff-na" data-effort-status="ready" data-effort-mode="none">effort 제어 없음</span>`
+      return html`<span class="rtc-eff-na" data-effort-status="ready" data-effort-mode=${state.mode}>${state.mode} · ${state.adjustable ? '조정 가능' : '고정'}${state.acceptedEfforts.length > 0 ? ` (${state.acceptedEfforts.join(', ')})` : ''}</span>`
   }
 }
 

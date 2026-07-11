@@ -156,7 +156,6 @@ export type {
   DashboardRuntimeResponseFormat,
   DashboardRuntimeToolChoice,
   DashboardRuntimeEffectiveCapabilities,
-  DashboardRuntimeThinkingControlFormat,
   DashboardRuntimeReasoningStreamingFormat,
   DashboardRuntimeAssignment,
   DashboardRuntimeAssignmentGovernance,

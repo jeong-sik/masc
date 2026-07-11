@@ -2849,7 +2849,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 
-  it('accepts canonical thinking-control wires and rejects unknown values', async () => {
+  it('preserves thinking-control wires without duplicating the server enum', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         providers: [
@@ -2880,7 +2880,7 @@ describe('fetchRuntimeProviders', () => {
     const result = await fetchRuntimeProviders()
 
     expect(result.providers[0]?.effective_capabilities?.thinking_control_format).toBe('ollama-think')
-    expect(result.providers[1]?.effective_capabilities?.thinking_control_format).toBeNull()
+    expect(result.providers[1]?.effective_capabilities?.thinking_control_format).toBe('future-undocumented-wire')
   })
 })
 

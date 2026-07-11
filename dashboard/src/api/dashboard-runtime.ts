@@ -165,21 +165,6 @@ export interface DashboardRuntimeReasoningStreamingFormat {
   field?: string | null
 }
 
-// Closed union of the canonical wire values emitted by
-// server_dashboard_http_runtime_info.ml. Keep this in lockstep with
-// Runtime_schema.thinking_control_format: an unknown value is not evidence for
-// a particular control mode and is decoded as null below.
-export type DashboardRuntimeThinkingControlFormat =
-  | 'none'
-  | 'thinking-object'
-  | 'thinking-object-adaptive'
-  | 'thinking-object-only'
-  | 'chat-template-kwargs'
-  | 'chat-template-token'
-  | 'ollama-think'
-  | 'reasoning-effort'
-  | 'enable-thinking'
-
 export interface DashboardRuntimeEffectiveCapabilities {
   source?: string | null
   max_context_tokens?: number | null
@@ -196,7 +181,7 @@ export interface DashboardRuntimeEffectiveCapabilities {
   supports_extended_thinking?: boolean
   supports_reasoning_budget?: boolean
   accepted_reasoning_efforts: string[] | null
-  thinking_control_format?: DashboardRuntimeThinkingControlFormat | null
+  thinking_control_format?: string | null
   preserve_thinking_control_format?: string | null
   reasoning_output_format?: string | null
   reasoning_streaming_format?: DashboardRuntimeReasoningStreamingFormat | null
@@ -670,26 +655,6 @@ function decodeRuntimeReasoningStreamingFormat(
   }
 }
 
-function decodeRuntimeThinkingControlFormat(
-  raw: unknown,
-): DashboardRuntimeThinkingControlFormat | null {
-  if (typeof raw !== 'string') return null
-  switch (raw) {
-    case 'none':
-    case 'thinking-object':
-    case 'thinking-object-adaptive':
-    case 'thinking-object-only':
-    case 'chat-template-kwargs':
-    case 'chat-template-token':
-    case 'ollama-think':
-    case 'reasoning-effort':
-    case 'enable-thinking':
-      return raw
-    default:
-      return null
-  }
-}
-
 function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffectiveCapabilities | null {
   if (!isRecord(raw)) return null
   return {
@@ -708,7 +673,10 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     supports_extended_thinking: asBoolean(raw.supports_extended_thinking),
     supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     accepted_reasoning_efforts: decodeNullableStringArray(raw.accepted_reasoning_efforts),
-    thinking_control_format: decodeRuntimeThinkingControlFormat(raw.thinking_control_format),
+    // Keep the server-projected wire opaque. The OCaml/OAS capability enum is
+    // the SSOT; duplicating its variants here would drift on the next catalog
+    // release and turn a received value into a false "missing" state.
+    thinking_control_format: asNullableString(raw.thinking_control_format),
     preserve_thinking_control_format: asNullableString(raw.preserve_thinking_control_format),
     reasoning_output_format: asNullableString(raw.reasoning_output_format),
     reasoning_streaming_format: decodeRuntimeReasoningStreamingFormat(raw.reasoning_streaming_format),

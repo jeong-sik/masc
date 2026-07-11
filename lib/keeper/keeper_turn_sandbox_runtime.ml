@@ -1088,7 +1088,11 @@ let run_exec_pipeline_with_status_once
     let rec build_process_stages acc = function
       | [] -> Ok (List.rev acc)
       | ({ command_argv; cwd = stage_cwd; env = _ }, keeper_env_args) :: rest ->
-        let cwd = Option.value stage_cwd ~default:cwd in
+        let cwd =
+          match stage_cwd with
+          | Some stage_cwd -> stage_cwd
+          | None -> cwd
+        in
         let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
         let argv =
           docker_exec_pipeline_argv

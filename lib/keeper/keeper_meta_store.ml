@@ -21,7 +21,28 @@ let runtime_meta_write_sync_hook config meta =
 let register_runtime_meta_write_sync f =
   Atomic.set runtime_meta_write_sync_hook_atomic f
 
-let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
+type write_error =
+  | Version_conflict of
+      { keeper_name : string
+      ; expected_version : int
+      ; actual : Keeper_meta_contract.keeper_meta
+      }
+  | Storage_error of string
+
+let write_error_to_string = function
+  | Version_conflict { keeper_name; expected_version; actual } ->
+    Printf.sprintf
+      "meta version conflict for %s: expected %d, disk has %d"
+      keeper_name
+      expected_version
+      actual.meta_version
+  | Storage_error msg -> msg
+;;
+
+let meta_cas_key config keeper_name =
+  Keeper_types_profile.keeper_meta_path config keeper_name
+  |> fun path -> File_lock_eio.Key.of_path (path ^ ".cas")
+;;
 
 let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
   if not (Fs_compat.file_exists path)
@@ -308,35 +329,46 @@ let persist_meta config path persisted =
    counters are a monotone invariant (RFC-0225 §3.2, RFC-0237); a caller that
    lost the race must resolve the conflict through [write_meta_with_merge],
    never overwrite the disk snapshot. *)
-let write_meta config (m : Keeper_meta_contract.keeper_meta) : (unit, string) result =
+let write_meta_result_with
+      with_lock
+      config
+      (m : Keeper_meta_contract.keeper_meta)
+  : (unit, write_error) result
+  =
   let path = keeper_meta_path config m.name in
-  match read_meta_file_path path with
-  | Ok (Some existing) ->
-    if existing.meta_version <> m.meta_version
-    then
+  with_lock (meta_cas_key config m.name) (fun () ->
+    match read_meta_file_path path with
+    | Ok (Some existing) ->
+      if existing.meta_version <> m.meta_version
+      then
+        Error
+          (Version_conflict
+             { keeper_name = m.name
+             ; expected_version = m.meta_version
+             ; actual = existing
+             })
+      else (
+        let persisted = { m with meta_version = m.meta_version + 1 } in
+        Result.map_error (fun msg -> Storage_error msg) (persist_meta config path persisted))
+    | Ok None ->
+      let persisted = { m with meta_version = 1 } in
+      Result.map_error (fun msg -> Storage_error msg) (persist_meta config path persisted)
+    | Error msg ->
       Error
-        (Printf.sprintf
-           "meta version conflict for %s: expected %d, disk has %d"
-           m.name
-           m.meta_version
-           existing.meta_version)
-    else (
-      let persisted = { m with meta_version = m.meta_version + 1 } in
-      persist_meta config path persisted)
-  | Ok None ->
-    (* No existing file: initial write. *)
-    let persisted = { m with meta_version = 1 } in
-    persist_meta config path persisted
-  | Error msg ->
-    Error (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg)
+        (Storage_error
+           (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg)))
 ;;
 
-let is_version_conflict_error msg =
-  try
-    ignore (Re.exec version_conflict_re msg);
-    true
-  with
-  | Not_found -> false
+let write_meta_result config m =
+  write_meta_result_with File_lock_eio.with_lock_eio config m
+;;
+
+let write_meta_blocking_result config m =
+  write_meta_result_with File_lock_eio.with_lock_blocking config m
+;;
+
+let write_meta config m =
+  Result.map_error write_error_to_string (write_meta_result config m)
 ;;
 
 (* ── Boot-time canonicalization ─────────────────────────── *)
@@ -411,22 +443,19 @@ let migrate_retired_keeper_meta_keys config =
 (* #9769 root fix: CAS retry with explicit field ownership. The
    turn-failure/cycle path uses [Keeper_meta_merge.heartbeat_fields_from_disk]
    now only carries the disk meta_version forward. *)
-let write_meta_with_merge
+let write_meta_with_merge_result
       ?(max_retries = 3)
       ~(merge : latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta)
       config
       (m : Keeper_meta_contract.keeper_meta)
-  : (unit, string) result
+  : (unit, write_error) result
   =
-  let path = keeper_meta_path config m.name in
   let rec attempt n (caller : Keeper_meta_contract.keeper_meta) =
-    match write_meta config caller with
+    match write_meta_result config caller with
     | Ok () -> Ok ()
-    | Error msg when n >= max_retries -> Error msg
-    | Error msg when not (is_version_conflict_error msg) -> Error msg
-    | Error _ ->
-      (match read_meta_file_path path with
-       | Ok (Some latest) ->
+    | Error error when n >= max_retries -> Error error
+    | Error (Storage_error _ as error) -> Error error
+    | Error (Version_conflict { actual = latest; _ }) ->
          Otel_metric_store.inc_counter
            Otel_metric_store.metric_write_meta_cas_retry_total
            ~labels:[("keeper", caller.name)]
@@ -439,11 +468,11 @@ let write_meta_with_merge
            caller.meta_version
            latest.meta_version;
          attempt (n + 1) (merge ~latest ~caller)
-       | Ok None ->
-         (* Disk file vanished between attempts; fall back to fresh write. *)
-         attempt (n + 1) { caller with meta_version = 0 }
-       | Error read_msg ->
-         Error (Printf.sprintf "write_meta retry: failed to re-read for CAS: %s" read_msg))
   in
   attempt 0 m
+;;
+
+let write_meta_with_merge ?max_retries ~merge config m =
+  write_meta_with_merge_result ?max_retries ~merge config m
+  |> Result.map_error write_error_to_string
 ;;

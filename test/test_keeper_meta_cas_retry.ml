@@ -4,8 +4,7 @@
     [Keeper_meta_merge.caller_wins]:
       - succeeds when no concurrent writer interferes
       - succeeds after N attempts when the disk version has advanced
-      - distinguishes version conflicts from real I/O errors via
-        [is_version_conflict_error] *)
+      - distinguishes typed version conflicts from storage errors *)
 
 open Alcotest
 open Masc
@@ -256,6 +255,60 @@ let test_operator_pause_survives_stale_heartbeat_retry () =
     check bool "stale blocker stays cleared" true
       (Option.is_none final.runtime.last_blocker))
 
+let test_concurrent_same_version_writers_have_one_typed_winner () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let initial = make_meta ~name:"concurrent-cas" in
+    (match Keeper_meta_store.write_meta config initial with
+     | Ok () -> ()
+     | Error err -> fail ("seed write failed: " ^ err));
+    let stale =
+      match Keeper_meta_store.read_meta config initial.name with
+      | Ok (Some meta) -> meta
+      | Ok None -> fail "seed meta disappeared"
+      | Error err -> fail ("seed read failed: " ^ err)
+    in
+    let first = { stale with active_goal_ids = [ "first" ] } in
+    let second = { stale with active_goal_ids = [ "second" ] } in
+    let first_result = ref None in
+    let second_result = ref None in
+    Eio.Fiber.both
+      (fun () -> first_result := Some (Keeper_meta_store.write_meta_result config first))
+      (fun () -> second_result := Some (Keeper_meta_store.write_meta_result config second));
+    let results =
+      [ Option.value ~default:(Error (Keeper_meta_store.Storage_error "first missing")) !first_result
+      ; Option.value ~default:(Error (Keeper_meta_store.Storage_error "second missing")) !second_result
+      ]
+    in
+    let successes, conflicts =
+      List.fold_left
+        (fun (successes, conflicts) -> function
+           | Ok () -> successes + 1, conflicts
+           | Error (Keeper_meta_store.Version_conflict _) -> successes, conflicts + 1
+           | Error (Keeper_meta_store.Storage_error err) ->
+             fail ("unexpected storage error: " ^ err))
+        (0, 0)
+        results
+    in
+    check int "exactly one same-version writer commits" 1 successes;
+    check int "the loser receives a typed conflict" 1 conflicts;
+    let persisted =
+      match Keeper_meta_store.read_meta config initial.name with
+      | Ok (Some meta) -> meta
+      | Ok None -> fail "concurrent CAS winner disappeared"
+      | Error err -> fail ("concurrent CAS winner read failed: " ^ err)
+    in
+    check int "winner advances the disk version"
+      (stale.meta_version + 1) persisted.meta_version;
+    check bool "one complete winner payload reaches disk" true
+      (persisted.active_goal_ids = first.active_goal_ids
+       || persisted.active_goal_ids = second.active_goal_ids))
+
 (* RFC-0237: the [write_meta ~force:true] escape hatch is removed, so the
    counter-rewind path the four keeper-internal sites carried
    (keeper_tool_surface / keeper_tool_surface_ops / keeper_keepalive /
@@ -301,23 +354,22 @@ let test_stale_write_conflicts_without_force () =
     in
     (match Keeper_meta_store.write_meta config stale with
      | Ok () -> fail "stale write unexpectedly succeeded (CAS bypass present?)"
-     | Error msg ->
-       check bool "stale write is rejected as a version conflict" true
-         (Keeper_meta_store.is_version_conflict_error msg));
+     | Error _ -> ());
+    (match Keeper_meta_store.write_meta_result config stale with
+     | Error (Keeper_meta_store.Version_conflict { expected_version; actual; _ }) ->
+       check int "typed conflict carries expected version"
+         stale.meta_version expected_version;
+       check int "typed conflict carries exact disk version"
+         (stale.meta_version + 1) actual.meta_version
+     | Error (Keeper_meta_store.Storage_error err) ->
+       fail ("expected typed conflict, got storage error: " ^ err)
+     | Ok () -> fail "typed stale write unexpectedly succeeded");
     let final = match Keeper_meta_store.read_meta config "delta" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
     check int "advanced disk counter survives (no rewind without force)"
       42 final.runtime.usage.total_turns)
-
-let test_is_version_conflict_error_classifies () =
-  let conflict_msg = "meta version conflict for foo: expected 3, disk has 4" in
-  let other_msg = "failed to write meta /tmp/x: Permission denied" in
-  check bool "classifies version conflict" true
-    (Keeper_meta_store.is_version_conflict_error conflict_msg);
-  check bool "rejects unrelated error" false
-    (Keeper_meta_store.is_version_conflict_error other_msg)
 
 let () =
   run "Keeper_types CAS retry (#9764/#9733/#9769)"
@@ -332,12 +384,9 @@ let () =
             `Quick test_monotonic_usage_counters_on_cas_retry;
           test_case "operator pause survives stale heartbeat retry"
             `Quick test_operator_pause_survives_stale_heartbeat_retry;
+          test_case "concurrent same-version writers have one typed winner"
+            `Quick test_concurrent_same_version_writers_have_one_typed_winner;
           test_case "stale write conflicts without force (RFC-0237 escape hatch closed)"
             `Quick test_stale_write_conflicts_without_force;
-        ] );
-      ( "is_version_conflict_error",
-        [
-          test_case "classifies conflict vs I/O error" `Quick
-            test_is_version_conflict_error_classifies;
         ] );
     ]

@@ -1187,29 +1187,32 @@ let run_keeper_msg_turn_admitted
                  payload wins at the cycle-owned fields and heartbeat-
                  owned fields are taken from disk. *)
               (match
-                 write_meta_with_merge
+                 write_meta_with_merge_result
                    ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
                    ctx.config updated_meta
                with
                | Ok () -> ()
-               | Error msg ->
+               | Error error ->
+                   let msg = write_error_to_string error in
                    Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string WriteMetaFailures)
                      ~labels:
                        [ ("keeper", updated_meta.name);
                          ("phase",
-                          if is_version_conflict_error msg
-                          then "keeper_msg_turn_cas_race"
-                          else "keeper_msg_turn")
+                          match error with
+                          | Version_conflict _ -> "keeper_msg_turn_cas_race"
+                          | Storage_error _ -> "keeper_msg_turn")
                        ]
                      ();
-                   if is_version_conflict_error msg then
-                     Log.Keeper.warn
-                       "write_meta lost CAS race after retries (keeper_msg turn): %s"
-                       msg
-                   else
-                     Log.Keeper.error
-                       "write_meta failed after keeper_msg turn: %s" msg);
+                   (match error with
+                    | Version_conflict _ ->
+                      Log.Keeper.warn
+                        "write_meta lost CAS race after retries (keeper_msg turn): %s"
+                        msg
+                    | Storage_error _ ->
+                      Log.Keeper.error
+                        "write_meta failed after keeper_msg turn: %s"
+                        msg));
               (try
                  Keeper_unified_metrics.append_metrics_snapshot
                    ~config:ctx.config

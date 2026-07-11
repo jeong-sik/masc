@@ -48,7 +48,7 @@ let cleanup_dead_tombstone
              pause, the heartbeat merge would copy the operator reason
              back over [Dead_tombstone] and still return [Ok ()]. *)
         match
-          write_meta_with_merge
+          write_meta_with_merge_result
             ~merge:Keeper_meta_merge.dead_tombstone_cleanup_from_disk
             ctx.config
             { meta with
@@ -64,7 +64,8 @@ let cleanup_dead_tombstone
             }
         with
         | Ok () -> true
-        | Error err when is_version_conflict_error err ->
+        | Error (Version_conflict _ as error) ->
+          let err = write_error_to_string error in
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string WriteMetaFailures)
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup_cas_race" ]
@@ -74,7 +75,7 @@ let cleanup_dead_tombstone
             entry.name
             err;
           false
-        | Error err ->
+        | Error (Storage_error err) ->
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string WriteMetaFailures)
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup" ]

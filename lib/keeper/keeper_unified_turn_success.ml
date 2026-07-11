@@ -602,21 +602,22 @@ let persist_terminal_turn_meta
     else updated_meta
   in
   (match
-     Keeper_meta_store.write_meta_with_merge
+     Keeper_meta_store.write_meta_with_merge_result
        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
        config
        updated_meta
    with
    | Ok () -> ()
-   | Error msg ->
+   | Error error ->
+     let msg = Keeper_meta_store.write_error_to_string error in
      Otel_metric_store.inc_counter
        Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:
          [ "keeper", updated_meta.name
          ; ( "phase"
-           , if Keeper_meta_store.is_version_conflict_error msg
-             then "keeper_cycle_cas_race"
-             else "keeper_cycle" )
+           , match error with
+             | Keeper_meta_store.Version_conflict _ -> "keeper_cycle_cas_race"
+             | Keeper_meta_store.Storage_error _ -> "keeper_cycle" )
          ]
        ();
      (* #22043: emit inside the [Error] arm so
@@ -632,9 +633,11 @@ let persist_terminal_turn_meta
          ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)
          ]
        ();
-     if Keeper_meta_store.is_version_conflict_error msg
-     then Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" msg
-     else Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
+     (match error with
+      | Keeper_meta_store.Version_conflict _ ->
+        Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" msg
+      | Keeper_meta_store.Storage_error _ ->
+        Log.Keeper.error "write_meta failed after keeper cycle: %s" msg));
   updated_meta
 ;;
 

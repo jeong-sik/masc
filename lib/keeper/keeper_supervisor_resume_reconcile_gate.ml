@@ -50,13 +50,14 @@ let resume_keeper_after_reconcile_gate
      [Keeper_registry.update_meta] applies the resume in-memory —
      a registry/disk split that hides the failure. *)
   (match
-     write_meta_with_merge
+     write_meta_with_merge_result
        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
        ctx.config
        resumed_meta
    with
    | Ok () -> ()
-   | Error err when is_version_conflict_error err ->
+   | Error (Version_conflict _ as error) ->
+     let err = write_error_to_string error in
      Otel_metric_store.inc_counter
        Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", resumed_meta.name; "phase", "reconcile_resume_cas_race" ]
@@ -65,7 +66,7 @@ let resume_keeper_after_reconcile_gate
        "%s: reconcile gate resume write_meta lost CAS race after retries: %s"
        resumed_meta.name
        err
-   | Error err ->
+   | Error (Storage_error err) ->
      Otel_metric_store.inc_counter
        Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", resumed_meta.name; "phase", "reconcile_resume" ]

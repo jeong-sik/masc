@@ -893,34 +893,35 @@ let run_keeper_cycle
 dominant source of the observed CAS race exhaustion after
              keeper OAS timeout. *)
                   (match
-                     write_meta_with_merge
+                     write_meta_with_merge_result
                        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
                        config
                        updated_meta
                    with
                    | Ok () -> ()
-                   | Error msg ->
+                   | Error error ->
+                     let msg = write_error_to_string error in
                      Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string WriteMetaFailures)
                        ~labels:
                          [ "keeper", updated_meta.name
                          ; ( "phase"
-                           , if is_version_conflict_error msg
-                             then "turn_failure_cas_race"
-                             else "turn_failure" )
+                           , match error with
+                             | Version_conflict _ -> "turn_failure_cas_race"
+                             | Storage_error _ -> "turn_failure" )
                          ]
                        ();
-                     if is_version_conflict_error msg
-                     then
-                       Log.Keeper.warn
-                         ~keeper_name:updated_meta.name
-                         "write_meta lost CAS race after retries (turn failure path): %s"
-                         msg
-                     else
-                       Log.Keeper.error
-                         ~keeper_name:updated_meta.name
-                         "write_meta failed after unified turn failure: %s"
-                         msg);
+                     (match error with
+                      | Version_conflict _ ->
+                        Log.Keeper.warn
+                          ~keeper_name:updated_meta.name
+                          "write_meta lost CAS race after retries (turn failure path): %s"
+                          msg
+                      | Storage_error _ ->
+                        Log.Keeper.error
+                          ~keeper_name:updated_meta.name
+                          "write_meta failed after unified turn failure: %s"
+                          msg));
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]

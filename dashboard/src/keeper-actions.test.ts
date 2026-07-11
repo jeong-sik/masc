@@ -1740,7 +1740,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       const assistants = thread.filter(entry => entry.role === 'assistant')
       expect(assistants).toHaveLength(2)
       expect(assistants.some(entry => entry.delivery === 'queued')).toBe(true)
-      expect(assistants.some(entry => entry.delivery === 'error')).toBe(true)
+      expect(assistants.some(entry => entry.delivery === 'transport_failure')).toBe(true)
       expect(keeperActionErrors.value.echo).toBeNull()
 
       // Let the resume loop finish.

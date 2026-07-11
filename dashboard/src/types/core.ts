@@ -742,6 +742,10 @@ export type KeeperConversationDelivery =
   | 'timeout'
   | 'cancelled'
   | 'error'
+  // Durable keeper_chat_store row written when a request failed before the
+  // keeper produced an utterance. Unlike generic client/tool errors, this
+  // writer-declared state is watermark-neutral.
+  | 'transport_failure'
   // Stream ended without a terminal RUN_FINISHED / RUN_ERROR event —
   // the transport was cut mid-response, so the text may be incomplete.
   | 'interrupted'

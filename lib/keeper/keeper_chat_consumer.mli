@@ -42,7 +42,10 @@ type turn_outcome =
 
     If finalization persistence fails, the exact decision is retained and
     retried before another turn starts; a transient filesystem error cannot
-    leave the lane stuck behind an outstanding lease.
+    leave the lane stuck behind an outstanding lease. External diagnostic text
+    is normalized at this terminal boundary. If queue validation still rejects
+    the decision, the consumer replaces it with a typed [Internal_error]
+    terminal outcome instead of retrying a permanently invalid action forever.
 
     The fiber runs until [sw] is released.
 

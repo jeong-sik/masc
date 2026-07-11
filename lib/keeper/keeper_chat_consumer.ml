@@ -78,31 +78,56 @@ end
 (* A finalization persist failure is recoverable: queue-core keeps the lease
    unchanged. Retain the exact typed decision and retry it before dispatching
    another turn for this Keeper. *)
+let invalid_finalization_fallback message =
+  let completed_at = Time_compat.now () in
+  let completed_at = if Float.is_finite completed_at then completed_at else 0.0 in
+  Keeper_chat_queue.Mark_failed
+    { completed_at
+    ; kind = Keeper_chat_queue.Internal_error
+    ; detail =
+        Safe_ops.sanitize_text_utf8
+          ("queued turn produced an invalid terminal outcome: " ^ message)
+    ; outcome_ref = None
+    }
+
 let settle_lease state ~keeper_name ~lease_id action =
   let result =
     match action with
     | Finalize outcome ->
-      (match Keeper_chat_queue.finalize ~keeper_name ~lease_id ~outcome with
-       | `Finalized _ ->
-         clear_pending_finalization state ~keeper_name ~lease_id;
-         `Settled
-       | `Unknown_lease ->
-         clear_pending_finalization state ~keeper_name ~lease_id;
-         Log.Keeper.warn
-           "keeper_chat_consumer: finalize found no matching lease=%s for \
-            keeper=%s (already finalized/nacked?)"
-           lease_id
-           keeper_name;
-         `Settled
-       | `Error error ->
-         remember_pending_finalization state ~keeper_name ~lease_id ~action;
-         Log.Keeper.error
-           "keeper_chat_consumer: finalize persist failed for keeper=%s \
-            lease=%s: %s; finalization will retry"
-           keeper_name
-           lease_id
-           (Keeper_chat_queue.mutation_error_to_string error);
-         `Pending)
+      let rec finalize ~allow_invalid_fallback outcome =
+        match Keeper_chat_queue.finalize ~keeper_name ~lease_id ~outcome with
+        | `Finalized _ ->
+          clear_pending_finalization state ~keeper_name ~lease_id;
+          `Settled
+        | `Unknown_lease ->
+          clear_pending_finalization state ~keeper_name ~lease_id;
+          Log.Keeper.warn
+            "keeper_chat_consumer: finalize found no matching lease=%s for \
+             keeper=%s (already finalized/nacked?)"
+            lease_id
+            keeper_name;
+          `Settled
+        | `Error (Keeper_chat_queue.Invalid_input message)
+          when allow_invalid_fallback ->
+          let fallback = invalid_finalization_fallback message in
+          Log.Keeper.error
+            "keeper_chat_consumer: rejected invalid terminal outcome for \
+             keeper=%s lease=%s: %s; replacing it with a typed internal_error"
+            keeper_name lease_id message;
+          finalize ~allow_invalid_fallback:false fallback
+        | `Error error ->
+          let retry_action = Finalize outcome in
+          remember_pending_finalization state ~keeper_name ~lease_id
+            ~action:retry_action;
+          Log.Keeper.error
+            "keeper_chat_consumer: finalize persist failed for keeper=%s \
+             lease=%s: %s; finalization will retry"
+            keeper_name
+            lease_id
+            (Keeper_chat_queue.mutation_error_to_string error);
+          `Pending
+      in
+      finalize ~allow_invalid_fallback:true outcome
     | Nack ->
       (match Keeper_chat_queue.nack ~keeper_name ~lease_id with
        | `Requeued _ ->
@@ -148,16 +173,30 @@ let retry_pending_finalization state ~keeper_name =
     | `Settled | `Pending -> ());
     true
 
+let canonical_optional_outcome_ref = function
+  | None -> None
+  | Some value ->
+    let value = Safe_ops.sanitize_text_utf8 value |> String.trim in
+    if String.equal value "" then None else Some value
+
+let canonical_failure_detail detail =
+  let detail = Safe_ops.sanitize_text_utf8 detail |> String.trim in
+  if String.equal detail ""
+  then "queued turn failed without diagnostic detail"
+  else detail
+
 let finalization_of_turn_outcome ~clock = function
   | Delivered { outcome_ref } ->
       Keeper_chat_queue.Mark_delivered
-        { completed_at = Eio.Time.now clock; outcome_ref }
+        { completed_at = Eio.Time.now clock
+        ; outcome_ref = canonical_optional_outcome_ref outcome_ref
+        }
   | Failed { kind; detail; outcome_ref } ->
       Keeper_chat_queue.Mark_failed
         { completed_at = Eio.Time.now clock
         ; kind
-        ; detail
-        ; outcome_ref
+        ; detail = canonical_failure_detail detail
+        ; outcome_ref = canonical_optional_outcome_ref outcome_ref
         }
 
 let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id ~queued =

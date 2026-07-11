@@ -267,6 +267,37 @@ describe('reconcileKeeperChatReceipts', () => {
     ))).toBe(true)
   })
 
+  it('retries terminal transcript convergence on the next poll after a failed fetch', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'delivered', completedAt: 42, outcomeRef: null },
+    })
+    fetchKeeperChatHistory
+      .mockRejectedValueOnce(new Error('temporary history timeout'))
+      .mockResolvedValueOnce([
+        { role: 'assistant', content: 'reply recovered on retry', ts: 1_780_000_002 },
+      ])
+
+    await reconcileKeeperChatReceipts('echo')
+
+    const receiptEntry = keeperThreads.value.echo?.find(entry => (
+      entry.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))
+    expect(receiptEntry?.delivery).toBe('delivered')
+    expect(keeperActionErrors.value.echo).toContain('transcript convergence')
+
+    await reconcileKeeperChatReceipts('echo')
+
+    expect(fetchKeeperChatReceipt).toHaveBeenCalledTimes(1)
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+    expect(keeperThreads.value.echo?.some(entry => (
+      entry.text === 'reply recovered on retry'
+    ))).toBe(true)
+    expect(keeperActionErrors.value.echo).toBeFalsy()
+  })
+
   it('surfaces a durable failed receipt on the queued chat row', async () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
@@ -353,6 +384,9 @@ describe('reconcileKeeperChatReceipts', () => {
   })
 
   it('ignores an older rejected lookup after a newer terminal success', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([
+      { role: 'assistant', content: 'authoritative terminal reply', ts: 1_780_000_003 },
+    ])
     let rejectOlder!: (reason: Error) => void
     let resolveNewer!: (value: {
       keeperName: string
@@ -382,7 +416,10 @@ describe('reconcileKeeperChatReceipts', () => {
     rejectOlder(new Error('stale network failure'))
     await olderReconciliation
 
-    expect(keeperThreads.value.echo?.[0]?.delivery).toBe('delivered')
+    const receiptEntry = keeperThreads.value.echo?.find(entry => (
+      entry.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))
+    expect(receiptEntry?.delivery).toBe('delivered')
     expect(keeperActionErrors.value.echo).toBeFalsy()
   })
 

@@ -36,8 +36,28 @@ val config_category_enum_strings : string list
 
 (** {1 Tool schema list} *)
 
+type control_operation =
+  | Pause
+  | Resume
+(** Closed set of operator control tools. *)
+
+val control_operations : control_operation list
+(** Exhaustive typed projection of operator control operations. *)
+
+val control_operation_id : control_operation -> string
+(** Stable descriptor identifier suffix for a control operation. *)
+
+val control_schema : control_operation -> Masc_domain.tool_schema
+(** Canonical generated schema for a control operation. *)
+
+val control_schemas : Masc_domain.tool_schema list
+(** Canonical control schemas used by registration. These schemas are
+    intentionally excluded from {!schemas} and the Config front-door inventory. *)
+
 val schemas : Masc_domain.tool_schema list
 (** [schemas] is the generated [Masc_domain.tool_schema list] for misc tools.
+    Operator controls are intentionally available only through
+    {!control_schemas}; they do not enter the Config front-door inventory.
     Descriptor-owned web backend names ([masc_web_search] / [masc_web_fetch])
     are intentionally projected into {!Config.raw_all_tool_schemas} from
     [Keeper_tool_descriptor.public_descriptors] instead of duplicated here.

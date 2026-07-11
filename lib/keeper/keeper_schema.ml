@@ -6,6 +6,12 @@ open Masc_domain
     Keeper creation/update no longer accepts sandbox posture knobs. *)
 let network_mode_enum_strings =
   [ "none"; "inherit" ]
+
+(** Hand-mirrored from [Keeper_sandbox_control]'s typed stop scope. Keeper_schema
+    is upstream of the runtime control module; the descriptor integrity test
+    keeps this JSON Schema enum aligned with the parser constants. *)
+let sandbox_stop_scope_enum_strings = [ "managed"; "turn"; "all" ]
+
 (** Issue #8486: hand-mirrored from
     [Keeper_status_detail.valid_tail_order_strings].  Same cycle
     constraint — Keeper_schema is upstream of Keeper_status_detail.
@@ -30,6 +36,72 @@ let tool_access_schema description =
   ]
 
 let keeper_schemas : tool_schema list = [
+  {
+    name = "masc_keeper_sandbox_start";
+    description = "Start the managed sandbox container for a keeper.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle whose managed sandbox should be started.");
+        ]);
+        ("network_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List (List.map (fun value -> `String value) network_mode_enum_strings));
+          ("description", `String "Optional sandbox network mode. Defaults to the keeper's configured network mode.");
+        ]);
+        ("ttl_sec", `Assoc [
+          ("type", `String "number");
+          ("minimum", `Float 1.0);
+          ("maximum", `Float 86400.0);
+          ("default", `Float 1800.0);
+          ("description", `String "Managed sandbox lifetime in seconds (default: 1800; clamped to 1-86400).");
+        ]);
+        ("timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("minimum", `Float 1.0);
+          ("maximum", `Float 30.0);
+          ("default", `Float 10.0);
+          ("description", `String "Sandbox start timeout in seconds (default: 10; clamped to 1-30).");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+      ("additionalProperties", `Bool false);
+    ];
+  };
+  {
+    name = "masc_keeper_sandbox_stop";
+    description = "Stop the managed sandbox container(s) for a keeper or fleet.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional keeper handle. When omitted, stop matching containers across the active fleet.");
+        ]);
+        ("container_kind", `Assoc [
+          ("type", `String "string");
+          ("enum", `List (List.map (fun value -> `String value) sandbox_stop_scope_enum_strings));
+          ("default", `String "managed");
+          ("description", `String "Container scope to stop: managed, turn, or all (default: managed).");
+        ]);
+        ("timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("minimum", `Float 1.0);
+          ("maximum", `Float 30.0);
+          ("default", `Float 10.0);
+          ("description", `String "Sandbox stop timeout in seconds (default: 10; clamped to 1-30).");
+        ]);
+        ("prune_stale", `Assoc [
+          ("type", `String "boolean");
+          ("default", `Bool false);
+          ("description", `String "Also remove stale managed sandbox containers after the targeted stop.");
+        ]);
+      ]);
+      ("additionalProperties", `Bool false);
+    ];
+  };
   {
     name = "masc_persona_list";
     description = "List available persona profiles that can be used to create keepers via masc_keeper_create_from_persona.";

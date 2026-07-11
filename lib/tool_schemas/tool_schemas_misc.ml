@@ -37,7 +37,27 @@ let config_category_enum_strings =
   ]
 ;;
 
-(* [schemas] is the generated misc schema set. Descriptor-owned web backend
+type control_operation =
+  | Pause
+  | Resume
+
+let control_operations = [ Pause; Resume ]
+
+let control_operation_id = function
+  | Pause -> "pause"
+  | Resume -> "resume"
+;;
+
+let control_schema = function
+  | Pause -> Tool_descriptors_gen.masc_pause_schema
+  | Resume -> Tool_descriptors_gen.masc_resume_schema
+;;
+
+let control_schemas = List.map control_schema control_operations
+
+(* [schemas] is the generated public misc schema set. Operator control schemas
+   use the dedicated typed projection above so they remain registered without
+   entering Config's public/front-door inventory. Descriptor-owned web backend
    names (masc_web_search / masc_web_fetch) are intentionally not generated
    here; [Config.raw_all_tool_schemas] projects them from
    [Keeper_tool_descriptor.public_descriptors] so the keeper universe still

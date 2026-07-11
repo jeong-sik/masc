@@ -17,8 +17,10 @@ const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
 // above `let` declarations, so the shared state must itself be created inside
 // `vi.hoisted` to avoid the temporal dead zone. Tests inject a
 // `keeper_waiting_inventory` by setting `mockedToolsData.value` before render.
-const { mockedToolsData } = vi.hoisted(() => ({
+const { mockedToolsData, mockedToolsError, subscribeToolsAutoRefresh } = vi.hoisted(() => ({
   mockedToolsData: { value: null as unknown },
+  mockedToolsError: { value: null as string | null },
+  subscribeToolsAutoRefresh: vi.fn(() => vi.fn()),
 }))
 
 vi.mock('../keeper-actions', () => ({
@@ -96,7 +98,9 @@ vi.mock('../store', async (importOriginal) => {
 vi.mock('../components/tools/tool-state', () => ({
   toolsData: mockedToolsData,
   toolsLoading: { value: false },
-  toolsError: { value: null },
+  toolsError: mockedToolsError,
+  KEEPER_WAITING_INVENTORY_REFRESH_MS: 15_000,
+  subscribeToolsAutoRefresh,
   loadTools: vi.fn(),
 }))
 
@@ -201,6 +205,8 @@ describe('KeeperConversationPanel', () => {
     keeperStreamStartedAt.value = {}
     shellAuthSummary.value = null
     mockedToolsData.value = null
+    mockedToolsError.value = null
+    subscribeToolsAutoRefresh.mockClear()
     _resetChatStoreForTests()
     vi.mocked(sendKeeperThreadMessage).mockReset()
     vi.mocked(sendKeeperThreadMessage).mockResolvedValue(undefined)
@@ -944,6 +950,74 @@ describe('KeeperConversationPanel', () => {
       expect(status?.getAttribute('data-server-chat-queue-read-errors')).toBe('1')
       expect(status?.textContent).toContain('대기열 조회 실패 1')
       expect(status?.textContent).toContain('repair_keeper_chat_queue_snapshot')
+    })
+  })
+
+  it('surfaces a failed tools refresh even when stale queue counts remain cached', async () => {
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [
+          {
+            keeper_name: 'sangsu',
+            state: 'waiting',
+            waiting_on: [],
+            waiting_count: 1,
+            sources: { chat_queue_pending: 1 },
+          },
+        ],
+      },
+    }
+    mockedToolsError.value = 'HTTP 502 Bad Gateway'
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
+      expect(status?.getAttribute('data-server-chat-queue-projection')).toBe('read-failed')
+      expect(status?.textContent).toContain('서버 대기열 갱신 실패')
+      expect(status?.textContent).toContain('표시 수치는 이전 snapshot일 수 있습니다')
+    })
+  })
+
+  it('shows each durable receipt lifecycle in messenger mode with receipt identity', async () => {
+    const receiptStates = ['pending', 'inflight', 'delivered', 'failed'] as const
+    keeperThreads.value = {
+      sangsu: receiptStates.map((queueState, index) => ({
+        id: `receipt-${queueState}`,
+        role: 'assistant' as const,
+        source: 'direct_assistant' as const,
+        label: 'sangsu',
+        text: `receipt ${queueState}`,
+        timestamp: null,
+        delivery: queueState === 'failed' ? 'error' as const : queueState === 'delivered' ? 'delivered' as const : 'queued' as const,
+        streamState: null,
+        details: {
+          queueReceiptId: `chatq_00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+          queueRevision: index + 1,
+          queueState,
+        },
+      })),
+    }
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [{ keeper_name: 'sangsu', state: 'waiting', waiting_on: [], waiting_count: 0 }],
+      },
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-chat-queue-state-badge="pending"]')?.textContent).toContain('서버 대기')
+      expect(container.querySelector('[data-chat-queue-state-badge="inflight"]')?.textContent).toContain('Keeper 처리 중')
+      expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.textContent).toContain('처리 완료')
+      expect(container.querySelector('[data-chat-queue-state-badge="failed"]')?.textContent).toContain('처리 실패')
+      expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.getAttribute('title')).toContain('chatq_')
     })
   })
 

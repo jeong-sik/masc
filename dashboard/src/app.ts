@@ -18,6 +18,7 @@ import { persistentSignal } from './lib/persistent-signal'
 import { route, initRouter } from './router'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerGovernanceRefresh, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
+import { initNotificationDelivery } from './notifications'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { ensureDevToken } from './api/dev-token'
@@ -213,6 +214,7 @@ export function App() {
     }
 
     const unsubSSE = setupSSEReaction()
+    const unsubNotify = initNotificationDelivery()
     startPeriodicRefresh()
     startErrorCleanup()
     const uninstallStalenessWatch = installBundleStalenessWatch()
@@ -221,6 +223,7 @@ export function App() {
       cancelled = true
       disconnectDashboardWS()
       unsubSSE()
+      unsubNotify()
       stopPeriodicRefresh()
       stopErrorCleanup()
       disposeNamespaceTruthScheduler()

@@ -26,6 +26,7 @@ import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route } from '../router'
 import { connected } from '../sse'
 import { tweaksDensity } from './tweaks-panel'
+import { notifyRules } from '../notifications'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
 import { dashboardLoading, shellConfigResolution, shellRuntimeResolution } from '../store'
@@ -319,9 +320,6 @@ function makeDashboardConfig(overrides: Partial<DashboardConfigResponse> = {}): 
         makeConfigEntry({ env: 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO', description: 'Runtime warning', value: '0.95', default: '0.95', source: 'default', source_detail: 'compiled default value' }),
         makeConfigEntry({ env: 'MASC_DASHBOARD_SIGNAL_STALE_SEC', description: 'Signal stale', value: '1200.0', default: '1200.0', source: 'default', source_detail: 'compiled default value' }),
       ],
-      alerting: [
-        makeConfigEntry({ env: 'MASC_ALERT_DEDUP_WINDOW_SEC', description: 'Alert dedup', value: '60.0', default: '60.0', source: 'default', source_detail: 'compiled default value' }),
-      ],
     },
     ...overrides,
   }
@@ -445,6 +443,12 @@ describe('SettingsSurface', () => {
     }
     localStorage.clear()
     tweaksDensity.value = 'spacious'
+    notifyRules.value = {
+      keeper_guardrail: true,
+      keeper_handoff: true,
+      'approval:pending': true,
+      'oas:agent_failed': true,
+    }
     window.location.hash = '#settings'
     route.value = { tab: 'settings', params: {}, postId: null }
   })
@@ -774,7 +778,7 @@ describe('SettingsSurface', () => {
     expect(container.textContent).not.toContain('미수집')
   })
 
-  it('notify page shows live thresholds without fake local routing controls', async () => {
+  it('notify page shows live thresholds plus a browser-local notification delivery writer', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
@@ -783,19 +787,41 @@ describe('SettingsSurface', () => {
       expect(container.textContent).toContain('MASC_DASHBOARD_CTX_PREPARING')
       expect(container.textContent).toContain('70%')
       expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live thresholds read-only')
-      expect(container.querySelector('[data-testid="notify-routing-readonly"]')?.textContent).toContain('no writer')
       expect(container.querySelector('[data-control-id="settings-notify-thresholds"]')?.getAttribute('data-control-kind'))
         .toBe('live-read')
       expect(container.querySelector('[data-control-id="settings-notify-routing"]')?.getAttribute('data-control-kind'))
-        .toBe('unsupported')
+        .toBe('browser-local')
     })
 
-    expect(container.querySelector('[data-testid="notify-local-summary"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-slider"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-stepper"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
-    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBeNull()
+    // jsdom/happy-dom has no Notification API, so the permission state is
+    // honestly 'unsupported' here — the granted/denied/request-button paths
+    // are covered with a mocked Notification in notifications.test.ts.
+    expect(container.querySelector('[data-testid="notify-permission-value"]')?.textContent).toBe('unsupported')
+    expect(container.querySelector('[data-testid="notify-permission-request"]')).toBeNull()
+
+    for (const kind of ['keeper_guardrail', 'keeper_handoff', 'approval:pending', 'oas:agent_failed']) {
+      expect(container.querySelector(`[data-testid="notify-rule-toggle-${kind}"]`)).not.toBeNull()
+    }
+  })
+
+  it('notify page per-event toggle writes to the browser-local rule store', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    const toggle = await waitFor(() => {
+      const el = container.querySelector('[data-testid="notify-rule-toggle-keeper_guardrail"]') as HTMLInputElement
+      expect(el).not.toBeNull()
+      return el
+    })
+    expect(toggle.checked).toBe(true)
+
+    await fireEvent.click(toggle)
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem('dashboard:notify:rules-v1') ?? '{}')
+      expect(stored.keeper_guardrail).toBe(false)
+    })
   })
 
   it('notify page surfaces config projection failures instead of rendering missing thresholds', async () => {
@@ -1639,7 +1665,7 @@ describe('settings read-surface helpers', () => {
 
     const notifyKinds = settingsControlInventory('notify').map(item => [item.id, item.kind])
     expect(notifyKinds).toContainEqual(['settings-notify-thresholds', 'live-read'])
-    expect(notifyKinds).toContainEqual(['settings-notify-routing', 'unsupported'])
+    expect(notifyKinds).toContainEqual(['settings-notify-routing', 'browser-local'])
   })
 
   it('settingsControlInventory records runtime routing writers as live-backed actions', () => {

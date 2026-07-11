@@ -498,6 +498,22 @@ function findKeeperRuntimeForAgent(
   return null
 }
 
+function fleetRosterKey(
+  agent: Pick<Agent, 'name' | 'keeper_id' | 'keeper_name'>,
+  lookup: Map<string, Keeper>,
+): string {
+  const keeper = findKeeperRuntimeForAgent(agent, lookup)
+  return keeper
+    ? fleetKeeperKey(keeper)
+    : `agent-name:${agent.name.trim()}`
+}
+
+function fleetKeeperIdEvidence(keeper: Keeper | null): string | null {
+  const keeperId = relationValue(keeper?.keeper_id)
+  const keeperName = relationValue(keeper?.name)
+  return keeperId && keeperId !== keeperName ? keeperId : null
+}
+
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
 type RosterAgent = Agent & { rosterSource?: 'agent_registry' | 'keeper_runtime' }
 
@@ -876,10 +892,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         // derivation so stale-blocker demotion in the typed SSOT
         // applies to the badge color too.
         const composite = compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
-        return [agent.name, runtimeBandMetaForAgent(agent, keeperRuntime, composite)] as const
+        return [
+          fleetRosterKey(agent, keeperRuntimeLookup),
+          runtimeBandMetaForAgent(agent, keeperRuntime, composite),
+        ] as const
       }),
     ),
-    [scopedAgents, keeperRuntimeLookup, runtimeKeeperList, compositeByKeeperKey],
+    [scopedAgents, keeperRuntimeLookup, compositeByKeeperKey],
   )
   const filtered = useMemo(() => scopedAgents.slice()
     .sort((a: Agent, b: Agent) => {
@@ -895,12 +914,16 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         paused: 3,
         offline: 4,
       }
-      const aOrder = order[bandByAgent.get(a.name)?.key ?? 'attention']
-      const bOrder = order[bandByAgent.get(b.name)?.key ?? 'attention']
+      const aOrder = order[
+        bandByAgent.get(fleetRosterKey(a, keeperRuntimeLookup))?.key ?? 'attention'
+      ]
+      const bOrder = order[
+        bandByAgent.get(fleetRosterKey(b, keeperRuntimeLookup))?.key ?? 'attention'
+      ]
       if (aOrder !== bOrder) return aOrder - bOrder
       return a.name.localeCompare(b.name)
     }),
-    [scopedAgents, bandByAgent],
+    [scopedAgents, bandByAgent, keeperRuntimeLookup],
   )
 
   const counts = countAgentsByStatus(scopedAgents, runtimeKeeperList, compositeByKeeperKey)
@@ -962,7 +985,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   const rosterRows = useMemo(() => filtered.map((agent: Agent) => {
     const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
-    const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
+    const rowKey = fleetRosterKey(agent, keeperRuntimeLookup)
+    const band = bandByAgent.get(rowKey) ?? runtimeBandMeta('attention')
     const compositeForMonitoring: KeeperCompositeSnapshot | null =
       compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime, compositeForMonitoring) : null
@@ -1019,7 +1043,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     }
 
     return {
-      key: agent.name,
+      key: rowKey,
       agent,
       keeperRuntime,
       band,
@@ -1078,6 +1102,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const selectedKoreanName = selectedRow?.keeperRuntime?.koreanName?.trim()
     || selectedRow?.agent.koreanName?.trim()
     || null
+  const selectedKeeperId = fleetKeeperIdEvidence(selectedRow?.keeperRuntime ?? null)
 
   // Render one fleet roster row (.fl-row), layered with the live classes /
   // test-ids the tests + CSS rely on (v2-monitoring-roster-row, data-tone,
@@ -1116,6 +1141,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const ctxPct = row.contextMeta?.pct ?? null
     const ctxHot = ctxPct != null && ctxPct >= FLEET_CTX_HOT_PCT
     const runtime = fleetRuntimeEvidence(row.keeperRuntime)
+    const keeperId = fleetKeeperIdEvidence(row.keeperRuntime)
 
     const handleRowKey = (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -1130,8 +1156,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         tabIndex=${0}
         key=${row.key}
         data-testid="keeper-operations-row"
+        data-roster-key=${row.key}
         data-tone=${tone}
-        aria-label=${`${row.displayName} 선택`}
+        aria-label=${row.isKeeper
+          ? `${row.displayName} keeper 선택`
+          : `${row.displayName} agent 선택`}
         aria-pressed=${selected}
         onClick=${() => setSelectedKey(row.key)}
         onKeyDown=${handleRowKey}
@@ -1158,7 +1187,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             </div>
             ${row.keeperRuntime?.sandbox_profile === 'local'
               ? html`<div class="fl-ns"><span class="fl-sandbox" title="git worktree 격리 · localhost-trust (OS sandbox 없음)">⬡</span> worktree 격리</div>`
-              : null}
+              : keeperId ? html`<div class="fl-ns">keeper-id · ${keeperId}</div>` : null}
           </div>
         </div>
 
@@ -1318,9 +1347,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               </span>
               <div class="min-w-0">
                 <h3 class="fl-as-name m-0 truncate">${selectedRow.displayName}</h3>
-                ${selectedKoreanName ? html`
+                ${selectedKoreanName || selectedKeeperId ? html`
                   <div class="fl-as-kr">
-                    ${selectedKoreanName}
+                    ${selectedKoreanName ?? ''}
+                    ${selectedKoreanName && selectedKeeperId ? ' · ' : ''}
+                    ${selectedKeeperId ? html`<span class="font-mono">keeper-id · ${selectedKeeperId}</span>` : null}
                   </div>
                 ` : null}
                 <div class="mt-1.5 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">

@@ -896,6 +896,41 @@ describe('AgentRoster live-only cards', () => {
     expect(container.querySelector('.fl-as-name')?.textContent).toBe('taskmaster-proud-bear')
   })
 
+  it('keeps equal display names selectable across agent and keeper namespaces', async () => {
+    agents.value = [makeAgent({ name: 'shared-name', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'shared-name',
+        keeper_id: 'keeper-uuid-shared',
+        agent_name: 'keeper-shared-name-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const rows = container.querySelectorAll('[data-testid="keeper-operations-row"]')
+    expect(rows).toHaveLength(2)
+    expect((rows[0] as HTMLElement).dataset.rosterKey).toBe('agent-name:shared-name')
+    expect((rows[1] as HTMLElement).dataset.rosterKey).toBe('keeper-id:keeper-uuid-shared')
+    expect(rows[0]?.getAttribute('aria-label')).toBe('shared-name agent 선택')
+    expect(rows[1]?.getAttribute('aria-label')).toBe('shared-name keeper 선택')
+
+    await act(async () => {
+      ;(rows[1] as HTMLElement).click()
+    })
+
+    expect((rows[0] as HTMLElement).getAttribute('aria-pressed')).toBe('false')
+    expect((rows[1] as HTMLElement).getAttribute('aria-pressed')).toBe('true')
+    expect((container.querySelector('.fl-open-chat') as HTMLElement).dataset.detailKind).toBe('keeper')
+  })
+
   it('renders the runtime column in the fleet list row (previously only visible in the aside)', async () => {
     agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active' })]
     keepers.value = [
@@ -1656,7 +1691,7 @@ describe('AgentRoster live-only cards', () => {
     expect((row.querySelector('.fl-ns') as HTMLElement).textContent).not.toContain('sangsu-uuid-77')
   })
 
-  it('does not reintroduce keeper-id or agent alias subtitles without a sandbox badge', async () => {
+  it('keeps a distinct projected keeper id without inferring an agent alias', async () => {
     agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
     keepers.value = [
       {
@@ -1678,9 +1713,9 @@ describe('AgentRoster live-only cards', () => {
 
     const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
     expect(row.querySelector('.fl-sandbox')).toBeNull()
-    expect(row.querySelector('.fl-ns')).toBeNull()
-    expect(row.textContent).not.toContain('sangsu-uuid-77')
-    expect(container.querySelector('.fl-as-id')?.textContent).not.toContain('sangsu-uuid-77')
+    expect(row.querySelector('.fl-ns')?.textContent).toContain('keeper-id · sangsu-uuid-77')
+    expect(container.querySelector('.fl-as-kr')?.textContent).toContain('keeper-id · sangsu-uuid-77')
+    expect(row.textContent).not.toContain('keeper-sangsu-agent')
   })
 
   it('keeps runtime provenance and actions in the 800px and 1024px layout', () => {

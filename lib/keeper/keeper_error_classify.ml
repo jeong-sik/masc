@@ -160,6 +160,7 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (ServerError _)
   | Agent_sdk.Error.Api (RateLimited _)
   | Agent_sdk.Error.Api (AuthError _)
+  | Agent_sdk.Error.Api (AuthorizationError _)
   | Agent_sdk.Error.Api (PaymentRequired _)
   | Agent_sdk.Error.Api (InvalidRequest _)
   | Agent_sdk.Error.Api (NotFound _)
@@ -216,8 +217,8 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
 let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest _ | NetworkError _ | Timeout _
-    | Overloaded _ | ServerError _ | RateLimited _ | AuthError _ | NotFound _
-    | PaymentRequired _ | ContextOverflow _) ->
+    | Overloaded _ | ServerError _ | RateLimited _ | AuthError _
+    | AuthorizationError _ | NotFound _ | PaymentRequired _ | ContextOverflow _) ->
       false
   | Agent_sdk.Error.Provider _ -> false
   | Agent_sdk.Error.Agent _ -> false
@@ -883,6 +884,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (Overloaded _)
   | Agent_sdk.Error.Api (ServerError _)
   | Agent_sdk.Error.Api (AuthError _)
+  | Agent_sdk.Error.Api (AuthorizationError _)
   | Agent_sdk.Error.Api (PaymentRequired _)
   | Agent_sdk.Error.Api (InvalidRequest _)
   | Agent_sdk.Error.Api (NotFound _)

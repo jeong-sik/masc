@@ -44,9 +44,8 @@ let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
 let publish_phase_lifecycle = Keeper_supervisor_publish_lifecycle.publish_phase_lifecycle
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
-let global_switch : Eio.Switch.t option Atomic.t = Atomic.make None
-let set_global_switch sw = Atomic.set global_switch (Some sw)
-let get_global_switch () = Atomic.get global_switch
+let set_global_switch = Keeper_process_switch.set
+let get_global_switch = Keeper_process_switch.get
 
 let set_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.set
 let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enabled
@@ -107,12 +106,9 @@ let launch_supervised_fiber_body
           "keeper supervise domain pool ignored: keepalive body requires the owning \
            Eio domain (first_keeper=%s)"
           meta.name;
-      (* determinism-contract: allow — ctx.sw fallback is the same deterministic
-         default used before the ref -> Atomic conversion. *)
-      let sw = Option.value (Atomic.get global_switch) ~default:ctx.sw in
       match
         Keeper_lane.fork
-          ~sw
+          ~sw:ctx.sw
           reg.lane
           ~run:body
           ~cleanup:(fun _ -> Ok ())
@@ -674,14 +670,10 @@ let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ contex
     ctx
 ;;
 
-(* Dead-tombstone cleanup extracted to
-   [Keeper_supervisor_cleanup_tombstone] (godfile decomp). publish_lifecycle is
-   injected explicitly to avoid sibling -> parent cycle. *)
+(* Dead-tombstone cleanup submits a durable exact-lane finalization operation;
+   completion events/hooks are delivered from its durable receipt. *)
 let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_entry) =
-  Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone
-    ~publish_lifecycle
-    ctx
-    entry
+  Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone ctx entry
 ;;
 
 (** Cohort key from structured failure_reason ADT.

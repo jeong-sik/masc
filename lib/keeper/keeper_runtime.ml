@@ -959,8 +959,11 @@ let start_supervisor_sweep ctx =
     in
     with_sweeps_rw (fun () ->
       Hashtbl.replace supervisor_sweeps base_path p);
-    let sw = Option.value (Keeper_supervisor.get_global_switch ()) ~default:ctx.sw in
-    Pulse.run ~sw p;
+    (* The sweep is owned by the context that constructed it. Detached
+       lifecycle workers use [Keeper_process_switch]; this context-bound
+       producer must not silently substitute one switch authority for the
+       other. *)
+    Pulse.run ~sw:ctx.sw p;
     (* #10125: counter increments once per actual Pulse start.
        After a server restart, if this stays at 0 the supervisor
        never came up — operators alert on absence of advancement. *)

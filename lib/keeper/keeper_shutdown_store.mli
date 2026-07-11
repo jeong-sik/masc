@@ -9,6 +9,7 @@ type error =
   | Not_found of string
   | Io_error of string
   | Decode_error of string
+  | Invalid_operation of Keeper_shutdown_types.invariant_error
   | Identity_mismatch of string
   | Revision_conflict of
       { expected : int

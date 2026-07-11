@@ -5,6 +5,7 @@ type error =
   | Not_found of string
   | Io_error of string
   | Decode_error of string
+  | Invalid_operation of Keeper_shutdown_types.invariant_error
   | Identity_mismatch of string
   | Revision_conflict of
       { expected : int
@@ -31,6 +32,10 @@ let error_to_string = function
   | Not_found path -> Printf.sprintf "shutdown operation not found: %s" path
   | Io_error detail -> Printf.sprintf "shutdown operation I/O failed: %s" detail
   | Decode_error detail -> Printf.sprintf "shutdown operation decode failed: %s" detail
+  | Invalid_operation error ->
+    Printf.sprintf
+      "shutdown operation invariant failed: %s"
+      (Keeper_shutdown_types.invariant_error_to_string error)
   | Identity_mismatch detail ->
     Printf.sprintf "shutdown operation identity mismatch: %s" detail
   | Revision_conflict { expected; actual } ->
@@ -210,12 +215,27 @@ let cleanup_evidence_to_json evidence =
     ]
 ;;
 
+let completion_receipt_to_json = function
+  | Completion_not_requested -> `Assoc [ "kind", `String "not_requested" ]
+  | Completion_pending action ->
+    `Assoc
+      [ "kind", `String "pending"
+      ; "action", `String (completion_action_to_string action)
+      ]
+  | Completion_delivered action ->
+    `Assoc
+      [ "kind", `String "delivered"
+      ; "action", `String (completion_action_to_string action)
+      ]
+;;
+
 let finalization_evidence_to_json evidence =
   `Assoc
     [ "cleanup", cleanup_evidence_to_json evidence.cleanup
     ; "meta_removed", `Bool evidence.meta_removed
     ; "session_removed", `Bool evidence.session_removed
     ; "registry_unregistered", `Bool evidence.registry_unregistered
+    ; "completion", completion_receipt_to_json evidence.completion
     ]
 ;;
 
@@ -296,7 +316,10 @@ let to_json operation =
     ; "actor", `String operation.actor
     ; ( "cleanup_intent"
       , `Assoc
-          [ "remove_meta", `Bool operation.cleanup_intent.remove_meta
+          [ ( "meta_disposition"
+            , `String
+                (meta_disposition_to_string
+                   operation.cleanup_intent.meta_disposition) )
           ; "remove_session", `Bool operation.cleanup_intent.remove_session
           ] )
     ; "turn_disposition", turn_disposition_to_json operation.turn_disposition
@@ -372,6 +395,11 @@ let optional_string field json =
 
 let ( let* ) result f = Result.bind result f
 
+let validate_operation operation =
+  Keeper_shutdown_types.validate operation
+  |> Result.map_error (fun error -> Invalid_operation error)
+;;
+
 let active_turn_of_json json =
   let* lane =
     match assoc "lane" json with
@@ -434,13 +462,39 @@ let cleanup_evidence_of_json json =
   Ok { settled_task_ids; pending_confirms_removed }
 ;;
 
+let completion_receipt_of_json json =
+  let* kind = string "kind" json in
+  match kind with
+  | "not_requested" -> Ok Completion_not_requested
+  | "pending" ->
+    let* action_wire = string "action" json in
+    let* action =
+      completion_action_of_string action_wire
+      |> Result.map_error (fun detail -> Decode_error detail)
+    in
+    Ok (Completion_pending action)
+  | "delivered" ->
+    let* action_wire = string "action" json in
+    let* action =
+      completion_action_of_string action_wire
+      |> Result.map_error (fun detail -> Decode_error detail)
+    in
+    Ok (Completion_delivered action)
+  | value ->
+    Error
+      (Decode_error
+         (Printf.sprintf "unknown shutdown completion receipt: %S" value))
+;;
+
 let finalization_evidence_of_json json =
   let* cleanup_json = assoc "cleanup" json in
   let* cleanup = cleanup_evidence_of_json cleanup_json in
   let* meta_removed = bool "meta_removed" json in
   let* session_removed = bool "session_removed" json in
   let* registry_unregistered = bool "registry_unregistered" json in
-  Ok { cleanup; meta_removed; session_removed; registry_unregistered }
+  let* completion_json = assoc "completion" json in
+  let* completion = completion_receipt_of_json completion_json in
+  Ok { cleanup; meta_removed; session_removed; registry_unregistered; completion }
 ;;
 
 let phase_of_json json =
@@ -540,7 +594,11 @@ let of_json json =
     let* generation = int "generation" json in
     let* actor = string "actor" json in
     let* cleanup_json = assoc "cleanup_intent" json in
-    let* remove_meta = bool "remove_meta" cleanup_json in
+    let* meta_disposition_wire = string "meta_disposition" cleanup_json in
+    let* meta_disposition =
+      meta_disposition_of_string meta_disposition_wire
+      |> Result.map_error (fun detail -> Decode_error detail)
+    in
     let* remove_session = bool "remove_session" cleanup_json in
     let* turn_json = assoc "turn_disposition" json in
     let* turn_disposition = turn_disposition_of_json turn_json in
@@ -551,7 +609,7 @@ let of_json json =
     let* phase = phase_of_json phase_json in
     let* created_at = string "created_at" json in
     let* updated_at = string "updated_at" json in
-    Ok
+    let operation =
       { schema_version = decoded_schema_version
       ; revision
       ; operation_id
@@ -560,7 +618,7 @@ let of_json json =
       ; trace_id
       ; generation
       ; actor
-      ; cleanup_intent = { remove_meta; remove_session }
+      ; cleanup_intent = { meta_disposition; remove_session }
       ; turn_disposition
       ; expected_backlog_version
       ; owned_task_ids
@@ -569,6 +627,9 @@ let of_json json =
       ; created_at
       ; updated_at
       }
+    in
+    let* () = validate_operation operation in
+    Ok operation
 ;;
 
 let contextualize_error operation_path = function
@@ -576,7 +637,8 @@ let contextualize_error operation_path = function
   | Io_error detail -> Io_error (Printf.sprintf "%s: %s" operation_path detail)
   | Identity_mismatch detail ->
     Identity_mismatch (Printf.sprintf "%s: %s" operation_path detail)
-  | (Already_exists _ | Not_found _ | Revision_conflict _) as error -> error
+  | (Already_exists _ | Not_found _ | Invalid_operation _ | Revision_conflict _) as error ->
+    error
 ;;
 
 let load_path_unlocked ~operation_path ~keeper_name ~operation_id =
@@ -616,6 +678,7 @@ let load_path_unlocked ~operation_path ~keeper_name ~operation_id =
 ;;
 
 let persist_new ~config operation =
+  let* () = validate_operation operation in
   let* operation_path = path_for_operation ~config operation in
   with_keeper_inventory_lock
     ~access:Write
@@ -630,18 +693,8 @@ let persist_new ~config operation =
            |> Result.map_error (fun detail -> Io_error detail)))
 ;;
 
-let same_identity
-    (left : Keeper_shutdown_types.t)
-    (right : Keeper_shutdown_types.t)
-  =
-  Operation_id.equal left.operation_id right.operation_id
-  && String.equal left.keeper_name right.keeper_name
-  && Keeper_lane.Id.equal left.lane_id right.lane_id
-  && Keeper_id.Trace_id.equal left.trace_id right.trace_id
-  && Int.equal left.generation right.generation
-;;
-
 let replace ~config ~expected_revision operation =
+  let* () = validate_operation operation in
   let* operation_path = path_for_operation ~config operation in
   with_keeper_inventory_lock
     ~access:Write
@@ -666,7 +719,7 @@ let replace ~config ~expected_revision operation =
                 { expected = expected_revision + 1
                 ; actual = operation.revision
                 })
-         | Ok existing when same_identity existing operation ->
+         | Ok existing when Keeper_shutdown_types.immutable_fields_equal existing operation ->
            Keeper_fs.save_json_atomic operation_path (to_json operation)
            |> Result.map_error (fun detail -> Io_error detail)
          | Ok _ ->
@@ -676,6 +729,7 @@ let replace ~config ~expected_revision operation =
 ;;
 
 let persist_blocked_latest ~config ~identity ~failure ~updated_at =
+  let* () = validate_operation identity in
   let* operation_path = path_for_operation ~config identity in
   with_keeper_inventory_lock
     ~access:Write
@@ -690,7 +744,9 @@ let persist_blocked_latest ~config ~identity ~failure ~updated_at =
              ~operation_id:identity.operation_id
          with
          | Error _ as error -> error
-         | Ok existing when not (same_identity existing identity) ->
+         | Ok existing
+           when not
+                  (Keeper_shutdown_types.immutable_fields_equal existing identity) ->
            Error (Identity_mismatch (Operation_id.to_string identity.operation_id))
          | Ok existing ->
            (match existing.phase with

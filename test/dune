@@ -96,6 +96,7 @@
   test_with_cleanups_on_release
   test_auth_login
   test_dashboard_dev_token_host_gate
+  test_server_request_authority
   test_audit_log
   test_console_sink
   test_governance_anomaly

@@ -11,7 +11,6 @@ val add_routes :
   ?sw:Eio.Switch.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   port:int ->
-  host:string ->
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
 val websocket_upgrade_unavailable_reason : unit -> string option
@@ -20,7 +19,10 @@ val websocket_upgrade_unavailable_reason : unit -> string option
     regression test; production requests still go through {!add_routes}. *)
 
 val websocket_upgrade_authorized :
-  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+  base_path:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  (unit, Masc_domain.masc_error) result
 (** Token-or-same-origin admission gate for [/ws] upgrades, mirroring the
     [/mcp] POST chain: [verify_mcp_auth] first, falling back to
     [ensure_same_origin_browser_request].  [base_path] locates the auth
@@ -29,12 +31,17 @@ val websocket_upgrade_authorized :
     still go through {!add_routes}. *)
 
 val canonical_loopback_location :
-  default_port:int -> Httpun.Request.t -> string option
-(** [Some redirect_url] when the request's [Host] header advertises a
-    non-canonical loopback host that should redirect, [None] when the
-    current host already matches canonical advertisement. *)
+  default_port:int ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  string option
+(** [Some redirect_url] when the admitted authority advertises a non-canonical
+    loopback host that should redirect, [None] when it already matches the
+    canonical advertisement. *)
 
 val canonical_root_dashboard_location :
-  default_port:int -> Httpun.Request.t -> string option
+  default_port:int ->
+  request_authority:Server_request_authority.authority ->
+  string option
 (** Like {!canonical_loopback_location} but rewrites the path to
     [/dashboard] for root-route redirects. *)

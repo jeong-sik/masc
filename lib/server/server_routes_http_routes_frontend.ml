@@ -22,24 +22,23 @@ let respond_redirect ~location reqd =
   in
   Httpun.Reqd.respond_with_string reqd response ""
 
-let canonical_loopback_location ~default_port request =
-  let (host, port) =
-    parse_host_port
-      (Httpun.Headers.get request.Httpun.Request.headers "host")
-      (Env_config_core.masc_host ()) default_port
-  in
+let authority_host_port ~default_port request_authority =
+  ( Server_request_authority.host request_authority
+  , Option.value
+      ~default:default_port
+      (Server_request_authority.port request_authority) )
+;;
+
+let canonical_loopback_location ~default_port ~request_authority request =
+  let host, port = authority_host_port ~default_port request_authority in
   let canonical_host = Transport_read_model.normalize_advertised_host host in
   if String.equal canonical_host host then
     None
   else
     Some (Printf.sprintf "http://%s:%d%s" canonical_host port request.target)
 
-let canonical_root_dashboard_location ~default_port request =
-  let (host, port) =
-    parse_host_port
-      (Httpun.Headers.get request.Httpun.Request.headers "host")
-      (Env_config_core.masc_host ()) default_port
-  in
+let canonical_root_dashboard_location ~default_port ~request_authority =
+  let host, port = authority_host_port ~default_port request_authority in
   let canonical_host = Transport_read_model.normalize_advertised_host host in
   if String.equal canonical_host host then
     None
@@ -47,7 +46,10 @@ let canonical_root_dashboard_location ~default_port request =
     Some (Printf.sprintf "http://%s:%d/dashboard" canonical_host port)
 
 let with_canonical_loopback_host ~port handler request reqd =
-  match canonical_loopback_location ~default_port:port request with
+  let request_authority = Server_request_authority.current_exn () in
+  match
+    canonical_loopback_location ~default_port:port ~request_authority request
+  with
   | Some location -> respond_redirect ~location reqd
   | None -> handler request reqd
 
@@ -55,7 +57,10 @@ let redirect_to_dashboard reqd =
   respond_redirect ~location:"/dashboard" reqd
 
 let websocket_discovery_handler request reqd =
-  Http.Response.json_value (websocket_discovery_json request) reqd
+  let request_authority = Server_request_authority.current_exn () in
+  Http.Response.json_value
+    (websocket_discovery_json ~request_authority request)
+    reqd
 
 let header_contains_token request name token =
   match Httpun.Headers.get request.Httpun.Request.headers name with
@@ -93,11 +98,11 @@ let websocket_auth_error message =
     (Masc_domain.Auth_error.Unauthorized
        { reason = Masc_domain.Auth_error.Generic; message })
 
-let websocket_upgrade_authorized ~base_path request =
+let websocket_upgrade_authorized ~base_path ~request_authority request =
   match verify_mcp_auth ~base_path request with
   | Ok _ -> Ok ()
   | Error token_error ->
-    (match ensure_same_origin_browser_request request with
+    (match ensure_same_origin_browser_request ~request_authority request with
      | Ok () -> Ok ()
      | Error origin_error ->
        let message =
@@ -117,7 +122,10 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
         | Some state -> (Mcp_server.workspace_config state).base_path
         | None -> Server_mcp_transport_http.default_base_path ()
       in
-      (match websocket_upgrade_authorized ~base_path request with
+      let request_authority = Server_request_authority.current_exn () in
+      (match
+         websocket_upgrade_authorized ~base_path ~request_authority request
+       with
        | Error err -> respond_auth_error request reqd err
        | Ok () ->
          (match
@@ -152,18 +160,24 @@ let webrtc_signaling_handler signaling_fn request reqd =
                 reqd))
     request reqd
 
-let add_routes ?sw ?clock ~port ~host router =
+let add_routes ?sw ?clock ~port router =
   router
   |> Http.Router.get "/health" health_handler
   |> Http.Router.get Server_health_paths.liveness liveness_handler
   |> Http.Router.get Server_health_paths.readiness readiness_handler
   |> Http.Router.get "/.well-known/agent.json" (fun request reqd ->
          with_public_read (fun _state req reqd ->
-         Http.Response.json_value (Runtime.agent_card_json req) reqd)
+         let request_authority = Server_request_authority.current_exn () in
+         Http.Response.json_value
+           (Runtime.agent_card_json ~request_authority req)
+           reqd)
          request reqd)
   |> Http.Router.get "/.well-known/agent-card.json" (fun request reqd ->
          with_public_read (fun _state req reqd ->
-         Http.Response.json_value (Runtime.agent_card_json req) reqd)
+         let request_authority = Server_request_authority.current_exn () in
+         Http.Response.json_value
+           (Runtime.agent_card_json ~request_authority req)
+           reqd)
          request reqd)
   |> Http.Router.ws_get "/ws" (websocket_handler ?sw ?clock)
   (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics now
@@ -258,10 +272,9 @@ let add_routes ?sw ?clock ~port ~host router =
            request reqd)
   |> Http.Router.get "/api/v1/openapi.json" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let host_header = Httpun.Headers.get req.Httpun.Request.headers "host" in
-         let (resolved_host, resolved_port) = match host_header with
-           | Some header -> parse_host_port (Some header) host port
-           | None -> ("", 0)
+         let request_authority = Server_request_authority.current_exn () in
+         let resolved_host, resolved_port =
+           authority_host_port ~default_port:port request_authority
          in
          let json =
            Transport.Rest.generate_openapi_document
@@ -278,7 +291,10 @@ let add_routes ?sw ?clock ~port ~host router =
          Http.Response.json_value ~status json reqd
        ) request reqd)
   |> Http.Router.get "/" (fun request reqd ->
-       match canonical_root_dashboard_location ~default_port:port request with
+       let request_authority = Server_request_authority.current_exn () in
+       match
+         canonical_root_dashboard_location ~default_port:port ~request_authority
+       with
        | Some location -> respond_redirect ~location reqd
        | None -> redirect_to_dashboard reqd)
   |> Http.Router.get "/static/css/middleware.css"

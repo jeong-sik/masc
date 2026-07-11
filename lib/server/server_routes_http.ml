@@ -6,7 +6,7 @@ include Server_routes_http_keeper_stream
 
 module Http = Http_server_eio
 
-let make_routes ~port ~host ~sw ~clock =
+let make_routes ~port ~host:_ ~sw ~clock =
   (* Register connectors before routes are wired up *)
   Channel_gate_connector.register (module Channel_gate_discord_state);
   Channel_gate_connector.register (module Channel_gate_imessage_state);
@@ -19,7 +19,7 @@ let make_routes ~port ~host ~sw ~clock =
   Server_routes_http_routes_multimodal.bind_workspace_getter
     Multimodal.Workspace_holder.get;
   Http.Router.create ()
-  |> Server_routes_http_routes_frontend.add_routes ~port ~host ~sw ~clock
+  |> Server_routes_http_routes_frontend.add_routes ~port ~sw ~clock
   |> Server_routes_http_routes_workspace.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_provider_runs.add_routes ~sw

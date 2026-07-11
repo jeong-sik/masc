@@ -163,7 +163,18 @@ let with_test_env f =
         ~clock:(Eio.Stdenv.clock env)
         ~mono_clock:(Eio.Stdenv.mono_clock env)
         ~sw
-        (fun () -> f ~env ~sw ~config))
+        (fun () ->
+          let request_authority =
+            match
+              Server_request_authority.of_host_port
+                ~host:"localhost"
+                ~port:8935
+            with
+            | Ok authority -> authority
+            | Error `Malformed -> fail "test authority must be valid"
+          in
+          Server_request_authority.with_current request_authority (fun () ->
+            f ~env ~sw ~config)))
 
 let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -802,15 +813,26 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
+  let request =
+    request_with_headers "/api/v1/dashboard/shell"
+      [
+        ("origin", "http://localhost:5173");
+        ("host", "localhost:5173");
+      ]
+  in
+  let request_authority =
+    match Server_request_authority.classify_http1_request request with
+    | Server_request_authority.Single authority -> authority
+    | ( Server_request_authority.Missing
+      | Server_request_authority.Multiple
+      | Server_request_authority.Malformed ) ->
+      fail "expected valid authority"
+  in
   let json =
-    Server_dashboard_http_core.dashboard_shell_http_json
-      ~request:
-        (request_with_headers "/api/v1/dashboard/shell"
-           [
-             ("origin", "http://localhost:5173");
-             ("host", "localhost:5173");
-           ])
-      config
+    Server_request_authority.with_current request_authority (fun () ->
+      Server_dashboard_http_core.dashboard_shell_http_json
+        ~request
+        config)
   in
   let open Yojson.Safe.Util in
   let auth = json |> member "auth" in

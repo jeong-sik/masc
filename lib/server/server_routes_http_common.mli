@@ -128,8 +128,15 @@ val state_net_opt :
 
 (** {1 Origin / Accept negotiation} *)
 
-val allowed_origins : string list
-val validate_origin : Httpun.Request.t -> bool
+val is_mcp_transport_request : Httpun.Request.t -> bool
+(** [true] only for requests entering the MCP HTTP/SSE surface. *)
+
+val validate_origin :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t -> bool
+(** Validate a browser Origin against the authority admitted at request entry.
+    Requests without Origin are native clients and remain valid. *)
+
 val accepts_sse : Httpun.Request.t -> bool
 val accepts_streamable_mcp : Httpun.Request.t -> bool
 val request_force_json_response : Httpun.Request.t -> bool
@@ -187,11 +194,6 @@ val handle_presence_events :
 
 val mcp_transport_http_deps :
   unit -> Server_mcp_transport_http.deps
-val host_header_has_forbidden_authority_chars :
-  string -> bool
-val parse_host_port :
-  string option -> string -> int -> string * int
-
 (** [respond_cached_read ~request ~reqd ~cache_key ~ttl compute] wraps a
     dashboard read [compute] in the SWR cache and the shared Executor_pool,
     then writes the JSON response. Collapses parallel read bursts to one

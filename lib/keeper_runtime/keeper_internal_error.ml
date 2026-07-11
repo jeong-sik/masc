@@ -19,6 +19,11 @@
    key the dashboard still parses). *)
 let runtime_id_to_string (s : string) = s
 
+(* Canonical wire kind for the typed [Capacity_backpressure] envelope.  The
+   producer codec, receipt terminal projection, and consumer decoder share
+   this value so recoverability cannot drift through duplicated literals. *)
+let capacity_backpressure_kind = "capacity_backpressure"
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -488,7 +493,7 @@ let masc_internal_error_to_json = function
     in
     `Assoc
       ([
-         ("kind", `String "capacity_backpressure");
+         ("kind", `String capacity_backpressure_kind);
          ("runtime_id", `String runtime_id);
          ("source", `String (capacity_backpressure_source_to_string source));
          ("detail", `String detail);
@@ -823,7 +828,7 @@ let summary_of_masc_internal_error = function
 
 let kind_of_masc_internal_error = function
   | Runtime_exhausted _ -> "runtime_exhausted"
-  | Capacity_backpressure _ -> "capacity_backpressure"
+  | Capacity_backpressure _ -> capacity_backpressure_kind
   | Resumable_cli_session _ -> "resumable_cli_session"
   | Accept_rejected _ -> "accept_rejected"
   | Admission_queue_timeout _ -> "admission_queue_timeout"
@@ -978,7 +983,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                Some (Runtime_exhausted { runtime_id; reason })
              | None -> None)
           | None -> None)
-      | Some (`String "capacity_backpressure") -> (
+      | Some (`String kind) when String.equal kind capacity_backpressure_kind -> (
           match
             string_opt_of_assoc "runtime_id" json,
             string_opt_of_assoc "source" json,

@@ -50,6 +50,7 @@ let is_auto_recoverable_turn_budget_terminal terminal_reason =
 
 type t =
   | Runtime_exhausted of string
+  | Capacity_backpressure of string
   | Config_or_auth of string
   | Provider_runtime_failure of string
   | Completion_contract_violation of string
@@ -66,7 +67,9 @@ let contains_config_or_auth lowered =
 ;;
 
 (* Priority-ranked partition. The bucket order replicates the [if/else]
-   order of the pre-typing [operator_disposition] string predicates;
+   order of the pre-typing [operator_disposition] string predicates, with the
+   exact canonical [Capacity_backpressure] policy bucket inserted before the
+   opaque internal-error fall-through;
    [of_wire] returns the FIRST matching bucket. The original
    (case-preserving) [wire] is carried in payload-bearing variants so
    [to_wire] reproduces it byte-for-byte; classification is done on a
@@ -76,6 +79,8 @@ let of_wire wire =
   let lowered = String.lowercase_ascii wire in
   if String.equal lowered "runtime_exhausted"
   then Runtime_exhausted wire
+  else if String.equal lowered Keeper_internal_error.capacity_backpressure_kind
+  then Capacity_backpressure wire
   else if contains_config_or_auth lowered
   then Config_or_auth wire
   else if
@@ -104,6 +109,7 @@ let of_wire wire =
    round-trip fidelity; [operator_disposition] ignores it. *)
 let to_wire = function
   | Runtime_exhausted wire -> wire
+  | Capacity_backpressure wire -> wire
   | Config_or_auth wire -> wire
   | Provider_runtime_failure wire -> wire
   | Completion_contract_violation wire -> wire
@@ -139,6 +145,7 @@ let is_transient_provider_runtime_failure = function
     || String.equal lowered "provider_error_network:timeout"
     || String.starts_with ~prefix:"provider_error_network:timeout:" lowered
   | Runtime_exhausted _
+  | Capacity_backpressure _
   | Config_or_auth _
   | Completion_contract_violation _
   | Turn_livelock _

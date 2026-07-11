@@ -6,8 +6,16 @@ let poll_interval_sec =
       try float_of_string s with Failure _ -> 1.0)
   | None -> 1.0
 
+type turn_outcome =
+  | Delivered of { outcome_ref : string option }
+  | Failed of
+      { kind : Keeper_chat_queue.failure_kind
+      ; detail : string
+      ; outcome_ref : string option
+      }
+
 type lease_finalization =
-  | Ack
+  | Finalize of Keeper_chat_queue.finalization
   | Nack
 
 type dispatch_state = {
@@ -46,11 +54,11 @@ let pending_finalization state keeper_name =
   with_dispatch_state state (fun () ->
       Hashtbl.find_opt state.pending_finalizations keeper_name)
 
-let clear_pending_finalization state ~keeper_name ~lease_id ~action =
+let clear_pending_finalization state ~keeper_name ~lease_id =
   with_dispatch_state state (fun () ->
       match Hashtbl.find_opt state.pending_finalizations keeper_name with
-      | Some (pending_lease_id, pending_action)
-        when String.equal pending_lease_id lease_id && pending_action = action ->
+      | Some (pending_lease_id, _)
+        when String.equal pending_lease_id lease_id ->
         Hashtbl.remove state.pending_finalizations keeper_name
       | Some _ | None -> ())
 
@@ -67,79 +75,77 @@ module For_testing = struct
   let clear_dispatching = clear_dispatching
 end
 
-(* Single broadcast site for every queue-depth-affecting mutation this module
-   performs (lease/ack/nack — [enqueue]'s callers broadcast their own, since
-   they already have the post-enqueue length in hand). Keeping it here rather
-   than scattered across each [`Leased]/[`Acked]/[`Requeued] call site avoids
-   an N-of-M gap where a future new call site forgets to broadcast. *)
-let broadcast_queue_changed ~keeper_name =
-  Keeper_chat_broadcast.queue_changed ~keeper_name
-    ~depth:(Keeper_chat_queue.length ~keeper_name)
-    ()
-
-(* A finalization persist failure is recoverable: the queue deliberately rolls
-   the lease mutation back, so the same lease remains outstanding in memory.
-   Keep the typed decision and retry it from the next poll; otherwise the
-   consumer would observe [Already_leased] forever and permanently wedge this
-   Keeper lane. The decision is not persisted separately because a process
-   restart requeues the outstanding lease, after which the pending decision is
-   intentionally discarded. *)
+(* A finalization persist failure is recoverable: queue-core keeps the lease
+   unchanged. Retain the exact typed decision and retry it before dispatching
+   another turn for this Keeper. *)
 let settle_lease state ~keeper_name ~lease_id action =
   let result =
     match action with
-    | Ack ->
-      (match Keeper_chat_queue.ack ~keeper_name ~lease_id with
-       | `Acked ->
-         clear_pending_finalization state ~keeper_name ~lease_id ~action;
-         broadcast_queue_changed ~keeper_name;
+    | Finalize outcome ->
+      (match Keeper_chat_queue.finalize ~keeper_name ~lease_id ~outcome with
+       | `Finalized _ ->
+         clear_pending_finalization state ~keeper_name ~lease_id;
          `Settled
        | `Unknown_lease ->
-         clear_pending_finalization state ~keeper_name ~lease_id ~action;
+         clear_pending_finalization state ~keeper_name ~lease_id;
          Log.Keeper.warn
-           "keeper_chat_consumer: ack found no matching lease=%s for keeper=%s \
-            (already acked/nacked?)"
+           "keeper_chat_consumer: finalize found no matching lease=%s for \
+            keeper=%s (already finalized/nacked?)"
            lease_id
            keeper_name;
          `Settled
-       | `Persist_failed msg ->
+       | `Error error ->
          remember_pending_finalization state ~keeper_name ~lease_id ~action;
          Log.Keeper.error
-           "keeper_chat_consumer: ack persist failed for keeper=%s lease=%s: %s; \
-            finalization will retry"
+           "keeper_chat_consumer: finalize persist failed for keeper=%s \
+            lease=%s: %s; finalization will retry"
            keeper_name
            lease_id
-           msg;
+           (match error with
+            | Keeper_chat_queue.Persistence_not_configured ->
+                "persistence_not_configured"
+            | Keeper_chat_queue.Revision_exhausted ->
+                "revision_exhausted"
+            | Keeper_chat_queue.Persist_failed message -> message
+            | Keeper_chat_queue.Snapshot_unavailable load_error ->
+                load_error.message);
          `Pending)
     | Nack ->
       (match Keeper_chat_queue.nack ~keeper_name ~lease_id with
-       | `Requeued ->
-         clear_pending_finalization state ~keeper_name ~lease_id ~action;
-         broadcast_queue_changed ~keeper_name;
+       | `Requeued _ ->
+         clear_pending_finalization state ~keeper_name ~lease_id;
          `Settled
        | `Unknown_lease ->
-         clear_pending_finalization state ~keeper_name ~lease_id ~action;
+         clear_pending_finalization state ~keeper_name ~lease_id;
          Log.Keeper.warn
            "keeper_chat_consumer: nack found no matching lease=%s for keeper=%s \
             (already acked/nacked?)"
            lease_id
            keeper_name;
          `Settled
-       | `Persist_failed msg ->
+       | `Error error ->
          remember_pending_finalization state ~keeper_name ~lease_id ~action;
          Log.Keeper.error
            "keeper_chat_consumer: nack persist failed for keeper=%s lease=%s: %s; \
             finalization will retry"
            keeper_name
            lease_id
-           msg;
+           (match error with
+            | Keeper_chat_queue.Persistence_not_configured ->
+                "persistence_not_configured"
+            | Keeper_chat_queue.Revision_exhausted ->
+                "revision_exhausted"
+            | Keeper_chat_queue.Persist_failed message -> message
+            | Keeper_chat_queue.Snapshot_unavailable load_error ->
+                load_error.message);
          `Pending)
   in
   result
 
 (* Keep these names at the call sites readable: they now retain the decision
    when persistence is temporarily unavailable instead of silently giving up. *)
-let ack_or_warn state ~keeper_name ~lease_id =
-  match settle_lease state ~keeper_name ~lease_id Ack with
+let finalize_or_warn state ~keeper_name ~lease_id outcome =
+  match settle_lease state ~keeper_name ~lease_id (Finalize outcome) with
   | `Settled | `Pending -> ()
 
 let nack_or_warn state ~keeper_name ~lease_id =
@@ -156,44 +162,44 @@ let retry_pending_finalization state ~keeper_name =
     | `Settled | `Pending -> ());
     true
 
-(* Races [handle_turn] against [dispatch_deadline_sec] so one wedged turn
-   cannot permanently starve this keeper's queue: [handle_turn] normally
-   blocks until the turn's terminal status is observed (see
-   [Server_routes_http_keeper_stream.process_single_turn]), and if the
-   underlying async execution is cancelled mid-turn by its own internal
-   timeout, nothing ever wakes that wait. [dispatch_deadline_sec] is set well
-   above that internal timeout (see the .mli) so by the time it fires here,
-   the turn's own machinery has already given up. *)
-let run_leased_turn state ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled
-    ~keeper_name ~lease_id ~queued =
-  match
-    Eio.Fiber.first
-      (fun () ->
-        handle_turn ~sw ~keeper_name ~queued_message:queued;
-        `Completed)
-      (fun () ->
-        Eio.Time.sleep clock dispatch_deadline_sec;
-        `Stalled)
-  with
-  | `Completed -> ack_or_warn state ~keeper_name ~lease_id
-  | `Stalled -> (
-      match on_stalled ~keeper_name ~queued_message:queued with
-      | () -> ack_or_warn state ~keeper_name ~lease_id
-      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-      | exception exn ->
-          Log.Keeper.warn
-            "keeper_chat_consumer: on_stalled failed for keeper=%s: %s; nacking \
-             instead of acking so the batch is retried"
-            keeper_name
-            (Printexc.to_string exn);
-          nack_or_warn state ~keeper_name ~lease_id)
+let finalization_of_turn_outcome ~clock = function
+  | Delivered { outcome_ref } ->
+      Keeper_chat_queue.Mark_delivered
+        { completed_at = Eio.Time.now clock; outcome_ref }
+  | Failed { kind; detail; outcome_ref } ->
+      Keeper_chat_queue.Mark_failed
+        { completed_at = Eio.Time.now clock
+        ; kind
+        ; detail
+        ; outcome_ref
+        }
 
-let dispatch_queued_turn state ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled
-    ~keeper_name ~lease_id ~queued =
+let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id ~queued =
+  match handle_turn ~sw ~keeper_name ~queued_message:queued with
+  | outcome ->
+      finalize_or_warn state ~keeper_name ~lease_id
+        (finalization_of_turn_outcome ~clock outcome)
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+      let detail = Printexc.to_string exn in
+      Log.Keeper.error
+        "keeper_chat_consumer: handle_turn raised for keeper=%s: %s; recording \
+         a terminal internal_error receipt"
+        keeper_name detail;
+      finalize_or_warn state ~keeper_name ~lease_id
+        (Keeper_chat_queue.Mark_failed
+           { completed_at = Eio.Time.now clock
+           ; kind = Keeper_chat_queue.Internal_error
+           ; detail
+           ; outcome_ref = None
+           })
+
+let dispatch_queued_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
+    ~queued =
   Eio.Fiber.fork ~sw (fun () ->
       try
-        run_leased_turn state ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~on_stalled
-          ~keeper_name ~lease_id ~queued;
+        run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id
+          ~queued;
         clear_dispatching state keeper_name
       with
       | Eio.Cancel.Cancelled _ as e ->
@@ -203,12 +209,13 @@ let dispatch_queued_turn state ~sw ~clock ~dispatch_deadline_sec ~handle_turn ~o
       | exn ->
           nack_or_warn state ~keeper_name ~lease_id;
           clear_dispatching state keeper_name;
-          Log.Keeper.warn
-            "keeper_chat_consumer: handle_turn failed for keeper=%s: %s"
+          Log.Keeper.error
+            "keeper_chat_consumer: dispatch finalization failed unexpectedly \
+             for keeper=%s: %s"
             keeper_name
             (Printexc.to_string exn))
 
-let start ~sw ~clock ~base_path ~dispatch_deadline_sec ~handle_turn ~on_stalled =
+let start ~sw ~clock ~base_path ~handle_turn =
   let dispatch_state = create_dispatch_state () in
   let rec poll_loop () =
     let keeper_names = Keeper_chat_queue.all_keeper_names () in
@@ -251,24 +258,30 @@ let start ~sw ~clock ~base_path ~dispatch_deadline_sec ~handle_turn ~on_stalled 
                        lease_id
                        keeper_name;
                      clear_dispatching dispatch_state keeper_name
-                 | `Persist_failed msg ->
+                 | `Error error ->
                      Log.Keeper.warn
                        "keeper_chat_consumer: lease_batch persist failed for keeper=%s: \
                         %s; retrying next poll"
                        keeper_name
-                       msg;
+                       (match error with
+                        | Keeper_chat_queue.Persistence_not_configured ->
+                            "persistence_not_configured"
+                        | Keeper_chat_queue.Revision_exhausted ->
+                            "revision_exhausted"
+                        | Keeper_chat_queue.Persist_failed message -> message
+                        | Keeper_chat_queue.Snapshot_unavailable load_error ->
+                            load_error.message);
                      clear_dispatching dispatch_state keeper_name
-                 | `Leased { Keeper_chat_queue.lease_id; messages } ->
-                     broadcast_queue_changed ~keeper_name;
-                     (match messages with
+                 | `Leased { Keeper_chat_queue.lease_id; items } ->
+                     (match items with
                       | _ :: _ :: _ ->
                           Log.Keeper.info
                             "keeper_chat_consumer: coalesced %d queued messages \
                              into one turn for keeper=%s"
-                            (List.length messages)
+                            (List.length items)
                             keeper_name
                       | [] | [ _ ] -> ());
-                     (match Keeper_chat_queue.merge_batch messages with
+                     (match Keeper_chat_queue.merge_batch items with
                       | None ->
                           (* Unreachable in practice: [lease_batch] only returns
                              [`Leased] with a non-empty [messages]. Nack rather
@@ -284,8 +297,7 @@ let start ~sw ~clock ~base_path ~dispatch_deadline_sec ~handle_turn ~on_stalled 
                       | Some queued ->
                           (try
                              dispatch_queued_turn dispatch_state ~sw ~clock
-                               ~dispatch_deadline_sec ~handle_turn ~on_stalled
-                               ~keeper_name ~lease_id ~queued
+                               ~handle_turn ~keeper_name ~lease_id ~queued
                            with
                            | Eio.Cancel.Cancelled _ as e ->
                                Eio.Cancel.protect (fun () ->

@@ -7,20 +7,21 @@ import { KeeperLaneInventoryPanel, KeeperWaitingInventoryPanel } from './keeper-
 
 function inventoryFixture(): DashboardKeeperWaitingInventory {
   return {
-    schema: 'masc.dashboard.keeper_waiting_inventory.v1',
+    schema: 'masc.dashboard.keeper_waiting_inventory.v2',
     source: 'server_keeper_waiting_inventory',
     generated_at: '2026-07-04T00:00:00Z',
     supported_states: ['idle', 'busy', 'waiting', 'deferred'],
     keeper_count_known: true,
     keeper_count: 3,
     waiting_keeper_count: 2,
-    row_count: 3,
+    row_count: 4,
     global_row_count: 1,
     global_pending_confirm_count_known: true,
     global_pending_confirm_count: 1,
     source_counts: {
       event_queue_pending: 1,
       event_queue_inflight: 1,
+      chat_queue_inflight: 1,
       schedule_waiting: 1,
       turn_admission_waiting: 1,
     },
@@ -28,10 +29,11 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       {
         keeper_name: 'sangsu',
         state: 'waiting',
-        waiting_count: 2,
+        waiting_count: 3,
         sources: {
           event_queue_pending: 1,
           event_queue_inflight: 1,
+          chat_queue_inflight: 1,
         },
         waiting_on: [
           {
@@ -49,6 +51,23 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
             wake_producer: 'keeper_no_progress_recovery',
             since_iso: '2026-07-04T00:01:00Z',
             next_action: 'recover_inflight_turn',
+          },
+          {
+            keeper_name: 'sangsu',
+            source: 'chat_queue_inflight',
+            waiting_on: 'dashboard',
+            wake_producer: 'keeper_chat_queue_store',
+            since_iso: '2026-07-04T00:02:00Z',
+            next_action: 'keeper_chat_turn_terminal_receipt',
+            detail: {
+              queue_index: 0,
+              receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+              lifecycle: {
+                state: 'inflight',
+                lease_id: 'lease_00000000-0000-4000-8000-000000000002',
+                started_at_iso: '2026-07-04T00:02:30Z',
+              },
+            },
           },
         ],
       },
@@ -117,6 +136,9 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('producer keeper supervisor')
     expect(container.textContent).toContain('producer keeper no progress recovery')
     expect(container.textContent).toContain('no_progress_recovery')
+    expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000001')
+    expect(container.textContent).toContain('lease_00000000-0000-4000-8000-000000000002')
+    expect(container.textContent).toContain('state inflight')
     expect(container.textContent).toContain('Global waiting')
     expect(container.textContent).toContain('masc.board_post')
     expect(container.textContent).not.toContain('idle-one')
@@ -204,7 +226,7 @@ describe('KeeperLaneInventoryPanel', () => {
         waiting_on: [
           {
             keeper_name: 'partial-lane',
-            source: 'external_message',
+            source: 'external_attention',
             waiting_on: 'discord:ops',
             wake_producer: null,
             next_action: '',

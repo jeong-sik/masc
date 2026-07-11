@@ -21,7 +21,12 @@ let check name cond =
 
 let base_path = "/tmp/masc_test_turn_admission"
 let keeper_name = "admission-keeper"
-let reset () = Keeper_turn_admission.For_testing.reset ()
+let reset () =
+  Keeper_turn_admission.For_testing.reset ();
+  Keeper_chat_queue.For_testing.reset ();
+  ignore
+    (Keeper_chat_queue.configure_persistence ~base_path
+      : Keeper_chat_queue.configure_report)
 
 let test_free_slot_admits () =
   reset ();
@@ -395,7 +400,6 @@ let test_idle_loop_yields_to_parked_chat () =
 
 let test_autonomous_yields_to_queued_connector_message () =
   reset ();
-  Keeper_chat_queue.clear ~keeper_name;
   Printf.printf
     "Test 10: autonomous lane yields while a connector/dashboard message is queued\n%!";
   (* Sanity: an empty queue lets the autonomous lane run. *)
@@ -406,16 +410,22 @@ let test_autonomous_yields_to_queued_connector_message () =
      without parking on the admission slot, so [chat_waiting] stays false. The
      autonomous lane must still yield, or a long/back-to-back autonomous turn
      busy-ACKs the connector forever (the starvation this pins). *)
-  ignore
-    (Keeper_chat_queue.enqueue ~keeper_name
+  (match
+     Keeper_chat_queue.enqueue ~keeper_name
        { Keeper_chat_queue.content = "deferred slack mention"
        ; user_blocks = []
        ; attachments = []
        ; timestamp = 1.0
        ; source = Keeper_chat_queue.Slack { channel = "C-test"; user_id = "U-test" }
        }
-      : string);
-  check "queue depth is 1 after enqueue" (Keeper_chat_queue.length ~keeper_name = 1);
+   with
+   | Ok _ -> ()
+   | Error error ->
+     check
+       ("enqueue succeeds: " ^ Keeper_chat_queue.mutation_error_to_string error)
+       false);
+  let queued = Keeper_chat_queue.snapshot ~keeper_name in
+  check "queue depth is 1 after enqueue" (List.length queued.pending = 1);
   check
     "a queued connector message is not a parked chat"
     (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
@@ -424,15 +434,36 @@ let test_autonomous_yields_to_queued_connector_message () =
      check "run_if_free yields (Busy) while a connector message is queued" true
    | `Ran () ->
      check "run_if_free must not admit while a connector message is queued" false);
-  (* Draining the queue (what the consumer does in the yielded window) lets the
-     autonomous lane run again. [length] excludes a leased-but-unacked batch
-     just like it excluded a dequeued one, so leasing alone (no ack needed)
-     is enough to reproduce that window here. *)
-  (match Keeper_chat_queue.lease_batch ~keeper_name with
-   | `Leased _ -> ()
-   | `Empty | `Already_leased _ | `Persist_failed _ ->
-     check "lease_batch drains the queued connector message" false);
-  check "queue empty after drain" (Keeper_chat_queue.length ~keeper_name = 0);
+  (* Leasing changes the receipt to Inflight but does not make it disappear.
+     The autonomous lane keeps yielding until the terminal decision commits. *)
+  let lease =
+    match Keeper_chat_queue.lease_batch ~keeper_name with
+    | `Leased lease -> Some lease
+    | `Empty | `Already_leased _ | `Error _ ->
+      check "lease_batch leases the queued connector message" false;
+      None
+  in
+  let inflight = Keeper_chat_queue.snapshot ~keeper_name in
+  check "leased receipt remains visible" (List.length inflight.inflight = 1);
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy _ -> check "run_if_free yields while the receipt is inflight" true
+   | `Ran () -> check "run_if_free must not overtake an inflight receipt" false);
+  (match lease with
+   | None -> ()
+   | Some lease ->
+     (match
+        Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+          ~outcome:
+            (Keeper_chat_queue.Mark_delivered
+               { completed_at = 2.0; outcome_ref = None })
+      with
+      | `Finalized _ -> ()
+      | `Unknown_lease | `Error _ ->
+        check "finalize commits the terminal receipt" false));
+  let settled = Keeper_chat_queue.snapshot ~keeper_name in
+  check
+    "queue has no active receipts after finalization"
+    (settled.pending = [] && settled.inflight = []);
   match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "ok") with
   | `Ran "ok" -> check "run_if_free admits again once the queue is drained" true
   | `Ran _ | `Busy _ -> check "run_if_free admits again once the queue is drained" false

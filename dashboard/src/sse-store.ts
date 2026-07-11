@@ -98,6 +98,16 @@ export function registerKeeperTurnRefresh(fn: (keeperName: string) => void): voi
   _keeperTurnRefreshFn = fn
 }
 
+// The tools payload owns the Keeper waiting/receipt projection. Queue SSE is
+// deliberately an invalidation signal, so the tools resource registers its
+// authoritative re-read here instead of this transport layer importing a UI
+// store or reconstructing Pending/Inflight state from event deltas.
+let _refreshKeeperChatQueueFn: (() => void) | null = null
+const pendingKeeperChatQueueRefreshNames = new Set<string>()
+export function registerKeeperChatQueueRefresh(fn: () => void): void {
+  _refreshKeeperChatQueueFn = fn
+}
+
 const _refreshActivityFns = new Set<() => void>()
 export function registerActivityRefresh(fn: () => void): () => void {
   _refreshActivityFns.add(fn)
@@ -646,6 +656,31 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
           console.debug('[SSE] keeper chat refresh unavailable', err instanceof Error ? err.message : '')
         })
     }
+    return true
+  }
+
+  if (event.type === 'keeper_chat_queue_changed') {
+    const keeperName = event.keeper_name?.trim() ?? ''
+    if (keeperName) pendingKeeperChatQueueRefreshNames.add(keeperName)
+    scheduleRefresh(
+      'keeper_chat_queue',
+      () => {
+        const keeperNames = Array.from(pendingKeeperChatQueueRefreshNames)
+        pendingKeeperChatQueueRefreshNames.clear()
+        _refreshKeeperChatQueueFn?.()
+        void import('./keeper-runtime')
+          .then(mod => Promise.all(
+            keeperNames.map(name => mod.reconcileKeeperChatReceipts(name)),
+          ))
+          .catch(err => {
+            console.warn(
+              '[SSE] keeper chat receipt reconciliation unavailable',
+              err instanceof Error ? err.message : err,
+            )
+          })
+      },
+      SSE_KEEPER_THREAD_DEBOUNCE_MS,
+    )
     return true
   }
 

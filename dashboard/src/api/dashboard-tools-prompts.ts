@@ -271,9 +271,25 @@ export interface DashboardScheduledAutomation {
   requests: DashboardScheduledAutomationRequest[]
 }
 
+export type DashboardKeeperWaitingSource =
+  | 'event_queue_pending'
+  | 'event_queue_inflight'
+  | 'chat_queue_pending'
+  | 'chat_queue_inflight'
+  | 'hitl_pending'
+  | 'external_attention'
+  | 'fusion_running'
+  | 'background_task'
+  | 'schedule_waiting'
+  | 'turn_admission_waiting'
+  | 'operator_pending_confirm'
+  | 'read_error'
+
+export type DashboardKeeperWaitingState = 'idle' | 'busy' | 'waiting' | 'deferred'
+
 export interface DashboardKeeperWaitingRow {
   keeper_name?: string | null
-  source: string
+  source: DashboardKeeperWaitingSource
   waiting_on: string
   wake_producer?: string | null
   since?: number | null
@@ -286,7 +302,7 @@ export interface DashboardKeeperWaitingRow {
 
 export interface DashboardKeeperWaitingKeeper {
   keeper_name: string
-  state: 'idle' | 'busy' | 'waiting' | 'deferred' | string
+  state: DashboardKeeperWaitingState
   waiting_on: DashboardKeeperWaitingRow[]
   waiting_count: number
   waiting_count_truncated?: boolean

@@ -106,13 +106,13 @@ let chat_appended ~keeper_name ~source ?content () =
 let chat_appended_with_audio ~keeper_name ~source ~audio ?content () =
   do_broadcast ~keeper_name ~source ~audio:(Some audio) ?content ()
 
-let queue_changed ~keeper_name ~depth () =
+let queue_changed ~keeper_name ~revision () =
   try
     Sse.broadcast
       (`Assoc
         [ ("type", `String "keeper_chat_queue_changed");
-          ("name", `String keeper_name);
-          ("depth", `Int depth);
+          ("keeper_name", `String keeper_name);
+          ("revision", `Intlit (Int64.to_string revision));
           ("ts_unix", `Float (Time_compat.now ()));
         ])
   with
@@ -126,4 +126,3 @@ let queue_changed ~keeper_name ~depth () =
       "keeper_chat_broadcast: queue_changed name=%s failed: %s"
       keeper_name
       (Printexc.to_string exn)
-

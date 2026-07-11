@@ -273,7 +273,12 @@ let send_message ~token ~channel ~content =
 
 let add_block acc block = block :: acc
 
-let adapter_loop ~token ~channel ~events ?base_url
+let adapter_loop_with_transport
+    ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t)
+    ~(send_plain : content:string -> (unit, error) result)
+    ~(send_blocks :
+       content:string -> blocks:Yojson.Safe.t list -> (unit, error) result)
+    ?base_url
     ?(on_send_result = fun _ -> ()) () =
   let rec loop ~acc_text ~acc_blocks ~run_id_opt =
     match Keeper_chat_events.subscribe events with
@@ -286,13 +291,14 @@ let adapter_loop ~token ~channel ~events ?base_url
           final_message_blocks ~content:acc_text
             ~event_blocks:(List.rev acc_blocks)
         in
-        if String.length acc_text > 0 || List.length blocks > 0 then
+        if String.length acc_text > 0 || List.length blocks > 0
+        then on_send_result (send_blocks ~content:acc_text ~blocks)
+        else
           on_send_result
-            (send_message_with_blocks ~token ~channel ~content:acc_text ~blocks);
+            (Error (Other "Slack terminal reply contained no text or blocks"));
         ()
     | Event_error { message } ->
-        on_send_result
-          (send_message ~token ~channel ~content:("Keeper error: " ^ message));
+        on_send_result (send_plain ~content:("Keeper error: " ^ message));
         ()
     | Run_started { run_id; thread_id = _ } ->
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
@@ -313,11 +319,20 @@ let adapter_loop ~token ~channel ~events ?base_url
     | Oas_media_delta _ ->
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Oas_stream_protocol_error error ->
-        on_send_result
-          (send_message ~token ~channel
+        (* This is an interim diagnostic, not the terminal queued-message
+           delivery receipt. Reporting it through [on_send_result] could let a
+           successful diagnostic mask a later final-send failure. *)
+        (match
+           send_plain
              ~content:
                ("Keeper stream protocol: "
-                ^ Keeper_chat_events.stream_protocol_error_summary error));
+                ^ Keeper_chat_events.stream_protocol_error_summary error)
+         with
+         | Ok () -> ()
+         | Error error ->
+           Log.Keeper.warn
+             "keeper_chat_slack: protocol diagnostic delivery failed: %s"
+             (Format.asprintf "%a" pp_error error));
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Tool_call_start _ | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _ ->
         loop ~acc_text ~acc_blocks ~run_id_opt
@@ -339,6 +354,13 @@ let adapter_loop ~token ~channel ~events ?base_url
   in
   loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:None
 
+let adapter_loop ~token ~channel ~events ?base_url ?on_send_result () =
+  adapter_loop_with_transport
+    ~send_plain:(fun ~content -> send_message ~token ~channel ~content)
+    ~send_blocks:(fun ~content ~blocks ->
+      send_message_with_blocks ~token ~channel ~content ~blocks)
+    ~events ?base_url ?on_send_result ()
+
 module For_testing = struct
   let escape_mrkdwn_text = escape_mrkdwn_text
   let truncate_to_limit = truncate_to_limit
@@ -350,4 +372,6 @@ module For_testing = struct
   let tool_context_block_json = tool_context_block_json
   let content_blocks_of_text = content_blocks_of_text
   let final_message_blocks = final_message_blocks
+
+  let adapter_loop = adapter_loop_with_transport
 end

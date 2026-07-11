@@ -36,6 +36,7 @@ import {
   clearStoredToken,
   currentDashboardActor,
   dashboardBearerToken,
+  getStoredTokenMeta,
   isRemoteAccess,
 } from '../api/core'
 import type { DashboardConfigResolutionItem } from '../types'
@@ -409,20 +410,20 @@ function SettingsControlLedger({ section }: { section: SectionId }) {
 }
 
 function AccountSettingsSection() {
-  const [tokenVisible, setTokenVisible] = useState(false)
   const [clearing, setClearing] = useState(false)
   const summary = shellAuthSummary.value
   const actor = summary?.effective_agent ?? summary?.token_agent ?? currentDashboardActor()
   const role = summary?.effective_role ?? summary?.default_role ?? 'unknown'
-  const token = dashboardBearerToken()
+  const tokenPresent = dashboardBearerToken() !== null
+  const tokenMeta = getStoredTokenMeta()
   const tokenState = summary?.token_valid === true
     ? 'verified'
-    : summary?.token_present === true || token
+    : summary?.token_present === true || tokenPresent
       ? 'unverified'
       : 'not configured'
 
   async function clearAccountToken() {
-    if (clearing || !token) return
+    if (clearing || !tokenPresent) return
     setClearing(true)
     try {
       clearStoredToken()
@@ -432,7 +433,6 @@ function AccountSettingsSection() {
       showToast(`Auth 갱신 실패: ${errorToString(error)}`, 'error')
     } finally {
       setClearing(false)
-      setTokenVisible(false)
     }
   }
 
@@ -452,22 +452,13 @@ function AccountSettingsSection() {
         <span class="set-role-chip mono">${role}</span>
       <//>
       <${SetRow} label="API token" hint="Browser token store · MCP/dashboard authentication">
-        <div class="set-account-token">
-          <input
-            class="set-input mono"
-            type=${tokenVisible ? 'text' : 'password'}
-            readonly
-            value=${token ?? ''}
-            placeholder="저장된 token 없음"
-            aria-label="Dashboard API token"
-          />
-          <button
-            type="button"
-            class="set-verify"
-            disabled=${!token}
-            aria-pressed=${tokenVisible ? 'true' : 'false'}
-            onClick=${() => setTokenVisible(visible => !visible)}
-          >${tokenVisible ? '숨기기' : '표시'}</button>
+        <div class="set-account-token" data-testid="settings-account-token-presence">
+          <span class=${`set-account-token-presence ${tokenPresent ? 'stored' : 'absent'}`}>
+            ${tokenPresent ? '브라우저에 저장됨' : '저장된 token 없음'}
+          </span>
+          ${tokenMeta
+            ? html`<span class="set-truth-source mono">source:${tokenMeta.source}${tokenMeta.scope ? ` · scope:${tokenMeta.scope}` : ''}</span>`
+            : null}
         </div>
       <//>
       <${SetRow} label="검증 상태" hint=${summary?.auth_error_code ?? 'shell auth projection'}>
@@ -479,7 +470,7 @@ function AccountSettingsSection() {
       <button
         type="button"
         class="set-account-clear"
-        disabled=${!token || clearing}
+        disabled=${!tokenPresent || clearing}
         onClick=${() => { void clearAccountToken() }}
       >${clearing ? '정리 중…' : '저장된 token 지우기'}</button>
     </div>

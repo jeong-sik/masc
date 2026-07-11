@@ -366,13 +366,25 @@
 .set-account-token {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   width: min(100%, 520px);
 }
 
-.set-account-token .set-input {
-  flex: 1;
-  min-width: 0;
+.set-account-token-presence {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-pill);
+  color: var(--text-dim);
+  font-size: var(--fs-11);
+  padding: 4px 10px;
+}
+
+.set-account-token-presence.stored {
+  border-color: color-mix(in oklab, var(--status-ok) 40%, transparent);
+  background: color-mix(in oklab, var(--status-ok) 8%, transparent);
+  color: var(--status-ok);
 }
 
 .set-role-chip,

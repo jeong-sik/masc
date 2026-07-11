@@ -1344,9 +1344,10 @@ export function FusionSurface() {
 
   return html`
     <main class="surf fus v2-fusion-surface" data-testid="fusion-surface" data-screen-label="Fusion">
-      <span class="sr-only" data-testid="fusion-reality-notice">
-        부분 지원. 보드 sink와 registry 관측을 표시합니다. live JoJ는 judges 패널 구성이 없으면 fail-closed 상태로 남습니다.
-      </span>
+      <div class="fus-reality-notice" data-testid="fusion-reality-notice" role="status">
+        <strong>부분 지원</strong>
+        <span>보드 sink + registry 관측 · live JoJ judges 미구성 시 fail-closed</span>
+      </div>
       ${boardError
         ? html`<div
             class="fus-board-error"

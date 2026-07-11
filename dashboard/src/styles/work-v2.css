@@ -409,30 +409,16 @@
   color: var(--text-dim);
 }
 
-.wk-backlog-toggle {
-  margin-left: auto;
-  flex: none;
-  border: 1px solid var(--border-main);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-mid);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: var(--fs-10);
-  padding: 4px 8px;
-}
-
-.wk-backlog-toggle:hover {
-  border-color: var(--border-highlight);
-  color: var(--text-bright);
-}
-
 .wk-backlog-list {
   border-top: 1px solid var(--border-soft);
   padding: 8px 16px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-block-size: min(24dvh, 14rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .wk-bl-row {

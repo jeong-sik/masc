@@ -33,8 +33,36 @@
 
 .v2-fusion-surface .fus-body {
   flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
+}
+
+.v2-fusion-surface .fus-reality-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-width: 0;
+  border-bottom: 1px solid var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--text-mid);
+  font-size: var(--fs-10);
+  line-height: 1.35;
+  padding: 6px 12px;
+}
+
+.v2-fusion-surface .fus-reality-notice strong {
+  flex: none;
+  color: var(--warn-fg);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.v2-fusion-surface .fus-reality-notice span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Fusion's dense master list uses a 20px identity sigil. Scope this size so

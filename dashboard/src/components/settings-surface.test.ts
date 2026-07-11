@@ -29,9 +29,10 @@ import { tweaksDensity } from './tweaks-panel'
 import { notificationDeliveryError, notifyRules } from '../notifications'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
-import { dashboardLoading, shellConfigResolution, shellRuntimeResolution } from '../store'
+import { dashboardLoading, shellAuthSummary, shellConfigResolution, shellRuntimeResolution } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
+import { setStoredToken } from '../api/core'
 
 const apiMock = vi.hoisted(() => ({
   fetchDashboardConfig: vi.fn(),
@@ -440,6 +441,7 @@ describe('SettingsSurface', () => {
       keepers: { path: '/workspace/.masc/keepers', exists: true, source: 'derived' },
       personas: { path: '/workspace/.masc/personas', exists: true, source: 'derived' },
     }
+    shellAuthSummary.value = null
     localStorage.clear()
     tweaksDensity.value = 'spacious'
     notifyRules.value = {
@@ -459,6 +461,7 @@ describe('SettingsSurface', () => {
     navigate.mockClear()
     shellConfigResolution.value = null
     shellRuntimeResolution.value = null
+    shellAuthSummary.value = null
     resetDevTokenBootstrap()
     sessionStorage.clear()
     localStorage.clear()
@@ -666,6 +669,30 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-nav-sandbox"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-gate"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-ide"]')).toBeNull()
+  })
+
+  it('renders token presence and source without re-projecting the bearer secret into the DOM', () => {
+    const secret = 'masc-secret-that-must-not-enter-dom'
+    setStoredToken(secret, { source: 'manual', scope: 'admin' })
+    shellAuthSummary.value = {
+      enabled: true,
+      require_token: true,
+      token_present: true,
+      token_valid: true,
+      token_agent: 'dashboard',
+      effective_agent: 'dashboard',
+      effective_role: 'admin',
+      can_keeper_msg: true,
+    }
+
+    render(html`<${SettingsSurface} />`, container)
+
+    const presence = container.querySelector('[data-testid="settings-account-token-presence"]')
+    expect(presence?.textContent).toContain('브라우저에 저장됨')
+    expect(presence?.textContent).toContain('source:manual')
+    expect(presence?.textContent).toContain('scope:admin')
+    expect(container.querySelector('input[aria-label="Dashboard API token"]')).toBeNull()
+    expect(container.innerHTML).not.toContain(secret)
   })
 
   it('MCP server page shows resolved endpoint, inventory, and runs a real status check', async () => {

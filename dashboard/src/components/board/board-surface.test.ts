@@ -688,6 +688,23 @@ describe('BoardSurface Component', () => {
     expect(boardHearthFilter.value).toBe('ops')
   })
 
+  it('renders every hearth in an available-space scroll region while queues stay outside it', () => {
+    boardHearths.value = Array.from({ length: 9 }, (_, index) => ({
+      name: `hearth-${index + 1}`,
+      count: index,
+    }))
+
+    const { container } = render(h(BoardSurface, null))
+
+    const hearthScroll = container.querySelector('.bd-hearth-scroll')
+    const queueSection = container.querySelector('.bd-queue-section')
+    expect(hearthScroll?.querySelectorAll('[data-testid^="bd-sub-hearth-"]')).toHaveLength(9)
+    expect(hearthScroll?.querySelector('[data-testid="bd-sub-hearth-9"]')).not.toBeNull()
+    expect(container.querySelector('.bd-sub-more')).toBeNull()
+    expect(queueSection?.querySelector('[data-testid="bd-queue-mod"]')).not.toBeNull()
+    expect(queueSection?.querySelector('[data-testid="bd-queue-mentions"]')).not.toBeNull()
+  })
+
   it('counts desktop mention queue from messages instead of board posts', () => {
     boardPosts.value = [
       makePost({ id: 'post-ops', title: 'Ops note', body: 'ops', author: 'keeper', hearth: 'ops' }),

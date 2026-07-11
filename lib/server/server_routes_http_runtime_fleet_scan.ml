@@ -1389,10 +1389,10 @@ let keeper_fleet_safety_health_json
     target_count > 1 && phase_counts.running < minimum_running_fibers
   in
   (* Recovering lanes are deliberately capacity-bearing for the fleet verdict:
-     they already own an executable lane and the supervisor is actively
-     restoring them. Keep that policy in one value so the advertised
-     effective count and its derived shortfall cannot diverge. Actual healthy
-     execution remains available separately as
+     [Failing] remains executable in the FSM, and restart budget marks the lane
+     eligible for heartbeat-driven recovery. Keep that policy in one value so
+     the advertised effective count and its derived shortfall cannot diverge.
+     Actual healthy execution remains available separately as
      [healthy_running_keeper_fiber_count]. *)
   let effective_reaction_capacity_count =
     phase_counts.running + phase_counts.recovering

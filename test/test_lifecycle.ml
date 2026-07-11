@@ -106,15 +106,17 @@ let () = test "shutdown deadline outlives a stuck cancelled switch" (fun () ->
        with
        | Error _ -> Unix._exit 25
        | Ok _watchdog ->
-           (try
-              Eio_main.run @@ fun _env ->
-              Eio.Switch.run @@ fun sw ->
-              Eio.Fiber.fork_daemon ~sw (fun () ->
-                  Eio.Cancel.protect (fun () -> Eio.Fiber.await_cancel ());
-                  `Stop_daemon);
-              raise Simulated_switch_shutdown
-            with Simulated_switch_shutdown -> Unix._exit 24);
-           Unix._exit 24)
+           (match
+              try
+                Eio_main.run @@ fun _env ->
+                Eio.Switch.run @@ fun sw ->
+                let () =
+                  Eio.Fiber.fork_daemon ~sw (fun () ->
+                      Eio.Cancel.protect (fun () -> Eio.Fiber.await_cancel ()))
+                in
+                raise Simulated_switch_shutdown
+              with Simulated_switch_shutdown -> `Shutdown_escaped_switch
+            with `Shutdown_escaped_switch -> Unix._exit 24))
   | child_pid ->
       let waited_pid, status = Unix.waitpid [] child_pid in
       assert (waited_pid = child_pid);

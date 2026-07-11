@@ -3,8 +3,10 @@
 // Fetches `/api/v1/sidecar/schema?name=<id>` (served by backend that shells
 // out to `python -m src.schema_dump`) and renders one widget per BotConfig
 // field. The form is editable in-browser so operators can paste tokens and
-// confirm shape, but Save is disabled until the backend PUT endpoint lands —
-// today the operator copies the rendered .env block into their shell.
+// confirm shape, then Save writes to disk via POST /api/v1/sidecar/config.
+// For in-process connectors (e.g. Slack), credentials are read from environment
+// variables at startup; the TOML on disk is authoritative for script-based
+// sidecars and for non-secret fields (trigger_policy, etc.).
 //
 // Sensitive fields (anything matching /token|secret|password|api_key/i in
 // the field name) get a password-masked input + reveal toggle so the value

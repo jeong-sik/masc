@@ -81,14 +81,14 @@ let active_passive_budget_execution =
     ]
 ;;
 
-let completed_passive_execution =
+let passive_execution_with_terminal_reason terminal_reason =
   `Assoc
     [ "latest_receipt_present", `Bool true
     ; "recorded_at", `String "2999-01-01T00:00:00Z"
     ; "completion_contract_result", `String "passive_only"
     ; "operator_disposition", `String "pass"
     ; "operator_disposition_reason", `String "healthy"
-    ; "terminal_reason_code", `String "completed"
+    ; "terminal_reason_code", `String terminal_reason
     ; "current_task_id", `Null
     ; "goal_ids", `List []
     ; "error", `Null
@@ -97,14 +97,37 @@ let completed_passive_execution =
     ]
 ;;
 
-let active_completed_passive_execution =
+let legacy_completed_passive_execution =
+  passive_execution_with_terminal_reason "completed"
+;;
+
+let canonical_success_passive_execution =
+  passive_execution_with_terminal_reason "success"
+;;
+
+let malformed_success_passive_execution =
+  passive_execution_with_terminal_reason " SUCCESS "
+;;
+
+let trust_with_terminal_reason_code code =
+  `Assoc
+    [ ( "latest_terminal_reason"
+      , `Assoc
+          [ "code", `String code
+          ; "severity", `Null
+          ; "disposition", `Null
+          ] )
+    ]
+;;
+
+let active_success_passive_execution =
   `Assoc
     [ "latest_receipt_present", `Bool true
     ; "recorded_at", `String "2999-01-01T00:00:00Z"
     ; "completion_contract_result", `String "passive_only"
     ; "operator_disposition", `String "pass"
     ; "operator_disposition_reason", `String "healthy"
-    ; "terminal_reason_code", `String "completed"
+    ; "terminal_reason_code", `String "success"
     ; "current_task_id", `String "TASK-1"
     ; "goal_ids", `List []
     ; "error", `Null
@@ -226,11 +249,22 @@ let test_active_passive_budget_exhaustion_is_not_blocked () =
   check (option string) "reason" None attention.cra_reason
 ;;
 
-let test_completed_passive_receipt_without_work_scope_is_not_blocked () =
+let test_legacy_completed_receipt_is_blocked () =
   let attention =
     Server_dashboard_http_composite.composite_runtime_attention
       ~snapshot
-      ~execution:completed_passive_execution
+      ~execution:legacy_completed_passive_execution
+  in
+  check bool "blocked" true attention.cra_blocked;
+  check bool "needs_attention" true attention.cra_needs_attention;
+  check string "state" "blocked" attention.cra_state
+;;
+
+let test_canonical_success_receipt_is_not_blocked () =
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention
+      ~snapshot
+      ~execution:canonical_success_passive_execution
   in
   check bool "blocked" false attention.cra_blocked;
   check bool "needs_attention" false attention.cra_needs_attention;
@@ -238,14 +272,37 @@ let test_completed_passive_receipt_without_work_scope_is_not_blocked () =
   check (option string) "reason" None attention.cra_reason
 ;;
 
-let test_active_completed_passive_receipt_is_not_blocked () =
-  (* RFC-0303 Phase 0: a completed passive-only turn with work scope is not a
+let test_malformed_success_receipt_is_blocked () =
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention
+      ~snapshot
+      ~execution:malformed_success_passive_execution
+  in
+  check bool "blocked" true attention.cra_blocked;
+  check bool "needs_attention" true attention.cra_needs_attention;
+  check string "state" "blocked" attention.cra_state
+;;
+
+let test_dashboard_execution_uses_strict_typed_success () =
+  check bool "canonical success" false
+    (Dashboard_execution.terminal_reason_requires_attention
+       (trust_with_terminal_reason_code "success"));
+  check bool "runtime completed is not final success" true
+    (Dashboard_execution.terminal_reason_requires_attention
+       (trust_with_terminal_reason_code "completed"));
+  check bool "malformed success is not normalized" true
+    (Dashboard_execution.terminal_reason_requires_attention
+       (trust_with_terminal_reason_code " SUCCESS "))
+;;
+
+let test_active_success_passive_receipt_is_not_blocked () =
+  (* RFC-0303 Phase 0: a successful passive-only turn with work scope is not a
      block. "Should it have acted on the claimed task?" is a goal-layer semantic
      judgment, not a per-turn dashboard attention flag. *)
   let attention =
     Server_dashboard_http_composite.composite_runtime_attention
       ~snapshot
-      ~execution:active_completed_passive_execution
+      ~execution:active_success_passive_execution
   in
   check bool "blocked" false attention.cra_blocked;
   check bool "needs_attention" false attention.cra_needs_attention;
@@ -293,13 +350,25 @@ let () =
             `Quick
             test_active_passive_budget_exhaustion_is_not_blocked
         ; test_case
-            "completed passive receipt without work scope is not blocked"
+            "legacy completed receipt is blocked"
             `Quick
-            test_completed_passive_receipt_without_work_scope_is_not_blocked
+            test_legacy_completed_receipt_is_blocked
         ; test_case
-            "active completed passive receipt is not blocked"
+            "canonical success receipt is not blocked"
             `Quick
-            test_active_completed_passive_receipt_is_not_blocked
+            test_canonical_success_receipt_is_not_blocked
+        ; test_case
+            "malformed success receipt is blocked"
+            `Quick
+            test_malformed_success_receipt_is_blocked
+        ; test_case
+            "dashboard execution uses strict typed success"
+            `Quick
+            test_dashboard_execution_uses_strict_typed_success
+        ; test_case
+            "active canonical success passive receipt is not blocked"
+            `Quick
+            test_active_success_passive_receipt_is_not_blocked
         ; test_case
             "not-dispatched turn-budget exhaustion is blocked"
             `Quick

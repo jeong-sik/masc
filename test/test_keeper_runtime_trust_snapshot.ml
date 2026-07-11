@@ -322,7 +322,7 @@ let test_completion_contract_result_rejects_drifted_label_before_parser () =
              [ "ended_at", `String "2026-06-01T00:00:00Z"
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
-             ; "terminal_reason_code", `String "completed"
+             ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String " Passive_Only "
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
@@ -360,7 +360,7 @@ let test_legacy_satisfied_completion_contract_result_is_unknown () =
              [ "ended_at", `String "2026-06-01T00:00:00Z"
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
-             ; "terminal_reason_code", `String "completed"
+             ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "satisfied"
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
@@ -394,7 +394,7 @@ let test_passive_only_no_work_receipt_does_not_mark_attention () =
              [ "ended_at", `String "2026-06-01T00:00:00Z"
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
-             ; "terminal_reason_code", `String "completed"
+             ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "passive_only"
              ; "current_task_id", `Null
              ; "goal_ids", `List []
@@ -444,7 +444,7 @@ let test_passive_only_active_receipt_does_not_mark_attention () =
              [ "ended_at", `String "2026-06-01T00:00:00Z"
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "passive_no_action"
-             ; "terminal_reason_code", `String "completed"
+             ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "passive_only"
              ; "current_task_id", `String "task-1844"
              ; "goal_ids", `List [ `String "goal-pm-flow" ]
@@ -506,7 +506,7 @@ let test_completion_blocker_supersedes_passive_only_receipt () =
              [ "ended_at", `String "2026-06-01T00:00:00Z"
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
-             ; "terminal_reason_code", `String "completed"
+             ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "passive_only"
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
@@ -596,7 +596,7 @@ let test_unknown_completion_contract_result_is_explicit () =
              [ "ended_at", `String "2026-06-01T00:00:00Z"
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
-             ; "terminal_reason_code", `String "completed"
+             ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "passive-only"
              ]);
        let snapshot = K.snapshot_json ~config ~meta in

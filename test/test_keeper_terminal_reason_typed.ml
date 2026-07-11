@@ -392,6 +392,38 @@ let base_receipt : R.t =
   }
 ;;
 
+let () =
+  let completed_stop = Runtime_agent.Completed in
+  let receipt =
+    { base_receipt with
+      outcome = `Ok
+    ; terminal_reason_code =
+        R.receipt_terminal_reason_code_of_stop_reason completed_stop
+    ; completion_contract_result = R.Contract_satisfied_execution
+    ; runtime_outcome = R.Runtime_completed
+    ; stop_reason = Some completed_stop
+    }
+  in
+  let json = R.to_json receipt in
+  check
+    "one receipt uses canonical terminal success"
+    (Json_util.get_string json "terminal_reason_code" = Some "success");
+  check
+    "the same receipt preserves runtime stop completed"
+    (Json_util.get_string json "stop_reason" = Some "completed");
+  let violated =
+    { receipt with completion_contract_result = R.Contract_violated }
+  in
+  let disposition = fst (R.operator_disposition violated) in
+  check
+    "runtime completion plus violated contract is not final success"
+    (disposition = R.Disp_pause_human);
+  check
+    "violated completed turn records a terminal reaction"
+    (R.reaction_kind_of_operator_disposition disposition
+     = Masc.Keeper_reaction_ledger.Terminal_reason)
+;;
+
 (* Field matrix axes. Kept small but covering the dimensions the
    classifier branches on. *)
 let codes = roundtrip_corpus
@@ -453,6 +485,26 @@ let operator_disposition_kinds =
 
 let () =
   List.iter
+    (fun (disposition, expected) ->
+      let actual = R.reaction_kind_of_operator_disposition disposition in
+      check
+        (Printf.sprintf
+           "typed reaction kind for %s"
+           (R.operator_disposition_kind_to_string disposition))
+        (actual = expected))
+    [ R.Disp_pass, Masc.Keeper_reaction_ledger.Execution_receipt
+    ; R.Disp_skipped, Masc.Keeper_reaction_ledger.Execution_receipt
+    ; R.Disp_pause_human, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_alert_exhausted, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_fail_open_next_runtime, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_pass_next_model, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_user_cancelled, Masc.Keeper_reaction_ledger.Terminal_reason
+    ; R.Disp_unknown, Masc.Keeper_reaction_ledger.Terminal_reason
+    ]
+;;
+
+let () =
+  List.iter
     (fun disposition ->
        let label = R.operator_disposition_kind_to_string disposition in
        let parsed =
@@ -497,8 +549,7 @@ let intentional_passive_only_policy_change (receipt : R.t) got =
            && receipt.actionable_signal = Some C.No_actionable_signal
            && receipt.outcome = `Ok
            && receipt.runtime_outcome = R.Runtime_completed
-           && (let c = String.lowercase_ascii receipt.terminal_reason_code in
-               c = "completed" || c = "success") ->
+           && String.equal receipt.terminal_reason_code "success" ->
       true
     | _ -> false
 ;;
@@ -687,7 +738,7 @@ let () =
 let () =
   let receipt =
     { base_receipt with
-      terminal_reason_code = "completed"
+      terminal_reason_code = "success"
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
     ; completion_contract_result = R.Contract_passive_only
@@ -727,7 +778,7 @@ let () =
 let () =
   let coordination_passive ?(actionable_signal = Some C.No_actionable_signal) () =
     { base_receipt with
-      terminal_reason_code = "completed"
+      terminal_reason_code = "success"
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
     ; completion_contract_result = R.Contract_passive_only

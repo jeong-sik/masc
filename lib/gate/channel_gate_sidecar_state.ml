@@ -259,9 +259,7 @@ module Make (Config : Config) = struct
         ("connector_id", `String connector_id);
         ("display_name", `String display_name);
         ("channel", `String channel);
-        ( "capabilities",
-          `List [ `String "runtime_status"; `String "bindings"; `String "audit" ]
-        );
+        ("capabilities", Channel_gate_connector_capability.all_json);
         ("status", `String (string_member status "status"));
         ("available", `Bool (bool_member status "available"));
         ("connected", `Bool (bool_member status "connected"));

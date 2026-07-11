@@ -78,6 +78,15 @@ let test_gate_time_parser_accepts_python_utc_isoformat () =
     (Option.is_none
        (Gate_time_util.parse_iso8601_opt "2026-06-06T00:00:00+09:00"))
 
+let test_connector_capability_wire_contract () =
+  check
+    (list string)
+    "closed capability order and wire values"
+    [ "runtime_status"; "bindings"; "audit" ]
+    (List.map
+       Channel_gate_connector_capability.to_wire
+       Channel_gate_connector_capability.all)
+
 let test_slack_bind_persists_binding_and_audit () =
   with_temp_dir @@ fun dir ->
   with_sidecar_paths "slack" dir (fun () ->
@@ -195,6 +204,11 @@ let test_slack_connector_json_carries_identity () =
       (json |> U.member "connector_id" |> U.to_string);
     check string "display name" "Slack"
       (json |> U.member "display_name" |> U.to_string);
+    check
+      (testable Yojson.Safe.pp Yojson.Safe.equal)
+      "connector capabilities use the canonical projection"
+      Channel_gate_connector_capability.all_json
+      (json |> U.member "capabilities");
     (* The endpoint passes [~gate_status_json]; identity must survive the
        merge, since it is the tile-matching key. *)
     let merged =
@@ -223,6 +237,8 @@ let () =
         [
           test_case "gate time parses python UTC isoformat" `Quick
             test_gate_time_parser_accepts_python_utc_isoformat;
+          test_case "connector capability wire contract" `Quick
+            test_connector_capability_wire_contract;
           test_case "slack bind persists binding and audit" `Quick
             test_slack_bind_persists_binding_and_audit;
           test_case "slack binding read errors are typed" `Quick

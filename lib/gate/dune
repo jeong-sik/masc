@@ -8,6 +8,7 @@
   channel_gate
   channel_gate_binding_store
   channel_gate_connector
+  channel_gate_connector_capability
   channel_gate_discord_names
   channel_gate_discord_state
   channel_gate_imessage_state

@@ -1000,6 +1000,9 @@ export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
     // and falsely report that the cleared state was rechecked.
     if (!opts?.force && (wantsLight || !inflightShellRefreshLight)) return inflightShellRefresh
     await inflightShellRefresh
+    // Another waiter may have started the required follow-up refresh while
+    // this caller resumed. Join it instead of launching duplicate requests.
+    if (inflightShellRefresh) return inflightShellRefresh
   }
   if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return true
   inflightShellRefreshLight = wantsLight

@@ -46,6 +46,7 @@ describe('refreshShell auth failure handling', () => {
     await vi.waitFor(() => expect(apiMocks.fetchDashboardShell).toHaveBeenCalledTimes(1))
 
     const afterStateChange = store.refreshShell({ force: true })
+    const concurrentAfterStateChange = store.refreshShell({ force: true })
     expect(apiMocks.fetchDashboardShell).toHaveBeenCalledTimes(1)
     resolveFirst?.({
       generated_at: '2026-07-11T11:00:00Z',
@@ -56,6 +57,7 @@ describe('refreshShell auth failure handling', () => {
 
     await expect(older).resolves.toBe(true)
     await expect(afterStateChange).resolves.toBe(true)
+    await expect(concurrentAfterStateChange).resolves.toBe(true)
     expect(apiMocks.fetchDashboardShell).toHaveBeenCalledTimes(2)
     expect(store.shellAuthSummary.value?.token_present).toBe(false)
     expect(store.shellAuthSummary.value?.token_valid).toBe(false)

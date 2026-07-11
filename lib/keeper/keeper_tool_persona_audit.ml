@@ -203,7 +203,10 @@ let item ~(config : Workspace.config) requested_name =
   let persona_profile_path =
     match List.find_opt Fs_compat.file_exists persona_candidates with
     | Some path -> Some path
-    | None -> List.hd_opt persona_candidates
+    | None -> (
+        match persona_candidates with
+        | path :: _ -> Some path
+        | [] -> None)
   in
   let persona_profile_exists =
     match persona_profile_path with

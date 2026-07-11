@@ -296,7 +296,9 @@ let keeper_config_probe_error_to_json
     ; ("next_action", `String "repair_keeper_config_directory")
     ]
 
-let keeper_toml_config_error_of_load_error ~keeper_name error =
+let keeper_toml_config_error_of_load_error
+    ~keeper_name
+    (error : keeper_toml_load_error) =
   { keeper_name
   ; keeper_path = error.keeper_path
   ; failing_path = error.failing_path

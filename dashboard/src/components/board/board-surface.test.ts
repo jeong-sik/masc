@@ -610,9 +610,11 @@ describe('BoardSurface Component', () => {
         body: 'content',
         author: 'ani1999',
         contributor_quality: {
-          accountability_score: 0.72,
-          source: 'agent_reputation',
-          board_posts: 1,
+          score: 0.72,
+          ups: 14,
+          downs: 2,
+          source: 'board_votes',
+          evidence_state: 'measured',
         },
       }),
     ]
@@ -622,7 +624,11 @@ describe('BoardSurface Component', () => {
     expect(screen.getByLabelText(/기여자 품질 72점/)).toHaveTextContent('품질 72')
   })
 
-  it('hides default contributor quality priors on post cards', () => {
+  // board-quality-wilson (#58): with no vote evidence (evidence_state
+  // "default"), the badge must not show a fabricated score even when
+  // the backend still sends score: 1 (there is none to send in practice,
+  // but the FE gate must not trust a numeric field over evidence_state).
+  it('hides contributor quality without vote evidence', () => {
     boardPosts.value = [
       makePost({
         id: 'post-quality-prior',
@@ -630,14 +636,10 @@ describe('BoardSurface Component', () => {
         body: 'content',
         author: 'ani1999',
         contributor_quality: {
-          accountability_score: 1,
-          source: 'agent_reputation',
-          board_posts: 0,
-          board_comments: 0,
-          completion_rate: 0,
-          response_rate: 0,
-          autonomy_level: 'standard',
-          thompson_confidence: 0.5,
+          score: 1,
+          ups: 0,
+          downs: 0,
+          source: 'board_votes',
           evidence_state: 'default',
         },
       }),
@@ -656,8 +658,10 @@ describe('BoardSurface Component', () => {
         body: 'content',
         author: 'ani1999',
         contributor_quality: {
-          accountability_score: 1,
-          source: 'agent_reputation',
+          score: 1,
+          ups: 3,
+          downs: 0,
+          source: 'board_votes',
           evidence_state: 'measured',
         },
       }),

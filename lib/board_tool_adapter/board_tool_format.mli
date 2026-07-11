@@ -11,7 +11,7 @@ type truncation_signal =
 
 type sort_order = Board_dispatch.sort_order =
   | Hot
-  | Trending
+  | Best
   | Recent
   | Updated
   | Discussed

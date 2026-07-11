@@ -5,9 +5,9 @@ import {
   boardPostPermalink,
   boardPostTrackbackMarkdown,
   boardPostXShareUrl,
-  contributorQualityBandLabel,
   contributorQualityBadgeClass,
   contributorQualityPercent,
+  contributorQualityTooltip,
   dedupeLeadingHeading,
   stripInlineMarkdown,
 } from './board-utils'
@@ -118,42 +118,45 @@ describe('board post sharing helpers', () => {
 })
 
 describe('contributor quality helpers', () => {
-  it('uses accountability_score when legacy score is absent and evidence exists', () => {
+  it('reads score from the Wilson-based board_votes projection when evidence is measured', () => {
     const quality = {
-      source: 'agent_reputation',
-      completion_rate: 0.8,
-      response_rate: 0.6,
-      board_posts: 1,
-      accountability_score: 0.9,
+      score: 0.72,
+      ups: 14,
+      downs: 2,
+      source: 'board_votes',
+      evidence_state: 'measured' as const,
     }
 
-    expect(contributorQualityPercent(quality)).toBe(90)
-    expect(contributorQualityBandLabel(quality)).toBe('품질')
-    expect(contributorQualityBadgeClass(quality)).toContain('color-bg-muted')
+    expect(contributorQualityPercent(quality)).toBe(72)
+    expect(contributorQualityBadgeClass()).toContain('color-bg-muted')
+    expect(contributorQualityTooltip(quality)).toBe('기여자 품질 72점 (Wilson lower bound) · 👍14 👎2')
   })
 
-  it('does not render default reputation priors as a numeric quality score', () => {
+  // board-quality-wilson (#58): evidence_state is the only gate now — no
+  // fallback heuristic re-derives "has evidence" from unrelated fields.
+  it('hides the score when evidence_state is not measured, even if score is present', () => {
     expect(contributorQualityPercent({
-      source: 'agent_reputation',
-      completion_rate: 0,
-      response_rate: 0,
-      board_posts: 0,
-      board_comments: 0,
-      accountability_score: 1,
-      autonomy_level: 'standard',
-      thompson_confidence: 0.5,
+      score: 1,
+      ups: 0,
+      downs: 0,
+      source: 'board_votes',
+      evidence_state: 'default',
     })).toBeNull()
   })
 
-  it('uses backend-supplied quality band without inventing thresholds', () => {
-    const quality = {
-      accountability_score: 0.4,
-      board_comments: 2,
-      band: 'strong' as const,
-    }
-    expect(contributorQualityPercent(quality)).toBe(40)
-    expect(contributorQualityBandLabel(quality)).toBe('강함')
-    expect(contributorQualityBadgeClass(quality)).toContain('ok-10')
+  it('hides the score when evidence_state is absent entirely', () => {
+    expect(contributorQualityPercent({ score: 0.5 })).toBeNull()
+  })
+
+  it('renders a measured score of 100 without a band', () => {
+    const quality = { score: 1, ups: 3, downs: 0, source: 'board_votes', evidence_state: 'measured' as const }
+    expect(contributorQualityPercent(quality)).toBe(100)
+    expect(contributorQualityTooltip(quality)).toBe('기여자 품질 100점 (Wilson lower bound) · 👍3 👎0')
+  })
+
+  it('defaults the tooltip vote counts to 0 when ups/downs are missing', () => {
+    const quality = { score: 0.42, source: 'board_votes', evidence_state: 'measured' as const }
+    expect(contributorQualityTooltip(quality)).toBe('기여자 품질 42점 (Wilson lower bound) · 👍0 👎0')
   })
 })
 

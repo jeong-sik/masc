@@ -103,19 +103,6 @@ function normalizeBoardActorSource(raw: unknown): BoardActorIdentity['source'] {
   }
 }
 
-function normalizeBoardContributorBand(raw: unknown): BoardContributorQuality['band'] {
-  const band = asString(raw, '').trim().toLowerCase()
-  switch (band) {
-    case 'low':
-    case 'watch':
-    case 'strong':
-    case 'excellent':
-      return band
-    default:
-      return undefined
-  }
-}
-
 function normalizeBoardKarmaTargetKind(raw: unknown): BoardKarmaLedgerEvent['target_kind'] | null {
   const kind = asString(raw, '').trim().toLowerCase()
   return kind === 'post' || kind === 'comment' ? kind : null
@@ -481,15 +468,9 @@ function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
 function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality | null {
   if (!isRecord(raw)) return null
   const score = asNumber(raw.score)
-  const completionRate = asNumber(raw.completion_rate)
-  const responseRate = asNumber(raw.response_rate)
-  const boardPosts = asNumber(raw.board_posts)
-  const boardComments = asNumber(raw.board_comments)
-  const accountabilityScore = asNumber(raw.accountability_score)
-  const thompsonConfidence = asNumber(raw.thompson_confidence)
+  const ups = asNumber(raw.ups)
+  const downs = asNumber(raw.downs)
   const source = asString(raw.source, '').trim() || undefined
-  const band = normalizeBoardContributorBand(raw.band)
-  const autonomyLevel = asString(raw.autonomy_level, '').trim() || undefined
   const rawEvidenceState = asString(raw.evidence_state, '').trim()
   const evidenceState = rawEvidenceState === 'measured' || rawEvidenceState === 'default'
     ? rawEvidenceState
@@ -497,28 +478,16 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
 
   if (
     score === undefined
-    && completionRate === undefined
-    && responseRate === undefined
-    && boardPosts === undefined
-    && boardComments === undefined
-    && accountabilityScore === undefined
-    && thompsonConfidence === undefined
+    && ups === undefined
+    && downs === undefined
     && source === undefined
-    && band === undefined
-    && autonomyLevel === undefined
     && evidenceState === undefined
   ) return null
   return {
     score,
-    band,
+    ups,
+    downs,
     source,
-    completion_rate: completionRate,
-    response_rate: responseRate,
-    board_posts: boardPosts,
-    board_comments: boardComments,
-    accountability_score: accountabilityScore,
-    autonomy_level: autonomyLevel,
-    thompson_confidence: thompsonConfidence,
     evidence_state: evidenceState,
   }
 }

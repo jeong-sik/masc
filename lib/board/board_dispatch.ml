@@ -23,7 +23,7 @@ module Float = Stdlib.Float
     @since 0.6.0
 *)
 
-type sort_order = Hot | Trending | Recent | Updated | Discussed
+type sort_order = Hot | Best | Recent | Updated | Discussed
 
 (** Issue #8449: SSOT helpers for [sort_order]. Three call sites used to
     own private parsers and a separate Variant in [Board_tool]; this PR
@@ -31,12 +31,21 @@ type sort_order = Hot | Trending | Recent | Updated | Discussed
     from the Variant. PR B will collapse the duplicate Variant; PR C
     will route [server_utils] through these parsers.
 
+    board-quality-wilson (#58): [Trending] retired in favor of [Best]
+    (Wilson score interval lower bound over votes — see
+    [Board_sort.wilson_lower_bound]); the old Hot picked up Trending's
+    time-decay role (see [Board_sort.hot_score]). [sort_order_of_string_opt]
+    intentionally does NOT accept "trending" as an alias for "best" — a
+    silent alias would hide the semantic change (net vote+decay vs.
+    confidence-weighted ratio) from any caller still passing the old
+    string.
+
     All constructors are nullary so [List.map] works. *)
-let all_sort_orders = [ Hot; Trending; Recent; Updated; Discussed ]
+let all_sort_orders = [ Hot; Best; Recent; Updated; Discussed ]
 
 let sort_order_to_string = function
   | Hot -> "hot"
-  | Trending -> "trending"
+  | Best -> "best"
   | Recent -> "recent"
   | Updated -> "updated"
   | Discussed -> "discussed"
@@ -47,7 +56,7 @@ let valid_sort_order_strings = List.map sort_order_to_string all_sort_orders
 let sort_order_of_string_opt s =
   match String.lowercase_ascii (String.trim s) with
   | "hot" -> Some Hot
-  | "trending" -> Some Trending
+  | "best" -> Some Best
   | "recent" -> Some Recent
   | "updated" -> Some Updated
   | "discussed" -> Some Discussed
@@ -310,7 +319,7 @@ let backend () =
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =
   (* Ranking formulas live in [Board_sort] (single source of truth) so the
-     Hot/Trending definitions cannot drift between this in-memory sort and
+     Hot/Best definitions cannot drift between this in-memory sort and
      [Board_core.list_posts]'s cached default sort. See [Board_sort]. *)
   match sort_by with
   | Hot -> List.sort Board_sort.hot_compare posts
@@ -320,8 +329,7 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
   | Updated ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
         Stdlib.Float.compare b.updated_at a.updated_at) posts
-  | Trending ->
-      List.sort (Board_sort.trending_compare ~now:(Time_compat.now ())) posts
+  | Best -> List.sort Board_sort.best_compare posts
   | Discussed ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
         let cmp = Stdlib.Int.compare b.reply_count a.reply_count in
@@ -458,7 +466,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
         ||
         match sort_by with
         | Hot -> false
-        | Trending | Recent | Updated | Discussed -> true
+        | Best | Recent | Updated | Discussed -> true
       in
       let fetch_limit =
         if needs_full_scan then Board.Limits.max_posts else max limit 500

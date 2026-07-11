@@ -366,7 +366,7 @@ let detect_truncated_markdown_with_reason (text : string) : truncation_signal op
     automatically updates the user-facing list. *)
 type sort_order = Board_dispatch.sort_order =
   | Hot
-  | Trending
+  | Best
   | Recent
   | Updated
   | Discussed

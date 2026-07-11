@@ -231,20 +231,31 @@ let board_moderation_fields ~include_moderation ~target_kind ~target_id =
       ("moderation_status", `String summary.Board_moderation.moderation_status);
     ]
 
-let board_contributor_quality_json
-    (rep : Reputation.agent_reputation) : Yojson.Safe.t =
+(* board-quality-wilson (#58): contributor_quality on a board post/comment
+   is a peer-vote-evidence score, not a repackaging of the unrelated
+   task-accountability penalty (Reputation.agent_reputation.accountability_score
+   answers "did this agent skip commitments", not "do peers rate this
+   agent's contributions well"). score = Board_sort.wilson_lower_bound
+   over (ups, downs) received — see docs/spec/11-board.md §9a.7 for the
+   contract and lib/board/board_sort.ml for the formula + citation.
+   evidence_state is derived from vote evidence alone (ups + downs > 0),
+   independent of Reputation.agent_reputation.evidence_state, which is
+   "measured" for ANY agent activity (tasks, mentions, v2 ledger, ...)
+   and would defeat the point: an agent active elsewhere but never
+   board-voted-on must still show no badge. *)
+let board_contributor_quality_json ~(ups : int) ~(downs : int) : Yojson.Safe.t =
+  let has_evidence = ups + downs > 0 in
   `Assoc
-    [
-      ("source", `String "agent_reputation");
-      ("completion_rate", `Float rep.completion_rate);
-      ("response_rate", `Float rep.response_rate);
-      ("board_posts", `Int rep.board_posts);
-      ("board_comments", `Int rep.board_comments);
-      ("accountability_score", `Float rep.accountability_score);
-      ("autonomy_level", `String rep.autonomy_level);
-      ("thompson_confidence", `Float rep.thompson_confidence);
-      ("evidence_state", `String rep.evidence_state);
-    ]
+    ([
+       ("source", `String "board_votes");
+       ("ups", `Int ups);
+       ("downs", `Int downs);
+       ("evidence_state", `String (if has_evidence then "measured" else "default"));
+     ]
+     @
+     if has_evidence then
+       [ ("score", `Float (Board_sort.wilson_lower_bound ~ups ~downs)) ]
+     else [])
 
 let board_contributor_quality_lookup ?config () =
   match config with
@@ -257,11 +268,10 @@ let board_contributor_quality_lookup ?config () =
         | None ->
             let value =
               try
-                let rep =
-                  Reputation.compute_reputation config
-                    ~agent_name:author
+                let ups, downs =
+                  Reputation.votes_received config ~agent_name:author
                 in
-                Some (board_contributor_quality_json rep)
+                Some (board_contributor_quality_json ~ups ~downs)
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->

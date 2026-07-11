@@ -136,17 +136,18 @@ type BoardPostMeta = Record<string, unknown> & {
 export type BoardVoteDirection = 'up' | 'down'
 export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
+// board-quality-wilson (#58): score is Board_sort.wilson_lower_bound(ups,
+// downs) over peer votes received by the author — see
+// docs/spec/11-board.md §9a.7. `band` is gone (was dead code: no backend
+// site ever emitted it). completion_rate/response_rate/accountability_score/
+// autonomy_level/thompson_confidence stay on the agent-reputation surface,
+// not this board projection (they answered "did this agent skip
+// commitments", unrelated to peer-vote quality).
 export interface BoardContributorQuality {
   score?: number
-  band?: 'low' | 'watch' | 'strong' | 'excellent'
+  ups?: number
+  downs?: number
   source?: string
-  completion_rate?: number
-  response_rate?: number
-  board_posts?: number
-  board_comments?: number
-  accountability_score?: number
-  autonomy_level?: string
-  thompson_confidence?: number
   evidence_state?: 'default' | 'measured'
 }
 

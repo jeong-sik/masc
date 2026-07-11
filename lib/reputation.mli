@@ -85,6 +85,23 @@ val count_board_activity_in_dir :
     Exposed for tests; the per-render board dashboard reaches this through
     {!compute_reputation}. *)
 
+val votes_received_in_dir :
+  board_dir:string -> agent_name:string -> int * int
+(** [(ups, downs)] peer votes received by [agent_name] under [board_dir],
+    aggregated from board_votes.jsonl joined against board_posts.jsonl /
+    board_comments.jsonl for author identity, through the same
+    mtime-gated projection style as {!count_board_activity_in_dir}.
+    Self-votes are excluded (matches {!Board_votes.karma_event_of_vote}'s
+    recipient/voter equality check), but unlike karma both [Up] and
+    [Down] are counted — this feeds the board contributor-quality Wilson
+    score (see [Board_sort.wilson_lower_bound]), which needs the full
+    trial count, not just the reputation-earning subset. [(0, 0)] means
+    "no peer vote evidence", not "confidently zero". Exposed for tests. *)
+
+val votes_received : Workspace.config -> agent_name:string -> int * int
+(** [(ups, downs)] received by [agent_name]; resolves [board_dir] from
+    [config] and delegates to {!votes_received_in_dir}. *)
+
 val reputation_to_json : agent_reputation -> Yojson.Safe.t
 (** Alias for {!agent_reputation_to_yojson}. *)
 

@@ -539,14 +539,11 @@ describe('fetchBoard', () => {
           report_count: 2,
           moderation_status: 'flagged',
           contributor_quality: {
-            source: 'agent_reputation',
-            completion_rate: 0.8,
-            response_rate: 0.6,
-            board_posts: 3,
-            board_comments: 5,
-            accountability_score: 0.9,
-            autonomy_level: 'elevated',
-            thompson_confidence: 0.7,
+            source: 'board_votes',
+            score: 0.9,
+            ups: 18,
+            downs: 2,
+            evidence_state: 'measured',
           },
           reactions: [
             {
@@ -601,14 +598,11 @@ describe('fetchBoard', () => {
       report_count: 2,
       moderation_status: 'flagged',
       contributor_quality: {
-        source: 'agent_reputation',
-        completion_rate: 0.8,
-        response_rate: 0.6,
-        board_posts: 3,
-        board_comments: 5,
-        accountability_score: 0.9,
-        autonomy_level: 'elevated',
-        thompson_confidence: 0.7,
+        source: 'board_votes',
+        score: 0.9,
+        ups: 18,
+        downs: 2,
+        evidence_state: 'measured',
       },
       claim_evidence: {
         state: 'artifact_missing',
@@ -754,20 +748,19 @@ describe('fetchBoard', () => {
     expect(result.posts[0]?.origin).toBeNull()
   })
 
-  it('keeps contributor_quality when only band and autonomy_level are present', async () => {
+  it('keeps contributor_quality when only evidence_state is present', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         posts: [
           {
-            id: 'post-band-only',
+            id: 'post-evidence-only',
             author: 'analyst',
-            title: 'Band only',
+            title: 'Evidence only',
             body: 'contributor_quality has no numeric fields',
             created_at: 1_713_000_000,
             updated_at: 1_713_000_000,
             contributor_quality: {
-              band: 'strong',
-              autonomy_level: 'elevated',
+              evidence_state: 'default',
             },
           },
         ],
@@ -781,8 +774,7 @@ describe('fetchBoard', () => {
     const result = await fetchBoard()
 
     expect(result.posts[0]?.contributor_quality).toEqual({
-      band: 'strong',
-      autonomy_level: 'elevated',
+      evidence_state: 'default',
     })
   })
 })

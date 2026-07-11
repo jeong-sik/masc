@@ -62,7 +62,7 @@ let test_sort_order_witness_in_enum () =
       Alcotest.failf "sort_order_to_string %S not in valid_sort_order_strings" actual
   in
   witness D.Hot;
-  witness D.Trending;
+  witness D.Best;
   witness D.Recent;
   witness D.Updated;
   witness D.Discussed;
@@ -78,6 +78,11 @@ let test_sort_order_legacy_aliases_rejected () =
   rejected "new rejected" "new";
   rejected "active rejected" "active";
   rejected "comments rejected" "comments";
+  (* board-quality-wilson (#58): "trending" is a retired sort name, not an
+     alias for "best" — a silent alias would hide the semantic change
+     (net-vote+decay vs. confidence-weighted ratio) from any caller still
+     passing the old string. *)
+  rejected "trending rejected (retired, not an alias for best)" "trending";
   rejected "garbage rejected" "definitely-not-an-order"
 
 let test_permanent_post () =

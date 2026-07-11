@@ -26,8 +26,8 @@ import {
   boardClaimEvidenceLabel,
   boardClaimEvidenceTitle,
   contributorQualityBadgeClass,
-  contributorQualityBandLabel,
   contributorQualityPercent,
+  contributorQualityTooltip,
   navigateToAuthor,
 } from '../../lib/board-utils'
 import {
@@ -551,10 +551,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
   const qualityPercent = contributorQualityPercent(post.contributor_quality)
-  const qualityBand = contributorQualityBandLabel(post.contributor_quality)
-  const qualityTitle = qualityPercent === null
-    ? undefined
-    : `기여자 품질 ${qualityPercent}점 · ${qualityBand}`
+  const qualityTitle = contributorQualityTooltip(post.contributor_quality)
   const claimEvidenceLabel = boardClaimEvidenceLabel(post.claim_evidence)
   const claimEvidenceTitle = boardClaimEvidenceTitle(post.claim_evidence)
   const upvoteActive = post.current_vote === 'up'
@@ -642,7 +639,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
                     <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
                     ${qualityPercent !== null ? html`
                       <span
-                        class=${`inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
+                        class=${`inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${contributorQualityBadgeClass()}`}
                         aria-label=${qualityTitle}
                         title=${qualityTitle}
                       >품질 ${qualityPercent}</span>

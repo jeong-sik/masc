@@ -71,7 +71,7 @@ val detect_truncated_markdown_with_reason :
 
 type sort_order = Board_dispatch.sort_order =
   | Hot
-  | Trending
+  | Best
   | Recent
   | Updated
   | Discussed

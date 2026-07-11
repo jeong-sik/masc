@@ -300,7 +300,7 @@ export interface JournalEntry {
 
 // --- Sort modes ---
 
-export type BoardSortMode = 'hot' | 'trending' | 'recent' | 'updated' | 'discussed'
+export type BoardSortMode = 'hot' | 'best' | 'recent' | 'updated' | 'discussed'
 
 // --- Route state ---
 

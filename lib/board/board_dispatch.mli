@@ -21,7 +21,7 @@
 
 (** {1 Sort orders} *)
 
-type sort_order = Hot | Trending | Recent | Updated | Discussed
+type sort_order = Hot | Best | Recent | Updated | Discussed
 
 val sort_order_to_string : sort_order -> string
 

@@ -55,7 +55,7 @@ export type { BoardComment, BoardPost, BoardSortMode }
 export const SORT_MODES: { id: BoardSortMode; label: string }[] = [
   { id: 'recent', label: '최신순' },
   { id: 'hot', label: '인기순' },
-  { id: 'trending', label: '급상승' },
+  { id: 'best', label: '베스트' },
   { id: 'updated', label: '최근 갱신' },
   { id: 'discussed', label: '댓글 많은 순' },
 ]

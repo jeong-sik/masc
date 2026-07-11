@@ -169,15 +169,18 @@ val board_reactions_lookup :
   Board.reaction_target_type * string ->
   Board.reaction_summary list
 
-val board_contributor_quality_json :
-  Reputation.agent_reputation -> Yojson.Safe.t
-(** [board_contributor_quality_json rep] projects the existing agent
-    reputation record into the compact board contributor-quality contract. *)
+val board_contributor_quality_json : ups:int -> downs:int -> Yojson.Safe.t
+(** [board_contributor_quality_json ~ups ~downs] emits the board
+    contributor-quality contract [{score?, ups, downs, evidence_state,
+    source}] — [score] is {!Board_sort.wilson_lower_bound} over
+    [(ups, downs)], present only when [ups + downs > 0].  See
+    docs/spec/11-board.md §9a.7. *)
 
 val board_contributor_quality_lookup :
   ?config:Workspace.config -> unit -> string -> Yojson.Safe.t option
 (** [board_contributor_quality_lookup ?config ()] returns a request-local
-    memoized lookup by author.  Without [config], it returns [None]. *)
+    memoized lookup by author, backed by {!Reputation.votes_received}.
+    Without [config], it returns [None]. *)
 
 val board_claim_evidence_lookup : unit -> string -> Yojson.Safe.t option
 (** [board_claim_evidence_lookup ()] snapshots the board-claim sidecar once and

@@ -181,7 +181,7 @@ let test_sort_order_of_string () =
     | Error e -> Alcotest.failf "%s: expected Ok, got Error: %s" name e
   in
   check "hot" Board_tool.Hot "hot";
-  check "trending" Board_tool.Trending "trending";
+  check "best" Board_tool.Best "best";
   check "recent" Board_tool.Recent "recent";
   check "updated" Board_tool.Updated "updated";
   check "discussed" Board_tool.Discussed "discussed";
@@ -508,20 +508,8 @@ let test_board_dashboard_json_embeds_contributor_quality () =
     | Ok post -> post
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
-  let rep =
-    {
-      (Reputation.default_reputation ~agent_name:"quality-author") with
-      completion_rate = 0.8;
-      response_rate = 0.6;
-      board_posts = 3;
-      board_comments = 5;
-      accountability_score = 0.9;
-      autonomy_level = "elevated";
-      thompson_confidence = 0.7;
-    }
-  in
   let contributor_quality =
-    Server_utils.board_contributor_quality_json rep
+    Server_utils.board_contributor_quality_json ~ups:14 ~downs:2
   in
   let post_json =
     Server_utils.board_post_dashboard_json ~contributor_quality
@@ -532,10 +520,28 @@ let test_board_dashboard_json_embeds_contributor_quality () =
     | `Assoc _ as quality -> quality
     | _ -> Alcotest.fail "expected contributor_quality object"
   in
-  Alcotest.(check string) "quality source" "agent_reputation"
+  Alcotest.(check string) "quality source" "board_votes"
     (json_member_string quality "source");
-  Alcotest.(check int) "quality board posts" 3
-    (json_member_int quality "board_posts")
+  Alcotest.(check int) "quality ups" 14
+    (json_member_int quality "ups");
+  Alcotest.(check int) "quality downs" 2
+    (json_member_int quality "downs");
+  Alcotest.(check string) "quality evidence_state" "measured"
+    (json_member_string quality "evidence_state")
+
+let test_board_contributor_quality_absent_without_evidence () =
+  (* Zero votes must show as "no evidence" (evidence_state = "default",
+     score field absent), not a fabricated numeric quality — this is the
+     honest-disappearance contract from item #58's fix design. *)
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let quality = Server_utils.board_contributor_quality_json ~ups:0 ~downs:0 in
+  Alcotest.(check string) "no-evidence state" "default"
+    (json_member_string quality "evidence_state");
+  Alcotest.(check bool) "score field absent without evidence" true
+    (match Yojson.Safe.Util.member "score" quality with
+     | `Null -> true
+     | _ -> false)
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
@@ -1344,7 +1350,7 @@ let test_post_list_sort_orders () =
   cleanup ();
   ignore (dispatch "masc_board_post"
     (make_args [("content", `String "sort test"); ("author", `String "a")]));
-  let sorts = ["hot"; "trending"; "recent"; "updated"; "discussed"] in
+  let sorts = ["hot"; "best"; "recent"; "updated"; "discussed"] in
   List.iter (fun s ->
     let ok, body = dispatch "masc_board_list"
       (make_args [("sort_by", `String s)]) in
@@ -1362,7 +1368,7 @@ let test_post_list_invalid_sort_rejected () =
     (make_args [("sort", `String "invalid_xyz")]) in
   Alcotest.(check bool) "invalid sort rejected" false ok;
   Alcotest.(check bool) "error mentions valid sorts" true
-    (contains_substring body "invalid sort. Valid: hot, trending, recent, updated, discussed")
+    (contains_substring body "invalid sort. Valid: hot, best, recent, updated, discussed")
 
 let test_post_list_filter_combinations () =
   with_eio @@ fun env ->
@@ -2616,6 +2622,8 @@ let () =
             `Quick test_board_dashboard_json_hides_unvoted_scores_when_blind;
           Alcotest.test_case "board dashboard json embeds contributor quality"
             `Quick test_board_dashboard_json_embeds_contributor_quality;
+          Alcotest.test_case "board contributor quality absent without vote evidence"
+            `Quick test_board_contributor_quality_absent_without_evidence;
           Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "MCP runtime board post author accepts matching alias"

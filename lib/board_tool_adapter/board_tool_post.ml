@@ -409,7 +409,7 @@ let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
       let sort_label =
         match sort_by with
         | Board_tool_format.Hot -> "Hot"
-        | Board_tool_format.Trending -> "Trending"
+        | Board_tool_format.Best -> "Best"
         | Board_tool_format.Recent -> "Recent"
         | Board_tool_format.Updated -> "Recently Updated"
         | Board_tool_format.Discussed -> "Most Discussed"

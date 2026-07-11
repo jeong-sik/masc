@@ -240,6 +240,97 @@ let count_board_activity (config : Workspace.config) ~(agent_name : string)
     : int * int =
   count_board_activity_in_dir ~board_dir:(Workspace.masc_dir config) ~agent_name
 
+(** {1 Board Vote Counting}
+
+    board-quality-wilson (#58): peer votes received by an author,
+    aggregated from board_votes.jsonl joined against board_posts.jsonl /
+    board_comments.jsonl for author identity. This is the evidence input
+    to the board contributor-quality score (see
+    {!Board_sort.wilson_lower_bound} in [server_utils.ml]) — a signal
+    distinct from {!count_board_activity} (posts/comments the agent
+    authored) and unrelated to {!accountability_metrics} (a
+    task-evidence penalty). Mirrors {!board_activity_table}'s
+    mtime-gated projection pattern rather than reading the live
+    [Board.store] actor, for the same reason: this module already reads
+    board JSONL directly and has no dependency on board actor
+    initialization order. *)
+
+(** Self-votes are excluded exactly like
+    {!Board_votes.karma_event_of_vote}'s recipient/voter equality check
+    — an author cannot inflate or deflate their own Wilson evidence by
+    voting on their own post/comment. Unlike karma (which only counts
+    [Up]), both directions count here: the Wilson bound needs the full
+    (ups, downs) trial count, not just the reputation-earning subset. *)
+let board_vote_totals_cache :
+    (string, int * int) Hashtbl.t Jsonl_mtime_projection.t =
+  Jsonl_mtime_projection.create ()
+
+let build_board_vote_totals ~votes_path ~posts_path ~comments_path :
+    (string, int * int) Hashtbl.t =
+  let author_of_id : (string, string) Hashtbl.t = Hashtbl.create 256 in
+  let index_authors rows =
+    List.iter
+      (fun json ->
+        let id = Safe_ops.json_string ~default:"" "id" json in
+        let author = Safe_ops.json_string ~default:"" "author" json in
+        if id <> "" && author <> "" then Hashtbl.replace author_of_id id author)
+      rows
+  in
+  index_authors (load_jsonl_safe posts_path);
+  index_authors (load_jsonl_safe comments_path);
+  let by_author : (string, int * int) Hashtbl.t = Hashtbl.create 256 in
+  let bump recipient select =
+    let prev = Hashtbl.find_opt by_author recipient |> Option.value ~default:(0, 0) in
+    Hashtbl.replace by_author recipient (select prev)
+  in
+  List.iter
+    (fun json ->
+      (* [target] is the full "kind:id:voter" vote-log key (see
+         [Board_votes.parse_vote_key]); [voter] is also persisted as
+         its own field ([Board_votes.vote_log_jsonl]) — read that
+         directly instead of re-deriving it from [target]. Only [id]
+         needs extracting from [target] here. *)
+      let target = Safe_ops.json_string ~default:"" "target" json in
+      let voter = Safe_ops.json_string ~default:"" "voter" json in
+      let direction = Safe_ops.json_string ~default:"" "direction" json in
+      match String.index_opt target ':' with
+      | None -> ()
+      | Some i1 ->
+        let rest = String.sub target (i1 + 1) (String.length target - i1 - 1) in
+        let id = match String.index_opt rest ':' with
+          | Some i2 -> String.sub rest 0 i2
+          | None -> rest
+        in
+        (match Hashtbl.find_opt author_of_id id with
+         | None -> ()
+         | Some recipient when String.equal recipient voter -> ()
+         | Some recipient ->
+           (match direction with
+            | "up" -> bump recipient (fun (ups, downs) -> (ups + 1, downs))
+            | "down" -> bump recipient (fun (ups, downs) -> (ups, downs + 1))
+            | _ -> ())))
+    (load_jsonl_safe votes_path);
+  by_author
+
+let board_vote_totals_table board_dir : (string, int * int) Hashtbl.t =
+  let votes_path = Filename.concat board_dir "board_votes.jsonl" in
+  let posts_path = Filename.concat board_dir "board_posts.jsonl" in
+  let comments_path = Filename.concat board_dir "board_comments.jsonl" in
+  Jsonl_mtime_projection.get board_vote_totals_cache ~key:board_dir
+    ~sources:[ votes_path; posts_path; comments_path ]
+    ~build:(fun () -> build_board_vote_totals ~votes_path ~posts_path ~comments_path)
+
+(** [(ups, downs)] received by [agent_name] under [board_dir], excluding
+    self-votes. [(0, 0)] when the author has never received a peer vote —
+    callers use that to mean "no evidence" (see {!Board_sort.wilson_lower_bound}). *)
+let votes_received_in_dir ~(board_dir : string) ~(agent_name : string) : int * int =
+  Hashtbl.find_opt (board_vote_totals_table board_dir) agent_name
+  |> Option.value ~default:(0, 0)
+
+(** [(ups, downs)] received by [agent_name], excluding self-votes. *)
+let votes_received (config : Workspace.config) ~(agent_name : string) : int * int =
+  votes_received_in_dir ~board_dir:(Workspace.masc_dir config) ~agent_name
+
 (** {1 Mention Counting} *)
 
 let count_mention_activity (config : Workspace.config) ~(agent_name : string)

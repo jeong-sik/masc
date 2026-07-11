@@ -539,8 +539,10 @@ describe('PostDetail', () => {
       moderation_status: 'approved',
       contributor_quality: {
         score: 0.91,
-        band: 'excellent',
-        source: 'agent_reputation',
+        ups: 20,
+        downs: 1,
+        source: 'board_votes',
+        evidence_state: 'measured',
       },
       comments: [],
     } as any
@@ -551,7 +553,7 @@ describe('PostDetail', () => {
     expect(screen.getByText(/Direct board post without automation provenance/)).toBeInTheDocument()
     expect(screen.getByText('직접')).toBeInTheDocument()
     expect(screen.getByLabelText('게시글 moderation 승인됨 1건')).toHaveTextContent('승인됨 1')
-    expect(screen.getByLabelText('기여자 품질 91점 · 우수')).toHaveTextContent('품질 91')
+    expect(screen.getByLabelText('기여자 품질 91점 (Wilson lower bound) · 👍20 👎1')).toHaveTextContent('품질 91')
   })
 
   it('renders contributor quality when it is the only detail badge', () => {
@@ -569,15 +571,17 @@ describe('PostDetail', () => {
       moderation_status: 'none',
       contributor_quality: {
         score: 0.42,
-        band: 'watch',
-        source: 'agent_reputation',
+        ups: 5,
+        downs: 5,
+        source: 'board_votes',
+        evidence_state: 'measured',
       },
       comments: [],
     } as any
 
     render(h(PostDetail, { post }))
 
-    expect(screen.getByLabelText('기여자 품질 42점 · 관찰')).toHaveTextContent('품질 42')
+    expect(screen.getByLabelText('기여자 품질 42점 (Wilson lower bound) · 👍5 👎5')).toHaveTextContent('품질 42')
   })
 
   it('renders claim evidence when it is the only detail badge', () => {

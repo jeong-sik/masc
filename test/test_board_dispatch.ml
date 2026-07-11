@@ -466,10 +466,10 @@ let test_list_posts_negative_limit_returns_empty () =
 let test_list_posts_with_sort () =
   let posts_hot = Board_dispatch.list_posts ~sort_by:Board_dispatch.Hot ~limit:5 () in
   let posts_recent = Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5 () in
-  let posts_trending = Board_dispatch.list_posts ~sort_by:Board_dispatch.Trending ~limit:5 () in
+  let posts_best = Board_dispatch.list_posts ~sort_by:Board_dispatch.Best ~limit:5 () in
   let posts_updated = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:5 () in
   let posts_discussed = Board_dispatch.list_posts ~sort_by:Board_dispatch.Discussed ~limit:5 () in
-  let counts = List.map List.length [posts_hot; posts_recent; posts_trending; posts_updated; posts_discussed] in
+  let counts = List.map List.length [posts_hot; posts_recent; posts_best; posts_updated; posts_discussed] in
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
 
@@ -487,13 +487,25 @@ let test_recent_sort_bypasses_hot_cutoff () =
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
+  (* board-quality-wilson (#58): Hot ranks on
+     Board_sort.hot_score = sign(net) * log10(max(1,|net|)) + decay, so a
+     net-vote gap of 1 (log10(1) = 0) is noise the decay term can (and,
+     for a same-instant fixture, does) cancel out entirely — that is the
+     intended behavior of Reddit's hot() formula, not a bug. Each filler
+     post needs a full order of magnitude of net vote (10 distinct
+     upvotes) to stay decisively ahead of a same-instant net-0 post; 1
+     vote each (the pre-#58 fixture) would make every post here tie the
+     brand-new cold post on hot_score, defeating this test's purpose. *)
+  let net_votes_per_hot_post = 10 in
   for i = 1 to 101 do
     let hot_post =
       create_post_exn ~author:(Printf.sprintf "hot-author-%03d" i)
         ~content:(Printf.sprintf "hot post %03d" i)
     in
-    vote_up_exn ~post_id:(Board.Post_id.to_string hot_post.id)
-      ~voter:(Printf.sprintf "hot-voter-%03d" i)
+    for j = 1 to net_votes_per_hot_post do
+      vote_up_exn ~post_id:(Board.Post_id.to_string hot_post.id)
+        ~voter:(Printf.sprintf "hot-voter-%03d-%02d" i j)
+    done
   done;
   let cold_post =
     create_post_exn ~author:"recent-cold-author"

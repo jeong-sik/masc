@@ -45,5 +45,5 @@ let writable_memory_kind_enum_strings =
 ;;
 
 let fs_write_mode_enum_strings = [ "overwrite"; "append"; "patch" ]
-let sort_order_enum_strings = [ "hot"; "trending"; "recent"; "updated"; "discussed" ]
+let sort_order_enum_strings = [ "hot"; "best"; "recent"; "updated"; "discussed" ]
 let vote_direction_enum_strings = [ "up"; "down" ]

@@ -50,6 +50,7 @@ import {
   boardClaimEvidenceTitle,
   contributorQualityBadgeClass,
   contributorQualityPercent,
+  contributorQualityTooltip,
   navigateToAuthor,
   stripInlineMarkdown,
   dedupeLeadingHeading,
@@ -370,9 +371,7 @@ function PostCard({ post }: { post: BoardPost }) {
   const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
   const isMod = post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved'
   const qualityPercent = contributorQualityPercent(post.contributor_quality)
-  const qualityTitle = qualityPercent === null
-    ? undefined
-    : `기여자 품질 ${qualityPercent}점`
+  const qualityTitle = contributorQualityTooltip(post.contributor_quality)
   const claimEvidenceLabel = boardClaimEvidenceLabel(post.claim_evidence)
   const claimEvidenceTitle = boardClaimEvidenceTitle(post.claim_evidence)
   const selected = selectedBoardPostId.value === post.id
@@ -456,7 +455,7 @@ function PostCard({ post }: { post: BoardPost }) {
         ${post.pinned ? html`<span class="bd-badge pin" title="고정된 게시글">고정</span>` : null}
         ${isMod ? html`<span class="bd-badge mod">모더레이션 대기</span>` : null}
         ${post.flair ? html`<span class="bd-badge">flair:${post.flair}</span>` : null}
-        ${qualityPercent !== null ? html`<span class="bd-badge ${contributorQualityBadgeClass(post.contributor_quality)}" aria-label=${qualityTitle} title=${qualityTitle}>품질 ${qualityPercent}</span>` : null}
+        ${qualityPercent !== null ? html`<span class="bd-badge ${contributorQualityBadgeClass()}" aria-label=${qualityTitle} title=${qualityTitle}>품질 ${qualityPercent}</span>` : null}
         ${claimEvidenceLabel !== null ? html`
           <span
             class=${`bd-badge ${boardClaimEvidenceBadgeClass(post.claim_evidence)}`}

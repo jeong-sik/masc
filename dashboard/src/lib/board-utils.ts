@@ -172,37 +172,26 @@ export function boardActorTitle(
 
 export function contributorQualityPercent(quality?: BoardContributorQuality | null): number | null {
   if (!contributorQualityHasEvidence(quality)) return null
-  const score = contributorQualityDisplayScore(quality)
-  return score === null ? null : clampPct(Math.round(score * 100))
+  const score = quality?.score
+  return score === undefined || !Number.isFinite(score) ? null : clampPct(Math.round(score * 100))
 }
 
-export function contributorQualityBandLabel(quality?: BoardContributorQuality | null): string {
-  switch (contributorQualityDisplayBand(quality)) {
-    case 'excellent':
-      return '우수'
-    case 'strong':
-      return '강함'
-    case 'watch':
-      return '관찰'
-    case 'low':
-      return '낮음'
-    default:
-      return '품질'
-  }
+// board-quality-wilson (#58): band is gone (dead code — no backend site
+// ever emitted it), so the badge no longer color-codes by quality tier.
+// The tooltip carries the evidence (ups/downs) instead of a band label.
+const CONTRIBUTOR_QUALITY_BADGE_CLASS =
+  'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
+
+export function contributorQualityBadgeClass(): string {
+  return CONTRIBUTOR_QUALITY_BADGE_CLASS
 }
 
-export function contributorQualityBadgeClass(quality?: BoardContributorQuality | null): string {
-  switch (contributorQualityDisplayBand(quality)) {
-    case 'excellent':
-    case 'strong':
-      return 'bg-[var(--ok-10)] text-[var(--ok-fg)] border-[var(--ok-20)]'
-    case 'watch':
-      return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
-    case 'low':
-      return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
-    default:
-      return 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
-  }
+export function contributorQualityTooltip(quality?: BoardContributorQuality | null): string | undefined {
+  const percent = contributorQualityPercent(quality)
+  if (percent === null) return undefined
+  const ups = quality?.ups ?? 0
+  const downs = quality?.downs ?? 0
+  return `기여자 품질 ${percent}점 (Wilson lower bound) · 👍${ups} 👎${downs}`
 }
 
 export function boardClaimEvidenceLabel(evidence?: BoardClaimEvidenceProjection | null): string | null {
@@ -248,45 +237,14 @@ export function boardClaimEvidenceTitle(evidence?: BoardClaimEvidenceProjection 
   ].join(' · ')
 }
 
-function contributorQualityDisplayScore(
-  quality?: BoardContributorQuality | null,
-): number | null {
-  if (!quality) return null
-  const legacyScore = quality.score
-  if (legacyScore !== undefined && Number.isFinite(legacyScore)) return legacyScore
-  const accountabilityScore = quality.accountability_score
-  if (accountabilityScore !== undefined && Number.isFinite(accountabilityScore)) {
-    return accountabilityScore
-  }
-  return null
-}
-
-function contributorQualityDisplayBand(
-  quality?: BoardContributorQuality | null,
-): BoardContributorQuality['band'] | null {
-  if (quality?.band) return quality.band
-  return null
-}
-
+// board-quality-wilson (#58): evidence is gated on the backend's own
+// evidence_state alone. The old heuristic here re-derived "has evidence"
+// client-side from six unrelated reputation fields (each with its own
+// hardcoded default), duplicating a decision the backend already makes
+// authoritatively from vote counts. Trust evidence_state; do not
+// reconstruct it from parallel signals.
 function contributorQualityHasEvidence(quality?: BoardContributorQuality | null): boolean {
-  if (!quality) return false
-  if (quality.evidence_state !== undefined) {
-    return quality.evidence_state === 'measured'
-  }
-  if (quality.band) return true
-  if (quality.score !== undefined && Number.isFinite(quality.score)) return true
-  if ((quality.board_posts ?? 0) > 0) return true
-  if ((quality.board_comments ?? 0) > 0) return true
-  if ((quality.completion_rate ?? 0) > 0) return true
-  if ((quality.response_rate ?? 0) > 0) return true
-
-  const DEFAULT_ACCOUNTABILITY_SCORE = 1.0
-  const DEFAULT_THOMPSON_CONFIDENCE = 0.5
-  const DEFAULT_AUTONOMY_LEVEL = 'standard'
-
-  if (quality.accountability_score !== undefined && quality.accountability_score < DEFAULT_ACCOUNTABILITY_SCORE) return true
-  if (quality.thompson_confidence !== undefined && quality.thompson_confidence !== DEFAULT_THOMPSON_CONFIDENCE) return true
-  return quality.autonomy_level !== undefined && quality.autonomy_level !== DEFAULT_AUTONOMY_LEVEL
+  return quality?.evidence_state === 'measured'
 }
 
 /** Navigate to keeper detail if author is a keeper, otherwise agent profile. */

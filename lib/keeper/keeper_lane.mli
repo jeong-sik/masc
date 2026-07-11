@@ -61,6 +61,12 @@ val reject_before_start : t -> reason:exn -> (unit, start_error) result
     [await_exit] for that boundary. *)
 val request_cancel : t -> cancel_result
 
+val shutdown_requested : t -> bool
+(** [true] once [request_cancel] has been called on this lane. Lets a
+    supervised body classify a resulting [Eio.Cancel.Cancelled] as an
+    operator-sanctioned shutdown (graceful stop) rather than a parent/restart
+    cancel, since both surface as the same exception. *)
+
 val exited : t -> exit Eio.Promise.t
 val peek_exit : t -> exit option
 val await_exit : t -> exit

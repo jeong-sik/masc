@@ -57,6 +57,11 @@ type t =
   ; state : state Atomic.t
   ; exited_p : exit Eio.Promise.t
   ; exited_r : exit Eio.Promise.u
+  ; shutdown_requested : bool Atomic.t
+    (* Set once [request_cancel] is called (shutdown of this lane). Lets a
+       supervised body distinguish an operator-sanctioned shutdown cancel
+       from a parent/restart cancel after the fact, since both surface as
+       [Eio.Cancel.Cancelled]. *)
   }
 
 type start_error =
@@ -78,13 +83,19 @@ let start_error_to_string = function
 
 let create () =
   let exited_p, exited_r = Eio.Promise.create () in
-  { id = Id.generate (); state = Atomic.make Not_started; exited_p; exited_r }
+  { id = Id.generate ()
+  ; state = Atomic.make Not_started
+  ; exited_p
+  ; exited_r
+  ; shutdown_requested = Atomic.make false
+  }
 ;;
 
 let id t = t.id
 let exited t = t.exited_p
 let peek_exit t = Eio.Promise.peek t.exited_p
 let await_exit t = Eio.Promise.await t.exited_p
+let shutdown_requested t = Atomic.get t.shutdown_requested
 
 let rec claim_start t =
   if Atomic.compare_and_set t.state Not_started Starting
@@ -152,6 +163,10 @@ let resolve_exit_without_cleanup t outcome =
 ;;
 
 let rec request_cancel t =
+  (* Record that a shutdown cancel was requested for this lane before we touch
+     the state, so a supervised body's cancellation handler can tell this apart
+     from a parent/restart cancel even if the state races to [Exited]. *)
+  Atomic.set t.shutdown_requested true;
   let current = Atomic.get t.state in
   match current with
   | Not_started ->

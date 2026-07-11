@@ -790,7 +790,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ignore (Activity_graph.emit (Mcp_server.workspace_config state)
       ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
       ~subject:(Activity_graph.entity ~kind:"tool" name)
-      ~kind:"tool.called"
+      ~kind:
+        (Activity_graph.tool_execution_event_kind_to_string
+           Activity_graph.External_tool_called)
       ~payload:activity_payload
       ~tags:(if success then ["tool"; "success"] else ["tool"; "failure"])
       ())

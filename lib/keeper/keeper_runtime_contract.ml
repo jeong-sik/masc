@@ -51,9 +51,24 @@ let task_is_unclaimed_todo (task : Masc_domain.task) =
   | Masc_domain.Cancelled _ ->
     false
 
+(* Closed set of claim-scope modes. Was a bare [string] (#20674): producers
+   and consumers matched on free string literals, so the compiler could not
+   force a consumer to handle a new mode, and a dropped producer left a dead
+   [empty_goal_scope_fallback_all_tasks] arm frozen in the consumer. A closed
+   variant makes every producer/consumer exhaustive at compile time. *)
+type claim_scope_mode =
+  | All_tasks
+  | Active_goal_ids
+  | Empty_goal_scope_fallback_all_tasks
+
+let claim_scope_mode_to_string = function
+  | All_tasks -> "all_tasks"
+  | Active_goal_ids -> "active_goal_ids"
+  | Empty_goal_scope_fallback_all_tasks -> "empty_goal_scope_fallback_all_tasks"
+
 type claim_goal_scope = {
   task_filter : Masc_domain.task -> bool;
-  mode : string;
+  mode : claim_scope_mode;
   effective_goal_ids : string list;
   fallback_reason : string option;
 }
@@ -65,14 +80,14 @@ let meta_only_claim_goal_scope ?task_goal_index (meta : keeper_meta) =
   | [] ->
       {
         task_filter = (fun (_task : Masc_domain.task) -> true);
-        mode = "all_tasks";
+        mode = All_tasks;
         effective_goal_ids = [];
         fallback_reason = None;
       }
   | goal_ids ->
       {
         task_filter = task_is_linked_to_keeper_goals ?task_goal_index goal_ids;
-        mode = "active_goal_ids";
+        mode = Active_goal_ids;
         effective_goal_ids = goal_ids;
         fallback_reason = None;
       }
@@ -113,11 +128,9 @@ let resolve_claim_goal_scope_for_tasks ~(config : Workspace.config)
     else
       {
         task_filter = (fun (_task : Masc_domain.task) -> true);
-        (* Reuse the established mode label consumed by
-           [Keeper_tool_task_runtime.claim_scope_context_suffix] rather than
-           minting a new string — a second label for the same concept would
-           drift the two sites apart. *)
-        mode = "empty_goal_scope_fallback_all_tasks";
+        (* [Keeper_tool_task_runtime.claim_scope_context_suffix] exhaustively
+           matches this constructor; the variant keeps the two sites in sync. *)
+        mode = Empty_goal_scope_fallback_all_tasks;
         effective_goal_ids = goal_ids;
         fallback_reason = Some "no_scoped_claimable_tasks";
       }

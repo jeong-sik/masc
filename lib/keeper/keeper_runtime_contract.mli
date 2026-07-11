@@ -13,9 +13,19 @@ val backend_of_meta : Keeper_meta_contract.keeper_meta -> string
 val task_is_linked_to_keeper_goals :
   ?task_goal_index:(string, string list) Hashtbl.t -> string list -> Masc_domain.task -> bool
 
+type claim_scope_mode =
+  | All_tasks
+  | Active_goal_ids
+  | Empty_goal_scope_fallback_all_tasks
+
+val claim_scope_mode_to_string : claim_scope_mode -> string
+(** Wire label for a claim-scope mode (e.g. observation JSON). Closed variant
+    (#20674) so producers/consumers stay exhaustive instead of drifting on a
+    bare [string]. *)
+
 type claim_goal_scope = {
   task_filter : Masc_domain.task -> bool;
-  mode : string;
+  mode : claim_scope_mode;
   effective_goal_ids : string list;
   fallback_reason : string option;
 }

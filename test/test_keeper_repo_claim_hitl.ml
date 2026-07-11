@@ -1,15 +1,24 @@
 module Claim = Masc.Keeper_repo_claim_hitl
 module AQ = Masc.Keeper_approval_queue
 
-(* #23956 made nonblocking resolution fail closed when no delivery hook is
-   installed (the pre-bootstrap default is None). These tests resolve
-   approvals without a server bootstrap, so install the same no-op hook the
-   approval queue's own suite uses; delivery semantics are covered there,
-   not here. *)
+(* Mirror the server composition root: a nonblocking decision is acknowledged
+   only after its typed [Hitl_resolved] stimulus is durable. The live wake is a
+   hint and safely finds no registered keeper in these repository fixtures. *)
 let () =
   AQ.set_approval_resolution_wake_hook
-    (fun ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-      Ok (fun () -> ()))
+    (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
+      match
+        Masc.Keeper_registry_event_queue.enqueue_hitl_resolution_durable_result
+          ~base_path
+          ~keeper_name
+          ~approval_id
+          ~decision
+          ~channel
+      with
+      | Error _ as error -> error
+      | Ok () ->
+        Ok (fun () ->
+          Masc.Keeper_keepalive_signal.wakeup_keeper ~base_path keeper_name))
 ;;
 
 open Repo_manager_types

@@ -557,27 +557,14 @@ let start_keeper_loops
      Keeper_approval_queue dependency cycle. *)
   Keeper_approval_queue.set_approval_resolution_wake_hook
     (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
-       let resolution =
-         Keeper_event_queue.
-           {
-             approval_id;
-             decision;
-             channel;
-           }
-       in
        let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
-       let stimulus : Keeper_event_queue.stimulus =
-         { Keeper_event_queue.post_id = Keeper_event_queue.hitl_resolution_post_id resolution
-         ; urgency = Keeper_event_queue.Immediate
-         ; arrived_at = Time_compat.now ()
-         ; payload = Keeper_event_queue.Hitl_resolved resolution
-         }
-       in
        match
-         Keeper_registry_event_queue.enqueue_durable_result
+         Keeper_registry_event_queue.enqueue_hitl_resolution_durable_result
            ~base_path
-           keeper_name
-           stimulus
+           ~keeper_name
+           ~approval_id
+           ~decision
+           ~channel
        with
        | Error _ as err -> err
        | Ok () ->

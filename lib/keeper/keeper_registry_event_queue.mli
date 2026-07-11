@@ -25,6 +25,18 @@ val enqueue_durable_result :
     write. An existing identical [post_id] is idempotent; the same [post_id]
     with a different typed payload is an explicit conflict. *)
 
+val enqueue_hitl_resolution_durable_result :
+  base_path:string
+  -> keeper_name:string
+  -> approval_id:string
+  -> decision:Keeper_event_queue.hitl_resolution_decision
+  -> channel:Keeper_continuation_channel.t
+  -> (unit, string) result
+(** Build and durably enqueue the canonical [Hitl_resolved] stimulus. This is
+    the single construction boundary shared by the server composition root and
+    nonblocking-approval tests; callers may signal a live fiber only after this
+    function returns [Ok ()]. *)
+
 (** Read-only snapshot of the keeper's queue. If the keeper is not registered,
     read the durable snapshot so diagnostics still expose pending replay. *)
 val snapshot : base_path:string -> string -> Keeper_event_queue.t

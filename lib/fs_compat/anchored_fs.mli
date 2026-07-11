@@ -37,9 +37,13 @@ type stat =
   ; link_count : int64
   }
 
-type directory_identity =
-  { device : int64
-  ; inode : int64
+type lock_file
+
+exception Descriptor_cleanup_failed of
+  { operation : string
+  ; primary : exn
+  ; primary_backtrace : Printexc.raw_backtrace
+  ; close_error : exn
   }
 
 type mutation_error =
@@ -55,17 +59,16 @@ val with_open_root : string -> (t -> 'a) -> 'a
 (** Open an existing real directory without following a final symlink and close
     the capability after the callback. Close failures are never discarded. *)
 
-val identity : t -> directory_identity
-(** Stable identity of the opened directory capability. Unlike a path spelling,
-    this remains unchanged if the directory is renamed while it is open. *)
-
-val with_lock_file :
-  t -> name:Segment.t -> perm:int -> (Unix.file_descr -> 'a) -> 'a
+val open_lock_file : t -> name:Segment.t -> perm:int -> lock_file
 (** Open or create one regular lock file relative to the directory capability,
-    without following a final symlink. A newly-created lock file and directory
-    entry are fsynced before the callback. The descriptor remains open for the
-    callback and is closed on every exit; closing releases any POSIX record lock
-    acquired by the callback. *)
+    without following a final symlink. A newly-created file and directory entry
+    are fsynced before this returns. The returned artifact must be closed with
+    {!close_lock_file}; {!File_lock_eio.with_lock_file} owns that lifecycle for
+    ordinary lock users. *)
+
+val lock_file_descriptor : lock_file -> Unix.file_descr
+val lock_file_identity : lock_file -> int64 * int64
+val close_lock_file : lock_file -> unit
 
 val with_open_dir : t -> Segment.t -> (t -> 'a) -> 'a
 (** Open one existing child directory without following symlinks. *)

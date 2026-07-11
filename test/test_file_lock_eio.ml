@@ -59,44 +59,77 @@ let test_with_lock_inside_eio () =
   check int "single call" 1 !calls;
   check bool "lock table tracked" true (File_lock_eio.lock_count () >= 1)
 
-let test_descriptor_lock_identity_ignores_path_alias () =
+let with_descriptor_lock directory ~segment ~path f =
+  let module Dir = Fs_compat.Anchored_dir in
+  File_lock_eio.with_lock_file
+    ~path
+    ~open_file:(fun () ->
+      Dir.open_lock_file directory ~name:segment ~perm:0o600)
+    ~descriptor:Dir.lock_file_descriptor
+    ~identity:Dir.lock_file_identity
+    ~close_file:Dir.close_lock_file
+    f
+;;
+
+let test_descriptor_lock_hard_link_alias_serializes_and_recovers () =
   with_temp_path @@ fun path ->
   Unix.mkdir path 0o700;
-  let lock_path = Filename.concat path "state.lock" in
+  let primary_path = Filename.concat path "state.lock" in
+  let alias_path = Filename.concat path "alias.lock" in
   Fun.protect
-    ~finally:(fun () -> cleanup_if_exists lock_path)
+    ~finally:(fun () ->
+      cleanup_if_exists alias_path;
+      cleanup_if_exists primary_path)
     (fun () ->
-      let alias = Filename.concat path Filename.current_dir_name in
       let module Dir = Fs_compat.Anchored_dir in
-      let segment =
+      let primary =
         match Dir.Segment.of_string "state.lock" with
         | Ok segment -> segment
         | Error error -> Alcotest.fail (Dir.Segment.error_to_string error)
       in
-      Dir.with_open_root path @@ fun first ->
-      Dir.with_open_root alias @@ fun second ->
-      let first_identity = Dir.identity first in
-      let second_identity = Dir.identity second in
-      let key (identity : Dir.directory_identity) =
-        File_lock_eio.Key.directory_entry
-          ~directory_device:identity.device
-          ~directory_inode:identity.inode
-          ~entry:(Dir.Segment.to_string segment)
+      let alias =
+        match Dir.Segment.of_string "alias.lock" with
+        | Ok segment -> segment
+        | Error error -> Alcotest.fail (Dir.Segment.error_to_string error)
       in
-      let first_key = key first_identity in
-      let second_key = key second_identity in
-      check bool
-        "directory aliases share one typed lock key"
-        true
-        (File_lock_eio.Key.equal first_key second_key);
-      let calls = ref 0 in
-      File_lock_eio.with_lock_file
-        ~key:first_key
-        ~path:lock_path
-        ~with_file:(fun callback ->
-          Dir.with_lock_file first ~name:segment ~perm:0o600 callback)
-        (fun () -> incr calls);
-      check int "descriptor lock body called once" 1 !calls)
+      Dir.with_open_root path @@ fun first ->
+      let bootstrap = Dir.open_lock_file first ~name:primary ~perm:0o600 in
+      Dir.close_lock_file bootstrap;
+      Unix.link primary_path alias_path;
+      Eio_main.run @@ fun _env ->
+      Eio_guard.enable ();
+      Fun.protect
+        ~finally:Eio_guard.disable
+        (fun () ->
+          Eio.Switch.run @@ fun sw ->
+          let first_entered, resolve_first_entered = Eio.Promise.create () in
+          let release_first, resolve_release_first = Eio.Promise.create () in
+          let second_attempted, resolve_second_attempted = Eio.Promise.create () in
+          let second_entered, resolve_second_entered = Eio.Promise.create () in
+          Eio.Fiber.fork ~sw (fun () ->
+            with_descriptor_lock first ~segment:primary ~path:primary_path (fun () ->
+              Eio.Promise.resolve resolve_first_entered ();
+              Eio.Promise.await release_first));
+          Eio.Promise.await first_entered;
+          Eio.Fiber.fork ~sw (fun () ->
+            Eio.Promise.resolve resolve_second_attempted ();
+            with_descriptor_lock first ~segment:alias ~path:alias_path (fun () ->
+              Eio.Promise.resolve resolve_second_entered ()));
+          Eio.Promise.await second_attempted;
+          Eio.Fiber.yield ();
+          Alcotest.(check bool)
+            "hard-link alias body waits for the first holder"
+            true
+            (Option.is_none (Eio.Promise.peek second_entered));
+          Eio.Promise.resolve resolve_release_first ();
+          Eio.Promise.await second_entered;
+          (match
+             with_descriptor_lock first ~segment:primary ~path:primary_path (fun () ->
+               failwith "body failure")
+           with
+           | exception Failure "body failure" -> ()
+           | () -> Alcotest.fail "expected body failure");
+          with_descriptor_lock first ~segment:alias ~path:alias_path (fun () -> ())))
 
 let () =
   run "file_lock_eio"
@@ -108,8 +141,8 @@ let () =
             test_acquire_flock_retry_without_eio;
           test_case "works inside Eio context" `Quick test_with_lock_inside_eio;
           test_case
-            "descriptor identity ignores path aliases"
+            "hard-link alias serializes and recovers after failure"
             `Quick
-            test_descriptor_lock_identity_ignores_path_alias;
+            test_descriptor_lock_hard_link_alias_serializes_and_recovers;
         ] );
     ]

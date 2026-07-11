@@ -499,11 +499,10 @@ let test_anchored_lock_file_rejects_symlink () =
   Unix.symlink outside link;
   Dir.with_open_root base_path @@ fun root ->
   (match
-     Dir.with_lock_file
+     Dir.open_lock_file
        root
        ~name:(anchored_segment "managed.lock")
        ~perm:0o600
-       (fun _ -> ())
    with
    | exception Unix.Unix_error _ -> ()
    | () -> Alcotest.fail "symlinked lock file was accepted");
@@ -511,6 +510,21 @@ let test_anchored_lock_file_rejects_symlink () =
     "symlink target unchanged"
     "sentinel"
     (Fs_compat.load_file_unix outside)
+
+let test_anchored_lock_file_rejects_fifo () =
+  with_temp_base @@ fun base_path ->
+  let module Dir = Fs_compat.Anchored_dir in
+  let fifo = Filename.concat base_path "managed.lock" in
+  Unix.mkfifo fifo 0o600;
+  Dir.with_open_root base_path @@ fun root ->
+  match
+    Dir.open_lock_file
+      root
+      ~name:(anchored_segment "managed.lock")
+      ~perm:0o600
+  with
+  | exception Unix.Unix_error _ -> ()
+  | _ -> Alcotest.fail "FIFO lock artifact was accepted"
 
 let test_anchored_segments_reject_ambiguous_names () =
   let module Segment = Fs_compat.Anchored_dir.Segment in
@@ -569,6 +583,8 @@ let () =
             test_anchored_root_rejects_symlink;
           Alcotest.test_case "symlinked lock file rejected" `Quick
             test_anchored_lock_file_rejects_symlink;
+          Alcotest.test_case "FIFO lock file rejected" `Quick
+            test_anchored_lock_file_rejects_fifo;
           Alcotest.test_case "ambiguous segments rejected" `Quick
             test_anchored_segments_reject_ambiguous_names;
         ] );

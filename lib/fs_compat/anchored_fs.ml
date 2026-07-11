@@ -44,12 +44,10 @@ type stat =
   ; link_count : int64
   }
 
-type directory_identity =
-  { device : int64
-  ; inode : int64
+type lock_file =
+  { descriptor : Unix.file_descr
+  ; metadata : stat
   }
-
-type lock_file
 
 exception Descriptor_cleanup_failed of
   { operation : string
@@ -177,18 +175,6 @@ let with_open_root path f =
   combine_close ~operation:"anchored root transaction" fd (fun () -> f fd)
 ;;
 
-let identity fd =
-  let metadata = stat_of_raw (fstat_raw fd) in
-  if metadata.kind <> Directory
-  then raise (Unix.Unix_error (Unix.ENOTDIR, "anchored_identity", ""));
-  { device = metadata.device; inode = metadata.inode }
-;;
-
-type lock_file =
-  { descriptor : Unix.file_descr
-  ; metadata : stat
-  }
-
 let open_lock_file dir ~name ~perm =
   let name_value = segment_value name in
   let created, fd =
@@ -227,7 +213,7 @@ let open_lock_file dir ~name ~perm =
 let lock_file_descriptor file = file.descriptor
 
 let lock_file_identity file =
-  { device = file.metadata.device; inode = file.metadata.inode }
+  file.metadata.device, file.metadata.inode
 ;;
 
 let close_lock_file file = Unix.close file.descriptor
@@ -254,12 +240,12 @@ let close_after_primary ~operation fd primary backtrace =
   | () -> Printexc.raise_with_backtrace primary backtrace
   | exception close_error ->
     raise
-      (Failure
-         (Printf.sprintf
-            "%s failed (%s); descriptor close also failed (%s)"
-            operation
-            (Printexc.to_string primary)
-            (Printexc.to_string close_error)))
+      (Descriptor_cleanup_failed
+         { operation
+         ; primary
+         ; primary_backtrace = backtrace
+         ; close_error
+         })
 ;;
 
 let open_ensured_child parent ~name ~perm ~enforce_perm =
@@ -303,15 +289,17 @@ let close_parent_before_descending ~parent ~child =
   match Unix.close parent with
   | () -> child
   | exception parent_close_error ->
+    let primary_backtrace = Printexc.get_raw_backtrace () in
     (match Unix.close child with
      | () -> raise parent_close_error
      | exception child_close_error ->
        raise
-         (Failure
-            (Printf.sprintf
-               "ancestor close failed (%s); child close also failed (%s)"
-               (Printexc.to_string parent_close_error)
-               (Printexc.to_string child_close_error))))
+         (Descriptor_cleanup_failed
+            { operation = "anchored ancestor close"
+            ; primary = parent_close_error
+            ; primary_backtrace
+            ; close_error = child_close_error
+            }))
 ;;
 
 let with_ensure_path ~root steps f =
@@ -359,19 +347,8 @@ let with_open_path_opt ~root steps f =
   walk (open_root_fd root) steps
 ;;
 
-let kind_of_int = function
-  | 0 -> Regular_file
-  | 1 -> Directory
-  | 2 -> Symbolic_link
-  | 3 -> Other
-  | value -> invalid_arg (Printf.sprintf "anchored stat returned invalid kind: %d" value)
-;;
-
 let stat dir name =
-  Option.map
-    (fun (kind, size, device, inode, link_count) ->
-       { kind = kind_of_int kind; size; device; inode; link_count })
-    (stat_at_raw dir (segment_value name))
+  Option.map stat_of_raw (stat_at_raw dir (segment_value name))
 ;;
 
 let same_identity (left : stat) (right : stat) =
@@ -529,11 +506,12 @@ let atomic_replace dir ~name ~perm content =
       | Ok (), Error exn -> Error (exn, Printexc.get_raw_backtrace ())
       | Error (write_error, backtrace), Error close_error ->
         Error
-          ( Failure
-              (Printf.sprintf
-                 "anchored atomic write failed (%s); close also failed (%s)"
-                 (Printexc.to_string write_error)
-                 (Printexc.to_string close_error))
+          ( Descriptor_cleanup_failed
+              { operation = "anchored atomic write"
+              ; primary = write_error
+              ; primary_backtrace = backtrace
+              ; close_error
+              }
           , backtrace )
     in
     (match before_commit with
@@ -643,13 +621,14 @@ let combine_closedir handle f =
   | Ok value, Ok () -> value
   | Error (exn, backtrace), Ok () -> Printexc.raise_with_backtrace exn backtrace
   | Ok _, Error close_error -> raise close_error
-  | Error (primary, _), Error close_error ->
+  | Error (primary, primary_backtrace), Error close_error ->
     raise
-      (Failure
-         (Printf.sprintf
-            "anchored readdir failed (%s); closedir also failed (%s)"
-            (Printexc.to_string primary)
-            (Printexc.to_string close_error)))
+      (Descriptor_cleanup_failed
+         { operation = "anchored readdir"
+         ; primary
+         ; primary_backtrace
+         ; close_error
+         })
 ;;
 
 let read_dir dir =
@@ -657,6 +636,7 @@ let read_dir dir =
   let handle =
     try fdopendir duplicate with
     | exn ->
+      let primary_backtrace = Printexc.get_raw_backtrace () in
       let close_error =
         try
           Unix.close duplicate;
@@ -668,11 +648,12 @@ let read_dir dir =
        | None -> raise exn
        | Some close_error ->
          raise
-           (Failure
-              (Printf.sprintf
-                 "fdopendir failed (%s); duplicate close also failed (%s)"
-                 (Printexc.to_string exn)
-                 (Printexc.to_string close_error))))
+           (Descriptor_cleanup_failed
+              { operation = "anchored fdopendir"
+              ; primary = exn
+              ; primary_backtrace
+              ; close_error
+              }))
   in
   combine_closedir handle (fun () ->
     let rec loop acc =

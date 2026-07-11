@@ -1359,9 +1359,28 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
         (Filename.concat keepers_dir "base.toml")
         "[keeper]\nautoboot_enabled = true\n";
       Config_dir_resolver.reset ();
+      let read_trim p =
+        if Sys.file_exists p
+        then String.trim (In_channel.with_open_bin p In_channel.input_all)
+        else "<none>"
+      in
+      let resolved_kdir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+      in
+      Printf.eprintf
+        "[EP34] test_keepers_dir=%s\n[EP34] resolved_kdir=%s\n[EP34] same=%b\n\
+         [EP34] base@test=%s\n[EP34] base@resolved=%s\n[EP34] resolved_entries=[%s]\n%!"
+        keepers_dir resolved_kdir (String.equal keepers_dir resolved_kdir)
+        (read_trim (Filename.concat keepers_dir "base.toml"))
+        (read_trim (Filename.concat resolved_kdir "base.toml"))
+        (if Sys.file_exists resolved_kdir
+         then String.concat ";" (Array.to_list (Sys.readdir resolved_kdir))
+         else "<missing>");
       let json =
         Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
       in
+      Printf.eprintf "[EP34] configured_keepers=%d\n%!"
+        (json |> member "configured_keepers" |> to_int);
       Alcotest.(check int)
         "configured_keepers includes explicit autoboot base keeper"
         3

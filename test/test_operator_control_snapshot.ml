@@ -407,7 +407,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
     (Option.is_some persisted_seed.auto_resume_after_sec);
   Alcotest.(check bool) "seed has runtime blocker" true
     (Option.is_some persisted_seed.runtime.last_blocker);
-  let ok, _ =
+  let ok, dispatch_message =
     dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
       ~args:
         (`Assoc
@@ -418,6 +418,11 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
             ("autoboot_enabled", `Bool false);
           ])
   in
+  (* Surface the tool_result message so a rejection reports its cause instead of
+     a bare [Received false]; the previous [_] discarded the failure detail. *)
+  if not ok then
+    Alcotest.failf "masc_keeper_up rejected the tombstoned resume: %s"
+      dispatch_message;
   Alcotest.(check bool) "keeper_up resumes tombstoned keeper" true ok;
   ignore
     (Keeper_keepalive.stop_keepalive_and_await

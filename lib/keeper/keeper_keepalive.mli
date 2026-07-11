@@ -130,6 +130,9 @@ type joined_stop_result =
 (** Request cooperative stop without claiming that the lane has exited. *)
 val stop_keepalive : ?base_path:string -> string -> unit
 
+(** Signal only the exact captured registry entry. *)
+val request_entry_stop : Keeper_registry.registry_entry -> unit
+
 (** Request cooperative stop and join the exact registry entry observed by
     this call. No timeout is invented: callers choose whether to await. *)
 val stop_keepalive_and_await :

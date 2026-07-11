@@ -12,6 +12,14 @@ val owned_active_tasks_for_meta :
   meta:Keeper_meta_contract.keeper_meta ->
   (owned_active_task list, string) result
 
+(** Shutdown transaction variant: agent-name resolution and backlog reads are
+    both strict. No fallback name is guessed when ownership identity cannot be
+    resolved. *)
+val owned_active_tasks_for_meta_strict :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (owned_active_task list, string) result
+
 (** Find the deterministic active task a keeper should treat as current.
 
     Only [Claimed] and [InProgress] tasks are active bindings. Tasks awaiting

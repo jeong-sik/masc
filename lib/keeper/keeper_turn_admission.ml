@@ -9,10 +9,30 @@ type in_flight_info =
   ; started_at : float
   }
 
+type autonomous_block =
+  | Turn_busy of in_flight_info option
+  | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
+
 type rejection =
   { waiting : int
   ; in_flight : in_flight_info option
+  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
+
+type shutdown_reservation =
+  { operation_id : Keeper_shutdown_types.Operation_id.t
+  ; in_flight : in_flight_info option
+  ; waiting : int
+  }
+
+type begin_shutdown_result =
+  | Shutdown_reserved of shutdown_reservation
+  | Shutdown_already_reserved of shutdown_reservation
+
+type rollback_shutdown_result =
+  | Shutdown_rolled_back
+  | Shutdown_not_reserved
+  | Shutdown_reserved_by_other of Keeper_shutdown_types.Operation_id.t
 
 type slot_snapshot =
   { snapshot_keeper_name : string
@@ -23,6 +43,7 @@ type slot_snapshot =
   ; snapshot_waiting_cap : int
   ; snapshot_waiting_full : bool
   ; snapshot_rejected_chat_count : int
+  ; snapshot_shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
 type fleet_snapshot =
@@ -32,6 +53,7 @@ type fleet_snapshot =
   ; fleet_waiting_full_keeper_count : int
   ; fleet_rejected_chat_total : int
   ; fleet_in_flight_keeper_count : int
+  ; fleet_shutdown_keeper_count : int
   ; fleet_slots : slot_snapshot list
   }
 
@@ -63,6 +85,7 @@ type slot =
   ; mutable waiting_entries : (int * float) list
   ; mutable next_waiter_id : int
   ; mutable rejected_chat_count : int
+  ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
 let slots : (string, slot) Hashtbl.t = Hashtbl.create 16
@@ -88,6 +111,7 @@ let slot_for ~base_path ~keeper_name =
         ; waiting_entries = []
         ; next_waiter_id = 0
         ; rejected_chat_count = 0
+        ; shutdown_operation_id = None
         }
       in
       Hashtbl.add slots key slot;
@@ -96,23 +120,36 @@ let slot_for ~base_path ~keeper_name =
 
 let set_info slot info = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.info <- info)
 let peek_info slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.info)
+let peek_shutdown slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.shutdown_operation_id)
 
 (* Precondition: the calling fiber holds [slot.turn_mu]. There is no
    suspension point between acquiring the mutex and entering [f], so
    cancellation cannot leak the slot; the exception arm releases on every
    raise out of [f], including [Eio.Cancel.Cancelled]. *)
 let run_locked slot ~lane f =
-  (* NDT-OK: gettimeofday timestamps the in-flight info for observability only *)
-  set_info slot (Some { lane; started_at = Unix.gettimeofday () });
-  match f () with
-  | v ->
-    set_info slot None;
+  let admission =
+    Stdlib.Mutex.protect slot.state_mu (fun () ->
+      match slot.shutdown_operation_id with
+      | Some operation_id -> Error operation_id
+      | None ->
+        (* NDT-OK: admission timestamp is observability evidence only. *)
+        slot.info <- Some { lane; started_at = Unix.gettimeofday () };
+        Ok ())
+  in
+  match admission with
+  | Error operation_id ->
     Eio.Mutex.unlock slot.turn_mu;
-    `Ran v
-  | exception exn ->
-    set_info slot None;
-    Eio.Mutex.unlock slot.turn_mu;
-    raise exn
+    `Shutdown_requested operation_id
+  | Ok () ->
+    (match f () with
+     | v ->
+       set_info slot None;
+       Eio.Mutex.unlock slot.turn_mu;
+       `Ran v
+     | exception exn ->
+       set_info slot None;
+       Eio.Mutex.unlock slot.turn_mu;
+       raise exn)
 ;;
 
 let waiting_count slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting)
@@ -130,7 +167,10 @@ let oldest_waiting_since entries =
 let rejected_snapshot slot =
   Stdlib.Mutex.protect slot.state_mu (fun () ->
     slot.rejected_chat_count <- slot.rejected_chat_count + 1;
-    { waiting = slot.waiting; in_flight = slot.info })
+    { waiting = slot.waiting
+    ; in_flight = slot.info
+    ; shutdown_operation_id = None
+    })
 ;;
 
 let run_if_free ~base_path ~keeper_name f =
@@ -148,32 +188,42 @@ let run_if_free ~base_path ~keeper_name f =
      gap: the autonomous lane cooperates on the same backlog the consumer
      drains, so the consumer's [in_flight = None] window opens
      deterministically instead of racing the next autonomous cycle. *)
-  if waiting_count slot > 0
-  then `Busy (peek_info slot)
-  else if Keeper_chat_queue.length ~keeper_name > 0
-  then `Busy (peek_info slot)
-  else if Eio.Mutex.try_lock slot.turn_mu
-  then run_locked slot ~lane:Autonomous f
-  else `Busy (peek_info slot)
+  match peek_shutdown slot with
+  | Some operation_id -> `Busy (Shutdown_requested operation_id)
+  | None when waiting_count slot > 0 -> `Busy (Turn_busy (peek_info slot))
+  | None when Keeper_chat_queue.length ~keeper_name > 0 ->
+    `Busy (Turn_busy (peek_info slot))
+  | None when Eio.Mutex.try_lock slot.turn_mu ->
+    (match run_locked slot ~lane:Autonomous f with
+     | `Ran value -> `Ran value
+     | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id))
+  | None -> `Busy (Turn_busy (peek_info slot))
 ;;
 
 let run_serialized ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   let waiter_id =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
-      if slot.waiting >= max_waiting_chat_requests
-      then None
-      else (
+      match slot.shutdown_operation_id with
+      | Some operation_id -> `Shutdown_requested operation_id
+      | None when slot.waiting >= max_waiting_chat_requests -> `Rejected
+      | None ->
         let waiter_id = slot.next_waiter_id in
         slot.next_waiter_id <- slot.next_waiter_id + 1;
         (* NDT-OK: waiter age timestamp for observability only. *)
         slot.waiting_entries <- (waiter_id, Unix.gettimeofday ()) :: slot.waiting_entries;
         slot.waiting <- slot.waiting + 1;
-        Some waiter_id))
+        `Waiting waiter_id)
   in
   match waiter_id with
-  | None -> `Rejected (rejected_snapshot slot)
-  | Some waiter_id ->
+  | `Shutdown_requested operation_id ->
+    `Rejected
+      { waiting = waiting_count slot
+      ; in_flight = peek_info slot
+      ; shutdown_operation_id = Some operation_id
+      }
+  | `Rejected -> `Rejected (rejected_snapshot slot)
+  | `Waiting waiter_id ->
     (* [Fun.protect] rather than [Switch.on_release]: there is no ambient
        switch here, the finally never raises and never yields, and the only
        suspension point it covers is the cancellable [Eio.Mutex.lock] wait
@@ -188,21 +238,41 @@ let run_serialized ~base_path ~keeper_name f =
                (fun (entry_waiter_id, _since) -> entry_waiter_id <> waiter_id)
                slot.waiting_entries))
       (fun () -> Eio.Mutex.lock slot.turn_mu);
-    run_locked slot ~lane:Chat f
+    (match run_locked slot ~lane:Chat f with
+     | `Ran value -> `Ran value
+     | `Shutdown_requested operation_id ->
+       `Rejected
+         { waiting = waiting_count slot
+         ; in_flight = peek_info slot
+         ; shutdown_operation_id = Some operation_id
+         })
 ;;
 
 let rejection_snapshot slot =
   let waiting = waiting_count slot in
-  { waiting; in_flight = peek_info slot }
+  { waiting; in_flight = peek_info slot; shutdown_operation_id = None }
 ;;
 
 let run_chat_if_free ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
-  if waiting_count slot > 0
-  then `Busy (rejection_snapshot slot)
-  else if Eio.Mutex.try_lock slot.turn_mu
-  then run_locked slot ~lane:Chat f
-  else `Busy (rejection_snapshot slot)
+  match peek_shutdown slot with
+  | Some operation_id ->
+    `Busy
+      { waiting = waiting_count slot
+      ; in_flight = peek_info slot
+      ; shutdown_operation_id = Some operation_id
+      }
+  | None when waiting_count slot > 0 -> `Busy (rejection_snapshot slot)
+  | None when Eio.Mutex.try_lock slot.turn_mu ->
+    (match run_locked slot ~lane:Chat f with
+     | `Ran value -> `Ran value
+     | `Shutdown_requested operation_id ->
+       `Busy
+         { waiting = waiting_count slot
+         ; in_flight = peek_info slot
+         ; shutdown_operation_id = Some operation_id
+         })
+  | None -> `Busy (rejection_snapshot slot)
 ;;
 
 let in_flight ~base_path ~keeper_name =
@@ -210,6 +280,38 @@ let in_flight ~base_path ~keeper_name =
   match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
   | None -> None
   | Some slot -> peek_info slot
+;;
+
+let reservation_of_slot slot operation_id =
+  { operation_id; in_flight = slot.info; waiting = slot.waiting }
+;;
+
+let begin_shutdown ~base_path ~keeper_name ~operation_id =
+  let slot = slot_for ~base_path ~keeper_name in
+  Stdlib.Mutex.protect slot.state_mu (fun () ->
+    match slot.shutdown_operation_id with
+    | None ->
+      slot.shutdown_operation_id <- Some operation_id;
+      Shutdown_reserved (reservation_of_slot slot operation_id)
+    | Some existing ->
+      Shutdown_already_reserved (reservation_of_slot slot existing))
+;;
+
+let rollback_shutdown ~base_path ~keeper_name ~operation_id =
+  let slot = slot_for ~base_path ~keeper_name in
+  Stdlib.Mutex.protect slot.state_mu (fun () ->
+    match slot.shutdown_operation_id with
+    | None -> Shutdown_not_reserved
+    | Some existing when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
+      slot.shutdown_operation_id <- None;
+      Shutdown_rolled_back
+    | Some existing -> Shutdown_reserved_by_other existing)
+;;
+
+let await_idle_after_shutdown ~base_path ~keeper_name =
+  let slot = slot_for ~base_path ~keeper_name in
+  Eio.Mutex.lock slot.turn_mu;
+  Eio.Mutex.unlock slot.turn_mu
 ;;
 
 let chat_waiting ~base_path ~keeper_name =
@@ -237,6 +339,7 @@ let zero_snapshot ~keeper_name =
   ; snapshot_waiting_cap = max_waiting_chat_requests
   ; snapshot_waiting_full = false
   ; snapshot_rejected_chat_count = 0
+  ; snapshot_shutdown_operation_id = None
   }
 ;;
 
@@ -250,6 +353,7 @@ let snapshot_of_slot slot =
     ; snapshot_waiting_cap = max_waiting_chat_requests
     ; snapshot_waiting_full = slot.waiting >= max_waiting_chat_requests
     ; snapshot_rejected_chat_count = slot.rejected_chat_count
+    ; snapshot_shutdown_operation_id = slot.shutdown_operation_id
     })
 ;;
 
@@ -309,12 +413,22 @@ let fleet_snapshot ~base_path ~keeper_names =
       0
       fleet_slots
   in
+  let fleet_shutdown_keeper_count =
+    List.fold_left
+      (fun acc slot ->
+        match slot.snapshot_shutdown_operation_id with
+        | Some _ -> acc + 1
+        | None -> acc)
+      0
+      fleet_slots
+  in
   { fleet_keeper_count = List.length keeper_names
   ; fleet_waiting_keeper_count
   ; fleet_waiting_total
   ; fleet_waiting_full_keeper_count
   ; fleet_rejected_chat_total
   ; fleet_in_flight_keeper_count
+  ; fleet_shutdown_keeper_count
   ; fleet_slots
   }
 ;;
@@ -337,6 +451,11 @@ let slot_snapshot_to_yojson slot =
     ; "chat_waiting_cap", `Int slot.snapshot_waiting_cap
     ; "chat_waiting_full", `Bool slot.snapshot_waiting_full
     ; "chat_rejected_count", `Int slot.snapshot_rejected_chat_count
+    ; ( "shutdown_operation_id"
+      , match slot.snapshot_shutdown_operation_id with
+        | None -> `Null
+        | Some operation_id ->
+          `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
     ]
 ;;
 
@@ -365,6 +484,7 @@ let fleet_health_json ~base_path ~keeper_names =
     ; "chat_waiting_full_keeper_count", `Int snapshot.fleet_waiting_full_keeper_count
     ; "chat_rejected_total_count", `Int snapshot.fleet_rejected_chat_total
     ; "in_flight_keeper_count", `Int snapshot.fleet_in_flight_keeper_count
+    ; "shutdown_keeper_count", `Int snapshot.fleet_shutdown_keeper_count
     ; "keepers", `List (List.map slot_snapshot_to_yojson snapshot.fleet_slots)
     ]
 ;;

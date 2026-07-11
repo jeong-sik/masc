@@ -25,6 +25,9 @@ module Obs = Masc.Keeper_heartbeat_loop_observations
 module WO = Masc.Keeper_world_observation
 module Health = Masc.Health
 module Lane = Masc.Keeper_lane
+module Shutdown_types = Masc.Keeper_shutdown_types
+module Shutdown_store = Masc.Keeper_shutdown_store
+module Shutdown_prepare_join = Masc.Keeper_shutdown_prepare_join
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -655,6 +658,7 @@ let test_keeper_lane_join_waits_for_children_and_cleanup () =
   let exit = Lane.await_exit lane in
   (match exit.outcome with
    | Lane.Completed -> ()
+   | Lane.Shutdown_requested -> fail "unexpected lane shutdown"
    | Lane.Cancelled_by_parent cause ->
      fail ("unexpected parent cancellation: " ^ Printexc.to_string cause)
    | Lane.Failed exn -> fail ("unexpected lane failure: " ^ Printexc.to_string exn));
@@ -697,6 +701,232 @@ let test_keeper_lane_identity_is_typed_and_unique () =
   match Lane.Id.of_string encoded with
   | Ok decoded -> check bool "lane id round-trip" true (Lane.Id.equal first_id decoded)
   | Error detail -> fail detail
+
+let test_keeper_lane_cancel_is_lane_local_and_joinable () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun parent_sw ->
+  let lane = Lane.create () in
+  let never_p, _never_r = Eio.Promise.create () in
+  (match
+     Lane.fork
+       ~sw:parent_sw
+       lane
+       ~run:(fun _lane_sw -> Eio.Promise.await never_p)
+       ~cleanup:(fun _outcome -> Ok ())
+   with
+   | Ok () -> ()
+   | Error error -> fail (Lane.start_error_to_string error));
+  Eio.Fiber.yield ();
+  (match Lane.request_cancel lane with
+   | Lane.Cancel_requested -> ()
+   | Lane.Cancel_already_requested
+   | Lane.Cancel_already_exiting
+   | Lane.Cancel_signal_failed _ -> fail "first lane cancellation was not accepted");
+  let exit = Lane.await_exit lane in
+  match exit.outcome with
+  | Lane.Shutdown_requested -> ()
+  | Lane.Completed -> fail "cancelled lane reported normal completion"
+  | Lane.Cancelled_by_parent cause ->
+    fail ("lane cancellation escaped to parent: " ^ Printexc.to_string cause)
+  | Lane.Failed exn -> fail ("lane cancellation failed: " ^ Printexc.to_string exn)
+
+let test_keeper_shutdown_store_round_trip_and_identity_guard () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-store" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta "shutdown-store-keeper" in
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let lane = Lane.create () in
+      let now = Masc_domain.now_iso () in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_id = Lane.id lane
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "tester"
+        ; cleanup_intent = { remove_meta = false; remove_session = false }
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase = Shutdown_types.Prepared
+        ; created_at = now
+        ; updated_at = now
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match Shutdown_store.persist_new ~config operation with
+       | Error (Shutdown_store.Already_exists _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok () -> fail "duplicate shutdown operation overwrote its record");
+      let loaded =
+        match Shutdown_store.load ~config operation_id with
+        | Ok loaded -> loaded
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      check string "shutdown keeper round-trip" operation.keeper_name loaded.keeper_name;
+      check bool
+        "shutdown lane identity round-trip"
+        true
+        (Lane.Id.equal operation.lane_id loaded.lane_id);
+      let joined =
+        { loaded with
+          phase = Shutdown_types.Joined_idle
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match Shutdown_store.replace ~config joined with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let mismatched = { joined with lane_id = Lane.id (Lane.create ()) } in
+      (match Shutdown_store.replace ~config mismatched with
+       | Error (Shutdown_store.Identity_mismatch _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok () -> fail "shutdown store accepted a different lane identity");
+      (match Shutdown_store.list_for_keeper ~config ~keeper_name:meta.name with
+       | Ok [ listed ] ->
+         check bool
+           "listed operation identity"
+           true
+           (Shutdown_types.Operation_id.equal listed.operation_id operation_id)
+       | Ok operations ->
+         fail (Printf.sprintf "expected one shutdown operation, got %d" (List.length operations))
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let unsupported_json =
+        match Shutdown_store.to_json joined with
+        | `Assoc fields ->
+          `Assoc (("schema_version", `Int 999) :: List.remove_assoc "schema_version" fields)
+        | _ -> fail "shutdown operation codec did not produce an object"
+      in
+      match Shutdown_store.of_json unsupported_json with
+      | Error (Shutdown_store.Decode_error _) -> ()
+      | Error error -> fail (Shutdown_store.error_to_string error)
+      | Ok _ -> fail "unsupported shutdown schema was accepted")
+
+let test_keeper_shutdown_prepare_joins_idle_lane () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun parent_sw ->
+  let base_dir = temp_dir "shutdown-prepare-join" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let name = "shutdown-idle-lane" in
+      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let never_p, _never_r = Eio.Promise.create () in
+      (match
+         Lane.fork
+           ~sw:parent_sw
+           entry.lane
+           ~run:(fun _lane_sw -> Eio.Promise.await never_p)
+           ~cleanup:(fun _outcome ->
+             (match R.dispatch_event_exact entry KSM.Stop_requested with
+              | Ok _ -> ()
+              | Error error -> fail (KSM.transition_error_to_string error));
+             (match R.dispatch_event_exact entry KSM.Drain_complete with
+              | Ok _ -> ()
+              | Error error -> fail (KSM.transition_error_to_string error));
+             (match R.resolve_done entry ~source:"shutdown_test_lane_cleanup" `Stopped with
+              | R.Done_resolved _ -> ()
+              | R.Done_already_resolved _ -> fail "test lane terminal resolved twice");
+             Ok ())
+       with
+       | Ok () -> ()
+       | Error error -> fail (Lane.start_error_to_string error));
+      Eio.Fiber.yield ();
+      let operation =
+        match
+          Shutdown_prepare_join.run
+            ~config
+            ~entry
+            ~request:
+              { actor = "operator"
+              ; cleanup_intent = { remove_meta = false; remove_session = false }
+              }
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+      in
+      (match operation.phase with
+       | Shutdown_types.Joined_idle -> ()
+       | Shutdown_types.Prepared
+       | Shutdown_types.Reconciliation_required _
+       | Shutdown_types.Blocked _ -> fail "idle lane did not reach Joined_idle");
+      check bool
+        "shutdown operation records lane join evidence"
+        true
+        (Option.is_some operation.join_evidence);
+      (match
+         Masc.Keeper_turn_admission.run_if_free
+           ~base_path:config.base_path
+           ~keeper_name:name
+           (fun () -> ())
+       with
+       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested operation_id) ->
+         check bool
+           "shutdown admission fence retains operation identity"
+           true
+           (Shutdown_types.Operation_id.equal operation.operation_id operation_id)
+       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+         fail "shutdown admission fence reopened before finalization"))
+
+let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-prepare-rollback" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let name = "shutdown-prepare-rollback-lane" in
+      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let probe_operation_id = Shutdown_types.Operation_id.generate () in
+      let records_dir =
+        Filename.dirname (Shutdown_store.path ~config probe_operation_id)
+      in
+      let blocker = open_out records_dir in
+      close_out blocker;
+      (match
+         Shutdown_prepare_join.run
+           ~config
+           ~entry
+           ~request:
+             { actor = "operator"
+             ; cleanup_intent = { remove_meta = false; remove_session = false }
+             }
+       with
+       | Error (Shutdown_prepare_join.Prepare_persist_failed _) -> ()
+       | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+       | Ok _ -> fail "shutdown prepare unexpectedly persisted through a file blocker");
+      match
+        Masc.Keeper_turn_admission.run_if_free
+          ~base_path:config.base_path
+          ~keeper_name:name
+          (fun () -> ())
+      with
+      | `Ran () -> ()
+      | `Busy _ -> fail "failed shutdown prepare left the keeper admission fence closed")
 
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
@@ -1115,6 +1345,14 @@ let () =
         test_keeper_lane_surfaces_cleanup_failure;
       test_case "lane identity is typed and unique" `Quick
         test_keeper_lane_identity_is_typed_and_unique;
+      test_case "lane cancellation is local and joinable" `Quick
+        test_keeper_lane_cancel_is_lane_local_and_joinable;
+      test_case "shutdown store round-trip and identity guard" `Quick
+        test_keeper_shutdown_store_round_trip_and_identity_guard;
+      test_case "shutdown prepare joins idle lane" `Quick
+        test_keeper_shutdown_prepare_joins_idle_lane;
+      test_case "shutdown prepare failure rolls back admission fence" `Quick
+        test_keeper_shutdown_prepare_failure_rolls_back_fence;
       test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick

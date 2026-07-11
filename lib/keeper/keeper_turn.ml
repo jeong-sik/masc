@@ -1353,7 +1353,20 @@ let handle_keeper_msg
             args)
     with
     | `Ran result -> result
-    | `Rejected { Keeper_turn_admission.waiting; in_flight } ->
+    | `Rejected
+        { Keeper_turn_admission.shutdown_operation_id = Some operation_id
+        ; _
+        } ->
+        tool_result_error
+          (Printf.sprintf
+             "keeper %s is stopping under operation %s"
+             name
+             (Keeper_shutdown_types.Operation_id.to_string operation_id))
+    | `Rejected
+        { Keeper_turn_admission.waiting
+        ; in_flight
+        ; shutdown_operation_id = None
+        } ->
         let in_flight_text =
           match in_flight with
           | None -> ""

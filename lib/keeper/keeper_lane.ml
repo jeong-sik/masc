@@ -1,5 +1,6 @@
 type outcome =
   | Completed
+  | Shutdown_requested
   | Cancelled_by_parent of exn
   | Failed of exn
 
@@ -10,8 +11,13 @@ type exit =
 
 type state =
   | Not_started
-  | Running
+  | Starting
+  | Running of Eio.Switch.t
+  | Cancellation_requested
+  | Finalizing
   | Exited
+
+exception Shutdown_cancel
 
 module Id = struct
   type t = string
@@ -57,6 +63,12 @@ type start_error =
   | Already_exited
   | Fork_failed of exn
 
+type cancel_result =
+  | Cancel_requested
+  | Cancel_already_requested
+  | Cancel_already_exiting
+  | Cancel_signal_failed of exn
+
 let start_error_to_string = function
   | Already_started -> "lane already started"
   | Already_exited -> "lane already exited"
@@ -74,13 +86,29 @@ let peek_exit t = Eio.Promise.peek t.exited_p
 let await_exit t = Eio.Promise.await t.exited_p
 
 let rec claim_start t =
-  if Atomic.compare_and_set t.state Not_started Running
+  if Atomic.compare_and_set t.state Not_started Starting
   then Ok ()
   else
     match Atomic.get t.state with
     | Not_started -> claim_start t
-    | Running -> Error Already_started
-    | Exited -> Error Already_exited
+    | Starting | Running _ | Cancellation_requested -> Error Already_started
+    | Finalizing | Exited -> Error Already_exited
+;;
+
+type attach_result =
+  | Scope_attached
+  | Cancel_before_attach
+
+let rec attach_scope t lane_sw =
+  let current = Atomic.get t.state in
+  match current with
+  | Starting ->
+    if Atomic.compare_and_set t.state current (Running lane_sw)
+    then Scope_attached
+    else attach_scope t lane_sw
+  | Cancellation_requested -> Cancel_before_attach
+  | Not_started | Running _ | Finalizing | Exited ->
+    invalid_arg "Keeper_lane.attach_scope: invalid lane state"
 ;;
 
 let cleanup_result cleanup outcome =
@@ -93,13 +121,56 @@ let cleanup_result cleanup outcome =
     | exn -> Some (Printexc.to_string exn))
 ;;
 
+let rec claim_finalization t =
+  let current = Atomic.get t.state in
+  match current with
+  | Starting | Running _ | Cancellation_requested ->
+    if Atomic.compare_and_set t.state current Finalizing
+    then true
+    else claim_finalization t
+  | Not_started | Finalizing | Exited -> false
+;;
+
 let resolve_exit_once t outcome cleanup =
-  if Atomic.compare_and_set t.state Running Exited
+  if claim_finalization t
   then (
     let cleanup_error = cleanup_result cleanup outcome in
+    Atomic.set t.state Exited;
     Eio.Promise.resolve t.exited_r { outcome; cleanup_error };
     true)
   else false
+;;
+
+let rec request_cancel t =
+  let current = Atomic.get t.state in
+  match current with
+  | Not_started ->
+    if Atomic.compare_and_set t.state current Finalizing
+    then (
+      Atomic.set t.state Exited;
+      Eio.Promise.resolve
+        t.exited_r
+        { outcome = Shutdown_requested; cleanup_error = None };
+      Cancel_requested)
+    else request_cancel t
+  | Starting ->
+    if Atomic.compare_and_set t.state current Cancellation_requested
+    then Cancel_requested
+    else request_cancel t
+  | Running lane_sw ->
+    if Atomic.compare_and_set t.state current Cancellation_requested
+    then
+      (try
+         Eio.Switch.fail lane_sw Shutdown_cancel;
+         Cancel_requested
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         ignore (Atomic.compare_and_set t.state Cancellation_requested current);
+         Cancel_signal_failed exn)
+    else request_cancel t
+  | Cancellation_requested -> Cancel_already_requested
+  | Finalizing | Exited -> Cancel_already_exiting
 ;;
 
 let fork ~sw t ~run ~cleanup =
@@ -112,9 +183,15 @@ let fork ~sw t ~run ~cleanup =
          Atomic.set started true;
          let outcome =
            try
-             Eio.Switch.run (fun lane_sw -> run lane_sw);
+             Eio.Switch.run (fun lane_sw ->
+               match attach_scope t lane_sw with
+               | Scope_attached -> run lane_sw
+               | Cancel_before_attach ->
+                 Eio.Switch.fail lane_sw Shutdown_cancel;
+                 Eio.Switch.check lane_sw);
              Completed
            with
+           | Shutdown_cancel -> Shutdown_requested
            | Eio.Cancel.Cancelled cause -> Cancelled_by_parent cause
            | exn -> Failed exn
          in

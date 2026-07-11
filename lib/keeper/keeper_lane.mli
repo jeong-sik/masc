@@ -16,6 +16,7 @@ end
 
 type outcome =
   | Completed
+  | Shutdown_before_start
   | Shutdown_requested
   | Cancelled_by_parent of exn
   | Failed of exn

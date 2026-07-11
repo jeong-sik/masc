@@ -660,6 +660,7 @@ let test_keeper_lane_join_waits_for_children_and_cleanup () =
   let exit = Lane.await_exit lane in
   (match exit.outcome with
    | Lane.Completed -> ()
+   | Lane.Shutdown_before_start -> fail "unexpected shutdown before lane start"
    | Lane.Shutdown_requested -> fail "unexpected lane shutdown"
    | Lane.Cancelled_by_parent cause ->
      fail ("unexpected parent cancellation: " ^ Printexc.to_string cause)
@@ -727,6 +728,7 @@ let test_keeper_lane_cancel_is_lane_local_and_joinable () =
   let exit = Lane.await_exit lane in
   match exit.outcome with
   | Lane.Shutdown_requested -> ()
+  | Lane.Shutdown_before_start -> fail "running lane reported pre-start shutdown"
   | Lane.Completed -> fail "cancelled lane reported normal completion"
   | Lane.Cancelled_by_parent cause ->
     fail ("lane cancellation escaped to parent: " ^ Printexc.to_string cause)
@@ -912,8 +914,54 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
            "shutdown admission fence retains operation identity"
            true
            (Shutdown_types.Operation_id.equal operation.operation_id operation_id)
-       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
          fail "shutdown admission fence reopened before finalization"))
+
+let test_keeper_shutdown_prepare_joins_not_started_lane () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-prepare-not-started" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let name = "shutdown-not-started-lane" in
+      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let operation =
+        match
+          Shutdown_prepare_join.run
+            ~config
+            ~entry
+            ~request:
+              { actor = "operator"
+              ; cleanup_intent = { remove_meta = false; remove_session = false }
+              }
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+      in
+      (match operation.phase with
+       | Shutdown_types.Joined_idle -> ()
+       | Shutdown_types.Prepared
+       | Shutdown_types.Finalizing_tasks _
+       | Shutdown_types.Cleanup_ready _
+       | Shutdown_types.Reconciliation_required _
+       | Shutdown_types.Finalized _
+       | Shutdown_types.Blocked _ -> fail "not-started lane did not reach Joined_idle");
+      (match Lane.peek_exit entry.lane with
+       | Some { outcome = Lane.Shutdown_before_start; cleanup_error = None } -> ()
+       | Some _ -> fail "not-started lane recorded the wrong exit evidence"
+       | None -> fail "not-started lane exit remained unresolved");
+      match Eio.Promise.peek entry.done_p with
+      | Some `Stopped -> ()
+      | Some (`Crashed detail) -> fail ("not-started lane crashed: " ^ detail)
+      | None -> fail "not-started lane terminal remained unresolved")
 
 let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
   Eio_main.run @@ fun env ->
@@ -1653,6 +1701,8 @@ let () =
         test_keeper_shutdown_store_round_trip_and_identity_guard;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
+      test_case "shutdown prepare joins not-started lane" `Quick
+        test_keeper_shutdown_prepare_joins_not_started_lane;
       test_case "shutdown prepare failure rolls back admission fence" `Quick
         test_keeper_shutdown_prepare_failure_rolls_back_fence;
       test_case "shutdown finalizes idle operation" `Quick

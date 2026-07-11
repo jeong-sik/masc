@@ -120,6 +120,7 @@ let cancellation_error ~config operation stage detail =
 
 let lane_outcome = function
   | Keeper_lane.Completed -> Lane_completed
+  | Keeper_lane.Shutdown_before_start -> Lane_shutdown_requested
   | Keeper_lane.Shutdown_requested -> Lane_shutdown_requested
   | Keeper_lane.Cancelled_by_parent exn ->
     Lane_cancelled_by_parent (Printexc.to_string exn)
@@ -230,6 +231,26 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
             ~base_path:config.Workspace.base_path
             ~keeper_name:current.name;
           let lane_exit = Keeper_lane.await_exit current.lane in
+          (match lane_exit.outcome with
+           | Keeper_lane.Shutdown_before_start ->
+             (match
+                Keeper_registry.resolve_done
+                  current
+                  ~source:"shutdown_before_lane_start"
+                  `Stopped
+              with
+              | Keeper_registry.Done_resolved _
+              | Keeper_registry.Done_already_resolved { previous = `Stopped; _ } -> ()
+              | Keeper_registry.Done_already_resolved
+                  { previous = `Crashed detail; _ } ->
+                Log.Keeper.warn
+                  "%s: shutdown before lane start preserved prior crash terminal: %s"
+                  current.name
+                  detail)
+           | Keeper_lane.Completed
+           | Keeper_lane.Shutdown_requested
+           | Keeper_lane.Cancelled_by_parent _
+           | Keeper_lane.Failed _ -> ());
           let terminal_result = Eio.Promise.await current.done_p in
           let evidence =
             { lane_outcome = lane_outcome lane_exit.outcome

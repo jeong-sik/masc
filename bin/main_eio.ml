@@ -176,30 +176,35 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
                 true
               end
 
-(** Path predicate: requests that go through the MCP transport surface
-    (HTTP-based sessions, SSE, JSON-RPC messages) and therefore must pass
-    origin and protocol-version checks. *)
-let is_mcp_like_path path =
-  String.equal path "/mcp"
-  || String.equal path "/mcp/managed"
-  || String.equal path "/mcp/operator"
-  || String.equal path "/sse"
-
 (** Returns true if the request failed origin or protocol-version
     validation and the corresponding error response was sent on [reqd].
     Caller should short-circuit further handling in that case. *)
-let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd =
-  if is_mcp_like && not (validate_origin request) then begin
+let try_mcp_validation_block
+    ~request_authority
+    ~request
+    ~protocol_version
+    ~origin
+    reqd
+  =
+  let is_mcp_transport = is_mcp_transport_request request in
+  if
+    is_mcp_transport
+    && not (validate_origin ~request_authority request)
+  then begin
     let body = json_rpc_error Masc.Mcp_error_code.Invalid_request "Invalid origin" in
-    let headers = Httpun.Headers.of_list (
-      ("content-length", string_of_int (String.length body))
-      :: json_headers "-" protocol_version origin
-    ) in
+    let headers =
+      Httpun.Headers.of_list
+        ([ ("content-length", string_of_int (String.length body))
+         ; ("content-type", "application/json")
+         ; ("vary", "Origin")
+         ]
+         @ mcp_headers "-" protocol_version)
+    in
     let response = Httpun.Response.create ~headers `Forbidden in
     safe_reqd_respond reqd response body;
     true
   end
-  else if is_mcp_like && request.Httpun.Request.meth <> `OPTIONS &&
+  else if is_mcp_transport && request.Httpun.Request.meth <> `OPTIONS &&
           not (is_valid_protocol_version protocol_version) then begin
     let body = json_rpc_error Masc.Mcp_error_code.Invalid_request "Unsupported protocol version" in
     let headers = Httpun.Headers.of_list (
@@ -325,6 +330,13 @@ let try_internal_error_response reqd msg =
           Log.Http.warn "main_eio internal_error response failed: %s"
             (Printexc.to_string exn))
 
+let respond_request_authority_bad_request ~error_code ~message reqd =
+  Http.Response.json_value
+    ~status:`Bad_request
+    (`Assoc [ "error_code", `String error_code; "error", `String message ])
+    reqd
+;;
+
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =
   fun client_addr gluten_reqd ->
@@ -335,32 +347,61 @@ let make_extended_handler routes =
        RFC-0281. *)
     let upgrade = gluten_reqd.Gluten.Reqd.upgrade in
     let request = Httpun.Reqd.request reqd in
-    (* Rate limiting: enforce before any auth or routing. *)
-    let path = Http.Request.path request in
-    if try_rate_limit_block ~path ~client_addr ~request reqd then ()
-    else
-    try
-      let is_mcp_like = is_mcp_like_path path in
-      let session_id_for_version = get_session_id_any request in
-      let protocol_version =
-        get_protocol_version_for_session ?session_id:session_id_for_version request
-      in
-      let origin = get_origin request in
-      if try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd then ()
-      else dispatch_route ~router:routes ~request ~path ~upgrade reqd
-    with
-    (* Re-raise cancellation so Eio structured concurrency propagates cleanly.
-       Previously the catch-all swallowed Cancelled and tried to write a 500
-       response; that masks shutdown signals and interferes with per-connection
-       switch cleanup. *)
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> (
-      let msg = Printexc.to_string exn in
-      match Http.Late_response.classify_write_failure exn with
-      | Some failure_msg ->
-          log_late_response_failure ~context:"main_eio request handler"
-            failure_msg
-      | None -> try_internal_error_response reqd msg)
+    match Server_request_authority.classify_http1_request request with
+    | Server_request_authority.Missing ->
+      respond_request_authority_bad_request
+        ~error_code:"request_authority_missing"
+        ~message:"request is missing its Host authority"
+        reqd
+    | Server_request_authority.Multiple ->
+      respond_request_authority_bad_request
+        ~error_code:"request_authority_multiple"
+        ~message:"request contains more than one Host field"
+        reqd
+    | Server_request_authority.Malformed ->
+      respond_request_authority_bad_request
+        ~error_code:"request_authority_malformed"
+        ~message:"request Host authority is malformed"
+        reqd
+    | Server_request_authority.Single request_authority ->
+      Server_request_authority.with_current request_authority (fun () ->
+        (* Authority admission precedes rate limiting, auth, and routing so no
+           credential I/O or URL projection can observe ambiguous Host input. *)
+        let path = Http.Request.path request in
+        if try_rate_limit_block ~path ~client_addr ~request reqd
+        then ()
+        else
+          try
+            let session_id_for_version = get_session_id_any request in
+            let protocol_version =
+              get_protocol_version_for_session
+                ?session_id:session_id_for_version
+                request
+            in
+            let origin = get_origin request in
+            if
+              try_mcp_validation_block
+                ~request_authority
+                ~request
+                ~protocol_version
+                ~origin
+                reqd
+            then ()
+            else dispatch_route ~router:routes ~request ~path ~upgrade reqd
+          with
+          (* Re-raise cancellation so Eio structured concurrency propagates
+             cleanly.  Previously the catch-all swallowed Cancelled and tried
+             to write a 500 response; that masks shutdown signals and
+             interferes with per-connection switch cleanup. *)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            let msg = Printexc.to_string exn in
+            (match Http.Late_response.classify_write_failure exn with
+             | Some failure_msg ->
+               log_late_response_failure
+                 ~context:"main_eio request handler"
+                 failure_msg
+             | None -> try_internal_error_response reqd msg))
 
 (** Main server loop *)
 let run_server ~sw ~env ~host ~port ~base_path =

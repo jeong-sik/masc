@@ -106,9 +106,3 @@ val searxng_default_url : string
 val otel_default_port : int
 
 val otel_default_url : string
-
-(** {1 CORS / DNS rebinding allowlist} *)
-
-(** Allowed origins read by [server_routes_http_common.ml]. Update
-    here to add/remove CORS origins. *)
-val allowed_origins : string list

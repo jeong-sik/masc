@@ -43,12 +43,16 @@ let parse_status header_raw =
   in
   find_http lines
 
-let run_curl ~port ~path () =
+let run_curl ?(headers = []) ~port ~path () =
   let header_file = Filename.temp_file "openapi-api-header-" ".txt" in
   let body_file = Filename.temp_file "openapi-api-body-" ".txt" in
   let url = Printf.sprintf "http://127.0.0.1:%d%s" port path in
+  let header_args =
+    List.fold_right (fun header acc -> "-H" :: header :: acc) headers []
+  in
   let args =
-    [|
+    Array.of_list
+      ([
       "curl";
       "-sS";
       "--http1.1";
@@ -60,8 +64,9 @@ let run_curl ~port ~path () =
       body_file;
       "-D";
       header_file;
-      url;
-    |]
+      ]
+      @ header_args
+      @ [ url ])
   in
   let (ic, oc, ec) =
     Unix.open_process_args_full "curl" args (Unix.environment ())
@@ -219,10 +224,10 @@ let with_server f =
     let logs = read_file log_file in
     fail (Printf.sprintf "server failed to become ready on port %d\n%s" port logs)
   );
-  Fun.protect ~finally:cleanup (fun () -> f ~port)
+  Fun.protect ~finally:cleanup (fun () -> f ~port ~base_path)
 
 let test_openapi_route_serves_document () =
-  with_server @@ fun ~port ->
+  with_server @@ fun ~port ~base_path:_ ->
   (* Retry up to 5 times: /health returns 200 before server_state is set,
      so the openapi route may initially return {"error":"not initialized"} *)
   let rec fetch_openapi retries =
@@ -258,6 +263,55 @@ let test_openapi_route_serves_document () =
        (fun row -> row |> member "operationId" |> to_string = "masc_status")
        operations)
 
+let test_invalid_authority_is_rejected_before_authority_routes () =
+  with_server @@ fun ~port ~base_path ->
+  let dev_token_path =
+    Server_routes_http_dashboard_dev_token.dashboard_dev_token_path base_path
+  in
+  check bool "dev token absent before invalid requests" false
+    (Sys.file_exists dev_token_path);
+  let routes =
+    [ "/"
+    ; "/dashboard"
+    ; "/dashboard/keepers"
+    ; "/api/v1/openapi.json"
+    ; "/.well-known/agent.json"
+    ; "/.well-known/agent-card.json"
+    ; "/ws"
+    ; "/health"
+    ; "/api/v1/dashboard/dev-token"
+    ]
+  in
+  let invalid_authorities =
+    [ ( "missing"
+      , [ "Host:" ]
+      , "request_authority_missing" )
+    ; ( "multiple"
+      , [ "Host: localhost:8935"; "hOsT: attacker.example" ]
+      , "request_authority_multiple" )
+    ; ( "malformed"
+      , [ "Host: user@localhost" ]
+      , "request_authority_malformed" )
+    ]
+  in
+  List.iter
+    (fun (case, headers, expected_code) ->
+      List.iter
+        (fun path ->
+          let result = run_curl ~headers ~port ~path () in
+          let label = case ^ " " ^ path in
+          check (option int) (label ^ " status") (Some 400) result.status;
+          let json = Yojson.Safe.from_string result.body in
+          check
+            string
+            (label ^ " error code")
+            expected_code
+            Yojson.Safe.Util.(json |> member "error_code" |> to_string))
+        routes)
+    invalid_authorities;
+  check bool "invalid authority performs no dev-token I/O" false
+    (Sys.file_exists dev_token_path)
+
 let () =
   run "openapi_api_e2e"
     [
@@ -265,5 +319,9 @@ let () =
         [
           test_case "route serves document" `Slow
             test_openapi_route_serves_document;
+          test_case
+            "invalid authority rejected before authority routes"
+            `Slow
+            test_invalid_authority_is_rejected_before_authority_routes;
         ] );
     ]

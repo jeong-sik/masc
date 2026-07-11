@@ -2,6 +2,44 @@ module Types = Masc_domain
 
 open Masc
 
+module Runtime_under_test = Server_routes_http_runtime
+
+let test_request_authority () =
+  match Server_request_authority.of_host_port ~host:"localhost" ~port:8935 with
+  | Ok authority -> authority
+  | Error `Malformed -> Alcotest.fail "test authority must be valid"
+;;
+
+module Server_routes_http_runtime = struct
+  include Runtime_under_test
+
+  let make_health_json ?listener ?section_timings_ref request =
+    Runtime_under_test.make_health_json
+      ?listener
+      ?section_timings_ref
+      ~request_authority:(test_request_authority ())
+      request
+  ;;
+
+  let make_health_response_json ?listener request =
+    Runtime_under_test.make_health_response_json
+      ?listener
+      ~request_authority:(test_request_authority ())
+      request
+  ;;
+
+  module For_testing = struct
+    include Runtime_under_test.For_testing
+
+    let refresh_full_health_snapshot_now ?listener request =
+      Runtime_under_test.For_testing.refresh_full_health_snapshot_now
+        ?listener
+        ~request_authority:(test_request_authority ())
+        request
+    ;;
+  end
+end
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let with_env name value f =

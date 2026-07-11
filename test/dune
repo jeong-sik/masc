@@ -760,6 +760,14 @@
   test_board_context_inference_resolution)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf))
 
+; Request-authority admission uses Eio fiber-local bindings and therefore owns
+; an explicit executable stanza instead of borrowing the pure synchronous test
+; group above.
+(test
+ (name test_server_request_authority)
+ (modules test_server_request_authority)
+ (libraries alcotest masc_test_deps eio_main h2))
+
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 
 (test

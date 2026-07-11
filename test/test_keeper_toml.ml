@@ -5,6 +5,22 @@ module KTP = Masc.Keeper_types_profile
 module KEP = Masc.Keeper_tool_persona_runtime
 module Runtime = Server_routes_http_runtime
 
+let health_request () =
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list [ "host", "localhost:8935" ])
+    `GET
+    "/health"
+;;
+
+let request_authority_exn request =
+  match Server_request_authority.classify_http1_request request with
+  | Server_request_authority.Single authority -> authority
+  | ( Server_request_authority.Missing
+    | Server_request_authority.Multiple
+    | Server_request_authority.Malformed ) ->
+    fail "expected valid authority"
+;;
+
 let contains_substring s needle =
   let s_len = String.length s in
   let n_len = String.length needle in
@@ -1543,8 +1559,12 @@ legacy_scope = "removed"
       ()
   in
   let before_unknown_metric = unknown_metric () in
-  let request = Httpun.Request.create `GET "/health" in
-  let json = Runtime.make_health_json request in
+  let request = health_request () in
+  let json =
+    Runtime.make_health_json
+      ~request_authority:(request_authority_exn request)
+      request
+  in
   let open Yojson.Safe.Util in
   let listener = json |> member "http_listener" in
   check bool "health exposes http listener diagnostics" true
@@ -1589,8 +1609,12 @@ legacy_scope = "removed"
 
 let test_health_json_build_exposes_runtime_binary_identity () =
   with_config_dir @@ fun _config_dir ->
-  let request = Httpun.Request.create `GET "/health" in
-  let json = Runtime.make_health_json request in
+  let request = health_request () in
+  let json =
+    Runtime.make_health_json
+      ~request_authority:(request_authority_exn request)
+      request
+  in
   let open Yojson.Safe.Util in
   let build = json |> member "build" in
   check bool "build binary version populated" true

@@ -246,8 +246,18 @@ let test_advertised_base_url_uses_forwarded_proto_without_internal_port () =
       [ "host", "masc.example.com"; "x-forwarded-proto", "https" ]
   in
   let request = Httpun.Request.create ~headers `GET "/ws" in
+  let request_authority =
+    match Server_request_authority.classify_http1_request request with
+    | Server_request_authority.Single authority -> authority
+    | ( Server_request_authority.Missing
+      | Server_request_authority.Multiple
+      | Server_request_authority.Malformed ) ->
+      fail "expected valid authority"
+  in
   check string "forwarded https base" "https://masc.example.com"
-    (Server_routes_http_runtime.advertised_base_url request)
+    (Server_routes_http_runtime.advertised_base_url
+       ~request_authority
+       request)
 
 let test_context_from_env_uses_default_loopback_base_url () =
   with_env "MASC_HTTP_BASE_URL" None (fun () ->

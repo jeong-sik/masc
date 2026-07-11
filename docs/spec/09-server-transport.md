@@ -326,6 +326,22 @@ Sse.subscribe_external ~id:"ws-123"
 
 ## 6. HTTP Route Map
 
+### 6.0 Request authority admission
+
+라우팅, 인증, credential I/O보다 먼저 `Server_request_authority`가 요청의
+authority를 한 번만 분류한다. HTTP/1.1은 case-insensitive `Host` 필드 전체를
+읽어 `Missing | Single authority | Multiple | Malformed`로 닫고, `Single`만
+request fiber에 바인딩한다. HTTP/2는 `:authority`만 authority 원천으로 쓰며
+`Host`가 함께 있으면 정규화한 host와 scheme 기본 port가 같은지 교차 검증한다.
+반복 `:authority`, 반복 `Host`, userinfo, 불완전 IPv6/port, 두 authority의
+불일치는 모두 route projection 전에 400이다. H2의 authority 없는
+`OPTIONS *`는 일반 missing authority와 합치지 않고 지원하지 않는 request
+target으로 명시적으로 거부한다.
+
+Auth/CORS, redirect, OpenAPI, agent-card, discovery/runtime projection은 이
+typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다시
+고르거나 설정 host로 fallback하는 경로는 두지 않는다.
+
 ### 6.1 MCP 엔드포인트 (main_eio.ml에서 직접 매칭)
 
 | Method | Path | Handler | 설명 |
@@ -350,9 +366,9 @@ Sse.subscribe_external ~id:"ws-123"
 `make_routes`가 HTTP Router를 조립한다:
 
 ```ocaml
-let make_routes ~port ~host ~sw ~clock =
+let make_routes ~port ~host:_ ~sw ~clock =
   Http.Router.empty
-  |> Server_routes_http_routes_frontend.add_routes ~port ~host
+  |> Server_routes_http_routes_frontend.add_routes ~port
   |> Server_routes_http_routes_workspace.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_provider_runs.add_routes ~sw
@@ -447,7 +463,13 @@ Access-Control-Expose-Headers: Mcp-Session-Id, Mcp-Protocol-Version
 Access-Control-Allow-Credentials: true
 ```
 
-MCP 경로(`/mcp`, `/sse`)에서 Origin 검증을 수행한다. 유효하지 않은 origin은 `403 Forbidden`.
+HTTP/1.1과 HTTP/2 모두 MCP 경로(`/mcp`, `/mcp/managed`,
+`/mcp/operator`, `/sse`, `POST /`)에서 같은 typed request authority를 기준으로
+Origin을 비교한다. HTTP(S)가 아닌 scheme, userinfo, host/port 불일치는
+`403 Forbidden`이며, `http://localhost.attacker` 같은 prefix 혼동은 허용하지
+않는다. Origin이 없는 native client는 허용한다. 로컬 Vite cross-port는
+명시된 loopback dev-origin 목록에 속하고 request authority도 같은 정규화된
+loopback host일 때만 허용한다.
 
 ---
 

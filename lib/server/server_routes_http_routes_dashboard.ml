@@ -504,8 +504,8 @@ let add_routes ~sw ~clock router =
          with_public_read (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let raw_result =
-             Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token_for_request
-               ~request:req
+             Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token_for_authority
+               ~request_authority:(Server_request_authority.current_exn ())
                ~base_path
            in
            begin
@@ -515,11 +515,7 @@ let add_routes ~sw ~clock router =
                  (`Assoc [ ("token", `String raw) ]) reqd
              | Error err ->
                let status =
-                 match err with
-                 | Server_routes_http_dashboard_dev_token.Request_host_rejected _ ->
-                   `Forbidden
-                 | Server_routes_http_dashboard_dev_token.Token_operation_failed _ ->
-                   `Internal_server_error
+                 Server_routes_http_dashboard_dev_token.request_error_status err
                in
                let error_code =
                  Server_routes_http_dashboard_dev_token.request_error_code err

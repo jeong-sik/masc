@@ -644,7 +644,14 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
       Auth.resolve_role_with_auth_config config.base_path ~auth_cfg ~agent_name ~token
   in
   let endpoint_gate_result =
-    match if token_present then Ok () else ensure_same_origin_browser_request request with
+    match
+      if token_present
+      then Ok ()
+      else
+        ensure_same_origin_browser_request
+          ~request_authority:(Server_request_authority.current_exn ())
+          request
+    with
     | Error err -> Error err
     | Ok () ->
       (match

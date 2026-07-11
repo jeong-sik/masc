@@ -703,7 +703,10 @@ let test_masc_board_registry_has_descriptor_projection () =
          let expected_visibility =
            match Keeper_tool_name.board_projection_of_masc_board_name board_name with
            | Keeper_tool_name.Direct_masc ->
-             (Tool_catalog.metadata schema.name).visibility
+             let operation_policy = Board_tool_registry.operation_policy board_name in
+             Tool_catalog.effective_registered_visibility
+               ~name:schema.name
+               ~declared:operation_policy.visibility
            | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
              Tool_catalog.Hidden
          in

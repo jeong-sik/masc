@@ -1138,16 +1138,16 @@ let board_descriptor name description ~readonly =
 let masc_board_descriptor board_name =
   let schema = Board_tool_registry.schema_for_board_name board_name in
   let name = Tool_name.Board_name.to_string board_name in
+  let operation_policy = Board_tool_registry.operation_policy board_name in
   let metadata = Tool_catalog.metadata name in
-  let readonly =
-    match metadata.readonly with
-    | Some readonly -> readonly
-    | None -> List.mem name Board_tool_dispatch.tool_spec_read_only
-  in
+  let readonly = operation_policy.readonly in
   let policy =
     let visibility =
       match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-      | Keeper_tool_name.Direct_masc -> metadata.visibility
+      | Keeper_tool_name.Direct_masc ->
+        Tool_catalog.effective_registered_visibility
+          ~name
+          ~declared:operation_policy.visibility
       | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
         Tool_catalog.Hidden
     in

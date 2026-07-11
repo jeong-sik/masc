@@ -181,9 +181,8 @@ let start_keeper_grpc_heartbeat
         m.name
         (Int64.of_float (Time_compat.now () *. 1000.0))
     in
-    let sw = Option.value (Keeper_supervisor.get_global_switch ()) ~default:ctx.sw in
     run_grpc_heartbeat_fiber
-      ~sw
+      ~sw:ctx.sw
       ~stop
       ~grpc_client:client
       ~config:ctx.config

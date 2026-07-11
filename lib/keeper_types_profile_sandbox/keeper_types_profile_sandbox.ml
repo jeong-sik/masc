@@ -85,6 +85,32 @@ let default_network_mode_for_profile = function
      default. *)
 ;;
 
+type sandbox_stop_scope =
+  | Stop_managed
+  | Stop_turn
+  | Stop_all
+
+let sandbox_stop_scope_to_string = function
+  | Stop_managed -> "managed"
+  | Stop_turn -> "turn"
+  | Stop_all -> "all"
+;;
+
+let all_sandbox_stop_scopes = [ Stop_managed; Stop_turn; Stop_all ]
+
+let sandbox_stop_scope_of_string raw =
+  let normalized = String.lowercase_ascii (String.trim raw) in
+  List.find_opt
+    (fun scope -> String.equal normalized (sandbox_stop_scope_to_string scope))
+    all_sandbox_stop_scopes
+;;
+
+let valid_sandbox_stop_scope_strings =
+  List.map sandbox_stop_scope_to_string all_sandbox_stop_scopes
+;;
+
+let default_sandbox_stop_scope = Stop_managed
+
 (* RFC vision-delegation §2.4 — persisted mechanism-selection axis. Decides how a
    keeper handles image input, resolved independently of the live runtime
    assignment so two identical turns resolve identically (RFC-0265 §3.4

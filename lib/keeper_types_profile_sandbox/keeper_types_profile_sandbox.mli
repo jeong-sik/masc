@@ -25,6 +25,20 @@ val valid_network_mode_strings : string list
 val default_sandbox_profile : sandbox_profile
 val default_network_mode_for_profile : sandbox_profile -> network_mode
 
+(** Typed scope for explicit sandbox stop operations.  This lower-level
+    contract is shared by the schema and Docker-control layers so the accepted
+    wire values cannot drift into separately maintained string lists. *)
+type sandbox_stop_scope =
+  | Stop_managed
+  | Stop_turn
+  | Stop_all
+
+val sandbox_stop_scope_to_string : sandbox_stop_scope -> string
+val sandbox_stop_scope_of_string : string -> sandbox_stop_scope option
+val all_sandbox_stop_scopes : sandbox_stop_scope list
+val valid_sandbox_stop_scope_strings : string list
+val default_sandbox_stop_scope : sandbox_stop_scope
+
 (** RFC vision-delegation §2.4 — persisted image-handling mechanism axis,
     resolved independently of the live runtime assignment. Same layering as
     {!network_mode} so {!Keeper_types_profile_defaults} can reference it. *)

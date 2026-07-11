@@ -37,9 +37,19 @@ let test_raw_all_tool_schemas_non_empty () =
 let test_all_tool_schemas_non_empty () =
   check bool "public schemas exist" true (List.length Config.all_tool_schemas > 0)
 
-let test_all_tool_names_omits_hidden_pause () =
-  check bool "masc_pause hidden from public schemas" false
-    (List.mem "masc_pause" (Config.all_tool_names ()))
+let test_control_tools_keep_raw_schema_but_leave_public_projection () =
+  let raw_names =
+    List.map
+      (fun (schema : Masc_domain.tool_schema) -> schema.name)
+      Config.raw_all_tool_schemas
+  in
+  let public_names = Config.all_tool_names () in
+  List.iter
+    (fun name ->
+      check bool (name ^ " retained in raw inventory") true (List.mem name raw_names);
+      check bool (name ^ " omitted from public projection") false
+        (List.mem name public_names))
+    [ "masc_pause"; "masc_resume" ]
 
 let test_shard_base_tools_registered_for_help () =
   List.iter
@@ -82,12 +92,14 @@ let test_visible_tool_schemas_subset_of_all () =
   check bool "visible <= all" true
     (List.length visible <= List.length Config.all_tool_schemas)
 
-let test_is_tool_allowed_pause () =
-  (* masc_pause is an admin-surface tool with a descriptor. *)
-  check bool "pause allowed on admin/catalog surface" true
-    (Config.is_tool_allowed "masc_pause");
-  check bool "pause included with include_hidden" true
-    (Tool_catalog.is_visible ~include_hidden:true "masc_pause")
+let test_control_tools_remain_admin_dispatchable () =
+  List.iter
+    (fun name ->
+      check bool (name ^ " allowed on admin/catalog surface") true
+        (Config.is_tool_allowed name);
+      check bool (name ^ " included with include_hidden") true
+        (Tool_catalog.is_visible ~include_hidden:true name))
+    [ "masc_pause"; "masc_resume" ]
 
 let () =
   run "Config Coverage"
@@ -99,8 +111,8 @@ let () =
             test_raw_all_tool_schemas_non_empty;
           test_case "all schemas non-empty" `Quick
             test_all_tool_schemas_non_empty;
-          test_case "all_tool_names omits hidden pause" `Quick
-            test_all_tool_names_omits_hidden_pause;
+          test_case "control tools are raw-only" `Quick
+            test_control_tools_keep_raw_schema_but_leave_public_projection;
           test_case "shard base tools registered for help" `Quick
             test_shard_base_tools_registered_for_help;
           test_case "removed mode tools omitted" `Quick
@@ -109,6 +121,7 @@ let () =
             test_tool_registry_omits_autoresearch_tools;
           test_case "visible is subset of all" `Quick
             test_visible_tool_schemas_subset_of_all;
-          test_case "pause public catalog allowed" `Quick test_is_tool_allowed_pause;
+          test_case "control tools remain admin dispatchable" `Quick
+            test_control_tools_remain_admin_dispatchable;
         ] );
     ]

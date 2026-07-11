@@ -1562,10 +1562,11 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
     ()
 ;;
 
-let masc_keeper_descriptor ?(polling_read = false) id name description ~readonly =
+let masc_keeper_descriptor ?(polling_read = false)
+      ?(keeper_model_projection = Internal_name) id name description ~readonly =
   cluster_descriptor
     ~polling_read
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection
     ~id:("masc.keeper." ^ id)
     ~name
     ~description
@@ -2095,9 +2096,15 @@ let internal_descriptors : t list =
       "Run operator-requested context compaction on a keeper." ~readonly:false
   ; masc_keeper_descriptor "clear" "masc_keeper_clear"
       "Last-resort context clear (drops conversation, requires reason)." ~readonly:false
-  ; masc_keeper_descriptor "sandbox_start" "masc_keeper_sandbox_start"
+  ; masc_keeper_descriptor
+      ~keeper_model_projection:Dispatch_only
+      "sandbox_start"
+      "masc_keeper_sandbox_start"
       "Start the managed sandbox container for a keeper." ~readonly:false
-  ; masc_keeper_descriptor "sandbox_stop" "masc_keeper_sandbox_stop"
+  ; masc_keeper_descriptor
+      ~keeper_model_projection:Dispatch_only
+      "sandbox_stop"
+      "masc_keeper_sandbox_stop"
       "Stop the managed sandbox container(s) for a keeper or fleet." ~readonly:false
   ; masc_keeper_descriptor "reset" "masc_keeper_reset"
       "Reset a keeper's runtime state (usage counters, last_model_used)." ~readonly:false

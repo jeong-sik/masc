@@ -114,7 +114,11 @@ let test_config_default () =
 
 let test_config_to_json () =
   let names = Config.all_tool_names () in
-  check bool "pause omitted from public names" false (List.mem "masc_pause" names)
+  List.iter
+    (fun name ->
+      check bool (name ^ " omitted from public names") false
+        (List.mem name names))
+    [ "masc_pause"; "masc_resume" ]
 
 let test_config_of_json () =
   let visible = Config.visible_tool_schemas () in
@@ -125,9 +129,13 @@ let test_config_of_json_custom () =
   check bool "mode tools removed" false (List.mem "masc_switch_mode" names)
 
 let test_config_of_json_invalid () =
-  (* masc_pause is not in public discovery, but remains callable on the admin/catalog surface. *)
-  check bool "pause allowed on admin/catalog surface" true
-    (Config.is_tool_allowed "masc_pause")
+  (* Control tools are not in public discovery, but remain callable on the
+     explicit admin/catalog surface. *)
+  List.iter
+    (fun name ->
+      check bool (name ^ " allowed on admin/catalog surface") true
+        (Config.is_tool_allowed name))
+    [ "masc_pause"; "masc_resume" ]
 
 (* ============================================================
    Env_config Tests

@@ -160,9 +160,23 @@ let execute_tool_eio
     let auth_result =
       if auth_enabled
       then (
-        match
-          Auth.authorize_tool_v2 config.base_path ~agent_name ~token ~tool_name:name
-        with
+        let authorization =
+          match Keeper_schema.sandbox_lifecycle_operation_of_tool_name name with
+          | Some operation ->
+            let policy = Keeper_schema.sandbox_lifecycle_policy operation in
+            Auth.check_permission
+              config.base_path
+              ~agent_name
+              ~token
+              ~permission:policy.required_permission
+          | None ->
+            Auth.authorize_tool_v2
+              config.base_path
+              ~agent_name
+              ~token
+              ~tool_name:name
+        in
+        match authorization with
         | Ok () -> Ok ()
         | Error err -> Error err)
       else Ok ()

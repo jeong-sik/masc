@@ -106,6 +106,8 @@ let validate_schemas (schemas : Masc_domain.tool_schema list) =
 let all_tool_schemas : Masc_domain.tool_schema list =
   let schemas =
     Capability_registry.public_tool_schemas_from front_door_tool_schemas
+    |> List.filter (fun (schema : Masc_domain.tool_schema) ->
+      Tool_catalog.is_public_mcp schema.name)
   in
   validate_schemas schemas;
   schemas
@@ -133,5 +135,7 @@ let is_raw_tool_name name = Hashtbl.mem raw_tool_name_set name
 
 let visible_tool_schemas ?(include_hidden = false) () :
     Masc_domain.tool_schema list =
-  Capability_registry.visible_public_tool_schemas_from ~include_hidden
-    front_door_tool_schemas
+  let source =
+    if include_hidden then front_door_tool_schemas else all_tool_schemas
+  in
+  Capability_registry.visible_public_tool_schemas_from ~include_hidden source

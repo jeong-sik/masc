@@ -30,6 +30,7 @@ module Keeper_dispatch_ref = Masc.Keeper_dispatch_ref
 module Workspace = Masc.Workspace
 module Task = Masc.Task
 module Keeper_tool_surface = Masc.Keeper_tool_surface
+module Keeper_schema = Masc.Keeper_schema
 module Capability_registry = Masc.Capability_registry
 module Tool_shard = Masc.Tool_shard
 
@@ -1372,6 +1373,86 @@ let test_rfc_0182_clusters_have_descriptor_projection () =
     cluster_projection_table
 ;;
 
+let test_sandbox_lifecycle_contract_is_canonical_and_privileged () =
+  List.iter
+    (fun operation ->
+      let name = Keeper_schema.sandbox_lifecycle_tool_name operation in
+      let policy = Keeper_schema.sandbox_lifecycle_policy operation in
+      let schema =
+        match
+          List.find_opt
+            (fun (schema : Masc_domain.tool_schema) ->
+              String.equal schema.name name)
+            Keeper_schema.sandbox_lifecycle_schemas
+        with
+        | Some schema -> schema
+        | None -> Alcotest.failf "missing sandbox lifecycle schema for %s" name
+      in
+      let descriptor = required_internal_descriptor name in
+      Alcotest.(check bool)
+        (name ^ " uses canonical keeper schema")
+        true
+        (descriptor.input_schema_source = Descriptor.Canonical_registry
+         && Yojson.Safe.equal descriptor.input_schema schema.input_schema);
+      Alcotest.(check bool)
+        (name ^ " stays outside Keeper model surface")
+        true
+        (descriptor.keeper_model_projection = Descriptor.Dispatch_only);
+      Alcotest.(check bool)
+        (name ^ " requires admin")
+        true
+        (policy.required_permission = Masc_domain.CanAdmin);
+      Alcotest.(check bool)
+        (name ^ " is destructive")
+        true
+        policy.destructive;
+      Alcotest.(check (option bool))
+        (name ^ " catalog destructive metadata")
+        (Some true)
+        (Tool_catalog.metadata name).destructive)
+    Keeper_schema.all_sandbox_lifecycle_operations
+;;
+
+let test_sandbox_stop_target_is_explicit () =
+  let parse fields =
+    Keeper_schema.parse_sandbox_stop_request (`Assoc fields)
+  in
+  (match parse [] with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "empty sandbox stop must not select the fleet");
+  (match parse [ "name", `String "base" ] with
+   | Ok { target = Keeper_schema.Stop_keeper "base"; _ } -> ()
+   | Ok _ -> Alcotest.fail "name target did not parse as one Keeper"
+   | Error error -> Alcotest.failf "valid Keeper stop rejected: %s" error);
+  (match parse [ "fleet", `Bool true ] with
+   | Ok { target = Keeper_schema.Stop_fleet; _ } -> ()
+   | Ok _ -> Alcotest.fail "fleet=true did not parse as fleet target"
+   | Error error -> Alcotest.failf "valid fleet stop rejected: %s" error);
+  List.iter
+    (fun fields ->
+      match parse fields with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "ambiguous sandbox stop target was accepted")
+    [ [ "fleet", `Bool false ]
+    ; [ "name", `String "base"; "fleet", `Bool true ]
+    ; [ "name", `String "base"; "cleanup_stale_fleet", `Bool true ]
+    ]
+;;
+
+let test_keeper_message_followups_remain_model_visible () =
+  List.iter
+    (fun name ->
+      let descriptor = required_internal_descriptor name in
+      Alcotest.(check bool)
+        (name ^ " remains Keeper-visible")
+        true
+        (descriptor.keeper_model_projection = Descriptor.Internal_name))
+    [ "masc_keeper_msg_result"
+    ; "masc_keeper_msg_cancel"
+    ; "masc_keeper_msg_queue"
+    ]
+;;
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Unix.unlink dir;
@@ -1723,6 +1804,18 @@ let () =
             "keeper/surface_audit project to descriptors"
             `Quick
             test_rfc_0182_clusters_have_descriptor_projection
+        ; test_case
+            "sandbox lifecycle schema and privilege are canonical"
+            `Quick
+            test_sandbox_lifecycle_contract_is_canonical_and_privileged
+        ; test_case
+            "sandbox stop requires an explicit target"
+            `Quick
+            test_sandbox_stop_target_is_explicit
+        ; test_case
+            "keeper message follow-ups remain model-visible"
+            `Quick
+            test_keeper_message_followups_remain_model_visible
         ] )
     ; ( "dispatch-gap"
       , [ test_case

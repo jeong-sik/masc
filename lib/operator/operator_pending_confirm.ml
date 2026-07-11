@@ -222,19 +222,21 @@ let remove_pending_confirm config token =
     write_pending_confirms config remaining
 
 let remove_pending_confirms_by_target config ~target_type ~target_id =
-  let all = raw_pending_confirms config in
-  let remaining =
-    List.filter
-      (fun (entry : pending_confirm) ->
-        not
-          (String.equal entry.target_type target_type
-          && entry.target_id = target_id))
-      all
-  in
-  let removed = List.length all - List.length remaining in
-  if removed > 0 then
-    write_pending_confirms config remaining |> Result.map (fun () -> removed)
-  else Ok 0
+  match read_pending_confirms_result config with
+  | Error _ as error -> error
+  | Ok all ->
+    let remaining =
+      List.filter
+        (fun (entry : pending_confirm) ->
+          not
+            (String.equal entry.target_type target_type
+            && entry.target_id = target_id))
+        all
+    in
+    let removed = List.length all - List.length remaining in
+    if removed > 0 then
+      write_pending_confirms config remaining |> Result.map (fun () -> removed)
+    else Ok 0
 
 let normalize_pending_confirm_actor_filter = function
   | Some raw ->

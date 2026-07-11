@@ -57,54 +57,24 @@ let auto_pause_handoff_context ~meta ~reason_tag =
 ;;
 
 let release_owned_active_tasks_after_pause ~config ~meta ~reason_tag =
-  match Keeper_current_task_reconcile.owned_active_tasks_for_meta ~config ~meta with
-  | Error err ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ReconcileFailures)
-      ~labels:[ "keeper", meta.name; "phase", "auto_pause_task_release_discovery" ]
-      ();
+  let handoff_context = auto_pause_handoff_context ~meta ~reason_tag in
+  match
+    Keeper_task_ownership_settlement.release_owned_active_tasks
+      ~config
+      ~meta
+      ~actor:supervisor_agent_name
+      ~reason_tag:"auto_pause_task_release"
+      ~handoff_context
+  with
+  | Ok _ -> true
+  | Error error ->
     Log.Keeper.error
-      "%s: skipped auto-pause task release because owned-task discovery failed: %s"
+      "%s: auto-pause task settlement failed for owner %s (%s): %s"
       meta.name
-      err;
+      meta.agent_name
+      reason_tag
+      (Keeper_task_ownership_settlement.error_to_string error);
     false
-  | Ok owned_tasks ->
-    List.fold_left
-      (fun all_ok (owned : Keeper_current_task_reconcile.owned_active_task) ->
-         let task_id = Keeper_id.Task_id.to_string owned.task_id in
-         let handoff_context = auto_pause_handoff_context ~meta ~reason_tag in
-         match
-           Workspace.force_release_task_r
-             config
-             ~agent_name:supervisor_agent_name
-             ~task_id
-             ~handoff_context
-             ()
-         with
-         | Ok msg ->
-           Log.Keeper.warn
-             "%s: released active task %s from auto-paused owner %s (%s): %s"
-             meta.name
-             task_id
-             meta.agent_name
-             reason_tag
-             msg;
-           all_ok
-         | Error err ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string ReconcileFailures)
-             ~labels:[ "keeper", meta.name; "phase", "auto_pause_task_release" ]
-             ();
-           Log.Keeper.error
-             "%s: failed to release active task %s from auto-paused owner %s (%s): %s"
-             meta.name
-             task_id
-             meta.agent_name
-             reason_tag
-             (Masc_domain.masc_error_to_string err);
-           false)
-      true
-      owned_tasks
 ;;
 
 let clear_current_task_id_after_successful_pause_release ~config ~meta ~reason_tag =

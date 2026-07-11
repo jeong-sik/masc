@@ -113,10 +113,9 @@ let supervise_keepalive
     Keeper_registry.update_meta ~base_path:ctx.config.base_path meta.name live_meta;
     match launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg with
     | Error _ ->
-      (* The launch gate aborted fail-closed (no fiber forked; [done_p]
-         resolved through the crash path and Crashed published by the gate).
-         Announcing [Started]/[Running] here would report a keeper that is
-         not running. *)
+      (* The launch gate aborted fail-closed and no fiber was forked.  An FSM
+         rejection owns a crash settlement; a concurrent shutdown owns its
+         own terminal settlement.  Neither permits a Started/Running event. *)
       ()
     | Ok () ->
       publish_lifecycle

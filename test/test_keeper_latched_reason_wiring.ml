@@ -29,6 +29,7 @@ module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_supervisor_cleanup_tombstone = Masc.Keeper_supervisor_cleanup_tombstone
 module Keeper_supervisor_types = Masc.Keeper_supervisor_types
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Tool_result = Masc.Tool_result
 
 let base_json name =
   `Assoc
@@ -193,6 +194,7 @@ let test_keeper_down_retain_records_reason () =
   let base_path = Masc_test_deps.setup_test_workspace () in
   Fun.protect
     ~finally:(fun () ->
+      Keeper_turn_lifecycle.For_testing.reset_remove_pending_confirms_by_target ();
       Keeper_registry.clear ();
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
@@ -206,7 +208,10 @@ let test_keeper_down_retain_records_reason () =
        (match Keeper_meta_store.write_meta config meta with
         | Ok () -> ()
         | Error err -> failf "seed meta write: %s" err);
-       ignore (Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       let entry = Keeper_registry.register ~base_path:config.base_path keeper_name meta in
+       ignore (Keeper_registry.resolve_fiber_exited entry : bool);
+       Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
+         (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
        let args =
          `Assoc
            [ "name", `String keeper_name
@@ -214,7 +219,11 @@ let test_keeper_down_retain_records_reason () =
            ; "remove_session", `Bool false
            ]
        in
-       let _result = Keeper_turn_lifecycle.handle_keeper_down_config ~config args in
+       let result = Keeper_turn_lifecycle.handle_keeper_down_config ~config args in
+       check bool "keeper_down transaction succeeds" true
+         (Tool_result.is_success result);
+       check bool "keeper_down unregisters joined lane" false
+         (Keeper_registry.is_registered ~base_path:config.base_path keeper_name);
        match Keeper_meta_store.read_meta config keeper_name with
        | Ok (Some persisted) ->
          check bool "keeper_down retain pauses keeper" true persisted.paused;
@@ -425,6 +434,46 @@ let test_heartbeat_merge_preserves_only_typed_operator_pause () =
     None
     (latched_reason_wire not_preserved)
 
+let test_operator_pause_merge_preserves_latest_runtime () =
+  let base = make_meta "operator-pause-owner-merge" in
+  let latest =
+    { base with
+      runtime =
+        { base.runtime with
+          usage = { base.runtime.usage with total_turns = 9 }
+        }
+    }
+  in
+  let caller =
+    { base with
+      paused = true
+    ; latched_reason =
+        Some
+          (Keeper_latched_reason.Operator_paused
+             { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
+    ; auto_resume_after_sec = None
+    ; runtime =
+        { base.runtime with
+          usage = { base.runtime.usage with total_turns = 1 }
+        ; last_blocker = None
+        }
+    }
+  in
+  let merged =
+    Keeper_meta_merge.operator_pause_from_caller ~latest ~caller
+  in
+  check bool "operator pause caller owns paused=true" true merged.paused;
+  check
+    (option string)
+    "operator pause caller owns the typed reason"
+    (Some wire_keeper_down)
+    (latched_reason_wire merged);
+  check
+    int
+    "operator pause merge preserves latest turn usage"
+    9
+    merged.runtime.usage.total_turns
+
 (* Reviewer P1 (2026-07-03): the overwrite test above only exercises the
    no-conflict write, where the merge never runs. On a CAS retry the cleanup
    re-reads disk; if that snapshot is an operator pause, reusing
@@ -538,6 +587,8 @@ let () =
             test_dead_tombstone_latch_blocks_legacy_auto_resume
         ; test_case "heartbeat merge uses typed operator latch, not pause shape" `Quick
             test_heartbeat_merge_preserves_only_typed_operator_pause
+        ; test_case "operator pause merge preserves latest runtime" `Quick
+            test_operator_pause_merge_preserves_latest_runtime
         ; test_case "dead-tombstone cleanup CAS retry preserves Dead_tombstone" `Quick
             test_dead_tombstone_cleanup_cas_retry_preserves_reason
         ] )

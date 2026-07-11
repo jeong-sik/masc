@@ -276,6 +276,17 @@ val clear_turn_switch : base_path:string -> string -> unit
 val interrupt_current_turn :
   base_path:string -> string -> [ `Cancelled of int | `No_turn_in_flight ]
 
+(** Cancel the in-flight turn as part of an already-started lane shutdown.
+    The typed result distinguishes an installed cancellation from the race in
+    which the turn switch has not been bound yet; [set_turn_switch] completes
+    that pending cancellation when the binding appears. *)
+val interrupt_current_turn_for_shutdown :
+  base_path:string -> string -> shutdown_interrupt_result
+
+(** Exact fiber-local ownership check for the entry's current turn switch.
+    This compares switch identity and never infers ownership from agent names. *)
+val current_fiber_owns_turn : registry_entry -> bool
+
 (** Record the verdict reasons from a [keeper_cycle_decision] that
     chose to skip the next turn.  Stamps [last_skip_observation] with
     [(now, reasons)] so the stale watchdog can surface *why* a keeper

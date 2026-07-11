@@ -17,6 +17,12 @@ val heartbeat_fields_from_disk : t
     already present on disk. This prevents stale turn/heartbeat writers from
     clearing [paused=true] after an operator paused the keeper. *)
 
+val operator_pause_from_caller : t
+(** Preserve the latest disk record and let the control-plane caller own only
+    [paused], [latched_reason], [auto_resume_after_sec], [updated_at], and
+    [runtime.last_blocker].  This prevents a shutdown pause written from a
+    stale registry snapshot from regressing turn usage or runtime state. *)
+
 val dead_tombstone_cleanup_from_disk : t
 (** {!monotonic_usage_counters}, with [paused] and [latched_reason] owned by the
     caller. Used by the dead-tombstone cleanup so a CAS retry that re-reads an

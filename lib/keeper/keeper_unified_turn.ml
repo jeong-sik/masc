@@ -429,6 +429,9 @@ let run_keeper_cycle
                    entry.meta
                  | None -> meta
                in
+               let event_bus_cleanup_error : string option Atomic.t =
+                 Atomic.make None
+               in
                Keeper_registry.mark_turn_measurement ~base_path:config.base_path meta.name;
                (match Keeper_registry.get ~base_path:config.base_path meta.name with
                 | Some { current_turn_observation = Some { measurement = Some _; _ }; _ }
@@ -446,13 +449,27 @@ let run_keeper_cycle
            instead of propagating them. *)
                  let cleanup () =
                    (try unsubscribe_event_bus () with
-                    | Eio.Cancel.Cancelled _ -> ()
+                    | Eio.Cancel.Cancelled _ as cancelled ->
+                      let detail = Printexc.to_string cancelled in
+                      ignore
+                        (Atomic.compare_and_set
+                           event_bus_cleanup_error
+                           None
+                           (Some detail)
+                         : bool)
                     | e ->
+                      let detail = Printexc.to_string e in
+                      ignore
+                        (Atomic.compare_and_set
+                           event_bus_cleanup_error
+                           None
+                           (Some detail)
+                         : bool);
                       Log.Keeper.warn
                         ~keeper_name:meta.name
                         "%s: unsubscribe_event_bus in turn cleanup raised: %s"
                         meta.name
-                        (Printexc.to_string e);
+                        detail;
                       Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string TurnCleanupFailures)
                         ~labels:[ "keeper", meta.name; "site", Keeper_turn_cleanup_failure_site.(to_label Unsubscribe_event_bus) ]
@@ -473,6 +490,71 @@ let run_keeper_cycle
                        Keeper_metrics.(to_string TurnCleanupFailures)
                        ~labels:[ "keeper", meta.name; "site", Keeper_turn_cleanup_failure_site.(to_label Mark_turn_finished) ]
                        ()
+                 in
+                 let persist_shutdown_interruption () =
+                   match Keeper_registry.get ~base_path:config.base_path meta.name with
+                   | None ->
+                     Log.Keeper.error
+                       ~keeper_name:meta.name
+                       "%s: shutdown interruption could not find its registered lane"
+                       meta.name
+                   | Some entry ->
+                     let event_bus_integrity_error =
+                       match
+                         event_bus_integrity_error_snapshot ()
+                         |> Option.map Agent_sdk.Error.to_string,
+                         Atomic.get event_bus_cleanup_error
+                       with
+                       | None, None -> None
+                       | Some tracked, None -> Some tracked
+                       | None, Some cleanup -> Some cleanup
+                       | Some tracked, Some cleanup ->
+                         Some
+                           (Printf.sprintf
+                              "event-bus integrity: %s; final drain cleanup: %s"
+                              tracked
+                              cleanup)
+                     in
+                     let record =
+                       Keeper_shutdown_types.make_interrupted_turn
+                         ~keeper_name:meta.name
+                         ~trace_id:meta.runtime.trace_id
+                         ~turn_id:keeper_turn_id
+                         ~current_task_id:entry.meta.current_task_id
+                         ~interrupted_at:(Time_compat.now ())
+                         ~committed_mutating_tools:
+                           (committed_mutating_tools_snapshot ())
+                         ~event_bus_integrity_error
+                     in
+                     (match Keeper_shutdown_record.persist ~config record with
+                      | Ok persisted ->
+                        (match
+                           Keeper_registry.record_shutdown_turn_persisted
+                             entry
+                             persisted
+                         with
+                         | Ok () -> ()
+                         | Error state_error ->
+                           Log.Keeper.error
+                             ~keeper_name:meta.name
+                             "%s: persisted shutdown interruption but registry settlement failed: %s"
+                             meta.name
+                             (Keeper_registry.shutdown_state_error_to_string state_error))
+                      | Error error ->
+                        (match
+                           Keeper_registry.record_shutdown_turn_persist_failed
+                             entry
+                             record
+                             ~error
+                         with
+                         | Ok () -> ()
+                         | Error state_error ->
+                           Log.Keeper.error
+                             ~keeper_name:meta.name
+                             "%s: shutdown interruption persistence and registry settlement failed: persistence=%s registry=%s"
+                             meta.name
+                             error
+                             (Keeper_registry.shutdown_state_error_to_string state_error)))
                  in
                  match
                    Keeper_context_runtime.timed (fun () ->
@@ -540,6 +622,13 @@ let run_keeper_cycle
                  | result ->
                    cleanup ();
                    result
+                 | exception
+                     (Eio.Cancel.Cancelled Keeper_registry.Shutdown_interrupt as e) ->
+                   let backtrace = Printexc.get_raw_backtrace () in
+                   Eio.Cancel.protect (fun () ->
+                     cleanup ();
+                     persist_shutdown_interruption ());
+                   Printexc.raise_with_backtrace e backtrace
                  | exception e ->
                    let backtrace = Printexc.get_raw_backtrace () in
                    cleanup ();

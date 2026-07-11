@@ -319,6 +319,65 @@ let run_turn
          meta.name (Printexc.to_string exn));
     Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name ()
   in
+  let persist_shutdown_fallback () =
+    match Keeper_registry.get ~base_path:config.base_path meta.name with
+    | None ->
+      Log.Keeper.error
+        "%s: shutdown fallback could not find its registered lane"
+        meta.name
+    | Some entry ->
+      let persist record =
+        match Keeper_shutdown_record.persist ~config record with
+        | Error error ->
+          (match
+             Keeper_registry.record_shutdown_turn_persist_failed
+               entry
+               record
+               ~error
+           with
+           | Ok () -> ()
+           | Error state_error ->
+             Log.Keeper.error
+               "%s: shutdown fallback persistence failed and state could not be recorded: persistence=%s registry=%s"
+               meta.name
+               error
+               (Keeper_registry.shutdown_state_error_to_string state_error))
+        | Ok persisted ->
+          (match Keeper_registry.record_shutdown_turn_persisted entry persisted with
+           | Ok () -> ()
+           | Error state_error ->
+             Log.Keeper.error
+               "%s: shutdown fallback persisted but state could not be committed: %s"
+               meta.name
+               (Keeper_registry.shutdown_state_error_to_string state_error))
+      in
+      (match Keeper_registry.shutdown_turn_settlement entry with
+       | Some
+           (Keeper_shutdown_types.Interrupted_turn_persisted _
+           | Keeper_shutdown_types.No_interrupted_turn) -> ()
+       | Some
+           (Keeper_shutdown_types.Interrupted_turn_persist_failed
+              { record; error = _ }) ->
+         persist record
+       | Some (Keeper_shutdown_types.Awaiting_interrupted_turn { turn_id }) ->
+         let record =
+           Keeper_shutdown_types.make_interrupted_turn
+             ~keeper_name:meta.name
+             ~trace_id:meta.runtime.trace_id
+             ~turn_id
+             ~current_task_id:entry.meta.current_task_id
+             ~interrupted_at:(Time_compat.now ())
+             ~committed_mutating_tools:[]
+             ~event_bus_integrity_error:
+               (Some
+                  "shutdown interruption occurred outside the event-bus settlement boundary; committed mutation status is unavailable")
+         in
+         persist record
+       | None ->
+         Log.Keeper.error
+           "%s: shutdown fallback ran without a shutdown transaction"
+           meta.name)
+  in
   Eio_guard.protect ~finally:safe_emit_turn_end
   @@ fun () ->
   try
@@ -1114,6 +1173,10 @@ let run_turn
           ());
        receipt_result)
 with
+| Eio.Cancel.Cancelled Keeper_registry.Shutdown_interrupt as ce ->
+  turn_cancelled := Some ce;
+  Eio.Cancel.protect persist_shutdown_fallback;
+  raise ce
 | Eio.Cancel.Cancelled Keeper_registry.Operator_interrupt as ce ->
   turn_cancelled := Some ce;
   Keeper_registry.set_failure_reason

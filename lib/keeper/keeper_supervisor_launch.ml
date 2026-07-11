@@ -62,7 +62,7 @@ let launch_supervised_fiber_body
   let base_path = ctx.config.base_path in
   let keepers_dir = Workspace.keepers_runtime_dir ctx.config in
   if restart_launch_noop_enabled_for_test ()
-  then ()
+  then ignore (Keeper_registry.resolve_fiber_exited reg : bool)
   else (
     (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
@@ -126,7 +126,9 @@ let launch_supervised_fiber_body
          [fiber_drop_cause] payload accurate. *)
       let cancelled_by_parent = Atomic.make false in
       let resolve_done ~source value =
-        if not (Atomic.get resolved) then
+        if Keeper_registry.shutdown_requested reg
+        then Done_signal_already_seen
+        else if not (Atomic.get resolved) then
           (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
              may have already resolved done_p via record_keeper_stopped.
              When the Promise is already resolved, suppress finally cleanup,
@@ -202,7 +204,9 @@ let launch_supervised_fiber_body
                   | None -> false)
                | None -> false
              in
-             if watchdog_triggered
+             if Keeper_registry.shutdown_requested reg
+             then ()
+             else if watchdog_triggered
              then (
                let reason =
                  match Keeper_registry.get ~base_path meta.name with
@@ -284,6 +288,11 @@ let launch_supervised_fiber_body
              Atomic.set cancelled_by_parent true;
              (* Do NOT re-raise Cancelled in a forked fiber, as it cancels the parent switch. *)
              ()
+           | exn when Keeper_registry.shutdown_requested reg ->
+             Log.Keeper.warn
+               "%s: lane exited with %s while shutdown owned terminal settlement"
+               meta.name
+               (Printexc.to_string exn)
            | exn ->
              (* RFC-0002: unified crash handler.
                 Keeper_fiber_crash carries no payload — failure_reason is
@@ -349,7 +358,7 @@ let launch_supervised_fiber_body
            crashing the server (see masc crash 2026-04-17). Swallow
            everything and log — cleanup is advisory, state-machine events
            already fired on the body's happy/error paths. *)
-          try
+          (try
             Keeper_registry.cleanup_tracking ~base_path meta.name;
             (* #14187 follow-up: a keeper that crashed after exhausting its
              turn-livelock budget would restart into the same turn_id
@@ -368,7 +377,9 @@ let launch_supervised_fiber_body
                previous lifetime would silently demote the new
                keeper's First block to DEBUG. *)
             Keeper_livelock_state.reset_for_keeper ~keeper:meta.name;
-            if not (Atomic.get resolved)
+            if Keeper_registry.shutdown_requested reg
+            then ()
+            else if not (Atomic.get resolved)
             then
               if Shutdown.is_shutting_down_global ()
               then (
@@ -518,13 +529,15 @@ let launch_supervised_fiber_body
               "%s: supervisor finally cleanup failed (suppressed to avoid \
                Fun.Finally_raised): %s"
               meta.name
-              (Printexc.to_string exn))))
+              (Printexc.to_string exn));
+          ignore (Keeper_registry.resolve_fiber_exited reg : bool))))
 ;;
 
-(** Launch gate: the registry FSM must accept [Fiber_started] before any
-    fiber is forked. Returns [Error _] when the launch was refused; in that
-    case nothing was forked, no [Started]/[Running] event may be published
-    by the caller, and [done_p] has been resolved through the crash path. *)
+(** Launch gate: the physical-lane CAS and registry FSM must both accept the
+    launch before any fiber is forked.  [Error _] always means no
+    [Started]/[Running] event may be published.  FSM rejection resolves
+    [done_p] through the crash path; a shutdown-race rejection leaves terminal
+    settlement to the shutdown transaction. *)
 let launch_supervised_fiber
       ~proactive_warmup_sec
       ctx
@@ -532,7 +545,18 @@ let launch_supervised_fiber
       (reg : Keeper_registry.registry_entry)
   =
   let base_path = ctx.config.base_path in
-  match Keeper_registry.prepare_fiber_launch ~base_path meta.name with
+  let launch_precondition_error reason =
+    Keeper_state_machine.Precondition_violation
+      { event = "fiber_launch"; reason }
+  in
+  if Keeper_registry.shutdown_requested reg
+  then (
+    ignore (Keeper_registry.settle_unlaunched_fiber_exit reg : bool);
+    Error
+      (launch_precondition_error
+         "shutdown transaction claimed the lane before fiber launch"))
+  else (
+    match Keeper_registry.prepare_fiber_launch ~base_path meta.name with
   | Error err ->
     (* Fail closed: a rejected [Fiber_started] (terminal state, invalid
        transition, precondition violation) means the registry refuses a
@@ -568,10 +592,38 @@ let launch_supervised_fiber
       |> should_publish_lifecycle_for_done_signal
     then
       publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed meta.name reason ();
+    ignore (Keeper_registry.resolve_fiber_exited reg : bool);
     Error err
+  | Ok _ when Keeper_registry.shutdown_requested reg ->
+    ignore (Keeper_registry.settle_unlaunched_fiber_exit reg : bool);
+    Error
+      (launch_precondition_error
+         "shutdown transaction won the launch race after Fiber_started")
   | Ok _ ->
-    launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg;
-    Ok ()
+    (match Keeper_registry.claim_fiber_launch reg with
+     | Keeper_registry.Fiber_launch_already_running ->
+       Error
+         (launch_precondition_error
+            "duplicate launch attempted for an already-running lane")
+     | Keeper_registry.Fiber_launch_already_exited ->
+       Error
+         (launch_precondition_error
+            "fiber launch attempted after the physical lane was settled")
+     | Keeper_registry.Fiber_launch_claimed
+       when Keeper_registry.shutdown_requested reg ->
+       ignore (Keeper_registry.resolve_fiber_exited reg : bool);
+       Error
+         (launch_precondition_error
+            "shutdown transaction won the launch race after the launch claim")
+     | Keeper_registry.Fiber_launch_claimed ->
+       (try
+          launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg;
+          Ok ()
+        with
+        | exn ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          ignore (Keeper_registry.resolve_fiber_exited reg : bool);
+          Printexc.raise_with_backtrace exn backtrace)))
 ;;
 
 (* #10993: persona drift visibility.

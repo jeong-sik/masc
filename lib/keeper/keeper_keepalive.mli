@@ -118,4 +118,42 @@ val percentile : float array -> float -> float
 val start_keepalive :
   ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
 val stop_keepalive : ?base_path:string -> string -> unit
+
+type joined_stop =
+  { interrupted_turn_id : int option
+  ; terminal : Keeper_registry.done_resolution
+  }
+
+type joined_stop_result =
+  | Keeper_not_registered
+  | Keeper_joined of joined_stop
+  | Keeper_stop_owned_by_shutdown
+  | Keeper_self_stop_rejected
+  | Keeper_exit_without_terminal
+
+type shutdown_lane_join =
+  { entry : Keeper_registry.registry_entry
+  ; interrupt : Keeper_registry.shutdown_interrupt_result
+  ; grpc_close_error : string option
+  }
+
+type shutdown_lane_join_result =
+  | Shutdown_keeper_not_registered
+  | Shutdown_self_join_rejected
+  | Shutdown_lane_joined of shutdown_lane_join
+
+(** Request a non-destructive lane stop and join its concrete fiber.  The
+    result explicitly rejects self-join and a concurrent typed shutdown; a
+    physical exit without [done_p] is surfaced rather than waited on forever. *)
+val stop_keepalive_and_await :
+  base_path:string -> string -> joined_stop_result
+
+(** Begin a typed shutdown, cancel the current turn with
+    {!Keeper_registry.Shutdown_interrupt}, and join the concrete lane fiber.
+    This deliberately does not resolve [done_p] or unregister the lane; the
+    lifecycle transaction owns those steps after durable settlement.  A
+    caller running inside the target turn is rejected rather than deadlocking
+    on its own physical-exit promise. *)
+val request_shutdown_and_await_exit :
+  base_path:string -> string -> shutdown_lane_join_result
 val stop_all_keepalives : unit -> unit

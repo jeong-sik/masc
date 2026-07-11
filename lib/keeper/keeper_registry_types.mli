@@ -118,6 +118,10 @@ exception Operator_interrupt
     The turn runtime may catch this via [Eio.Cancel.Cancelled] and record
     [failure_reason.Operator_interrupt] for observability. *)
 
+exception Shutdown_interrupt
+(** Lane-shutdown cancellation.  The interrupted turn must durably settle a
+    {!Keeper_shutdown_types.interrupted_turn} before the lane may unregister. *)
+
 val ambiguous_partial_commit_kind_to_string :
   ambiguous_partial_commit_kind -> string
 
@@ -437,6 +441,16 @@ type turn_measurement = {
 
 type done_resolution = [ `Stopped | `Crashed of string ]
 
+type fiber_lifecycle_state =
+  | Fiber_not_started
+  | Fiber_running
+  | Fiber_exited
+
+type fiber_launch_claim_result =
+  | Fiber_launch_claimed
+  | Fiber_launch_already_running
+  | Fiber_launch_already_exited
+
 type registry_entry = {
   base_path : string;
   name : string;
@@ -461,6 +475,15 @@ type registry_entry = {
       (** Completion resolver owned by {!resolve_done}. Runtime callers must
           not resolve this field directly; use {!resolve_done} so
           double-resolve races return the prior terminal outcome. *)
+  fiber_exited_p : unit Eio.Promise.t;
+      (** Resolves only after the concrete keepalive fiber has left its body
+          and completed lane-local cleanup.  Unlike [done_p], this is a join
+          signal and must not be resolved when stop is merely requested. *)
+  fiber_exited_r : unit Eio.Promise.u;
+  fiber_lifecycle_state : fiber_lifecycle_state Atomic.t;
+      (** Exact launch/join ownership.  Launch and shutdown race through this
+          state instead of inferring physical fiber existence from the
+          lifecycle phase. *)
   restart_count : int;
   last_restart_ts : float;
   dead_since_ts : float option;
@@ -474,6 +497,12 @@ type registry_entry = {
   current_turn_switch : Eio.Switch.t option Atomic.t;
       (** Live turn-scoped switch exposed for operator interrupt.
           [Some sw] while a turn is running; [None] otherwise. *)
+  shutdown_state : Keeper_shutdown_types.state Atomic.t;
+      (** Lane-local shutdown transaction state. *)
+  shutdown_transaction_claimed : bool Atomic.t;
+      (** Ephemeral single-writer guard for the durable shutdown transaction.
+          This prevents concurrent operator fibers from releasing the same
+          task ownership or deleting the same session in parallel. *)
   board_wakeups : float StringMap.t;
   board_cursor_ts : float;
   board_cursor_post_id : string option;
@@ -575,6 +604,24 @@ and completed_turn_observation = {
           last turn ran, not only the live one. *)
 }
 
+type shutdown_begin_result =
+  | Shutdown_started
+  | Shutdown_already_started of Keeper_shutdown_types.turn_settlement
+
+type shutdown_state_error =
+  | Shutdown_not_requested
+  | Shutdown_turn_mismatch of
+      { expected_turn_id : int
+      ; actual_turn_id : int
+      }
+  | Shutdown_turn_already_settled of { turn_id : int }
+
+type shutdown_interrupt_result =
+  | Shutdown_no_turn_in_flight
+  | Shutdown_turn_interrupted of { turn_id : int }
+  | Shutdown_turn_interrupt_pending of { turn_id : int }
+  | Shutdown_turn_state_error of shutdown_state_error
+
 type done_resolve_result =
   | Done_resolved of { source : string }
   | Done_already_resolved of {
@@ -604,6 +651,48 @@ type registry_entry_validation_error = registry_entry_health
     already-resolved outcome. *)
 val resolve_done :
   registry_entry -> source:string -> done_resolution -> done_resolve_result
+
+(** Resolve the concrete keepalive-fiber join signal at most once.  Returns
+    [true] only for the resolver that completed the promise. *)
+val resolve_fiber_exited : registry_entry -> bool
+
+val await_fiber_exit : registry_entry -> unit
+
+(** Atomically claim the right to launch the concrete lane fiber. *)
+val claim_fiber_launch : registry_entry -> fiber_launch_claim_result
+
+(** Settle a lane that has not launched.  Returns [true] only when this call
+    changed [Fiber_not_started] to [Fiber_exited] and resolved the join
+    promise.  A running lane remains owned by its physical fiber. *)
+val settle_unlaunched_fiber_exit : registry_entry -> bool
+
+(** Acquire/release the lane-local single-writer guard.  A failed acquire is
+    an explicit concurrent-shutdown result; it must never wait on the other
+    operator fiber. *)
+val try_claim_shutdown_transaction : registry_entry -> bool
+val release_shutdown_transaction : registry_entry -> unit
+
+val begin_shutdown : registry_entry -> shutdown_begin_result
+val shutdown_requested : registry_entry -> bool
+
+val shutdown_turn_settlement :
+  registry_entry -> Keeper_shutdown_types.turn_settlement option
+
+val mark_shutdown_turn_pending :
+  registry_entry -> turn_id:int -> (unit, shutdown_state_error) result
+
+val record_shutdown_turn_persisted :
+  registry_entry ->
+  Keeper_shutdown_types.persisted_interrupted_turn ->
+  (unit, shutdown_state_error) result
+
+val record_shutdown_turn_persist_failed :
+  registry_entry ->
+  Keeper_shutdown_types.interrupted_turn ->
+  error:string ->
+  (unit, shutdown_state_error) result
+
+val shutdown_state_error_to_string : shutdown_state_error -> string
 
 (** Internal: keeper registry key composition (base_path ^ \\x1f ^ name).
     Exposed via mli so keeper_registry.ml's state functions can use it

@@ -561,6 +561,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
      stale registry records.  The iterator yields between cohort groups; the
      yield meter still protects unusually large cohorts or non-default sizes. *)
   let process_entry (acc : sweep_acc) (entry : Keeper_registry.registry_entry) =
+    if Keeper_registry.shutdown_requested entry
+    then acc
+    else
     match entry.phase with
     | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
       (match entry.dead_since_ts with
@@ -790,10 +793,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
               ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
             (match launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg with
              | Error _ ->
-               (* Launch gate aborted fail-closed (no fiber; done resolved and
-                  Crashed published by the gate). Announcing Restarted/Running
-                  here would report a keeper that never started; the resolved
-                  Crashed outcome re-enters the sweep with backoff/budget. *)
+               (* Launch gate aborted fail-closed.  FSM rejection owns a crash
+                  settlement; a concurrent shutdown owns its terminal
+                  settlement.  Neither permits Restarted/Running. *)
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string RestartOutcomes)
                  ~labels:[ "keeper", old_entry.name; "outcome", "launch_rejected" ]

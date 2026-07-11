@@ -716,7 +716,9 @@ let record_keeper_stopped
       ~detail
   : bool
   =
-  if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
+  if Keeper_registry.shutdown_requested entry
+  then false
+  else if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
   then (
     Keeper_registry.dispatch_event_unit
       ~base_path
@@ -743,7 +745,9 @@ let record_keeper_crashed
   : unit
   =
   let reason = Keeper_registry.failure_reason_to_string failure_reason in
-  if resolve_registry_done entry ~source:"keepalive_record_crashed" (`Crashed reason)
+  if Keeper_registry.shutdown_requested entry
+  then ()
+  else if resolve_registry_done entry ~source:"keepalive_record_crashed" (`Crashed reason)
   then (
     let outcome = reason in
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
@@ -845,6 +849,9 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
          heartbeat before the gate left a live gRPC resource behind a
          rejected launch — the same half-commit class this change removes
          from the fiber-fork path. *)
+      if Keeper_registry.shutdown_requested reg
+      then ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+      else
       match dispatch_fiber_started ~base_path:ctx.config.base_path m.name with
       | Error err ->
         (* Fail closed: the registry FSM refused [Fiber_started], so no
@@ -876,8 +883,35 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             ~phase:Keeper_state_machine.Crashed
             ~keeper_name:m.name
             ~detail:reason
-            ()
+            ();
+        ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+      | Ok () when Keeper_registry.shutdown_requested reg ->
+        (* Shutdown won the register-to-fork race.  No lane fiber exists, so
+           resolve the physical join signal and leave terminal FSM/done
+           settlement to the shutdown transaction. *)
+        ignore (Keeper_registry.resolve_fiber_exited reg : bool)
       | Ok () ->
+        let launch_claimed =
+          match Keeper_registry.claim_fiber_launch reg with
+          | Keeper_registry.Fiber_launch_claimed -> true
+          | Keeper_registry.Fiber_launch_already_exited ->
+            if not (Keeper_registry.shutdown_requested reg)
+            then
+              Log.Keeper.error
+                "%s: direct keepalive launch found an exited physical-lane state"
+                m.name;
+            false
+          | Keeper_registry.Fiber_launch_already_running ->
+            Log.Keeper.error
+              "%s: duplicate direct keepalive launch rejected for a running physical lane"
+              m.name;
+            false
+        in
+        if not launch_claimed
+        then ()
+        else if Keeper_registry.shutdown_requested reg
+        then ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+        else
         let stop = reg.fiber_stop in
         let wakeup = reg.fiber_wakeup in
         (* Start optional gRPC heartbeat fiber *)
@@ -891,7 +925,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         (* Telemetry feedback refresh loop removed in #6814:
          behavioral_stats no longer consumed by build_prompt. *)
         publish_keeper_started ~live_meta;
-        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+        (try Eio.Fiber.fork ~sw:ctx.sw (fun () ->
         let record_crash failure_reason =
           record_keeper_crashed
             reg
@@ -952,6 +986,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                  live_meta.name
                  (Printexc.to_string e))
         in
+        let finalize_fiber_exit () =
+          safe_cleanup_tracking ();
+          ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+        in
         Eio_guard.protect
           (fun () ->
              try
@@ -996,16 +1034,55 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                       live_meta.name
                       (Printexc.to_string exn));
                  record_crash (Keeper_registry.Exception (Printexc.to_string exn))))
-          ~finally:safe_cleanup_tracking))
+          ~finally:finalize_fiber_exit)
+         with
+         | exn ->
+           let backtrace = Printexc.get_raw_backtrace () in
+           (match grpc_close with
+            | None -> ()
+            | Some close_fn ->
+              (try close_fn () with
+               | Eio.Cancel.Cancelled _ -> ()
+               | close_error ->
+                 Log.Keeper.error
+                   "%s: gRPC close failed after direct lane fork failure: %s"
+                   m.name
+                   (Printexc.to_string close_error)));
+           record_keeper_crashed
+             reg
+             ~base_path:ctx.config.base_path
+             ~keeper_name:m.name
+             ~failure_reason:
+               (Keeper_registry.Exception
+                  ("direct lane fork failed: " ^ Printexc.to_string exn));
+           ignore (Keeper_registry.resolve_fiber_exited reg : bool);
+           Printexc.raise_with_backtrace exn backtrace))
 ;;
 
-let stop_keepalive ?base_path name =
-  let entries =
-    Keeper_registry.all ?base_path ()
-    |> List.filter (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name)
-  in
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
+type joined_stop =
+  { interrupted_turn_id : int option
+  ; terminal : Keeper_registry.done_resolution
+  }
+
+type joined_stop_result =
+  | Keeper_not_registered
+  | Keeper_joined of joined_stop
+  | Keeper_stop_owned_by_shutdown
+  | Keeper_self_stop_rejected
+  | Keeper_exit_without_terminal
+
+type shutdown_lane_join =
+  { entry : Keeper_registry.registry_entry
+  ; interrupt : Keeper_registry.shutdown_interrupt_result
+  ; grpc_close_error : string option
+  }
+
+type shutdown_lane_join_result =
+  | Shutdown_keeper_not_registered
+  | Shutdown_self_join_rejected
+  | Shutdown_lane_joined of shutdown_lane_join
+
+let signal_entry_stop (entry : Keeper_registry.registry_entry) =
        (* tla-lint: allow-mutation: fiber signal — stop+wakeup pair triggers cooperative shutdown *)
        Atomic.set entry.fiber_stop true;
        Atomic.set entry.fiber_wakeup true;
@@ -1014,27 +1091,104 @@ let stop_keepalive ?base_path name =
           as TRUE before the heartbeat fiber consumes its termination
           signal. *)
        post_wakeup_signal ~wakeup:entry.fiber_wakeup;
-       (match Atomic.get entry.grpc_close with
-        | Some close_fn ->
-          (try close_fn () with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | _exn ->
-             Otel_metric_store.inc_counter
-               "masc_keeper_grpc_close_failures"
-               ~labels:[ "keeper", entry.meta.name ]
-               ())
-        | None -> ());
-       match entry.phase with
-       | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
-       | _ ->
-         if
-           record_keeper_stopped
-             entry
-             ~base_path:entry.base_path
-             ~keeper_name:entry.name
-             ~detail:"manual stop"
-         then Keeper_registry.cleanup_tracking ~base_path:entry.base_path entry.name)
-    entries
+       match Atomic.get entry.grpc_close with
+       | None -> None
+       | Some close_fn ->
+         (try
+            close_fn ();
+            None
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Otel_metric_store.inc_counter
+              "masc_keeper_grpc_close_failures"
+              ~labels:[ "keeper", entry.meta.name ]
+              ();
+            Some (Printexc.to_string exn))
+;;
+
+let request_entry_stop (entry : Keeper_registry.registry_entry) =
+  let grpc_close_error = signal_entry_stop entry in
+  Option.iter
+    (fun error ->
+       Log.Keeper.error
+         "%s: gRPC close failed while requesting lane stop: %s"
+         entry.name
+         error)
+    grpc_close_error;
+  if Keeper_registry.shutdown_requested entry
+  then (
+    match
+      Keeper_registry.interrupt_current_turn_for_shutdown
+        ~base_path:entry.base_path
+        entry.name
+    with
+    | Keeper_registry.Shutdown_turn_interrupted { turn_id }
+    | Keeper_registry.Shutdown_turn_interrupt_pending { turn_id } -> Some turn_id
+    | Keeper_registry.Shutdown_no_turn_in_flight -> None
+    | Keeper_registry.Shutdown_turn_state_error error ->
+      Log.Keeper.error
+        "%s: shutdown turn interrupt state failed while requesting stop: %s"
+        entry.name
+        (Keeper_registry.shutdown_state_error_to_string error);
+      None)
+  else
+    match Keeper_registry.interrupt_current_turn ~base_path:entry.base_path entry.name with
+    | `Cancelled turn_id -> Some turn_id
+    | `No_turn_in_flight -> None
+;;
+
+let stop_keepalive ?base_path name =
+  Keeper_registry.all ?base_path ()
+  |> List.filter (fun (entry : Keeper_registry.registry_entry) ->
+    String.equal entry.name name)
+  |> List.iter (fun entry -> ignore (request_entry_stop entry : int option))
+;;
+
+let stop_keepalive_and_await ~base_path name =
+  match Keeper_registry.get ~base_path name with
+  | None -> Keeper_not_registered
+  | Some entry when Keeper_registry.current_fiber_owns_turn entry ->
+    Keeper_self_stop_rejected
+  | Some entry when Keeper_registry.shutdown_requested entry ->
+    Keeper_stop_owned_by_shutdown
+  | Some entry ->
+    let interrupted_turn_id = request_entry_stop entry in
+    let settled_before_launch =
+      Keeper_registry.settle_unlaunched_fiber_exit entry
+    in
+    if settled_before_launch
+    then
+      ignore
+        (record_keeper_stopped
+           entry
+           ~base_path
+           ~keeper_name:name
+           ~detail:"stopped before physical lane launch"
+          : bool);
+    Keeper_registry.await_fiber_exit entry;
+    if Keeper_registry.shutdown_requested entry
+    then Keeper_stop_owned_by_shutdown
+    else
+      (match Eio.Promise.peek entry.done_p with
+       | Some terminal -> Keeper_joined { interrupted_turn_id; terminal }
+       | None -> Keeper_exit_without_terminal)
+;;
+
+let request_shutdown_and_await_exit ~base_path name =
+  match Keeper_registry.get ~base_path name with
+  | None -> Shutdown_keeper_not_registered
+  | Some entry when Keeper_registry.current_fiber_owns_turn entry ->
+    Shutdown_self_join_rejected
+  | Some entry ->
+    ignore (Keeper_registry.begin_shutdown entry : Keeper_registry.shutdown_begin_result);
+    let grpc_close_error = signal_entry_stop entry in
+    let interrupt =
+      Keeper_registry.interrupt_current_turn_for_shutdown ~base_path name
+    in
+    ignore (Keeper_registry.settle_unlaunched_fiber_exit entry : bool);
+    Keeper_registry.await_fiber_exit entry;
+    Shutdown_lane_joined { entry; interrupt; grpc_close_error }
 ;;
 
 (** Stop all running keepers. Used in test cleanup to prevent orphaned

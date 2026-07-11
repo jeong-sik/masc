@@ -121,6 +121,12 @@ let get_net_opt () : eio_net option =
 let get_clock_opt () =
   Atomic.get current_clock
 
+let get_bound_turn_switch_opt () =
+  try Eio.Fiber.get sw_key with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Stdlib.Effect.Unhandled _ -> None
+;;
+
 let get_switch_opt () =
   (* RFC-0107 §3.3 / audit §10.5 — fiber-local first, then atomic fallback.
 
@@ -135,12 +141,7 @@ let get_switch_opt () =
      [Eio.Fiber.get] raises if called outside any Eio fiber context
      (e.g. test setup before [Eio_main.run]). In that case there is no
      fiber-local state to consult, so we fall through to the atomic. *)
-  let from_fiber =
-    try Eio.Fiber.get sw_key
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> None
-  in
+  let from_fiber = get_bound_turn_switch_opt () in
   match from_fiber with
   | Some _ as some_sw -> some_sw
   | None -> Atomic.get current_sw

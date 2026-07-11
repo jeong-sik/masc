@@ -77,6 +77,11 @@ val get_clock_opt : unit -> float Eio.Time.clock_ty Eio.Resource.t option
 val get_switch_opt : unit -> Eio.Switch.t option
 (** Get the Eio switch if available. *)
 
+val get_bound_turn_switch_opt : unit -> Eio.Switch.t option
+(** Return only the turn-scoped fiber binding, without falling back to the
+    server root switch.  This is an exact boundary check for operations that
+    must reject self-cancellation of their owning turn. *)
+
 val get_net : unit -> (eio_net, string) result
 (** Get the Eio network handle.
     Returns Error if not initialized. *)

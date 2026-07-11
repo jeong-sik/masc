@@ -54,6 +54,22 @@ let preserve_operator_pause_from_disk
 
 let heartbeat_fields_from_disk = preserve_operator_pause_from_disk
 
+let operator_pause_from_caller
+      ~(latest : Keeper_meta_contract.keeper_meta)
+      ~(caller : Keeper_meta_contract.keeper_meta)
+  =
+  { latest with
+    paused = caller.paused
+  ; latched_reason = caller.latched_reason
+  ; auto_resume_after_sec = caller.auto_resume_after_sec
+  ; updated_at = caller.updated_at
+  ; runtime =
+      { latest.runtime with
+        last_blocker = caller.runtime.last_blocker
+      }
+  }
+;;
+
 (* Dead-tombstone cleanup is the authoritative writer of [paused] and
    [latched_reason]: it records that the supervisor is tearing the keeper down
    as a dead tombstone. This is the inverse ownership of

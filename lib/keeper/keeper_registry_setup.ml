@@ -324,6 +324,7 @@ let register_with_state
       meta
       ~(phase : Keeper_state_machine.phase)
       ~(conditions : Keeper_state_machine.conditions)
+      ~(fiber_lifecycle_state : fiber_lifecycle_state)
   =
   let meta = canonicalize_registry_meta ~operation:"register" ~base_path name meta in
   Log.Keeper.info
@@ -332,6 +333,7 @@ let register_with_state
     base_path
     (Keeper_state_machine.phase_to_string phase);
   let done_p, done_r = Eio.Promise.create () in
+  let fiber_exited_p, fiber_exited_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key (Atomic.get registry) with
    | Some entry when entry.phase = Running ->
@@ -358,6 +360,9 @@ let register_with_state
     ; grpc_close = Atomic.make None
     ; done_p
     ; done_r
+    ; fiber_exited_p
+    ; fiber_exited_r
+    ; fiber_lifecycle_state = Atomic.make fiber_lifecycle_state
     ; restart_count = 0
     ; last_restart_ts = 0.0
     ; dead_since_ts = None
@@ -367,6 +372,8 @@ let register_with_state
     ; turn_consecutive_failures = 0
     ; livelock_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
+    ; shutdown_state = Atomic.make Keeper_shutdown_types.Not_requested
+    ; shutdown_transaction_claimed = Atomic.make false
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
@@ -401,7 +408,13 @@ let register ~base_path name meta =
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
-  register_with_state ~base_path name meta ~phase ~conditions
+  register_with_state
+    ~base_path
+    name
+    meta
+    ~phase
+    ~conditions
+    ~fiber_lifecycle_state:Fiber_running
 ;;
 
 let register_offline ~base_path name meta =
@@ -412,7 +425,13 @@ let register_offline ~base_path name meta =
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
-  register_with_state ~base_path name meta ~phase ~conditions
+  register_with_state
+    ~base_path
+    name
+    meta
+    ~phase
+    ~conditions
+    ~fiber_lifecycle_state:Fiber_not_started
 ;;
 
 (** R-A-6.a — refuse to revive a keeper whose restart_budget was previously exhausted.  Pairs with TLA+ §S3 BudgetNeverRevives:  []( ~restart_budget_remaining => []( ~restart_budget_remaining ))  Witho... *)
@@ -437,6 +456,7 @@ let register_restarting ~base_path name meta
      re-allocating. Pending Event Layer stimuli are restored from the durable
      queue snapshot instead of being reset across restart. *)
   let done_p, done_r = Eio.Promise.create () in
+  let fiber_exited_p, fiber_exited_r = Eio.Promise.create () in
   let initial_event_queue =
     Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
   in
@@ -453,6 +473,9 @@ let register_restarting ~base_path name meta
     ; grpc_close = Atomic.make None
     ; done_p
     ; done_r
+    ; fiber_exited_p
+    ; fiber_exited_r
+    ; fiber_lifecycle_state = Atomic.make Fiber_not_started
     ; restart_count = 0
     ; last_restart_ts = 0.0
     ; dead_since_ts = None
@@ -462,6 +485,8 @@ let register_restarting ~base_path name meta
     ; turn_consecutive_failures = 0
     ; livelock_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
+    ; shutdown_state = Atomic.make Keeper_shutdown_types.Not_requested
+    ; shutdown_transaction_claimed = Atomic.make false
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
@@ -891,10 +916,61 @@ let mark_turn_runtime_done ~base_path name =
     (Packed Turn_finalizing)
 ;;
 
+let fail_turn_switch_for_shutdown entry sw =
+  try Eio.Switch.fail sw Shutdown_interrupt with
+  | Invalid_argument message ->
+    Log.Keeper.debug
+      "%s: shutdown interrupt reached an already-finished turn switch: %s"
+      entry.name
+      message
+;;
+
+let interrupt_entry_turn_for_shutdown entry =
+  match entry.current_turn_observation with
+  | None ->
+    if not (shutdown_requested entry)
+    then Shutdown_turn_state_error Shutdown_not_requested
+    else (
+      match Atomic.exchange entry.current_turn_switch None with
+      | None -> Shutdown_no_turn_in_flight
+      | Some sw ->
+        fail_turn_switch_for_shutdown entry sw;
+        Shutdown_no_turn_in_flight)
+  | Some observation ->
+    (match mark_shutdown_turn_pending entry ~turn_id:observation.turn_id with
+     | Error Shutdown_not_requested ->
+       Shutdown_turn_state_error Shutdown_not_requested
+     | Error state_error ->
+       (match Atomic.exchange entry.current_turn_switch None with
+        | Some sw -> fail_turn_switch_for_shutdown entry sw
+        | None -> ());
+       Shutdown_turn_state_error state_error
+     | Ok () ->
+       (match Atomic.exchange entry.current_turn_switch None with
+        | None ->
+          Shutdown_turn_interrupt_pending { turn_id = observation.turn_id }
+        | Some sw ->
+          fail_turn_switch_for_shutdown entry sw;
+          Shutdown_turn_interrupted { turn_id = observation.turn_id }))
+;;
+
 let set_turn_switch ~base_path name sw_opt =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | Some entry -> Atomic.set entry.current_turn_switch sw_opt
   | None -> ()
+  | Some entry ->
+    Atomic.set entry.current_turn_switch sw_opt;
+    (match sw_opt with
+     | Some _ when shutdown_requested entry ->
+       (match interrupt_entry_turn_for_shutdown entry with
+        | Shutdown_turn_state_error error ->
+          Log.Keeper.error
+            "%s: failed to arm shutdown interrupt for newly-bound turn: %s"
+            entry.name
+            (shutdown_state_error_to_string error)
+        | Shutdown_no_turn_in_flight
+        | Shutdown_turn_interrupted _
+        | Shutdown_turn_interrupt_pending _ -> ())
+     | Some _ | None -> ())
 ;;
 
 let clear_turn_switch ~base_path name =
@@ -914,4 +990,19 @@ let interrupt_current_turn ~base_path name =
          (try Eio.Switch.fail sw Operator_interrupt with
           | Invalid_argument _ -> ());
          `Cancelled obs.turn_id)
+;;
+
+let interrupt_current_turn_for_shutdown ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> Shutdown_no_turn_in_flight
+  | Some entry -> interrupt_entry_turn_for_shutdown entry
+;;
+
+let current_fiber_owns_turn (entry : registry_entry) =
+  match
+    Eio_context.get_bound_turn_switch_opt (),
+    Atomic.get entry.current_turn_switch
+  with
+  | Some bound, Some target -> bound == target
+  | Some _, None | None, Some _ | None, None -> false
 ;;

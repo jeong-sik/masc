@@ -703,7 +703,7 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           (Option.is_none (Eio.Promise.peek entry.done_p));
         Masc.Keeper_keepalive.stop_keepalive keeper_name)
 
-let test_stop_keepalive_resolves_running_entry_immediately () =
+let test_stop_keepalive_does_not_resolve_before_lane_exit () =
   R.clear ();
   let keeper_name = "manual-stop-entry" in
   let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
@@ -711,12 +711,11 @@ let test_stop_keepalive_resolves_running_entry_immediately () =
   match R.get ~base_path:bp keeper_name with
   | None -> fail "expected manual-stop-entry in registry"
   | Some entry ->
-    check string "state stopped immediately" "stopped" (KSM.phase_to_string entry.phase);
-    (match Eio.Promise.peek reg.done_p with
-     | Some `Stopped -> ()
-     | Some (`Crashed reason) ->
-       fail ("expected stopped promise, got crashed: " ^ reason)
-     | None -> fail "expected manual stop to resolve done_p")
+    check bool "stop signal is latched" true (Atomic.get entry.fiber_stop);
+    check bool "done waits for lane owner" true
+      (Option.is_none (Eio.Promise.peek reg.done_p));
+    check bool "physical exit remains unresolved" true
+      (Option.is_none (Eio.Promise.peek reg.fiber_exited_p))
 
 let test_stop_keepalive_preserves_existing_crash_outcome () =
   R.clear ();
@@ -1024,8 +1023,8 @@ let () =
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick
         test_start_keepalive_reclaims_finished_failing_entry;
-      test_case "manual stop resolves running entry immediately" `Quick
-        test_stop_keepalive_resolves_running_entry_immediately;
+      test_case "manual stop waits for concrete lane exit" `Quick
+        test_stop_keepalive_does_not_resolve_before_lane_exit;
       test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
       test_case "resolve_done reports prior outcome" `Quick

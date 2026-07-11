@@ -363,6 +363,27 @@ let update_keeper ?(preserve_prompt_defaults = false)
                    ~new_ids:updated.active_goal_ids
                    ()
                in
-               stop_keepalive ~base_path:ctx.config.base_path updated.name;
-               start_keepalive ctx updated;
-               tool_result_ok (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated)))))
+               (match
+                  stop_keepalive_and_await
+                    ~base_path:ctx.config.base_path
+                    updated.name
+                with
+                | Keeper_not_registered | Keeper_joined _ ->
+                  start_keepalive ctx updated;
+                  tool_result_ok
+                    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated))
+                | Keeper_stop_owned_by_shutdown ->
+                  tool_result_error
+                    (Printf.sprintf
+                       "keeper %s is already owned by a shutdown transaction"
+                       updated.name)
+                | Keeper_self_stop_rejected ->
+                  tool_result_error
+                    (Printf.sprintf
+                       "keeper %s cannot synchronously restart its own active turn"
+                       updated.name)
+                | Keeper_exit_without_terminal ->
+                  tool_result_error
+                    (Printf.sprintf
+                       "keeper %s exited without a terminal lifecycle result"
+                       updated.name)))))

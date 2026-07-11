@@ -4,9 +4,11 @@
 
 type tool_result = Keeper_types_profile.tool_result
 
-(** Handle the [masc_keeper_down] MCP tool call: stop keepalive,
-    optionally remove meta and/or session directory, broadcast
-    Operator_pause to the registry. *)
+(** Handle [masc_keeper_down] as a lane-local transaction: persist paused
+    intent, cancel and join the concrete lane fiber, settle an interrupted turn
+    and task ownership, then commit cleanup and unregister.  A failed stage
+    returns an explicit retryable partial-failure payload and leaves the paused
+    lane registered. *)
 val handle_keeper_down :
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 

@@ -297,35 +297,47 @@ let purge_agent_filesystem_artifacts config agent_names =
   |> Result.map List.rev
 ;;
 
-let purge_keeper_artifacts config requested_name
+let purge_keeper_artifacts config
     ({ keeper_name; agent_name; trace_id; toml_path } : keeper_purge_target) =
   let keeper_dir = Keeper_fs.keeper_dir config in
   let keeper_runtime_dir = Filename.concat keeper_dir keeper_name in
-  let cleanup_names =
-    [ requested_name; keeper_name; agent_name ]
-    |> List.filter_map String_util.trim_to_option
-    |> Json_util.dedupe_keep_order
+  let shutdown_result =
+    Keeper_turn_lifecycle.handle_keeper_down_config
+      ~config
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "remove_meta", `Bool true
+        ; "remove_session", `Bool false
+        ])
   in
-  cleanup_names
-  |> List.iter (fun name ->
-       Keeper_keepalive.stop_keepalive ~base_path:config.base_path name);
-  match
-    Operator_pending_confirm.remove_pending_confirms_by_target
-      config
-      ~target_type:"keeper"
-      ~target_id:(Some keeper_name)
-  with
-  | Error msg ->
-    Error
-      (Printf.sprintf
-         "pending-confirm cleanup failed for keeper %s: %s"
-         keeper_name
-         msg)
+  let shutdown_receipt =
+    if not (Tool_result.is_success shutdown_result)
+    then Error (Tool_result.message shutdown_result)
+    else
+      try
+        let receipt = Yojson.Safe.from_string (Tool_result.message shutdown_result) in
+        (match Safe_ops.json_int_opt "pending_confirms_removed" receipt with
+         | Some removed -> Ok removed
+         | None ->
+           Error
+             (Printf.sprintf
+                "keeper shutdown receipt for %s omitted pending_confirms_removed"
+                keeper_name))
+      with
+      | Yojson.Json_error error ->
+        Error
+          (Printf.sprintf
+             "keeper shutdown returned a malformed receipt for %s: %s"
+             keeper_name
+             error)
+  in
+  match shutdown_receipt with
+  | Error detail ->
+    Error (Printf.sprintf "keeper shutdown failed for %s: %s" keeper_name detail)
   | Ok keeper_pending_confirms_removed ->
   Log.Misc.info
     "[keeper_purge] cleanup keeper=%s pending_confirms_removed=%d"
     keeper_name keeper_pending_confirms_removed;
-  Keeper_registry.unregister ~base_path:config.base_path keeper_name;
   (match purge_agent_filesystem_artifacts config [ agent_name; keeper_name ] with
    | Error _ as err -> err
    | Ok agent_cleanup_results ->
@@ -495,7 +507,7 @@ let add_delete_action_routes router =
                (match resolve_keeper_purge_target config requested_name with
                 | Some keeper_target ->
                   let toml_deleted = Option.is_some keeper_target.toml_path in
-                  (match purge_keeper_artifacts config requested_name keeper_target with
+                  (match purge_keeper_artifacts config keeper_target with
                    | Error msg ->
                      respond_error
                        ~status:`Internal_server_error

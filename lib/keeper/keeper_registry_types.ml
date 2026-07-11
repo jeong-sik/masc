@@ -13,6 +13,7 @@ module StringMap = Set_util.StringMap
 include Keeper_registry_types_failure
 
 exception Operator_interrupt
+exception Shutdown_interrupt
 
 (* Turn_phase FSM types, witnesses, transitions, and resolver extracted to
    [Keeper_registry_types_turn_phase] (500-line decomp). *)
@@ -89,6 +90,16 @@ type turn_measurement =
 
 type done_resolution = [ `Stopped | `Crashed of string ]
 
+type fiber_lifecycle_state =
+  | Fiber_not_started
+  | Fiber_running
+  | Fiber_exited
+
+type fiber_launch_claim_result =
+  | Fiber_launch_claimed
+  | Fiber_launch_already_running
+  | Fiber_launch_already_exited
+
 type registry_entry =
   { base_path : string
   ; name : string
@@ -104,6 +115,9 @@ type registry_entry =
   ; grpc_close : (unit -> unit) option Atomic.t
   ; done_p : done_resolution Eio.Promise.t
   ; done_r : done_resolution Eio.Promise.u
+  ; fiber_exited_p : unit Eio.Promise.t
+  ; fiber_exited_r : unit Eio.Promise.u
+  ; fiber_lifecycle_state : fiber_lifecycle_state Atomic.t
   ; restart_count : int
   ; last_restart_ts : float
   ; dead_since_ts : float option
@@ -113,6 +127,8 @@ type registry_entry =
   ; turn_consecutive_failures : int
   ; livelock_state : livelock_attempt_state option Atomic.t
   ; current_turn_switch : Eio.Switch.t option Atomic.t
+  ; shutdown_state : Keeper_shutdown_types.state Atomic.t
+  ; shutdown_transaction_claimed : bool Atomic.t
   ; board_wakeups : float StringMap.t
   ; board_cursor_ts : float
   ; board_cursor_post_id : string option
@@ -154,6 +170,24 @@ and completed_turn_observation =
   ; ct_wake : wake_reason
   }
 
+type shutdown_begin_result =
+  | Shutdown_started
+  | Shutdown_already_started of Keeper_shutdown_types.turn_settlement
+
+type shutdown_state_error =
+  | Shutdown_not_requested
+  | Shutdown_turn_mismatch of
+      { expected_turn_id : int
+      ; actual_turn_id : int
+      }
+  | Shutdown_turn_already_settled of { turn_id : int }
+
+type shutdown_interrupt_result =
+  | Shutdown_no_turn_in_flight
+  | Shutdown_turn_interrupted of { turn_id : int }
+  | Shutdown_turn_interrupt_pending of { turn_id : int }
+  | Shutdown_turn_state_error of shutdown_state_error
+
 type done_resolve_result =
   | Done_resolved of { source : string }
   | Done_already_resolved of
@@ -185,6 +219,185 @@ let resolve_done entry ~source (value : done_resolution) =
          | None -> value
        in
        Done_already_resolved { source; previous })
+;;
+
+let resolve_fiber_exited entry =
+  Atomic.set entry.fiber_lifecycle_state Fiber_exited;
+  match Eio.Promise.peek entry.fiber_exited_p with
+  | Some () -> false
+  | None ->
+    (try
+       Eio.Promise.resolve entry.fiber_exited_r ();
+       true
+     with
+     | Invalid_argument _ -> false)
+;;
+
+let await_fiber_exit entry = Eio.Promise.await entry.fiber_exited_p
+
+let rec claim_fiber_launch entry =
+  let current = Atomic.get entry.fiber_lifecycle_state in
+  match current with
+  | Fiber_not_started ->
+    if Atomic.compare_and_set entry.fiber_lifecycle_state current Fiber_running
+    then Fiber_launch_claimed
+    else claim_fiber_launch entry
+  | Fiber_running -> Fiber_launch_already_running
+  | Fiber_exited -> Fiber_launch_already_exited
+;;
+
+let rec settle_unlaunched_fiber_exit entry =
+  let current = Atomic.get entry.fiber_lifecycle_state in
+  match current with
+  | Fiber_not_started ->
+    if Atomic.compare_and_set entry.fiber_lifecycle_state current Fiber_exited
+    then (
+      ignore (resolve_fiber_exited entry : bool);
+      true)
+    else settle_unlaunched_fiber_exit entry
+  | Fiber_running | Fiber_exited -> false
+;;
+
+let try_claim_shutdown_transaction entry =
+  Atomic.compare_and_set entry.shutdown_transaction_claimed false true
+;;
+
+let release_shutdown_transaction entry =
+  Atomic.set entry.shutdown_transaction_claimed false
+;;
+
+let rec begin_shutdown entry =
+  let current = Atomic.get entry.shutdown_state in
+  match current with
+  | Keeper_shutdown_types.Not_requested ->
+    let requested =
+      Keeper_shutdown_types.Requested Keeper_shutdown_types.No_interrupted_turn
+    in
+    if Atomic.compare_and_set entry.shutdown_state current requested
+    then Shutdown_started
+    else begin_shutdown entry
+  | Keeper_shutdown_types.Requested settlement ->
+    Shutdown_already_started settlement
+;;
+
+let shutdown_requested entry =
+  match Atomic.get entry.shutdown_state with
+  | Keeper_shutdown_types.Not_requested -> false
+  | Keeper_shutdown_types.Requested _ -> true
+;;
+
+let shutdown_turn_settlement entry =
+  match Atomic.get entry.shutdown_state with
+  | Keeper_shutdown_types.Not_requested -> None
+  | Keeper_shutdown_types.Requested settlement -> Some settlement
+;;
+
+let settlement_turn_id = function
+  | Keeper_shutdown_types.No_interrupted_turn -> None
+  | Keeper_shutdown_types.Awaiting_interrupted_turn { turn_id } -> Some turn_id
+  | Keeper_shutdown_types.Interrupted_turn_persisted { record; _ }
+  | Keeper_shutdown_types.Interrupted_turn_persist_failed { record; _ } ->
+    Some record.turn_id
+;;
+
+let rec mark_shutdown_turn_pending entry ~turn_id =
+  let current = Atomic.get entry.shutdown_state in
+  match current with
+  | Keeper_shutdown_types.Not_requested -> Error Shutdown_not_requested
+  | Keeper_shutdown_types.Requested Keeper_shutdown_types.No_interrupted_turn ->
+    let next =
+      Keeper_shutdown_types.Requested
+        (Keeper_shutdown_types.Awaiting_interrupted_turn { turn_id })
+    in
+    if Atomic.compare_and_set entry.shutdown_state current next
+    then Ok ()
+    else mark_shutdown_turn_pending entry ~turn_id
+  | Keeper_shutdown_types.Requested settlement ->
+    (match settlement_turn_id settlement with
+     | Some expected_turn_id when expected_turn_id = turn_id -> Ok ()
+     | Some expected_turn_id ->
+       Error (Shutdown_turn_mismatch { expected_turn_id; actual_turn_id = turn_id })
+     | None -> Error Shutdown_not_requested)
+;;
+
+let rec record_shutdown_turn_persisted entry
+      (persisted : Keeper_shutdown_types.persisted_interrupted_turn)
+  =
+  let turn_id = persisted.record.turn_id in
+  let current = Atomic.get entry.shutdown_state in
+  match current with
+  | Keeper_shutdown_types.Not_requested -> Error Shutdown_not_requested
+  | Keeper_shutdown_types.Requested
+      (Keeper_shutdown_types.Awaiting_interrupted_turn { turn_id = expected_turn_id })
+  | Keeper_shutdown_types.Requested
+      (Keeper_shutdown_types.Interrupted_turn_persist_failed
+         { record = { turn_id = expected_turn_id; _ }; _ }) ->
+    if expected_turn_id <> turn_id
+    then Error (Shutdown_turn_mismatch { expected_turn_id; actual_turn_id = turn_id })
+    else
+      let next =
+        Keeper_shutdown_types.Requested
+          (Keeper_shutdown_types.Interrupted_turn_persisted persisted)
+      in
+      if Atomic.compare_and_set entry.shutdown_state current next
+      then Ok ()
+      else record_shutdown_turn_persisted entry persisted
+  | Keeper_shutdown_types.Requested
+      (Keeper_shutdown_types.Interrupted_turn_persisted { record; _ }) ->
+    if record.turn_id = turn_id
+    then Ok ()
+    else
+      Error
+        (Shutdown_turn_mismatch
+           { expected_turn_id = record.turn_id; actual_turn_id = turn_id })
+  | Keeper_shutdown_types.Requested Keeper_shutdown_types.No_interrupted_turn ->
+    Error Shutdown_not_requested
+;;
+
+let rec record_shutdown_turn_persist_failed entry
+      (record : Keeper_shutdown_types.interrupted_turn)
+      ~error
+  =
+  let turn_id = record.turn_id in
+  let current = Atomic.get entry.shutdown_state in
+  match current with
+  | Keeper_shutdown_types.Not_requested -> Error Shutdown_not_requested
+  | Keeper_shutdown_types.Requested
+      (Keeper_shutdown_types.Awaiting_interrupted_turn { turn_id = expected_turn_id }) ->
+    if expected_turn_id <> turn_id
+    then Error (Shutdown_turn_mismatch { expected_turn_id; actual_turn_id = turn_id })
+    else
+      let next =
+        Keeper_shutdown_types.Requested
+          (Keeper_shutdown_types.Interrupted_turn_persist_failed { record; error })
+      in
+      if Atomic.compare_and_set entry.shutdown_state current next
+      then Ok ()
+      else record_shutdown_turn_persist_failed entry record ~error
+  | Keeper_shutdown_types.Requested
+      (Keeper_shutdown_types.Interrupted_turn_persisted { record = prior; _ })
+  | Keeper_shutdown_types.Requested
+      (Keeper_shutdown_types.Interrupted_turn_persist_failed
+         { record = prior; _ }) ->
+    if prior.turn_id = turn_id
+    then Error (Shutdown_turn_already_settled { turn_id })
+    else
+      Error
+        (Shutdown_turn_mismatch
+           { expected_turn_id = prior.turn_id; actual_turn_id = turn_id })
+  | Keeper_shutdown_types.Requested Keeper_shutdown_types.No_interrupted_turn ->
+    Error Shutdown_not_requested
+;;
+
+let shutdown_state_error_to_string = function
+  | Shutdown_not_requested -> "shutdown was not requested"
+  | Shutdown_turn_mismatch { expected_turn_id; actual_turn_id } ->
+    Printf.sprintf
+      "shutdown turn mismatch: expected=%d actual=%d"
+      expected_turn_id
+      actual_turn_id
+  | Shutdown_turn_already_settled { turn_id } ->
+    Printf.sprintf "shutdown turn %d is already settled" turn_id
 ;;
 
 let registry_key ~base_path name =

@@ -19,6 +19,6 @@ val supervise_keepalive :
   unit
 (** Register and launch a supervised keepalive fiber when spawn admission
     allows it. When the injected launch gate returns [Error _] (registry
-    FSM rejected [Fiber_started]), no [Started]/[Running] event is
-    published — the gate already resolved the entry through the crash
-    path. *)
+    FSM rejection or a concurrent shutdown), no [Started]/[Running] event is
+    published.  FSM rejection owns a crash settlement; shutdown rejection
+    leaves terminal settlement to the shutdown transaction. *)

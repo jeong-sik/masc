@@ -416,7 +416,14 @@ let test_autonomous_yields_to_queued_connector_message () =
        ; user_blocks = []
        ; attachments = []
        ; timestamp = 1.0
-       ; source = Keeper_chat_queue.Slack { channel = "C-test"; user_id = "U-test" }
+       ; source =
+           Keeper_chat_queue.Slack
+             { channel_id = "C-test"
+             ; user_id = "U-test"
+             ; user_name = "slack-user"
+             ; team_id = Some "T-test"
+             ; thread_ts = Some "171.001"
+             }
        }
    with
    | Ok _ -> ()

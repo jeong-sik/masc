@@ -40,7 +40,7 @@ let streaming_update_min_interval_sec = 3.0
    gateway does); clock-less callers keep the prior unbounded behavior. Matches
    the socket client's [fetch_wss_url] default so all Slack HTTP shares one
    ceiling. *)
-let default_http_timeout_sec = 10.0
+let default_http_timeout_sec = Masc_http_client.default_request_timeout_sec
 
 let user_agent = "masc-slack-bot/0.1 (https://github.com/jeong-sik/masc)"
 

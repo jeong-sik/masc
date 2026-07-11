@@ -190,16 +190,16 @@ let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
           ~channel_workspace_id:channel_id
           ~channel_user_id:user_id;
     }
-  | Keeper_chat_queue.Slack { channel; user_id } ->
+  | Keeper_chat_queue.Slack { channel_id; user_id; user_name; _ } ->
     {
-      payload_channel = channel;
+      payload_channel = "slack";
       payload_channel_user_id = user_id;
-      payload_channel_user_name = "";
-      payload_channel_workspace_id = "";
+      payload_channel_user_name = user_name;
+      payload_channel_workspace_id = channel_id;
       agent_name =
         Gate_keeper_backend.agent_name_for_channel_actor
-          ~channel
-          ~channel_workspace_id:""
+          ~channel:"slack"
+          ~channel_workspace_id:channel_id
           ~channel_user_id:user_id;
     }
 
@@ -1125,7 +1125,7 @@ let start_keeper_loops
                    | Some token ->
                        fork_delivery_adapter ~label:"Discord"
                          ~run:(fun settle ->
-                           Keeper_chat_discord.adapter_loop ~token
+                           Keeper_chat_discord.adapter_loop ~clock ~token
                              ~channel_id ~events
                              ~on_send_result:(fun result ->
                                settle
@@ -1148,7 +1148,7 @@ let start_keeper_loops
                           DISCORD_BOT_TOKEN not set, \
                           skipping Discord delivery for keeper=%s"
                          keeper_name)
-              | Keeper_chat_queue.Slack { channel; _ } ->
+              | Keeper_chat_queue.Slack { channel_id; thread_ts; _ } ->
                   Log.Keeper.info
                     "keeper_chat_consumer: forking Slack adapter \
                      for keeper=%s"
@@ -1157,8 +1157,8 @@ let start_keeper_loops
                    | Some token ->
                        fork_delivery_adapter ~label:"Slack"
                          ~run:(fun settle ->
-                           Keeper_chat_slack.adapter_loop ~token
-                             ~channel ~events
+                           Keeper_chat_slack.adapter_loop ~clock ~token
+                             ~channel:channel_id ?thread_ts ~events
                              ~on_send_result:(fun result ->
                                Slack_observability.record_reply
                                  (match result with

@@ -207,9 +207,113 @@ let test_busy_discord_persist_failure_is_explicit () =
         check "failed enqueue does not advance queue revision"
           (snapshot.revision = 0L)))
 
+let test_pending_receipt_prevents_direct_overtake () =
+  Printf.printf "Test: active receipt queues a later connector turn without a live slot\n%!";
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-pending-conn-%d-%d" (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock = Eio.Stdenv.clock env in
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:(Some keeper_name));
+      Keeper_turn_admission.For_testing.reset ();
+      configure_queue ~base;
+      ignore
+        (Keeper_chat_queue.enqueue ~keeper_name
+           { content = "first"
+           ; user_blocks = []
+           ; attachments = []
+           ; timestamp = Eio.Time.now clock
+           ; source =
+               Keeper_chat_queue.Discord
+                 { channel_id = "chan-777"; user_id = "user-42" }
+           });
+      Eio.Switch.run @@ fun sw ->
+      let reply =
+        Gate_keeper_backend.dispatch
+          ~connector_kind:Gate_keeper_backend.Discord
+          ~sw ~clock ~proc_mgr:None ~net:None ~config
+          ~channel:"discord" ~channel_user_id:"user-42"
+          ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
+          ~keeper_name ~idempotency_key:"discord-msg-778"
+          ~metadata:[] ~content:"second"
+      in
+      (match reply with
+       | Gate_protocol.Reply { message_request = Some request; _ } ->
+         check "later connector input is queued" (request.status = Gate_protocol.Queued)
+       | _ -> check "later connector input is queued" false);
+      let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+      check "FIFO keeps both accepted receipts pending"
+        (List.map (fun item -> item.Keeper_chat_queue.message.content) snapshot.pending
+         = [ "first"; "second" ]))
+
+let test_busy_slack_preserves_thread_context () =
+  Printf.printf "Test: busy Slack dispatch preserves reply-thread identity\n%!";
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-busy-slack-%d-%d" (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock = Eio.Stdenv.clock env in
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:(Some keeper_name));
+      Keeper_turn_admission.For_testing.reset ();
+      configure_queue ~base;
+      Eio.Switch.run @@ fun sw ->
+      let reply =
+        with_busy_slot ~base ~sw (fun () ->
+          Gate_keeper_backend.dispatch
+            ~connector_kind:Gate_keeper_backend.Slack
+            ~sw ~clock ~proc_mgr:None ~net:None ~config
+            ~channel:"slack" ~channel_user_id:"U-42"
+            ~channel_user_name:"Slack User" ~channel_workspace_id:"C-777"
+            ~keeper_name ~idempotency_key:"slack-msg-171.001"
+            ~metadata:
+              [ "slack.message_ts", "171.001"
+              ; "slack.team_id", "T-777"
+              ]
+            ~content:"threaded question")
+      in
+      (match reply with
+       | Gate_protocol.Reply { message_request = Some request; _ } ->
+         check "Slack busy input is queued" (request.status = Gate_protocol.Queued)
+       | _ -> check "Slack busy input is queued" false);
+      match (Keeper_chat_queue.snapshot ~keeper_name).pending with
+      | [ { message =
+              { source =
+                  Keeper_chat_queue.Slack
+                    { channel_id; user_id; user_name; team_id; thread_ts }
+              ; _
+              }
+          ; _
+          } ] ->
+        check "Slack channel retained" (channel_id = "C-777");
+        check "Slack user retained" (user_id = "U-42" && user_name = "Slack User");
+        check "Slack team retained" (team_id = Some "T-777");
+        check "top-level message roots deferred reply thread"
+          (thread_ts = Some "171.001")
+      | _ -> check "one typed Slack receipt is pending" false)
+
 let () =
   test_busy_discord_enqueues ();
   test_busy_discord_persist_failure_is_explicit ();
+  test_pending_receipt_prevents_direct_overtake ();
+  test_busy_slack_preserves_thread_context ();
   if !failures > 0 then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;
     exit 1)

@@ -14,7 +14,13 @@
 type message_source =
   | Dashboard
   | Discord of { channel_id : string; user_id : string }
-  | Slack of { channel : string; user_id : string }
+  | Slack of {
+      channel_id : string;
+      user_id : string;
+      user_name : string;
+      team_id : string option;
+      thread_ts : string option;
+    }
 
 type queued_message = {
   content : string;
@@ -92,6 +98,7 @@ type snapshot_load_error = {
 type mutation_error =
   | Persistence_not_configured
   | Snapshot_unavailable of snapshot_load_error
+  | Invalid_input of string
   | Revision_exhausted
   | Persist_failed of string
 
@@ -197,6 +204,7 @@ val merge_batch : leased_message list -> queued_message option
 
 val pending_count : keeper_name:string -> (int, mutation_error) result
 val inflight_count : keeper_name:string -> (int, mutation_error) result
+val has_active_receipts : keeper_name:string -> (bool, mutation_error) result
 val snapshot : keeper_name:string -> diagnostic_snapshot
 
 val lookup_receipt :

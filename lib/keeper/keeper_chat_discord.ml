@@ -19,13 +19,13 @@ let pp_error = Discord_rest_client.pp_error
 
 (* ── Text chunking helpers ────────────────────────────────────────── *)
 
-let send_message ~token ~channel_id ~content =
+let send_message ?clock ~token ~channel_id ~content () =
   let content = Observability_redact.redact_text content in
   let limit = Discord_rest_client.message_content_limit in
   let len = String.length content in
   if len = 0 then Ok ()
   else if len <= limit then
-    match Discord_rest_client.send_message ~token ~channel_id ~content () with
+    match Discord_rest_client.send_message ?clock ~token ~channel_id ~content () with
     | Ok _msg_id -> Ok ()
     | Error err ->
         let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
@@ -45,7 +45,7 @@ let send_message ~token ~channel_id ~content =
         let chunk, remaining =
           Discord_rest_client.split_at_codepoint rest ~limit
         in
-        (match Discord_rest_client.send_message ~token ~channel_id ~content:chunk () with
+        (match Discord_rest_client.send_message ?clock ~token ~channel_id ~content:chunk () with
          | Ok _msg_id -> send_chunks first_error remaining
          | Error err ->
              let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
@@ -106,9 +106,9 @@ let final_head_and_overflow content =
   let overflow = if overflow_str = "" then None else Some overflow_str in
   (head, overflow)
 
-let edit_message ~token ~channel_id ~message_id ~content =
+let edit_message ?clock ~token ~channel_id ~message_id ~content () =
   match Discord_rest_client.edit_message
-          ~token ~channel_id ~message_id ~content ()
+          ?clock ~token ~channel_id ~message_id ~content ()
   with
   | Ok () -> Ok ()
   | Error err ->
@@ -170,7 +170,7 @@ let tool_embed_title ~tool_name =
 
 (* Send a "running" embed for a tool call. Returns the Discord message
    id so we can edit it to "done" later. *)
-let send_tool_running ~token ~channel_id ~tool_call_name =
+let send_tool_running ?clock ~token ~channel_id ~tool_call_name () =
   let embed =
     { Discord_rest_client.title = tool_embed_title ~tool_name:tool_call_name
     ; description = Some "Running…"
@@ -181,7 +181,7 @@ let send_tool_running ~token ~channel_id ~tool_call_name =
     }
   in
   match Discord_rest_client.send_embed_message
-          ~token ~channel_id ~content:"" ~embeds:[embed] () with
+          ?clock ~token ~channel_id ~content:"" ~embeds:[embed] () with
   | Ok msg_id -> Some msg_id
   | Error err ->
       let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
@@ -191,8 +191,8 @@ let send_tool_running ~token ~channel_id ~tool_call_name =
 
 (* Edit a "running" embed to "done", preserving the original tool name and
    enriching it with optional argument and result summaries. *)
-let send_tool_done ~token ~channel_id ~message_id ~tool_call_name
-    ~args_summary ~result_summary =
+let send_tool_done ?clock ~token ~channel_id ~message_id ~tool_call_name
+    ~args_summary ~result_summary () =
   let fields =
     [ ( "args"
       , truncate_to ~max_len:Discord_rest_client.embed_field_value_limit
@@ -220,7 +220,7 @@ let send_tool_done ~token ~channel_id ~message_id ~tool_call_name
     }
   in
   match Discord_rest_client.edit_embed_message
-          ~token ~channel_id ~message_id ~content:"" ~embeds:[embed] () with
+          ?clock ~token ~channel_id ~message_id ~content:"" ~embeds:[embed] () with
   | Ok () -> ()
   | Error err ->
       let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
@@ -237,12 +237,12 @@ let public_voice_audio_url ?base_url token =
   in
   base ^ "/api/v1/voice/audio/" ^ token
 
-let send_link_block ~token ~channel_id ~url ~title ~description ~image =
+let send_link_block ?clock ~token ~channel_id ~url ~title ~description ~image () =
   let embed =
     Discord_rest_client.link_embed ~url ~title ~description ~image
   in
   match Discord_rest_client.send_embed_message
-          ~token ~channel_id ~content:"" ~embeds:[embed] ()
+          ?clock ~token ~channel_id ~content:"" ~embeds:[embed] ()
   with
   | Ok _msg_id -> ()
   | Error err ->
@@ -250,10 +250,10 @@ let send_link_block ~token ~channel_id ~url ~title ~description ~image =
       Log.Keeper.warn
         "keeper_chat_discord: send_link_block failed: %s" err_str
 
-let send_image_block ~token ~channel_id ~url ~caption =
+let send_image_block ?clock ~token ~channel_id ~url ~caption () =
   let embed = Discord_rest_client.image_embed ~url ~caption in
   match Discord_rest_client.send_embed_message
-          ~token ~channel_id ~content:"" ~embeds:[embed] ()
+          ?clock ~token ~channel_id ~content:"" ~embeds:[embed] ()
   with
   | Ok _msg_id -> ()
   | Error err ->
@@ -261,8 +261,8 @@ let send_image_block ~token ~channel_id ~url ~caption =
       Log.Keeper.warn
         "keeper_chat_discord: send_image_block failed: %s" err_str
 
-let send_audio_block ~token ~channel_id ~base_url ~audio_token ~message_text
-    ~duration_sec =
+let send_audio_block ?clock ~token ~channel_id ~base_url ~audio_token ~message_text
+    ~duration_sec () =
   let url = public_voice_audio_url ?base_url audio_token in
   let duration_prefix =
     match duration_sec with
@@ -274,7 +274,7 @@ let send_audio_block ~token ~channel_id ~base_url ~audio_token ~message_text
   in
   (* Rich audio is a side message, not the primary terminal delivery receipt.
      [send_message] already logs the concrete transport error. *)
-  match send_message ~token ~channel_id ~content with
+  match send_message ?clock ~token ~channel_id ~content () with
   | Ok () | Error _ -> ()
 
 let truncate_embed_desc s =
@@ -346,12 +346,12 @@ let rich_embeds_of_text text =
   |> Keeper_chat_blocks.parse_text_to_blocks
   |> List.filter_map rich_embed_of_chat_block
 
-let send_text_rich_embeds ~token ~channel_id text =
+let send_text_rich_embeds ?clock ~token ~channel_id text =
   rich_embeds_of_text text
   |> List.iter (fun embed ->
          match
            Discord_rest_client.send_embed_message ~token ~channel_id
-             ~content:"" ~embeds:[ embed ] ()
+             ?clock ~content:"" ~embeds:[ embed ] ()
          with
          | Ok _msg_id -> ()
          | Error err ->
@@ -373,7 +373,8 @@ let combine_delivery_results primary overflow =
   | Ok () -> overflow
 
 let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
-    ~edit_message ~send_message ?base_url ?(on_send_result = fun _ -> ()) () =
+    ~edit_message ~send_message ?clock ?base_url
+    ?(on_send_result = fun _ -> ()) () =
   let base_url =
     match base_url with
     | Some b -> Some (Masc_network_defaults.normalize_loopback_base_url b)
@@ -489,7 +490,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
               combine_delivery_results patch_result overflow_result
         in
         on_send_result final_result;
-        send_text_rich_embeds ~token ~channel_id acc_text;
+        send_text_rich_embeds ?clock ~token ~channel_id acc_text;
         (* Loop exits after one turn. *)
         ()
     | Event_error { message } ->
@@ -526,7 +527,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Tool_call_start { tool_call_id; tool_call_name } ->
         let tool_msgs =
-          match send_tool_running ~token ~channel_id ~tool_call_name with
+          match send_tool_running ?clock ~token ~channel_id ~tool_call_name () with
           | Some discord_msg_id ->
               let entry =
                 { discord_message_id = discord_msg_id
@@ -549,24 +550,24 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         (match find_tool_msg tool_msgs tool_call_id with
          | Some entry ->
              let args_summary = Option.value entry.args_summary ~default:"" in
-             send_tool_done ~token ~channel_id
+             send_tool_done ?clock ~token ~channel_id
                ~message_id:entry.discord_message_id
                ~tool_call_name:entry.tool_call_name ~args_summary
-               ~result_summary:entry.result_summary;
+               ~result_summary:entry.result_summary ();
              let tool_msgs = remove_tool_msg tool_msgs tool_call_id in
              loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
          | None ->
              (* No running embed was created (send failed earlier). *)
              loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs)
     | Link_block { url; title; description; image } ->
-        send_link_block ~token ~channel_id ~url ~title ~description ~image;
+        send_link_block ?clock ~token ~channel_id ~url ~title ~description ~image ();
         loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Image_block { url; caption } ->
-        send_image_block ~token ~channel_id ~url ~caption;
+        send_image_block ?clock ~token ~channel_id ~url ~caption ();
         loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Audio_block { token; mime = _; message_text; duration_sec } ->
-        send_audio_block ~token ~channel_id ~base_url ~audio_token:token
-          ~message_text ~duration_sec;
+        send_audio_block ?clock ~token ~channel_id ~base_url ~audio_token:token
+          ~message_text ~duration_sec ();
         loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Tool_context_block { tool_call_id; name = _; args_summary; result_summary }
       ->
@@ -586,15 +587,15 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
   loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
     ~last_edited_text:"" ~base_url ~tool_msgs:[]
 
-let adapter_loop ~token ~channel_id ~events ?base_url
+let adapter_loop ~clock ~token ~channel_id ~events ?base_url
     ?(on_send_result = fun _ -> ()) () =
   adapter_loop_with_transport ~token ~channel_id ~events
     ~post_message:(fun ~content ->
-      Discord_rest_client.send_message ~token ~channel_id ~content ())
+      Discord_rest_client.send_message ~clock ~token ~channel_id ~content ())
     ~edit_message:(fun ~message_id ~content ->
-      edit_message ~token ~channel_id ~message_id ~content)
-    ~send_message:(fun ~content -> send_message ~token ~channel_id ~content)
-    ?base_url ~on_send_result ()
+      edit_message ~clock ~token ~channel_id ~message_id ~content ())
+    ~send_message:(fun ~content -> send_message ~clock ~token ~channel_id ~content ())
+    ~clock ?base_url ~on_send_result ()
 
 module For_testing = struct
   let streaming_patch_content = streaming_patch_content

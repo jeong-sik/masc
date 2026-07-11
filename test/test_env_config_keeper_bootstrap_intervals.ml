@@ -183,6 +183,38 @@ let test_discord_queue_projection_matches_gateway_context () =
     "gate:discord:discord-channel-1:discord-user-9"
     projection.agent_name
 
+let test_slack_queue_projection_matches_gateway_context () =
+  let queued : Chat_queue.queued_message =
+    { content = "hello"
+    ; user_blocks = []
+    ; attachments = []
+    ; timestamp = 0.0
+    ; source =
+        Chat_queue.Slack
+          { channel_id = "C-SLACK"
+          ; user_id = "U-SLACK"
+          ; user_name = "Slack User"
+          ; team_id = Some "T-SLACK"
+          ; thread_ts = Some "171.001"
+          }
+    }
+  in
+  let projection = Boot.queued_chat_projection queued in
+  check string "connector label" "slack" projection.payload_channel;
+  check string "actor id" "U-SLACK" projection.payload_channel_user_id;
+  check string "actor name" "Slack User" projection.payload_channel_user_name;
+  check string "workspace id uses Slack channel id" "C-SLACK"
+    projection.payload_channel_workspace_id;
+  check string "agent identity matches gate channel actor"
+    "gate:slack:C-SLACK:U-SLACK" projection.agent_name;
+  match Chat_queue.continuation_channel_of_message_source queued.source with
+  | Keeper_continuation_channel.Slack { team_id; channel_id; thread_ts; user_id } ->
+    check (option string) "team retained" (Some "T-SLACK") team_id;
+    check string "channel retained" "C-SLACK" channel_id;
+    check (option string) "thread retained" (Some "171.001") thread_ts;
+    check string "user retained" "U-SLACK" user_id
+  | _ -> fail "Slack source must project to a Slack continuation"
+
 let () =
   run "env_config_keeper_bootstrap_intervals"
     [
@@ -218,5 +250,7 @@ let () =
         [
           test_case "Discord queue source keeps connector context" `Quick
             test_discord_queue_projection_matches_gateway_context;
+          test_case "Slack queue source keeps connector context" `Quick
+            test_slack_queue_projection_matches_gateway_context;
         ] );
     ]

@@ -148,7 +148,7 @@ describe('ChatTranscript', () => {
     expect(bubble?.textContent).toContain('✓')
   })
 
-  it('preserves structured failure messages as preformatted text', () => {
+  it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
     const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress","last_tool_effect":"mutating"}'
     render(
       html`<${ChatTranscript}
@@ -170,10 +170,24 @@ describe('ChatTranscript', () => {
       container,
     )
 
-    const pre = container.querySelector('[data-chat-structured-error]')
+    // Typed failure card: discriminated by the row's delivery/kind signal,
+    // never by matching the content string.
+    const card = container.querySelector('[data-chat-failure-card]')
+    expect(card).not.toBeNull()
+    // The raw internal error no longer replaces the reply: the card leads
+    // with the reassurance that the pending message survives the failure.
+    expect(card?.querySelector('[data-chat-failure-reassurance]')?.textContent)
+      .toContain('다음 턴')
+    // Diagnostic detail is collapsed by default…
+    expect(container.querySelector('[data-chat-failure-detail]')).toBeNull()
+    expect(card?.textContent).not.toContain('no_usable_progress')
+    // …and expands to the preformatted token view on demand.
+    const toggle = card?.querySelector('[data-chat-failure-detail-toggle]') as HTMLButtonElement
+    toggle.click()
+    await flushUi()
+    const pre = container.querySelector('[data-chat-failure-detail]')
     expect(pre?.tagName).toBe('PRE')
     expect(pre?.classList.contains('chat-error-text')).toBe(true)
-    expect(pre?.classList.contains('break-words')).toBe(false)
     expect(pre?.textContent).toContain('ollama_cloud.deepseek-v4-flash')
     expect(Array.from(pre?.querySelectorAll('.chat-error-token') ?? []).some(node =>
       node.textContent?.includes('ollama_cloud.deepseek-v4-flash'),

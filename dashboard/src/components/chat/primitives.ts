@@ -2056,6 +2056,63 @@ function renderStructuredFailureText(text: string): Array<string | VNode> {
   })
 }
 
+/** Typed failure card for kind=transport_failure rows.
+ *
+ * The discriminator is the writer-declared row kind (normalized to
+ * delivery='error'), never a string match on the content — the raw error
+ * text is diagnostic payload, shown collapsed. The reassurance line states
+ * what the backend guarantees: a Transport_failure row is watermark-neutral
+ * (keeper_chat_store), so the user message it failed to answer stays pending
+ * for the keeper's next turn. */
+function ChatFailureCard({ text }: { text: string }) {
+  const [detailOpen, setDetailOpen] = useState(false)
+  return html`
+    <div
+      class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-status-error)]/40 bg-[var(--color-bg-surface)] p-3"
+      data-chat-structured-error
+      data-chat-failure-card
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <span
+          class="inline-flex items-center rounded-[var(--r-0)] bg-[var(--color-status-error)]/15 px-2 py-0.5 text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-status-error)]"
+        >
+          응답 실패
+        </span>
+        <span class="text-sm font-semibold text-[var(--color-fg-primary)]">
+          이 턴은 응답을 만들지 못했습니다
+        </span>
+      </div>
+      <p class="m-0 text-sm leading-airy text-[var(--color-fg-secondary)]" data-chat-failure-reassurance>
+        보낸 메시지는 사라지지 않았습니다 — 대기 상태로 남아 keeper의 다음 턴에서 다시 처리됩니다.
+      </p>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
+          aria-expanded=${detailOpen}
+          data-chat-failure-detail-toggle
+          onClick=${() => { setDetailOpen(!detailOpen) }}
+        >
+          ${detailOpen ? '상세 접기' : '오류 상세 보기'}
+        </button>
+        <button
+          type="button"
+          class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
+          data-chat-failure-copy
+          onClick=${() => { void copyWithToast(text, '오류 내용을 복사했습니다') }}
+        >
+          오류 복사
+        </button>
+      </div>
+      ${detailOpen
+        ? html`
+            <pre class="chat-error-text" data-chat-failure-detail>${renderStructuredFailureText(text)}</pre>
+          `
+        : null}
+    </div>
+  `
+}
+
 function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachment }) {
   const [open, setOpen] = useState(false)
   const canDownload = isSafeAttachmentHref(attachment)
@@ -2533,12 +2590,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
         ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
         : html`
             ${isFailureMessage
-              ? html`
-                  <pre
-                    class="chat-error-text"
-                    data-chat-structured-error
-                  >${renderStructuredFailureText(messageText)}</pre>
-                `
+              ? html`<${ChatFailureCard} text=${messageText} />`
               : hasEffectiveBlocks
               ? html`<${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />`
               : html`

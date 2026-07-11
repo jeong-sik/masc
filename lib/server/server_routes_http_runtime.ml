@@ -75,7 +75,11 @@ let advertised_host_port_authority ~request_authority =
   let default_port = configured_http_port () in
   let request_host = Server_request_authority.host request_authority in
   let port_opt = Server_request_authority.port request_authority in
-  let port = Option.value ~default:default_port port_opt in
+  let port =
+    match port_opt with
+    | Some explicit_port -> explicit_port
+    | None -> default_port
+  in
   let host = Transport_read_model.normalize_advertised_host request_host in
   let authority =
     match port_opt with

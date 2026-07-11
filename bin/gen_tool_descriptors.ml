@@ -420,8 +420,6 @@ let phase6_specs : tool_spec list =
   ; masc_gc_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec
-  ; masc_pause_spec
-  ; masc_resume_spec
     (* PR-2: plan group *)
   ; masc_plan_init_spec
   ; masc_plan_update_spec
@@ -558,7 +556,7 @@ let format_behavior_contract = function
     "\n\nUsage rules:\n" ^ String.concat "\n" bullets
 ;;
 
-let emit_tool_schema buf spec =
+let emit_tool_schema_record buf spec =
   Buffer.add_string buf "  {\n";
   buf_addf buf "    name = %S;\n" spec.name;
   buf_addf
@@ -576,7 +574,18 @@ let emit_tool_schema buf spec =
   emit_required buf spec.parameters;
   buf_addf buf "      (\"additionalProperties\", `Bool %b);\n" spec.additional_properties;
   Buffer.add_string buf "    ];\n";
-  Buffer.add_string buf "  };\n"
+  Buffer.add_string buf "  }"
+;;
+
+let emit_tool_schema buf spec =
+  emit_tool_schema_record buf spec;
+  Buffer.add_string buf ";\n"
+;;
+
+let emit_named_tool_schema buf binding spec =
+  buf_addf buf "let %s : tool_schema =\n" binding;
+  emit_tool_schema_record buf spec;
+  Buffer.add_string buf "\n;;\n\n"
 ;;
 
 let emit_schemas_list buf specs =
@@ -590,6 +599,8 @@ let emit_schemas_list buf specs =
 let () =
   let buf = Buffer.create 4096 in
   emit_header buf;
+  emit_named_tool_schema buf "masc_pause_schema" masc_pause_spec;
+  emit_named_tool_schema buf "masc_resume_schema" masc_resume_spec;
   emit_schemas_list buf phase6_specs;
   print_string (Buffer.contents buf)
 ;;

@@ -82,7 +82,7 @@ let test_masc_spawn_is_not_generated () =
     (has_schema "masc_spawn" Tool_schemas_misc.schemas)
 ;;
 
-let test_control_schemas_are_generated () =
+let test_control_schemas_use_dedicated_typed_projection () =
   let properties schema =
     match schema.input_schema with
     | `Assoc fields ->
@@ -91,8 +91,36 @@ let test_control_schemas_are_generated () =
        | _ -> Alcotest.failf "%s has no object properties" schema.name)
     | _ -> Alcotest.failf "%s has a non-object schema" schema.name
   in
-  let pause = find_by_name "masc_pause" Tool_descriptors_gen.schemas in
-  let resume = find_by_name "masc_resume" Tool_descriptors_gen.schemas in
+  let pause = Tool_schemas_misc.control_schema Tool_schemas_misc.Pause in
+  let resume = Tool_schemas_misc.control_schema Tool_schemas_misc.Resume in
+  Alcotest.check
+    yojson_testable
+    "pause projection keeps generated canonical schema"
+    Tool_descriptors_gen.masc_pause_schema.input_schema
+    pause.input_schema;
+  Alcotest.check
+    yojson_testable
+    "resume projection keeps generated canonical schema"
+    Tool_descriptors_gen.masc_resume_schema.input_schema
+    resume.input_schema;
+  Alcotest.(check (list string))
+    "typed control projection is exhaustive"
+    [ "masc_pause"; "masc_resume" ]
+    (List.map
+       (fun operation ->
+          (Tool_schemas_misc.control_schema operation).name)
+       Tool_schemas_misc.control_operations);
+  List.iter
+    (fun name ->
+       Alcotest.(check bool)
+         (name ^ " absent from generated public misc schemas")
+         false
+         (has_schema name Tool_descriptors_gen.schemas);
+       Alcotest.(check bool)
+         (name ^ " absent from effective public misc schemas")
+         false
+         (has_schema name Tool_schemas_misc.schemas))
+    [ "masc_pause"; "masc_resume" ];
   Alcotest.(check bool)
     "masc_pause has reason property"
     true
@@ -358,9 +386,9 @@ let () =
         ] )
     ; ( "control schema SSOT"
       , [ Alcotest.test_case
-            "pause and resume are generated"
+            "pause and resume use a dedicated typed projection"
             `Quick
-            test_control_schemas_are_generated
+            test_control_schemas_use_dedicated_typed_projection
         ] )
     ; ( "masc_tool_help field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_tool_help_name_matches

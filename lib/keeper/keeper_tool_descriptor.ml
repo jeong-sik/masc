@@ -976,11 +976,10 @@ let find_masc_schema_opt name =
 let find_cluster_schema_opt name =
   (* Priority preserves the historical hidden keeper namespace ownership:
      keeper taskboard wrappers first, then typed board wrappers, voice,
-     the generated misc/control registry, then public masc_* aggregates.
+     the generated misc registry, then public masc_* aggregates.
      The namespaces are expected to be disjoint; this order is not a conflict
-     resolver. [masc_pause]/[masc_resume] deliberately stay out of Config's
-     public schema list, so their canonical Tool_schemas_misc definitions must
-     be read directly rather than replaced by a permissive placeholder. *)
+     resolver. Control descriptors use their dedicated typed schema projection
+     and do not enter this name-based lookup. *)
   match find_taskboard_schema_opt name with
   | Some _ as schema -> schema
   | None ->
@@ -1518,14 +1517,17 @@ let masc_misc_descriptor id name description ~readonly =
     ()
 ;;
 
-let masc_control_descriptor id name description ~readonly =
-  cluster_descriptor
+let masc_control_descriptor operation =
+  let schema = Tool_schemas_misc.control_schema operation in
+  cluster_descriptor_with_schema_source
     ~keeper_model_projection:Dispatch_only
-    ~id:("masc.control." ^ id)
-    ~name
-    ~description
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:("masc.control." ^ Tool_schemas_misc.control_operation_id operation)
+    ~name:schema.name
+    ~description:schema.description
     ~handler:Tool_masc_control_dispatch
-    ~readonly
+    ~readonly:false
     ~inline_safe:false
     ~maintenance_only:false
     ()
@@ -2070,10 +2072,8 @@ let internal_descriptors : t list =
      duplicate internal descriptors here; that would make runtime receipt
      projection depend on list order. *)
   (* ── RFC-0182 §3.1 — masc_control_* cluster (2 entries) ──────── *)
-  ; masc_control_descriptor "pause" "masc_pause"
-      "Pause a paused/runnable agent." ~readonly:false
-  ; masc_control_descriptor "resume" "masc_resume"
-      "Resume a paused agent." ~readonly:false
+  ; masc_control_descriptor Tool_schemas_misc.Pause
+  ; masc_control_descriptor Tool_schemas_misc.Resume
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
   ; masc_agent_timeline_descriptor "masc_agent_timeline"
       "Read agent timeline events." ~readonly:true
@@ -2115,11 +2115,14 @@ let internal_descriptors : t list =
   ; masc_keeper_descriptor "up" "masc_keeper_up"
       "Bring a keeper online (create new or update existing)." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_surface_audit singleton ────────────── *)
-  ; cluster_descriptor
+  ; let schema = Tool_schemas_misc.surface_audit_schema ~remote:false in
+    cluster_descriptor_with_schema_source
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~input_schema:schema.input_schema
       ~id:"masc.surface.audit"
-      ~name:"masc_surface_audit"
-      ~description:"Read dashboard surface readiness snapshot (optionally for a single surface)."
+      ~name:schema.name
+      ~description:schema.description
       ~handler:Tool_masc_surface_audit
       ~readonly:true
       ~inline_safe:false

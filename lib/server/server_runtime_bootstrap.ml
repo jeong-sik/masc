@@ -880,50 +880,54 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Runtime_params.restore ~base_path;
       Log.Server.info "Runtime_params restored from %s" base_path;
       Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
-      (* #10130: sweep [save_file_atomic] orphan temp files left by
-         SIGKILL'd or ENFILE-crashed prior processes.  Zero-byte
-         orphans are deleted; non-zero orphans (evidence of silent
-         atomic-save data loss) are preserved in
-         [<base_path>/.recovered/] for forensic inspection.  Always
-         runs at boot so each restart publishes fresh cleanup
-         counters.
-
-         #10205 finding 5: the sweep walks every keeper subdirectory
-         under [base_path] ([Sys.readdir] per directory + [Unix.stat]
-         per orphan candidate).  It does NOT need to gate
-         [install_tooling] or the [Bootstrap completed] log line —
-         the sweep results are advisory diagnostics, not a
-         precondition for serving.  Fork it into a background fiber
-         so the boot hot path completes immediately; the counter
-         and WARN publish asynchronously, which is the right shape
-         for operator dashboards (delta-from-zero, not synchronous
-         readback). *)
+      (* #10130 / #24083: recover descriptor-writer temporary entries only
+         from the closed runtime-schema catalog. Filename shape is never
+         treated as ownership; playground, repository, connector, and user
+         workspace trees are absent from the catalog. The complete blocking
+         traversal runs in one cancellation-protected systhread and returns a
+         typed outcome for every candidate or traversal failure. *)
       Eio.Fiber.fork ~sw (fun () ->
         try
-          let deleted, preserved =
-            Fs_compat.cleanup_atomic_orphans ~base_path ()
+          let outcomes =
+            Server_atomic_orphan_recovery.recover_eio
+              ~config:(Mcp_server.workspace_config state)
           in
-          if deleted > 0 then
+          let summary = Server_atomic_orphan_recovery.summarize outcomes in
+          if summary.deleted > 0 then
             Otel_metric_store.inc_counter
               Otel_metric_store.metric_fs_atomic_orphans_cleaned
               ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label Empty)) ]
-              ~delta:(float_of_int deleted)
+              ~delta:(float_of_int summary.deleted)
               ();
-          if preserved > 0 then
+          if summary.preserved > 0 then
             Otel_metric_store.inc_counter
               Otel_metric_store.metric_fs_atomic_orphans_cleaned
               ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label With_data)) ]
-              ~delta:(float_of_int preserved)
+              ~delta:(float_of_int summary.preserved)
               ();
-          if deleted + preserved > 0 then
+          List.iter
+            (function
+              | (Server_atomic_orphan_recovery.Pending _
+                | Server_atomic_orphan_recovery.Failed _) as outcome ->
+                Log.Server.warn
+                  "boot: atomic orphan recovery item %s"
+                  (Server_atomic_orphan_recovery.outcome_to_string outcome)
+              | Server_atomic_orphan_recovery.Deleted _
+              | Server_atomic_orphan_recovery.Preserved _ ->
+                ())
+            outcomes;
+          if summary.deleted + summary.preserved + summary.pending + summary.failed > 0
+          then
             Log.Server.warn
-              "boot: cleaned %d save_file_atomic orphans (%d empty, \
-               %d preserved with data in .recovered/ — see #10130)"
-              (deleted + preserved) deleted preserved
+              "boot: atomic orphan recovery deleted=%d preserved=%d pending=%d failed=%d"
+              summary.deleted
+              summary.preserved
+              summary.pending
+              summary.failed
         with Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
              Log.Server.error
-               "boot: atomic orphan sweep failed: %s"
+               "boot: atomic orphan recovery failed: %s"
                (Printexc.to_string exn));
       (* #9786: audit credential store for shared bearer tokens.
          When two credentials hash to the same token,

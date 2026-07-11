@@ -3,7 +3,7 @@
 (library
  (name fs_compat)
  (public_name masc.fs_compat)
- (modules fs_compat mkdir_memo fd_cache atomic_write durable_mutation)
+ (modules fs_compat mkdir_memo fd_cache durable_mutation)
  (foreign_stubs
   (language c)
   (names durable_mutation_stubs))

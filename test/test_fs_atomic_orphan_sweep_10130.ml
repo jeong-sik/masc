@@ -1,215 +1,278 @@
-(* test/test_fs_atomic_orphan_sweep_10130.ml
+open Alcotest
+open Masc
 
-   #10130: [.atomic_*.tmp] orphans from [save_file_atomic]
-   accumulate after SIGKILL or ENFILE because the OCaml
-   with-handler never ran.  The 2026-04-24 audit found 33
-   orphans with 6 non-zero files holding real keeper-meta
-   JSON — evidence of 6 silent data-loss events.
-
-   [Fs_compat.cleanup_atomic_orphans] is a boot-time sweep:
-   - zero-byte orphans are deleted;
-   - non-zero orphans are MOVED (not deleted) to
-     [<base_path>/.recovered/] so operators can forensically
-     inspect data-loss events.
-
-   These tests pin that contract so a future refactor can't
-   silently delete the forensic evidence.
-*)
+module Recovery = Server_atomic_orphan_recovery
 
 let make_temp_base () =
   let dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-fs-atomic-10130-%06x"
-         (Random.bits ()))
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-fs-atomic-24083-%06x" (Random.bits ()))
   in
   Unix.mkdir dir 0o755;
   dir
+;;
 
-let rm_rf path =
-  let rec go p =
-    match Unix.lstat p with
-    | exception Unix.Unix_error _ -> ()
-    | { st_kind = S_DIR; _ } ->
-        (Array.iter (fun e -> go (Filename.concat p e)) (Sys.readdir p));
-        (try Unix.rmdir p with Unix.Unix_error _ -> ())
-    | _ -> (try Unix.unlink p with Unix.Unix_error _ -> ())
-  in
-  go path
+let rec rm_rf path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error _ -> ()
+  | { st_kind = Unix.S_DIR; _ } ->
+    Array.iter (fun entry -> rm_rf (Filename.concat path entry)) (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Unix.unlink path
+;;
 
 let with_temp_base f =
-  let dir = make_temp_base () in
-  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+  let base_path = make_temp_base () in
+  Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () -> f base_path)
+;;
 
-let write_file ~path ~content =
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc
+let config base_path = Workspace.build_default_config base_path
+let masc_root base_path = Workspace.masc_dir_from_base_path ~base_path
 
-let touch path = write_file ~path ~content:""
+let write_file path content =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel content)
+;;
 
-(* Name matcher is strict: both prefix and suffix required. *)
+let read_file path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+;;
+
+let touch path = write_file path ""
+
 let test_name_matcher () =
-  let yes s =
-    Alcotest.(check bool) ("match " ^ s) true
-      (Fs_compat.is_atomic_orphan_name s)
+  let yes value =
+    check bool value true (Fs_compat.is_atomic_orphan_name value)
   in
-  let no s =
-    Alcotest.(check bool) ("no match " ^ s) false
-      (Fs_compat.is_atomic_orphan_name s)
+  let no value =
+    check bool value false (Fs_compat.is_atomic_orphan_name value)
   in
-  yes ".atomic_abc.tmp";
-  yes ".atomic_946c84.tmp";
-  yes ".atomic_.tmp";
-  no "atomic_abc.tmp";
-  no ".atomic_abc";
-  no "normal.json";
-  no "sangsu.json";
-  no ".atomic_prefix_only";
-  no "prefix_.atomic_abc.tmp" (* prefix not at start *)
+  List.iter yes [ ".atomic_abc.tmp"; ".atomic_946c84.tmp"; ".atomic_.tmp" ];
+  List.iter
+    no
+    [ "atomic_abc.tmp"
+    ; ".atomic_abc"
+    ; "normal.json"
+    ; "prefix_.atomic_abc.tmp"
+    ]
+;;
 
-(* Zero-byte orphans at base_path: deleted, counter reports
-   [(1, 0)]. *)
-let test_zero_byte_orphan_at_base_deleted () =
-  with_temp_base @@ fun base_path ->
-  let orphan = Filename.concat base_path ".atomic_empty01.tmp" in
-  touch orphan;
-  let deleted, preserved =
-    Fs_compat.cleanup_atomic_orphans ~base_path ()
-  in
-  Alcotest.(check int) "1 deleted" 1 deleted;
-  Alcotest.(check int) "0 preserved" 0 preserved;
-  Alcotest.(check bool) "orphan file removed" false
-    (Sys.file_exists orphan)
+let test_catalog_is_closed_and_excludes_foreign_trees () =
+  with_temp_base (fun base_path ->
+    let catalog = Recovery.catalog (config base_path) in
+    let paths = List.map (fun (entry : Recovery.catalog_entry) -> entry.path) catalog in
+    let root = masc_root base_path in
+    let contains name = List.mem (Filename.concat root name) paths in
+    check bool "workspace root is catalogued" true (List.mem root paths);
+    check bool "nested keeper root is catalogued" true (contains "keepers");
+    check bool "operator root is catalogued" true (contains "operator");
+    check bool "schedule root is catalogued" true (contains "schedules");
+    check bool "trace root is catalogued" true (contains "traces");
+    check bool "playground is excluded" false (contains "playground");
+    check bool "repository clones are excluded" false (contains "repos");
+    check bool "connector state is excluded" false (contains "connectors"))
+;;
 
-(* Non-zero orphan at base_path: moved to .recovered/, NOT
-   deleted.  The original path is gone but the payload survives
-   in the recovered directory for forensic inspection. *)
-let test_nonzero_orphan_preserved_in_recovered () =
-  with_temp_base @@ fun base_path ->
-  let orphan = Filename.concat base_path ".atomic_data42.tmp" in
-  let payload = "{\"name\":\"sangsu\",\"goal\":\"…\"}" in
-  write_file ~path:orphan ~content:payload;
-  let deleted, preserved =
-    Fs_compat.cleanup_atomic_orphans ~base_path ()
-  in
-  Alcotest.(check int) "0 deleted" 0 deleted;
-  Alcotest.(check int) "1 preserved" 1 preserved;
-  Alcotest.(check bool) "original removed" false
-    (Sys.file_exists orphan);
-  let recovered_dir = Filename.concat base_path ".recovered" in
-  Alcotest.(check bool) ".recovered/ created" true
-    (Sys.file_exists recovered_dir);
-  let entries = Sys.readdir recovered_dir in
-  Alcotest.(check int) "1 file in .recovered/" 1 (Array.length entries);
-  let recovered_path = Filename.concat recovered_dir entries.(0) in
-  let ic = open_in recovered_path in
-  let n = in_channel_length ic in
-  let content = really_input_string ic n in
-  close_in ic;
-  Alcotest.(check string) "payload survived"
-    payload content
+let test_root_entries_delete_and_preserve () =
+  with_temp_base (fun base_path ->
+    let root = masc_root base_path in
+    Fs_compat.mkdir_p root;
+    let empty = Filename.concat root ".atomic_empty.tmp" in
+    let data = Filename.concat root ".atomic_data.tmp" in
+    touch empty;
+    write_file data "forensic-payload";
+    let outcomes = Recovery.recover_blocking ~config:(config base_path) in
+    let summary = Recovery.summarize outcomes in
+    check int "one empty orphan deleted" 1 summary.deleted;
+    check int "one data orphan preserved" 1 summary.preserved;
+    check int "no recovery failures" 0 summary.failed;
+    check bool "empty source removed" false (Sys.file_exists empty);
+    check bool "data source removed" false (Sys.file_exists data);
+    check int
+      "recovery mirror is not rescanned"
+      0
+      (Recovery.recover_blocking ~config:(config base_path) |> List.length);
+    match
+      List.find_opt
+        (function Recovery.Preserved _ -> true | _ -> false)
+        outcomes
+    with
+    | Some (Recovery.Preserved { provenance; recovered_path; _ }) ->
+      check bool "root provenance" true
+        (provenance.root_kind = Recovery.Workspace_root);
+      check string "relative provenance" ".atomic_data.tmp" provenance.relative_path;
+      check string "payload preserved" "forensic-payload" (read_file recovered_path);
+      check bool "closed recovery bucket" true
+        (String.starts_with
+           ~prefix:
+             (Filename.concat root ".recovered/atomic-orphans/workspace-root")
+           recovered_path)
+    | Some _ | None -> fail "missing preserved root outcome")
+;;
 
-(* Orphans in subdirs are found too.  #10130 evidence was mostly
-   under base_path/keepers/. *)
-let test_orphans_in_subdirs_found () =
-  with_temp_base @@ fun base_path ->
-  let subdir = Filename.concat base_path "keepers" in
-  Unix.mkdir subdir 0o755;
-  touch (Filename.concat subdir ".atomic_zeroKeeper.tmp");
-  write_file ~path:(Filename.concat subdir ".atomic_dataKeeper.tmp")
-    ~content:"sangsu data";
-  let deleted, preserved =
-    Fs_compat.cleanup_atomic_orphans ~base_path ()
-  in
-  Alcotest.(check int) "1 deleted from subdir" 1 deleted;
-  Alcotest.(check int) "1 preserved from subdir" 1 preserved
+let test_nested_keeper_store_is_recovered_with_provenance () =
+  with_temp_base (fun base_path ->
+    let keeper_dir =
+      Filename.concat (masc_root base_path) "keepers/alpha/memory/deep"
+    in
+    let orphan = Filename.concat keeper_dir ".atomic_memory.tmp" in
+    write_file orphan "keeper-memory";
+    let outcomes = Recovery.recover_blocking ~config:(config base_path) in
+    match outcomes with
+    | [ Recovery.Preserved { provenance; recovered_path; _ } ] ->
+      check bool "keeper root provenance" true
+        (provenance.root_kind = Recovery.Keepers);
+      check string
+        "nested relative path"
+        "alpha/memory/deep/.atomic_memory.tmp"
+        provenance.relative_path;
+      check string "nested payload preserved" "keeper-memory" (read_file recovered_path)
+    | outcomes ->
+      failf "expected one nested keeper preservation, got %d outcomes"
+        (List.length outcomes))
+;;
 
-(* Non-orphan files must NOT be touched.  Matches the
-   [is_atomic_orphan_name] predicate strictly. *)
-let test_non_orphan_files_untouched () =
-  with_temp_base @@ fun base_path ->
-  let normal = Filename.concat base_path "sangsu.json" in
-  write_file ~path:normal ~content:"{\"real\":\"data\"}";
-  let atomic_no_suffix = Filename.concat base_path ".atomic_abc" in
-  write_file ~path:atomic_no_suffix ~content:"not an orphan";
-  let _ = Fs_compat.cleanup_atomic_orphans ~base_path () in
-  Alcotest.(check bool) "sangsu.json survived" true
-    (Sys.file_exists normal);
-  Alcotest.(check bool) ".atomic_abc (no .tmp) survived" true
-    (Sys.file_exists atomic_no_suffix)
+let test_foreign_trees_are_not_traversed () =
+  with_temp_base (fun base_path ->
+    let root = masc_root base_path in
+    let foreign_paths =
+      [ Filename.concat root "playground/alpha/repos/project/.atomic_user.tmp"
+      ; Filename.concat root "repos/project/.atomic_repo.tmp"
+      ; Filename.concat base_path "workspace/.atomic_workspace.tmp"
+      ; Filename.concat base_path ".gate/runtime/slack/.atomic_connector.tmp"
+      ]
+    in
+    List.iter (fun path -> write_file path "foreign") foreign_paths;
+    let outcomes = Recovery.recover_blocking ~config:(config base_path) in
+    check int "foreign trees produce no recovery outcomes" 0 (List.length outcomes);
+    List.iter
+      (fun path -> check bool ("untouched " ^ path) true (Sys.file_exists path))
+      foreign_paths)
+;;
 
-(* Idempotent: second call on an already-clean dir is a noop. *)
-let test_idempotent () =
-  with_temp_base @@ fun base_path ->
-  touch (Filename.concat base_path ".atomic_once.tmp");
-  let _ = Fs_compat.cleanup_atomic_orphans ~base_path () in
-  let deleted, preserved =
-    Fs_compat.cleanup_atomic_orphans ~base_path ()
-  in
-  Alcotest.(check int) "second call: 0 deleted" 0 deleted;
-  Alcotest.(check int) "second call: 0 preserved" 0 preserved
+let test_symlinks_are_pending_and_never_followed () =
+  with_temp_base (fun base_path ->
+    let external_dir = Filename.concat base_path "external" in
+    let external_orphan = Filename.concat external_dir ".atomic_external.tmp" in
+    write_file external_orphan "external";
+    let keeper_root = Filename.concat (masc_root base_path) "keepers/alpha" in
+    Fs_compat.mkdir_p keeper_root;
+    let directory_link = Filename.concat keeper_root "linked-tree" in
+    Unix.symlink external_dir directory_link;
+    let orphan_link = Filename.concat keeper_root ".atomic_link.tmp" in
+    Unix.symlink external_orphan orphan_link;
+    let outcomes = Recovery.recover_blocking ~config:(config base_path) in
+    check bool "external orphan untouched" true (Sys.file_exists external_orphan);
+    check bool "directory symlink untouched" true
+      ((Unix.lstat directory_link).st_kind = Unix.S_LNK);
+    match outcomes with
+    | [ Recovery.Pending { provenance; reason = Recovery.Symlink } ] ->
+      check string "symlink provenance" "alpha/.atomic_link.tmp"
+        provenance.relative_path
+    | outcomes ->
+      failf "expected one pending symlink, got %d outcomes" (List.length outcomes))
+;;
 
-(* Mixed case (matches the 2026-04-24 production evidence:
-   33 orphans total, 6 with data). *)
-let test_mixed_batch () =
-  with_temp_base @@ fun base_path ->
-  (* 10 empty + 3 with data *)
-  for i = 0 to 9 do
-    touch (Filename.concat base_path
-             (Printf.sprintf ".atomic_empty%02d.tmp" i))
-  done;
-  for i = 0 to 2 do
-    write_file
-      ~path:(Filename.concat base_path
-               (Printf.sprintf ".atomic_data%02d.tmp" i))
-      ~content:(Printf.sprintf "payload %d" i)
-  done;
-  let deleted, preserved =
-    Fs_compat.cleanup_atomic_orphans ~base_path ()
-  in
-  Alcotest.(check int) "10 deleted" 10 deleted;
-  Alcotest.(check int) "3 preserved" 3 preserved
+let test_catalog_root_symlink_is_pending_and_never_followed () =
+  with_temp_base (fun base_path ->
+    let root = masc_root base_path in
+    let external_dir = Filename.concat base_path "external-keepers" in
+    let external_orphan = Filename.concat external_dir ".atomic_external.tmp" in
+    write_file external_orphan "external";
+    Fs_compat.mkdir_p root;
+    let keepers_link = Filename.concat root "keepers" in
+    Unix.symlink external_dir keepers_link;
+    let outcomes = Recovery.recover_blocking ~config:(config base_path) in
+    check bool "external orphan untouched" true (Sys.file_exists external_orphan);
+    match outcomes with
+    | [ Recovery.Pending { provenance; reason = Recovery.Symlink } ] ->
+      check bool
+        "catalog root provenance"
+        true
+        (provenance.root_kind = Recovery.Keepers);
+      check string "catalog root relative provenance" "." provenance.relative_path
+    | outcomes ->
+      failf
+        "expected one pending catalog-root symlink, got %d outcomes"
+        (List.length outcomes))
+;;
 
-(* .recovered/ dir itself must be skipped on recursion so we
-   don't loop on any orphan someone moved there by hand. *)
-let test_recovered_dir_skipped_on_rescan () =
-  with_temp_base @@ fun base_path ->
-  let recovered = Filename.concat base_path ".recovered" in
-  Unix.mkdir recovered 0o755;
-  (* Drop an orphan-shaped name into .recovered/ directly.  A
-     rescan must not touch it. *)
-  write_file ~path:(Filename.concat recovered ".atomic_seed.tmp")
-    ~content:"already forensic";
-  let deleted, preserved =
-    Fs_compat.cleanup_atomic_orphans ~base_path ()
-  in
-  Alcotest.(check int) "0 deleted" 0 deleted;
-  Alcotest.(check int) "0 preserved (recovered/ not re-scanned)"
-    0 preserved;
-  Alcotest.(check bool) ".recovered/ seed file untouched" true
-    (Sys.file_exists (Filename.concat recovered ".atomic_seed.tmp"))
+let test_invalid_recovery_root_is_typed_failure () =
+  with_temp_base (fun base_path ->
+    let root = masc_root base_path in
+    let keeper_orphan = Filename.concat root "keepers/alpha/.atomic_data.tmp" in
+    write_file keeper_orphan "data";
+    let external_dir = Filename.concat base_path "external-recovery" in
+    Fs_compat.mkdir_p external_dir;
+    Fs_compat.mkdir_p root;
+    Unix.symlink external_dir (Filename.concat root ".recovered");
+    let outcomes = Recovery.recover_blocking ~config:(config base_path) in
+    check bool "source remains after recovery-root failure" true
+      (Sys.file_exists keeper_orphan);
+    check int "external target remains empty" 0
+      (Array.length (Sys.readdir external_dir));
+    match outcomes with
+    | [ Recovery.Failed { provenance; stage; mutation_effect; _ } ] ->
+      check bool "failure keeps keeper provenance" true
+        (provenance.root_kind = Recovery.Keepers);
+      check bool "typed recovery-directory stage" true
+        (stage = Recovery.Create_recovery_directory);
+      check bool "source unchanged effect" true
+        (mutation_effect = Recovery.Source_unchanged)
+    | outcomes ->
+      failf "expected one typed failure, got %d outcomes" (List.length outcomes))
+;;
+
+let test_eio_boundary () =
+  with_temp_base (fun base_path ->
+    let orphan = Filename.concat (masc_root base_path) ".atomic_eio.tmp" in
+    touch orphan;
+    Eio_main.run @@ fun _env ->
+    let outcomes = Recovery.recover_eio ~config:(config base_path) in
+    let summary = Recovery.summarize outcomes in
+    check int "Eio recovery deletes one orphan" 1 summary.deleted)
+;;
 
 let () =
-  Alcotest.run "fs_atomic_orphan_sweep_10130"
-    [
-      ( "name-matcher",
-        [ Alcotest.test_case "strict prefix+suffix match" `Quick
-            test_name_matcher ] );
-      ( "sweep-behavior",
-        [
-          Alcotest.test_case "zero-byte at base: deleted" `Quick
-            test_zero_byte_orphan_at_base_deleted;
-          Alcotest.test_case "non-zero: preserved in .recovered/" `Quick
-            test_nonzero_orphan_preserved_in_recovered;
-          Alcotest.test_case "orphans in subdirs found" `Quick
-            test_orphans_in_subdirs_found;
-          Alcotest.test_case "non-orphan files untouched" `Quick
-            test_non_orphan_files_untouched;
-          Alcotest.test_case "idempotent: second call is noop" `Quick
-            test_idempotent;
-          Alcotest.test_case "mixed batch (prod-shaped)" `Quick
-            test_mixed_batch;
-          Alcotest.test_case ".recovered/ skipped on rescan" `Quick
-            test_recovered_dir_skipped_on_rescan;
-        ] );
+  run
+    "fs-atomic-orphan-recovery"
+    [ "matcher", [ test_case "writer name SSOT" `Quick test_name_matcher ]
+    ; ( "catalog"
+      , [ test_case
+            "closed roots exclude foreign trees"
+            `Quick
+            test_catalog_is_closed_and_excludes_foreign_trees
+        ] )
+    ; ( "recovery"
+      , [ test_case "root delete and preserve" `Quick test_root_entries_delete_and_preserve
+        ; test_case
+            "nested keeper provenance"
+            `Quick
+            test_nested_keeper_store_is_recovered_with_provenance
+        ; test_case
+            "foreign trees untouched"
+            `Quick
+            test_foreign_trees_are_not_traversed
+        ; test_case
+            "symlink non-interference"
+            `Quick
+            test_symlinks_are_pending_and_never_followed
+        ; test_case
+            "catalog-root symlink non-interference"
+            `Quick
+            test_catalog_root_symlink_is_pending_and_never_followed
+        ; test_case
+            "typed recovery failure"
+            `Quick
+            test_invalid_recovery_root_is_typed_failure
+        ; test_case "Eio boundary" `Quick test_eio_boundary
+        ] )
     ]
+;;

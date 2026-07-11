@@ -166,10 +166,9 @@ let with_out_channel oc ~f =
    tmp -> fsync(tmp) -> rename -> best-effort fsync(parent dir) — the same
    primitive board and event-queue persistence use. A local fsync pair here would
    duplicate (and could drift from) that durability boundary, so route through it.
-   NB: the primitive's boot-time atomic-orphan sweep is depth-1 from base_path and
-   does not currently reach the keepers dir, so a SIGKILL between write and rename
-   still leaves an uncollected [.atomic_*.tmp] here — a pre-existing gap (the old
-   hand-rolled temp was not swept either), tracked separately, not worsened here.
+   The boot-time recovery catalog owns the nested keeper runtime tree, so a
+   SIGKILL between write and rename leaves a temporary entry that is recovered
+   without traversing playground, repository, connector, or user workspace trees.
    The Memory OS write contract raises only for [Not_committed]. A committed
    parent-sync debt is observable but must not trigger a duplicate write. *)
 let write_file_atomically path content =

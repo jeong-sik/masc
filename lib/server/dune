@@ -8,6 +8,9 @@
   keeper_grpc_heartbeat
   server_dashboard_http_schedule_actions
   server_schedule_runner_policy)
+ (foreign_stubs
+  (language c)
+  (names server_atomic_orphan_recovery_stubs))
  (flags :standard -open Masc)
  (libraries
   masc

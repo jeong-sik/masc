@@ -60,28 +60,6 @@ val save_file_atomic_eio : string -> string -> unit Durable_mutation.report
     {!Durable_mutation}. Exposed for recovery and tests. *)
 val is_atomic_orphan_name : string -> bool
 
-(** #10130: boot-time sweep for [.atomic_*.tmp] orphans left
-    behind when the atomic writer's with-handler never ran (the
-    owning process was SIGKILL'd after its exclusive temporary entry
-    was created).
-
-    Scans [base_path] and its immediate subdirectories (skipping
-    [recovered_subdir] and anything that isn't a directory).
-    - Zero-byte orphans are deleted.
-    - Non-zero orphans are moved to
-      [<base_path>/<recovered_subdir>/<original-name>.<ts-ms>]
-      so operators can forensically inspect data-loss events
-      instead of having them silently cleaned up.
-
-    Returns [(deleted, preserved)]:
-    - [deleted]: zero-byte orphans removed.
-    - [preserved]: non-zero orphans moved to [recovered_subdir]. *)
-val cleanup_atomic_orphans
-  :  base_path:string
-  -> ?recovered_subdir:string
-  -> unit
-  -> int * int
-
 (** Append string to file. *)
 val append_file : string -> string -> unit
 

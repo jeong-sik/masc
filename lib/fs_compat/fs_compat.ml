@@ -273,10 +273,6 @@ let save_file_atomic_eio path content =
 
 let is_atomic_orphan_name = Durable_mutation.is_temporary_name
 
-let cleanup_atomic_orphans ~base_path ?recovered_subdir () =
-  Atomic_write.cleanup_atomic_orphans ~mkdir_p_unix ~base_path ?recovered_subdir ()
-;;
-
 (** Append string to file.
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)

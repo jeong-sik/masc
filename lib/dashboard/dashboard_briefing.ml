@@ -199,12 +199,10 @@ let rec evidence_preview_strings json =
       fields |> List.map snd |> List.concat_map evidence_preview_strings |> dedup_strings |> take 4
   | _ -> []
 
-(* Issue #8395: root-level attention uses [target_type="workspace"].  This
-   predicate previously compared only to the literal "workspace", so the
-   canonical form fell through to the public queue.  Delegate to the
-   shared canonical target check used by [Dashboard_briefing_assembly]. *)
+(* Workspace-level attention stays internal to the operator projection. *)
 let is_internal_attention incident =
-  Operator_digest_types.is_root_target_type (string_field "target_type" incident)
+  Operator_digest_types.is_workspace_target_type
+    (string_field "target_type" incident)
 
 let related_sessions_for_attention incident sessions =
   let direct_session =

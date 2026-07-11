@@ -83,8 +83,9 @@ val summary_of_recommendations :
 (** {1 Target type normalisation} *)
 
 (** [true] for the canonical ["workspace"] target type. *)
-val is_root_target_type : string -> bool
+val is_workspace_target_type : string -> bool
 
 (** Accepts [None] → [Ok "workspace"]; [Some raw] is trimmed + lowercased, then
-    checked via {!is_root_target_type}. Otherwise [Error "target_type must be root"]. *)
+    checked via {!is_workspace_target_type}. Otherwise returns the canonical
+    workspace-target validation error. *)
 val normalize_digest_target_type : string option -> (string, string) result

@@ -55,8 +55,8 @@ val target_type_to_string : target_type -> string
 
 val target_type_of_string : string -> target_type option
 (** Accepts only the canonical [["workspace"]] target type for [Workspace].
-    Historical [["workspace"]] / [["namespace"]] aliases are rejected at
-    the parse boundary. *)
+    Historical [["root"]] / [["namespace"]] aliases are rejected at the parse
+    boundary. *)
 
 (** {1 JSON codec} *)
 

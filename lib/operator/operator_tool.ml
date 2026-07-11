@@ -75,11 +75,9 @@ let strict_action_enums =
   ]
 
 let target_type_enums =
-  [
-    `String "root";
-    `String "namespace";
-    `String "keeper";
-  ]
+  List.map
+    (fun value -> `String value)
+    Operator_action_constants.valid_target_type_strings
 
 let snapshot_schema ~remote =
   {
@@ -109,7 +107,8 @@ let snapshot_schema ~remote =
         ];
   }
 
-let digest_target_type_enums = [ `String "root" ]
+let digest_target_type_enums =
+  [ `String Operator_action_constants.workspace_target_type ]
 let judgment_surface_enums =
   [
     `String "command.namespace";
@@ -397,9 +396,14 @@ let () =
          ?model_name ?recommended_action ~evidence_refs ~disagreement_with_truth
          ~generated_at ~generated_at_unix ~fresh_until ~fresh_until_unix ~keeper_name () ->
       let target_type =
-        match String.lowercase_ascii target_type_str with
-        | "workspace" | "namespace" -> Operator_judgment.Workspace
-        | other -> invalid_arg ("invalid target_type in judgment record: " ^ other)
+        match
+          String.lowercase_ascii target_type_str
+          |> Operator_judgment.target_type_of_string
+        with
+        | Some target_type -> target_type
+        | None ->
+            invalid_arg
+              ("invalid target_type in judgment record: " ^ target_type_str)
       in
       ignore (
         Operator_judgment.record config ~surface ~target_type ~target_id ~summary

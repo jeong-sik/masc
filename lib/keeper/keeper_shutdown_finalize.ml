@@ -60,11 +60,11 @@ let task_has_operation_receipt operation (task : Masc_domain.task) =
     && List.exists
          (String.equal (operation_evidence_ref operation))
          handoff.evidence_refs
-  | Masc_domain.Claimed _
-  | Masc_domain.InProgress _
-  | Masc_domain.AwaitingVerification _
-  | Masc_domain.Done _
-  | Masc_domain.Cancelled _
+  | Masc_domain.Claimed _, _
+  | Masc_domain.InProgress _, _
+  | Masc_domain.AwaitingVerification _, _
+  | Masc_domain.Done _, _
+  | Masc_domain.Cancelled _, _
   | Masc_domain.Todo, None -> false
 ;;
 

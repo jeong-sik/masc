@@ -205,6 +205,14 @@ reconnect hydration, and a visible-panel safety poll provide catch-up when the
 queue invalidation arrives before the stream acknowledgement or is missed during
 a disconnect.
 
+A delivered receipt's `outcome_ref` is the exact `turn_ref` persisted on its
+assistant transcript row. Terminal transcript convergence is complete only when
+the bounded history read contains that identity; an older non-empty history
+window is not success. The history and receipt deadlines cover response-body
+parsing as well as response headers, and the Dashboard permits only one terminal
+convergence read per Keeper at a time. Failed, empty, stale, or timed-out reads
+remain pending for the next visible-panel poll.
+
 ### 6.2 Authoritative queue projection
 
 `Server_keeper_waiting_inventory` exposes separate

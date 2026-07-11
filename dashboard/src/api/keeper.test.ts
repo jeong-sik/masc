@@ -19,6 +19,7 @@ import {
   bulkKeeperDirective,
   clearKeeper,
   deleteKeeperHistorySnapshots,
+  fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
   fetchKeeperCheckpoints,
   fetchQueuedKeeperMessageResult,
@@ -53,8 +54,10 @@ import {
   parseKeeperRuntimeTrace as parseKeeperRuntimeTraceFromRuntimeTrace,
 } from './keeper-runtime-trace'
 import { resetDevTokenBootstrap } from './dev-token'
+import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.clearAllMocks()
   vi.unstubAllGlobals()
   try {
@@ -185,6 +188,27 @@ describe('Keeper chat durable receipt API', () => {
       '/api/v1/keepers/keeper%20sangsu/chat/receipts/chatq_00000000-0000-4000-8000-000000000001',
       expect.objectContaining({ headers: expect.any(Object) }),
     )
+  })
+
+  it('bounds chat history response-body consumption after headers arrive', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: vi.fn(() => new Promise<never>(() => undefined)),
+    } satisfies Partial<Response>)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const historyPromise = fetchKeeperChatHistory('echo')
+    const rejection = expect(historyPromise).rejects.toMatchObject({ timeout: true })
+    await vi.advanceTimersByTimeAsync(DEFAULT_GET_TIMEOUT_MS)
+    await rejection
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }))
   })
 })
 

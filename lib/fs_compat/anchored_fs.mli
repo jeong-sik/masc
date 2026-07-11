@@ -42,13 +42,22 @@ val stat : t -> string -> stat option
 val read_file : t -> string -> string
 (** Read one existing regular file without following a final symlink. *)
 
+val fsync_file : t -> string -> stat
+(** Fsync one existing regular file and return the identity of the opened file.
+    The final entry is opened with [O_NOFOLLOW]. *)
+
+val chmod_file : t -> string -> int -> unit
+(** Apply permissions to one existing regular file through its opened file
+    descriptor, without following a final symlink. *)
+
 val save_file_atomic :
   t -> name:string -> perm:int -> string -> (unit, string) result
 (** Write through an exclusive temporary file in [t], fsync it, rename it over
     [name], and fsync [t]. No path component is reopened by name outside [t]. *)
 
 val unlink_if_exists : t -> string -> bool
-(** Remove one non-directory child entry. Returns [false] only for ENOENT. *)
+(** Remove and durably publish removal of one non-directory child entry.
+    Returns [false] only for ENOENT. *)
 
 val rename : src_dir:t -> src:string -> dst_dir:t -> dst:string -> unit
 (** Atomically move one child entry between two directory capabilities. *)

@@ -157,6 +157,22 @@ let same_identity left right =
   Int64.equal left.device right.device && Int64.equal left.inode right.inode
 ;;
 
+let kind_of_unix = function
+  | Unix.S_REG -> Regular_file
+  | Unix.S_DIR -> Directory
+  | Unix.S_LNK -> Symbolic_link
+  | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Other
+;;
+
+let stat_of_unix (metadata : Unix.stats) =
+  { kind = kind_of_unix metadata.st_kind
+  ; size = Int64.of_int metadata.st_size
+  ; device = Int64.of_int metadata.st_dev
+  ; inode = Int64.of_int metadata.st_ino
+  ; link_count = Int64.of_int metadata.st_nlink
+  }
+;;
+
 let read_file dir name =
   require_segment ~operation:"read_file" name;
   let fd = open_read_fd dir name in
@@ -175,6 +191,28 @@ let read_file dir name =
       | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
     in
     loop ())
+;;
+
+let fsync_file dir name =
+  require_segment ~operation:"fsync_file" name;
+  let fd = open_read_fd dir name in
+  combine_close ~operation:"anchored file fsync" fd (fun () ->
+    let metadata = Unix.fstat fd in
+    if metadata.Unix.st_kind <> Unix.S_REG
+    then raise (Unix.Unix_error (Unix.EINVAL, "anchored_fsync_file", name));
+    Unix.fsync fd;
+    stat_of_unix metadata)
+;;
+
+let chmod_file dir name perm =
+  require_segment ~operation:"chmod_file" name;
+  let fd = open_read_fd dir name in
+  combine_close ~operation:"anchored file chmod" fd (fun () ->
+    let metadata = Unix.fstat fd in
+    if metadata.Unix.st_kind <> Unix.S_REG
+    then raise (Unix.Unix_error (Unix.EINVAL, "anchored_chmod_file", name));
+    Unix.fchmod fd perm;
+    Unix.fsync fd)
 ;;
 
 let write_all fd content =
@@ -204,7 +242,9 @@ let rec create_temporary dir =
 let unlink_if_exists dir name =
   require_segment ~operation:"unlink_if_exists" name;
   match unlink_at dir name with
-  | () -> true
+  | () ->
+    fsync dir;
+    true
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
 ;;
 

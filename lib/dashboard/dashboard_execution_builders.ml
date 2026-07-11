@@ -46,7 +46,8 @@ let keeper_action_stale_sec = Env_config.Dashboard.keeper_action_stale_sec
 let task_assignee (task : Masc_domain.task) =
   match task.task_status with
   | Claimed { assignee; _ } | InProgress { assignee; _ }
-  | AwaitingVerification { assignee; _ } | Done { assignee; _ } ->
+  | AwaitingVerification { assignee; _ } | Done { assignee; _ }
+  | OperatorBlocked { assignee; _ } ->
       Some assignee
   | Todo | Cancelled _ -> None
 
@@ -364,13 +365,14 @@ let task_operation_status (task : Masc_domain.task) =
   (* RFC-0323 G-6: awaiting verification is the normal completion lane,
      not a pause — the operation is still moving (verifier's turn). *)
   | Masc_domain.AwaitingVerification _ -> Some "active"
+  | Masc_domain.OperatorBlocked _ -> Some "active"
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
 let task_operation_severity (task : Masc_domain.task) =
   match task.task_status with
   (* RFC-0323 G-6: verification pending is not a warning tone. *)
   | Masc_domain.AwaitingVerification _ -> Tone_ok
-  | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Tone_ok
+  | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.OperatorBlocked _ -> Tone_ok
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> Tone_ok
 
 let task_operation_updated_at (task : Masc_domain.task) =

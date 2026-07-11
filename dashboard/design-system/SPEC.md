@@ -185,10 +185,12 @@ bonsai의 timeline view 전용. dashboard에서 timeline 도입 시 동일 vocab
 
 | Canonical (Role) | backing raw | density | 적용 범위 | 의미 |
 |------------------|-------------|---------|-----------|------|
-| `--mobile-touch-target-min` | `--sp-8` (`40px`) | invariant | dashboard mobile operator controls | pointer 입력이 필요한 control의 최소 hit area |
+| `--mobile-touch-target-min` | `--grid-unit × 5` (`40px`) | invariant | dashboard mobile operator controls | pointer 입력이 필요한 control의 최소 hit area |
 
 이 값은 일반 row/control density와 분리한다. compact density에서도 물리적 hit
 area가 줄어들면 안 되므로 `--row-h-tall`이나 `--ctrl-h-*`를 대신 사용하지 않는다.
+`--sp-8`은 v2 skin의 compact spacing scale과 이름이 겹쳐 live cascade에서 `20px`로
+재정의되므로 backing raw로 사용하지 않는다.
 컴포넌트는 보이는 control에 `min-width`/`min-height`로 적용하고, 작은 checkbox처럼
 실제 input이 더 작아야 하는 경우에는 클릭 가능한 `label` wrapper의 `width`/`height`에
 적용한다. button이 아닌 wrapper도 touch target이면 `touch-action: manipulation`을

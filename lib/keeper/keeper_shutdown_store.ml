@@ -145,7 +145,7 @@ let path ~config ~keeper_name operation_id =
       (Keeper_shutdown_types.Operation_id.to_string operation_id ^ ".json"))
 ;;
 
-let path_for_operation ~config operation =
+let path_for_operation ~config (operation : Keeper_shutdown_types.t) =
   path
     ~config
     ~keeper_name:operation.keeper_name

@@ -717,6 +717,47 @@ let test_config_council_preset_is_staged_eligible () =
      | presets ->
        Alcotest.failf "expected exactly one preset, got %d" (List.length presets))
 
+let test_shipped_runtime_council_is_staged_eligible () =
+  let runtime_toml =
+    In_channel.with_open_bin "../../config/runtime.toml" In_channel.input_all
+  in
+  match Fusion_config.of_toml (parse runtime_toml) with
+  | Error errors ->
+    Alcotest.failf "shipped runtime.toml must validate, got: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error errors))
+  | Ok policy ->
+    (match
+       List.find_opt
+         (fun validated ->
+            String.equal
+              (raw validated).Fusion_policy.name
+              "council")
+         policy.Fusion_policy.presets
+     with
+     | None -> Alcotest.fail "shipped runtime.toml has no council preset"
+     | Some validated ->
+       let preset = raw validated in
+       match
+         Fusion_policy.staged_judge_groups
+           ~group_size:policy.Fusion_policy.staged_judge_group_size
+           preset.Fusion_policy.judges
+       with
+       | Ok [ first_stage; second_stage ] ->
+         Alcotest.(check (list string))
+           "shipped first stage lenses"
+           [ "evidence"; "coverage"; "risk" ]
+           (List.map (fun judge -> judge.Fusion_policy.jlabel) first_stage);
+         Alcotest.(check (list string))
+           "shipped second stage lenses"
+           [ "feasibility"; "simplicity"; "adversarial" ]
+           (List.map (fun judge -> judge.Fusion_policy.jlabel) second_stage)
+       | Ok groups ->
+         Alcotest.failf "shipped council must have two stages, got %d"
+           (List.length groups)
+       | Error error ->
+         Alcotest.failf "shipped council is not staged-eligible: %s"
+           (Fusion_policy.staged_judge_group_error_message error))
+
 (* 회귀 가드: quorum 형태(2 judges)는 staged 비자격 — 이 fail-closed가 council
    추가 전 모든 shipped preset의 상태였다. *)
 let test_config_two_judges_not_staged_eligible () =
@@ -1771,6 +1812,8 @@ let () =
             test_config_bad_staged_judge_group_size
         ; Alcotest.test_case "council_staged_eligible" `Quick
             test_config_council_preset_is_staged_eligible
+        ; Alcotest.test_case "shipped_runtime_council_staged_eligible" `Quick
+            test_shipped_runtime_council_is_staged_eligible
         ; Alcotest.test_case "two_judges_not_staged_eligible" `Quick
             test_config_two_judges_not_staged_eligible
         ; Alcotest.test_case "invalid_max_tool_calls" `Quick

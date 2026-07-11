@@ -132,6 +132,28 @@ let launch_supervised_fiber_body
           ~base_path
           meta.name
           (Some (Keeper_registry.Exception detail));
+        (match
+           Keeper_registry.dispatch_event
+             ~base_path
+             meta.name
+             (Keeper_state_machine.Fiber_terminated
+                { outcome = detail; provider_id = None; http_status = None })
+         with
+         | Ok _ -> ()
+         | Error transition_error ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string DispatchEventFailures)
+             ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
+             ();
+           Log.Keeper.warn
+             "supervisor: fork-rejection Fiber_terminated dispatch failed: %s"
+             (Keeper_state_machine.transition_error_to_string transition_error));
+        Keeper_registry.record_crash
+          ~base_path
+          meta.name
+          (Time_compat.now ())
+          detail;
+        Keeper_registry_error_recording.record ~base_path meta.name detail;
         if
           Keeper_registry.resolve_done
             reg

@@ -29,10 +29,12 @@ import { errorToString } from '../../lib/format-string'
 import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
 import { contextThresholds } from '../../config/context-thresholds'
 import {
-  findRuntimeCatalogEntry,
   loadRuntimeCatalog,
+  resolveRuntimeCatalogEntry,
   runtimeCatalogState,
+  type RuntimeCatalogEntryResolution,
 } from '../../lib/runtime-catalog-resource'
+import type { DashboardRuntimeThinkingControlFormat } from '../../api/dashboard'
 import {
   runtimeCatalogDeclaredSpec,
   runtimeCatalogEffectiveCapabilities,
@@ -144,6 +146,100 @@ export const runtimeRawSpecOpen = persistentSignal<boolean>({
   defaultValue: false,
 })
 
+type RuntimeEffortState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'error'; readonly message: string }
+  | { readonly status: 'missing' }
+  | { readonly status: 'unknown'; readonly reason: string }
+  | {
+      readonly status: 'ready'
+      readonly mode: DashboardRuntimeThinkingControlFormat
+      readonly controlled: boolean
+      readonly adjustable: boolean
+      readonly acceptedEfforts: readonly string[]
+    }
+
+function thinkingControlEnabled(mode: DashboardRuntimeThinkingControlFormat): boolean {
+  switch (mode) {
+    case 'none':
+      return false
+    case 'thinking-object':
+    case 'thinking-object-adaptive':
+    case 'thinking-object-only':
+    case 'chat-template-kwargs':
+    case 'chat-template-token':
+    case 'ollama-think':
+    case 'reasoning-effort':
+    case 'enable-thinking':
+      return true
+  }
+}
+
+function resolveRuntimeEffortState(
+  catalogEntry: RuntimeCatalogEntryResolution,
+): RuntimeEffortState {
+  switch (catalogEntry.status) {
+    case 'loading':
+      return { status: 'loading' }
+    case 'error':
+      return { status: 'error', message: catalogEntry.message }
+    case 'missing':
+      return { status: 'missing' }
+    case 'ready': {
+      const capabilities = catalogEntry.entry.effective_capabilities
+      if (!capabilities) {
+        return { status: 'unknown', reason: '유효 capability 미수신' }
+      }
+      const mode = capabilities.thinking_control_format
+      if (!mode) {
+        return { status: 'unknown', reason: 'thinking control 형식 미수신' }
+      }
+      const acceptedEfforts = capabilities.accepted_reasoning_efforts ?? []
+      return {
+        status: 'ready',
+        mode,
+        controlled: thinkingControlEnabled(mode),
+        adjustable:
+          capabilities.supports_reasoning_budget === true
+          || acceptedEfforts.length > 0,
+        acceptedEfforts,
+      }
+    }
+  }
+}
+
+function RuntimeEffortValue({ state }: { state: RuntimeEffortState }): VNode {
+  switch (state.status) {
+    case 'loading':
+      return html`<span class="rtc-eff-na" data-effort-status="loading">카탈로그 로딩 중</span>`
+    case 'error':
+      return html`<span class="rtc-eff-na" data-effort-status="error" title=${state.message}>카탈로그 조회 실패</span>`
+    case 'missing':
+      return html`<span class="rtc-eff-na" data-effort-status="missing" data-missing="runtime-effort">카탈로그 미등재</span>`
+    case 'unknown':
+      return html`<span class="rtc-eff-na" data-effort-status="unknown">${state.reason}</span>`
+    case 'ready':
+      return state.controlled
+        ? html`<span class="rtc-eff-na" data-effort-status="ready" data-effort-mode=${state.mode}>${state.mode} · ${state.adjustable ? '조정 가능' : '고정'}${state.acceptedEfforts.length > 0 ? ` (${state.acceptedEfforts.join(', ')})` : ''}</span>`
+        : html`<span class="rtc-eff-na" data-effort-status="ready" data-effort-mode="none">effort 제어 없음</span>`
+  }
+}
+
+function RuntimeCapabilitiesUnavailable({
+  resolution,
+}: {
+  resolution: Exclude<RuntimeCatalogEntryResolution, { status: 'ready' }>
+}): VNode {
+  switch (resolution.status) {
+    case 'loading':
+      return html`<div class="rtc-na" data-runtime-catalog-status="loading">능력 정보 로딩 중</div>`
+    case 'error':
+      return html`<div class="rtc-na" data-runtime-catalog-status="error" title=${resolution.message}>능력 정보 조회 실패</div>`
+    case 'missing':
+      return html`<div class="rtc-na" data-runtime-catalog-status="missing" data-missing="runtime-capabilities">능력 정보 미수신</div>`
+  }
+}
+
 function RuntimeSection({
   keeper,
   drift,
@@ -166,8 +262,8 @@ function RuntimeSection({
   // model — the rail does not reach into the config editor's write signal.
   const pendingRuntime =
     drift && drift.runtime_override ? drift.default_runtime_id : null
-  const catalog = runtimeCatalogState.value.status === 'loaded' ? runtimeCatalogState.value.data : []
-  const entry = runtime ? findRuntimeCatalogEntry(catalog, runtime) : null
+  const catalogEntry = resolveRuntimeCatalogEntry(runtimeCatalogState.value, runtime)
+  const entry = catalogEntry.status === 'ready' ? catalogEntry.entry : null
   const ctxK = formatContextTokens(entry?.max_context ?? contextMax(keeper))
   const capabilitiesDeclared = entry?.capabilities_declared !== false
   // Read-only capability readout (audit P7-4). multimodal = accepts non-text
@@ -181,20 +277,10 @@ function RuntimeSection({
         || entry?.supports_video_input,
       )
     : null
-  // Effort mode/adjustability read entry.effective_capabilities (OAS-catalog
-  // derived, the value OAS request-building actually uses) — NOT the
-  // top-level entry.thinking_control_format/supports_reasoning_budget. Those
-  // top-level fields mirror runtime.toml's hand-maintained
-  // [models.<id>.capabilities] block, which OAS request-building never reads
-  // (masc #21521 / oas models.toml). They drifted from the OAS catalog on
-  // every reasoning model audited. effective_capabilities absence means "no
-  // OAS catalog entry for this model", independent of capabilitiesDeclared
-  // above (that flag is about the unrelated runtime.toml block).
-  const effectiveCaps = entry?.effective_capabilities ?? null
-  const effortMode = effectiveCaps?.thinking_control_format ?? null
-  const effortControlled = effortMode !== null && effortMode !== 'none'
-  const acceptedEfforts = effectiveCaps?.accepted_reasoning_efforts ?? null
-  const effortAdjustable = Boolean(effectiveCaps?.supports_reasoning_budget) || Boolean(acceptedEfforts?.length)
+  // Effort reads OAS-catalog effective_capabilities, the same source request
+  // building uses. Catalog transport state, a missing runtime entry, and an
+  // entry whose effective capabilities were not projected are distinct facts.
+  const effortState = resolveRuntimeEffortState(catalogEntry)
   // The raw rows are only materialized while the disclosure is open — closed
   // state renders the curated block alone.
   const rawOpen = runtimeRawSpecOpen.value
@@ -224,17 +310,17 @@ function RuntimeSection({
         <div class="rtc-model mono">
           ${entry?.model_api_name ?? model ?? '—'}${ctxK ? html` · ${ctxK}` : null}
         </div>
-        ${entry
+        ${catalogEntry.status === 'ready'
           ? html`
               <div class="rtc-flags">
-                <span class=${`rtc-flag ${entry.tools_support ? 'on' : 'off'}`}>
-                  ${entry.tools_support ? '✓' : '✕'} tools
+                <span class=${`rtc-flag ${catalogEntry.entry.tools_support ? 'on' : 'off'}`}>
+                  ${catalogEntry.entry.tools_support ? '✓' : '✕'} tools
                 </span>
-                <span class=${`rtc-flag ${entry.thinking_support ? 'on' : 'off'}`}>
-                  ${entry.thinking_support ? '✓' : '✕'} thinking
+                <span class=${`rtc-flag ${catalogEntry.entry.thinking_support ? 'on' : 'off'}`}>
+                  ${catalogEntry.entry.thinking_support ? '✓' : '✕'} thinking
                 </span>
-                <span class=${`rtc-flag ${entry.streaming ? 'on' : 'off'}`}>
-                  ${entry.streaming ? '✓' : '✕'} streaming
+                <span class=${`rtc-flag ${catalogEntry.entry.streaming ? 'on' : 'off'}`}>
+                  ${catalogEntry.entry.streaming ? '✓' : '✕'} streaming
                 </span>
                 <span
                   class=${`rtc-flag ${multimodal === true ? 'on' : multimodal === false ? 'off' : 'na'}`}
@@ -244,18 +330,10 @@ function RuntimeSection({
                 </span>
               </div>
             `
-          : html`<div class="rtc-na" data-missing="runtime-capabilities">능력 정보 미수신</div>`}
+          : html`<${RuntimeCapabilitiesUnavailable} resolution=${catalogEntry} />`}
         <div class="rtc-effort">
           <span class="rtc-effort-k">effort</span>
-          ${/* No OAS catalog entry means the effort mode is unknown, not a
-               definitive "no control" claim. Mirror the multimodal flag's
-               unknown handling instead of asserting a value the catalog never
-               reported. */ ''}
-          ${!entry || !effectiveCaps
-            ? html`<span class="rtc-eff-na" data-missing="runtime-effort">카탈로그 미등재</span>`
-            : effortControlled
-              ? html`<span class="rtc-eff-na" data-effort-mode=${effortMode}>${effortMode} · ${effortAdjustable ? '조정 가능' : '고정'}${acceptedEfforts?.length ? ` (${acceptedEfforts.join(', ')})` : ''}</span>`
-              : html`<span class="rtc-eff-na" data-effort-mode="none">effort 제어 없음</span>`}
+          <${RuntimeEffortValue} state=${effortState} />
         </div>
         ${rawSpecAvailable
           ? html`

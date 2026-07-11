@@ -1054,7 +1054,7 @@ export function RuntimeEnvironmentEditor({
                     /><span>streaming</span>
                   </label>
                 </div>
-                <div class="rt-note">capability 세부 항목(tool-choice, thinking-control-format 등)은 runtime.toml 탭에서 편집하세요.</div>
+                <div class="rt-note">capability 세부 항목(tool-choice 등)은 runtime.toml 탭에서 편집하세요.</div>
                 ${modelFormError ? html`<div class="rt-warn" role="alert" data-testid="runtime-add-model-error">${modelFormError}</div>` : null}
                 <div class="rt-add-actions">
                   <button

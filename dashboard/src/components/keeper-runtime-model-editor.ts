@@ -41,14 +41,20 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 
-function RuntimeCapabilityPill({ label, value }: { label: string; value: boolean | undefined }) {
-  const enabled = value === true
-  const tone = enabled
+function RuntimeCapabilityPill({ label, value }: { label: string; value: boolean | null | undefined }) {
+  const state = value === true ? 'on' : value === false ? 'off' : 'unknown'
+  const tone = state === 'on'
     ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-    : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'
+    : state === 'off'
+      ? 'border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'
+      : 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
   return html`
-    <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${tone}">
-      ${label} ${enabled ? 'on' : 'off'}
+    <span
+      class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${tone}"
+      data-capability-state=${state}
+      title=${state === 'unknown' ? 'capability 값 미수신' : null}
+    >
+      ${label} ${state}
     </span>
   `
 }

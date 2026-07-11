@@ -418,7 +418,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
         supports_structured_output: true,
         supports_reasoning: true,
         accepted_reasoning_efforts: ['low', 'medium'],
-        thinking_control_format: 'responses.reasoning',
+        thinking_control_format: 'reasoning-effort',
         ignored_sampling_parameters: ['temperature'],
         supported_models: ['minimax-m3-api'],
       },
@@ -445,7 +445,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
           thinking_support: true,
           streaming: true,
           capabilities: {
-            thinking_control_format: 'responses.reasoning',
+            thinking_control_format: 'reasoning-effort',
             supports_response_format_json: true,
             supports_structured_output: true,
           },

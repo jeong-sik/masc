@@ -12,6 +12,8 @@ import { highlightCodeHtml } from './shiki-highlighter'
 import { renderMermaidSvg } from './mermaid-graph'
 import { sanitizeHtml } from '../../lib/dompurify'
 import { memoizeLru } from '../../lib/lru-cache'
+import { MENTION_RE } from '../../lib/mention-utils'
+import { keepers } from '../../store'
 
 // ── Marked instance (GFM tables + line-break support) ────────
 const md = new Marked({ gfm: true, breaks: true })
@@ -116,11 +118,103 @@ function renderMarkdownUncached(text: string): string {
 const MARKDOWN_CACHE_MAX = 256
 export const renderMarkdown = memoizeLru(renderMarkdownUncached, { max: MARKDOWN_CACHE_MAX })
 
+// ── Mention highlighting ──────────────────────────────────────
+// A separate post-process over the sanitized HTML, not baked into
+// `renderMarkdown`: which names are "known" changes with the live keeper
+// roster, but `renderMarkdown`'s cache is keyed by source text alone.
+// Baking roster membership into that cache would either go stale (a keeper
+// that leaves stops highlighting in already-cached posts) or force
+// text+roster as the cache key (defeats the point of caching by text — the
+// roster changes far more often than any given post is re-rendered).
+// Operating on the DOM (not marked's tokenizer) also gets code/pre
+// exclusion for free: walking the tree and skipping `<code>`/`<pre>`
+// descendants is exactly what "don't highlight inside code" means,
+// without needing marked's inline-extension dispatch order (which does not
+// reserve '@' as a token boundary and would need the built-in text
+// tokenizer's stop-char set widened to ever see it).
+function isInsideCodeOrPre(node: Node, root: Node): boolean {
+  let el: Node | null = node.parentNode
+  while (el && el !== root) {
+    if (el.nodeName === 'CODE' || el.nodeName === 'PRE') return true
+    el = el.parentNode
+  }
+  return false
+}
+
+function collectHighlightableTextNodes(root: Node): Text[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const nodes: Text[] = []
+  let current = walker.nextNode()
+  while (current) {
+    if (!isInsideCodeOrPre(current, root)) nodes.push(current as Text)
+    current = walker.nextNode()
+  }
+  return nodes
+}
+
+function highlightMentionsInTextNode(node: Text, knownNames: ReadonlySet<string>): void {
+  const value = node.nodeValue ?? ''
+  if (!value.includes('@')) return
+
+  const fragment = document.createDocumentFragment()
+  let lastIndex = 0
+  let matchedAny = false
+
+  for (const match of value.matchAll(MENTION_RE)) {
+    const [, boundary = '', name] = match
+    if (name === undefined || !knownNames.has(name.toLowerCase())) continue
+    const start = (match.index ?? 0) + boundary.length
+    const end = start + 1 + name.length // '@' + name
+    fragment.appendChild(document.createTextNode(value.slice(lastIndex, start)))
+    const span = document.createElement('span')
+    span.className = 'mention'
+    span.textContent = `@${name}`
+    fragment.appendChild(span)
+    lastIndex = end
+    matchedAny = true
+  }
+
+  if (!matchedAny) return
+  fragment.appendChild(document.createTextNode(value.slice(lastIndex)))
+  node.replaceWith(fragment)
+}
+
+/** Wrap `@name` runs matching a known keeper/agent name in
+ * `<span class="mention">`. Skips text inside `<code>`/`<pre>` so a
+ * mention-shaped token in a code block stays literal. Names not in
+ * `knownNames` (emails, typos, unrelated `@word`s) are left as plain text —
+ * only addresses that resolve to a real roster entry get highlighted.
+ * Exported for testing. */
+export function highlightMentions(html: string, knownNames: ReadonlySet<string>): string {
+  if (knownNames.size === 0 || !html.includes('@')) return html
+  const container = document.createElement('div')
+  container.innerHTML = html
+  for (const node of collectHighlightableTextNodes(container)) {
+    highlightMentionsInTextNode(node, knownNames)
+  }
+  return container.innerHTML
+}
+
 // ── Component ────────────────────────────────────────────────
 export function MarkdownContent({ text, class: className }: { text: string; class?: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const htmlStr = useMemo(() => renderMarkdown(text), [text])
   const classes = ['markdown-content', className].filter(Boolean).join(' ')
+
+  // Roster-name join (not `keepers.value` itself) as the memo key: the
+  // roster signal gets a new array reference on every poll tick even when
+  // the name set is unchanged, which would otherwise re-run mention
+  // highlighting (and the effects below, since they depend on the
+  // highlighted HTML) on a cadence unrelated to any actual content change.
+  const rosterKey = keepers.value.map(keeper => keeper.name.toLowerCase()).join('\0')
+  const knownNames = useMemo(
+    () => new Set(rosterKey ? rosterKey.split('\0') : []),
+    [rosterKey],
+  )
+  const highlighted = useMemo(
+    () => highlightMentions(htmlStr, knownNames),
+    [htmlStr, knownNames],
+  )
 
   // Post-render: replace mermaid code blocks with rendered SVG
   useEffect(() => {
@@ -156,7 +250,7 @@ export function MarkdownContent({ text, class: className }: { text: string; clas
       }
     })()
     return () => { cancelled = true }
-  }, [htmlStr])
+  }, [highlighted])
 
   // Post-render: highlight code blocks with shiki
   useEffect(() => {
@@ -204,9 +298,9 @@ export function MarkdownContent({ text, class: className }: { text: string; clas
         }
       }
     })()
-    
-    return () => { cancelled = true }
-  }, [htmlStr])
 
-  return html`<div ref=${containerRef} class=${classes} dangerouslySetInnerHTML=${{ __html: htmlStr }}></div>`
+    return () => { cancelled = true }
+  }, [highlighted])
+
+  return html`<div ref=${containerRef} class=${classes} dangerouslySetInnerHTML=${{ __html: highlighted }}></div>`
 }

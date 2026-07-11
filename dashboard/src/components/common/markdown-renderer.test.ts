@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { MarkdownContent, renderMarkdown } from './markdown-renderer'
+import { MarkdownContent, highlightMentions, renderMarkdown } from './markdown-renderer'
 import { renderMermaidSvg } from './mermaid-graph'
+import { keepers } from '../../store'
 
 // Mock the shared mermaid render path: markdown-renderer delegates to it for
 // ```mermaid fences. Real mermaid is dynamically imported and unavailable here.
@@ -186,5 +187,68 @@ describe('MarkdownContent mermaid fences', () => {
     expect(container.querySelector('code.language-mermaid')).not.toBeNull()
 
     warnSpy.mockRestore()
+  })
+})
+
+describe('highlightMentions', () => {
+  it('wraps a mention matching a known name in a mention span', () => {
+    const out = highlightMentions('<p>hi @albini look</p>', new Set(['albini']))
+    expect(out).toContain('<span class="mention">@albini</span>')
+  })
+
+  it('leaves an @word not in the known-name set as plain text', () => {
+    const out = highlightMentions('<p>send to user@example</p>', new Set(['albini']))
+    expect(out).not.toContain('class="mention"')
+  })
+
+  it('matches case-insensitively against the known-name set', () => {
+    const out = highlightMentions('<p>PING @ALBINI now</p>', new Set(['albini']))
+    expect(out).toContain('<span class="mention">@ALBINI</span>')
+  })
+
+  it('does not highlight a mention-shaped token inside a code block', () => {
+    const out = highlightMentions('<pre><code>@albini</code></pre>', new Set(['albini']))
+    expect(out).not.toContain('class="mention"')
+    expect(out).toContain('@albini')
+  })
+
+  it('does not highlight inside inline code', () => {
+    const out = highlightMentions('<p>use <code>@albini</code> as a flag</p>', new Set(['albini']))
+    expect(out).not.toContain('class="mention"')
+  })
+
+  it('returns the input unchanged when there is no known-name set', () => {
+    const html = '<p>@albini</p>'
+    expect(highlightMentions(html, new Set())).toBe(html)
+  })
+})
+
+describe('MarkdownContent mention highlighting', () => {
+  afterEach(() => {
+    keepers.value = []
+  })
+
+  it('highlights a mention of a keeper in the live roster', () => {
+    keepers.value = [{ name: 'albini' } as (typeof keepers.value)[number]]
+    const container = document.createElement('div')
+    render(h(MarkdownContent, { text: 'hey @albini take a look' }), container)
+    const mention = container.querySelector('.mention')
+    expect(mention).not.toBeNull()
+    expect(mention?.textContent).toBe('@albini')
+  })
+
+  it('does not highlight an @word for a keeper not in the roster', () => {
+    keepers.value = [{ name: 'someone-else' } as (typeof keepers.value)[number]]
+    const container = document.createElement('div')
+    render(h(MarkdownContent, { text: 'hey @albini take a look' }), container)
+    expect(container.querySelector('.mention')).toBeNull()
+  })
+
+  it('does not highlight a mention-shaped token inside a fenced code block', () => {
+    keepers.value = [{ name: 'albini' } as (typeof keepers.value)[number]]
+    const container = document.createElement('div')
+    render(h(MarkdownContent, { text: '```\n@albini\n```' }), container)
+    expect(container.querySelector('.mention')).toBeNull()
+    expect(container.querySelector('code')?.textContent).toContain('@albini')
   })
 })

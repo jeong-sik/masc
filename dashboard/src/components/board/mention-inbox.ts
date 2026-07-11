@@ -7,6 +7,7 @@ import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { SYSTEM_MESSAGE_FROM, boardMessageRowKey, previewBoardMessage } from '../../lib/board-utils'
 import { currentDashboardActorName } from '../../lib/dashboard-session-actor'
+import { MENTION_RE } from '../../lib/mention-utils'
 import { messages, shellAuthSummary } from '../../store'
 import type { DashboardShellAuthSummary, Message } from '../../types'
 import { navigateBoard } from './board-route'
@@ -23,8 +24,6 @@ export interface MentionInboxModel {
   forMe: MentionInboxRow[]
   others: MentionInboxRow[]
 }
-
-const MENTION_RE = /(^|[^A-Za-z0-9._-])@([A-Za-z0-9._-]{1,64})/g
 
 function normalizeTarget(value: string | null | undefined): string | null {
   const normalized = value?.trim().replace(/^@+/, '').toLowerCase()

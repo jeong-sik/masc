@@ -66,6 +66,8 @@
   & table { margin: 8px 0; }
 
   & img { max-width: 100%; height: auto; border-radius: var(--r-2); margin: 4px 0; }
+
+  & .mention { color: var(--brass-1); font-weight: var(--fw-semi); }
 }
 
 /* ── Mermaid rendered output ──────────────────────────────── */

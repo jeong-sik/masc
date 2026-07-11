@@ -19,7 +19,6 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
       { id: 'anthropic.sonnet', provider: 'Anthropic', model: 'claude-sonnet-4', max_context: 200000, is_default: false },
     ],
     model_routing: {
-      keeper_assignments: [{ keeper: 'analyst', runtime_id: 'anthropic.sonnet' }],
       librarian_runtime_id: 'openai.gpt-4o',
       structured_judge_runtime_id: 'openai.gpt-4o',
       hitl_summary_runtime_id: 'anthropic.sonnet',
@@ -37,10 +36,6 @@ describe('parseRuntimeDefaultsResponse', () => {
     expect(out.default_model).toBe('gpt-4o')
     expect(out.runtimes).toHaveLength(2)
     expect(out.runtimes[0]!.is_default).toBe(true)
-    expect(out.model_routing.keeper_assignments[0]).toEqual({
-      keeper: 'analyst',
-      runtime_id: 'anthropic.sonnet',
-    })
     expect(out.model_routing.structured_judge_runtime_id).toBe('openai.gpt-4o')
     expect(out.model_routing.hitl_summary_runtime_id).toBe('anthropic.sonnet')
     expect(out.model_routing.cross_verifier_runtime_id).toBeNull()
@@ -55,7 +50,6 @@ describe('parseRuntimeDefaultsResponse', () => {
         default_max_context: null,
         runtimes: [],
         model_routing: {
-          keeper_assignments: [],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           hitl_summary_runtime_id: null,
@@ -67,7 +61,6 @@ describe('parseRuntimeDefaultsResponse', () => {
     expect(out.default_runtime_id).toBeNull()
     expect(out.default_model).toBeNull()
     expect(out.runtimes).toHaveLength(0)
-    expect(out.model_routing.keeper_assignments).toHaveLength(0)
   })
 
   it('throws schema drift when a runtime entry is missing a required field', () => {

@@ -30,7 +30,6 @@ type resolved =
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; keeper_assignments : (string * string) list
   ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
   ; hitl_summary_runtime_id : string option
@@ -59,10 +58,6 @@ let runtime_entry_json (e : runtime_entry) : Yojson.Safe.t =
     ]
 ;;
 
-let keeper_assignment_json (keeper, runtime_id) : Yojson.Safe.t =
-  `Assoc [ "keeper", `String keeper; "runtime_id", `String runtime_id ]
-;;
-
 let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
   `Assoc
     [ "generated_at_iso", `String generated_at_iso
@@ -75,9 +70,7 @@ let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
     ; "runtimes", `List (List.map runtime_entry_json r.runtimes)
     ; ( "model_routing"
       , `Assoc
-          [ ( "keeper_assignments"
-            , `List (List.map keeper_assignment_json r.keeper_assignments) )
-          ; "librarian_runtime_id", string_opt_json r.librarian_runtime_id
+          [ "librarian_runtime_id", string_opt_json r.librarian_runtime_id
           ; ( "structured_judge_runtime_id"
             , string_opt_json r.structured_judge_runtime_id )
           ; "hitl_summary_runtime_id", string_opt_json r.hitl_summary_runtime_id
@@ -102,7 +95,6 @@ let resolved_of_runtime () : resolved =
   ; default_max_context =
       Option.map Runtime.max_context_of_runtime default
   ; runtimes = List.map entry (Runtime.get_runtimes ())
-  ; keeper_assignments = Runtime.keeper_assignments ()
   ; librarian_runtime_id = Runtime.librarian_runtime_id ()
   ; structured_judge_runtime_id = Runtime.structured_judge_runtime_id ()
   ; hitl_summary_runtime_id = Runtime.hitl_summary_runtime_id ()

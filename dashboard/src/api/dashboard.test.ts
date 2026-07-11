@@ -3262,7 +3262,6 @@ describe('fetchRuntimeDefaults', () => {
         { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
       ],
       model_routing: {
-        keeper_assignments: [{ keeper: 'analyst', runtime_id: 'openai.gpt-4o' }],
         librarian_runtime_id: null,
         structured_judge_runtime_id: null,
         cross_verifier_runtime_id: null,
@@ -3283,6 +3282,5 @@ describe('fetchRuntimeDefaults', () => {
     expect(result.default_runtime_id).toBe('openai.gpt-4o')
     expect(result.default_model).toBe('gpt-4o')
     expect(result.runtimes[0]?.is_default).toBe(true)
-    expect(result.model_routing.keeper_assignments[0]?.keeper).toBe('analyst')
   })
 })

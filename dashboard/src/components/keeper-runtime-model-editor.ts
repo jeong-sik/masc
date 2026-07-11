@@ -34,6 +34,11 @@ import {
   runtimeCatalogState,
 } from '../lib/runtime-catalog-resource'
 import {
+  loadRuntimeResolved,
+  runtimeResolvedState,
+} from '../lib/runtime-resolved-resource'
+import type { RuntimeAssignment } from '../api/schemas/runtime-resolved'
+import {
   runtimeCatalogDeclaredSpec,
   runtimeCatalogEffectiveCapabilities,
   runtimeCatalogParameterPolicy,
@@ -158,6 +163,48 @@ function EditorHeader() {
   `
 }
 
+// assignment_source distinguishes an explicit [runtime.assignments] entry from
+// a keeper riding [runtime].default with no entry of its own — the one fact
+// the deleted settings→routing fleet panel showed that this per-keeper card
+// did not. Sourced from GET /api/v1/runtime/resolved (read-only; no new write
+// path, no string matching — the resolved endpoint already types this as a
+// closed 'explicit' | 'default' union).
+function AssignmentSourceBadge({ assignment }: { assignment: RuntimeAssignment }) {
+  const tone = assignment.assignment_source === 'explicit'
+    ? 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
+    : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'
+  const target = assignment.resolved.id ?? assignment.resolved.kind
+  return html`
+    <span
+      class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${tone}"
+      data-testid="keeper-runtime-assignment-source"
+      data-assignment-source=${assignment.assignment_source}
+      data-assignment-target-kind=${assignment.resolved.kind}
+    >
+      ${assignment.assignment_source} → ${target}
+    </span>
+  `
+}
+
+function AssignmentTruth({
+  state,
+  keeperName,
+}: {
+  state: typeof runtimeResolvedState.value
+  keeperName: string
+}) {
+  if (state.status === 'idle' || state.status === 'loading') {
+    return html`<span class="text-3xs text-[var(--color-fg-muted)]" data-testid="keeper-runtime-assignment-loading">assignment 불러오는 중</span>`
+  }
+  if (state.status === 'error') {
+    return html`<span class="text-3xs text-[var(--color-status-danger)]" data-testid="keeper-runtime-assignment-error">assignment 확인 실패: ${state.message}</span>`
+  }
+  const assignment = state.data.assignments.find(item => item.keeper === keeperName)
+  return assignment
+    ? html`<${AssignmentSourceBadge} assignment=${assignment} />`
+    : html`<span class="text-3xs text-[var(--color-status-warn)]" data-testid="keeper-runtime-assignment-missing">assignment projection에 Keeper가 없습니다.</span>`
+}
+
 export function KeeperRuntimeModelEditor({
   keeperName,
   onOpenRuntimeConfig,
@@ -190,6 +237,10 @@ export function KeeperRuntimeModelEditor({
   const catalog = catalogState.status === 'loaded' ? catalogState.data : []
   const runtimeEntry = findRuntimeCatalogEntry(catalog, current)
 
+  void loadRuntimeResolved()
+  const resolvedState = runtimeResolvedState.value
+  const assignmentTruth = html`<${AssignmentTruth} state=${resolvedState} keeperName=${keeperName} />`
+
   const canonicalRow =
     canonical && canonical !== current
       ? html`<div class="text-2xs text-[var(--color-fg-muted)]">정규화: ${canonical}</div>`
@@ -205,7 +256,10 @@ export function KeeperRuntimeModelEditor({
     return html`
       <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--color-border-default)]/60 bg-[var(--color-bg-surface)]/35 px-4 py-3">
         <${EditorHeader} />
-        <div class="text-sm font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</div>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="text-sm font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</div>
+          ${assignmentTruth}
+        </div>
         ${canonicalRow}
         ${summary}
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-status-warn)]">
@@ -222,7 +276,10 @@ export function KeeperRuntimeModelEditor({
   return html`
     <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-4 py-3">
       <${EditorHeader} />
-      <div class="text-2xs text-[var(--color-fg-muted)]">현재 <span class="font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</span></div>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="text-2xs text-[var(--color-fg-muted)]">현재 <span class="font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</span></div>
+        ${assignmentTruth}
+      </div>
       ${canonicalRow}
       ${summary}
       ${onOpenRuntimeConfig

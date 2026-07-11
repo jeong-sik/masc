@@ -21,7 +21,6 @@ let test_build_resolved_serializes_defaults_and_routing () =
           ; is_default = false
           }
         ]
-    ; keeper_assignments = [ "analyst", "anthropic.sonnet" ]
     ; librarian_runtime_id = Some "openai.gpt-4o"
     ; structured_judge_runtime_id = Some "openai.gpt-4o"
     ; hitl_summary_runtime_id = Some "anthropic.sonnet"
@@ -51,12 +50,6 @@ let test_build_resolved_serializes_defaults_and_routing () =
   Alcotest.(check bool) "runtime is_default" true
     (member "is_default" first |> Yojson.Safe.Util.to_bool);
   let routing = member "model_routing" json in
-  let assignments = member "keeper_assignments" routing |> Yojson.Safe.Util.to_list in
-  Alcotest.(check int) "assignments length" 1 (List.length assignments);
-  Alcotest.(check string) "assignment keeper" "analyst"
-    (member "keeper" (List.hd assignments) |> Yojson.Safe.Util.to_string);
-  Alcotest.(check string) "assignment runtime_id" "anthropic.sonnet"
-    (member "runtime_id" (List.hd assignments) |> Yojson.Safe.Util.to_string);
   Alcotest.(check string) "librarian routing" "openai.gpt-4o"
     (member "librarian_runtime_id" routing |> Yojson.Safe.Util.to_string);
   Alcotest.(check string) "structured judge routing" "openai.gpt-4o"
@@ -72,7 +65,6 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
     ; default_model = None
     ; default_max_context = None
     ; runtimes = []
-    ; keeper_assignments = []
     ; librarian_runtime_id = None
     ; structured_judge_runtime_id = None
     ; hitl_summary_runtime_id = None
@@ -89,8 +81,6 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
   Alcotest.(check int) "runtimes empty" 0
     (member "runtimes" json |> Yojson.Safe.Util.to_list |> List.length);
   let routing = member "model_routing" json in
-  Alcotest.(check int) "assignments empty" 0
-    (member "keeper_assignments" routing |> Yojson.Safe.Util.to_list |> List.length);
   Alcotest.(check bool) "cross_verifier null" true
     (member "cross_verifier_runtime_id" routing = `Null);
   Alcotest.(check bool) "structured_judge null" true

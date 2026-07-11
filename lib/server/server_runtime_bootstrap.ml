@@ -740,11 +740,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     loop ());
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
-  let explicit_base_url =
-    match Env_config_core.masc_http_base_url_result () with
-    | Ok base_url -> Some base_url
-    | Error message -> raise (Env_config_core.Config_error message)
-  in
+  (* The listener identity comes only from the effective CLI/bootstrap config
+     above.  A public identity is additional trust only when the operator
+     explicitly configured MASC_HTTP_BASE_URL; deriving it again from env
+     MASC_HOST/MASC_HTTP_PORT would diverge from CLI overrides and could admit
+     a host/port on which this process is not listening. *)
+  let explicit_base_url = Env_config_core.masc_http_base_url_opt () in
   let request_trust_policy =
     match
       Server_request_authority.make_trust_policy
@@ -757,6 +758,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       raise
         (Env_config_core.Config_error
            (Server_request_authority.trust_policy_error_to_string error))
+  in
+  let background_request_authority =
+    Server_request_authority.projection_context request_trust_policy
   in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
   let request_handler = make_request_handler ~trust_policy:request_trust_policy routes in
@@ -1389,7 +1393,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         (* Full-health scans are heavier than the probe path. Start them after
            shell prewarm has either succeeded or exhausted its own budget so
            cold-start diagnostics do not contend with the shell's first render. *)
-        Server_routes_http_runtime.start_full_health_snapshot_refresh_loop ~sw ~clock);
+        Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
+          ~sw
+          ~clock
+          ~request_authority:background_request_authority);
       start_lazy_startup state;
       (* RFC-0206: runtime catalog startup validation removed; Runtime.init_default
          already fail-fasts on an invalid runtime config at boot. *)

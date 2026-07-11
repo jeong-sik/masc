@@ -234,7 +234,7 @@ let host_is_unspecified host =
   | Error _ -> false
 ;;
 
-let configured_bind_matches configured request_authority =
+let configured_bind_matches (configured : trusted_identity) request_authority =
   let same_port =
     Option.equal Int.equal
       (effective_host_port ~scheme:Http configured.authority)
@@ -271,11 +271,14 @@ let explicit_identity_of_base_url raw =
       None
 ;;
 
-let make_trust_policy ~bind_host ~bind_port ~explicit_base_url =
+let make_trust_policy ~bind_host ~bind_port ~explicit_base_url :
+    (trust_policy, trust_policy_error) result =
   match host_port_of_parts ~host:bind_host ~port:(Some bind_port) with
   | None -> Error Malformed_bind_authority
   | Some bind_authority ->
-    let configured_bind = { authority = bind_authority; scheme = Http } in
+    let configured_bind : trusted_identity =
+      { authority = bind_authority; scheme = Http }
+    in
     (match explicit_base_url with
      | None -> Ok { configured_bind; explicit_trusted_host = None }
      | Some raw ->
@@ -288,7 +291,23 @@ let make_trust_policy ~bind_host ~bind_port ~explicit_base_url =
             }))
 ;;
 
-let admit_authority ~trust_policy ~wire_scheme parsed =
+let projection_context (trust_policy : trust_policy) : request_context =
+  let identity, trust_class =
+    match trust_policy.explicit_trusted_host with
+    | Some identity -> identity, Explicit_trusted_host
+    | None -> trust_policy.configured_bind, Configured_bind
+  in
+  { host = identity.authority.host
+  ; port = identity.authority.port
+  ; scheme = identity.scheme
+  ; trust_class
+  }
+;;
+
+let admit_authority
+    ~(trust_policy : trust_policy)
+    ~(wire_scheme : scheme)
+    (parsed : host_port) : authority option =
   let explicit_match () =
     match trust_policy.explicit_trusted_host with
     | Some trusted
@@ -325,7 +344,9 @@ let admit_authority ~trust_policy ~wire_scheme parsed =
      | None -> explicit_match ())
 ;;
 
-let admit_http1_authority ~trust_policy parsed =
+let admit_http1_authority
+    ~(trust_policy : trust_policy)
+    (parsed : host_port) : authority option =
   match trust_policy.explicit_trusted_host with
   | Some trusted
     when trusted.scheme = Https
@@ -358,7 +379,7 @@ let admit_http1_authority ~trust_policy parsed =
         | Some _ | None -> None))
 ;;
 
-let classify_http1_request ~trust_policy request =
+let classify_http1_request ~(trust_policy : trust_policy) request =
   match Httpun.Headers.get_multi request.Httpun.Request.headers "host" with
   | [] -> Missing
   | [ raw ] ->
@@ -372,7 +393,7 @@ let classify_http1_request ~trust_policy request =
   | _ -> Multiple
 ;;
 
-let classify_h2_request ~trust_policy request =
+let classify_h2_request ~(trust_policy : trust_policy) request =
   let authorities = H2.Headers.get_multi request.H2.Request.headers ":authority" in
   let hosts = H2.Headers.get_multi request.H2.Request.headers "host" in
   match scheme_of_string request.H2.Request.scheme, authorities with
@@ -419,12 +440,21 @@ let classify_h2_request ~trust_policy request =
   | Some _, _ -> H2_authority Malformed
 ;;
 
-let host authority = authority.host
-let port authority = authority.port
+let host (authority : authority) = authority.host
+let port (authority : authority) = authority.port
 let scheme (authority : authority) = authority.scheme
-let trust_class authority = authority.trust_class
+let trust_class (authority : authority) = authority.trust_class
 
-let rendered authority =
+let port_or_default (authority : authority) =
+  match authority.port with
+  | Some port -> port
+  | None ->
+    (match authority.scheme with
+     | Http -> 80
+     | Https -> 443)
+;;
+
+let rendered (authority : authority) =
   match authority.port with
   | None -> rendered_host authority.host
   | Some port -> Printf.sprintf "%s:%d" (rendered_host authority.host) port
@@ -434,11 +464,12 @@ let of_host_port ~host ~port =
   match host_port_of_parts ~host ~port:(Some port) with
   | Some authority ->
     Ok
-      { host = authority.host
-      ; port = authority.port
-      ; scheme = Http
-      ; trust_class = Configured_bind
-      }
+      ({ host = authority.host
+       ; port = authority.port
+       ; scheme = Http
+       ; trust_class = Configured_bind
+       }
+        : authority)
   | None -> Error `Malformed
 ;;
 
@@ -461,14 +492,17 @@ let parse_serialized_origin raw =
           String.sub raw authority_start (String.length raw - authority_start)
         in
         (match scheme_of_string scheme_raw, parse_h2 authority_raw with
-         | Some scheme, Some authority -> Ok { authority; scheme }
+         | Some scheme, Some authority ->
+           Ok ({ authority; scheme } : serialized_origin)
          | Some _, None | None, _ -> Error `Malformed)
 ;;
 
-let serialized_origin_host origin = origin.authority.host
-let serialized_origin_scheme origin = origin.scheme
+let serialized_origin_host (origin : serialized_origin) = origin.authority.host
+let serialized_origin_scheme (origin : serialized_origin) = origin.scheme
 
-let serialized_origin_equal left right =
+let serialized_origin_equal
+    (left : serialized_origin)
+    (right : serialized_origin) =
   left.scheme = right.scheme
   && host_port_equivalent_for_scheme
        ~scheme:left.scheme
@@ -476,7 +510,9 @@ let serialized_origin_equal left right =
        right.authority
 ;;
 
-let serialized_origin_matches_authority origin authority =
+let serialized_origin_matches_authority
+    (origin : serialized_origin)
+    (authority : authority) =
   origin.scheme = authority.scheme
   && String.equal origin.authority.host authority.host
   && Option.equal Int.equal

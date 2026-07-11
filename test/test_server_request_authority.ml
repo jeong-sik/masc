@@ -323,7 +323,15 @@ let test_request_context_preserves_scheme_and_trust () =
   check_trust
     "external trust"
     Authority.Explicit_trusted_host
-    external_authority
+    external_authority;
+  let projected = Authority.projection_context external_policy in
+  check string "background projection uses public host"
+    "masc.example.test" (Authority.host projected);
+  check_scheme "background projection uses public scheme" Authority.Https projected;
+  check_trust
+    "background projection keeps public trust"
+    Authority.Explicit_trusted_host
+    projected
 ;;
 
 let test_trust_policy_has_no_permissive_default () =

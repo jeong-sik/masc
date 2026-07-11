@@ -41,6 +41,12 @@ val make_trust_policy :
 
 val trust_policy_error_to_string : trust_policy_error -> string
 
+val projection_context : trust_policy -> request_context
+(** Return the policy-owned context for background projections that have no
+    wire request to classify.  The explicit public identity wins when present;
+    otherwise the effective listener identity is used.  Consumers must not
+    reconstruct this context from environment variables. *)
+
 type classification =
   | Missing
   | Single of request_context
@@ -75,6 +81,11 @@ val of_host_port : host:string -> port:int -> (authority, [ `Malformed ]) result
 
 val host : authority -> string
 val port : authority -> int option
+val port_or_default : authority -> int
+(** Return the admitted explicit port or the typed scheme default (80/443).
+    This is the only projection for consumers that require a concrete port;
+    they must not re-read listener environment after admission. *)
+
 val scheme : authority -> scheme
 val scheme_to_string : scheme -> string
 val trust_class : authority -> trust_class

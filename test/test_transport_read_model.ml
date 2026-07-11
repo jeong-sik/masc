@@ -271,7 +271,13 @@ let test_advertised_base_url_uses_typed_trusted_scheme () =
   check string "trusted HTTPS base" "https://masc.example.com"
     (Server_routes_http_runtime.advertised_base_url
        ~request_authority
-       request)
+       request);
+  with_env "MASC_HTTP_PORT" (Some "9000") (fun () ->
+      let host, port =
+        Server_routes_http_runtime.advertised_host_port ~request_authority
+      in
+      check string "typed authority host" "masc.example.com" host;
+      check int "typed HTTPS default port" 443 port)
 
 let test_context_from_env_uses_default_loopback_base_url () =
   with_env "MASC_HTTP_BASE_URL" None (fun () ->
@@ -281,6 +287,27 @@ let test_context_from_env_uses_default_loopback_base_url () =
               check string "normalized host" "127.0.0.1" ctx.host;
               check string "default base_url" "http://127.0.0.1:8935"
                 ctx.base_url)))
+
+let test_explicit_base_url_opt_never_derives_from_bind_env () =
+  with_env "MASC_HTTP_BASE_URL" None (fun () ->
+      with_env "MASC_HOST" (Some "0.0.0.0") (fun () ->
+          with_env "MASC_HTTP_PORT" (Some "9000") (fun () ->
+              check
+                (option string)
+                "listener env is not an explicit public identity"
+                None
+                (Env_config_core.masc_http_base_url_opt ()))))
+
+let test_explicit_base_url_opt_normalizes_only_explicit_value () =
+  with_env
+    "MASC_HTTP_BASE_URL"
+    (Some "  https://example.com/root///  ")
+    (fun () ->
+       check
+         (option string)
+         "explicit public identity is normalized"
+         (Some "https://example.com/root")
+         (Env_config_core.masc_http_base_url_opt ()))
 
 let test_context_from_env_trims_explicit_base_url () =
   with_env "MASC_HTTP_BASE_URL" (Some "https://example.com/root/") (fun () ->
@@ -335,6 +362,10 @@ let () =
         [
           test_case "default loopback base url" `Quick
             test_context_from_env_uses_default_loopback_base_url;
+          test_case "explicit base URL does not derive bind env" `Quick
+            test_explicit_base_url_opt_never_derives_from_bind_env;
+          test_case "explicit base URL normalizes explicit value" `Quick
+            test_explicit_base_url_opt_normalizes_only_explicit_value;
           test_case "trim explicit base url" `Quick
             test_context_from_env_trims_explicit_base_url;
           test_case "normalize loopback alias base url" `Quick

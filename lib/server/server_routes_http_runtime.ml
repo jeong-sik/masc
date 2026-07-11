@@ -72,22 +72,14 @@ let authority_of_host_port host port =
   Printf.sprintf "%s:%d" (authority_host host) port
 
 let advertised_host_port_authority ~request_authority =
-  let default_port = configured_http_port () in
   let request_host = Server_request_authority.host request_authority in
   let port_opt = Server_request_authority.port request_authority in
-  let port =
-    match port_opt with
-    | Some explicit_port -> explicit_port
-    | None -> default_port
-  in
+  let port = Server_request_authority.port_or_default request_authority in
   let host = Transport_read_model.normalize_advertised_host request_host in
   let authority =
     match port_opt with
     | Some _ -> authority_of_host_port host port
-    | None ->
-      if String.equal host request_host
-      then authority_host host
-      else authority_of_host_port host port
+    | None -> authority_host host
   in
   host, port, authority
 
@@ -1186,18 +1178,8 @@ let make_cached_full_health_json ?(listener = "http/1.1") ~request_authority
              ~refresh_started_at ~refresh_requested snapshot );
        ])
 
-let start_full_health_snapshot_refresh_loop ~sw ~clock =
+let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
   let request = Httpun.Request.create `GET "/health?full=1" in
-  let request_authority =
-    match
-      Server_request_authority.of_host_port
-        ~host:(configured_http_host ())
-        ~port:(configured_http_port ())
-    with
-    | Ok authority -> authority
-    | Error `Malformed ->
-      invalid_arg "configured HTTP host/port is not a valid authority"
-  in
   Proactive_refresh.start
     ~sw
     ~clock

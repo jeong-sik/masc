@@ -685,8 +685,8 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
     match Keeper_registry.unregister_exact entry with
     | Keeper_registry.Exact_unregistered ->
       Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-      true
-    | Keeper_registry.Exact_entry_missing -> false
+      ()
+    | Keeper_registry.Exact_entry_missing -> ()
     | Keeper_registry.Exact_entry_replaced ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string SupervisorCleanupFailures)
@@ -694,14 +694,13 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
         ();
       Log.Keeper.warn
         "%s: stale supervisor entry was not unregistered because a newer lane owns the name"
-        entry.name;
-      false
+        entry.name
   in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
        (* K4c — reclaim only when this exact lane was removed. A stale
           sweep must not drop the accumulator of a newer same-name lane. *)
-       ignore (unregister_exact_and_drop entry : bool))
+       unregister_exact_and_drop entry)
     final_acc.to_unregister;
   List.iter
     (fun ((entry : Keeper_registry.registry_entry), msg) ->
@@ -864,7 +863,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          Log.Keeper.error "%s: cannot read meta for restart, removing" old_entry.name;
          (* K4c — restart-meta read failure: abandon only the exact crashed
             lane observed by this sweep. *)
-         ignore (unregister_exact_and_drop old_entry : bool))
+         unregister_exact_and_drop old_entry)
     restart_list;
   (* Phase 2: restore paused reconcile gates whose approval queue was lost
      on restart. The queue itself is in-memory, but paused keeper meta is

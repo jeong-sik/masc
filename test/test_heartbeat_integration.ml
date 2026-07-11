@@ -29,6 +29,7 @@ module Shutdown_types = Masc.Keeper_shutdown_types
 module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_prepare_join = Masc.Keeper_shutdown_prepare_join
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
+module Keeper_meta_store = Masc.Keeper_meta_store
 
 let bp = "/tmp/test-heartbeat-integ"
 

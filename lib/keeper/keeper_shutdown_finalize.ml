@@ -226,14 +226,7 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
                            latest_backlog.version
                            (current.expected_backlog_version + 1))
                     then
-                      block
-                        ~config
-                        current
-                        Task_settlement
-                        (Printf.sprintf
-                           "task release backlog version mismatch: expected %d, actual %d"
-                           (current.expected_backlog_version + 1)
-                           latest_backlog.version)
+                      settle_tasks ~config ~meta current settled
                     else
                       let settled = task_id :: settled in
                       (match
@@ -431,7 +424,7 @@ let unregister_exact operation = function
        Error "Keeper registry lane was replaced during finalization")
 ;;
 
-let release_finalized_admission ~config operation =
+let release_finalized_admission ~(config : Workspace.config) operation =
   match
     Keeper_turn_admission.rollback_shutdown
       ~base_path:config.base_path

@@ -252,8 +252,19 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
           in
           (match lane_exit.cleanup_error with
            | Some detail ->
-             (match persist_blocked ~config joined Lane_join detail with
-              | Ok blocked -> Error (Join_failed blocked)
+             let blocked =
+               { joined with
+                 phase = Blocked { stage = Lane_join; detail }
+               ; updated_at = Masc_domain.now_iso ()
+               }
+             in
+             (match
+                Keeper_shutdown_store.replace
+                  ~config
+                  ~expected_revision:operation.revision
+                  blocked
+              with
+              | Ok () -> Error (Join_failed blocked)
               | Error error -> Error (Join_record_update_failed error))
            | None ->
              (match

@@ -13,8 +13,41 @@ type state =
   | Running
   | Exited
 
+module Id = struct
+  type t = string
+
+  let prefix = "lane-"
+  (* NDT-OK: UUID entropy is identity only; lifecycle decisions compare the
+     typed value and never branch on its random contents. *)
+  let rng = Random.State.make_self_init ()
+  let rng_mutex = Eio.Mutex.create ()
+
+  let generate () =
+    let uuid =
+      Eio.Mutex.use_ro rng_mutex (fun () -> Uuidm.v4_gen rng ())
+    in
+    prefix ^ Uuidm.to_string uuid
+  ;;
+
+  let of_string value =
+    let prefix_length = String.length prefix in
+    if
+      String.length value = prefix_length + 36
+      && String.equal (String.sub value 0 prefix_length) prefix
+    then
+      match Uuidm.of_string (String.sub value prefix_length 36) with
+      | Some _ -> Ok value
+      | None -> Error (Printf.sprintf "invalid Keeper lane id: %S" value)
+    else Error (Printf.sprintf "invalid Keeper lane id: %S" value)
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+end
+
 type t =
-  { state : state Atomic.t
+  { id : Id.t
+  ; state : state Atomic.t
   ; exited_p : exit Eio.Promise.t
   ; exited_r : exit Eio.Promise.u
   }
@@ -32,9 +65,10 @@ let start_error_to_string = function
 
 let create () =
   let exited_p, exited_r = Eio.Promise.create () in
-  { state = Atomic.make Not_started; exited_p; exited_r }
+  { id = Id.generate (); state = Atomic.make Not_started; exited_p; exited_r }
 ;;
 
+let id t = t.id
 let exited t = t.exited_p
 let peek_exit t = Eio.Promise.peek t.exited_p
 let await_exit t = Eio.Promise.await t.exited_p

@@ -6,6 +6,14 @@
 
 type t
 
+module Id : sig
+  type t
+
+  val of_string : string -> (t, string) result
+  val to_string : t -> string
+  val equal : t -> t -> bool
+end
+
 type outcome =
   | Completed
   | Cancelled_by_parent of exn
@@ -24,6 +32,7 @@ type start_error =
 val start_error_to_string : start_error -> string
 
 val create : unit -> t
+val id : t -> Id.t
 
 val fork :
   sw:Eio.Switch.t ->

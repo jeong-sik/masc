@@ -685,6 +685,19 @@ let test_keeper_lane_surfaces_cleanup_failure () =
     (Some "cleanup evidence")
     exit.cleanup_error
 
+let test_keeper_lane_identity_is_typed_and_unique () =
+  let first = Lane.create () in
+  let second = Lane.create () in
+  let first_id = Lane.id first in
+  let encoded = Lane.Id.to_string first_id in
+  check bool
+    "separate registry lanes have separate identities"
+    false
+    (Lane.Id.equal first_id (Lane.id second));
+  match Lane.Id.of_string encoded with
+  | Ok decoded -> check bool "lane id round-trip" true (Lane.Id.equal first_id decoded)
+  | Error detail -> fail detail
+
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1100,6 +1113,8 @@ let () =
         test_keeper_lane_join_waits_for_children_and_cleanup;
       test_case "lane join surfaces cleanup failure" `Quick
         test_keeper_lane_surfaces_cleanup_failure;
+      test_case "lane identity is typed and unique" `Quick
+        test_keeper_lane_identity_is_typed_and_unique;
       test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick

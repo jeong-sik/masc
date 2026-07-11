@@ -5,12 +5,22 @@ open Masc_domain
 (** Network mode strings exposed only by explicit sandbox-management tools.
     Keeper creation/update no longer accepts sandbox posture knobs. *)
 let network_mode_enum_strings =
-  [ "none"; "inherit" ]
+  Keeper_types_profile_sandbox.valid_network_mode_strings
+;;
 
-(** Hand-mirrored from [Keeper_sandbox_control]'s typed stop scope. Keeper_schema
-    is upstream of the runtime control module; the descriptor integrity test
-    keeps this JSON Schema enum aligned with the parser constants. *)
-let sandbox_stop_scope_enum_strings = [ "managed"; "turn"; "all" ]
+module Sandbox_contract = Keeper_sandbox_control_contract
+
+let sandbox_stop_scope_enum_strings = Sandbox_contract.stop_scope_strings
+
+let bounded_number_schema (bounds : Sandbox_contract.bounded_float) description =
+  `Assoc
+    [ "type", `String "number"
+    ; "minimum", `Float bounds.minimum
+    ; "maximum", `Float bounds.maximum
+    ; "default", `Float bounds.default
+    ; "description", `String description
+    ]
+;;
 
 (** Issue #8486: hand-mirrored from
     [Keeper_status_detail.valid_tail_order_strings].  Same cycle
@@ -51,20 +61,14 @@ let keeper_schemas : tool_schema list = [
           ("enum", `List (List.map (fun value -> `String value) network_mode_enum_strings));
           ("description", `String "Optional sandbox network mode. Defaults to the keeper's configured network mode.");
         ]);
-        ("ttl_sec", `Assoc [
-          ("type", `String "number");
-          ("minimum", `Float 1.0);
-          ("maximum", `Float 86400.0);
-          ("default", `Float 1800.0);
-          ("description", `String "Managed sandbox lifetime in seconds (default: 1800; clamped to 1-86400).");
-        ]);
-        ("timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("minimum", `Float 1.0);
-          ("maximum", `Float 30.0);
-          ("default", `Float 10.0);
-          ("description", `String "Sandbox start timeout in seconds (default: 10; clamped to 1-30).");
-        ]);
+        ( "ttl_sec",
+          bounded_number_schema
+            Sandbox_contract.managed_ttl_sec
+            "Managed sandbox lifetime in seconds." );
+        ( "timeout_sec",
+          bounded_number_schema
+            Sandbox_contract.operation_timeout_sec
+            "Sandbox start timeout in seconds." );
       ]);
       ("required", `List [`String "name"]);
       ("additionalProperties", `Bool false);
@@ -83,16 +87,16 @@ let keeper_schemas : tool_schema list = [
         ("container_kind", `Assoc [
           ("type", `String "string");
           ("enum", `List (List.map (fun value -> `String value) sandbox_stop_scope_enum_strings));
-          ("default", `String "managed");
+          ( "default",
+            `String
+              (Sandbox_contract.stop_scope_to_string
+                 Sandbox_contract.default_stop_scope) );
           ("description", `String "Container scope to stop: managed, turn, or all (default: managed).");
         ]);
-        ("timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("minimum", `Float 1.0);
-          ("maximum", `Float 30.0);
-          ("default", `Float 10.0);
-          ("description", `String "Sandbox stop timeout in seconds (default: 10; clamped to 1-30).");
-        ]);
+        ( "timeout_sec",
+          bounded_number_schema
+            Sandbox_contract.operation_timeout_sec
+            "Sandbox stop timeout in seconds." );
         ("prune_stale", `Assoc [
           ("type", `String "boolean");
           ("default", `Bool false);

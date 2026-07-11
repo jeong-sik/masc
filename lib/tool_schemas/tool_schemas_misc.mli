@@ -54,6 +54,11 @@ val control_schemas : Masc_domain.tool_schema list
 (** Canonical control schemas used by registration. These schemas are
     intentionally excluded from {!schemas} and the Config front-door inventory. *)
 
+val surface_audit_schema : remote:bool -> Masc_domain.tool_schema
+(** Canonical surface-audit schema shared by the local operator, remote
+    operator, and keeper descriptor projections. The input contract is
+    identical on every surface; only operator guidance differs. *)
+
 val schemas : Masc_domain.tool_schema list
 (** [schemas] is the generated [Masc_domain.tool_schema list] for misc tools.
     Operator controls are intentionally available only through

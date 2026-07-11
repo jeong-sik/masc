@@ -590,19 +590,19 @@ let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
     (schema_property_enum_strings start_schema "network_mode");
   check_json
     "sandbox start ttl default"
-    (`Float 1800.0)
+    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.default)
     (schema_property_field start_schema "ttl_sec" "default");
   check_json
     "sandbox start ttl minimum"
-    (`Float 1.0)
+    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.minimum)
     (schema_property_field start_schema "ttl_sec" "minimum");
   check_json
     "sandbox start ttl maximum"
-    (`Float 86400.0)
+    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.maximum)
     (schema_property_field start_schema "ttl_sec" "maximum");
   check_json
     "sandbox start timeout default"
-    (`Float 10.0)
+    (`Float Masc.Keeper_sandbox_control_contract.operation_timeout_sec.default)
     (schema_property_field start_schema "timeout_sec" "default");
   let stop_schema =
     check_descriptor
@@ -611,22 +611,17 @@ let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
       []
   in
   let runtime_stop_scopes =
-    [ Masc.Keeper_sandbox_control.managed_kind
-    ; Masc.Keeper_sandbox_control.turn_kind
-    ; Masc.Keeper_sandbox_control.all_kind
-    ]
+    Masc.Keeper_sandbox_control_contract.stop_scope_strings
   in
-  Alcotest.(check (list string))
-    "sandbox stop schema mirror matches the runtime parser"
-    runtime_stop_scopes
-    Masc.Keeper_schema.sandbox_stop_scope_enum_strings;
   Alcotest.(check (list string))
     "sandbox stop enum matches the runtime parser"
     runtime_stop_scopes
     (schema_property_enum_strings stop_schema "container_kind");
   check_json
     "sandbox stop scope default"
-    (`String Masc.Keeper_sandbox_control.managed_kind)
+    (`String
+      (Masc.Keeper_sandbox_control_contract.stop_scope_to_string
+         Masc.Keeper_sandbox_control_contract.default_stop_scope))
     (schema_property_field stop_schema "container_kind" "default");
   check_json
     "sandbox stop prune default"
@@ -634,7 +629,7 @@ let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
     (schema_property_field stop_schema "prune_stale" "default");
   check_json
     "sandbox stop timeout default"
-    (`Float 10.0)
+    (`Float Masc.Keeper_sandbox_control_contract.operation_timeout_sec.default)
     (schema_property_field stop_schema "timeout_sec" "default")
 ;;
 

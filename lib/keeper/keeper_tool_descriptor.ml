@@ -2115,11 +2115,14 @@ let internal_descriptors : t list =
   ; masc_keeper_descriptor "up" "masc_keeper_up"
       "Bring a keeper online (create new or update existing)." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_surface_audit singleton ────────────── *)
-  ; cluster_descriptor
+  ; let schema = Tool_schemas_misc.surface_audit_schema ~remote:false in
+    cluster_descriptor_with_schema_source
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~input_schema:schema.input_schema
       ~id:"masc.surface.audit"
-      ~name:"masc_surface_audit"
-      ~description:"Read dashboard surface readiness snapshot (optionally for a single surface)."
+      ~name:schema.name
+      ~description:schema.description
       ~handler:Tool_masc_surface_audit
       ~readonly:true
       ~inline_safe:false

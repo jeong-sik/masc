@@ -478,7 +478,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-nav-mcp"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-notify"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-logs"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="settings-nav-account"]')).toBeNull()
+    expect(container.querySelector('[data-testid="settings-nav-account"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-policy"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-gate"]')).toBeNull()
   })
@@ -494,7 +494,7 @@ describe('SettingsSurface', () => {
     render(html`<${SettingsSurface} />`, container)
 
     const title = () => container.querySelector('[data-testid="settings-section-title"]') as HTMLElement
-    expect(title().textContent).toBe('런타임')
+    expect(title().textContent).toBe('계정')
 
     const pathsNav = container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement
     await fireEvent.click(pathsNav)
@@ -507,7 +507,7 @@ describe('SettingsSurface', () => {
     await fireEvent.click(runtimeNav)
 
     expect(title().textContent).toBe('런타임')
-    expect(navigate).toHaveBeenLastCalledWith('settings', {})
+    expect(navigate).toHaveBeenLastCalledWith('settings', { section: 'runtime' })
   })
 
   it('selects a valid section from the dashboard route', () => {
@@ -629,20 +629,20 @@ describe('SettingsSurface', () => {
     }
   })
 
-  it('falls invalid settings sections back to runtime without a fake subsection', () => {
-    expect(normalizeSettingsSection('not-real')).toBe('runtime')
+  it('falls invalid settings sections back to the live account subsection', () => {
+    expect(normalizeSettingsSection('not-real')).toBe('account')
     route.value = { tab: 'settings', params: { section: 'not-real' }, postId: null }
 
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임')
-    expect(container.querySelector('[data-testid="settings-nav-runtime"]')?.getAttribute('data-active')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('계정')
+    expect(container.querySelector('[data-testid="settings-nav-account"]')?.getAttribute('data-active')).toBe('true')
   })
 
   it('syncs when the dashboard route section changes while mounted', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임')
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('계정')
 
     route.value = { tab: 'settings', params: { section: 'logs' }, postId: null }
 
@@ -651,16 +651,17 @@ describe('SettingsSurface', () => {
     })
   })
 
-  it('does not render removed fake-only settings sections', async () => {
+  it('renders the live auth-backed account section without fake policy controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml + provider catalog')
-    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('live')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live auth + browser token')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('mixed')
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.textContent).not.toContain('Save changes')
     expect(container.textContent).not.toContain('Reissue')
     expect(container.textContent).not.toContain('Log out')
-    expect(container.querySelector('[data-testid="settings-nav-account"]')).toBeNull()
+    expect(container.querySelector('[data-testid="settings-nav-account"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="settings-account-live"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-policy"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-sandbox"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-gate"]')).toBeNull()

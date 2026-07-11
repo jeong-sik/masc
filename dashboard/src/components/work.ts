@@ -1366,6 +1366,7 @@ function WorkSurfaceV2() {
   const [view, setView] = useState<WorkView>(readStoredWorkView)
   const [openSet, setOpenSet] = useState<Set<string>>(new Set())
   const [claimed, setClaimed] = useState<Set<string>>(new Set())
+  const [backlogExpanded, setBacklogExpanded] = useState(false)
 
   useEffect(() => {
     setOpenSet(prev => {
@@ -1460,6 +1461,14 @@ function WorkSurfaceV2() {
         goalTitle: t.goal_id ? goalTitleById.get(t.goal_id) : undefined,
       }))
   }, [claimedTasks, goalTitleById])
+  // A large live backlog must not bury the actual goal tree. Keep the exact
+  // count visible, render a deterministic preview, and let the operator opt in
+  // to the full list. No ranking or synthetic priority is introduced here.
+  const backlogPreviewLimit = 2
+  const visibleBacklogTasks = backlogExpanded
+    ? backlogTasks
+    : backlogTasks.slice(0, backlogPreviewLimit)
+  const hiddenBacklogCount = backlogTasks.length - visibleBacklogTasks.length
 
   const toggleGoal = (id: string) => {
     setOpenSet(prev => {
@@ -1687,9 +1696,17 @@ function WorkSurfaceV2() {
                 클레임 가능 백로그
                 <span class="n">${backlogTasks.length}</span>
                 <span class="wk-backlog-sub mono">keeper_task_claim — 미배정 task</span>
+                ${backlogTasks.length > backlogPreviewLimit
+                  ? html`<button
+                      type="button"
+                      class="wk-backlog-toggle"
+                      aria-expanded=${backlogExpanded ? 'true' : 'false'}
+                      onClick=${() => setBacklogExpanded(open => !open)}
+                    >${backlogExpanded ? '접기' : `전체 보기 +${hiddenBacklogCount}`}</button>`
+                  : null}
               </div>
               <div class="wk-backlog-list">
-                ${backlogTasks.map(t => html`
+                ${visibleBacklogTasks.map(t => html`
                   <div key=${t.id} class="wk-bl-row">
                     <span class="wk-task-id mono">${t.id}</span>
                     <span class="wk-bl-title">

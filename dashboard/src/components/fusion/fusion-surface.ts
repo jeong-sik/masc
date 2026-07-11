@@ -3,7 +3,6 @@ import { useMemo, useState } from 'preact/hooks'
 import type { BoardPost } from '../../types'
 import type { FusionRunRecord, FusionRunStatusLabel } from '../../api/dashboard'
 import { navigate, replaceRoute, route } from '../../router'
-import { ConnectionStatus } from '../dashboard-shell'
 import {
   fusionBoardError,
   fusionBoardLoading,
@@ -19,7 +18,6 @@ import { RichContent } from '../common/rich-content'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { fusionRunStatusText, fusionRunStatusTone } from './fusion-runs-panel'
 import { asRecord, asString, asStringArray } from '../common/normalize'
-import { StatusChip } from '../common/status-chip'
 import { fusionDecisionSpec, type FusionDecisionSpec } from '../v2/fusion-constants'
 import {
   firstString,
@@ -1322,7 +1320,14 @@ export function FusionSurface() {
   const merged = useMemo(() => buildMergedRuns(runs, registryRuns), [runs, registryRuns])
   const boardError = fusionBoardError.value
   const selectedRunId = route.value.params.run_id ?? route.value.params.run
-  const selected = merged.find(run => run.runId === selectedRunId) ?? merged[0] ?? null
+  // A registry-only record proves lifecycle state, but it cannot populate the
+  // panel/judge evidence workspace. Without an explicit routed selection,
+  // open the newest board-backed run so the default detail pane is useful;
+  // registry rows remain selectable and keep their honest sparse detail.
+  const selected = merged.find(run => run.runId === selectedRunId)
+    ?? merged.find(run => run.kind === 'board')
+    ?? merged[0]
+    ?? null
   const registryRunning = registryRuns.filter(run => run.status === 'running').length
   const registryFailed = registryRuns.filter(run => run.status === 'failed').length
   // Paged master list (38-bug campaign #34): render a page of rows instead of
@@ -1339,29 +1344,9 @@ export function FusionSurface() {
 
   return html`
     <main class="surf fus v2-fusion-surface" data-testid="fusion-surface" data-screen-label="Fusion">
-      <header class="surf-head fus-head">
-        <div>
-          <div class="eyebrow">RFC-0252 · 패널 + 심판</div>
-          <h1>Fusion</h1>
-          <p class="surf-sub ov-sub">
-            masc_fusion 패널 심의 · 심판 종합 · 보드 sink 증거.
-          </p>
-          <div class="mt-2 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="fusion-reality-notice">
-            <${StatusChip} tone="warn" uppercase=${false}>부분 지원<//>
-            <span>보드 sink와 registry 관측을 표시합니다. live JoJ는 judges 패널 구성이 없으면 fail-closed 상태로 남습니다.</span>
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <${ConnectionStatus} />
-          <button
-            type="button"
-            class=${`fus-link inline fus-refresh ${ringFocusClasses()}`}
-            onClick=${() => { void refreshFusionBoard(); void refreshFusionRuns() }}
-            disabled=${fusionBoardLoading.value || fusionRunsLoading.value}
-          >${fusionBoardLoading.value || fusionRunsLoading.value ? 'Refreshing...' : 'Refresh'}</button>
-        </div>
-      </header>
-
+      <span class="sr-only" data-testid="fusion-reality-notice">
+        부분 지원. 보드 sink와 registry 관측을 표시합니다. live JoJ는 judges 패널 구성이 없으면 fail-closed 상태로 남습니다.
+      </span>
       ${boardError
         ? html`<div
             class="fus-board-error"
@@ -1376,24 +1361,31 @@ export function FusionSurface() {
           </div>`
         : null}
 
-      <section class="fus-kpis" aria-label="Fusion overview">
-        <${FusionMetric} label="보드 런" value=${runs.length} tone=${runs.length ? 'ok' : undefined} />
-        <${FusionMetric}
-          label="레지스트리"
-          value=${registryRuns.length}
-          tone=${registryRunning ? 'warn' : registryRuns.length ? 'ok' : undefined}
-        />
-        <${FusionMetric} label="실행 중" value=${registryRunning} tone=${registryRunning ? 'warn' : undefined} />
-        <${FusionMetric} label="실패" value=${registryFailed} tone=${registryFailed ? 'bad' : undefined} />
-      </section>
-
       <div class="fus-body">
         <aside class="fus-list" aria-label="Fusion runs">
           <div class="fus-list-h">
             <h4>심의 런</h4>
+            <span class="fus-list-sub">${merged.length}</span>
+            <span class="sr-only">보드 런 ${runs.length} · 레지스트리 ${registryRuns.length} · 실패 ${registryFailed}</span>
             ${registryRunning > 0
               ? html`<span class="fus-list-live"><span class="fus-rdot run"></span>${registryRunning} 진행</span>`
               : null}
+            <span
+              class="fus-list-truth"
+              title="보드 sink와 registry 관측을 표시합니다. live JoJ는 judges 패널 구성이 없으면 fail-closed 상태로 남습니다."
+            >관측</span>
+            <button
+              type="button"
+              class=${`fus-list-refresh fus-refresh ${ringFocusClasses()}`}
+              aria-label="Fusion 새로고침"
+              title="Fusion 새로고침"
+              onClick=${() => { void refreshFusionBoard(); void refreshFusionRuns() }}
+              disabled=${fusionBoardLoading.value || fusionRunsLoading.value}
+            >
+              ${fusionBoardLoading.value || fusionRunsLoading.value
+                ? html`<span aria-hidden="true">…</span><span class="sr-only">Refreshing...</span>`
+                : '↻'}
+            </button>
           </div>
           ${merged.length === 0
             ? html`<div class="fus-list-scroll"><div class="ov-empty">심의 런이 없습니다</div></div>`

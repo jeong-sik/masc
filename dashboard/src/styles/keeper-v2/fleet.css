@@ -264,7 +264,10 @@
 /* ── responsive: progressively shed columns instead of letting strings collide ── */
 /* mid width — aside still present, but main is tight: drop 최근 도구 first,
    keep 런타임 (5 tracks remain: Keeper / 운영판정 / 컨텍스트 / 런타임 / 액션). */
-@media (max-width: 1320px) and (min-width: 1101px) {
+/* The fixed 372px detail aside leaves the roster at roughly 986px in the
+   canonical 1440px operator viewport. Shed the recent-tool column there so
+   the action group remains fully visible instead of sliding under the aside. */
+@media (max-width: 1500px) and (min-width: 1101px) {
   .fl-shell { --fl-cols: minmax(168px, 1.3fr) 168px 132px 110px 160px; }
   .fl-rhead span:nth-child(5), .fl-row .fl-tool { display: none; }
 }

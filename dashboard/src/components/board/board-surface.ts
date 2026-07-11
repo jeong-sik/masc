@@ -550,6 +550,10 @@ function BdRail({ activeSub, onSub, onMentions }: {
   onMentions: () => void
 }) {
   const hearths = boardHearths.value
+  const [allHearthsOpen, setAllHearthsOpen] = useState(false)
+  const hearthPreviewLimit = 6
+  const visibleHearths = allHearthsOpen ? hearths : hearths.slice(0, hearthPreviewLimit)
+  const hiddenHearthCount = hearths.length - visibleHearths.length
   const allCount = boardPosts.value.length
   const modCount = useMemo(() => boardPosts.value.filter(p => p.moderation_status && p.moderation_status !== 'none' && p.moderation_status !== 'approved').length, [boardPosts.value])
   const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
@@ -567,7 +571,7 @@ function BdRail({ activeSub, onSub, onMentions }: {
         <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>전체</span>
         <span class="n">${allCount}</span>
       </button>
-      ${hearths.map(hearth => html`
+      ${visibleHearths.map(hearth => html`
         <button
           key=${hearth.name}
           type="button"
@@ -580,6 +584,18 @@ function BdRail({ activeSub, onSub, onMentions }: {
           <span class="n">${hearth.count}</span>
         </button>
       `)}
+      ${hearths.length > hearthPreviewLimit
+        ? html`<button
+            type="button"
+            class="bd-sub bd-sub-more"
+            aria-expanded=${allHearthsOpen ? 'true' : 'false'}
+            onClick=${() => setAllHearthsOpen(open => !open)}
+          >
+            <span class="glyph">${allHearthsOpen ? '−' : '＋'}</span>
+            ${allHearthsOpen ? '접기' : '더 보기'}
+            <span class="n">${allHearthsOpen ? hearths.length : hiddenHearthCount}</span>
+          </button>`
+        : null}
       <div class="div"></div>
       <h4>큐</h4>
       <button type="button" class="bd-sub" onClick=${() => { boardFilterMode.value = 'mod'; onMentions() }} data-testid="bd-queue-mod">

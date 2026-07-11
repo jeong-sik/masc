@@ -24,7 +24,14 @@ vi.mock('./composite-fsm-flowchart', () => ({
   CompositeFsmFlowchart: () => h('div', { 'data-testid': 'composite-fsm-flowchart' }, 'CompositeFsmFlowchart'),
 }))
 vi.mock('./agent-roster', () => ({
-  AgentRoster: ({ keeperFilter }: { keeperFilter: string }) => h('div', { 'data-testid': 'agent-roster', 'data-filter': keeperFilter }, 'AgentRoster'),
+  AgentRoster: ({ keeperFilter }: { keeperFilter: string }) => h(
+    'div',
+    { 'data-testid': 'agent-roster', 'data-filter': keeperFilter },
+    'AgentRoster',
+    keeperFilter === 'agent-only'
+      ? null
+      : h('button', { 'data-testid': 'keeper-spawn-panel' }, '+ 새 Keeper'),
+  ),
 }))
 
 vi.mock('./keeper-spawn/keeper-spawn-panel', () => ({

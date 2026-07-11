@@ -301,3 +301,9 @@
 }
 .sch-diag > .sch-diag-summary:hover { color: var(--text-mid); }
 .sch-diag > .sch-diag-summary[aria-expanded="true"] { margin-bottom: 10px; color: var(--text-mid); }
+
+.sch-diag-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 8px;
+}

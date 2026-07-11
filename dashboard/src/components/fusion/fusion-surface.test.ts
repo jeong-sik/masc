@@ -746,6 +746,35 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('1 진행')
   })
 
+  it('defaults to board-backed evidence when a newer registry-only run is also present', () => {
+    fusionRuns.value = [{
+      runId: 'fus-running',
+      keeper: 'sangsu',
+      preset: 'balanced',
+      startedAt: 1_790_000_000,
+      status: 'running',
+    }]
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-evidence',
+        created_at: '2026-01-01T00:00:00Z',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-evidence',
+          question: 'Which evidence is actionable?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Board-backed detail.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Use the evidence pane.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="fusion-registry-row"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="fusion-detail"]')?.textContent).toContain('fus-evidence')
+    expect(container.querySelector('[data-testid="fusion-registry-detail"]')).toBeNull()
+  })
+
   it('renders preset from registry when board meta does not carry it', () => {
     fusionRuns.value = [
       {

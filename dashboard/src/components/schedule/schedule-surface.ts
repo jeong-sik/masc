@@ -12,7 +12,6 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { ConnectionStatus } from '../dashboard-shell'
 import type { DashboardScheduledAutomation } from '../../api'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
@@ -148,30 +147,21 @@ export function ScheduleSurface() {
   return html`
     <main class="ov ov-2col sch-surf" data-screen-label="예약" data-testid="schedule-surface">
       <div class="ov-scroll">
-        <header class="ov-head" style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <header class="ov-head">
           <div>
             <span class="ov-eyebrow">Schedule</span>
             <h1>예약 · 자동화 큐</h1>
             <p class="ov-sub">
               keeper가 예약한 미래 작업 · operator가 due 전 승인 · <span class="mono">lib/schedule</span>
             </p>
-            <div class="mt-2 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="schedule-reality-notice">
-              <${StatusChip} tone="warn" uppercase=${false}>관측 전용<//>
-              <span>schedule runner projection을 읽어 표시하며, 이 화면에서 keeper turn을 자동 구동하지 않습니다.</span>
-            </div>
-          </div>
-          <div class="flex flex-col items-end gap-2">
-            <${ConnectionStatus} />
-            <${ActionButton}
-              variant="danger"
-              size="sm"
-              onClick=${handlePrune}
-              disabled=${pruning}
-              ariaBusy=${pruning}
-              testId="schedule-prune-btn"
+            <div
+              class="mt-2 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]"
+              data-testid="schedule-reality-notice"
+              title="schedule runner projection을 읽어 표시하며, 이 화면에서 keeper turn을 자동 구동하지 않습니다."
             >
-              ${pruning ? '정리 중...' : '완료된 예약 정리'}
-            <//>
+              <${StatusChip} tone="warn" uppercase=${false}>관측 전용<//>
+              <span class="sr-only">schedule runner projection을 읽어 표시하며, 이 화면에서 keeper turn을 자동 구동하지 않습니다.</span>
+            </div>
           </div>
         </header>
 
@@ -258,6 +248,18 @@ export function ScheduleSurface() {
           >Keeper 진단 · wake evidence · background ${diagOpen ? '▴' : '▾'}</button>
           ${diagOpen
             ? html`
+                <div class="sch-diag-actions">
+                  <${ActionButton}
+                    variant="danger"
+                    size="sm"
+                    onClick=${handlePrune}
+                    disabled=${pruning}
+                    ariaBusy=${pruning}
+                    testId="schedule-prune-btn"
+                  >
+                    ${pruning ? '정리 중...' : '완료된 예약 정리'}
+                  <//>
+                </div>
                 <section class="mt-3" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
                   <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
                   <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />

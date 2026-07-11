@@ -384,6 +384,8 @@ describe('ScheduleSurface', () => {
       render(html`<${ScheduleSurface} />`, container)
       await flush()
 
+      container.querySelector<HTMLButtonElement>('[data-testid="schedule-diagnostics-toggle"]')?.click()
+      await flush()
       container.querySelector<HTMLButtonElement>('[data-testid="schedule-prune-btn"]')?.click()
       await flush()
 

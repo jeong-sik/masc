@@ -25,6 +25,7 @@ import {
 import { missionSnapshot } from '../mission-signals'
 import { namespaceTruth } from '../namespace-truth-store'
 import { fleetCompositeSnapshot } from '../composite-signals'
+import { operatorSnapshot } from '../operator-store'
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -722,6 +723,7 @@ describe('AgentRoster live-only cards', () => {
     namespaceTruth.value = null
     missionSnapshot.value = null
     fleetCompositeSnapshot.value = null
+    operatorSnapshot.value = null
   })
 
   afterEach(() => {
@@ -738,6 +740,7 @@ describe('AgentRoster live-only cards', () => {
     namespaceTruth.value = null
     missionSnapshot.value = null
     fleetCompositeSnapshot.value = null
+    operatorSnapshot.value = null
   })
 
   it('renders keeper cards from live runtime data and ignores stale mission brief fields', async () => {
@@ -843,6 +846,28 @@ describe('AgentRoster live-only cards', () => {
     // the real, data-backed health pills stay.
     expect(container.querySelector('.fl-health')).not.toBeNull()
     expect(text).toContain('runtime rows')
+  })
+
+  it('renders admission capacity only from the live operator projection', async () => {
+    operatorSnapshot.value = {
+      admission_queue: {
+        mode: 'bounded',
+        throttle_owner: 'oas_runtime',
+        max_concurrent: 6,
+        active: 4,
+        available: 2,
+        queue_depth: 1,
+      },
+    } as any
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+
+    const capacity = container.querySelector('[data-testid="fleet-admission-capacity"]')
+    expect(capacity?.textContent).toContain('bounded')
+    expect(capacity?.textContent).toContain('4 / 6')
+    expect(capacity?.textContent).toContain('oas_runtime')
   })
 
   it('uses the explicit agent_name relation while showing only the keeper display name', async () => {
@@ -1728,7 +1753,7 @@ describe('AgentRoster live-only cards', () => {
       expect(width).toBeLessThanOrEqual(1100)
     }
 
-    expect(css).toContain('@media (max-width: 1320px) and (min-width: 1101px)')
+    expect(css).toContain('@media (max-width: 1500px) and (min-width: 1101px)')
     expect(responsiveBlock).toContain('--fl-cols: minmax(168px, 1.3fr) minmax(150px, 1fr) minmax(104px, 0.8fr) 160px')
     expect(responsiveBlock).toContain('.fl-row .fl-ctx, .fl-row .fl-tool { display: none; }')
     expect(responsiveBlock).not.toContain('.fl-row .fl-runtime')

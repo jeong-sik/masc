@@ -71,6 +71,8 @@ import { FL_TONE_LABEL, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
+import { showSpawnPanel } from './keeper-spawn/keeper-spawn-state'
+import { operatorSnapshot } from '../operator-store'
 
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
@@ -879,6 +881,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value
   const namespaceName = namespaceStatus?.project ?? 'default'
+  const admission = operatorSnapshot.value?.admission_queue ?? null
 
   const scopedAgents = useMemo(
     () => scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, keeperFilter, keeperRuntimeLookup),
@@ -1248,40 +1251,66 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   return html`
     <div class="v2-monitoring-surface fl-shell agent-page">
-      <section class="monitor-surface-card monitor-surface-card-strong v2-monitoring-card p-5" aria-label="runtime surface directory">
-        <div class="flex flex-col gap-5">
-          <div class="flex min-w-0 flex-col gap-2.5">
-            <div class="fl-health">
-              <span class="fl-hpill ok">실행 rows <b>${healthRun}</b></span>
-                ${healthTransient > 0 ? html`<span class="fl-hpill busy">전이 rows <b>${healthTransient}</b></span>` : null}
-              <span class="fl-hpill warn">일시정지 rows <b>${healthPaused}</b></span>
-              <span class="fl-hpill">오프라인 rows <b>${healthOffline}</b></span>
-              ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
-            </div>
-          </div>
-
-          ${showExecutionFallbackState
-            ? html`
-                <div class="rounded-[var(--r-1)] border ${executionError.value ? 'border-[var(--warn-border)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-[var(--shadow-panel)]">
-                  <div class="flex flex-col gap-2">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <strong class="text-xs font-semibold text-[var(--color-fg-primary)]">${fallbackStateTitle}</strong>
-                    </div>
-                    <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-primary)]">${fallbackStateMessage}</p>
-                    <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                      <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">프로젝트 ${namespaceName}</span>
-                      ${configuredIdleHint ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">${configuredIdleHint}</span>` : null}
-                    </div>
-                  </div>
-                </div>
-              `
-            : null}
-
+      <header class="fl-top" aria-label="Keeper Fleet summary">
+        <div class="fl-brand">
+          <span class="ov-eyebrow">Observatory</span>
+          <span class="fl-title">Keeper Fleet</span>
         </div>
-      </section>
+        <div class="fl-health">
+          <span class="fl-hpill ok">런타임 가능 <b>${healthRun}</b></span>
+          ${healthTransient > 0 ? html`<span class="fl-hpill busy">전이 <b>${healthTransient}</b></span>` : null}
+          <span class="fl-hpill warn">일시정지 <b>${healthPaused}</b></span>
+          <span class="fl-hpill">오프라인 <b>${healthOffline}</b></span>
+          ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
+        </div>
+        <span class="fl-spacer"></span>
+        <button
+          type="button"
+          class="fl-create"
+          data-testid="keeper-spawn-panel"
+          onClick=${() => { showSpawnPanel.value = true }}
+        >＋ 새 Keeper</button>
+        <div class="fl-meta"><span class="live">● live</span><span>${namespaceName}</span></div>
+        <span class="sr-only">실행 rows ${healthRun} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 오프라인 rows ${healthOffline}</span>
+      </header>
 
-      <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_372px]">
-        <section class="fl-main monitor-surface-card monitor-surface-card-medium v2-monitoring-panel overflow-hidden" aria-label="Keeper operations list">
+      ${showExecutionFallbackState
+        ? html`
+            <div class="fl-fallback ${executionError.value ? 'error' : ''}">
+              <strong>${fallbackStateTitle}</strong>
+              <span>${fallbackStateMessage}</span>
+              ${configuredIdleHint ? html`<span class="mono">${configuredIdleHint}</span>` : null}
+            </div>
+          `
+        : null}
+
+      ${admission ? html`
+        <section class="fl-capacity" aria-label="Runtime admission capacity" data-testid="fleet-admission-capacity">
+          <div class="fl-capacity-lead">
+            <span class="ov-eyebrow">Admission</span>
+            <strong>${admission.mode}</strong>
+          </div>
+          <div class="fl-capacity-cell">
+            <span>활성 / 상한</span>
+            <strong>${admission.active} / ${admission.max_concurrent}</strong>
+          </div>
+          <div class="fl-capacity-cell ${admission.queue_depth > 0 ? 'warn' : ''}">
+            <span>대기열</span>
+            <strong>${admission.queue_depth}</strong>
+          </div>
+          <div class="fl-capacity-cell">
+            <span>가용 슬롯</span>
+            <strong>${admission.available}</strong>
+          </div>
+          <div class="fl-capacity-cell owner">
+            <span>제어 주체</span>
+            <strong>${admission.throttle_owner}</strong>
+          </div>
+        </section>
+      ` : null}
+
+      <div class="fl-body">
+        <section class="fl-main v2-monitoring-panel" aria-label="Keeper operations list">
           <!--
             keeper-v2 Fleet skin (fleet.css .fl-*): roster header + tone-rail
             rows + attention/steady group dividers. The shell's SurfaceLead
@@ -1324,7 +1353,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           </div>
         </section>
 
-        <aside class="fl-aside monitor-surface-card monitor-surface-card-medium v2-monitoring-panel" aria-label="Selected keeper detail">
+        <aside class="fl-aside v2-monitoring-panel" aria-label="Selected keeper detail">
           ${selectedRow ? html`
             <div class="fl-as-head">
               <span class="fl-as-ey">${selectedRow.isKeeper ? 'selected keeper runtime' : 'selected workspace agent'}</span>

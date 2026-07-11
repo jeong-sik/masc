@@ -344,7 +344,7 @@ describe('ChatTranscript', () => {
     )
   })
 
-  it('renders REST replay failure and no-turn-ref gaps as visible stream contract badges', () => {
+  it('renders REST replay failure and no-turn-ref gaps as visible stream contract badges', async () => {
     const entries = chatHistoryEntriesFromRest('sangsu', [
       {
         id: 'smoke-legacy-user',
@@ -418,7 +418,16 @@ describe('ChatTranscript', () => {
     expect(failure.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('server_lifecycle_replay_only')
     expect(failure.getAttribute('data-chat-stream-contract-badge-state')).toBe('server-replay')
     expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 replay')
-    expect(failure.textContent).toContain('Timeout after 630.0s')
+    // transport_failure renders the typed card, so the raw diagnostic is
+    // collapsed by default (the legacy banner is suppressed for card rows)
+    // and surfaces only on expand.
+    const errCard = failure.querySelector('[data-chat-failure-card]')
+    expect(errCard).not.toBeNull()
+    expect(failure.textContent).not.toContain('Timeout after 630.0s')
+    const errToggle = errCard?.querySelector('[data-chat-failure-detail-toggle]') as HTMLButtonElement
+    errToggle.click()
+    await flushUi()
+    expect(failure.querySelector('[data-chat-failure-detail]')?.textContent).toContain('Timeout after 630.0s')
     expect(
       [...container.querySelectorAll('[data-chat-stream-contract-delivery-receipt]')]
         .map(node => node.getAttribute('data-chat-stream-contract-delivery-receipt')),

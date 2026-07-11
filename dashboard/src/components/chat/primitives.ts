@@ -2352,8 +2352,13 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
+  // delivery='error' is the persisted transport_failure row (keeper-state.ts
+  // maps kind=transport_failure → 'error'); only that row renders the typed
+  // failure card, because its reassurance ("보낸 메시지는 사라지지 않았습니다")
+  // holds only when the keeper never answered. interrupted/timeout keep any
+  // partial text and render as prose plus the diagnostic banner below.
   const isFailureMessage =
-    isFailedDelivery(entry.delivery) && !!entry.error?.trim()
+    entry.delivery === 'error' && !!entry.error?.trim()
   const richTextRole = entry.role === 'assistant' || entry.role === 'system'
   const hasRealText = !liveLabel && !!entry.text && entry.text.trim().length > 0
   const hasCardBlock = (entry.blocks ?? []).some((b) => CARD_BLOCK_TYPES.has(b.t))
@@ -2626,7 +2631,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       ${entry.audio
         ? html`<${AudioPlayer} clip=${entry.audio} />`
         : null}
-      ${entry.error
+      ${entry.error && !isFailureMessage
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-sm font-medium leading-paragraph text-[var(--bad-light)]">
               ${entry.error}

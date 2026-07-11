@@ -15,10 +15,15 @@ val runtime_meta_write_sync_hook :
 val register_runtime_meta_write_sync :
   (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) -> unit
 
-(** Pre-compiled regex matching the CAS [meta version conflict]
-    error message. Exposed for symmetry — used internally by
-    [is_version_conflict_error]. *)
-val version_conflict_re : Re.re
+type write_error =
+  | Version_conflict of
+      { keeper_name : string
+      ; expected_version : int
+      ; actual : Keeper_meta_contract.keeper_meta
+      }
+  | Storage_error of string
+
+val write_error_to_string : write_error -> string
 
 (** Read a keeper meta JSON file at [path]. Returns [Ok None] when
     the file does not exist; warns on unknown keys; scrubs deprecated
@@ -105,18 +110,30 @@ val read_meta_if_changed :
 val persist_meta :
   Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
-(** Persist [m] with a CAS bump on [meta_version]: the write is rejected
+(** Persist [m] from an Eio fiber with a CAS bump on [meta_version]: the write is rejected
     if the on-disk version has moved since [m] was read. There is no force
     / bypass path — cumulative usage counters are a monotone invariant
     (RFC-0225 §3.2, RFC-0237), so callers that lost a race must resolve the
-    conflict through {!write_meta_with_merge}, not overwrite the disk. *)
+    conflict through {!write_meta_with_merge}, not overwrite the disk. Domain
+    or systhread callers must use {!write_meta_blocking_result}. *)
 val write_meta :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
 
-(** [true] iff [msg] matches [version_conflict_re]. *)
-val is_version_conflict_error : string -> bool
+val write_meta_result :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, write_error) result
+(** Eio-fiber CAS writer. Version conflicts are typed and carry the exact disk
+    snapshot observed inside the per-path critical section. *)
+
+val write_meta_blocking_result :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, write_error) result
+(** Domain/systhread CAS writer using the blocking lock contract. Do not call
+    from an Eio fiber. *)
 
 (** Strip retired top-level keys from persisted keeper meta files —
     fields left behind by schema removals (e.g. the #23929 continuity
@@ -150,3 +167,12 @@ val write_meta_with_merge :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
+
+val write_meta_with_merge_result :
+  ?max_retries:int ->
+  merge:(latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta) ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, write_error) result
+(** Typed form of {!write_meta_with_merge}. An exhausted version race remains
+    [Version_conflict]; storage failures remain [Storage_error]. *)

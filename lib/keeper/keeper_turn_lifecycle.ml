@@ -82,23 +82,26 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
            }
          in
          ((match
-             write_meta_with_merge
+             write_meta_with_merge_result
                ~merge:Keeper_meta_merge.caller_wins config retained
            with
            | Ok () -> ()
-           | Error err ->
+           | Error error ->
+               let err = Keeper_meta_store.write_error_to_string error in
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string WriteMetaFailures)
                  ~labels:[("keeper", name);
                           ("phase",
-                           if Keeper_meta_store.is_version_conflict_error err
-                           then "keeper_down_cas_race"
-                           else "keeper_down")]
+                          match error with
+                          | Keeper_meta_store.Version_conflict _ ->
+                            "keeper_down_cas_race"
+                          | Keeper_meta_store.Storage_error _ -> "keeper_down")]
                  ();
-               if Keeper_meta_store.is_version_conflict_error err then
-                 Log.Keeper.warn "keeper_down write_meta lost CAS race: %s" err
-               else
-                 Log.Keeper.error "keeper_down write_meta failed: %s" err);
+               (match error with
+                | Keeper_meta_store.Version_conflict _ ->
+                  Log.Keeper.warn "keeper_down write_meta lost CAS race: %s" err
+                | Keeper_meta_store.Storage_error _ ->
+                  Log.Keeper.error "keeper_down write_meta failed: %s" err));
           Keeper_registry.update_meta ~base_path:config.base_path name retained;
           Keeper_registry.dispatch_event_unit ~base_path:config.base_path name
             Keeper_state_machine.Operator_pause));

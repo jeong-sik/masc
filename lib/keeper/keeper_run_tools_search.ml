@@ -5,16 +5,19 @@ type tool_search_hit_partition =
   }
 
 let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_results =
-  (* PR #14574 review #1/#7: only expose a public alias (e.g. "Execute") when
+  (* Only expose a descriptor's model projection (e.g. "Execute") when
      its routed internal handler is actually in the
-     incoming active surface. Adding all [public_names ()]
-     unconditionally let [keeper_tool_search] return aliases even when
+     incoming active surface. Adding compatibility aliases
+     unconditionally let [keeper_tool_search] return names even when
      their backing tool was not permitted for the turn, which would invite
      the model to attempt unregistered tool calls. *)
-  let aliases_with_allowed_route =
-    Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names allowed
+  let projected_names_with_allowed_route =
+    Keeper_tool_descriptor.public_descriptors
+    |> List.filter (fun (descriptor : Keeper_tool_descriptor.t) ->
+      List.mem descriptor.internal_name allowed)
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   in
-  let allowed = allowed @ aliases_with_allowed_route in
+  let allowed = allowed @ projected_names_with_allowed_route in
   let allowed_set =
     let tbl = Hashtbl.create (List.length allowed) in
     List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;

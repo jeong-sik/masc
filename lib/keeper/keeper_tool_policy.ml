@@ -184,22 +184,88 @@ let keeper_supported_masc_tool_names_from_schemas schemas =
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   |> dedupe_tool_names
 
+type descriptor_coverage =
+  | Projected
+  | Dispatch_only
+  | Missing_descriptor
+  | Missing_canonical_schema
+  | Duplicate_descriptors
+
+let missing_canonical_schema_names descriptors =
+  descriptors
+  |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+    match descriptor.input_schema_source with
+    | Keeper_tool_descriptor.Missing_canonical_registry ->
+      Some descriptor.internal_name
+    | Keeper_tool_descriptor.Descriptor_owned
+    | Keeper_tool_descriptor.Canonical_registry -> None)
+  |> List.sort_uniq String.compare
+;;
+
+let descriptor_coverage_for_internal_name name =
+  match Keeper_tool_descriptor.descriptors_for_internal name with
+  | [] -> Missing_descriptor
+  | [ descriptor ] ->
+    (match descriptor.Keeper_tool_descriptor.input_schema_source with
+     | Keeper_tool_descriptor.Missing_canonical_registry -> Missing_canonical_schema
+     | Keeper_tool_descriptor.Descriptor_owned
+     | Keeper_tool_descriptor.Canonical_registry ->
+       if List.mem name (Keeper_tool_descriptor.keeper_candidate_names descriptor)
+       then Projected
+       else Dispatch_only)
+  | _ :: _ :: _ -> Duplicate_descriptors
+;;
+
 let inject_masc_schemas (schemas : Masc_domain.tool_schema list) =
-  set_masc_schemas (keeper_supported_masc_schemas schemas)
+  let supported = keeper_supported_masc_schemas schemas in
+  let projected, missing, missing_schemas, duplicates =
+    List.fold_left
+      (fun (projected, missing, missing_schemas, duplicates)
+           (schema : Masc_domain.tool_schema) ->
+         match descriptor_coverage_for_internal_name schema.name with
+         | Projected -> schema :: projected, missing, missing_schemas, duplicates
+         | Dispatch_only -> projected, missing, missing_schemas, duplicates
+         | Missing_descriptor ->
+           projected, schema.name :: missing, missing_schemas, duplicates
+         | Missing_canonical_schema ->
+           projected, missing, schema.name :: missing_schemas, duplicates
+         | Duplicate_descriptors ->
+           projected, missing, missing_schemas, schema.name :: duplicates)
+      ([], [], [], [])
+      supported
+  in
+  let missing = List.sort_uniq String.compare missing in
+  let missing_schemas =
+    (missing_schemas
+     @ missing_canonical_schema_names (Keeper_tool_descriptor.all_descriptors ()))
+    |> List.sort_uniq String.compare
+  in
+  let duplicates = List.sort_uniq String.compare duplicates in
+  (match missing, missing_schemas, duplicates with
+   | [], [], [] -> ()
+   | _, _, _ ->
+     Log.Keeper.emit
+       Log.Error
+       ~keeper_name:"system"
+       ~category:Log.Tool
+       ~details:
+         (`Assoc
+            [ "error_kind", `String "invalid_keeper_tool_descriptor_coverage"
+            ; "tool_names", Json_util.json_string_list missing
+            ; "missing_schema_tool_names", Json_util.json_string_list missing_schemas
+            ; "duplicate_tool_names", Json_util.json_string_list duplicates
+            ])
+       "keeper tool schema projection rejected");
+  set_masc_schemas (List.rev projected)
 
 let is_keeper_maintenance_only_tool name =
   List.mem name (Keeper_tool_descriptor.keeper_maintenance_only_names ())
 
-(* ── Candidate aggregation (descriptor/registry-driven) ───────── *)
-
-let tool_schema_names schemas =
-  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas
+(* ── Candidate aggregation (descriptor-driven) ────────────────── *)
 
 let descriptor_candidate_tool_names () =
   Keeper_tool_descriptor.all_descriptors ()
-  |> List.concat_map (fun descriptor ->
-    Keeper_tool_descriptor.public_names_of_descriptor descriptor
-    @ Keeper_tool_descriptor.internal_names descriptor)
+  |> List.concat_map Keeper_tool_descriptor.keeper_candidate_names
   |> List.filter is_keeper_model_board_route
   |> dedupe_tool_names
 
@@ -208,10 +274,8 @@ let keeper_base_candidate_tool_names () =
      Denylist filtering only; no secondary allowlist layer. *)
   dedupe_tool_names
     ( effective_core_tools ()
-    @ tool_schema_names Tool_shard.all_keeper_tool_schemas
     @ descriptor_candidate_tool_names ()
-    @ keeper_internal_candidate_tool_names
-    @ injected_masc_tool_names () )
+    )
   |> List.filter is_keeper_model_board_route
   |> List.filter (fun name -> not (is_keeper_maintenance_only_tool name))
 
@@ -392,9 +456,9 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
 let keeper_tool_search_scope = keeper_universe_tool_names
 
 let descriptor_model_tool_schemas () =
-  Keeper_tool_descriptor.all_descriptors ()
+  Keeper_tool_descriptor.model_visible_descriptors ()
   |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
-    Keeper_tool_descriptor.internal_names descriptor
+    Keeper_tool_descriptor.keeper_model_names descriptor
     |> List.filter is_keeper_model_board_route
     |> List.map (fun name ->
       { Masc_domain.name
@@ -403,19 +467,11 @@ let descriptor_model_tool_schemas () =
       }))
   |> dedupe_tool_schemas
 
-(** Shared schema assembly: computes the full tool schema list once.
-    [masc_schemas_fn] selects policy-filtered or universe-filtered MASC schemas
-    depending on the caller's access scope. Descriptor-backed internal tools
-    are first so descriptor-owned schemas win dedupe over older shard entries,
-    and so descriptor-only tools such as [masc_fusion] cannot appear in
-    candidate names without a matching Agent.run [Tool.t]. *)
-let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schema list)
-    (meta : keeper_meta) : Masc_domain.tool_schema list =
+(** The model schema surface is descriptor-only. Shard and injected schemas
+    remain handler/schema inputs, but never act as a permissive exposure
+    fallback when a descriptor is absent. *)
+let all_keeper_schemas () : Masc_domain.tool_schema list =
   descriptor_model_tool_schemas ()
-  @ keeper_model_tools
-  @ keeper_voice_tool_schemas
-  @ [ keeper_tool_search_schema ]
-  @ (masc_schemas_fn meta)
 
 (** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup
     instead of List.mem (O(n) per schema). *)
@@ -430,14 +486,14 @@ let filter_schemas_by_names (names : string list)
     Returns schemas for the active descriptor/registry surface minus denied tools. *)
 let keeper_model_tool_schemas (meta : keeper_meta) : Masc_domain.tool_schema list =
   let scoped = keeper_tool_search_scope meta in
-  all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
+  all_keeper_schemas ()
   |> filter_schemas_by_names scoped
 
 (** Universe model tool schemas for make_tools.
     Returns schemas for all universe tools so Agent.run() can call them. *)
 let keeper_universe_model_tools (meta : keeper_meta) : Masc_domain.tool_schema list =
   let universe = keeper_universe_tool_names meta in
-  all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
+  all_keeper_schemas ()
   |> filter_schemas_by_names universe
 
 (* ── Tool description lookup (for prompt auto-hints) ─────────── *)
@@ -499,17 +555,11 @@ let required_hints_of_schema (schema : Yojson.Safe.t) : string =
     else "required: " ^ String.concat ", " names
   | _ -> ""
 
-(** Lookup tool description by name from all available schema sources.
+(** Lookup tool description by name from the descriptor-owned model surface.
     Returns [Some first_sentence] + optional enum/required hints if found, [None] otherwise.
-    Searches shard-resolved tools (voice included via shard), inline schemas,
-    injected masc_* schemas, and tool_search schema. *)
+    Non-descriptor schemas cannot re-enter the model prompt through hints. *)
 let tool_hint_of (name : string) : string option =
-  let all_schemas =
-    Tool_shard.keeper_model_tools
-    @ [ Keeper_tool_registry.keeper_tool_search_schema ]
-    @ Tool_schemas_inline.schemas
-    @ masc_schemas_snapshot ()
-  in
+  let all_schemas = descriptor_model_tool_schemas () in
   match List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) all_schemas with
   | Some s ->
     let base = first_sentence s.description in

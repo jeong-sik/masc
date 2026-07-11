@@ -2252,10 +2252,37 @@ let () = test "transition_missing_task_clears_stale_current_task" (fun () ->
     | Some diagnosis ->
       Json_util.get_string diagnosis "rule_id" = Some "stale_task_id_not_found"
       && Json_util.get_string diagnosis "tool_suggestion"
-         = Some "keeper_tasks_list"
+         = Some "masc_tasks"
     | None -> false);
   assert (str_contains (Tool_result.message result) "absent from the live backlog")
 )
+
+let () = test "keeper transition rejection projects Keeper task-list guidance" (fun () ->
+  let ctx = make_test_ctx () in
+  let result =
+    Task.Tool.dispatch_for_keeper
+      ctx
+      ~name:"masc_transition"
+      ~args:
+        (`Assoc
+           [ "task_id", `String "task-1468"; "action", `String "start" ])
+  in
+  match result with
+  | None -> failwith "Keeper transition dispatch returned None"
+  | Some result ->
+    assert (not (Tool_result.is_success result));
+    let data = Tool_result.data result in
+    (match Json_util.assoc_member_opt "diagnosis" data with
+     | Some diagnosis ->
+       assert
+         (Json_util.get_string diagnosis "tool_suggestion"
+          = Some "keeper_tasks_list")
+     | None -> failwith "missing Keeper transition diagnosis");
+    (match Json_util.assoc_member_opt "alternatives" data with
+     | Some (`List alternatives) ->
+       assert (List.mem (`String "keeper_tasks_list") alternatives);
+       assert (not (List.mem (`String "masc_tasks") alternatives))
+     | _ -> failwith "missing Keeper transition alternatives"))
 
 (* RFC-0109 Phase E (#18822, 2026-05-27) retired the transition-layer
    substring evidence gate. The two tests that previously locked in

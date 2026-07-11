@@ -589,6 +589,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
              "keeper_board_fake";
              "keeper_voice_speak";
              "keeper_task_claim";
+             "masc_transition";
+             "masc_plan_get";
              "keeper_surface_read";
              "tool_search_files";
              "tool_read_file";
@@ -609,16 +611,22 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (member "voice" "keeper_voice_speak");
   check bool "task tool grouped as workspace" true
     (member "workspace" "keeper_task_claim");
+  check bool "MASC task tool grouped as workspace" true
+    (member "workspace" "masc_transition");
+  check bool "MASC plan tool grouped as workspace" true
+    (member "workspace" "masc_plan_get");
   check bool "surface read grouped as surface" true
     (member "surface" "keeper_surface_read");
   check bool "surface read not hidden under meta" false
     (member "meta" "keeper_surface_read");
   check bool "tools_list remains a meta introspection tool" true
     (member "meta" "keeper_tools_list");
-  check bool "Grep tool grouped" true
+  check bool "Grep tool grouped under its sole model name" true
+    (member "search_files" "Grep");
+  check bool "Grep internal route omitted from model list" false
     (member "search_files" "tool_search_files");
-  check bool "fs tool grouped" true
-    (member "fs" "tool_read_file");
+  check bool "fs tool grouped under its sole model name" true
+    (member "fs" "Read");
   check bool "memory tool grouped" true
     (member "memory" "keeper_memory_search");
   let descriptor_surface =
@@ -662,10 +670,12 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (string_member "public_name" execute);
   check string "Execute executor" "shell_ir"
     (string_member "executor" execute);
-  check bool "Execute active internal name listed" true
+  check bool "Execute internal route is not a model name" false
     (list_member_contains "active_names" "tool_execute" execute);
   check bool "Execute active public name listed" true
     (list_member_contains "active_names" "Execute" execute);
+  check string "Execute model projection" "preferred_public_name"
+    (string_member "keeper_model_projection" execute);
   let policy = Yojson.Safe.Util.member "policy" execute in
   check string "Execute effect domain" "playground_write"
     (string_member "effect_domain" policy);
@@ -719,8 +729,12 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (string_member "effect_domain" grep_policy);
   check bool "Grep policy group omitted" true
     (Yojson.Safe.Util.member "policy_group" grep_policy = `Null);
-  check bool "Grep active internal name listed" true
+  check bool "Grep internal route is not a model name" false
     (list_member_contains "active_names" "tool_search_files" grep);
+  check bool "Grep preferred model name listed" true
+    (list_member_contains "active_names" "Grep" grep);
+  check bool "Grep compatibility alias is not a model name" false
+    (list_member_contains "active_names" "Search" grep);
   let malformed_execute =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =
@@ -1540,6 +1554,42 @@ let make_dummy_oas_tool name =
     (fun _ -> Tool_result.make_ok ~tool_name:name ~start_time:0.0 ~data:(`String "") ())
 ;;
 
+let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
+  let descriptor =
+    match KTD.descriptors_for_internal "tool_execute" with
+    | [ descriptor ] -> descriptor
+    | [] -> fail "missing tool_execute descriptor"
+    | _ :: _ :: _ -> fail "duplicate tool_execute descriptors"
+  in
+  let payload =
+    KET.For_testing.descriptor_route_invariant_payload
+      ~tool_name:"Execute"
+      descriptor
+  in
+  (match
+     KET.For_testing.descriptor_route_kind ~descriptor ~output:None
+   with
+   | KET.For_testing.Invariant -> ()
+   | KET.For_testing.Output | KET.For_testing.Registered_only ->
+     fail "resolved descriptor without output must not reach registered fallback");
+  check bool "descriptor route miss is not ok" false
+    Yojson.Safe.Util.(member "ok" payload |> to_bool);
+  check string
+    "descriptor route miss has typed error"
+    "keeper_tool_descriptor_route_invariant"
+    Yojson.Safe.Util.(member "error" payload |> to_string);
+  check string
+    "descriptor route miss is a runtime failure"
+    "runtime_failure"
+    Yojson.Safe.Util.(member "failure_class" payload |> to_string);
+  check string "descriptor identity is retained" "agent.execute"
+    Yojson.Safe.Util.(member "descriptor_id" payload |> to_string);
+  check string "executor identity is retained" "shell_ir"
+    Yojson.Safe.Util.(member "executor" payload |> to_string);
+  check string "runtime handler identity is retained" "tool_execute"
+    Yojson.Safe.Util.(member "runtime_handler" payload |> to_string)
+;;
+
 let string_of_concurrency_class = function
   | Agent_sdk.Tool.Parallel_read -> "parallel_read"
   | Agent_sdk.Tool.Sequential_workspace -> "sequential_workspace"
@@ -1808,6 +1858,8 @@ let () =
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick
         test_keeper_tools_list_json_uses_typed_groups;
+      test_case "descriptor route miss is typed runtime failure" `Quick
+        test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);
     ("oas_descriptor", [
       test_case "masc_web_search is Exclusive_external" `Quick

@@ -27,6 +27,43 @@ type approval =
   | Policy_selected
   | Human_required
 
+(** One explicit Keeper-model exposure choice per descriptor. Compatibility
+    aliases remain routable at transport boundaries but never become a second
+    model-facing name. [Dispatch_only] keeps an internal runtime route out of
+    the Keeper model surface. *)
+type keeper_model_projection =
+  | Preferred_public_name
+  | Internal_name
+  | Dispatch_only
+
+(** Descriptor-owned model description enrichment. The dynamic task-state
+    context is explicit metadata rather than an internal-name comparison in
+    the OAS bundle assembler. *)
+type model_description_projection =
+  | Static_description
+  | Current_task_state
+
+(** Typed display group for Keeper capability discovery. *)
+type keeper_tool_group =
+  | Execute_group
+  | Search_files_group
+  | Filesystem_group
+  | Board_group
+  | Voice_group
+  | Workspace_group
+  | Surface_group
+  | Memory_group
+  | Meta_group
+  | Core_group
+
+(** Provenance of the descriptor input schema. A missing canonical cluster
+    schema makes that descriptor dispatch-only and is reported by the schema
+    injection boundary. *)
+type input_schema_source =
+  | Descriptor_owned
+  | Canonical_registry
+  | Missing_canonical_registry
+
 type readonly_of_input = Yojson.Safe.t -> bool option
 
 type runtime_handler =
@@ -64,6 +101,9 @@ type runtime_handler =
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_library_dispatch
+  | Tool_masc_recurring_dispatch
+  | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
 
 type policy =
@@ -81,6 +121,10 @@ type policy =
 
 type t =
   { id : string
+  ; keeper_model_projection : keeper_model_projection
+  ; model_description_projection : model_description_projection
+  ; keeper_tool_group : keeper_tool_group
+  ; input_schema_source : input_schema_source
   ; public_name : string
   ; public_aliases : string list
   ; internal_name : string
@@ -110,6 +154,10 @@ val executor_to_string : executor -> string
 val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
 val approval_to_string : approval -> string
+val keeper_model_projection_to_string : keeper_model_projection -> string
+val model_description_projection_to_string : model_description_projection -> string
+val keeper_tool_group_to_string : keeper_tool_group -> string
+val input_schema_source_to_string : input_schema_source -> string
 val runtime_handler_to_string : runtime_handler -> string
 
 (** [public_descriptors] is the LLM-native public surface (RFC-0064 hard-cut).
@@ -128,10 +176,18 @@ val internal_descriptors : t list
     descriptor-backed tool, regardless of LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
 
-(** [model_visible_descriptors ()] is [public_descriptors] plus internal
-    descriptors whose policy visibility is [Default]. Hidden internal
-    descriptors remain executable only through non-model dispatcher paths. *)
+(** Descriptors with one explicit model-facing projection and a resolved input
+    schema. Missing canonical schemas are fail-closed. *)
 val model_visible_descriptors : unit -> t list
+
+(** The sole active Keeper model name. Empty only for [Dispatch_only]. *)
+val keeper_model_names : t -> string list
+
+(** Names admitted by the Keeper execution/candidate boundary. A preferred
+    public descriptor retains compatibility aliases and its internal handler
+    route for transport/runtime dispatch. Only [keeper_model_names] controls
+    the model schema, so these aliases cannot become duplicate model tools. *)
+val keeper_candidate_names : t -> string list
 
 val public_names_of_descriptor : t -> string list
 val public_names : unit -> string list

@@ -490,7 +490,8 @@ let tool_definitions = [
 
 let () =
   List.iter
-    (fun (s : Masc_domain.tool_schema) ->
+    (fun (definition : Tool_schemas_library.definition) ->
+      let s = definition.schema in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -498,8 +499,9 @@ let () =
            ~module_tag:Tool_dispatch.Mod_library
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ~is_read_only:definition.read_only
+           ~is_idempotent:definition.read_only
            ()))
-    Tool_schemas_library.schemas
+    Tool_schemas_library.definitions
 
 let schemas = Tool_schemas_library.schemas
-

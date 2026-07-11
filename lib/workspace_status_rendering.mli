@@ -45,6 +45,7 @@ val assigned_task_ids :
     for the [masc_status] response. *)
 
 val status_summary_string :
+  task_list_projection:Tool_capability_projection.task_list ->
   ctx:Workspace_types.context ->
   bound:bool ->
   actual_name:string ->
@@ -68,9 +69,13 @@ val status_summary_string :
   backlog:Masc_domain.backlog ->
   string
 (** [status_summary_string] renders the full [masc_status]
-    operator-visible string.  All 21 named arguments are
+    operator-visible string.  All 22 named arguments are
     required — there is no convenience overload because every
     line is a deliberate operator surface.
+
+    [task_list_projection] is the typed audience projection for follow-up
+    guidance: external callers receive [masc_tasks], Keeper models receive
+    [keeper_tasks_list].
 
     {2 Display caps}
 

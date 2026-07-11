@@ -15,9 +15,15 @@ module StringSet : Set.S with type elt = string
 
 val is_keeper_safe_inline_tool : string -> bool
 
-(** Filter and inject MASC schemas for keeper tool selection.
-    Call once after MASC schemas are registered. *)
+(** Filter and inject descriptor-backed MASC handler schemas.
+    Dispatch-only routes are retained outside the model surface. A supported
+    schema with no descriptor, duplicate descriptors, or any descriptor with a
+    missing canonical schema is rejected and emitted as a structured error. *)
 val inject_masc_schemas : Masc_domain.tool_schema list -> unit
+
+(** Pure diagnostic projection used by startup validation and invariant tests. *)
+val missing_canonical_schema_names :
+  Keeper_tool_descriptor.t list -> string list
 
 (** Filter raw schemas down to the masc_* subset a keeper can actually see. *)
 val keeper_supported_masc_schemas :
@@ -106,10 +112,11 @@ val keeper_tool_search_scope : keeper_meta -> string list
 
 (** {1 Tool Schema Assembly} *)
 
-(** Universe model tool schemas for Agent.run(). *)
+(** Descriptor-projected universe model schemas for Agent.run(). No shard or
+    injected-schema fallback is admitted. *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
-(** Active descriptor/registry model tool schemas for BM25 indexing. *)
+(** Active descriptor-projected model tool schemas for BM25 indexing. *)
 val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Filter schemas by a set of allowed names.  O(1) per schema. *)
@@ -122,7 +129,7 @@ val dedupe_tool_schemas :
 
 (** {1 Tool Description Lookup} *)
 
-(** Lookup tool hint (first sentence + enum/required hints) by name.
+(** Lookup a descriptor-projected tool hint by model name.
     Returns [None] for unknown tools. *)
 val tool_hint_of : string -> string option
 

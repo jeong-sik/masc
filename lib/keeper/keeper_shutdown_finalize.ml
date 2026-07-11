@@ -426,15 +426,16 @@ let rec remove_tree path =
 let remove_meta_file ~config operation =
   match operation.cleanup_intent.meta_disposition with
   | Remove_meta ->
-    match
-      Keeper_meta_store.remove_meta_if_identity
-        config
-        ~name:operation.keeper_name
-        ~trace_id:operation.trace_id
-        ~generation:operation.generation
-    with
-    | Ok () | Error Keeper_meta_store.Remove_identity_missing -> Ok ()
-    | Error error -> Error (Keeper_meta_store.identity_remove_error_to_string error)
+    (match
+       Keeper_meta_store.remove_meta_if_identity
+         config
+         ~name:operation.keeper_name
+         ~trace_id:operation.trace_id
+         ~generation:operation.generation
+     with
+     | Ok () | Error Keeper_meta_store.Remove_identity_missing -> Ok ()
+     | Error error ->
+       Error (Keeper_meta_store.identity_remove_error_to_string error))
   | Retain_operator_pause
   | Retain_dead_tombstone -> Ok ()
 ;;

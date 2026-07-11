@@ -55,25 +55,6 @@ let post_ids queue =
   |> List.map (fun (item : Queue.stimulus) -> item.post_id)
 ;;
 
-let snapshot_path ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue.json"
-;;
-
-let inflight_path ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-inflight.json"
-;;
-
-let persist_queue_file path queue =
-  Queue.queue_to_yojson queue
-  |> Yojson.Safe.pretty_to_string
-  |> Fs_compat.save_file_atomic path
-  |> require_ok ("write split-state fixture " ^ path)
-;;
-
 let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
@@ -297,7 +278,7 @@ let test_exception_does_not_poison_owner_or_other_lane () =
       (Persistence.load ~base_path ~keeper_name:keeper_b |> post_ids))
 ;;
 
-let test_fleet_summary_never_observes_split_owner_pair () =
+let test_fleet_summary_serializes_with_owner_commit () =
   with_temp_dir "event-queue-owner-summary" (fun base_path ->
     let keeper_name = "summary_owner" in
     let pending = stimulus ~post_id:"pending" ~arrived_at:9.0 in
@@ -307,18 +288,14 @@ let test_fleet_summary_never_observes_split_owner_pair () =
       ~keeper_name
       (Queue.enqueue Queue.empty pending);
     Persistence.record_inflight ~base_path ~keeper_name [ inflight ];
-    let pending_path = snapshot_path ~base_path ~keeper_name in
-    let inflight_path = inflight_path ~base_path ~keeper_name in
-    let split_ready = Atomic.make false in
+    let transform_entered = Atomic.make false in
     let release = Atomic.make false in
     let writer_result = ref None in
     let writer =
       Domain.spawn (fun () ->
         Persistence.update_result ~base_path ~keeper_name (fun _queue ->
-          persist_queue_file pending_path Queue.empty;
-          Atomic.set split_ready true;
+          Atomic.set transform_entered true;
           await_atomic_in_domain release;
-          persist_queue_file inflight_path Queue.empty;
           Queue.empty))
     in
     Fun.protect
@@ -326,7 +303,7 @@ let test_fleet_summary_never_observes_split_owner_pair () =
         Atomic.set release true;
         writer_result := Some (Domain.join writer))
       (fun () ->
-         await_atomic split_ready;
+         await_atomic transform_entered;
          Eio.Switch.run (fun sw ->
            let summary_started = Atomic.make false in
            let summary_done = Atomic.make false in
@@ -341,7 +318,7 @@ let test_fleet_summary_never_observes_split_owner_pair () =
            await_atomic summary_started;
            Eio.Fiber.yield ();
            Alcotest.(check bool)
-             "summary blocks while one owner pair is split"
+             "summary blocks while the owner transaction is in progress"
              false
              (Atomic.get summary_done);
            Atomic.set release true;
@@ -352,8 +329,8 @@ let test_fleet_summary_never_observes_split_owner_pair () =
              0
              (int_field "pending_count" keeper);
            Alcotest.(check int)
-             "summary inflight count comes from completed pair"
-             0
+             "summary preserves independently leased work"
+             1
              (int_field "inflight_count" keeper)));
     require_some "split writer join" !writer_result
     |> require_ok "split writer update")
@@ -364,6 +341,6 @@ let () =
     test_canonical_owner_and_cross_context_isolation ();
     test_cancelled_waiter_does_not_leak_owner_lock ();
     test_exception_does_not_poison_owner_or_other_lane ();
-    test_fleet_summary_never_observes_split_owner_pair ());
+    test_fleet_summary_serializes_with_owner_commit ());
   print_endline "test_keeper_event_queue_owner_lock: OK"
 ;;

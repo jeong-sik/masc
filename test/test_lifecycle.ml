@@ -95,6 +95,67 @@ let () = test "inline shutdown hooks run registered cleanup hooks" (fun () ->
   Shutdown_hooks.run_all ();
   assert !called)
 
+exception Simulated_switch_shutdown
+
+let () = test "shutdown deadline outlives a stuck cancelled switch" (fun () ->
+  match Unix.fork () with
+  | 0 ->
+      (match
+         Shutdown.start_process_deadline_watchdog
+           ~timeout_s:0.05
+       with
+       | Error _ -> Unix._exit 25
+       | Ok _watchdog ->
+           (try
+              Eio_main.run @@ fun _env ->
+              Eio.Switch.run @@ fun sw ->
+              Eio.Fiber.fork_daemon ~sw (fun () ->
+                  Eio.Cancel.protect (fun () -> Eio.Fiber.await_cancel ());
+                  `Stop_daemon);
+              raise Simulated_switch_shutdown
+            with Simulated_switch_shutdown -> Unix._exit 24);
+           Unix._exit 24)
+  | child_pid ->
+      let waited_pid, status = Unix.waitpid [] child_pid in
+      assert (waited_pid = child_pid);
+      assert (status = Unix.WEXITED Shutdown.process_deadline_exit_code))
+
+let () = test "shutdown deadline disarm state is explicit" (fun () ->
+  let watchdog =
+    match
+      Shutdown.start_process_deadline_watchdog
+        ~timeout_s:1.0
+    with
+    | Ok watchdog -> watchdog
+    | Error error -> failwith (Shutdown.deadline_error_to_string error)
+  in
+  assert (Shutdown.disarm_deadline_watchdog watchdog = Shutdown.Disarmed);
+  assert
+    (Shutdown.disarm_deadline_watchdog watchdog = Shutdown.Already_disarmed))
+
+let () = test "shutdown deadline rejects invalid time values" (fun () ->
+  assert
+    (match
+       Shutdown.start_process_deadline_watchdog
+         ~timeout_s:nan
+     with
+     | Error (Shutdown.Non_finite_deadline_timeout _) -> true
+     | _ -> false);
+  assert
+    (match
+       Shutdown.start_process_deadline_watchdog
+         ~timeout_s:infinity
+     with
+     | Error (Shutdown.Non_finite_deadline_timeout _) -> true
+     | _ -> false);
+  assert
+    (match
+       Shutdown.start_process_deadline_watchdog
+         ~timeout_s:0.0
+     with
+     | Error (Shutdown.Non_positive_deadline_timeout _) -> true
+     | _ -> false))
+
 (* ── Summary ──────────────────────────────────── *)
 
 let () =

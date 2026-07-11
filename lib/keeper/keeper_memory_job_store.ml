@@ -306,9 +306,155 @@ let operation_stage_path ~base_path ~keeper_name ~operation_id =
   path_for_id (operations_dir ~base_path ~keeper_name) operation_id
 ;;
 
-let inspect_path path =
-  try Ok (Some (Unix.lstat path)) with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+module Anchored = Fs_compat.Anchored_dir
+
+type anchored_directory =
+  { handle : Anchored.t
+  ; path : string
+  }
+
+type store_directories =
+  { jobs : anchored_directory
+  ; awaiting : anchored_directory
+  ; pending : anchored_directory
+  ; inflight : anchored_directory
+  ; receipts : anchored_directory
+  ; operations : anchored_directory
+  }
+
+type artifact =
+  { directory : anchored_directory
+  ; name : Anchored.Segment.t
+  ; path : string
+  }
+
+let child_name ~parent path =
+  if String.equal (Filename.dirname path) parent
+  then
+    let raw = Filename.basename path in
+    (match Anchored.Segment.of_string raw with
+     | Ok segment -> Ok segment
+     | Error error ->
+       Error
+         (Io_error
+            { operation = Inspect
+            ; path
+            ; detail = Anchored.Segment.error_to_string error
+            }))
+  else
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path
+         ; detail =
+             Printf.sprintf
+               "memory job path is not a direct child of its SSOT parent %s"
+               parent
+         })
+;;
+
+let with_directory ~owned parent path f =
+  let* name = child_name ~parent:parent.path path in
+  let permission = if owned then private_directory_mode else 0o755 in
+  try
+    Anchored.with_ensure_dir
+      parent.handle
+      ~name
+      ~perm:permission
+      ~enforce_perm:owned
+      (fun handle -> f { handle; path })
+  with
+  | Unix.Unix_error ((Unix.ELOOP | Unix.ENOTDIR), _, _) as exn ->
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path
+         ; detail = Printexc.to_string exn
+         })
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Io_error
+         { operation = Ensure_directory
+         ; path
+         ; detail = Printexc.to_string exn
+         })
+;;
+
+let with_ensured_store ~base_path ~keeper_name f =
+  let masc_path = Common.masc_dir_from_base_path ~base_path in
+  let keepers_path = Common.keepers_runtime_dir_of_base ~base_path in
+  let keeper_path = Filename.concat keepers_path keeper_name in
+  let jobs_path = keeper_jobs_dir ~base_path ~keeper_name in
+  let awaiting_path = awaiting_dir ~base_path ~keeper_name in
+  let pending_path = pending_dir ~base_path ~keeper_name in
+  let inflight_path = inflight_dir ~base_path ~keeper_name in
+  let receipts_path = receipts_dir ~base_path ~keeper_name in
+  let operations_path = operations_dir ~base_path ~keeper_name in
+  let* masc_name = child_name ~parent:base_path masc_path in
+  let* keepers_name = child_name ~parent:masc_path keepers_path in
+  let* keeper_name_segment = child_name ~parent:keepers_path keeper_path in
+  let* jobs_name = child_name ~parent:keeper_path jobs_path in
+  let steps : Anchored.ensure_step list =
+    [ { name = masc_name; perm = 0o755; enforce_perm = false }
+    ; { name = keepers_name; perm = 0o755; enforce_perm = false }
+    ; { name = keeper_name_segment; perm = 0o755; enforce_perm = false }
+    ; { name = jobs_name
+      ; perm = private_directory_mode
+      ; enforce_perm = true
+      }
+    ]
+  in
+  try
+    Anchored.with_ensure_path ~root:base_path steps @@ fun handle ->
+    let jobs = { handle; path = jobs_path } in
+    with_directory ~owned:true jobs awaiting_path @@ fun awaiting ->
+    with_directory ~owned:true jobs pending_path @@ fun pending ->
+    with_directory ~owned:true jobs inflight_path @@ fun inflight ->
+    with_directory ~owned:true jobs receipts_path @@ fun receipts ->
+    with_directory ~owned:true jobs operations_path @@ fun operations ->
+    f { jobs; awaiting; pending; inflight; receipts; operations }
+  with
+  | Unix.Unix_error ((Unix.ELOOP | Unix.ENOTDIR), _, _) as exn ->
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path = jobs_path
+         ; detail = Printexc.to_string exn
+         })
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Io_error
+         { operation = Ensure_directory
+         ; path = jobs_path
+         ; detail = Printexc.to_string exn
+         })
+;;
+
+type 'a presence =
+  | Missing
+  | Present of 'a
+
+type existing_jobs = { jobs : anchored_directory }
+
+let with_existing_directory parent path f =
+  let* name = child_name ~parent:parent.path path in
+  try
+    match
+      Anchored.with_open_dir_opt parent.handle name (fun handle ->
+        f { handle; path })
+    with
+    | None -> Ok Missing
+    | Some result -> result
+  with
+  | Unix.Unix_error ((Unix.ELOOP | Unix.ENOTDIR), _, _) as exn ->
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path
+         ; detail = Printexc.to_string exn
+         })
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Error
@@ -319,126 +465,101 @@ let inspect_path path =
          })
 ;;
 
-let sync_directory path =
-  match Fs_compat.fsync_directory path with
-  | Ok () -> Ok ()
-  | Error detail -> Error (Io_error { operation = Sync; path; detail })
-;;
-
-let not_real_directory_error path =
-  Io_error
-    { operation = Inspect
-    ; path
-    ; detail = "memory job store path is not a real directory"
-    }
-;;
-
-let require_existing_real_directory path =
-  let* stat = protect_io Inspect path (fun () -> Unix.lstat path) in
-  if stat.Unix.st_kind = Unix.S_DIR
-  then Ok ()
-  else Error (not_real_directory_error path)
-;;
-
-let ensure_real_directory ~owned path =
-  let* before = inspect_path path in
-  let* created =
-    match before with
-    | Some _ -> Ok false
-    | None ->
-      let mode = if owned then private_directory_mode else 0o755 in
-      let* () =
-        protect_io Ensure_directory path (fun () ->
-          try Unix.mkdir path mode with
-          | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-      in
-      Ok true
+let with_optional_directory parent path f =
+  let* presence =
+    with_existing_directory parent path (fun directory ->
+      let* value = f directory in
+      Ok (Present value))
   in
-  let* () = require_existing_real_directory path in
-  let* () = if created then sync_directory (Filename.dirname path) else Ok () in
-  if not owned
-  then Ok ()
-  else
-    let* () =
-      protect_io Set_permissions path (fun () ->
-        Unix.chmod path private_directory_mode)
-    in
-    sync_directory path
+  match presence with
+  | Missing -> Ok None
+  | Present value -> Ok (Some value)
 ;;
 
-let managed_root_directories ~base_path =
-  let masc_dir = Common.masc_dir_from_base_path ~base_path in
-  [ masc_dir; Common.keepers_runtime_dir_of_base ~base_path ]
+let with_existing_jobs ~base_path ~keeper_name f =
+  let masc_path = Common.masc_dir_from_base_path ~base_path in
+  let keepers_path = Common.keepers_runtime_dir_of_base ~base_path in
+  let keeper_path = Filename.concat keepers_path keeper_name in
+  let jobs_path = keeper_jobs_dir ~base_path ~keeper_name in
+  let* masc_name = child_name ~parent:base_path masc_path in
+  let* keepers_name = child_name ~parent:masc_path keepers_path in
+  let* keeper_name_segment = child_name ~parent:keepers_path keeper_path in
+  let* jobs_name = child_name ~parent:keeper_path jobs_path in
+  try
+    match
+      Anchored.with_open_path_opt
+        ~root:base_path
+        [ masc_name; keepers_name; keeper_name_segment; jobs_name ]
+        (fun handle ->
+           let* value = f { jobs = { handle; path = jobs_path } } in
+           Ok (Present value))
+    with
+    | None -> Ok Missing
+    | Some result -> result
+  with
+  | Unix.Unix_error ((Unix.ELOOP | Unix.ENOTDIR), _, _) as exn ->
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path = jobs_path
+         ; detail = Printexc.to_string exn
+         })
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path = jobs_path
+         ; detail = Printexc.to_string exn
+         })
 ;;
 
-let keeper_ancestor_directories ~base_path ~keeper_name =
-  let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
-  [ Filename.concat keepers_root keeper_name
-  ; keeper_jobs_dir ~base_path ~keeper_name
-  ]
+let artifact_from_segment directory name =
+  let raw_name = Anchored.Segment.to_string name in
+  { directory
+  ; name
+  ; path = Filename.concat directory.path raw_name
+  }
 ;;
 
-let validate_real_directory_chain paths =
-  let rec loop = function
-    | [] -> Ok true
-    | path :: rest ->
-      let* stat = inspect_path path in
-      (match stat with
-       | None -> Ok false
-       | Some stat when stat.Unix.st_kind = Unix.S_DIR -> loop rest
-       | Some _ -> Error (not_real_directory_error path))
+let artifact directory raw_name =
+  let name =
+    match Anchored.Segment.of_string raw_name with
+    | Ok segment -> segment
+    | Error error ->
+      invalid_arg
+        (Printf.sprintf
+           "invalid memory job artifact name %S: %s"
+           raw_name
+           (Anchored.Segment.error_to_string error))
   in
-  loop paths
+  artifact_from_segment directory name
 ;;
 
-let require_real_directory_chain paths =
-  let rec loop = function
-    | [] -> Ok ()
-    | path :: rest ->
-      let* () = require_existing_real_directory path in
-      loop rest
-  in
-  loop paths
+let artifact_for_id directory id = artifact directory (id ^ json_suffix)
+
+let awaiting_artifact store (job : job) =
+  artifact_for_id store.awaiting job.id
 ;;
 
-let validate_managed_root_if_present ~base_path =
-  validate_real_directory_chain
-    (base_path :: managed_root_directories ~base_path)
+let pending_artifact store (job : job) =
+  artifact_for_id store.pending job.id
 ;;
 
-let validate_keeper_ancestors_if_present ~base_path ~keeper_name =
-  validate_real_directory_chain
-    (base_path
-     :: (managed_root_directories ~base_path
-         @ keeper_ancestor_directories ~base_path ~keeper_name))
+let inflight_artifact store (job : job) =
+  artifact_for_id store.inflight job.id
 ;;
 
-let ensure_store_dirs ~base_path ~keeper_name =
-  let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
-  let keeper_dir = Filename.concat keepers_root keeper_name in
-  let* () = require_existing_real_directory base_path in
-  let parent_dirs =
-    managed_root_directories ~base_path @ [ keeper_dir ]
-  in
-  let owned_dirs =
-    [ keeper_jobs_dir ~base_path ~keeper_name
-    ; pending_dir ~base_path ~keeper_name
-    ; awaiting_dir ~base_path ~keeper_name
-    ; inflight_dir ~base_path ~keeper_name
-    ; receipts_dir ~base_path ~keeper_name
-    ; operations_dir ~base_path ~keeper_name
-    ]
-  in
-  let rec loop ~owned = function
-    | [] -> Ok ()
-    | dir :: rest ->
-      let* () = ensure_real_directory ~owned dir in
-      loop ~owned rest
-  in
-  let* () = loop ~owned:false parent_dirs in
-  let* () = loop ~owned:true owned_dirs in
-  require_real_directory_chain
-    (base_path :: (parent_dirs @ owned_dirs))
+let receipt_artifact store (job : job) =
+  artifact_for_id store.receipts job.id
+;;
+
+let receipt_artifact_for_identity store (identity : receipt_identity) =
+  artifact_for_id store.receipts identity.id
+;;
+
+let operation_artifact store operation_id =
+  artifact_for_id store.operations operation_id
 ;;
 
 let valid_job_id id =
@@ -918,189 +1039,315 @@ let receipt_of_json json =
   | _ -> Error "memory job receipt must be a JSON object"
 ;;
 
-let read_json path =
-  let* stat = protect_io Inspect path (fun () -> Unix.lstat path) in
-  if stat.Unix.st_kind <> Unix.S_REG
-  then
+let inspect_artifact item =
+  protect_io Inspect item.path (fun () ->
+    Anchored.stat item.directory.handle item.name)
+;;
+
+let read_json_opt item =
+  let content =
+    try Ok (Anchored.read_file_opt item.directory.handle item.name) with
+    | Unix.Unix_error ((Unix.ELOOP | Unix.EISDIR), _, _) as exn ->
+      Error
+        (Io_error
+           { operation = Inspect
+           ; path = item.path
+           ; detail = Printexc.to_string exn
+           })
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Error
+        (Io_error
+           { operation = Read
+           ; path = item.path
+           ; detail = Printexc.to_string exn
+           })
+  in
+  let* content = content in
+  match content with
+  | None -> Ok None
+  | Some content ->
+    (match Safe_ops.parse_json_safe ~context:item.path content with
+     | Ok json -> Ok (Some json)
+     | Error detail ->
+       Error (Io_error { operation = Read; path = item.path; detail }))
+;;
+
+let read_json item =
+  let* json = read_json_opt item in
+  match json with
+  | Some json -> Ok json
+  | None ->
     Error
       (Io_error
-         { operation = Inspect
-         ; path
-         ; detail = "memory job artifact is not a regular file"
+         { operation = Read
+         ; path = item.path
+         ; detail = "memory job artifact does not exist"
          })
-  else
-    match
-      try
-        Fs_compat.load_file_unix path
-        |> Safe_ops.parse_json_safe ~context:path
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    with
-    | Ok json -> Ok json
-    | Error detail -> Error (Io_error { operation = Read; path; detail })
 ;;
 
-let read_envelope path =
-  let* json = read_json path in
+let read_envelope item =
+  let* json = read_json item in
   envelope_of_json json
-  |> Result.map_error (fun detail -> Decode_error { path; detail })
+  |> Result.map_error (fun detail -> Decode_error { path = item.path; detail })
 ;;
 
-let read_receipt path =
-  let* json = read_json path in
+let read_envelope_opt item =
+  let* json = read_json_opt item in
+  match json with
+  | None -> Ok None
+  | Some json ->
+    envelope_of_json json
+    |> Result.map Option.some
+    |> Result.map_error (fun detail ->
+      Decode_error { path = item.path; detail })
+;;
+
+let read_receipt item =
+  let* json = read_json item in
   receipt_of_json json
-  |> Result.map_error (fun detail -> Decode_error { path; detail })
+  |> Result.map_error (fun detail -> Decode_error { path = item.path; detail })
 ;;
 
-let save_json path json =
+let read_receipt_opt item =
+  let* json = read_json_opt item in
+  match json with
+  | None -> Ok None
+  | Some json ->
+    receipt_of_json json
+    |> Result.map Option.some
+    |> Result.map_error (fun detail ->
+      Decode_error { path = item.path; detail })
+;;
+
+let save_json item json =
   match
-    Fs_compat.save_file_atomic_unix
-      path
+    Anchored.atomic_replace
+      item.directory.handle
+      ~name:item.name
+      ~perm:private_file_mode
       (Yojson.Safe.pretty_to_string json)
   with
-  | Ok () ->
-    protect_io Set_permissions path (fun () -> Unix.chmod path private_file_mode)
-  | Error detail -> Error (Io_error { operation = Write; path; detail })
-;;
-
-let file_exists path =
-  try
-    ignore (Unix.lstat path);
-    Ok true
-  with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
+  | Ok () -> Ok ()
+  | Error error ->
     Error
       (Io_error
-         { operation = Inspect
-         ; path
-         ; detail = Printexc.to_string exn
+         { operation = Write
+         ; path = item.path
+         ; detail = Anchored.mutation_error_to_string error
          })
 ;;
 
-let remove_if_exists path =
-  let* exists = file_exists path in
-  if not exists
-  then Ok ()
-  else protect_io Remove path (fun () -> Sys.remove path)
+let remove_if_exists item =
+  match Anchored.unlink_if_exists item.directory.handle item.name with
+  | Ok (`Missing | `Removed) -> Ok ()
+  | Error error ->
+    Error
+      (Io_error
+         { operation = Remove
+         ; path = item.path
+         ; detail = Anchored.mutation_error_to_string error
+         })
 ;;
 
-let cleanup_paths paths =
+let remove_required item =
+  match Anchored.unlink_if_exists item.directory.handle item.name with
+  | Ok `Removed -> Ok ()
+  | Ok `Missing ->
+    Error
+      (Io_error
+         { operation = Remove
+         ; path = item.path
+         ; detail = "required memory job artifact disappeared before unlink"
+         })
+  | Error error ->
+    Error
+      (Io_error
+         { operation = Remove
+         ; path = item.path
+         ; detail = Anchored.mutation_error_to_string error
+         })
+;;
+
+let cleanup_artifacts items =
   List.fold_left
-    (fun errors path ->
-       match remove_if_exists path with
+    (fun errors item ->
+       match remove_if_exists item with
        | Ok () -> errors
        | Error error -> error :: errors)
     []
-    paths
+    items
   |> List.rev
 ;;
 
-let reconcile_atomic_orphan dir name =
-  let path = Filename.concat dir name in
-  let recovered_root =
-    Filename.concat
-      (Filename.dirname dir)
-      recovered_atomic_writes_dirname
-  in
-  let bucket = Filename.basename dir in
-  let recovered_dir =
-    Filename.concat
-      recovered_root
-      bucket
-  in
-  let* () = ensure_real_directory ~owned:true recovered_root in
-  let* () = ensure_real_directory ~owned:true recovered_dir in
-  match Fs_compat.recover_atomic_orphan ~path ~recovered_root ~bucket with
-  | Error detail -> Error (Io_error { operation = Inspect; path; detail })
-  | Ok Fs_compat.Deleted_zero_length ->
-    Log.Keeper.warn "memory job queue removed zero-length atomic orphan path=%s" path;
+let require_same_regular_identity ~source ~destination expected = function
+  | Some ({ Anchored.kind = Regular_file; _ } as actual)
+    when Anchored.same_identity expected actual -> Ok ()
+  | Some _ ->
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path = destination
+         ; detail =
+             Printf.sprintf
+               "atomic orphan destination conflicts with source %s"
+               source
+         })
+  | None ->
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path = destination
+         ; detail = "atomic orphan destination disappeared"
+         })
+;;
+
+let reconcile_atomic_orphan ~jobs directory name =
+  let source = artifact_from_segment directory name in
+  let* inspected = inspect_artifact source in
+  match inspected with
+  | None ->
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path = source.path
+         ; detail = "atomic orphan disappeared during reconciliation"
+         })
+  | Some { Anchored.kind = Regular_file; size = 0L; _ } ->
+    let* () = remove_required source in
+    Log.Keeper.warn
+      "memory job queue removed zero-length atomic orphan path=%s"
+      source.path;
     Ok ()
-  | Ok (Fs_compat.Preserved_nonempty destination) ->
-    (match
-       protect_io Set_permissions recovered_dir (fun () ->
-         Unix.chmod recovered_dir private_directory_mode)
-     with
-     | Error _ as error -> error
-     | Ok () ->
-       let* () =
-         protect_io Set_permissions destination (fun () ->
-           Unix.chmod destination private_file_mode)
-       in
-       Log.Keeper.error
-         "memory job queue preserved non-empty atomic orphan source=%s destination=%s"
-         path
-         destination;
-       Ok ())
-;;
-
-let list_json_paths dir =
-  let* exists = file_exists dir in
-  if not exists
-  then Ok []
-  else
-    let* stat = protect_io Inspect dir (fun () -> Unix.lstat dir) in
+  | Some ({ Anchored.kind = Regular_file; _ } as source_identity) ->
+    let* synced_identity =
+      protect_io Sync source.path (fun () ->
+        Anchored.fsync_file directory.handle name)
+    in
     let* () =
-      if stat.Unix.st_kind = Unix.S_DIR
+      if Anchored.same_identity source_identity synced_identity
       then Ok ()
       else
         Error
           (Io_error
              { operation = Inspect
-             ; path = dir
-             ; detail = "memory job queue path is not a real directory"
+             ; path = source.path
+             ; detail = "atomic orphan changed while it was being synced"
              })
     in
-    let* entries =
-      protect_io List_directory dir (fun () -> Sys.readdir dir |> Array.to_list)
+    let bucket_name = Filename.basename directory.path in
+    let recovered_path =
+      Filename.concat jobs.path recovered_atomic_writes_dirname
     in
-    let rec validate acc = function
-      | [] -> Ok (List.sort String.compare acc)
-      | name :: rest ->
-        let path = Filename.concat dir name in
-        if Filename.check_suffix name json_suffix
-        then validate (path :: acc) rest
-        else if Fs_compat.is_atomic_orphan_name name
-        then
-          let* () = reconcile_atomic_orphan dir name in
-          validate acc rest
-        else Error (Unexpected_queue_entry path)
+    with_directory ~owned:true jobs recovered_path @@ fun recovered ->
+    let bucket_path = Filename.concat recovered.path bucket_name in
+    with_directory ~owned:true recovered bucket_path @@ fun bucket ->
+    let destination = artifact_from_segment bucket name in
+    let* destination_before = inspect_artifact destination in
+    let* () =
+      match destination_before with
+      | Some _ ->
+        require_same_regular_identity
+          ~source:source.path
+          ~destination:destination.path
+          synced_identity
+          destination_before
+      | None ->
+        let link_result =
+          match
+            Anchored.link_no_replace
+              ~src_dir:directory.handle
+              ~src:name
+              ~dst_dir:bucket.handle
+              ~dst:name
+          with
+          | Ok () -> Ok ()
+          | Error
+              (Anchored.Not_committed
+                 { cause = Unix.Unix_error (Unix.EEXIST, _, _)
+                 ; cleanup_error = None
+                 }) -> Ok ()
+          | Error error ->
+            Error
+              (Io_error
+                 { operation = Write
+                 ; path = destination.path
+                 ; detail = Anchored.mutation_error_to_string error
+                 })
+        in
+        let* () = link_result in
+        let* destination_after = inspect_artifact destination in
+        require_same_regular_identity
+          ~source:source.path
+          ~destination:destination.path
+          synced_identity
+          destination_after
     in
-    validate [] entries
+    let* source_before_unlink = inspect_artifact source in
+    let* () =
+      require_same_regular_identity
+        ~source:source.path
+        ~destination:source.path
+        synced_identity
+        source_before_unlink
+    in
+    let* () = remove_required source in
+    let* () =
+      protect_io Set_permissions destination.path (fun () ->
+        Anchored.chmod_file bucket.handle name private_file_mode)
+    in
+    Log.Keeper.error
+      "memory job queue preserved non-empty atomic orphan source=%s destination=%s"
+      source.path
+      destination.path;
+    Ok ()
+  | Some _ ->
+    Error
+      (Io_error
+         { operation = Inspect
+         ; path = source.path
+         ; detail = "atomic orphan is not a regular file"
+         })
 ;;
 
-let reconcile_atomic_orphans_in_dir dir =
-  let* exists = file_exists dir in
-  if not exists
-  then Ok ()
-  else
-    let* stat = protect_io Inspect dir (fun () -> Unix.lstat dir) in
-    let* () =
-      if stat.Unix.st_kind = Unix.S_DIR
-      then Ok ()
-      else
-        Error
-          (Io_error
-             { operation = Inspect
-             ; path = dir
-             ; detail = "memory job queue path is not a real directory"
-             })
-    in
-    let* entries =
-      protect_io List_directory dir (fun () -> Sys.readdir dir |> Array.to_list)
-    in
-    let rec loop = function
-      | [] -> Ok ()
-      | name :: rest ->
-        if Fs_compat.is_atomic_orphan_name name
-        then
-          let* () = reconcile_atomic_orphan dir name in
-          loop rest
-        else loop rest
-    in
-    loop entries
+let list_json_artifacts ~jobs directory =
+  let* entries =
+    protect_io List_directory directory.path (fun () ->
+      Anchored.read_dir directory.handle)
+  in
+  let rec validate acc = function
+    | [] -> Ok (List.rev acc)
+    | name :: rest ->
+      let raw_name = Anchored.Segment.to_string name in
+      let item = artifact_from_segment directory name in
+      if Filename.check_suffix raw_name json_suffix
+      then validate (item :: acc) rest
+      else if Fs_compat.is_atomic_orphan_name raw_name
+      then
+        let* () = reconcile_atomic_orphan ~jobs directory name in
+        validate acc rest
+      else Error (Unexpected_queue_entry item.path)
+  in
+  validate [] entries
+;;
+
+let reconcile_atomic_orphans_in_dir ~jobs directory =
+  let* entries =
+    protect_io List_directory directory.path (fun () ->
+      Anchored.read_dir directory.handle)
+  in
+  let rec loop = function
+    | [] -> Ok ()
+    | name :: rest ->
+      if
+        Fs_compat.is_atomic_orphan_name
+          (Anchored.Segment.to_string name)
+      then
+        let* () = reconcile_atomic_orphan ~jobs directory name in
+        loop rest
+      else loop rest
+  in
+  loop entries
 ;;
 
 let job_equal (left : job) (right : job) =
@@ -1176,41 +1423,38 @@ let ensure_queue_coordinates ~expected_keeper_name ~path envelope =
   else Ok ()
 ;;
 
-let classify_existing_envelope ~expected_job ~expected_state ~path outcome =
-  let* exists = file_exists path in
-  if not exists
-  then Ok None
-  else
-    let* envelope = read_envelope path in
+let classify_existing_envelope ~expected_job ~expected_state ~item outcome =
+  let* envelope = read_envelope_opt item in
+  match envelope with
+  | None -> Ok None
+  | Some envelope ->
     let* () =
       ensure_queue_coordinates
         ~expected_keeper_name:expected_job.keeper_name
-        ~path
+        ~path:item.path
         envelope
     in
-    let* () = ensure_same_job ~expected:expected_job ~path envelope in
-    let* () = ensure_expected_state ~expected:expected_state ~path envelope in
+    let* () = ensure_same_job ~expected:expected_job ~path:item.path envelope in
+    let* () =
+      ensure_expected_state ~expected:expected_state ~path:item.path envelope
+    in
     Ok (Some outcome)
 ;;
 
 let stage_awaiting_turn_commit ~base_path job =
-  let* () = ensure_store_dirs ~base_path ~keeper_name:job.keeper_name in
-  let receipt_path = receipt_path ~base_path job in
-  let* receipt_exists = file_exists receipt_path in
-  if receipt_exists
-  then
-    let* receipt = read_receipt receipt_path in
+  with_ensured_store ~base_path ~keeper_name:job.keeper_name @@ fun store ->
+  let receipt_item = receipt_artifact store job in
+  let* existing_receipt = read_receipt_opt receipt_item in
+  match existing_receipt with
+  | Some receipt ->
     if receipt_identity_matches_retry receipt.identity job
     then
       let cleanup_errors =
-        cleanup_paths
-          [ awaiting_path ~base_path job
-          ; pending_path ~base_path job
-          ; inflight_path ~base_path job
-          ; operation_stage_path
-              ~base_path
-              ~keeper_name:job.keeper_name
-              ~operation_id:job.id
+        cleanup_artifacts
+          [ awaiting_artifact store job
+          ; pending_artifact store job
+          ; inflight_artifact store job
+          ; operation_artifact store job.id
           ]
       in
       List.iter
@@ -1221,16 +1465,18 @@ let stage_awaiting_turn_commit ~base_path job =
              (error_to_string error))
         cleanup_errors;
       Ok Already_completed
-    else Error (Identity_conflict { job_id = job.id; path = receipt_path })
-  else
-    let awaiting_path = awaiting_path ~base_path job in
-    let pending_path = pending_path ~base_path job in
-    let inflight_path = inflight_path ~base_path job in
+    else
+      Error
+        (Identity_conflict { job_id = job.id; path = receipt_item.path })
+  | None ->
+    let awaiting_item = awaiting_artifact store job in
+    let pending_item = pending_artifact store job in
+    let inflight_item = inflight_artifact store job in
     let* awaiting =
       classify_existing_envelope
         ~expected_job:job
         ~expected_state:Expect_awaiting
-        ~path:awaiting_path
+        ~item:awaiting_item
         Already_awaiting
     in
     match awaiting with
@@ -1240,7 +1486,7 @@ let stage_awaiting_turn_commit ~base_path job =
       classify_existing_envelope
         ~expected_job:job
         ~expected_state:Expect_pending
-        ~path:pending_path
+        ~item:pending_item
         Already_pending
     in
     match pending with
@@ -1250,14 +1496,14 @@ let stage_awaiting_turn_commit ~base_path job =
         classify_existing_envelope
           ~expected_job:job
           ~expected_state:Expect_inflight
-          ~path:inflight_path
+          ~item:inflight_item
           Already_inflight
       in
       (match inflight with
        | Some outcome -> Ok outcome
        | None ->
          let envelope = { job; state = Awaiting_turn_commit } in
-         let* () = save_json awaiting_path (envelope_to_json envelope) in
+         let* () = save_json awaiting_item (envelope_to_json envelope) in
          Ok Staged_awaiting_turn_commit)
 ;;
 
@@ -1278,103 +1524,108 @@ let compare_job_order left right =
         if by_enqueued <> 0 then by_enqueued else String.compare left.id right.id
 ;;
 
-let load_envelopes ~expected_keeper_name ~expected_state paths =
+let load_envelopes ~expected_keeper_name ~expected_state items =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
-    | path :: rest ->
-      let* envelope = read_envelope path in
+    | item :: rest ->
+      let* envelope = read_envelope item in
       let* () =
-        ensure_queue_coordinates ~expected_keeper_name ~path envelope
+        ensure_queue_coordinates
+          ~expected_keeper_name
+          ~path:item.path
+          envelope
       in
-      let* () = ensure_expected_state ~expected:expected_state ~path envelope in
-      loop ((path, envelope) :: acc) rest
+      let* () =
+        ensure_expected_state
+          ~expected:expected_state
+          ~path:item.path
+          envelope
+      in
+      loop ((item, envelope) :: acc) rest
   in
-  loop [] paths
+  loop [] items
 ;;
 
 let list_awaiting ~base_path ~keeper_name =
   if not (keeper_name_is_valid keeper_name)
   then Error (Invalid_keeper_name keeper_name)
   else
-    let* () = ensure_store_dirs ~base_path ~keeper_name in
-    let* paths = list_json_paths (awaiting_dir ~base_path ~keeper_name) in
+    with_ensured_store ~base_path ~keeper_name @@ fun store ->
+    let* items = list_json_artifacts ~jobs:store.jobs store.awaiting in
     let* envelopes =
       load_envelopes
         ~expected_keeper_name:keeper_name
         ~expected_state:Expect_awaiting
-        paths
+        items
     in
     Ok (List.map (fun (_, envelope) -> envelope.job) envelopes)
 ;;
 
 let activate ~base_path (job : job) =
-  let* () = ensure_store_dirs ~base_path ~keeper_name:job.keeper_name in
-  let awaiting = awaiting_path ~base_path job in
-  let pending = pending_path ~base_path job in
-  let inflight = inflight_path ~base_path job in
-  let receipt = receipt_path ~base_path job in
-  let operation =
-    operation_stage_path
-      ~base_path
-      ~keeper_name:job.keeper_name
-      ~operation_id:job.id
-  in
-  let* receipt_exists = file_exists receipt in
-  if receipt_exists
-  then
-    let* terminal = read_receipt receipt in
+  with_ensured_store ~base_path ~keeper_name:job.keeper_name @@ fun store ->
+  let awaiting = awaiting_artifact store job in
+  let pending = pending_artifact store job in
+  let inflight = inflight_artifact store job in
+  let receipt = receipt_artifact store job in
+  let operation = operation_artifact store job.id in
+  let* terminal = read_receipt_opt receipt in
+  match terminal with
+  | Some terminal ->
     if not (receipt_identity_matches_retry terminal.identity job)
-    then Error (Identity_conflict { job_id = job.id; path = receipt })
+    then Error (Identity_conflict { job_id = job.id; path = receipt.path })
     else
-      let cleanup_errors = cleanup_paths [ awaiting; pending; inflight; operation ] in
+      let cleanup_errors =
+        cleanup_artifacts [ awaiting; pending; inflight; operation ]
+      in
       Ok (Activation_already_completed, { cleanup_errors })
-  else
+  | None ->
     let* pending_state =
       classify_existing_envelope
         ~expected_job:job
         ~expected_state:Expect_pending
-        ~path:pending
+        ~item:pending
         Activation_already_pending
     in
     (match pending_state with
      | Some activation ->
-       let cleanup_errors = cleanup_paths [ awaiting ] in
+       let cleanup_errors = cleanup_artifacts [ awaiting ] in
        Ok (activation, { cleanup_errors })
      | None ->
        let* inflight_state =
          classify_existing_envelope
            ~expected_job:job
            ~expected_state:Expect_inflight
-           ~path:inflight
+           ~item:inflight
            Activation_already_inflight
        in
        (match inflight_state with
         | Some activation ->
-          let cleanup_errors = cleanup_paths [ awaiting ] in
+          let cleanup_errors = cleanup_artifacts [ awaiting ] in
           Ok (activation, { cleanup_errors })
         | None ->
-          let* awaiting_exists = file_exists awaiting in
-          if not awaiting_exists
-          then
+          let* awaiting_envelope = read_envelope_opt awaiting in
+          (match awaiting_envelope with
+           | None ->
             Error
               (Decode_error
-                 { path = awaiting
+                 { path = awaiting.path
                  ; detail =
                      "cannot activate a memory job without its awaiting-turn-commit envelope"
                  })
-          else
-            let* envelope = read_envelope awaiting in
+           | Some envelope ->
             let* () =
               ensure_queue_coordinates
                 ~expected_keeper_name:job.keeper_name
-                ~path:awaiting
+                ~path:awaiting.path
                 envelope
             in
-            let* () = ensure_same_job ~expected:job ~path:awaiting envelope in
+            let* () =
+              ensure_same_job ~expected:job ~path:awaiting.path envelope
+            in
             let* () =
               ensure_expected_state
                 ~expected:Expect_awaiting
-                ~path:awaiting
+                ~path:awaiting.path
                 envelope
             in
             let* () =
@@ -1385,113 +1636,108 @@ let activate ~base_path (job : job) =
                    ; state = Pending
                    })
             in
-            let cleanup_errors = cleanup_paths [ awaiting ] in
-            Ok (Activated, { cleanup_errors })))
+            let cleanup_errors = cleanup_artifacts [ awaiting ] in
+            Ok (Activated, { cleanup_errors }))))
 ;;
 
 let abort_awaiting ~base_path (job : job) =
-  let* () = ensure_store_dirs ~base_path ~keeper_name:job.keeper_name in
-  let path = awaiting_path ~base_path job in
-  let* exists = file_exists path in
-  if not exists
-  then Ok ()
-  else
-    let* envelope = read_envelope path in
+  with_ensured_store ~base_path ~keeper_name:job.keeper_name @@ fun store ->
+  let item = awaiting_artifact store job in
+  let* envelope = read_envelope_opt item in
+  match envelope with
+  | None -> Ok ()
+  | Some envelope ->
     let* () =
       ensure_queue_coordinates
         ~expected_keeper_name:job.keeper_name
-        ~path
+        ~path:item.path
         envelope
     in
-    let* () = ensure_same_job ~expected:job ~path envelope in
+    let* () = ensure_same_job ~expected:job ~path:item.path envelope in
     let* () =
-      ensure_expected_state ~expected:Expect_awaiting ~path envelope
+      ensure_expected_state ~expected:Expect_awaiting ~path:item.path envelope
     in
-    remove_if_exists path
+    remove_if_exists item
 ;;
 
-let recover_one ~base_path (inflight_path, envelope) =
+let recover_one store (inflight_item, envelope) =
   match envelope.state with
   | Awaiting_turn_commit | Pending ->
     Error
       (Decode_error
-         { path = inflight_path
+         { path = inflight_item.path
          ; detail = "inflight directory contains a pending envelope"
          })
   | Inflight { started_at } ->
     let job = envelope.job in
-    let receipt_path = receipt_path ~base_path job in
-    let* receipt_exists = file_exists receipt_path in
-    if receipt_exists
-    then
-      let* receipt = read_receipt receipt_path in
+    let receipt_item = receipt_artifact store job in
+    let* receipt = read_receipt_opt receipt_item in
+    (match receipt with
+     | Some receipt ->
       if not (receipt_identity_matches_job receipt.identity job)
-      then Error (Identity_conflict { job_id = job.id; path = receipt_path })
+      then
+        Error
+          (Identity_conflict { job_id = job.id; path = receipt_item.path })
       else if not (Float.equal receipt.started_at started_at)
       then
         Error
           (Inflight_lease_conflict
              { job_id = job.id
-             ; path = inflight_path
+             ; path = inflight_item.path
              ; expected_started_at = receipt.started_at
              ; actual_started_at = started_at
              })
       else
         let cleanup_errors =
-          cleanup_paths
-            [ operation_stage_path
-                ~base_path
-                ~keeper_name:job.keeper_name
-                ~operation_id:job.id
-            ; awaiting_path ~base_path job
-            ; pending_path ~base_path job
-            ; inflight_path
+          cleanup_artifacts
+            [ operation_artifact store job.id
+            ; awaiting_artifact store job
+            ; pending_artifact store job
+            ; inflight_item
             ]
         in
         Ok (false, cleanup_errors)
-    else
-      let pending_path = pending_path ~base_path job in
-      let* pending_exists = file_exists pending_path in
+     | None ->
+      let pending_item = pending_artifact store job in
+      let* pending = read_envelope_opt pending_item in
       let* () =
-        if pending_exists
-        then
-          let* pending = read_envelope pending_path in
-          let* () = ensure_same_job ~expected:job ~path:pending_path pending in
+        match pending with
+        | Some pending ->
+          let* () =
+            ensure_same_job ~expected:job ~path:pending_item.path pending
+          in
           ensure_expected_state
             ~expected:Expect_pending
-            ~path:pending_path
+            ~path:pending_item.path
             pending
-        else save_json pending_path (envelope_to_json { job; state = Pending })
+        | None -> save_json pending_item (envelope_to_json { job; state = Pending })
       in
-      let cleanup_errors = cleanup_paths [ inflight_path ] in
-      Ok (true, cleanup_errors)
+      let cleanup_errors = cleanup_artifacts [ inflight_item ] in
+      Ok (true, cleanup_errors))
 ;;
 
 let recover_inflight ~base_path ~keeper_name =
   if not (keeper_name_is_valid keeper_name)
   then Error (Invalid_keeper_name keeper_name)
   else
-    let* () = ensure_store_dirs ~base_path ~keeper_name in
+    with_ensured_store ~base_path ~keeper_name @@ fun store ->
     let* () =
-      reconcile_atomic_orphans_in_dir
-        (receipts_dir ~base_path ~keeper_name)
+      reconcile_atomic_orphans_in_dir ~jobs:store.jobs store.receipts
     in
     let* () =
-      reconcile_atomic_orphans_in_dir
-        (operations_dir ~base_path ~keeper_name)
+      reconcile_atomic_orphans_in_dir ~jobs:store.jobs store.operations
     in
-    let dir = inflight_dir ~base_path ~keeper_name in
-    let* paths = list_json_paths dir in
+    let* items = list_json_artifacts ~jobs:store.jobs store.inflight in
     let* envelopes =
       load_envelopes
         ~expected_keeper_name:keeper_name
         ~expected_state:Expect_inflight
-        paths
+        items
     in
     let rec loop replayed cleanup_errors = function
       | [] -> Ok { replayed; cleanup_errors = List.rev cleanup_errors }
       | item :: rest ->
-        let* did_recover, item_cleanup_errors = recover_one ~base_path item in
+        let* did_recover, item_cleanup_errors = recover_one store item in
         loop
           (if did_recover then replayed + 1 else replayed)
           (List.rev_append item_cleanup_errors cleanup_errors)
@@ -1506,67 +1752,65 @@ let claim_all ~base_path ~keeper_name ~now =
   else if (not (Float.is_finite now)) || now < 0.0
   then Error (Invalid_claim_time now)
   else
-    let* () = ensure_store_dirs ~base_path ~keeper_name in
-    let dir = pending_dir ~base_path ~keeper_name in
-    let* paths = list_json_paths dir in
+    with_ensured_store ~base_path ~keeper_name @@ fun store ->
+    let* items = list_json_artifacts ~jobs:store.jobs store.pending in
     let* envelopes =
       load_envelopes
         ~expected_keeper_name:keeper_name
         ~expected_state:Expect_pending
-        paths
+        items
     in
     let ordered =
       envelopes
-      |> List.map (fun (path, envelope) -> path, envelope.job)
+      |> List.map (fun (item, envelope) -> item, envelope.job)
       |> List.sort (fun (_, left) (_, right) -> compare_job_order left right)
     in
-    let process_item path job =
-      let receipt_path = receipt_path ~base_path job in
-      let* receipt_exists = file_exists receipt_path in
-      if receipt_exists
-      then
-        let* receipt = read_receipt receipt_path in
+    let process_item item job =
+      let receipt_item = receipt_artifact store job in
+      let* receipt = read_receipt_opt receipt_item in
+      match receipt with
+      | Some receipt ->
         if not (receipt_identity_matches_job receipt.identity job)
-        then Error (Identity_conflict { job_id = job.id; path = receipt_path })
+        then
+          Error
+            (Identity_conflict { job_id = job.id; path = receipt_item.path })
         else
           Ok
             (`Skipped
-              (cleanup_paths
-                 [ path
-                 ; awaiting_path ~base_path job
-                 ; inflight_path ~base_path job
-                 ; operation_stage_path
-                     ~base_path
-                     ~keeper_name:job.keeper_name
-                     ~operation_id:job.id
+              (cleanup_artifacts
+                 [ item
+                 ; awaiting_artifact store job
+                 ; inflight_artifact store job
+                 ; operation_artifact store job.id
                  ]))
-      else
+      | None ->
         let lease = { job; started_at = now } in
-        let destination = inflight_path ~base_path job in
-        let* inflight_exists = file_exists destination in
-        if inflight_exists
-        then
-          let* inflight = read_envelope destination in
+        let destination = inflight_artifact store job in
+        let* inflight = read_envelope_opt destination in
+        (match inflight with
+         | Some inflight ->
           let* () =
             ensure_queue_coordinates
               ~expected_keeper_name:keeper_name
-              ~path:destination
+              ~path:destination.path
               inflight
           in
-          let* () = ensure_same_job ~expected:job ~path:destination inflight in
+          let* () =
+            ensure_same_job ~expected:job ~path:destination.path inflight
+          in
           let* () =
             ensure_expected_state
               ~expected:Expect_inflight
-              ~path:destination
+              ~path:destination.path
               inflight
           in
           Error
             (Pending_already_inflight
                { job_id = job.id
-               ; pending_path = path
-               ; inflight_path = destination
+               ; pending_path = item.path
+               ; inflight_path = destination.path
                })
-        else
+         | None ->
           let* () =
             save_json
               destination
@@ -1575,7 +1819,7 @@ let claim_all ~base_path ~keeper_name ~now =
                  ; state = Inflight { started_at = lease.started_at }
                  })
           in
-          Ok (`Claimed (lease, cleanup_paths [ path ]))
+          Ok (`Claimed (lease, cleanup_artifacts [ item ])))
     in
     let rec claim leases cleanup_errors = function
       | [] ->
@@ -1584,8 +1828,8 @@ let claim_all ~base_path ~keeper_name ~now =
           ; cleanup_errors = List.rev cleanup_errors
           ; blocked = None
           }
-      | (path, job) :: rest ->
-        (match process_item path job with
+      | (item, job) :: rest ->
+        (match process_item item job with
          | Error error ->
            Ok
              { leases = List.rev leases
@@ -1608,34 +1852,16 @@ let claim_all ~base_path ~keeper_name ~now =
 
 let finish ~base_path (receipt : terminal_receipt) =
   let identity = receipt.identity in
-  let* () = ensure_store_dirs ~base_path ~keeper_name:identity.keeper_name in
-  let path = receipt_path_for_identity ~base_path identity in
-  let operation =
-    operation_stage_path
-      ~base_path
-      ~keeper_name:identity.keeper_name
-      ~operation_id:identity.id
-  in
-  let awaiting =
-    path_for_id
-      (awaiting_dir ~base_path ~keeper_name:identity.keeper_name)
-      identity.id
-  in
-  let pending =
-    path_for_id
-      (pending_dir ~base_path ~keeper_name:identity.keeper_name)
-      identity.id
-  in
-  let inflight =
-    path_for_id
-      (inflight_dir ~base_path ~keeper_name:identity.keeper_name)
-      identity.id
-  in
-  let* exists = file_exists path in
+  with_ensured_store ~base_path ~keeper_name:identity.keeper_name @@ fun store ->
+  let receipt_item = receipt_artifact_for_identity store identity in
+  let operation = operation_artifact store identity.id in
+  let awaiting = artifact_for_id store.awaiting identity.id in
+  let pending = artifact_for_id store.pending identity.id in
+  let inflight = artifact_for_id store.inflight identity.id in
+  let* existing_receipt = read_receipt_opt receipt_item in
   let* () =
-    if exists
-    then
-      let* current = read_receipt path in
+    match existing_receipt with
+    | Some current ->
       if receipt_identity_equal current.identity identity
          && current.outcome = receipt.outcome
          && Float.equal current.started_at receipt.started_at
@@ -1644,29 +1870,40 @@ let finish ~base_path (receipt : terminal_receipt) =
               (payload_sha256 current.detail)
               (payload_sha256 receipt.detail)
       then Ok ()
-      else Error (Identity_conflict { job_id = identity.id; path })
-    else
-      let* inflight_exists = file_exists inflight in
-      if not inflight_exists
-      then Error (Missing_inflight_lease { job_id = identity.id; path = inflight })
       else
-        let* envelope = read_envelope inflight in
+        Error
+          (Identity_conflict { job_id = identity.id; path = receipt_item.path })
+    | None ->
+      let* inflight_envelope = read_envelope_opt inflight in
+      (match inflight_envelope with
+       | None ->
+        Error
+          (Missing_inflight_lease
+             { job_id = identity.id; path = inflight.path })
+       | Some envelope ->
         let* () =
           ensure_queue_coordinates
             ~expected_keeper_name:identity.keeper_name
-            ~path:inflight
+            ~path:inflight.path
             envelope
         in
-        let* () = ensure_expected_state ~expected:Expect_inflight ~path:inflight envelope in
+        let* () =
+          ensure_expected_state
+            ~expected:Expect_inflight
+            ~path:inflight.path
+            envelope
+        in
         if not (receipt_identity_matches_job identity envelope.job)
-        then Error (Identity_conflict { job_id = identity.id; path = inflight })
+        then
+          Error
+            (Identity_conflict { job_id = identity.id; path = inflight.path })
         else
           (match envelope.state with
            | Awaiting_turn_commit | Pending ->
              Error
                (Missing_inflight_lease
                   { job_id = identity.id
-                  ; path = inflight
+                  ; path = inflight.path
                   })
            | Inflight { started_at } ->
              if not (Float.equal started_at receipt.started_at)
@@ -1674,110 +1911,160 @@ let finish ~base_path (receipt : terminal_receipt) =
                Error
                  (Inflight_lease_conflict
                     { job_id = identity.id
-                    ; path = inflight
+                    ; path = inflight.path
                     ; expected_started_at = receipt.started_at
                     ; actual_started_at = started_at
                     })
-             else save_json path (receipt_to_json receipt))
+             else save_json receipt_item (receipt_to_json receipt)))
   in
-  let cleanup_errors = cleanup_paths [ operation; awaiting; pending; inflight ] in
+  let cleanup_errors =
+    cleanup_artifacts [ operation; awaiting; pending; inflight ]
+  in
   Ok { cleanup_errors }
+;;
+
+let count_queue_in_jobs ~keeper_name ~jobs ~path ~expected_state =
+  let* count =
+    with_optional_directory jobs path (fun directory ->
+      let* items = list_json_artifacts ~jobs directory in
+      let* envelopes =
+        load_envelopes
+          ~expected_keeper_name:keeper_name
+          ~expected_state
+          items
+      in
+      Ok (List.length envelopes))
+  in
+  Ok (Option.value count ~default:0)
+;;
+
+let count_backlog_in_jobs ~base_path ~keeper_name jobs =
+  let* awaiting =
+    count_queue_in_jobs
+      ~keeper_name
+      ~jobs
+      ~path:(awaiting_dir ~base_path ~keeper_name)
+      ~expected_state:Expect_awaiting
+  in
+  let* pending =
+    count_queue_in_jobs
+      ~keeper_name
+      ~jobs
+      ~path:(pending_dir ~base_path ~keeper_name)
+      ~expected_state:Expect_pending
+  in
+  let* inflight =
+    count_queue_in_jobs
+      ~keeper_name
+      ~jobs
+      ~path:(inflight_dir ~base_path ~keeper_name)
+      ~expected_state:Expect_inflight
+  in
+  Ok (awaiting + pending + inflight)
 ;;
 
 let backlog_count ~base_path ~keeper_name =
   if not (keeper_name_is_valid keeper_name)
   then Error (Invalid_keeper_name keeper_name)
   else
-    let* ancestors_exist =
-      validate_keeper_ancestors_if_present ~base_path ~keeper_name
+    let* presence =
+      with_existing_jobs ~base_path ~keeper_name @@ fun store ->
+      count_backlog_in_jobs ~base_path ~keeper_name store.jobs
     in
-    if not ancestors_exist
-    then Ok 0
-    else
-      let* awaiting = list_json_paths (awaiting_dir ~base_path ~keeper_name) in
-      let* pending = list_json_paths (pending_dir ~base_path ~keeper_name) in
-      let* inflight = list_json_paths (inflight_dir ~base_path ~keeper_name) in
-      let* awaiting_envelopes =
-        load_envelopes
-          ~expected_keeper_name:keeper_name
-          ~expected_state:Expect_awaiting
-          awaiting
-      in
-      let* pending_envelopes =
-        load_envelopes
-          ~expected_keeper_name:keeper_name
-          ~expected_state:Expect_pending
-          pending
-      in
-      let* inflight_envelopes =
-        load_envelopes
-          ~expected_keeper_name:keeper_name
-          ~expected_state:Expect_inflight
-          inflight
-      in
-      Ok
-        (List.length awaiting_envelopes
-         + List.length pending_envelopes
-         + List.length inflight_envelopes)
-;;
-
-let directory_exists path =
-  let* exists = file_exists path in
-  if not exists
-  then Ok false
-  else
-    let* is_directory =
-      protect_io Inspect path (fun () ->
-        (Unix.lstat path).Unix.st_kind = Unix.S_DIR)
-    in
-    if is_directory
-    then Ok true
-    else
-      Error
-        (Io_error
-           { operation = Inspect
-           ; path
-           ; detail = "expected a directory but found a non-directory entry"
-           })
+    (match presence with
+     | Missing -> Ok 0
+     | Present count -> Ok count)
 ;;
 
 let discover_keeper_names ~base_path =
-  let root = Common.keepers_runtime_dir_of_base ~base_path in
-  let* root_exists = validate_managed_root_if_present ~base_path in
-  if not root_exists
-  then Ok ([], [])
-  else
-    let* entries =
-      protect_io List_directory root (fun () -> Sys.readdir root |> Array.to_list)
-    in
-    let rec loop keepers errors = function
-      | [] ->
-        Ok
-          ( List.sort_uniq String.compare keepers
-          , List.rev errors )
-      | keeper_name :: rest ->
-        if not (keeper_name_is_valid keeper_name)
-        then loop keepers (Invalid_keeper_name keeper_name :: errors) rest
-        else
-          let keeper_dir = Filename.concat root keeper_name in
-          let jobs_dir = keeper_jobs_dir ~base_path ~keeper_name in
-          (match directory_exists keeper_dir with
-           | Error error -> loop keepers (error :: errors) rest
-           | Ok false -> loop keepers errors rest
-           | Ok true ->
-             (match directory_exists jobs_dir with
-              | Error error -> loop keepers (error :: errors) rest
-              | Ok false -> loop keepers errors rest
-              | Ok true ->
-                (match backlog_count ~base_path ~keeper_name with
-                 | Error error -> loop keepers (error :: errors) rest
-                 | Ok count ->
+  let masc_path = Common.masc_dir_from_base_path ~base_path in
+  let keepers_path = Common.keepers_runtime_dir_of_base ~base_path in
+  let* masc_name = child_name ~parent:base_path masc_path in
+  let* keepers_name = child_name ~parent:masc_path keepers_path in
+  let* presence =
+    try
+      match
+        Anchored.with_open_path_opt
+          ~root:base_path
+          [ masc_name; keepers_name ]
+          (fun handle ->
+             let keepers_directory = { handle; path = keepers_path } in
+             let* entries =
+               protect_io List_directory keepers_path (fun () ->
+                 Anchored.read_dir keepers_directory.handle)
+             in
+             let rec loop keepers errors = function
+               | [] ->
+                 Ok
+                   (Present
+                      ( List.sort_uniq String.compare keepers
+                      , List.rev errors ))
+               | keeper_segment :: rest ->
+                 let keeper_name =
+                   Anchored.Segment.to_string keeper_segment
+                 in
+                 if not (keeper_name_is_valid keeper_name)
+                 then
                    loop
-                     (if count > 0 then keeper_name :: keepers else keepers)
-                     errors
-                     rest)))
-    in
-    loop [] [] entries
+                     keepers
+                     (Invalid_keeper_name keeper_name :: errors)
+                     rest
+                 else
+                   let keeper_path =
+                     Filename.concat keepers_path keeper_name
+                   in
+                   let jobs_path = keeper_jobs_dir ~base_path ~keeper_name in
+                   let count_result =
+                     with_optional_directory
+                       keepers_directory
+                       keeper_path
+                       (fun keeper_directory ->
+                          let* jobs_presence =
+                            with_optional_directory
+                              keeper_directory
+                              jobs_path
+                              (count_backlog_in_jobs
+                                 ~base_path
+                                 ~keeper_name)
+                          in
+                          Ok (Option.value jobs_presence ~default:0))
+                   in
+                   (match count_result with
+                    | Error error ->
+                      loop keepers (error :: errors) rest
+                    | Ok None -> loop keepers errors rest
+                    | Ok (Some count) ->
+                      loop
+                        (if count > 0
+                         then keeper_name :: keepers
+                         else keepers)
+                        errors
+                        rest)
+             in
+             loop [] [] entries)
+      with
+      | None -> Ok Missing
+      | Some result -> result
+    with
+    | Unix.Unix_error ((Unix.ELOOP | Unix.ENOTDIR), _, _) as exn ->
+      Error
+        (Io_error
+           { operation = Inspect
+           ; path = keepers_path
+           ; detail = Printexc.to_string exn
+           })
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Error
+        (Io_error
+           { operation = Inspect
+           ; path = keepers_path
+           ; detail = Printexc.to_string exn
+           })
+  in
+  match presence with
+  | Missing -> Ok ([], [])
+  | Present result -> Ok result
 ;;
 
 module For_testing = struct

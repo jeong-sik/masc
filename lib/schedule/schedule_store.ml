@@ -1,5 +1,7 @@
 open Schedule_domain
 
+module StringMap = Set_util.StringMap
+
 type state =
   { version : int
   ; updated_at : float
@@ -366,6 +368,24 @@ let compare_execution_desc (left : execution_record) (right : execution_record) 
   match compare right.started_at left.started_at with
   | 0 -> String.compare right.execution_id left.execution_id
   | cmp -> cmp
+;;
+
+let index_executions state =
+  let by_schedule =
+    List.fold_right
+      (fun (execution : execution_record) by_schedule ->
+         StringMap.update execution.schedule_id
+           (function
+             | None -> Some [ execution ]
+             | Some executions -> Some (execution :: executions))
+           by_schedule)
+      (List.sort compare_execution_desc state.executions)
+      StringMap.empty
+  in
+  fun ~schedule_id ->
+    match StringMap.find_opt schedule_id by_schedule with
+    | None -> []
+    | Some executions -> executions
 ;;
 
 let executions_for_schedule state ~schedule_id =

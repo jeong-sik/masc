@@ -3054,14 +3054,36 @@ let schedule_signal_rows_and_errors config limit =
    single [last_execution] projected, so "the schedule ran — what happened?"
    had no dashboard answer beyond the latest attempt). Newest first; the
    limit keeps the projection payload bounded like the other list caps here. *)
-let schedule_execution_history_limit = 10
+let schedule_execution_history_preview_limit = 10
+
+type schedule_execution_history_projection =
+  { rows : Schedule_domain.execution_record list
+  ; total_count : int
+  ; limit : int
+  }
+
+let schedule_execution_history_projection executions =
+  { rows = take schedule_execution_history_preview_limit executions
+  ; total_count = List.length executions
+  ; limit = schedule_execution_history_preview_limit
+  }
+;;
+
+let schedule_execution_history_dashboard_json history =
+  `Assoc
+    [ "rows", `List (List.map execution_record_dashboard_json history.rows)
+    ; "total_count", `Int history.total_count
+    ; "limit", `Int history.limit
+    ; "truncated", `Bool (history.total_count > history.limit)
+    ]
+;;
 
 let schedule_request_dashboard_json
   ~now
   ~config
   ~state
   ?last_execution
-  ?(executions = [])
+  ~execution_history
   (request : Schedule_domain.schedule_request)
   =
   let next_due_at =
@@ -3140,9 +3162,7 @@ let schedule_request_dashboard_json
       , match last_execution with
         | None -> `Null
         | Some execution -> execution_record_dashboard_json execution )
-    ; "executions", `List (List.map execution_record_dashboard_json executions)
-    ; ( "execution_history_limit_reached"
-      , `Bool (List.length executions >= schedule_execution_history_limit) )
+    ; "execution_history", schedule_execution_history_dashboard_json execution_history
     ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_execution
     ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_execution
     ; ( "keeper_reaction_evidence"
@@ -3393,6 +3413,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
         | _ -> String.compare left.schedule_id right.schedule_id)
     in
     let request_rows = take schedule_projection_request_limit sorted in
+    let executions_for_schedule = Schedule_store.index_executions state in
     `Assoc
       (base_fields
        @ [ "status", `String "ok"
@@ -3425,18 +3446,16 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
            , `List
                (List.map
                   (fun (request : Schedule_domain.schedule_request) ->
-                     let last_execution =
-                       Schedule_store.last_execution_for_schedule state
-                         ~schedule_id:request.Schedule_domain.schedule_id
-                     in
                      let executions =
-                       Schedule_store.executions_for_schedule state
+                       executions_for_schedule
                          ~schedule_id:request.Schedule_domain.schedule_id
-                       |> List.filteri (fun i _ ->
-                         i < schedule_execution_history_limit)
                      in
+                     let execution_history =
+                       schedule_execution_history_projection executions
+                     in
+                     let last_execution = List.hd_opt executions in
                      schedule_request_dashboard_json ~now ~config ~state ?last_execution
-                       ~executions request)
+                       ~execution_history request)
                   request_rows) )
          ])
 ;;

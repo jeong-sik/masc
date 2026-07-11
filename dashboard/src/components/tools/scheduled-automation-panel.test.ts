@@ -573,6 +573,53 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).toContain('페이로드')
   })
 
+  it('renders server-owned execution history without duplicating the latest row', async () => {
+    const latest = {
+      execution_id: 'exec-latest',
+      schedule_id: 'sched-history',
+      started_at_iso: '2026-06-21T00:12:00Z',
+      status: 'succeeded',
+    }
+    const previous = {
+      execution_id: 'exec-previous',
+      schedule_id: 'sched-history',
+      started_at_iso: '2026-06-21T00:11:00Z',
+      status: 'failed',
+      error: 'provider unavailable',
+    }
+    const auto = automation([
+      request({
+        schedule_id: 'sched-history',
+        last_execution: latest,
+        execution_history: {
+          rows: [latest, previous],
+          total_count: 12,
+          limit: 10,
+          truncated: true,
+        },
+      }),
+    ])
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
+    const scheduledFilter = container.querySelector(
+      '[data-schedule-filter="scheduled"]',
+    ) as HTMLButtonElement
+    scheduledFilter.click()
+    await flush()
+    const openDetail = container.querySelector(
+      '[data-schedule-detail="sched-history"]',
+    ) as HTMLButtonElement
+    openDetail.click()
+    await flush()
+
+    expect(container.querySelectorAll('[data-execution-history-row]')).toHaveLength(1)
+    expect(container.querySelector('[data-execution-history-row="exec-latest"]')).toBeNull()
+    expect(container.querySelector('[data-execution-history-row="exec-previous"]')?.textContent)
+      .toContain('provider unavailable')
+    expect(container.querySelector('[data-execution-history-truncated]')?.textContent)
+      .toContain('전체 12건 중 최근 10건')
+  })
+
   it('renders keeper wake dispatch receipts as queue proof in diagnostics and v2', async () => {
     const auto = automation([
       request({

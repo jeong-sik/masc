@@ -2048,8 +2048,7 @@ export function SchDetail({
               reactionEvidence=${request.keeper_reaction_evidence ?? null}
             />
             <${SchExecutionHistory}
-              executions=${request.executions ?? []}
-              limitReached=${request.execution_history_limit_reached ?? false}
+              history=${request.execution_history ?? null}
             />
           </div>
 
@@ -2065,17 +2064,15 @@ export function SchDetail({
  *  repeated failures/successes had no dashboard trail). Row [0] duplicates
  *  the SchExecution block above, so the list starts at the second-newest. */
 function SchExecutionHistory({
-  executions,
-  limitReached,
+  history,
 }: {
-  executions: DashboardScheduledAutomationExecution[]
-  limitReached: boolean
+  history: DashboardScheduledAutomationRequest['execution_history'] | null
 }) {
-  const history = executions.slice(1)
-  if (history.length === 0) return null
+  const rows = history?.rows.slice(1) ?? []
+  if (rows.length === 0 && !history?.truncated) return null
   return html`
     <div class="sch-kvs" data-schedule-execution-history>
-      ${history.map(row => html`
+      ${rows.map(row => html`
         <div class="sch-kv" data-execution-history-row=${row.execution_id}>
           <span class="k mono">${formatDateTimeKo(row.started_at_iso ?? null)}</span>
           <span class="v mono">
@@ -2083,8 +2080,8 @@ function SchExecutionHistory({
           </span>
         </div>
       `)}
-      ${limitReached
-        ? html`<div class="sch-kv"><span class="k"></span><span class="v mono" data-execution-history-truncated>이전 기록은 잘렸습니다 (최근 10건만 표시)</span></div>`
+      ${history?.truncated
+        ? html`<div class="sch-kv"><span class="k"></span><span class="v mono" data-execution-history-truncated>전체 ${history.total_count.toLocaleString()}건 중 최근 ${history.limit.toLocaleString()}건을 표시합니다</span></div>`
         : null}
     </div>
   `

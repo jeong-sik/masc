@@ -82,6 +82,11 @@ val state_of_yojson : Yojson.Safe.t -> (state, string) result
 val list_schedules : Workspace_utils.config -> Schedule_domain.schedule_request list
 val get_schedule :
   Workspace_utils.config -> schedule_id:string -> Schedule_domain.schedule_request option
+(** Builds one immutable, newest-first execution index for a state snapshot.
+    Reuse the returned lookup when projecting more than one schedule so the
+    global execution ledger is sorted and grouped exactly once. *)
+val index_executions :
+  state -> schedule_id:string -> Schedule_domain.execution_record list
 val executions_for_schedule :
   state -> schedule_id:string -> Schedule_domain.execution_record list
 val last_execution_for_schedule :

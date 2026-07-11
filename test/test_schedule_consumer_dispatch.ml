@@ -803,7 +803,8 @@ let create_recurring_keeper_wake_schedule config =
 let dashboard_execution_ids row =
   let open Yojson.Safe.Util in
   row
-  |> member "executions"
+  |> member "execution_history"
+  |> member "rows"
   |> to_list
   |> List.map (fun execution -> execution |> member "execution_id" |> to_string)
 ;;
@@ -833,6 +834,7 @@ let test_dashboard_projects_bounded_execution_history () =
     dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id
   in
   let open Yojson.Safe.Util in
+  let history row = row |> member "execution_history" in
   dispatch_occurrence 0;
   dispatch_occurrence 1;
   let below_cap = dashboard_row () in
@@ -844,24 +846,38 @@ let test_dashboard_projects_bounded_execution_history () =
   check int "two executions projected" 2
     (List.length (dashboard_execution_ids below_cap));
   check bool "limit marker stays false below the cap" false
-    (below_cap |> member "execution_history_limit_reached" |> to_bool);
-  (match below_cap |> member "executions" |> to_list with
+    (history below_cap |> member "truncated" |> to_bool);
+  (match history below_cap |> member "rows" |> to_list with
    | first :: second :: _ ->
      let started json = json |> member "started_at" |> to_number in
      check bool "projection is newest first" true
        (started first > started second)
    | projected ->
      failf "expected two projected executions, got %d" (List.length projected));
-  for i = 2 to 11 do
+  for i = 2 to 9 do
     dispatch_occurrence i
   done;
+  let exactly_at_cap = dashboard_row () in
+  check int "exactly ten executions are not truncated" 10
+    (history exactly_at_cap |> member "total_count" |> to_int);
+  check bool "exact cap has no hidden execution" false
+    (history exactly_at_cap |> member "truncated" |> to_bool);
+  dispatch_occurrence 10;
+  let above_cap = dashboard_row () in
+  check int "total count survives preview truncation" 11
+    (history above_cap |> member "total_count" |> to_int);
+  check int "server publishes its preview limit" 10
+    (history above_cap |> member "limit" |> to_int);
+  check bool "eleven executions truncate the preview" true
+    (history above_cap |> member "truncated" |> to_bool);
+  dispatch_occurrence 11;
   let stored = stored_execution_ids config ~schedule_id:request.schedule_id in
   check int "store keeps every execution" 12 (List.length stored);
   let at_cap = dashboard_row () in
   let projected = dashboard_execution_ids at_cap in
   check int "projection truncates at the history limit" 10 (List.length projected);
   check bool "limit marker reports truncation" true
-    (at_cap |> member "execution_history_limit_reached" |> to_bool);
+    (history at_cap |> member "truncated" |> to_bool);
   check (list string) "cap keeps the newest records in store order"
     (List.filteri (fun i _ -> i < 10) stored)
     projected;

@@ -587,27 +587,50 @@ let list_unlocked ~config =
   then Ok []
   else
     try
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.sort String.compare
-      |> List.fold_left
-           (fun result filename ->
-              let* operations = result in
-              if not (Filename.check_suffix filename ".json")
-              then
-                Error
-                  (Decode_error
-                     (Printf.sprintf "unexpected shutdown store entry: %s" filename))
-              else
-                let raw_id = Filename.chop_suffix filename ".json" in
-                let* operation_id =
-                  Operation_id.of_string raw_id
-                  |> Result.map_error (fun e -> Decode_error e)
-                in
-                let* operation = load ~config operation_id in
-                Ok (operation :: operations))
-           (Ok [])
-      |> Result.map List.rev
+      (* WORKAROUND: fleet-wide autoboot block 완화. 근본 해결은 #24195
+         (per-owner path + typed [Corrupt_record] fence). flat 레이아웃에서는
+         payload가 손상되면 그 안의 keeper_name을 복원할 수 없어 admission
+         fence를 세울 수 없다. 그래서 손상 항목을 per-record로 skip 한다 —
+         손상 1건이 전 fleet autoboot를 0으로 만드는 것(현재 동작)보다 blast
+         radius가 작다(해당 keeper만 fence 없이 재개). 모든 skip은 WARN 으로
+         관측 가능하므로 silent failure 는 아니다. dir-level I/O 실패만 여전히
+         [Error] 로 escalate 한다.
+         removal target: #24195 (per-owner fence) 머지 시 이 skip 경로 제거. *)
+      let operations =
+        Sys.readdir dir
+        |> Array.to_list
+        |> List.sort String.compare
+        |> List.filter_map (fun filename ->
+             if Fs_compat.is_atomic_orphan_name filename
+             then (
+               (* crash-during-write 로 남은 atomic-write orphan: 유효 record가
+                  아니라 reclaimable 잔여물이므로 fleet 를 막지 않는다. *)
+               Log.Keeper.warn
+                 "shutdown store: skipping atomic-write orphan %s" filename;
+               None)
+             else if not (Filename.check_suffix filename ".json")
+             then (
+               Log.Keeper.warn
+                 "shutdown store: skipping non-json entry %s" filename;
+               None)
+             else
+               let raw_id = Filename.chop_suffix filename ".json" in
+               match Operation_id.of_string raw_id with
+               | Error e ->
+                 Log.Keeper.warn
+                   "shutdown store: skipping undecodable operation id %s: %s"
+                   filename e;
+                 None
+               | Ok operation_id ->
+                 (match load ~config operation_id with
+                  | Error e ->
+                    Log.Keeper.warn
+                      "shutdown store: skipping unreadable record %s: %s"
+                      filename (error_to_string e);
+                    None
+                  | Ok operation -> Some operation))
+      in
+      Ok operations
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Io_error (Printexc.to_string exn))

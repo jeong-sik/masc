@@ -339,31 +339,33 @@ let start_keeper_loops
       match Keeper_shutdown_store.list_all ~config with
       | Error error -> Error (Keeper_shutdown_store.error_to_string error)
       | Ok operations ->
-        List.fold_left
-          (fun restored operation ->
-             match restored with
-             | Error _ as error -> error
-             | Ok () when not (operation_requires_fence operation) -> Ok ()
-             | Ok () ->
-               (match
-                  Keeper_turn_admission.restore_shutdown
-                    ~base_path:config.base_path
-                    ~keeper_name:operation.keeper_name
-                    ~operation_id:operation.operation_id
-                with
-                | Keeper_turn_admission.Shutdown_restored
-                | Keeper_turn_admission.Shutdown_already_restored -> Ok ()
-                | Keeper_turn_admission.Shutdown_restore_conflict existing ->
-                  Error
-                    (Printf.sprintf
-                       "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
-                       operation.keeper_name
-                       (Keeper_shutdown_types.Operation_id.to_string
-                          operation.operation_id)
-                       (Keeper_shutdown_types.Operation_id.to_string existing))))
-          (Ok ())
-          operations
-        |> Result.map (fun () -> operations)
+        (* Per-operation isolation: a restore conflict on one keeper must not
+           abort the remaining fence restores, which would leave the whole
+           fleet unbooted. Each conflict is logged (observable, not silent)
+           and that keeper is skipped; the healthy keepers still restore.
+           근본 정합: #24195 (per-owner fence)가 conflict 를 typed 로 격리. *)
+        List.iter
+          (fun operation ->
+             if operation_requires_fence operation
+             then (
+               match
+                 Keeper_turn_admission.restore_shutdown
+                   ~base_path:config.base_path
+                   ~keeper_name:operation.keeper_name
+                   ~operation_id:operation.operation_id
+               with
+               | Keeper_turn_admission.Shutdown_restored
+               | Keeper_turn_admission.Shutdown_already_restored -> ()
+               | Keeper_turn_admission.Shutdown_restore_conflict existing ->
+                 Log.Keeper.warn
+                   "shutdown admission restore conflict (isolated): keeper=%s \
+                    durable=%s existing=%s"
+                   operation.keeper_name
+                   (Keeper_shutdown_types.Operation_id.to_string
+                      operation.operation_id)
+                   (Keeper_shutdown_types.Operation_id.to_string existing)))
+          operations;
+        Ok operations
     in
     Eio.Promise.resolve shutdown_inventory_r inventory;
     match inventory with

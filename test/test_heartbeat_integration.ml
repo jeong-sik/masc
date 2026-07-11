@@ -1122,7 +1122,20 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
           (fun () -> ())
       with
       | `Ran () -> ()
-      | `Busy _ -> fail "failed shutdown prepare left the keeper admission fence closed")
+      | `Busy (Masc.Keeper_turn_admission.Shutdown_requested id) ->
+        (* DIAG (#24135 born-red): a lingering shutdown reservation still owns
+           the slot after a failed prepare — the Fun.protect rollback did not
+           clear [slot.shutdown_operation_id]. Surfacing the id distinguishes
+           "rollback never ran" from "rollback cleared a different id". *)
+        fail
+          (Printf.sprintf
+             "failed shutdown prepare left the keeper admission fence closed: \
+              Shutdown_requested %s still owns the slot (rollback did not clear)"
+             (Shutdown_types.Operation_id.to_string id))
+      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) ->
+        fail
+          "failed shutdown prepare left the keeper admission fence closed: \
+           Turn_busy (slot held by a turn, not a shutdown reservation)")
 
 let test_keeper_shutdown_finalizes_idle_operation () =
   Eio_main.run @@ fun env ->

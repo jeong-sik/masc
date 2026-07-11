@@ -70,31 +70,6 @@ let media_degrade_manifest_decision ~(runtime_id : string)
         ("media_dropped_counts", `String summary);
       ])
 
-let rec strip_matching_message_prefix prefix messages =
-  match prefix, messages with
-  | [], suffix -> Some suffix
-  | expected :: prefix_rest, actual :: message_rest when expected = actual ->
-    strip_matching_message_prefix prefix_rest message_rest
-  | _ :: _, [] | _ :: _, _ :: _ -> None
-
-type replay_prefix_projection =
-  | Replay_prefix_unchanged
-  | Replay_prefix_media_degraded
-
-let restore_canonical_replay_prefix
-    ~(canonical_prefix : Agent_sdk.Types.message list)
-    ~(dispatch_prefix : Agent_sdk.Types.message list)
-    ~(checkpoint_messages : Agent_sdk.Types.message list)
-    : (Agent_sdk.Types.message list, string) result =
-  match strip_matching_message_prefix canonical_prefix checkpoint_messages with
-  | Some _already_canonical_suffix -> Ok checkpoint_messages
-  | None ->
-    (match strip_matching_message_prefix dispatch_prefix checkpoint_messages with
-     | Some current_turn_suffix -> Ok (canonical_prefix @ current_turn_suffix)
-     | None ->
-       Error
-         "media-degraded checkpoint preserves neither canonical nor typed dispatch history prefix")
-
 type context_window_rebudget =
   { requested_context_window : int option
   ; final_runtime_context_window : int
@@ -602,7 +577,7 @@ let run_named
        | None ->
          (* Nothing strippable (e.g. only ToolResult-nested media): keep the
             inputs unchanged so the loud capability floor still applies. *)
-         goal_blocks, initial_messages, oas_checkpoint, Replay_prefix_unchanged
+         goal_blocks, initial_messages, oas_checkpoint, Keeper_replay_prefix.unchanged
        | Some note ->
          Log.Keeper.warn
            "%s: RFC-0265 media degrade on %s — dropped %s, continuing text-only"
@@ -616,17 +591,19 @@ let run_named
          let goal_with_note =
            stripped_goal @ [ Agent_sdk.Types.text_block note ]
          in
+         let dispatch_prefix =
+           match stripped_checkpoint with
+           | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
+           | None -> stripped_initial
+         in
          ( Some goal_with_note
          , stripped_initial
          , stripped_checkpoint
-         , Replay_prefix_media_degraded ))
+         , Keeper_replay_prefix.media_degraded
+             ~canonical_prefix:canonical_replay_prefix
+             ~dispatch_prefix ))
     | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
-      goal_blocks, initial_messages, oas_checkpoint, Replay_prefix_unchanged
-  in
-  let dispatch_replay_prefix =
-    match oas_checkpoint with
-    | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
-    | None -> initial_messages
+      goal_blocks, initial_messages, oas_checkpoint, Keeper_replay_prefix.unchanged
   in
   let transport_resolved =
     match transport with
@@ -777,22 +754,23 @@ let run_named
             match result with
             | Error _ as error -> error
             | Ok run_result ->
-              (match replay_prefix_projection, run_result.Runtime_agent.checkpoint with
-               | Replay_prefix_unchanged, _ | Replay_prefix_media_degraded, None ->
-                 Ok run_result
-               | Replay_prefix_media_degraded, Some checkpoint ->
+              (match run_result.Runtime_agent.checkpoint with
+               | None -> Ok run_result
+               | Some checkpoint ->
                  (match
-                    restore_canonical_replay_prefix
-                      ~canonical_prefix:canonical_replay_prefix
-                      ~dispatch_prefix:dispatch_replay_prefix
-                      ~checkpoint_messages:checkpoint.Agent_sdk.Checkpoint.messages
+                    Keeper_replay_prefix.restore_checkpoint
+                      replay_prefix_projection
+                      checkpoint
                   with
-                  | Ok messages ->
+                  | Ok checkpoint ->
                     Ok
                       { run_result with
-                        Runtime_agent.checkpoint = Some { checkpoint with messages }
+                        Runtime_agent.checkpoint = Some checkpoint
                       }
-                  | Error detail -> Error (Agent_sdk.Error.Internal detail)))
+                  | Error error ->
+                    Error
+                       (Agent_sdk.Error.Internal
+                          (Keeper_replay_prefix.restore_error_to_string error))))
           in
           let latency_ms =
             let ns =
@@ -845,7 +823,6 @@ module For_testing = struct
   let lane_modality_reroute_decision = lane_modality_reroute_decision
   let dedupe_runtimes_preserve_order = dedupe_runtimes_preserve_order
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
-	  let restore_canonical_replay_prefix = restore_canonical_replay_prefix
 	  let attempt_inference_policy = attempt_inference_policy
 	  let attempt_runtime_candidates = attempt_runtime_candidates
 

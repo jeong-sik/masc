@@ -83,6 +83,21 @@ let test_unregister_exact_preserves_replacement_lane () =
   | KR.Exact_entry_replaced -> fail "replacement identity changed unexpectedly"
 ;;
 
+let test_unregister_exact_accepts_same_lane_record_update () =
+  KR.clear ();
+  let observed = register "alice" in
+  (match
+     KR.update_entry ~base_path "alice" (fun entry ->
+       { entry with last_error = Some "immutable record replacement" })
+   with
+   | Ok () -> ()
+   | Error error -> fail (KR.registry_entry_validation_error_to_string error));
+  match KR.unregister_exact observed with
+  | KR.Exact_unregistered -> ()
+  | KR.Exact_entry_missing -> fail "same lane disappeared before removal"
+  | KR.Exact_entry_replaced -> fail "same lane record update was treated as ABA"
+;;
+
 let test_dispatch_write_failure_skips_phase_side_effects () =
   KR.clear ();
   KLH.reset_for_testing ();
@@ -242,6 +257,10 @@ let () =
             "stale entry preserves replacement lane"
             `Quick
             test_unregister_exact_preserves_replacement_lane
+        ; test_case
+            "same lane immutable update remains removable"
+            `Quick
+            test_unregister_exact_accepts_same_lane_record_update
         ] )
     ; ( "dispatch_event"
       , [ test_case

@@ -519,7 +519,12 @@ let remove_entry ?expected ~base_path name =
     | None -> Entry_missing
     | Some entry ->
       (match expected with
-       | Some expected_entry when entry != expected_entry -> Entry_replaced
+       | Some expected_entry
+         when not
+                (Keeper_lane.Id.equal
+                   (Keeper_lane.id entry.lane)
+                   (Keeper_lane.id expected_entry.lane)) ->
+         Entry_replaced
        | None | Some _ ->
          let updated = StringMap.remove key current in
          if Atomic.compare_and_set registry current updated

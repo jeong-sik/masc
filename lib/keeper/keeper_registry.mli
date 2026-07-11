@@ -71,9 +71,10 @@ type unregister_exact_result =
   | Exact_entry_missing
   | Exact_entry_replaced
 
-(** Remove [entry] only if it is still the exact registry value for its
-    [(base_path, name)] key. This prevents a stale sweep from unregistering a
-    newer same-name lane. *)
+(** Remove [entry] only if its typed lane identity still owns the
+    [(base_path, name)] key. Immutable registry field updates may replace the
+    record value while preserving the same lane; a newer same-name lane has a
+    different identity and is retained. *)
 val unregister_exact : registry_entry -> unregister_exact_result
 
 (** Look up a keeper by name. *)

@@ -37,13 +37,13 @@ type entry =
   }
 
 (** A request exists, but the supplied access identity does not own it (or
-    cannot be constructed).  The mismatch variants intentionally do not expose
-    the persisted owner value. *)
+    cannot be constructed). [Caller_mismatch] intentionally does not expose
+    the persisted owner value. A different base path is a different store and
+    therefore yields [Absent], not an ownership oracle. *)
 type access_rejection =
   | Invalid_base_path of { reason : string }
   | Invalid_caller
   | Invalid_request_id
-  | Base_path_mismatch
   | Caller_mismatch
 
 (** Outcome of looking up a request record.
@@ -62,9 +62,13 @@ type load_result =
 
 type submit_error =
   | Submit_rejected of access_rejection
+  | Invalid_timeout of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Background_switch_unavailable of { reason : string }
-  | Background_fork_failed of { reason : string }
+  | Background_fork_failed of
+      { request_id : string
+      ; reason : string
+      }
 
 type cancel_result =
   | Cancelled_request
@@ -97,6 +101,11 @@ type worker_abort_reason =
 
 (** {1 Submit and poll} *)
 
+val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
+(** Resolve the server-lifetime root switch without consulting the current
+    turn-local switch. Failure is typed and suitable for the same error envelope
+    as [submit]. *)
+
 (** [submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~f
     ~keeper_name ~base_path ~caller] forks a background daemon fiber on the
     explicitly supplied server-lifetime [background_sw].  The per-request
@@ -106,8 +115,10 @@ type worker_abort_reason =
     [clock] is provided,
     the worker records a terminal timeout error if [f] does not return before
     the deadline: [timeout_sec] when explicitly supplied, otherwise the
-    runtime-resolved keeper turn timeout. Cancellation of [sw] interrupts the
-    worker and records a terminal [Cancelled] state before stopping, so
+    runtime-resolved keeper turn timeout. A timeout must resolve to a finite
+    positive value before the request is persisted. Cancellation of the
+    per-request worker switch interrupts the worker and records a terminal
+    [Cancelled] state before stopping, so
     pollers do not observe an indefinite [Running] request. [Lost] is
     reserved for persisted non-terminal requests recovered without a live
     worker.
@@ -178,7 +189,7 @@ val entry_to_json : entry -> Yojson.Safe.t
 module For_testing : sig
   val record_schema_version : int
   val is_safe_request_id : string -> bool
-  val forget : base_path:string -> request_id:string -> unit
+  val forget : base_path:string -> caller:string -> request_id:string -> unit
   val clear : unit -> unit
   val record_path : base_path:string -> request_id:string -> string option
   val load_record : base_path:string -> request_id:string -> load_result

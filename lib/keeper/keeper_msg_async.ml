@@ -43,7 +43,6 @@ type access_rejection =
   | Invalid_base_path of { reason : string }
   | Invalid_caller
   | Invalid_request_id
-  | Base_path_mismatch
   | Caller_mismatch
 
 (** Outcome of looking up a request record. [Absent] means no record exists
@@ -58,9 +57,13 @@ type load_result =
 
 type submit_error =
   | Submit_rejected of access_rejection
+  | Invalid_timeout of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Background_switch_unavailable of { reason : string }
-  | Background_fork_failed of { reason : string }
+  | Background_fork_failed of
+      { request_id : string
+      ; reason : string
+      }
 
 type cancel_result =
   | Cancelled_request
@@ -94,14 +97,17 @@ type worker_abort_reason =
 module Request_key = struct
   type t =
     { base_path : string
+    ; submitted_by : string
     ; request_id : string
     }
 
   let equal a b =
-    String.equal a.base_path b.base_path && String.equal a.request_id b.request_id
+    String.equal a.base_path b.base_path
+    && String.equal a.submitted_by b.submitted_by
+    && String.equal a.request_id b.request_id
   ;;
 
-  let hash key = Hashtbl.hash (key.base_path, key.request_id)
+  let hash key = Hashtbl.hash (key.base_path, key.submitted_by, key.request_id)
 end
 
 module Request_table = Hashtbl.Make (Request_key)
@@ -119,6 +125,29 @@ let effective_timeout_sec ?timeout_sec () =
   match timeout_sec with
   | Some timeout_sec -> timeout_sec
   | None -> Keeper_runtime_resolved.turn_timeout_sec ()
+;;
+
+let resolve_timeout_sec ?timeout_sec () =
+  let value = effective_timeout_sec ?timeout_sec () in
+  if Float.is_finite value && value > 0.0
+  then Ok value
+  else
+    Error
+      (Invalid_timeout
+         { reason =
+             Printf.sprintf
+               "keeper_msg timeout_sec must be finite and greater than zero (resolved=%g)"
+               value
+         })
+;;
+
+let server_background_switch () =
+  match Eio_context.get_root_switch_opt () with
+  | Some sw -> Ok sw
+  | None ->
+    Error
+      (Background_switch_unavailable
+         { reason = "keeper_msg requires the server root switch (unavailable)" })
 ;;
 
 let request_dir ~base_path =
@@ -155,7 +184,9 @@ let resolve_access_identity ~base_path ~caller =
   Ok (base_path, submitted_by)
 ;;
 
-let request_key ~base_path ~request_id : Request_key.t = { base_path; request_id }
+let request_key ~base_path ~submitted_by ~request_id : Request_key.t =
+  { base_path; submitted_by; request_id }
+;;
 
 let max_request_id_len = 128
 
@@ -212,11 +243,6 @@ let access_rejection_to_json = function
       [ "error", `String "invalid_request_id"
       ; "message", `String "request_id contains invalid characters or length"
       ]
-  | Base_path_mismatch ->
-    `Assoc
-      [ "error", `String "request_base_path_mismatch"
-      ; "message", `String "request does not belong to this canonical base_path"
-      ]
   | Caller_mismatch ->
     `Assoc
       [ "error", `String "request_caller_mismatch"
@@ -226,6 +252,11 @@ let access_rejection_to_json = function
 
 let submit_error_to_json = function
   | Submit_rejected rejection -> access_rejection_to_json rejection
+  | Invalid_timeout { reason } ->
+    `Assoc
+      [ "error", `String "invalid_timeout"
+      ; "message", `String reason
+      ]
   | Initial_persistence_failed { reason } ->
     `Assoc
       [ "error", `String "request_persistence_failed"
@@ -236,9 +267,11 @@ let submit_error_to_json = function
       [ "error", `String "background_switch_unavailable"
       ; "message", `String reason
       ]
-  | Background_fork_failed { reason } ->
+  | Background_fork_failed { request_id; reason } ->
     `Assoc
       [ "error", `String "request_background_start_failed"
+      ; "request_id", `String request_id
+      ; "status", `String "lost"
       ; "message", `String reason
       ]
 ;;
@@ -640,8 +673,8 @@ let mark_lost_after_recovery (entry : entry) =
   | Error reason -> Error reason
 ;;
 
-let request_has_live_worker ~base_path request_id =
-  let key = request_key ~base_path ~request_id in
+let request_has_live_worker ~base_path ~submitted_by request_id =
+  let key = request_key ~base_path ~submitted_by ~request_id in
   Eio.Mutex.use_ro mu (fun () -> Request_table.mem pending key)
 ;;
 
@@ -663,7 +696,11 @@ let recover_lost_disk_records_canonical ~base_path =
                 else (
                   match load_record_canonical ~base_path ~request_id with
                   | Found ({ status = Queued | Running; _ } as entry) ->
-                    if request_has_live_worker ~base_path request_id
+                    if
+                      request_has_live_worker
+                        ~base_path
+                        ~submitted_by:entry.submitted_by
+                        request_id
                     then recovered
                     else (
                       (* See mark_lost_after_recovery: persisted status change is enough. *)
@@ -814,6 +851,7 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Submit_rejected rejection)
   | Ok (base_path, submitted_by) ->
+    let* worker_timeout_sec = resolve_timeout_sec ?timeout_sec () in
     gc_stale ();
     ignore (gc_stale_disk_canonical ~base_path);
     let request_id = generate_request_id () in
@@ -827,7 +865,7 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
       ; completed_at = None
       }
     in
-    let key = request_key ~base_path ~request_id in
+    let key = request_key ~base_path ~submitted_by ~request_id in
     with_lock (fun () -> Request_table.replace pending key entry);
     (match persist_entry entry |> observe_persist_error ~operation:"initial" entry with
      | Error reason ->
@@ -841,7 +879,6 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
        (match
           Eio.Fiber.fork_daemon ~sw:background_sw (fun () ->
     set_status_protected ~preserve_terminal:true key Running;
-    let worker_timeout_sec = effective_timeout_sec ?timeout_sec () in
     (* [f] owns any terminal signal it emits on its own side channels while
        it runs (e.g. push_worker_event in server_routes_http_keeper_stream's
        process_single_turn). Every catch arm below fires exactly when [f] was
@@ -948,18 +985,18 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
         with
         | () -> Ok request_id
         | exception exn ->
-          with_lock (fun () -> Request_table.remove pending key);
-          (match record_path ~base_path ~request_id with
-           | Some path -> ignore (remove_record_file path : bool)
-           | None -> ());
-          Error (Background_fork_failed { reason = Printexc.to_string exn })))
+          let reason =
+            Printf.sprintf
+              "keeper_msg request was persisted but its background worker could not start: %s"
+              (Printexc.to_string exn)
+          in
+          set_status_protected ~preserve_terminal:true key (Lost { reason });
+          Error (Background_fork_failed { request_id; reason })))
 ;;
 
 (** Exact owner check for both the process-global table and persisted rows. *)
-let owner_rejection ~base_path ~caller (entry : entry) =
-  if not (String.equal entry.base_path base_path)
-  then Some Base_path_mismatch
-  else if not (String.equal entry.submitted_by caller)
+let owner_rejection ~caller (entry : entry) =
+  if not (String.equal entry.submitted_by caller)
   then Some Caller_mismatch
   else None
 ;;
@@ -972,17 +1009,17 @@ let poll ~base_path ~caller request_id : load_result =
     if not (is_safe_request_id request_id)
     then Rejected Invalid_request_id
     else (
-      let key = request_key ~base_path ~request_id in
+      let key = request_key ~base_path ~submitted_by:caller ~request_id in
       match Eio.Mutex.use_ro mu (fun () -> Request_table.find_opt pending key) with
       | Some entry ->
-        (match owner_rejection ~base_path ~caller entry with
+        (match owner_rejection ~caller entry with
          | Some rejection -> Rejected rejection
          | None -> Found entry)
       | None ->
         ignore (gc_stale_disk_canonical ~base_path);
         (match load_record_canonical ~base_path ~request_id with
          | Found entry ->
-           (match owner_rejection ~base_path ~caller entry with
+           (match owner_rejection ~caller entry with
             | Some rejection -> Rejected rejection
             | None ->
               (match entry.status with
@@ -1002,7 +1039,7 @@ let list_for_keeper ~base_path ~caller ?keeper_name () :
     Eio.Mutex.use_ro mu (fun () ->
       Request_table.fold
         (fun _id entry acc ->
-           if Option.is_some (owner_rejection ~base_path ~caller entry)
+           if Option.is_some (owner_rejection ~caller entry)
            then acc
            else
              match keeper_name with
@@ -1085,13 +1122,13 @@ let cancel ~base_path ~caller request_id : cancel_result =
     if not (is_safe_request_id request_id)
     then Cancel_rejected Invalid_request_id
     else (
-      let key = request_key ~base_path ~request_id in
+      let key = request_key ~base_path ~submitted_by:caller ~request_id in
       let in_memory_decision =
         with_lock (fun () ->
           match Request_table.find_opt pending key with
           | None -> `Load_disk
           | Some entry ->
-            (match owner_rejection ~base_path ~caller entry with
+            (match owner_rejection ~caller entry with
              | Some rejection -> `Rejected rejection
              | None when is_terminal_status entry.status -> `Terminal entry.status
              | None ->
@@ -1131,7 +1168,7 @@ let cancel ~base_path ~caller request_id : cancel_result =
          | Unreadable reason -> Cancel_unreadable reason
          | Rejected rejection -> Cancel_rejected rejection
          | Found entry ->
-           (match owner_rejection ~base_path ~caller entry with
+           (match owner_rejection ~caller entry with
             | Some rejection -> Cancel_rejected rejection
             | None when is_terminal_status entry.status ->
               Cancel_already_terminal entry.status
@@ -1148,11 +1185,11 @@ let cancel ~base_path ~caller request_id : cancel_result =
 module For_testing = struct
   let record_schema_version = record_schema_version
   let is_safe_request_id = is_safe_request_id
-  let forget ~base_path ~request_id =
-    match canonical_base_path base_path with
+  let forget ~base_path ~caller ~request_id =
+    match resolve_access_identity ~base_path ~caller with
     | Error _ -> ()
-    | Ok base_path ->
-      let key = request_key ~base_path ~request_id in
+    | Ok (base_path, submitted_by) ->
+      let key = request_key ~base_path ~submitted_by ~request_id in
       with_lock (fun () -> Request_table.remove pending key)
   ;;
 

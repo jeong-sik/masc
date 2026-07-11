@@ -301,6 +301,15 @@ val authorize_tool_request :
   Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Check that the request is allowed to call [tool_name]. *)
 
+val authorize_tool_request_with_actor :
+  base_path:string ->
+  tool_name:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t -> (string, Masc_domain.masc_error) result
+(** Check [tool_name] authority and return the exact principal used for that
+    decision. Auth-disabled same-origin dashboard calls use the explicit
+    ["dashboard"] principal. *)
+
 val authorize_token_bound_permission_request :
   base_path:string ->
   permission:Masc_domain.permission ->
@@ -357,6 +366,14 @@ val with_tool_auth :
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Tool-call auth combinator. *)
+
+val with_tool_actor_auth :
+  tool_name:string ->
+  (Mcp_server.server_state ->
+   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Tool-call auth combinator that threads the exact authorized caller into the
+    handler instead of asking the handler to resolve identity again. *)
 
 val with_token_permission_auth :
   permission:Masc_domain.permission ->

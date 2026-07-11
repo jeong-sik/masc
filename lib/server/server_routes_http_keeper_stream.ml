@@ -368,7 +368,14 @@ let parse_keeper_chat_request_cancel_path request =
       | _ -> Error "expected /api/v1/gate/message/requests/<request_id>/cancel" )
   | None -> Error "invalid keeper chat request path"
 
-let handle_keeper_chat_request_result state request reqd =
+let http_status_of_access_rejection = function
+  | Keeper_msg_async.Invalid_base_path _
+  | Keeper_msg_async.Invalid_caller
+  | Keeper_msg_async.Invalid_request_id -> `Bad_request
+  | Keeper_msg_async.Caller_mismatch -> `Forbidden
+;;
+
+let handle_keeper_chat_request_result ~caller state request reqd =
   match parse_keeper_chat_request_result_path request with
   | Error message ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
@@ -376,7 +383,9 @@ let handle_keeper_chat_request_result state request reqd =
   | Ok request_id -> (
       match
         Keeper_msg_async.poll
-          ~base_path:(Mcp_server.workspace_config state).base_path request_id
+          ~base_path:(Mcp_server.workspace_config state).base_path
+          ~caller
+          request_id
       with
       | Keeper_msg_async.Absent ->
           respond_json_value_with_cors ~status:`Not_found request reqd
@@ -389,32 +398,42 @@ let handle_keeper_chat_request_result state request reqd =
                   "request record unreadable: %s — request was accepted but \
                    its result is lost"
                   reason))
+      | Keeper_msg_async.Rejected rejection ->
+          respond_json_value_with_cors
+            ~status:(http_status_of_access_rejection rejection)
+            request
+            reqd
+            (Keeper_msg_async.access_rejection_to_json rejection)
       | Keeper_msg_async.Found entry ->
           respond_json_value_with_cors ~status:`OK request reqd
             (Keeper_msg_async.entry_to_json entry) )
 
-let handle_keeper_chat_request_cancel state request reqd =
+let handle_keeper_chat_request_cancel ~caller state request reqd =
   match parse_keeper_chat_request_cancel_path request with
   | Error message ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (keeper_chat_stream_error_json message)
   | Ok request_id ->
-      let cancelled =
+      let result =
         Keeper_msg_async.cancel
-          ~base_path:(Mcp_server.workspace_config state).base_path request_id
+          ~base_path:(Mcp_server.workspace_config state).base_path
+          ~caller
+          request_id
       in
-      if cancelled then
-        respond_json_value_with_cors ~status:`OK request reqd
-          (`Assoc
-            [
-              ("request_id", `String request_id);
-              ("status", `String "cancelled");
-              ("message", `String "Keeper turn cancelled successfully.");
-            ])
-      else
-        respond_json_value_with_cors ~status:`Not_found request reqd
-          (keeper_chat_stream_error_json
-             "request_id not found or already finished")
+      let status =
+        match result with
+        | Keeper_msg_async.Cancelled_request -> `OK
+        | Keeper_msg_async.Cancel_not_found -> `Not_found
+        | Keeper_msg_async.Cancel_rejected rejection ->
+            http_status_of_access_rejection rejection
+        | Keeper_msg_async.Cancel_already_terminal _ -> `Conflict
+        | Keeper_msg_async.Cancel_unreadable _
+        | Keeper_msg_async.Cancel_persistence_failed _
+        | Keeper_msg_async.Cancel_worker_signal_failed _ ->
+            `Internal_server_error
+      in
+      respond_json_value_with_cors ~status request reqd
+        (Keeper_msg_async.cancel_result_to_json ~request_id result)
 
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
@@ -1085,15 +1104,18 @@ let body_with_rewritten_payload ~fallback payload_json_opt =
   | Some (`Assoc _ as payload_json) -> Yojson.Safe.to_string payload_json
   | Some _ | None -> fallback
 
-let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
+let keeper_request_terminal_payload ?request_id ~keeper_name ~status ~ok
     ?(message = "") () =
   let fields =
-    [
-      ("request_id", `String request_id);
-      ("keeper_name", `String keeper_name);
-      ("status", `String status);
-      ("ok", `Bool ok);
+    [ ("keeper_name", `String keeper_name)
+    ; ("status", `String status)
+    ; ("ok", `Bool ok)
     ]
+  in
+  let fields =
+    match request_id with
+    | Some request_id -> ("request_id", `String request_id) :: fields
+    | None -> fields
   in
   let fields =
     if String.trim message = "" then fields
@@ -1194,9 +1216,9 @@ let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
    the user line, and whether this turn was dispatched from the queue
    consumer. *)
 let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
-    ~state ~clock ~sw ~auth_token ~thread_id ~continuation_channel ~closed
+    ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
-    ~payload ~run_id ~message_id ~agent_name
+    ~payload ~run_id ~message_id ~agent_name ~submitted_by
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
   let base_path = (Mcp_server.workspace_config state).base_path in
   let redaction =
@@ -1407,17 +1429,27 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     in
     push_worker_event (Stream_terminal { ok = false; status; body; queued_outcome })
   in
-  let request_id =
-    Keeper_msg_async.submit ?timeout_sec ~clock ~sw ~on_worker_aborted
-      ~base_path
-      ~keeper_name:payload.name
-      ~f:(fun () ->
+  let submit_result =
+    match Keeper_msg_async.server_background_switch () with
+    | Error error ->
+        Error
+          (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+    | Ok background_sw ->
+      Keeper_msg_async.submit
+        ?timeout_sec
+        ~clock
+        ~background_sw
+        ~on_worker_aborted
+        ~base_path
+        ~caller:submitted_by
+        ~keeper_name:payload.name
+        ~f:(fun request_sw ->
         let start_time = Time_compat.now () in
         let dispatch_result =
           try
             if dashboard_direct_stream then
               match
-                execute_keeper_stream_tool_streaming_if_free ~sw ~clock
+                execute_keeper_stream_tool_streaming_if_free ~sw:request_sw ~clock
                   ?auth_token
                   state ~agent_name ~arguments:args ~on_event
                   ~continuation_channel
@@ -1434,7 +1466,10 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                    | Error message -> Error message)
             else
               (match
-                 execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token
+                 execute_keeper_stream_tool_streaming
+                   ~sw:request_sw
+                   ~clock
+                   ?auth_token
                    state ~agent_name ~arguments:args ~on_event
                    ~continuation_channel ~on_text_delta:(fun _ -> ())
                with
@@ -1451,7 +1486,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                 (try
                    Ok
                      (`Ran
-	                        (execute_keeper_stream_tool ~sw ~clock
+	                        (execute_keeper_stream_tool ~sw:request_sw ~clock
 	                           ?auth_token
 	                           state ~agent_name ~arguments:args
                             ~continuation_channel))
@@ -1707,11 +1742,39 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               (Stream_terminal
                  { ok = false; status = "error"; body = err; queued_outcome });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
-      ()
+        ()
+      |> Result.map_error (fun error ->
+        Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
   in
-  (match client_disconnects with
-   | None -> ()
-   | Some (disconnect_sw, disconnects) ->
+  let request_id =
+    match submit_result with
+    | Ok request_id -> Some request_id
+    | Error body ->
+        let persisted = persist_failure_reply body in
+        let queued_outcome =
+          if not queued_turn then None
+          else
+            match persisted with
+            | Ok () -> Some (Failed { kind = Turn_failed; detail = body })
+            | Error persist_error ->
+                Some
+                  (Failed
+                     { kind = Transcript_persist_failed
+                     ; detail = persist_error
+                     })
+        in
+        push_worker_event
+          (Stream_terminal
+             { ok = false
+             ; status = "rejected"
+             ; body
+             ; queued_outcome
+             });
+        None
+  in
+  (match client_disconnects, request_id with
+   | None, _ | _, None -> ()
+   | Some (disconnect_sw, disconnects), Some request_id ->
        Eio.Fiber.fork ~sw:disconnect_sw (fun () ->
          match
            Eio.Fiber.first
@@ -1731,46 +1794,49 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  payload.name request_id;
                push_worker_event Stream_client_disconnected
              end));
-  Log.Keeper.info
-    "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
-    payload.name request_id
-    (if has_connector_context payload then payload.channel else "dashboard");
-  Keeper_chat_events.publish events
-    (Custom
-       { name = "KEEPER_QUEUE_REQUEST";
-         value =
-           Gate_protocol.message_request_to_json
-             { request_id;
-               destination_type = "keeper";
-               destination_id = payload.name;
-               channel =
-                 (if has_connector_context payload then payload.channel
-                  else "dashboard");
-               actor_id = Some agent_name;
-               status = Gate_protocol.Queued;
-               modalities = modalities_for_request payload;
-               transport = Some "sse";
-               metadata =
-                 [
-                   ("projection", "keeper_chat_stream");
-                   ("protocol", "gate_message_request");
-                 ];
-             }
-       });
+  Option.iter
+    (fun request_id ->
+       Log.Keeper.info
+         "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
+         payload.name request_id
+         (if has_connector_context payload then payload.channel else "dashboard");
+       Keeper_chat_events.publish events
+         (Custom
+            { name = "KEEPER_QUEUE_REQUEST"
+            ; value =
+                Gate_protocol.message_request_to_json
+                  { request_id
+                  ; destination_type = "keeper"
+                  ; destination_id = payload.name
+                  ; channel =
+                      (if has_connector_context payload then payload.channel
+                       else "dashboard")
+                  ; actor_id = Some agent_name
+                  ; status = Gate_protocol.Queued
+                  ; modalities = modalities_for_request payload
+                  ; transport = Some "sse"
+                  ; metadata =
+                      [ ("projection", "keeper_chat_stream")
+                      ; ("protocol", "gate_message_request")
+                      ]
+                  }
+            }))
+    request_id;
   let publish_terminal ~status ~ok ?(message = "") () =
     let message = redact_text message in
     let payload_json =
-      keeper_request_terminal_payload ~request_id ~keeper_name:payload.name
+      keeper_request_terminal_payload ?request_id ~keeper_name:payload.name
         ~status ~ok ~message ()
     in
+    let request_label = Option.value ~default:"not-accepted" request_id in
     if ok || String.equal status "cancelled" then
       Log.Keeper.info
         "keeper_stream: request terminal keeper=%s request_id=%s status=%s"
-        payload.name request_id status
+        payload.name request_label status
     else
       Log.Keeper.warn
         "keeper_stream: request terminal keeper=%s request_id=%s status=%s message=%s"
-        payload.name request_id status message;
+        payload.name request_label status message;
       Keeper_chat_events.publish events
         (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
   in
@@ -1887,8 +1953,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  { name = "KEEPER_CONTINUATION_CHECKPOINT";
                    value =
                      `Assoc
-                       [ ("request_id", `String request_id);
-                         ("message", `String visible_reply) ]
+                       (("message", `String visible_reply)
+                        :: (match request_id with
+                            | Some request_id ->
+                                [ ("request_id", `String request_id) ]
+                            | None -> []))
                  });
           publish_terminal ~status:"done" ~ok:true ();
           Keeper_chat_events.publish events Text_message_end;
@@ -1928,7 +1997,7 @@ let keeper_chat_stream_headers origin =
      ]
     @ cors_headers origin)
 
-let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
+let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
   let redaction =
     Keeper_secret_redaction.snapshot
       ~base_path:(Mcp_server.workspace_config state).base_path
@@ -2206,12 +2275,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                  ~channel:payload.channel
                  ~channel_workspace_id:payload.channel_workspace_id
                  ~channel_user_id:payload.channel_user_id
-             else
-               match agent_from_request request with
-               | Some raw ->
-                   let trimmed = String.trim raw in
-                   if trimmed <> "" then trimmed else "unknown"
-               | None -> "unknown"
+             else submitted_by
            in
            let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
            let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
@@ -2236,11 +2300,11 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
              ignore
                (process_single_turn ~connector_user_line_recorded_upstream:false
                   ~queued_turn:false
-                  ~state ~clock ~sw
+                  ~state ~clock
                   ~auth_token:(auth_token_from_request request)
                   ~thread_id ~continuation_channel ~closed
                   ~client_disconnects:(Some (stream_sw, client_disconnects))
-                  ~payload ~run_id ~message_id ~agent_name ~events
+                  ~payload ~run_id ~message_id ~agent_name ~submitted_by ~events
                 : queued_turn_outcome option);
              wait_for_adapter_finished ()
            in

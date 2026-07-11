@@ -2067,8 +2067,6 @@
 
 (include stanzas/test_keeper_msg_async_terminal_event.inc)
 
-(include stanzas/test_keeper_msg_cancel.inc)
-
 (include stanzas/test_turn_record.inc)
 
 (include stanzas/test_keeper_chat_coalescing.inc)

@@ -116,12 +116,14 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** {1 Queue request handlers} *)
 
 val handle_keeper_chat_request_result :
+  caller:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [GET /api/v1/keepers/chat/requests/<request_id>].
     Reads the async keeper message request state directly from
     {!Keeper_msg_async} without requiring an MCP session. *)
 
 val handle_keeper_chat_request_cancel :
+  caller:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/chat/requests/<request_id>/cancel].
     Cancels a live async keeper message request when it is still
@@ -141,6 +143,7 @@ val handle_keeper_turn_interrupt :
 val handle_keeper_chat_stream :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  submitted_by:string ->
   Mcp_server.server_state ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
@@ -182,7 +185,6 @@ val process_single_turn :
   queued_turn:bool ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  sw:Eio.Switch.t ->
   auth_token:string option ->
   thread_id:string ->
   continuation_channel:Keeper_continuation_channel.t ->
@@ -192,11 +194,12 @@ val process_single_turn :
   run_id:string ->
   message_id:string ->
   agent_name:string ->
+  submitted_by:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   queued_turn_outcome option
 (** Execute a single keeper turn, publishing events to the provided
-    event stream. [sw] owns the async keeper_msg worker and must outlive
-    a single HTTP stream when resumable dashboard requests are used.
+    event stream. The async keeper_msg worker is always forked under the
+    server root switch and owns a separate per-request cancellation switch.
     [closed] is a mutable flag that suppresses worker event pushes when
     set to [true] (used by the SSE adapter when the HTTP stream is
     closed). [client_disconnects] carries the HTTP stream switch and

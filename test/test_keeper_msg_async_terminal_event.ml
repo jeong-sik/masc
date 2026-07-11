@@ -21,9 +21,17 @@ module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_types_profile = Masc.Keeper_types_profile
 
 (* [Keeper_msg_async.submit] persists request records to disk via
-   [Keeper_fs.save_json_atomic]; test_keeper_msg_cancel.ml establishes this
-   precondition for the same submit-and-persist path. *)
+   [Keeper_fs.save_json_atomic]; [test_keeper_mutex_coverage] exercises the
+   same accepted-submit and persisted-terminal path. *)
 let () = Mirage_crypto_rng_unix.use_default ()
+let caller = "terminal-event-test-caller"
+
+let accepted_request_id = function
+  | Ok request_id -> request_id
+  | Error error ->
+    fail
+      (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+;;
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -71,16 +79,18 @@ let test_timeout_invokes_on_worker_aborted_exactly_once () =
             ~clock
             ~timeout_sec:0.01
             ~on_worker_aborted:(fun reason -> aborted := reason :: !aborted)
-            ~sw
+            ~background_sw:sw
             ~base_path
+            ~caller
             ~keeper_name:"terminal-event-timeout"
-            ~f:(fun () ->
+            ~f:(fun _request_sw ->
               (* Sleeps far past the 0.01s timeout budget so
                  [Eio.Time.with_timeout_exn] cancels this fiber before it
                  ever returns — [f] never reaches its own completion. *)
               Eio.Time.sleep clock 5.0;
               Keeper_types_profile.tool_result_ok "unreachable")
             ()
+          |> accepted_request_id
         in
         let fired =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
@@ -101,7 +111,7 @@ let test_timeout_invokes_on_worker_aborted_exactly_once () =
                 (List.length reasons)));
         (* The pre-existing polling table must still record the timeout
            terminally — this fix must not regress that contract. *)
-        match Keeper_msg_async.poll ~base_path request_id with
+        match Keeper_msg_async.poll ~base_path ~caller request_id with
         | Keeper_msg_async.Found { status = Keeper_msg_async.Done { ok = false; _ }; _ } -> ()
         | Keeper_msg_async.Found { status; _ } ->
           fail
@@ -109,7 +119,8 @@ let test_timeout_invokes_on_worker_aborted_exactly_once () =
                (Keeper_msg_async.status_to_string status))
         | Keeper_msg_async.Absent -> fail "request record unexpectedly absent"
         | Keeper_msg_async.Unreadable reason ->
-          fail (Printf.sprintf "request record unreadable: %s" reason))))
+          fail (Printf.sprintf "request record unreadable: %s" reason)
+        | Keeper_msg_async.Rejected _ -> fail "request access unexpectedly rejected")))
 ;;
 
 let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
@@ -126,19 +137,22 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
             ~clock
             ~timeout_sec:5.0
             ~on_worker_aborted:(fun reason -> aborted := reason :: !aborted)
-            ~sw
+            ~background_sw:sw
             ~base_path
+            ~caller
             ~keeper_name:"terminal-event-operator-cancel"
-            ~f:(fun () ->
+            ~f:(fun _request_sw ->
               f_was_called := true;
               Eio.Promise.resolve worker_started_resolver ();
               Eio.Promise.await never;
               Keeper_types_profile.tool_result_ok "unreachable")
             ()
+          |> accepted_request_id
         in
         Eio.Promise.await worker_started;
-        let cancelled = Keeper_msg_async.cancel ~base_path request_id in
-        check bool "cancel accepted the running request" true cancelled;
+        let cancelled = Keeper_msg_async.cancel ~base_path ~caller request_id in
+        check bool "cancel accepted the running request" true
+          (cancelled = Keeper_msg_async.Cancelled_request);
         let fired =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
             not (List.is_empty !aborted))
@@ -168,15 +182,17 @@ let test_normal_completion_never_invokes_on_worker_aborted () =
             ~clock
             ~timeout_sec:5.0
             ~on_worker_aborted:(fun reason -> aborted := reason :: !aborted)
-            ~sw
+            ~background_sw:sw
             ~base_path
+            ~caller
             ~keeper_name:"terminal-event-normal-completion"
-            ~f:(fun () -> Keeper_types_profile.tool_result_ok "ok")
+            ~f:(fun _request_sw -> Keeper_types_profile.tool_result_ok "ok")
             ()
+          |> accepted_request_id
         in
         let reached_done =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
-            match Keeper_msg_async.poll ~base_path request_id with
+            match Keeper_msg_async.poll ~base_path ~caller request_id with
             | Keeper_msg_async.Found { status = Keeper_msg_async.Done _; _ } -> true
             | _ -> false)
         in

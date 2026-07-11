@@ -490,6 +490,28 @@ let test_anchored_root_rejects_symlink () =
   | exception Unix.Unix_error _ -> ()
   | () -> Alcotest.fail "symlinked root was accepted as an anchored capability"
 
+let test_anchored_lock_file_rejects_symlink () =
+  with_temp_base @@ fun base_path ->
+  let module Dir = Fs_compat.Anchored_dir in
+  let outside = Filename.concat base_path "outside.lock" in
+  let link = Filename.concat base_path "managed.lock" in
+  Fs_compat.save_file_unix outside "sentinel";
+  Unix.symlink outside link;
+  Dir.with_open_root base_path @@ fun root ->
+  (match
+     Dir.with_lock_file
+       root
+       ~name:(anchored_segment "managed.lock")
+       ~perm:0o600
+       (fun _ -> ())
+   with
+   | exception Unix.Unix_error _ -> ()
+   | () -> Alcotest.fail "symlinked lock file was accepted");
+  Alcotest.(check string)
+    "symlink target unchanged"
+    "sentinel"
+    (Fs_compat.load_file_unix outside)
+
 let test_anchored_segments_reject_ambiguous_names () =
   let module Segment = Fs_compat.Anchored_dir.Segment in
   List.iter
@@ -545,6 +567,8 @@ let () =
             test_anchored_capability_survives_path_substitution;
           Alcotest.test_case "symlinked root rejected" `Quick
             test_anchored_root_rejects_symlink;
+          Alcotest.test_case "symlinked lock file rejected" `Quick
+            test_anchored_lock_file_rejects_symlink;
           Alcotest.test_case "ambiguous segments rejected" `Quick
             test_anchored_segments_reject_ambiguous_names;
         ] );

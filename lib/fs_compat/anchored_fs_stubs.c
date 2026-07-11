@@ -83,6 +83,23 @@ CAMLprim value masc_anchored_open_read(value directory, value name)
   CAMLreturn(Val_int(fd));
 }
 
+CAMLprim value masc_anchored_open_write(value directory, value name)
+{
+  CAMLparam1(name);
+  char *copied_name;
+  int fd;
+
+  caml_unix_check_path(name, "anchored_open_write");
+  copied_name = caml_stat_strdup(String_val(name));
+  caml_enter_blocking_section();
+  fd = openat(anchored_fd(directory), copied_name,
+              O_WRONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+  caml_leave_blocking_section();
+  stat_free_preserving_errno(copied_name);
+  if (fd == -1) uerror("anchored_open_write", name);
+  CAMLreturn(Val_int(fd));
+}
+
 CAMLprim value masc_anchored_create_exclusive(value directory, value name, value mode)
 {
   CAMLparam1(name);

@@ -37,6 +37,11 @@ type stat =
   ; link_count : int64
   }
 
+type directory_identity =
+  { device : int64
+  ; inode : int64
+  }
+
 type mutation_error =
   | Not_committed of
       { cause : exn
@@ -49,6 +54,18 @@ val mutation_error_to_string : mutation_error -> string
 val with_open_root : string -> (t -> 'a) -> 'a
 (** Open an existing real directory without following a final symlink and close
     the capability after the callback. Close failures are never discarded. *)
+
+val identity : t -> directory_identity
+(** Stable identity of the opened directory capability. Unlike a path spelling,
+    this remains unchanged if the directory is renamed while it is open. *)
+
+val with_lock_file :
+  t -> name:Segment.t -> perm:int -> (Unix.file_descr -> 'a) -> 'a
+(** Open or create one regular lock file relative to the directory capability,
+    without following a final symlink. A newly-created lock file and directory
+    entry are fsynced before the callback. The descriptor remains open for the
+    callback and is closed on every exit; closing releases any POSIX record lock
+    acquired by the callback. *)
 
 val with_open_dir : t -> Segment.t -> (t -> 'a) -> 'a
 (** Open one existing child directory without following symlinks. *)

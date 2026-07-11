@@ -13,6 +13,33 @@
 
 module SMap = Set_util.StringMap
 
+module Key = struct
+  type t =
+    { directory_device : int64
+    ; directory_inode : int64
+    ; entry : string
+    }
+
+  let directory_entry ~directory_device ~directory_inode ~entry =
+    { directory_device; directory_inode; entry }
+  ;;
+
+  let equal left right =
+    Int64.equal left.directory_device right.directory_device
+    && Int64.equal left.directory_inode right.directory_inode
+    && String.equal left.entry right.entry
+  ;;
+
+  let registry_key key =
+    Printf.sprintf
+      "descriptor:%Lx:%Lx:%d:%s"
+      key.directory_device
+      key.directory_inode
+      (String.length key.entry)
+      key.entry
+  ;;
+end
+
 exception Flock_timeout of { caller : string; path : string; attempts : int }
 
 (** Observability hook fired after each [acquire_flock_retry*] attempt
@@ -178,9 +205,15 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
     that do not honor the non-blocking contract reliably. Retry sleep yields
     to the Eio scheduler when a clock is available and otherwise sleeps in a
     systhread so the calling fiber does not block the domain. *)
-let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
-    ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
-  let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
+let acquire_flock_on_fd_cooperative
+      ?clock
+      ~fd
+      ~lock_path
+      ?(max_attempts = 200)
+      ?(sleep_sec = 0.01)
+      ~caller
+      ()
+  =
   let started_at = Time_compat.now () in
   let rec acquire attempts =
     if attempts <= 0 then begin
@@ -210,7 +243,21 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
         acquire (attempts - 1)
       end
   in
-  try acquire max_attempts
+  acquire max_attempts
+;;
+
+let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
+    ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
+  let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
+  try
+    acquire_flock_on_fd_cooperative
+      ?clock
+      ~fd
+      ~lock_path
+      ~max_attempts
+      ~sleep_sec
+      ~caller
+      ()
   with exn ->
     run_blocking_lock_op (fun () -> try Unix.close fd with Unix.Unix_error _ -> ());
     raise exn
@@ -250,6 +297,23 @@ let with_lock ?clock path f =
       f
   in
   with_mutex path (fun () -> run_with_flock ())
+
+(** Descriptor-relative counterpart of [with_lock]. [with_file] must keep the
+    supplied descriptor open for its callback and close it before returning.
+    The cooperative mutex encloses [with_file], so the POSIX lock is released by
+    close before another same-process fiber can enter the critical section. *)
+let with_lock_file ?clock ~key ~path ~with_file f =
+  with_mutex (Key.registry_key key) (fun () ->
+    with_file (fun fd ->
+      ignore
+        (acquire_flock_on_fd_cooperative
+           ?clock
+           ~fd
+           ~lock_path:path
+           ~caller:"File_lock_eio"
+           ()
+         : Unix.file_descr);
+      f ()))
 
 (** Number of tracked lock paths (for diagnostics). *)
 let lock_count () = SMap.cardinal (Atomic.get table).entries

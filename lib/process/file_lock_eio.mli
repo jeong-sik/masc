@@ -71,6 +71,17 @@ val release_flock_fd : Unix.file_descr -> unit
 
 (** {1 High-level scoped locking} *)
 
+module Key : sig
+  type t
+
+  val directory_entry :
+    directory_device:int64 -> directory_inode:int64 -> entry:string -> t
+  (** Same-process lock identity for one entry in an already-open directory.
+      It is independent of the path spelling used to reach that directory. *)
+
+  val equal : t -> t -> bool
+end
+
 (** [with_mutex path f] runs [f] while holding the cooperative
     per-[path] Eio.Mutex only. Use for in-memory backends that need
     single-process fiber serialisation but have no filesystem
@@ -86,6 +97,18 @@ val with_lock :
   string ->
   (unit -> 'a) ->
   'a
+
+val with_lock_file :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> key:Key.t
+  -> path:string
+  -> with_file:((Unix.file_descr -> 'a) -> 'a)
+  -> (unit -> 'a)
+  -> 'a
+(** Descriptor-relative counterpart of {!with_lock}. [with_file] opens the lock
+    artifact without path re-resolution, keeps its descriptor open for the
+    supplied callback, and closes it before returning. [key] provides canonical
+    same-process serialization; [path] is diagnostic only. *)
 
 (** {1 Observability hook} *)
 

@@ -452,6 +452,84 @@ let test_transition_outbox_projects_with_stable_identity () =
     |> require_ok "empty outbox projection is idempotent")
 ;;
 
+let test_registration_preparation_is_atomic_and_fail_closed () =
+  with_temp_dir "keeper-event-queue-v2-registration" (fun base_path ->
+    let keeper_name = "registration_keeper" in
+    let source = stimulus "abandoned" 1.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending source)
+    |> require_ok "seed registration source";
+    ignore
+      (Persistence.claim_when_result
+         ~base_path
+         ~keeper_name
+         ~claimed_at:2.0
+         ~ready:(fun _ -> true)
+         ()
+       |> require_ok "claim registration source"
+       |> require_some "registration lease");
+    let pending =
+      Persistence.prepare_registration_result
+        ~base_path
+        ~keeper_name
+        ~settled_at:3.0
+        ()
+      |> require_ok "prepare registration"
+    in
+    Alcotest.(check (list string))
+      "abandoned lease returned to pending"
+      [ "abandoned" ]
+      (post_ids pending);
+    let prepared =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load prepared registration state"
+    in
+    Alcotest.(check int) "registration leaves no active lease" 0 (List.length (State.leases prepared));
+    Alcotest.(check int)
+      "registration records one recovery transition"
+      1
+      (List.length (State.transition_outbox prepared));
+    let prepared_revision = State.revision prepared in
+    ignore
+      (Persistence.prepare_registration_result
+         ~base_path
+         ~keeper_name
+         ~settled_at:4.0
+         ()
+       |> require_ok "repeat prepared registration");
+    let repeated =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load repeated registration state"
+    in
+    Alcotest.(check int64)
+      "repeat registration does not synthesize a transition"
+      prepared_revision
+      (State.revision repeated);
+    Alcotest.(check int)
+      "repeat registration retains one recovery transition"
+      1
+      (List.length (State.transition_outbox repeated));
+
+    let malformed_keeper = "malformed_registration_keeper" in
+    let malformed_path =
+      Filename.concat
+        (keeper_dir ~base_path ~keeper_name:malformed_keeper)
+        "event-queue.json"
+    in
+    Fs_compat.mkdir_p (Filename.dirname malformed_path);
+    Fs_compat.save_file_atomic malformed_path "{}"
+    |> require_ok "write malformed registration state";
+    (match
+       Persistence.prepare_registration_result
+         ~base_path
+         ~keeper_name:malformed_keeper
+         ~settled_at:5.0
+         ()
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "malformed registration state became an empty queue"))
+;;
+
 let test_failed_owner_write_does_not_block_peer_lane () =
   with_temp_dir "keeper-event-queue-v2-fault" (fun base_path ->
     let broken = "broken_lane" in
@@ -501,6 +579,10 @@ let () =
             "transition outbox projection"
             `Quick
             test_transition_outbox_projects_with_stable_identity
+        ; Alcotest.test_case
+            "registration preparation"
+            `Quick
+            test_registration_preparation_is_atomic_and_fail_closed
         ; Alcotest.test_case
             "lane write fault isolation"
             `Quick

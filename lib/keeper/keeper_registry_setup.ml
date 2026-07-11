@@ -352,48 +352,13 @@ let update_entry_if_registered_unit ~base_path name f =
   ignore (update_entry_if_registered ~base_path name (fun entry -> f entry, true))
 ;;
 
-let rec queue_contains_stimulus queue stimulus =
-  match Keeper_event_queue.dequeue queue with
-  | None -> false
-  | Some (head, rest) -> head = stimulus || queue_contains_stimulus rest stimulus
-;;
-
-let enqueue_missing_stimulus queue stimulus =
-  if queue_contains_stimulus queue stimulus
-  then queue
-  else Keeper_event_queue.enqueue queue stimulus
-;;
-
-let merge_event_queues ~durable ~live =
-  let rec loop acc queue =
-    match Keeper_event_queue.dequeue queue with
-    | None -> acc
-    | Some (stimulus, rest) -> loop (enqueue_missing_stimulus acc stimulus) rest
-  in
-  loop durable live
-;;
-
-let refresh_entry_event_queue_from_persistence ~base_path name entry =
-  let durable = Keeper_event_queue_persistence.load ~base_path ~keeper_name:name in
-  let rec loop () =
-    let live = Atomic.get entry.event_queue in
-    let merged = merge_event_queues ~durable ~live in
-    if merged = live
-    then ()
-    else if Atomic.compare_and_set entry.event_queue live merged
-    then
-      Keeper_event_queue_persistence.persist_snapshot
-        ~base_path
-        ~keeper_name:name
-        (fun () -> Atomic.get entry.event_queue)
-    else loop ()
-  in
-  loop ()
-;;
-
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Registration_invalid of registry_entry_validation_error
+  | Registration_event_queue_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
 
 let register_with_state_result
       ~respect_shutdown_fence
@@ -412,9 +377,15 @@ let register_with_state_result
     (Keeper_state_machine.phase_to_string phase);
   let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
-  let initial_event_queue =
-    Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
-  in
+  match
+    Keeper_event_queue_persistence.prepare_registration_result
+      ~base_path
+      ~keeper_name:name
+      ~settled_at:(Time_compat.now ())
+      ()
+  with
+  | Error detail -> Error (Registration_event_queue_unavailable { keeper_name = name; detail })
+  | Ok initial_event_queue ->
   let entry =
     { base_path
     ; name
@@ -492,7 +463,6 @@ let register_with_state_result
       "registry: keeper registered name=%s running_count=%d"
       name
       (Atomic.get running_count_atomic);
-    refresh_entry_event_queue_from_persistence ~base_path name entry;
     Ok entry
 ;;
 
@@ -509,6 +479,12 @@ let register_with_state ~base_path name meta ~phase ~conditions =
   | Ok entry -> entry
   | Error (Registration_invalid error) ->
     invalid_arg (registry_entry_validation_error_to_string error)
+  | Error (Registration_event_queue_unavailable { keeper_name; detail }) ->
+    invalid_arg
+      (Printf.sprintf
+         "keeper registration event queue unavailable keeper=%s: %s"
+         keeper_name
+         detail)
   | Error (Registration_shutdown_reserved _) ->
     invalid_arg "unchecked registry registration observed a shutdown fence"
 ;;
@@ -556,6 +532,10 @@ let register_offline_if_admitted ~base_path name meta =
 type register_restarting_error =
   | Budget_already_exhausted of { name : string }
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_event_queue_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
 
 let register_restarting ~base_path name meta
   : (registry_entry, register_restarting_error) result
@@ -577,9 +557,15 @@ let register_restarting ~base_path name meta
      re-allocating. Pending Event Layer stimuli are restored from the durable
      queue snapshot instead of being reset across restart. *)
   let done_p, done_r = Eio.Promise.create () in
-  let initial_event_queue =
-    Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
-  in
+  match
+    Keeper_event_queue_persistence.prepare_registration_result
+      ~base_path
+      ~keeper_name:name
+      ~settled_at:(Time_compat.now ())
+      ()
+  with
+  | Error detail -> Error (Restart_event_queue_unavailable { keeper_name = name; detail })
+  | Ok initial_event_queue ->
   let new_entry =
     { base_path
     ; name
@@ -645,7 +631,6 @@ let register_restarting ~base_path name meta
       name
       base_path
       (Keeper_state_machine.phase_to_string phase);
-    refresh_entry_event_queue_from_persistence ~base_path name registered;
     Ok registered
 ;;
 

@@ -53,9 +53,17 @@ val transition_outbox_result :
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Compatibility replay projection: pending followed by active lease stimuli.
     New live registry code should use {!load_pending} after explicitly
-    recovering abandoned leases at registration. *)
+    recovering abandoned leases at registration. Raises [Failure] when the
+    durable state is unavailable; it never substitutes an empty queue. *)
+
+val load_result :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
+(** Result-returning replay projection for callers that can propagate a durable
+    read failure. *)
 
 val load_pending : base_path:string -> keeper_name:string -> Keeper_event_queue.t
+(** Compatibility pending projection. Raises [Failure] on a durable read
+    failure; use {!load_pending_result} in production control flow. *)
 
 val load_pending_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
@@ -125,16 +133,17 @@ val settle_result :
   unit ->
   (settle_result, string) result
 
-val recover_leases_result :
+val prepare_registration_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   settled_at:float ->
   unit ->
-  (unit, string) result
-(** Registration boundary for a newly-owned lane.  Requeues abandoned leases
-    and records one stable [Registration_recovery] transition per lease in the
-    same state write. *)
+  (Keeper_event_queue.t, string) result
+(** Registration boundary for a newly-owned lane. Requeues an abandoned lease,
+    records its stable [Registration_recovery] transition, and returns the
+    resulting pending projection from the same durable transaction. A malformed
+    state is an [Error]; registration must not substitute an empty queue. *)
 
 val mark_transition_projected_result :
   base_path:string ->

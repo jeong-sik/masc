@@ -297,29 +297,38 @@ let replay_queue state =
 ;;
 
 let load_with_projection ~projection ~base_path ~keeper_name =
-  match load_state_result ~base_path ~keeper_name with
-  | Ok state -> projection state
-  | Error message ->
-    Log.Keeper.error
-      "event_queue_snapshot: refusing unreadable state keeper=%s: %s"
-      keeper_name
-      message;
-    Keeper_event_queue.empty
+  load_state_result ~base_path ~keeper_name |> Result.map projection
+;;
+
+let load_result ~base_path ~keeper_name =
+  load_with_projection ~projection:replay_queue ~base_path ~keeper_name
+;;
+
+let unavailable_projection_exn ~keeper_name message =
+  Failure
+    (Printf.sprintf
+       "event queue state unavailable keeper=%s: %s"
+       keeper_name
+       message)
 ;;
 
 let load ~base_path ~keeper_name =
-  let queue = load_with_projection ~projection:replay_queue ~base_path ~keeper_name in
-  if not (Keeper_event_queue.is_empty queue)
-  then
-    Log.Keeper.info
-      "event_queue_snapshot: restored %s for keeper=%s"
-      (Keeper_event_queue.summary queue)
-      keeper_name;
-  queue
+  match load_result ~base_path ~keeper_name with
+  | Error message -> raise (unavailable_projection_exn ~keeper_name message)
+  | Ok queue ->
+    if not (Keeper_event_queue.is_empty queue)
+    then
+      Log.Keeper.info
+        "event_queue_snapshot: restored %s for keeper=%s"
+        (Keeper_event_queue.summary queue)
+        keeper_name;
+    queue
 ;;
 
 let load_pending ~base_path ~keeper_name =
-  load_with_projection ~projection:State.pending ~base_path ~keeper_name
+  match load_with_projection ~projection:State.pending ~base_path ~keeper_name with
+  | Ok queue -> queue
+  | Error message -> raise (unavailable_projection_exn ~keeper_name message)
 ;;
 
 let load_pending_result ~base_path ~keeper_name =
@@ -567,7 +576,7 @@ let settle_result
     State.settle ~settled_at ~lease ~settlement state)
 ;;
 
-let recover_leases_result
+let prepare_registration_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
@@ -577,7 +586,7 @@ let recover_leases_result
   commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
     match State.recover_leases ~settled_at state with
     | Error _ as error -> error
-    | Ok state -> Ok (state, ()))
+    | Ok state -> Ok (state, State.pending state))
 ;;
 
 let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =

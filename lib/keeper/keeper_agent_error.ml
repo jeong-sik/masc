@@ -167,6 +167,7 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   | Agent_sdk.Retry.ServerError { status; _ } ->
     Printf.sprintf "api_error_server:%d" status
   | Agent_sdk.Retry.AuthError _ -> "api_error_auth"
+  | Agent_sdk.Retry.AuthorizationError _ -> "api_error_authorization"
   | Agent_sdk.Retry.PaymentRequired _ -> "api_error_payment_required"
   | Agent_sdk.Retry.InvalidRequest _ -> "api_error_invalid_request"
   | Agent_sdk.Retry.NotFound _ -> "api_error_not_found"
@@ -266,6 +267,8 @@ let provider_error_terminal_reason_code = function
       "provider_error_capacity_backpressure:%s"
       (Llm_provider.Error.capacity_scope_to_string scope)
   | Llm_provider.Error.AuthError _ -> "provider_error_auth"
+  | Llm_provider.Error.AuthorizationError _ ->
+    "provider_error_authorization"
   | Llm_provider.Error.ServerError { code; _ } ->
     Printf.sprintf "provider_error_server:%d" code
   | Llm_provider.Error.NetworkError { kind; timeout_phase; _ } ->

@@ -99,7 +99,9 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
       if transient then Transient_network else Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) -> Transient_rate_limit
-  | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _) -> Non_transient
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _) ->
+      Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidRequest _) -> Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) -> Transient_capacity
@@ -111,6 +113,7 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidConfig _) -> Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) -> Unclassified
   | Agent_sdk.Error.Api (InvalidRequest _ | ServerError _ | AuthError _
+    | AuthorizationError _
     | NotFound _ | PaymentRequired _ | ContextOverflow _) -> Non_transient
   | Agent_sdk.Error.Agent _ | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _ | Agent_sdk.Error.Serialization _
@@ -192,7 +195,9 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
       (Llm_provider.Error.InvalidRequest _ | Llm_provider.Error.NetworkError _
       | Llm_provider.Error.Timeout _
       | Llm_provider.Error.ServerError _ | Llm_provider.Error.RateLimit _
-      | Llm_provider.Error.AuthError _ | Llm_provider.Error.MissingApiKey _
+      | Llm_provider.Error.AuthError _
+      | Llm_provider.Error.AuthorizationError _
+      | Llm_provider.Error.MissingApiKey _
       | Llm_provider.Error.NotFound _ | Llm_provider.Error.CapacityExhausted _
       | Llm_provider.Error.HardQuota _
       | Llm_provider.Error.ProviderUnavailable _
@@ -566,7 +571,9 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
            when status >= 500 ->
              Some Server_error
-         | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _) ->
+         | Agent_sdk.Error.Api
+             ( Llm_provider.Retry.AuthError _
+             | Llm_provider.Retry.AuthorizationError _ ) ->
              Some Auth_error
          | Agent_sdk.Error.Provider
              (Llm_provider.Error.RateLimit _) ->
@@ -584,7 +591,9 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
              Some Server_error
          | Agent_sdk.Error.Provider
-             (Llm_provider.Error.AuthError _ | Llm_provider.Error.MissingApiKey _) ->
+             ( Llm_provider.Error.AuthError _
+             | Llm_provider.Error.AuthorizationError _
+             | Llm_provider.Error.MissingApiKey _ ) ->
              Some Auth_error
          | Agent_sdk.Error.Provider
              (Llm_provider.Error.ServerError _

@@ -37,6 +37,8 @@ let provider_error_to_http_error = function
       }
   | Llm_provider.Error.AuthError { detail; _ } ->
     Llm_provider.Http_client.HttpError { code = 401; body = detail }
+  | Llm_provider.Error.AuthorizationError { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 403; body = detail }
   | Llm_provider.Error.ServerError { code; detail; _ } ->
     Llm_provider.Http_client.HttpError { code; body = detail }
   | Llm_provider.Error.InvalidRequest { reason; _ } ->

@@ -127,6 +127,7 @@ let classify_provider_error = function
   | Llm_provider.Error.HardQuota _
   | Llm_provider.Error.CapacityExhausted _
   | Llm_provider.Error.AuthError _
+  | Llm_provider.Error.AuthorizationError _
   | Llm_provider.Error.ServerError _
   | Llm_provider.Error.NetworkError _
   | Llm_provider.Error.InvalidRequest _

@@ -3,16 +3,21 @@
     Keeps side-effecting run helpers separate from the main build/resume/run
     orchestration in {!Runtime_agent}. *)
 
-let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status
+let missing_masc_bus_warned = Atomic.make false
+
+let publish_lifecycle ~name ~event ~detail ?error ?session_id ?status
     ?(attrs = []) () =
   match Masc_event_bus.get () with
-  | None -> ()
-  | Some _mb ->
+  | None ->
+      if Atomic.compare_and_set missing_masc_bus_warned false true then
+        Log.Misc.warn
+          "runtime lifecycle event was not published: MASC event bus is not initialized"
+  | Some mb ->
       let optional_string_field key = function
         | Some value when String.trim value <> "" -> [ (key, `String value) ]
         | _ -> []
       in
-      ignore
+      Agent_sdk.Event_bus.publish mb
         (Agent_sdk.Event_bus.mk_event
            (Custom
               ( Printf.sprintf "masc.oas_worker.%s" event

@@ -67,7 +67,7 @@ type config = Runtime_agent_context.config = {
   stream_idle_timeout_s : float option;
   max_execution_time_s : float option;
   body_timeout_s : float option;
-  max_tokens : int;
+  max_tokens : int option;
   temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
   context_reducer : Agent_sdk.Context_reducer.t option;
@@ -404,8 +404,11 @@ end
 
 (** {1 Lifecycle / checkpoint helpers (re-exported)} *)
 
+module Lifecycle_for_testing : sig
+  val provider_attrs : config -> (string * Yojson.Safe.t) list
+end
+
 val publish_lifecycle :
-  Agent_sdk.Event_bus.t ->
   name:string ->
   event:string ->
   detail:string ->

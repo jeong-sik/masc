@@ -1527,92 +1527,43 @@ let test_seed_of_thinking_support_gate_contract () =
     (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
 ;;
 
-(* ---- reasoning max_tokens resolution: [Runtime_inference.resolve_max_tokens]
-   sizes a reasoning turn from the model's declared output ceiling (OAS catalog),
-   bounded above by the operational [reasoning_turn_max_tokens] (32768). A
-   reasoning runtime with no catalog ceiling keeps the caller fallback (the bound
-   is never the request value on its own); non-reasoning runtimes keep the caller
-   fallback. Regression guard for the thinking_only + stop_reason=max_tokens
-   truncation (live fleet 2026-06-30). ----
+(* ---- masc#24067 / oas#2517: the keeper lane must not synthesize a request
+   [max_tokens] value. [Runtime_inference.resolve_max_tokens] — which sized a
+   reasoning turn from the model's declared OAS output ceiling, and otherwise
+   fell back to a flat keeper default — is deleted: BOTH arms invented a
+   request value the model catalog ceiling was never meant to supply. MASC
+   keeps that ceiling observable but does not reinterpret it as a request;
+   OAS owns envelope-specific validation and clamp policy.
+   [Keeper_run_context.resolve_max_tokens_for_runtime] replaces it
+   with a two-source-only contract: an explicit caller [?max_tokens] argument,
+   or a per-keeper [MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS] profile override
+   (exercised separately in test_keeper_toml.ml's oas_env tests). Absent both,
+   [None] — no [max_tokens] field goes on the OAS request, regardless of
+   whether the runtime is a reasoning model with a declared catalog ceiling. ---- *)
 
-   The fallback sentinel (8192) mirrors the keeper path's flat default and is
-   distinct from every reasoning result asserted below, so a test failure
-   pinpoints which branch regressed. *)
-let fallback_sentinel () = 8192
-
-let test_resolve_max_tokens_reasoning_defers_to_caps_not_fallback () =
+let test_resolve_max_tokens_for_runtime_no_override_is_none () =
   with_runtime_thinking (fun () ->
-    (* qwen36-35b-a3b-mtp declares [max_output_tokens = 65536] in the OAS
-       fixture catalog. The reasoning path defers to that OAS-owned ceiling,
-       bounded by the 32768 operational cap — NOT the flat keeper fallback
-       (8192). *)
-    Alcotest.(check int)
-      "reasoning runtime defers to its OAS capability ceiling, clamped by the \
-       operational bound above the 8192 keeper fallback"
-      32768
-      (Runtime_inference.resolve_max_tokens
+    Alcotest.(check (option int))
+      "unconfigured keeper + no caller override sends no max_tokens, even for \
+       a reasoning runtime with a declared catalog ceiling"
+      None
+      (Keeper_run_context.resolve_max_tokens_for_runtime
+         ~keeper_name:"masc24067-unconfigured-keeper"
          ~runtime_id:"ollama_cloud.thinkdefault"
-         ~fallback:fallback_sentinel))
+         ()))
 ;;
 
-let test_resolve_max_tokens_non_reasoning_uses_fallback () =
+let test_resolve_max_tokens_for_runtime_caller_override_is_some () =
   with_runtime_thinking (fun () ->
-    Alcotest.(check int)
-      "non-reasoning runtime keeps the caller fallback unchanged"
-      8192
-      (Runtime_inference.resolve_max_tokens
-         ~runtime_id:"ollama_cloud.nothink"
-         ~fallback:fallback_sentinel))
-;;
-
-let test_resolve_max_tokens_reasoning_small_ceiling_respected () =
-  with_runtime_thinking (fun () ->
-    Alcotest.(check int)
-      "reasoning runtime whose declared ceiling is below the operational bound \
-       keeps its smaller ceiling (never request more than the provider accepts)"
-      4096
-      (Runtime_inference.resolve_max_tokens
-         ~runtime_id:"ollama_cloud.smallout"
-         ~fallback:fallback_sentinel))
-;;
-
-let test_resolve_max_tokens_reasoning_big_ceiling_clamped () =
-  with_runtime_thinking (fun () ->
-    Alcotest.(check int)
-      "reasoning runtime whose declared ceiling exceeds the operational bound is \
-       clamped to the bound (runaway guard)"
-      32768
-      (Runtime_inference.resolve_max_tokens
-         ~runtime_id:"ollama_cloud.bigout"
-         ~fallback:fallback_sentinel))
-;;
-
-let test_resolve_max_tokens_unknown_runtime_uses_fallback () =
-  with_runtime_thinking (fun () ->
-    Alcotest.(check int)
-      "unknown runtime id falls through to the caller fallback (fail-safe)"
-      8192
-      (Runtime_inference.resolve_max_tokens
-         ~runtime_id:"bogus.binding"
-         ~fallback:fallback_sentinel))
-;;
-
-let test_resolve_max_tokens_reasoning_no_capability_falls_back () =
-  with_runtime_thinking (fun () ->
-    (* [ollama_cloud.think]'s model api-name is absent from the OAS catalog, so
-       its capability projection has no max_output_tokens even though
-       runtime.toml marks it thinking-support=true. A reasoning runtime with no
-       declared ceiling must NOT jump to the operational bound — without a known
-       provider ceiling, requesting 32768 could exceed what the provider accepts
-       and turn the thinking truncation into a max_tokens rejection. It keeps the
-       caller fallback (the budget increase is gated on an OAS-declared ceiling). *)
-    Alcotest.(check int)
-      "reasoning runtime with no catalog ceiling keeps the fallback, does not \
-       jump to the operational bound"
-      8192
-      (Runtime_inference.resolve_max_tokens
-         ~runtime_id:"ollama_cloud.think"
-         ~fallback:fallback_sentinel))
+    Alcotest.(check (option int))
+      "explicit caller max_tokens argument passes through as Some, unchanged \
+       by the target runtime's catalog ceiling"
+      (Some 4096)
+      (Keeper_run_context.resolve_max_tokens_for_runtime
+         ~keeper_name:"masc24067-unconfigured-keeper"
+         ~runtime_id:"ollama_cloud.thinkdefault"
+         ~max_tokens:4096
+         ()))
 ;;
 
 let test_max_output_tokens_accessor_projects_catalog () =
@@ -1976,29 +1927,13 @@ let () =
         ] )
     ; ( "reasoning max_tokens resolution"
       , [ Alcotest.test_case
-            "reasoning runtime defers to OAS capability ceiling, not fallback"
+            "no override configured -> None (masc#24067 / oas#2517)"
             `Quick
-            test_resolve_max_tokens_reasoning_defers_to_caps_not_fallback
+            test_resolve_max_tokens_for_runtime_no_override_is_none
         ; Alcotest.test_case
-            "non-reasoning runtime -> caller fallback"
+            "explicit caller override -> Some (masc#24067 / oas#2517)"
             `Quick
-            test_resolve_max_tokens_non_reasoning_uses_fallback
-        ; Alcotest.test_case
-            "reasoning runtime, ceiling below bound -> ceiling respected"
-            `Quick
-            test_resolve_max_tokens_reasoning_small_ceiling_respected
-        ; Alcotest.test_case
-            "reasoning runtime, ceiling above bound -> clamped to bound"
-            `Quick
-            test_resolve_max_tokens_reasoning_big_ceiling_clamped
-        ; Alcotest.test_case
-            "unknown runtime id -> caller fallback"
-            `Quick
-            test_resolve_max_tokens_unknown_runtime_uses_fallback
-        ; Alcotest.test_case
-            "reasoning runtime with no catalog ceiling -> fallback, not bound"
-            `Quick
-            test_resolve_max_tokens_reasoning_no_capability_falls_back
+            test_resolve_max_tokens_for_runtime_caller_override_is_some
         ; Alcotest.test_case
             "max_output_tokens_of_runtime_id projects catalog ceiling"
             `Quick

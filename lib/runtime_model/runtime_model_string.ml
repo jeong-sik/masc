@@ -21,7 +21,7 @@ let split_provider_model = Runtime_model_id_split.split_provider_model
 (** Build a config for ["custom:model@url"] specs. *)
 let make_custom_config
   ~temperature
-  ~max_tokens
+  ?max_tokens
   ?system_prompt
   ?supports_tool_choice_override
   ?keep_alive
@@ -42,7 +42,7 @@ let make_custom_config
               ~base_url
               ~request_path:Masc_network_defaults.openai_chat_completions_path)
          ~temperature
-         ~max_tokens
+         ?max_tokens
          ?system_prompt
          ?supports_tool_choice_override
          ?keep_alive
@@ -73,7 +73,7 @@ let resolve_effective_api_key_env
 (** Build a {!Llm_provider.Provider_config.t} from a resolved registry entry. *)
 let make_registry_config
   ~temperature
-  ~max_tokens
+  ?max_tokens
   ?system_prompt
   ?(api_key_env_overrides = [])
   ?supports_tool_choice_override
@@ -147,7 +147,7 @@ let make_registry_config
     ~headers
     ~request_path
     ~temperature
-    ~max_tokens
+    ?max_tokens
     ~max_context
     ?system_prompt
     ?supports_tool_choice_override
@@ -163,7 +163,7 @@ let make_registry_config
     never flattened to [OpenAI_compat]. *)
 let parse_model_string
   ?(temperature = Runtime_provider_defaults.agent_default_temperature)
-  ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
+  ?max_tokens
   ?system_prompt
   ?(api_key_env_overrides = [])
   ?supports_tool_choice_override
@@ -177,7 +177,7 @@ let parse_model_string
   | Some ("custom", model_id) ->
     make_custom_config
       ~temperature
-      ~max_tokens
+      ?max_tokens
       ?system_prompt
       ?supports_tool_choice_override
       ?keep_alive
@@ -198,7 +198,7 @@ let parse_model_string
             Some
               (make_registry_config
                  ~temperature
-                 ~max_tokens
+                 ?max_tokens
                  ?system_prompt
                  ~api_key_env_overrides
                  ?supports_tool_choice_override

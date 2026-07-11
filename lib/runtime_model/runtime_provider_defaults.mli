@@ -6,8 +6,6 @@
 
 val agent_default_temperature : float
 
-val agent_default_max_tokens : int
-
 val worker_default_temperature : float
 
 val deterministic_temperature : float

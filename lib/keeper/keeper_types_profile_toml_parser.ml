@@ -13,6 +13,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let has_raw key = List.mem_assoc key doc in
+  let oas_env = extract_oas_env_from_doc doc in
   let tool_access_defaults_result =
     let key = k "tool_access" in
     if has_raw key then
@@ -130,6 +131,15 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let result =
     Result.bind result (fun () -> tool_access_defaults_result)
   in
+  let result =
+    Result.bind result (fun () -> validate_unified_max_tokens_toml_value doc)
+  in
+  let result =
+    Result.bind result (fun () ->
+      Result.map
+        (fun _ -> ())
+        (parse_unified_max_tokens_override_of_oas_env oas_env))
+  in
   Result.map
     (fun tool_access ->
       {
@@ -168,7 +178,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         per_provider_timeout_state;
         per_provider_timeout;
         always_approve = bool_ "always_approve";
-        oas_env = extract_oas_env_from_doc doc;
+        oas_env;
         unknown_toml_keys = [];
       })
     result

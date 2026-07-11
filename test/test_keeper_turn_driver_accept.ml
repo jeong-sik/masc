@@ -1388,7 +1388,7 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       ; max_context_resolution = retry_context_resolution
       ; max_context = retry_context_resolution.turn_budget
       ; temperature = 0.0
-      ; max_tokens = 1024
+      ; max_tokens = Some 1024
       }
     in
     let result =

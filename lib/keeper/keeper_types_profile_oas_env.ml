@@ -17,6 +17,10 @@ let oas_env_key_prefix = "keeper.oas_env."
 
 let keeper_unified_max_tokens_oas_env_key = "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS"
 
+let keeper_unified_max_tokens_toml_key =
+  oas_env_key_prefix ^ keeper_unified_max_tokens_oas_env_key
+;;
+
 let oas_env_key_is_allowed suffix =
   String.starts_with suffix ~prefix:"MASC_KEEPER_OAS_"
   || (String.starts_with suffix ~prefix:"OAS_"
@@ -74,28 +78,52 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
     doc
 ;;
 
-let unified_max_tokens_override_of_oas_env ?keeper_name pairs =
+let validate_unified_max_tokens_toml_value doc =
+  match List.assoc_opt keeper_unified_max_tokens_toml_key doc with
+  | None -> Ok ()
+  | Some (Keeper_toml_loader.Toml_int value) when value > 0 -> Ok ()
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "%s must be a positive integer TOML value"
+         keeper_unified_max_tokens_toml_key)
+;;
+
+let parse_unified_max_tokens_override_of_oas_env pairs =
   let key = keeper_unified_max_tokens_oas_env_key in
   let raw_opt = List.assoc_opt key pairs in
   match raw_opt with
-  | None -> None
+  | None -> Ok None
   | Some raw ->
     let trimmed = String.trim raw in
     (match int_of_string_opt trimmed with
-     | Some value ->
-       let min_v = 256 in
-       let max_v = 262_144 in
-       Some (max min_v (min max_v value))
+     | Some value when value > 0 -> Ok (Some value)
+     | Some _ ->
+       Error
+         (Printf.sprintf
+            "keeper.oas_env.%s must be a positive integer, got %S"
+            key
+            raw)
      | None ->
+       Error
+         (Printf.sprintf
+            "keeper.oas_env.%s must be a positive integer, got %S"
+            key
+            raw))
+;;
+
+let unified_max_tokens_override_of_oas_env ?keeper_name pairs =
+  match parse_unified_max_tokens_override_of_oas_env pairs with
+  | Ok value -> value
+  | Error detail ->
        let keeper =
          match keeper_name with
          | Some name -> name
          | None -> "(unknown)"
        in
        Log.Keeper.warn
-         "keeper.oas_env: ignoring invalid %s=%S for keeper=%s; expected integer"
-         key
-         raw
-         keeper;
-       None)
+         "keeper.oas_env: invalid max_tokens override for keeper=%s: %s"
+         keeper
+         detail;
+       None
 ;;

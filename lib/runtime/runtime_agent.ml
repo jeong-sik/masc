@@ -83,7 +83,7 @@ type config =
   stream_idle_timeout_s : float option;
   max_execution_time_s : float option;
   body_timeout_s : float option;
-  max_tokens : int;
+  max_tokens : int option;
   temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
   context_reducer : Agent_sdk.Context_reducer.t option;
@@ -920,12 +920,15 @@ let provider_lifecycle_attrs (config : config) =
     ("provider_kind", `String provider_kind);
     ("model_id", `String config.model_id);
     ("provider_model_id", `String provider_cfg.model_id);
-    ("max_tokens", `Int config.max_tokens);
-
   ]
+  @ Runtime_max_tokens.telemetry_fields config.max_tokens
   @ nonempty_string "base_url" provider_cfg.base_url
   @ nonempty_string "request_path" provider_cfg.request_path
   @ endpoint
+
+module Lifecycle_for_testing = struct
+  let provider_attrs = provider_lifecycle_attrs
+end
 
 (* ================================================================ *)
 (* Internal: checkpoint persistence                                  *)
@@ -1161,11 +1164,9 @@ let run_blocks
   | t ->
     Log.Misc.info "oas_worker %s: transport=%s"
       config.name (Masc_grpc_transport.to_string t));
-  Option.iter (fun bus ->
-    publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal_detail
-      ~attrs:(provider_lifecycle_attrs config)
-      ()
-  ) config.event_bus;
+  publish_lifecycle ~name:config.name ~event:"build" ~detail:goal_detail
+    ~attrs:(provider_lifecycle_attrs config)
+    ();
   let agent_result = match oas_checkpoint with
     | Some checkpoint ->
       (try resume_from_checkpoint ~sw ~net ~config ~checkpoint
@@ -1179,15 +1180,13 @@ let run_blocks
   in
   match agent_result with
   | Error e ->
-    Option.iter (fun bus ->
-      publish_lifecycle bus ~name:config.name ~event:"build_error"
-        ~detail:(Agent_sdk.Error.to_string e)
-        ~error:(Agent_sdk.Error.to_string e)
-        ~status:"build_error"
-        ~session_id
-        ~attrs:(provider_lifecycle_attrs config)
-        ()
-    ) config.event_bus;
+    publish_lifecycle ~name:config.name ~event:"build_error"
+      ~detail:(Agent_sdk.Error.to_string e)
+      ~error:(Agent_sdk.Error.to_string e)
+      ~status:"build_error"
+      ~session_id
+      ~attrs:(provider_lifecycle_attrs config)
+      ();
     Error e
   | Ok agent ->
   (match agent_ref with Some r -> r := Some agent | None -> ());
@@ -1235,16 +1234,14 @@ let run_blocks
        | None -> ());
       Some ckpt
     in
-    Option.iter (fun bus ->
-      let lifecycle = worker_lifecycle_classification_of_result result in
-      publish_lifecycle bus ~name:config.name ~event:lifecycle.event
-        ~detail:(Printf.sprintf "session=%s" session_id)
-        ?error:lifecycle.error
-        ~session_id
-        ~status:lifecycle.status
-        ~attrs:(provider_lifecycle_attrs config)
-        ()
-    ) config.event_bus;
+    let lifecycle = worker_lifecycle_classification_of_result result in
+    publish_lifecycle ~name:config.name ~event:lifecycle.event
+      ~detail:(Printf.sprintf "session=%s" session_id)
+      ?error:lifecycle.error
+      ~session_id
+      ~status:lifecycle.status
+      ~attrs:(provider_lifecycle_attrs config)
+      ();
     let turns = (Agent_sdk.Agent.state agent).turn_count in
     let trace_ref = Agent_sdk.Agent.last_raw_trace_run agent in
     let close_after_success () =

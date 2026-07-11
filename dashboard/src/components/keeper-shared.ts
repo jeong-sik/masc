@@ -74,14 +74,19 @@ import {
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
-import { loadTools, toolsData, toolsLoading } from './tools/tool-state'
+import {
+  KEEPER_WAITING_INVENTORY_REFRESH_MS,
+  subscribeToolsAutoRefresh,
+  toolsData,
+  toolsError,
+} from './tools/tool-state'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 
 // Mirrors `LANE_REFRESH_MS` in keeper-workspace/keeper-lane-strip.ts. That
 // const is module-local there, so we keep the same 15 s cadence here rather
 // than exporting it cross-file for a single consumer.
-const BUSY_REFRESH_MS = 15_000
+const BUSY_REFRESH_MS = KEEPER_WAITING_INVENTORY_REFRESH_MS
 
 
 function GhostButton({
@@ -526,15 +531,28 @@ function ServerQueueStatus({
   pendingCount,
   inflightCount,
   readErrorCount,
+  projectionError,
+  projectionReady,
+  projectionPresent,
   nextAction,
 }: {
   busy: boolean
   pendingCount: number
   inflightCount: number
   readErrorCount: number
+  projectionError?: string | null
+  projectionReady: boolean
+  projectionPresent: boolean
   nextAction?: string | null
 }) {
-  if (!busy && pendingCount === 0 && inflightCount === 0 && readErrorCount === 0) return null
+  const projectionUnavailable = Boolean(projectionError) || !projectionReady || !projectionPresent
+  if (
+    !projectionUnavailable
+    && !busy
+    && pendingCount === 0
+    && inflightCount === 0
+    && readErrorCount === 0
+  ) return null
   return html`
     <div
       class="mb-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2.5 text-xs text-[var(--color-fg-secondary)] v2-monitoring-panel"
@@ -542,6 +560,13 @@ function ServerQueueStatus({
       data-server-chat-queue-pending=${pendingCount}
       data-server-chat-queue-inflight=${inflightCount}
       data-server-chat-queue-read-errors=${readErrorCount}
+      data-server-chat-queue-projection=${projectionError
+        ? 'read-failed'
+        : !projectionReady
+          ? 'loading'
+          : !projectionPresent
+            ? 'missing'
+            : 'ready'}
     >
       <div class="flex flex-wrap items-center gap-2 v2-monitoring-row">
         <span class="font-semibold text-[var(--color-fg-primary)]">Keeper 서버 대기열</span>
@@ -554,12 +579,20 @@ function ServerQueueStatus({
         ${readErrorCount > 0
           ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]" data-server-chat-queue-state="read-error">대기열 조회 실패 ${readErrorCount}</span>`
           : null}
+        ${projectionError
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]">서버 대기열 갱신 실패</span>`
+          : !projectionReady
+            ? html`<span class="rounded-[var(--r-0)] border border-[var(--info-20)] bg-[var(--info-10)] px-2 py-0.5">서버 대기열 불러오는 중</span>`
+            : !projectionPresent
+              ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]">Keeper 대기열 투영 없음</span>`
+              : null}
         ${busy && inflightCount === 0
           ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5">다른 턴 실행 중</span>`
           : null}
       </div>
       <div class="mt-1.5 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         이 값은 브라우저 초안이 아니라 서버의 durable receipt 투영입니다.
+        ${projectionError ? html` 최근 갱신 오류: <code>${projectionError}</code>. 표시 수치는 이전 snapshot일 수 있습니다.` : null}
         ${nextAction ? html` 다음 서버 동작: <code>${nextAction}</code>` : null}
       </div>
     </div>
@@ -602,12 +635,15 @@ export function KeeperConversationPanel({
   // is hidden, refresh immediately on focus/return, and return the cleanup so
   // the busy chip / interrupt button cannot freeze on a stale snapshot.
   useEffect(() => {
-    if (!toolsData.value && !toolsLoading.value) void loadTools()
+    const unsubscribeToolsRefresh = subscribeToolsAutoRefresh()
     void reconcileKeeperChatReceipts(keeperName)
-    return setupVisibleAutoRefresh(() => {
-      void loadTools()
+    const stopReceiptRefresh = setupVisibleAutoRefresh(() => {
       void reconcileKeeperChatReceipts(keeperName)
     }, BUSY_REFRESH_MS)
+    return () => {
+      stopReceiptRefresh()
+      unsubscribeToolsRefresh()
+    }
   }, [keeperName])
 
   const inventoryEntry = useMemo(() => {
@@ -654,6 +690,11 @@ export function KeeperConversationPanel({
   const serverPendingCount = Math.max(0, inventoryEntry?.sources?.chat_queue_pending ?? 0)
   const serverInflightCount = Math.max(0, inventoryEntry?.sources?.chat_queue_inflight ?? 0)
   const serverQueueReadErrorCount = Math.max(0, inventoryEntry?.sources?.read_error ?? 0)
+  const toolsProjectionError = toolsError.value
+  const toolsProjectionReady = toolsData.value !== null
+  const toolsProjectionPresent = Boolean(
+    toolsData.value?.keeper_waiting_inventory && inventoryEntry,
+  )
   const visibleThread = useMemo(
     () =>
       sending && !thread.some(isActiveAssistantEntry)
@@ -887,6 +928,9 @@ export function KeeperConversationPanel({
       pendingCount=${serverPendingCount}
       inflightCount=${serverInflightCount}
       readErrorCount=${serverQueueReadErrorCount}
+      projectionError=${toolsProjectionError}
+      projectionReady=${toolsProjectionReady}
+      projectionPresent=${toolsProjectionPresent}
       nextAction=${inventoryEntry?.next_action}
     />
   `

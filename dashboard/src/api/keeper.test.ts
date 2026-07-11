@@ -138,6 +138,32 @@ describe('Keeper chat durable receipt API', () => {
     })).toThrow('missing identity')
   })
 
+  it('rejects malformed nullable outcome refs instead of coercing schema drift', () => {
+    expect(() => parseKeeperChatReceipt({
+      schema: 'keeper_chat_queue.receipt.v1',
+      keeper_name: 'echo',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 2,
+      state: { kind: 'delivered', completed_at: 42, outcome_ref: 7 },
+    })).toThrow('outcome_ref must be a string or null')
+  })
+
+  it('rejects whitespace-only failure detail', () => {
+    expect(() => parseKeeperChatReceipt({
+      schema: 'keeper_chat_queue.receipt.v1',
+      keeper_name: 'echo',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 2,
+      state: {
+        kind: 'failed',
+        failure_kind: 'delivery_failed',
+        detail: '   ',
+        completed_at: 42,
+        outcome_ref: null,
+      },
+    })).toThrow('invalid failure metadata')
+  })
+
   it('fetches the exact encoded Keeper receipt route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

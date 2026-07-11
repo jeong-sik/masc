@@ -753,6 +753,7 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
     return
   }
   const failures: string[] = []
+  let terminalReceiptObserved = false
   await Promise.all(queuedEntries.map(async (entry) => {
     const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
     if (!receiptId) return
@@ -809,6 +810,8 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
           })
           break
         case 'delivered':
+          terminalReceiptObserved = terminalReceiptObserved
+            || (currentState !== 'delivered' && currentState !== 'failed')
           finalizeAssistantEntry(keeperName, entry.id, {
             delivery: 'delivered',
             streamState: null,
@@ -818,6 +821,8 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
           })
           break
         case 'failed':
+          terminalReceiptObserved = terminalReceiptObserved
+            || (currentState !== 'delivered' && currentState !== 'failed')
           finalizeAssistantEntry(keeperName, entry.id, {
             delivery: 'error',
             streamState: null,
@@ -833,6 +838,15 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
       )
     }
   }))
+  if (
+    terminalReceiptObserved
+    && keeperReceiptReconciliationGeneration.get(keeperName) === generation
+  ) {
+    // Receipt settlement and transcript persistence are separate projections.
+    // Force one merge here so a dropped keeper_chat_appended invalidation cannot
+    // leave the terminal ACK visible without the final assistant message.
+    await hydrateKeeperChatHistory(keeperName, { force: true })
+  }
   const stillQueued = (keeperThreads.value[keeperName] ?? []).some(entry => (
     entry.role === 'assistant'
     && entry.delivery === 'queued'

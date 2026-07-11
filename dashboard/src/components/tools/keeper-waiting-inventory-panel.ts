@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import type {
   DashboardKeeperWaitingInventory,
   DashboardKeeperWaitingKeeper,
@@ -140,7 +141,9 @@ function WaitingRow({ row }: { row: DashboardKeeperWaitingRow }) {
 }
 
 function KeeperRow({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
-  const rows = (keeper.waiting_on ?? []).slice(0, 4)
+  const [expanded, setExpanded] = useState(false)
+  const allRows = keeper.waiting_on ?? []
+  const rows = expanded ? allRows : allRows.slice(0, 4)
   const truncatedSources = Object.entries(keeper.truncated_sources ?? {})
     .filter(([, truncated]) => truncated)
     .map(([source]) => enumLabel(source))
@@ -163,8 +166,13 @@ function KeeperRow({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
         : null}
       <div class="mt-2">
         ${rows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)}
-        ${keeper.waiting_count > rows.length
-          ? html`<div class="pt-1 text-2xs text-[var(--color-fg-muted)]">+${keeper.waiting_count - rows.length} more</div>`
+        ${allRows.length > rows.length
+          ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(true)} data-expand-waiting-rows>+${allRows.length - rows.length} more · 전체 보기</button>`
+          : expanded && allRows.length > 4
+            ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(false)} data-collapse-waiting-rows>접기</button>`
+          : null}
+        ${keeper.waiting_count > allRows.length
+          ? html`<div class="pt-1 text-2xs text-[var(--color-status-warn)]">서버 projection에서 ${keeper.waiting_count - allRows.length}행이 추가로 생략되었습니다.</div>`
           : null}
       </div>
     </div>
@@ -236,7 +244,9 @@ function laneSummary(keeper: DashboardKeeperWaitingKeeper): string {
 }
 
 function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
-  const rows = (keeper.waiting_on ?? []).slice(0, 6)
+  const [expanded, setExpanded] = useState(false)
+  const allRows = keeper.waiting_on ?? []
+  const rows = expanded ? allRows : allRows.slice(0, 6)
   const truncatedSources = Object.entries(keeper.truncated_sources ?? {})
     .filter(([, truncated]) => truncated)
     .map(([source]) => enumLabel(source))
@@ -279,8 +289,13 @@ function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) 
         ${rows.length > 0
           ? rows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)
           : html`<div class="border-t border-[var(--color-border-subtle)] pt-2 text-xs text-[var(--color-fg-muted)]">no keeper-specific waiting rows</div>`}
-        ${keeper.waiting_count > rows.length
-          ? html`<div class="pt-1 text-2xs text-[var(--color-fg-muted)]">+${keeper.waiting_count - rows.length} more</div>`
+        ${allRows.length > rows.length
+          ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(true)} data-expand-lane-rows>+${allRows.length - rows.length} more · 전체 보기</button>`
+          : expanded && allRows.length > 6
+            ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(false)} data-collapse-lane-rows>접기</button>`
+          : null}
+        ${keeper.waiting_count > allRows.length
+          ? html`<div class="pt-1 text-2xs text-[var(--color-status-warn)]">서버 projection에서 ${keeper.waiting_count - allRows.length}행이 추가로 생략되었습니다.</div>`
           : null}
       </div>
     </article>

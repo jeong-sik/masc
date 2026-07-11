@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { DashboardKeeperWaitingInventory } from '../../api'
@@ -148,6 +149,32 @@ describe('KeeperWaitingInventoryPanel', () => {
     render(html`<${KeeperWaitingInventoryPanel} inventory=${null} />`, container)
 
     expect(container.textContent).toContain('waiting inventory unavailable')
+  })
+
+  it('expands the active receipt rows instead of hiding reload correlation ids', () => {
+    const inventory = inventoryFixture()
+    const keeper = inventory.keepers[0]
+    if (!keeper) throw new Error('fixture keeper missing')
+    keeper.waiting_on = Array.from({ length: 7 }, (_, index) => ({
+      keeper_name: keeper.keeper_name,
+      source: 'chat_queue_pending',
+      waiting_on: 'slack',
+      wake_producer: 'keeper_chat_queue',
+      next_action: 'keeper_chat_consumer_drain',
+      detail: {
+        queue_index: index,
+        receipt_id: `chatq_00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        lifecycle: { state: 'pending' },
+      },
+    }))
+    keeper.waiting_count = keeper.waiting_on.length
+
+    render(html`<${KeeperWaitingInventoryPanel} inventory=${inventory} />`, container)
+
+    expect(container.textContent).not.toContain('chatq_00000000-0000-4000-8000-000000000006')
+    fireEvent.click(container.querySelector('[data-expand-waiting-rows]') as HTMLButtonElement)
+    expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000006')
+    expect(container.querySelector('[data-collapse-waiting-rows]')).not.toBeNull()
   })
 
   it('renders unknown pending-confirm count when the store read failed', () => {

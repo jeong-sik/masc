@@ -28,10 +28,18 @@ let python_argv_for sidecar_dir =
   else [ "uv"; "run"; "--directory"; sidecar_dir; "python"; "-m"; "src.schema_dump" ]
 ;;
 
+(** Built-in JSON schema for in-process connectors that have no Python sidecar.
+    The dashboard Save form needs this to whitelist fields and coerce types. *)
+let slack_builtin_schema =
+  {|{"properties":{"slack_app_token":{"type":"string"},"slack_bot_token":{"type":"string"},"trigger_policy":{"type":"string"}}}|}
+
 let fetch_schema ?base_path id =
   match Hashtbl.find_opt schema_cache id with
   | Some cached -> Ok cached
   | None ->
+    (* In-process connectors have no Python sidecar; return built-in schema *)
+    if id = "slack" then (Hashtbl.replace schema_cache id slack_builtin_schema; Ok slack_builtin_schema)
+    else
     (match Server_routes_http_sidecar_paths.runtime_sidecar_dir_result ?base_path id with
      | Error _ as error -> error
      | Ok sidecar_dir ->

@@ -967,6 +967,7 @@ let test_aggregate_update_noop_when_missing () =
 (* Once a snapshot exists, an incremental update folds success/failure
    counts and advances last_used to the max-ts entry. *)
 let test_aggregate_increment_after_seed () =
+  Eio_main.run @@ fun _env ->
   with_tmpdir (fun dir ->
     let masc_root = dir and keeper = "agg-inc" in
     let now = Unix.gettimeofday () in
@@ -995,6 +996,7 @@ let test_aggregate_increment_after_seed () =
    update an already-seeded snapshot too; otherwise those calls become
    invisible to future affinity reads until a full rebuild. *)
 let test_aggregate_direct_append_after_seed () =
+  Eio_main.run @@ fun _env ->
   with_tmpdir (fun dir ->
     let masc_root = dir and keeper = "agg-direct" in
     let now = Unix.gettimeofday () in
@@ -1051,6 +1053,7 @@ let test_aggregate_rejects_keeper_name_mismatch () =
 (* Rebuild reconstructs per-tool counts across all trace files and persists
    the snapshot. *)
 let test_aggregate_rebuild_from_jsonl () =
+  Eio_main.run @@ fun _env ->
   with_tmpdir (fun dir ->
     let masc_root = dir and keeper = "agg-rebuild" in
     let now = Unix.gettimeofday () in

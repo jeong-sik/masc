@@ -1536,6 +1536,8 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
   cleanup_dir base_path
 
 let test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   let config = Masc.Workspace.default_config base_path in
   let _ = Masc.Workspace.init config ~agent_name:None in

@@ -498,28 +498,32 @@ let test_summary_recent_clamp () =
 
 (* ── Registration ───────────────────────────────────── *)
 
+let eio_test_case name speed test =
+  Alcotest.test_case name speed (fun () -> Eio_main.run (fun _env -> test ()))
+;;
+
 let () =
   Alcotest.run "dashboard_verification" [
     "requests_json", [
-      Alcotest.test_case "restores boot override config inputs" `Quick
+      eio_test_case "restores boot override config inputs" `Quick
         test_config_input_override_restores_boot_override;
-      Alcotest.test_case "overrides and restores env inputs" `Quick
+      eio_test_case "overrides and restores env inputs" `Quick
         test_temp_base_path_overrides_and_restores_env_inputs;
-      Alcotest.test_case "shape" `Quick test_requests_json_shape;
-      Alcotest.test_case "uses explicit base_path, not env" `Quick
+      eio_test_case "shape" `Quick test_requests_json_shape;
+      eio_test_case "uses explicit base_path, not env" `Quick
         test_requests_json_uses_explicit_base_path_not_env;
-      Alcotest.test_case "task_id filter" `Quick test_task_id_filter;
-      Alcotest.test_case "ignores legacy root entries" `Quick
+      eio_test_case "task_id filter" `Quick test_task_id_filter;
+      eio_test_case "ignores legacy root entries" `Quick
         test_requests_json_ignores_legacy_root_entries;
-      Alcotest.test_case "conflict triage fields" `Quick
+      eio_test_case "conflict triage fields" `Quick
         test_requests_json_surfaces_conflict_triage_fields;
-      Alcotest.test_case "fd pressure degraded projection" `Quick
+      eio_test_case "fd pressure degraded projection" `Quick
         test_requests_and_summary_degrade_under_fd_pressure;
     ];
     "summary_json", [
-      Alcotest.test_case "empty base_path" `Quick test_summary_empty;
-      Alcotest.test_case "bucket counts + recent rejections"
+      eio_test_case "empty base_path" `Quick test_summary_empty;
+      eio_test_case "bucket counts + recent rejections"
         `Quick test_summary_bucket_counts;
-      Alcotest.test_case "recent clamp" `Quick test_summary_recent_clamp;
+      eio_test_case "recent clamp" `Quick test_summary_recent_clamp;
     ];
   ]

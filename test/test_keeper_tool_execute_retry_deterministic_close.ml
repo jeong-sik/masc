@@ -343,6 +343,7 @@ let bool_member name json =
 ;;
 
 let test_gh_approval_pending_helper_enqueues_nonblocking () =
+  Eio_main.run @@ fun _env ->
   let base_path = temp_dir () in
   let approval_id = ref None in
   Fun.protect
@@ -462,6 +463,7 @@ let require_durable_resolution
 ;;
 
 let test_gh_approval_resolution_does_not_install_retry_grant () =
+  Eio_main.run @@ fun _env ->
   let base_path = temp_dir () in
   let approval_ids = ref [] in
   let remember id =

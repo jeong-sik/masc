@@ -1013,6 +1013,47 @@ let test_persona_without_keeper_toml_remains_valid () =
     check (option string) "persona manifest" (Some profile_path)
       defaults.manifest_path
 
+let test_persona_parse_failure_is_typed_profile_error () =
+  with_profile_base @@ fun ~base_path ~config_dir ~keepers_dir ->
+  let persona_dir = Filename.concat (Filename.concat config_dir "personas") "analyst" in
+  mkdir_p persona_dir;
+  let profile_path = Filename.concat persona_dir "profile.json" in
+  write_file profile_path "{invalid-json";
+  let keeper_path = Filename.concat keepers_dir "reviewer.toml" in
+  write_file keeper_path
+    "[keeper]\npersona_name = \"analyst\"\nautoboot_enabled = true\n";
+  match
+    KTP.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      "reviewer"
+  with
+  | Ok _ -> fail "malformed persona profile must fail before defaults projection"
+  | Error error ->
+    check bool "persona parse error kind" true (error.kind = KTP.Parse_error);
+    check string "keeper TOML retains dependency owner" keeper_path error.keeper_path;
+    check string "persona profile is the failing path" profile_path error.failing_path;
+    check bool "error reports profile dependency" true
+      (contains_substring
+         (KTP.keeper_toml_load_error_to_string error)
+         "profile dependency")
+
+let test_persona_read_failure_is_typed_profile_error () =
+  with_profile_base @@ fun ~base_path ~config_dir ~keepers_dir:_ ->
+  let persona_dir = Filename.concat (Filename.concat config_dir "personas") "analyst" in
+  mkdir_p persona_dir;
+  let profile_path = Filename.concat persona_dir "profile.json" in
+  Unix.mkdir profile_path 0o755;
+  match
+    KTP.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      "analyst"
+  with
+  | Ok _ -> fail "unreadable persona profile must fail before defaults projection"
+  | Error error ->
+    check bool "persona read error kind" true (error.kind = KTP.Read_error);
+    check string "standalone persona owns load" profile_path error.keeper_path;
+    check string "unreadable persona is the failing path" profile_path error.failing_path
+
 let test_keeper_config_directory_probe_is_typed () =
   let path = Filename.temp_file "keeper-config-not-dir" ".toml" in
   Fun.protect
@@ -2064,6 +2105,10 @@ let () =
             test_absent_profile_is_legitimate_empty_defaults;
           test_case "persona without keeper TOML remains valid" `Quick
             test_persona_without_keeper_toml_remains_valid;
+          test_case "persona parse failure is typed" `Quick
+            test_persona_parse_failure_is_typed_profile_error;
+          test_case "persona read failure is typed" `Quick
+            test_persona_read_failure_is_typed_profile_error;
           test_case "config directory probe is typed" `Quick
             test_keeper_config_directory_probe_is_typed;
         ] );

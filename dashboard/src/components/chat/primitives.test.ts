@@ -160,7 +160,7 @@ describe('ChatTranscript', () => {
             label: 'sangsu',
             text: '응답을 만들지 못했습니다',
             rawText: '응답을 만들지 못했습니다',
-            delivery: 'error',
+            delivery: 'transport_failure',
             error: text,
           }),
         ]}
@@ -177,7 +177,7 @@ describe('ChatTranscript', () => {
     // The raw internal error no longer replaces the reply: the card leads
     // with the reassurance that the pending message survives the failure.
     expect(card?.querySelector('[data-chat-failure-reassurance]')?.textContent)
-      .toContain('다음 턴을 시작하면')
+      .toContain('정상 응답하기 전까지')
     // Diagnostic detail is collapsed by default…
     expect(container.querySelector('[data-chat-failure-detail]')).toBeNull()
     expect(card?.textContent).not.toContain('no_usable_progress')
@@ -193,6 +193,29 @@ describe('ChatTranscript', () => {
       node.textContent?.includes('ollama_cloud.deepseek-v4-flash'),
     )).toBe(true)
     expect(container.querySelector('[data-chat-blocks]')).toBeNull()
+  })
+
+  it('keeps generic client errors distinct from durable transport failures', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'client-error-user',
+            text: '내 질문은 계속 보여야 해',
+            delivery: 'error',
+            error: 'queue poll lost its delivery receipt',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="client-error-user"]')
+    expect(bubble?.textContent).toContain('내 질문은 계속 보여야 해')
+    expect(bubble?.textContent).toContain('queue poll lost its delivery receipt')
+    expect(bubble?.querySelector('[data-chat-failure-card]')).toBeNull()
   })
 
   it('exposes entry provenance as rendered attributes and surface links', () => {
@@ -409,7 +432,7 @@ describe('ChatTranscript', () => {
 
     const failure = container.querySelector('[data-chat-entry-id="smoke-error-assistant"]') as HTMLElement
     expect(failure).not.toBeNull()
-    expect(failure.getAttribute('data-chat-delivery-state')).toBe('error')
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('transport_failure')
     expect(failure.getAttribute('data-chat-turn-ref')).toBe('trace-chat-contract-smoke#8')
     expect(failure.getAttribute('data-chat-stream-contract-source')).toBe('backend_stream_lifecycle')
     expect(failure.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')

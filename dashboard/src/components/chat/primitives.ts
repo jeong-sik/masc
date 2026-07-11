@@ -411,6 +411,8 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
       return 'no reply'
     case 'error':
       return 'error'
+    case 'transport_failure':
+      return 'transport failure'
     case 'interrupted':
       return 'interrupted'
     case 'history':
@@ -2058,9 +2060,9 @@ function renderStructuredFailureText(text: string): Array<string | VNode> {
 
 /** Typed failure card for kind=transport_failure rows.
  *
- * The discriminator is the writer-declared row kind (normalized to
- * delivery='error'), never a string match on the content — the raw error
- * text is diagnostic payload, shown collapsed. The reassurance line states
+ * The discriminator is the writer-declared row kind (normalized to the closed
+ * delivery='transport_failure' variant), never a string match on the content.
+ * The raw error text is diagnostic payload, shown collapsed. The reassurance line states
  * what the backend guarantees: a Transport_failure row is watermark-neutral
  * (keeper_chat_store), so the user message it failed to answer stays pending
  * for the keeper's next turn. */
@@ -2083,7 +2085,7 @@ function ChatFailureCard({ diagnostic }: { diagnostic: string }) {
         </span>
       </div>
       <p class="m-0 text-sm leading-airy text-[var(--color-fg-secondary)]" data-chat-failure-reassurance>
-        보낸 메시지는 사라지지 않았습니다 — 대기 상태로 유지되며, keeper가 다음 턴을 시작하면 다시 처리 대상이 됩니다.
+        보낸 메시지는 사라지지 않았습니다. 이 실패 기록은 처리 완료로 간주되지 않으며, keeper가 이후 정상 응답하기 전까지 다시 처리 대상에 남습니다.
       </p>
       <div class="flex items-center gap-2">
         <button
@@ -2352,13 +2354,13 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
-  // delivery='error' is the persisted transport_failure row (keeper-state.ts
-  // maps kind=transport_failure → 'error'); only that row renders the typed
+  // keeper-state.ts maps the writer-declared kind=transport_failure to its own
+  // closed delivery variant; only that durable row renders the typed
   // failure card, because its reassurance ("보낸 메시지는 사라지지 않았습니다")
   // holds only when the keeper never answered. interrupted/timeout keep any
   // partial text and render as prose plus the diagnostic banner below.
   const isFailureMessage =
-    entry.delivery === 'error' && !!entry.error?.trim()
+    entry.delivery === 'transport_failure' && !!entry.error?.trim()
   const richTextRole = entry.role === 'assistant' || entry.role === 'system'
   const hasRealText = !liveLabel && !!entry.text && entry.text.trim().length > 0
   const hasCardBlock = (entry.blocks ?? []).some((b) => CARD_BLOCK_TYPES.has(b.t))

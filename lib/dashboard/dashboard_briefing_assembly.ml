@@ -107,10 +107,12 @@ let identity_digest prefix identity =
   Printf.sprintf "%s:%s" prefix (Digest.to_hex (Digest.string identity))
 
 let is_internal_attention incident =
-  Operator_digest_types.is_root_target_type (string_field "target_type" incident)
+  Operator_digest_types.is_workspace_target_type
+    (string_field "target_type" incident)
 
 let is_internal_action action =
-  Operator_digest_types.is_root_target_type (string_field "target_type" action)
+  Operator_digest_types.is_workspace_target_type
+    (string_field "target_type" action)
 
 let incident_action_types kind =
   match kind with

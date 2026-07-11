@@ -16,9 +16,10 @@ let normalize_judgment_surface value =
 
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
-  if Operator_digest_types.is_root_target_type normalized then
-    Ok ("workspace", Operator_judgment.Workspace)
-  else Error "target_type must be root"
+  match Operator_judgment.target_type_of_string normalized with
+  | Some target_type ->
+      Ok (Operator_judgment.target_type_to_string target_type, target_type)
+  | None -> Error Operator_action_constants.workspace_target_type_error
 
 let default_fresh_ttl_sec surface =
   match surface with
@@ -108,21 +109,23 @@ let canonical_action_type action_type = action_type
 
 let normalize_action_target_type target_type =
   let normalized = String.trim target_type |> String.lowercase_ascii in
-  if Operator_digest_types.is_root_target_type normalized then Ok "workspace"
-  else match normalized with
-  | "keeper" -> Ok "keeper"
-  | value when String.equal value Operator_action_constants.goal_target_type -> Ok value
-  | "" -> Ok ""
-  | _ -> Error "target_type must be root, keeper, or goal"
+  if String.equal normalized ""
+  then Ok ""
+  else
+    match Operator_action_constants.target_type_of_string normalized with
+    | Some target_type ->
+        Ok (Operator_action_constants.target_type_to_string target_type)
+    | None -> Error Operator_action_constants.invalid_target_type_message
 
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
-    -> "workspace"
+    -> Operator_action_constants.workspace_target_type
   | action when String.equal action Operator_action_constants.goal_completion_decision ->
     Operator_action_constants.goal_target_type
-  | "keeper_message" | "keeper_probe" -> "keeper"
-  | action when String.equal action Operator_action_constants.keeper_recover -> "keeper"
+  | "keeper_message" | "keeper_probe" -> Operator_action_constants.keeper_target_type
+  | action when String.equal action Operator_action_constants.keeper_recover ->
+      Operator_action_constants.keeper_target_type
   | _ -> ""
 
 let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
@@ -216,11 +219,14 @@ let preview_of_action (request : action_request) =
   `Assoc (base @ [ ("payload", `Assoc payload_fields) ])
 
 let validate_target_type expected request =
-  if String.equal request.target_type expected then Ok ()
-  else
+  match Operator_action_constants.target_type_of_string request.target_type with
+  | Some actual when actual = expected -> Ok ()
+  | Some _ | None ->
     Error
-      (Printf.sprintf "invalid target_type for %s (expected %s)"
-         request.action_type expected)
+      (Printf.sprintf
+         "invalid target_type for %s (expected %s)"
+         request.action_type
+         (Operator_action_constants.target_type_to_string expected))
 
 let require_target_id request =
   match request.target_id with

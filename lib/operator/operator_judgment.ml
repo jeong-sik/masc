@@ -26,11 +26,15 @@ type record = {
 }
 
 let target_type_to_string = function
-  | Workspace -> "workspace"
+  | Workspace -> Operator_action_constants.workspace_target_type
 
 let target_type_of_string = function
-  | "workspace" -> Some Workspace
-  | _ -> None
+  | value ->
+      (match Operator_action_constants.target_type_of_string value with
+       | Some Operator_action_constants.Workspace -> Some Workspace
+       | Some Operator_action_constants.Keeper
+       | Some Operator_action_constants.Goal
+       | None -> None)
 
 
 let operator_dir config =

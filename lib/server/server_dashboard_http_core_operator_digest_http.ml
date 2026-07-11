@@ -4,8 +4,8 @@
     [operator_digest_http_json] is the GET handler backing the
     operator dashboard's digest surface. Two paths:
 
-    1. **Default root request** (no actor, no target_id, no
-       include_workers override, target_type omitted or [root]) — serves the cached
+    1. **Default workspace request** (no actor, no target_id, no
+       include_workers override, target_type omitted or [workspace]) — serves the cached
        [operator_digest_cache] surface immediately (0ms), decorated
        with the default query metadata.
 
@@ -55,18 +55,26 @@ let operator_digest_http_json ~state ~sw ~clock request =
     | Some ("1" | "true" | "yes") -> Some true
     | _ -> None
   in
-  let root_target_type value =
+  let workspace_target_type value =
     match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
     | None -> true
-    | Some "workspace" -> true
-    | Some _ -> false
+    | Some raw ->
+      (match Operator_action_constants.target_type_of_string raw with
+       | Some Operator_action_constants.Workspace -> true
+       | Some Operator_action_constants.Keeper
+       | Some Operator_action_constants.Goal
+       | None -> false)
   in
-  let effective_target_type = Option.value ~default:"workspace" target_type in
+  let effective_target_type =
+    Option.value
+      ~default:Operator_action_constants.workspace_target_type
+      target_type
+  in
   let default_namespace_request =
     actor = None
     && target_id = None
     && include_workers = None
-    && root_target_type target_type
+    && workspace_target_type target_type
   in
   let query =
     Core_operator_query.operator_digest_query_json

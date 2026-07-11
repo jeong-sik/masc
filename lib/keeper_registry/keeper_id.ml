@@ -8,17 +8,14 @@ let preview_id s =
 
 module Keeper_name = struct
   type t = string
+
   let is_valid s =
     let len = String.length s in
-    s <> "." && s <> ".." && len > 0 && len <= 64 &&
-    let rec check i =
-      if i = len then true
-      else
-        let c = s.[i] in
-        match c with
-        | 'a'..'z' | 'A'..'Z' | '0'..'9' | '-' | '_' -> check (i + 1)
-        | _ -> false
-    in check 0
+    (not (String.equal s "."))
+    && not (String.equal s "..")
+    && len <= 64
+    && Safe_identifier.is_portable_name s
+  ;;
 
   let of_string s =
     if is_valid s then Ok s
@@ -29,13 +26,14 @@ module Keeper_name = struct
         else if String.length s = 0 then "empty string"
         else if String.length s > 64
         then Printf.sprintf "length %d exceeds 64" (String.length s)
-        else "contains characters outside [A-Za-z0-9_-]"
+        else Safe_identifier.portable_name_error ~field:"keeper_name"
       in
       Error
         (Printf.sprintf
            "Invalid keeper_name %S: %s"
            (preview_id s)
            reason)
+  ;;
 
   let to_string s = s
   let equal = String.equal
@@ -57,7 +55,7 @@ module Trace_id = struct
         else if String.length s = 0 then "empty string"
         else if String.length s > 64
         then Printf.sprintf "length %d exceeds 64" (String.length s)
-        else "contains characters outside [A-Za-z0-9_-]"
+        else Safe_identifier.portable_name_error ~field:"trace_id"
       in
       Error (Printf.sprintf "Invalid trace_id %S: %s" (preview_id s) reason))
   let to_string s = s

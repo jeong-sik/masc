@@ -888,7 +888,9 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (IdleDetected _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
+  | Agent_sdk.Error.Agent (ExitConditionMet _)
+  | Agent_sdk.Error.Agent (ToolFailureRecoveryFailed _)
+  | Agent_sdk.Error.Agent (ToolFailureRecoveryDeferred _) -> false
   | Agent_sdk.Error.Agent (InputRequired _) -> false
   (* Non-API / non-Agent error families. *)
   | Agent_sdk.Error.Mcp _
@@ -977,7 +979,9 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (IdleDetected _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
+  | Agent_sdk.Error.Agent (ExitConditionMet _)
+  | Agent_sdk.Error.Agent (ToolFailureRecoveryFailed _)
+  | Agent_sdk.Error.Agent (ToolFailureRecoveryDeferred _) -> false
   | Agent_sdk.Error.Api _
   | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Mcp _

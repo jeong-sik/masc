@@ -26,7 +26,8 @@ let visible_response_text_present ~stop_reason ~response_text_present =
      a budget stop it does not count as a visible reply for the contract. *)
   | Runtime_agent.TurnBudgetExhausted _
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     false
   | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ ->
     response_text_present
@@ -42,7 +43,8 @@ let budget_exhausted_contract_status ~stop_reason status =
   | ( ( Runtime_agent.Completed
       | Runtime_agent.MutationBoundaryReached _
       | Runtime_agent.Yielded_to_chat_waiting _
-      | Runtime_agent.Yielded_to_durable_stimulus _ )
+      | Runtime_agent.Yielded_to_durable_stimulus _
+      | Runtime_agent.ToolFailureRecoveryDeferred _ )
     , _ )
   | Runtime_agent.TurnBudgetExhausted _, _ ->
     status
@@ -53,18 +55,30 @@ let observed_completion_contract_status
       ~stop_reason ~response_text_present
   : Keeper_execution_receipt.completion_contract_result
   =
-  let response_text_present =
-    visible_response_text_present ~stop_reason ~response_text_present
-  in
-  let status =
-    if (not response_text_present) && actual_keeper_tool_names = []
-    then Keeper_execution_receipt.Contract_violated
-    else
-      Keeper_agent_run_turn_helpers.completion_contract_result_for_progress_evidence
-        ~had_owned_active_task_at_turn_start
-        ~actual_keeper_tool_names
-  in
-  budget_exhausted_contract_status ~stop_reason status
+  match stop_reason with
+  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+    (* The typed recovery judge deliberately ended this run. It is a control
+       checkpoint, not a completion claim and not an empty model reply. Keep
+       the completion-contract axis inert so failure escalation cannot turn a
+       valid Defer decision into a Keeper pause. *)
+    Keeper_execution_receipt.Contract_passive_only
+  | ( Runtime_agent.Completed
+    | Runtime_agent.TurnBudgetExhausted _
+    | Runtime_agent.MutationBoundaryReached _
+    | Runtime_agent.Yielded_to_chat_waiting _
+    | Runtime_agent.Yielded_to_durable_stimulus _ ) as stop_reason ->
+    let response_text_present =
+      visible_response_text_present ~stop_reason ~response_text_present
+    in
+    let status =
+      if (not response_text_present) && actual_keeper_tool_names = []
+      then Keeper_execution_receipt.Contract_violated
+      else
+        Keeper_agent_run_turn_helpers.completion_contract_result_for_progress_evidence
+          ~had_owned_active_task_at_turn_start
+          ~actual_keeper_tool_names
+    in
+    budget_exhausted_contract_status ~stop_reason status
 ;;
 
 let text_only_violation_contract_status ~actual_keeper_tool_names ~fallback

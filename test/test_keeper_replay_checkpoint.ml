@@ -265,6 +265,67 @@ let test_empty_success_drops_current_turn_replay () =
     (prune_reason_to_string reason)
 ;;
 
+let test_recovery_defer_preserves_typed_receipt_suffix () =
+  let open Agent_sdk.Types in
+  let history =
+    [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
+  in
+  let receipt_metadata =
+    [ "oas.tool_failure_recovery.v1", `Assoc [ "version", `Int 1 ] ]
+  in
+  let result_message =
+    { (message Tool
+         [ ToolResult
+             { tool_use_id = "tool-1"
+             ; content = "working directory is required"
+             ; is_error = true
+             ; json = None
+             ; content_blocks = None
+             }
+         ]) with
+      metadata = receipt_metadata
+    }
+  in
+  let current_turn =
+    [ message User [ Text "current user" ]
+    ; message Assistant
+        [ ToolUse
+            { id = "tool-1"
+            ; name = "Execute"
+            ; input = `Assoc [ "cmd", `String "gh pr list" ]
+            }
+        ]
+    ; result_message
+    ]
+  in
+  let patched, reason =
+    Finalize.checkpoint_for_replay_persistence
+      ~history_messages:history
+      ~pre_turn_working_context:None
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~session_id:"new-session"
+      ~response_text:""
+      ~stop_reason:
+        (Runtime_agent.ToolFailureRecoveryDeferred
+           { turns_used = 2
+           ; reason = "wait for repository state"
+           ; tool_names = [ "Execute" ]
+           })
+      (checkpoint (history @ current_turn))
+    |> expect_ok
+  in
+  Alcotest.(check string) "session unified" "new-session" patched.session_id;
+  Alcotest.(check int) "full recovery suffix retained" 5
+    (List.length patched.messages);
+  Alcotest.(check bool) "receipt metadata retained" true
+    (List.exists
+       (fun (message : Agent_sdk.Types.message) ->
+          message.metadata = receipt_metadata)
+       patched.messages);
+  Alcotest.(check (option string)) "no prune reason" None
+    (prune_reason_to_string reason)
+;;
+
 let test_media_degraded_projection_persists_canonical_checkpoint () =
   let open Agent_sdk.Types in
   let canonical_history =
@@ -352,6 +413,10 @@ let () =
             "empty success drops current turn"
             `Quick
             test_empty_success_drops_current_turn_replay
+        ; Alcotest.test_case
+            "recovery defer preserves typed receipt suffix"
+            `Quick
+            test_recovery_defer_preserves_typed_receipt_suffix
         ; Alcotest.test_case
             "media-degraded projection persists canonical checkpoint"
             `Quick

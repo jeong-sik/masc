@@ -491,6 +491,36 @@ let test_finalization_does_not_surface_hidden_reasoning () =
     false
     (contains ~needle:"provider-private reasoning" reason)
 
+let test_recovery_defer_does_not_synthesize_tool_narration () =
+  let deferred =
+    { (run_result ()) with
+      stop_reason =
+        Runtime_agent.ToolFailureRecoveryDeferred
+          { turns_used = 2
+          ; reason = "wait for repository state"
+          ; tool_names = [ "Execute" ]
+          }
+    }
+  in
+  match
+    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+      ~runtime_id:"runtime.reasoning-model"
+      ~initial_messages:[]
+      ~run_result:deferred
+      ~text:""
+      ~tool_names:[ "Execute" ]
+      ()
+  with
+  | Ok text ->
+    Alcotest.(check string)
+      "control checkpoint has no synthetic assistant narration"
+      ""
+      text
+  | Error error ->
+    Alcotest.failf
+      "typed recovery checkpoint should finalize without a chat reply: %s"
+      (Agent_sdk.Error.to_string error)
+
 let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -2436,6 +2466,10 @@ let () =
             "finalization does not surface hidden reasoning"
             `Quick
             test_finalization_does_not_surface_hidden_reasoning;
+          Alcotest.test_case
+            "recovery defer does not synthesize tool narration"
+            `Quick
+            test_recovery_defer_does_not_synthesize_tool_narration;
           Alcotest.test_case
             "runtime mapping preserves no-progress accept rejection"
             `Quick

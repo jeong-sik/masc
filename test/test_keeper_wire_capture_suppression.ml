@@ -7,7 +7,7 @@
         wire_capture_response_suppression_reason_label,
         emit_wire_capture_response_suppressed_metrics, replay_response_text_for_capture
       - Keeper_agent_run_response_text: completion_contract_suppresses_visible_response,
-        finalize (budget/attention auto-suppress default)
+        finalize (budget/control-checkpoint/attention auto-suppress default)
 
     Excluded from restoration: assertions on the deleted [STATE] snapshot
     fields (state_snapshot_source, state_snapshot.decisions) and
@@ -23,31 +23,56 @@ module Metrics = Masc.Otel_metric_store
 (* ── wire_capture_response_suppression_reasons / labels / metrics ───── *)
 
 let test_wire_capture_suppression_reasons_emit_all_cause_metrics () =
-  let reasons ~budget_exhausted ~contract_suppresses_visible_response =
+  let reasons
+        ~budget_exhausted
+        ~control_checkpoint
+        ~contract_suppresses_visible_response
+    =
     Finalize.wire_capture_response_suppression_reasons
       ~budget_exhausted
+      ~control_checkpoint
       ~contract_suppresses_visible_response
     |> List.map Finalize.wire_capture_response_suppression_reason_label
   in
   Alcotest.(check (list string))
     "no suppression"
     []
-    (reasons ~budget_exhausted:false ~contract_suppresses_visible_response:false);
+    (reasons
+       ~budget_exhausted:false
+       ~control_checkpoint:false
+       ~contract_suppresses_visible_response:false);
   Alcotest.(check (list string))
     "budget exhausted"
     [ "budget_exhausted" ]
-    (reasons ~budget_exhausted:true ~contract_suppresses_visible_response:false);
+    (reasons
+       ~budget_exhausted:true
+       ~control_checkpoint:false
+       ~contract_suppresses_visible_response:false);
+  Alcotest.(check (list string))
+    "control checkpoint"
+    [ "control_checkpoint" ]
+    (reasons
+       ~budget_exhausted:false
+       ~control_checkpoint:true
+       ~contract_suppresses_visible_response:false);
   Alcotest.(check (list string))
     "completion contract"
     [ "completion_contract" ]
-    (reasons ~budget_exhausted:false ~contract_suppresses_visible_response:true);
+    (reasons
+       ~budget_exhausted:false
+       ~control_checkpoint:false
+       ~contract_suppresses_visible_response:true);
   Alcotest.(check (list string))
     "both cause labels preserved"
     [ "budget_exhausted"; "completion_contract" ]
-    (reasons ~budget_exhausted:true ~contract_suppresses_visible_response:true);
+    (reasons
+       ~budget_exhausted:true
+       ~control_checkpoint:false
+       ~contract_suppresses_visible_response:true);
   let keeper_name = "wirecap_suppression_metric" in
   let labels reason = [ ("keeper", keeper_name); ("reason", reason) ] in
   let budget_labels = labels "budget_exhausted" in
+  let control_labels = labels "control_checkpoint" in
   let contract_labels = labels "completion_contract" in
   let metric_value ~labels =
     Metrics.metric_value_or_zero
@@ -56,16 +81,22 @@ let test_wire_capture_suppression_reasons_emit_all_cause_metrics () =
       ()
   in
   let budget_before = metric_value ~labels:budget_labels in
+  let control_before = metric_value ~labels:control_labels in
   let contract_before = metric_value ~labels:contract_labels in
   Finalize.emit_wire_capture_response_suppressed_metrics
     ~keeper_name
     (Finalize.wire_capture_response_suppression_reasons
        ~budget_exhausted:true
+       ~control_checkpoint:true
        ~contract_suppresses_visible_response:true);
   Alcotest.(check (float 0.0001))
     "budget exhausted metric increments"
     (budget_before +. 1.0)
     (metric_value ~labels:budget_labels);
+  Alcotest.(check (float 0.0001))
+    "control checkpoint metric increments"
+    (control_before +. 1.0)
+    (metric_value ~labels:control_labels);
   Alcotest.(check (float 0.0001))
     "completion contract metric increments"
     (contract_before +. 1.0)
@@ -207,6 +238,25 @@ let test_contract_requires_attention_finalizer_drops_response_text_by_default ()
     finalized.response_text
 ;;
 
+let test_recovery_defer_finalizer_drops_response_text_by_default () =
+  let finalized =
+    Response_text.finalize
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~stop_reason:
+        (Runtime_agent.ToolFailureRecoveryDeferred
+           { turns_used = 2
+           ; reason = "wait for repository state"
+           ; tool_names = [ "Execute" ]
+           })
+      ~raw_response_text:"No textual reply was produced. Tools invoked: Execute."
+      ()
+  in
+  Alcotest.(check string)
+    "typed recovery checkpoint never becomes a chat reply"
+    ""
+    finalized.response_text
+;;
+
 let () =
   Alcotest.run
     "keeper_wire_capture_suppression"
@@ -261,6 +311,10 @@ let () =
             "contract-requires-attention auto-suppresses by default"
             `Quick
             test_contract_requires_attention_finalizer_drops_response_text_by_default
+        ; Alcotest.test_case
+            "typed recovery checkpoint auto-suppresses by default"
+            `Quick
+            test_recovery_defer_finalizer_drops_response_text_by_default
         ] )
     ]
 ;;

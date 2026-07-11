@@ -91,20 +91,24 @@ let continuation_delivery_gate ~channel ~tool_calls ~content =
 
 type wire_capture_response_suppression_reason =
   | Budget_exhausted
+  | Control_checkpoint
   | Completion_contract
 
 let wire_capture_response_suppression_reasons
       ~budget_exhausted
+      ~control_checkpoint
       ~contract_suppresses_visible_response
   =
   let reasons =
     if contract_suppresses_visible_response then [ Completion_contract ] else []
   in
+  let reasons = if control_checkpoint then Control_checkpoint :: reasons else reasons in
   if budget_exhausted then Budget_exhausted :: reasons else reasons
 ;;
 
 let wire_capture_response_suppression_reason_label = function
   | Budget_exhausted -> "budget_exhausted"
+  | Control_checkpoint -> "control_checkpoint"
   | Completion_contract -> "completion_contract"
 ;;
 
@@ -209,33 +213,64 @@ let checkpoint_for_replay_persistence
          Keeper_execution_receipt.completion_contract_result)
       ~(session_id : string)
       ~(response_text : string)
+      ?(stop_reason = Runtime_agent.Completed)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
-  match
-    replay_suffix_prune_reason
-      ~completion_contract_result
-  with
-  | Some reason ->
-    let pruned =
-      prune_current_turn_replay
-        ~history_messages
-        ~pre_turn_working_context
-        checkpoint
-    in
-    (match pruned with
-    | Some checkpoint -> Ok (checkpoint, Some reason)
-    | None ->
-      Error
-        (Printf.sprintf
-           "refusing to save checkpoint: replay suffix prune reason=%s but \
-            checkpoint messages do not match pre-turn history prefix"
-           (replay_suffix_prune_reason_to_string reason)))
-  | None ->
-    canonical_success_replay_checkpoint
-      ~history_messages
-      ~session_id
-      ~response_text
-      checkpoint
+  match stop_reason with
+  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+    (* OAS attached the durable recovery receipt to the current ToolResult.
+       Blank-response canonicalization and completion-contract pruning both
+       remove that suffix, so this typed control checkpoint must preserve it
+       verbatim. Prefix validation still fails closed before persistence. *)
+    (match
+       Keeper_replay_prefix.split
+         ~prefix:history_messages
+         checkpoint.Agent_sdk.Checkpoint.messages
+     with
+     | Ok (_ :: _) ->
+       Ok
+         ( { checkpoint with
+             Agent_sdk.Checkpoint.session_id
+           ; messages =
+               Keeper_context_core.repair_broken_tool_call_pairs
+                 checkpoint.messages
+           }
+         , None )
+     | Ok [] ->
+       Error
+         "refusing to save recovery-deferred checkpoint without a current-turn \
+          replay suffix"
+     | Error _ ->
+       Error
+         "refusing to save recovery-deferred checkpoint: messages do not match \
+          pre-turn history prefix")
+  | ( Runtime_agent.Completed
+    | Runtime_agent.TurnBudgetExhausted _
+    | Runtime_agent.MutationBoundaryReached _
+    | Runtime_agent.Yielded_to_chat_waiting _
+    | Runtime_agent.Yielded_to_durable_stimulus _ ) ->
+    (match replay_suffix_prune_reason ~completion_contract_result with
+     | Some reason ->
+       let pruned =
+         prune_current_turn_replay
+           ~history_messages
+           ~pre_turn_working_context
+           checkpoint
+       in
+       (match pruned with
+        | Some checkpoint -> Ok (checkpoint, Some reason)
+        | None ->
+          Error
+            (Printf.sprintf
+               "refusing to save checkpoint: replay suffix prune reason=%s but \
+                checkpoint messages do not match pre-turn history prefix"
+               (replay_suffix_prune_reason_to_string reason)))
+     | None ->
+       canonical_success_replay_checkpoint
+         ~history_messages
+         ~session_id
+         ~response_text
+         checkpoint)
 ;;
 
 module For_testing = struct
@@ -304,9 +339,14 @@ let finalize
       ~history_assistant_source
       completion_contract_result
   in
+  let control_checkpoint =
+    Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
+      result.stop_reason
+  in
   let suppression_reasons =
     wire_capture_response_suppression_reasons
       ~budget_exhausted
+      ~control_checkpoint
       ~contract_suppresses_visible_response
   in
   let suppress_visible_response = suppression_reasons <> [] in
@@ -383,6 +423,7 @@ let finalize
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
+          ~stop_reason:result.stop_reason
           checkpoint
       in
       (match checkpoint_for_save_result with

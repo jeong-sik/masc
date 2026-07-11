@@ -161,7 +161,8 @@ let blocker_class_releases_owned_tasks_on_pause = function
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
-  | Sdk_input_required -> false
+  | Sdk_input_required
+  | Sdk_tool_failure_recovery_failed -> false
 ;;
 
 let release_owned_active_tasks_after_typed_pause ~config ~meta ~reason_tag =

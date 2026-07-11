@@ -27,6 +27,16 @@ type stop_reason =
     (* The current autonomous cycle completed at least one OAS provider turn,
        then released its lane because another durable stimulus was queued
        behind the stimulus already leased by this cycle. *)
+  | ToolFailureRecoveryDeferred of
+      { turns_used : int
+      ; reason : string
+      ; tool_names : string list
+      }
+    (* The OAS typed recovery judge ended this Agent.run without another main
+       provider call. [reason] is observation-only model output; scheduling
+       decisions must branch only on this constructor. The host owns the next
+       activity boundary, so this is a checkpoint yield, never a provider
+       failure or Keeper pause. *)
 
 type config =
   { name : string

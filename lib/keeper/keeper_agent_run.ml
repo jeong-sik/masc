@@ -45,7 +45,12 @@ let normalize_response_text_for_finalization
       ~tool_names
       ()
   =
-  match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
+  if
+    Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
+      run_result.stop_reason
+  then Ok ""
+  else
+    match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
   | Error _ ->
     (* Finalization intentionally exposes the higher-level accept-rejected

@@ -297,6 +297,8 @@ let append_decision_record
                       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
                   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
                       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
+                  | Runtime_agent.ToolFailureRecoveryDeferred { turns_used; _ } ->
+                      Printf.sprintf "tool_failure_recovery_deferred(%d)" turns_used
                 in
               let inference_fields =
                 match r.inference_telemetry with

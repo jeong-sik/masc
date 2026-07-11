@@ -25,6 +25,11 @@ type stop_reason =
     }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | ToolFailureRecoveryDeferred of {
+      turns_used : int;
+      reason : string;
+      tool_names : string list;
+    }
 
 (** {1 Per-worker config} *)
 

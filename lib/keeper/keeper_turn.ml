@@ -110,7 +110,8 @@ let has_no_progress_loop_blocker (meta : keeper_meta) =
           | Sdk_guardrail_violation
           | Sdk_tripwire_violation
           | Sdk_exit_condition_met
-          | Sdk_input_required )
+          | Sdk_input_required
+          | Sdk_tool_failure_recovery_failed )
       ; _
       } ->
     false

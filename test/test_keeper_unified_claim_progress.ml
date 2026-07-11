@@ -207,6 +207,27 @@ let test_budget_exhausted_tool_only_execution_does_not_satisfy_contract () =
     (result [])
 ;;
 
+let test_recovery_defer_is_not_a_completion_contract_violation () =
+  let result =
+    KAR.Contract_helpers.observed_completion_contract_status
+      ~had_owned_active_task_at_turn_start:true
+      ~actual_keeper_tool_names:[ "tool_execute" ]
+      ~stop_reason:
+        (Runtime_agent.ToolFailureRecoveryDeferred
+           { turns_used = 2
+           ; reason = "wait for repository state"
+           ; tool_names = [ "Execute" ]
+           })
+      ~response_text_present:false
+    |> Masc.Keeper_execution_receipt.completion_contract_result_to_string
+  in
+  check
+    string
+    "typed control checkpoint is completion-contract neutral"
+    "passive_only"
+    result
+;;
+
 let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
   { tool_name
   ; provider = "test"
@@ -309,6 +330,10 @@ let () =
             "budget-exhausted tool-only execution does not satisfy contract"
             `Quick
             test_budget_exhausted_tool_only_execution_does_not_satisfy_contract
+        ; test_case
+            "recovery defer is completion-contract neutral"
+            `Quick
+            test_recovery_defer_is_not_a_completion_contract_violation
         ; test_case
             "contract progress filters no-progress tool results"
             `Quick

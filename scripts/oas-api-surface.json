@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "ca4dbb1995b39feb9b0ffb15352d64cce1840391",
-  "pinned_version": "v0.211.0",
+  "pinned_sha": "fc405106e62dce43b57d08870ea6fbbff8422c93",
+  "pinned_version": "v0.211.2",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -19,6 +19,9 @@
       "SlotSchedulerObserved",
       "ToolCalled",
       "ToolCompleted",
+      "ToolFailureEpisodeDetected",
+      "ToolFailureRecoveryDecided",
+      "ToolFailureRecoveryJudgeFailed",
       "TurnCompleted",
       "TurnReady",
       "TurnStarted"

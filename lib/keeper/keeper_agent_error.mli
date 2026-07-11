@@ -32,6 +32,8 @@ type sdk_termination_semantics =
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required
+  | Oas_tool_failure_recovery_failed
+  | Oas_tool_failure_recovery_deferred
   | Sdk_error_failure
 
 val sdk_termination_semantics

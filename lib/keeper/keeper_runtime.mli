@@ -44,8 +44,7 @@ type boot_meta_resolution = {
 type boot_meta_failure_cause =
   | Missing_meta
   | Meta_read_error
-  | Config_parse_failed
-  | Invalid_profile
+  | Config_invalid
   | Sandbox_profile_required
   | Goal_required
   | Materialization_failed
@@ -60,6 +59,7 @@ type boot_meta_failure = {
   keeper_name : string;
   base_path : string;
   cause : boot_meta_failure_cause;
+  config_error : Keeper_types_profile.keeper_toml_load_error option;
   error : string;
   recorded_at : string;
   recorded_at_unix : float;
@@ -95,17 +95,20 @@ type autoboot_exclusion = {
   keeper_name : string;
   reason : autoboot_exclusion_reason;
 }
-(** Why a configured keeper is intentionally absent from
-    {!bootable_keeper_names}. *)
+(** Why keeper policy intentionally excludes a configured keeper from
+    autoboot. Invalid configuration is a separate typed admission failure and
+    is not collapsed into this policy type. *)
 
 val bootable_keeper_names : Workspace.config -> string list
-(** Names of every keeper whose [keepers/<name>/keeper.toml] exists and
-    looks bootable on disk. *)
+(** Names of every valid, autoboot-admitted keeper profile. Invalid configured
+    keepers remain visible through configured-name/config-error surfaces and
+    are still inspected by bootstrap, but never appear executable here. *)
 
 val autoboot_exclusion_reason : Workspace.config -> string -> autoboot_exclusion_reason option
-(** Per-keeper autoboot exclusion reason, or [None] when the keeper is bootable.
-    Single-keeper projection of
-    {!autoboot_excluded_keeper_reasons}. *)
+(** Per-keeper pause/autoboot policy exclusion, or [None] when policy admits
+    the keeper. [None] does not assert configuration validity; callers that
+    need executable admission use {!bootable_keeper_names}. Single-keeper
+    projection of {!autoboot_excluded_keeper_reasons}. *)
 
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
@@ -134,10 +137,6 @@ val apply_default_opt : 'a option -> 'a option -> 'a option
 (** [apply_default_opt primary fallback] returns [primary] when it is
     [Some], else [fallback]. *)
 
-
-val invalid_profile_defaults_error : keeper_name:string -> string -> string
-(** Render the structured error message for a profile-defaults parse
-    failure. *)
 
 val effective_declarative_runtime_id :
   Keeper_types_profile.keeper_profile_defaults ->
@@ -220,7 +219,9 @@ val existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t
     spawns on hot-reload. *)
 
 val has_boot_entries : Workspace.config -> bool
-(** [true] when at least one bootable keeper exists for [config]. *)
+(** [true] when at least one configured keeper is a bootstrap candidate,
+    including an invalid profile that must keep the supervisor alive so a
+    repaired file can be admitted without a server restart. *)
 
 val should_start_supervisor_sweep :
   config:Workspace.config -> stats:keeper_bootstrap_stats -> bool

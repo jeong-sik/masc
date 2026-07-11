@@ -1245,9 +1245,12 @@ let mcp_websocket_handler
     [handler] builds the per-connection [input_handlers] from the
     [Wsd.t]; the MCP session ({!mcp_websocket_handler}) and the IDE LSP
     session each supply their own. *)
-(* RFC 6455 §4.2.1 scrutiny: the request must be a GET with Host, an
-   [Upgrade: websocket] header, a [Connection] list containing "upgrade", a 16-
-   byte base64 [Sec-WebSocket-Key], and [Sec-WebSocket-Version: 13]. *)
+(* RFC 6455 §4.2.1 scrutiny after the shared request-entry authority gate: the
+   request must be a GET with [Upgrade: websocket], a [Connection] list
+   containing "upgrade", a 16-byte base64 [Sec-WebSocket-Key], and
+   [Sec-WebSocket-Version: 13].  Host cardinality and syntax are already
+   represented by [Server_request_authority.authority] in the request fiber;
+   this downstream handshake must not re-read the raw Host field. *)
 let ws_upgrade_accept (request : Httpun.Request.t) : (string, string) result =
   let h name = Httpun.Headers.get request.Httpun.Request.headers name in
   let ci_eq a b = String.equal (String.lowercase_ascii a) b in
@@ -1257,10 +1260,10 @@ let ws_upgrade_accept (request : Httpun.Request.t) : (string, string) result =
       (String.split_on_char ',' v)
   in
   match
-    request.Httpun.Request.meth, h "host", h "upgrade", h "connection",
+    request.Httpun.Request.meth, h "upgrade", h "connection",
     h "sec-websocket-key", h "sec-websocket-version"
   with
-  | `GET, Some _host, Some upgrade, Some connection, Some key, Some "13"
+  | `GET, Some upgrade, Some connection, Some key, Some "13"
     when ci_eq upgrade "websocket"
          && connection_lists_upgrade connection
          && (try String.length (Base64.decode_exn key) = 16 with _ -> false) ->

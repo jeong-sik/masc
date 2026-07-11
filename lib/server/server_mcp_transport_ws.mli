@@ -289,7 +289,9 @@ val ws_upgrade_accept : Httpun.Request.t -> (string, string) result
 (** Validate an HTTP/1.1 -> WebSocket upgrade request (RFC 6455 §4.2.1): [GET],
     [Upgrade: websocket], [Connection] listing [upgrade], [Sec-WebSocket-Version:
     13], and a [Sec-WebSocket-Key] that base64-decodes to exactly 16 bytes.
-    Returns the accept token on success.  Exposed for unit tests. *)
+    Returns the accept token on success.  Authority validation belongs to the
+    shared request-entry gate, so this function intentionally does not re-read
+    [Host].  Exposed for unit tests. *)
 
 val respond_and_drive_upgrade :
   upgrade:(Gluten.impl -> unit) ->

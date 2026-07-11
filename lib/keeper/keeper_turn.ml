@@ -645,6 +645,13 @@ let run_keeper_msg_turn_admitted
     with
     | Error e -> tool_result_error ("" ^ e)
     | Ok meta0 ->
+      (match
+         Keeper_unified_turn_pre_dispatch.load_profile_defaults
+           ~base_path:ctx.config.base_path
+           ~keeper_name:meta0.name
+       with
+       | Error err -> tool_result_error (Agent_sdk.Error.to_string err)
+       | Ok profile_defaults ->
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a Delegate keeper,
          evict each image to the artifact store + an eager analyze_image reading
          BEFORE it enters the turn, so the main history stays text-only and
@@ -728,9 +735,6 @@ let run_keeper_msg_turn_admitted
 	            | None -> ());
 	              resolution.effective_budget
 	            in
-		            let profile_defaults =
-		              Keeper_types_profile.load_keeper_profile_defaults meta.name
-		            in
             let base_dir =
               let root = session_base_dir ctx.config in
               match channel_session_key with
@@ -1084,10 +1088,11 @@ let run_keeper_msg_turn_admitted
 		                           (fun ~runtime_id ~max_context ~is_retry
 		                                ~degraded_retry_runtime ~fallback_reason
 		                                ~runtime_rotation_attempts ->
-		                              Keeper_agent_run.run_turn
-		                                ~config:ctx.config
-		                                ~meta
-		                                ~turn_ctx_cell
+			                              Keeper_agent_run.run_turn
+			                                ~config:ctx.config
+			                                ~meta
+			                                ~profile_defaults
+			                                ~turn_ctx_cell
 		                                ~base_dir
 		                                ~max_context
 		                                ~build_turn_prompt
@@ -1311,13 +1316,14 @@ let run_keeper_msg_turn_admitted
               in
               tool_result_ok (Yojson.Safe.to_string reply_json)
 
-))))))))
+)))))))))
 
 let handle_keeper_msg
       ?on_text_delta
       ?on_event
       ?event_bus
       ?continuation_channel
+      ?on_admission_rejected
       ctx
       args
   : tool_result
@@ -1354,19 +1360,21 @@ let handle_keeper_msg
     with
     | `Ran result -> result
     | `Rejected
-        { Keeper_turn_admission.shutdown_operation_id = Some operation_id
-        ; _
-        } ->
+        ({ Keeper_turn_admission.shutdown_operation_id = Some operation_id
+         ; _
+         } as rejection) ->
+        Option.iter (fun notify -> notify rejection) on_admission_rejected;
         tool_result_error
           (Printf.sprintf
              "keeper %s is stopping under operation %s"
              name
              (Keeper_shutdown_types.Operation_id.to_string operation_id))
     | `Rejected
-        { Keeper_turn_admission.waiting
-        ; in_flight
-        ; shutdown_operation_id = None
-        } ->
+        ({ Keeper_turn_admission.waiting
+         ; in_flight
+         ; shutdown_operation_id = None
+         } as rejection) ->
+        Option.iter (fun notify -> notify rejection) on_admission_rejected;
         let in_flight_text =
           match in_flight with
           | None -> ""

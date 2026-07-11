@@ -4,6 +4,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 module Lib = Masc
 module Auth = Masc.Auth
+module Keeper_chat_queue = Masc.Keeper_chat_queue
 module Workspace = Masc.Workspace
 
 open Alcotest
@@ -149,6 +150,52 @@ let test_keeper_post_route_classifies_catchup_judge () =
     (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
        Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
 
+let test_keeper_chat_receipt_route_and_json () =
+  let receipt_id =
+    match
+      Keeper_chat_queue.Receipt_id.of_string
+        "chatq_00000000-0000-4000-8000-000000000123"
+    with
+    | Ok receipt_id -> receipt_id
+    | Error error -> fail error
+  in
+  let path =
+    "/api/v1/keepers/idealist/chat/receipts/"
+    ^ Keeper_chat_queue.Receipt_id.to_string receipt_id
+  in
+  check (option (pair string string)) "receipt route is exact"
+    (Some ("idealist", Keeper_chat_queue.Receipt_id.to_string receipt_id))
+    (Server_dashboard_http_keeper_api.keeper_chat_receipt_route path);
+  check (option (pair string string)) "receipt route rejects extra segments" None
+    (Server_dashboard_http_keeper_api.keeper_chat_receipt_route (path ^ "/extra"));
+  let json =
+    Server_dashboard_http_keeper_api.keeper_chat_receipt_json
+      ~keeper_name:"idealist" ~revision:7L
+      { Keeper_chat_queue.receipt_id
+      ; state =
+          Keeper_chat_queue.Failed
+            { completed_at = 42.0
+            ; kind = Keeper_chat_queue.Delivery_failed
+            ; detail = "Slack rejected sk-proj-abcdefghijklmnopqrstuvwxyz"
+            ; outcome_ref = Some "chat-row-7"
+            }
+      }
+  in
+  let open Yojson.Safe.Util in
+  check string "receipt JSON state" "failed"
+    (json |> member "state" |> member "kind" |> to_string);
+  check string "receipt JSON revision" "7"
+    (match json |> member "revision" with
+     | `Int revision -> string_of_int revision
+     | `Intlit revision -> revision
+     | _ -> "invalid");
+  check string "receipt JSON failure kind" "delivery_failed"
+    (json |> member "state" |> member "failure_kind" |> to_string);
+  check bool "receipt JSON redacts failure detail" false
+    (contains_substring
+       (json |> member "state" |> member "detail" |> to_string)
+       "sk-proj-abcdefghijklmnopqrstuvwxyz")
+
 let with_test_env f =
   let dir = test_dir () in
 	Fun.protect
@@ -163,7 +210,18 @@ let with_test_env f =
         ~clock:(Eio.Stdenv.clock env)
         ~mono_clock:(Eio.Stdenv.mono_clock env)
         ~sw
-        (fun () -> f ~env ~sw ~config))
+        (fun () ->
+          let request_authority =
+            match
+              Server_request_authority.of_host_port
+                ~host:"localhost"
+                ~port:8935
+            with
+            | Ok authority -> authority
+            | Error `Malformed -> fail "test authority must be valid"
+          in
+          Server_request_authority.with_current request_authority (fun () ->
+            f ~env ~sw ~config)))
 
 let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -802,15 +860,26 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
+  let request =
+    request_with_headers "/api/v1/dashboard/shell"
+      [
+        ("origin", "http://localhost:5173");
+        ("host", "localhost:5173");
+      ]
+  in
+  let request_authority =
+    match Server_request_authority.classify_http1_request request with
+    | Server_request_authority.Single authority -> authority
+    | ( Server_request_authority.Missing
+      | Server_request_authority.Multiple
+      | Server_request_authority.Malformed ) ->
+      fail "expected valid authority"
+  in
   let json =
-    Server_dashboard_http_core.dashboard_shell_http_json
-      ~request:
-        (request_with_headers "/api/v1/dashboard/shell"
-           [
-             ("origin", "http://localhost:5173");
-             ("host", "localhost:5173");
-           ])
-      config
+    Server_request_authority.with_current request_authority (fun () ->
+      Server_dashboard_http_core.dashboard_shell_http_json
+        ~request
+        config)
   in
   let open Yojson.Safe.Util in
   let auth = json |> member "auth" in
@@ -1760,6 +1829,8 @@ let () =
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
           test_case "keeper catch-up judge route is classified" `Quick
             test_keeper_post_route_classifies_catchup_judge;
+          test_case "keeper chat receipt route is typed" `Quick
+            test_keeper_chat_receipt_route_and_json;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "event_of_string round-trips to_string" `Quick

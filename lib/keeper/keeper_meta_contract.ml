@@ -676,15 +676,6 @@ let apply_profile_default_opt opt current =
   | None -> current
 ;;
 
-let invalid_profile_defaults_error ~keeper_name detail =
-  if String_util.contains_substring detail "runtime_id" then
-    Printf.sprintf
-      "invalid profile.runtime_id for keeper %s: unknown runtime_id: %s"
-      keeper_name detail
-  else
-    Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
-;;
-
 let missing_required_sandbox_profile_error ~keeper_name
     (defaults : Keeper_types_profile.keeper_profile_defaults) =
   let manifest_hint =
@@ -782,10 +773,18 @@ let effective_meta_of_profile_defaults
         }
 ;;
 
-let effective_meta_result (meta : keeper_meta) : (keeper_meta, string) result =
-  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
-  | Error detail ->
-      Error (invalid_profile_defaults_error ~keeper_name:meta.name detail)
+let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string) result =
+  match
+    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      meta.name
+  with
+  | Error error ->
+      Error
+        (Printf.sprintf
+           "invalid keeper profile for keeper %s: %s"
+           meta.name
+           (Keeper_types_profile.keeper_toml_load_error_to_string error))
   | Ok defaults -> effective_meta_of_profile_defaults defaults meta
 ;;
 

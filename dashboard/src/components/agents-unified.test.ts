@@ -24,7 +24,14 @@ vi.mock('./composite-fsm-flowchart', () => ({
   CompositeFsmFlowchart: () => h('div', { 'data-testid': 'composite-fsm-flowchart' }, 'CompositeFsmFlowchart'),
 }))
 vi.mock('./agent-roster', () => ({
-  AgentRoster: ({ keeperFilter }: { keeperFilter: string }) => h('div', { 'data-testid': 'agent-roster', 'data-filter': keeperFilter }, 'AgentRoster'),
+  AgentRoster: ({ keeperFilter }: { keeperFilter: string }) => h(
+    'div',
+    { 'data-testid': 'agent-roster', 'data-filter': keeperFilter },
+    'AgentRoster',
+    keeperFilter === 'agent-only'
+      ? null
+      : h('button', { 'data-testid': 'keeper-spawn-panel' }, '+ 새 Keeper'),
+  ),
 }))
 
 vi.mock('./keeper-spawn/keeper-spawn-panel', () => ({
@@ -105,6 +112,7 @@ describe('AgentsUnified', () => {
     expect(container.querySelector('[data-testid="fleet-fsm-matrix"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="composite-fsm-flowchart"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="fsm-hub"]')).not.toBeNull()
+    expect(container.querySelector('h1')?.textContent).toBe('Keeper Fleet FSM')
     // FSM view is a structural drill-down, not a fleet roster — no keeper-create entry here.
     expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).toBeNull()
   })

@@ -369,6 +369,7 @@
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
+  test_keeper_event_queue_owner_lock
   test_keeper_event_queue_persist_poison
   test_keeper_goal_stagnation_wake
   test_workspace_routes_keeper
@@ -738,6 +739,7 @@
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
+  test_keeper_event_queue_owner_lock
   test_keeper_event_queue_persist_poison
   test_keeper_goal_stagnation_wake
   test_actionable_path_action
@@ -759,6 +761,14 @@
   test_board_rest_routes
   test_board_context_inference_resolution)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf))
+
+; Request-authority admission uses Eio fiber-local bindings and therefore owns
+; an explicit executable stanza instead of borrowing the pure synchronous test
+; group above.
+(test
+ (name test_server_request_authority)
+ (modules test_server_request_authority)
+ (libraries alcotest masc_test_deps eio_main h2))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 
@@ -1054,7 +1064,6 @@
   test_dashboard_k2_feeds
   test_keeper_profile_normalize_10552
   test_personality_field_diff_10269
-  test_toml_skip_dedup_10259
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
@@ -1252,7 +1261,6 @@
   test_dashboard_k2_feeds
   test_keeper_profile_normalize_10552
   test_personality_field_diff_10269
-  test_toml_skip_dedup_10259
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch

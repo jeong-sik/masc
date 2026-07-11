@@ -373,6 +373,14 @@ let public_mcp_set : (string, unit) Hashtbl.t =
 
 let is_public_mcp name = Hashtbl.mem public_mcp_set name
 
+let effective_registered_visibility ~name ~declared =
+  if
+    Tool_catalog_surfaces.is_system_internal_hidden name
+    && declared = Default
+  then Hidden
+  else declared
+;;
+
 let full_surface_override () = Env_config.Tools.full_surface_enabled ()
 
 (* ================================================================ *)

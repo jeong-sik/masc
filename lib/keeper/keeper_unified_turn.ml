@@ -161,15 +161,22 @@ let run_keeper_cycle
             [Keeper_unified_turn_pre_dispatch].  profile_defaults stays
             in scope so the retry-loop block below can also call the
             extracted builder with the same defaults. *)
-         let profile_defaults =
-           Keeper_types_profile.load_keeper_profile_defaults meta.name
-         in
          let effective_runtime_runtime_name = effective_runtime_id in
-         (match
-            Keeper_unified_turn_pre_dispatch.build_runtime_execution
-              ~meta
-              ~profile_defaults
-              ~runtime_id:effective_runtime_runtime_name
+         let profile_and_execution =
+           match
+             Keeper_unified_turn_pre_dispatch.load_profile_defaults
+               ~base_path:config.base_path
+               ~keeper_name:meta.name
+           with
+           | Error _ as error -> error
+           | Ok profile_defaults ->
+             Keeper_unified_turn_pre_dispatch.build_runtime_execution
+               ~meta
+               ~profile_defaults
+               ~runtime_id:effective_runtime_runtime_name
+             |> Result.map (fun execution -> profile_defaults, execution)
+         in
+         (match profile_and_execution
           with
           | Error err ->
             let terminal_reason_code =
@@ -214,7 +221,7 @@ let run_keeper_cycle
               ~prev:Keeper_turn_fsm.Runtime_routing
               (Keeper_turn_fsm.Failed failure_reason);
             Error err, turn_state
-          | Ok initial_execution ->
+          | Ok (profile_defaults, initial_execution) ->
             let turn_state =
               Keeper_unified_turn_manifest.append_manifest
                 ~config

@@ -257,6 +257,35 @@ let test_dead_tombstone_latch_blocks_legacy_auto_resume () =
        ~now:(Unix.time () +. 7200.0)
        meta)
 
+(* Regression for the "permanent zombie" bug: operator [masc_keeper_up]
+   ([Keeper_turn_up_update] resume branch) must clear [latched_reason], not
+   only [paused].  A [Dead_tombstone] latch that survives a paused-clearing
+   resume keeps [paused_meta_auto_resume_due] false forever, so the keeper can
+   never recover.  This pins that clearing the latch re-enables recovery. *)
+let test_operator_resume_clears_dead_tombstone_latch () =
+  let base = make_meta "revive-after-operator-up" in
+  let paused_due =
+    { base with
+      paused = true
+    ; auto_resume_after_sec = Some 1.0
+    ; updated_at = "1970-01-01T00:00:00Z"
+    }
+  in
+  check
+    bool
+    "Dead_tombstone latch blocks auto-resume"
+    false
+    (Keeper_supervisor_types.paused_meta_auto_resume_due
+       ~now:(Unix.time () +. 7200.0)
+       { paused_due with latched_reason = Some Keeper_latched_reason.Dead_tombstone });
+  check
+    bool
+    "operator-cleared latch re-enables auto-resume"
+    true
+    (Keeper_supervisor_types.paused_meta_auto_resume_due
+       ~now:(Unix.time () +. 7200.0)
+       { paused_due with latched_reason = None })
+
 let test_heartbeat_merge_preserves_only_typed_operator_pause () =
   let caller =
     { (make_meta "typed-operator-pause-merge-caller") with
@@ -320,6 +349,8 @@ let () =
             test_dead_tombstone_final_meta_records_reason
         ; test_case "dead-tombstone latch blocks legacy auto-resume" `Quick
             test_dead_tombstone_latch_blocks_legacy_auto_resume
+        ; test_case "operator resume clears dead-tombstone latch to re-enable recovery"
+            `Quick test_operator_resume_clears_dead_tombstone_latch
         ; test_case "heartbeat merge uses typed operator latch, not pause shape" `Quick
             test_heartbeat_merge_preserves_only_typed_operator_pause
         ] )

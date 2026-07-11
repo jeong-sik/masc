@@ -26,7 +26,19 @@ import {
   type RuntimeRoutingLane,
 } from '../api/dashboard.js'
 import { callMcpTool } from '../api/mcp'
-import { shellConfigResolution, shellRuntimeResolution } from '../store'
+import {
+  refreshShell,
+  shellAuthSummary,
+  shellConfigResolution,
+  shellRuntimeResolution,
+} from '../store'
+import {
+  clearStoredToken,
+  currentDashboardActor,
+  dashboardBearerToken,
+  getStoredTokenMeta,
+  isRemoteAccess,
+} from '../api/core'
 import type { DashboardConfigResolutionItem } from '../types'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { SettingsRepositoriesSection } from './settings-repositories'
@@ -34,6 +46,7 @@ import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
+import { showToast } from './common/toast'
 import { Checkbox } from './common/checkbox'
 import { ActionButton } from './common/button'
 import { logDisplayKind } from './log-classification'
@@ -78,9 +91,10 @@ export type SettingsControlInventoryItem = {
   readonly action: string
 }
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
-const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
+const DEFAULT_SETTINGS_SECTION: SectionId = 'account'
 
 const SET_SECTIONS: [SectionId, string, string][] = [
+  ['account', 'Account', '계정'],
   ['runtime', 'Runtime', '런타임'],
   ['routing', 'Routing', '모델 라우팅'],
   ['runtimes', 'Runtimes', '런타임 관리'],
@@ -94,11 +108,12 @@ const SET_SECTIONS: [SectionId, string, string][] = [
   ['display', 'Display', '표시'],
 ]
 
-// keeper-v2 design settings.jsx SET_GROUPS의 부분 채택: account/lifecycle/
+// keeper-v2 design settings.jsx SET_GROUPS의 부분 채택: lifecycle/
 // sandbox/gate 섹션은 백엔드 계약 부재로 미구현이라 그룹에서 빠져 있고,
 // 디자인이 nav에서 뺀 mcp/display는 live-backed 동작 섹션이라 유지한다
 // (docs/design/keeper-v2-design-delta-audit-2026-07-03.md).
 const SET_GROUPS: [string, SectionId[]][] = [
+  ['계정', ['account']],
   ['Keeper 운영', ['runtime', 'routing', 'prompts', 'fusion']],
   ['인프라 · 실행', ['runtimes', 'paths']],
   ['연결 · 통합', ['mcp', 'repositories']],
@@ -116,6 +131,14 @@ const SETTINGS_LOG_POLL_MS = 3000
 const DISPLAY_DENSITY_OPTIONS: Density[] = ['compact', 'regular', 'spacious']
 
 const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
+  {
+    id: 'account-auth-summary',
+    section: 'account',
+    label: 'Dashboard auth session',
+    kind: 'live-read',
+    source: 'dashboard shell auth projection + browser token store',
+    action: 'clear local token and refresh shell auth truth',
+  },
   {
     id: 'runtime-default-runtime',
     section: 'runtime',
@@ -383,6 +406,78 @@ function SettingsControlLedger({ section }: { section: SectionId }) {
         `)}
       </div>
     </section>
+  `
+}
+
+function AccountSettingsSection() {
+  const [clearing, setClearing] = useState(false)
+  const summary = shellAuthSummary.value
+  const actor = summary?.effective_agent ?? summary?.token_agent ?? currentDashboardActor()
+  const role = summary?.effective_role ?? summary?.default_role ?? 'unknown'
+  const tokenPresent = dashboardBearerToken() !== null
+  const tokenMeta = getStoredTokenMeta()
+  const tokenState = summary?.token_valid === true
+    ? 'verified'
+    : summary?.token_present === true || tokenPresent
+      ? 'unverified'
+      : 'not configured'
+
+  async function clearAccountToken() {
+    if (clearing || !tokenPresent) return
+    setClearing(true)
+    try {
+      clearStoredToken()
+      const refreshed = await refreshShell({ force: true })
+      if (!refreshed) {
+        showToast('Token은 지웠지만 auth 상태를 다시 확인하지 못했습니다.', 'error')
+        return
+      }
+      showToast('Dashboard token을 지우고 auth 상태를 다시 확인했습니다.', 'success')
+    } catch (error) {
+      showToast(`Auth 갱신 실패: ${errorToString(error)}`, 'error')
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  return html`
+    <div class="set-account" data-testid="settings-account-live">
+      <div class="set-hint">
+        현재 dashboard shell이 검증한 actor·role과 이 브라우저에 저장된 Bearer token 상태입니다.
+        토큰 생성·재발급 writer는 이 화면에 없으므로 지원한다고 가장하지 않습니다.
+      </div>
+      <${SetRow} label="운영자" hint="Effective dashboard actor">
+        <div class="set-truth-value">
+          <span class="mono">@${actor}</span>
+          <span class="set-truth-source">${isRemoteAccess() ? 'remote access' : 'local access'}</span>
+        </div>
+      <//>
+      <${SetRow} label="역할" hint="Server-resolved effective role">
+        <span class="set-role-chip mono">${role}</span>
+      <//>
+      <${SetRow} label="API token" hint="Browser token store · MCP/dashboard authentication">
+        <div class="set-account-token" data-testid="settings-account-token-presence">
+          <span class=${`set-account-token-presence ${tokenPresent ? 'stored' : 'absent'}`}>
+            ${tokenPresent ? '브라우저에 저장됨' : '저장된 token 없음'}
+          </span>
+          ${tokenMeta
+            ? html`<span class="set-truth-source mono">source:${tokenMeta.source}${tokenMeta.scope ? ` · scope:${tokenMeta.scope}` : ''}</span>`
+            : null}
+        </div>
+      <//>
+      <${SetRow} label="검증 상태" hint=${summary?.auth_error_code ?? 'shell auth projection'}>
+        <span class=${`set-account-state ${tokenState}`}>${tokenState}</span>
+      <//>
+      ${summary?.auth_error_detail
+        ? html`<div class="set-account-error" role="status">${summary.auth_error_detail}</div>`
+        : null}
+      <button
+        type="button"
+        class="set-account-clear"
+        disabled=${!tokenPresent || clearing}
+        onClick=${() => { void clearAccountToken() }}
+      >${clearing ? '정리 중…' : '저장된 token 지우기'}</button>
+    </div>
   `
 }
 
@@ -798,7 +893,7 @@ function NotifyEventToggleRow({ kind }: { kind: NotifyEventKind }) {
   const label = NOTIFY_EVENT_LABELS[kind]
   return html`
     <${SetRow} label=${label} hint=${kind}>
-      <div class="set-truth-value" data-testid=${`notify-rule-row-${kind}`}>
+      <label class="set-truth-value v2-mobile-operator-target" data-testid=${`notify-rule-row-${kind}`}>
         <${Checkbox}
           checked=${enabled}
           ariaLabel=${`Notify on ${label}`}
@@ -806,7 +901,7 @@ function NotifyEventToggleRow({ kind }: { kind: NotifyEventKind }) {
           onChange=${(next: boolean) => setNotifyRuleEnabled(kind, next)}
         />
         <span class="set-truth-source">${enabled ? 'notify' : 'muted'}</span>
-      </div>
+      </label>
     <//>
   `
 }
@@ -843,6 +938,7 @@ function settingsSectionState(
   section: SectionId,
   pathResolutionAvailability: PathResolutionAvailability = 'ready',
 ): { mode: SettingsSectionMode; label: string } {
+  if (section === 'account') return { mode: 'mixed', label: 'live auth + browser token' }
   if (section === 'runtime') return { mode: 'live', label: 'runtime.toml + provider catalog' }
   if (section === 'routing') return { mode: 'live', label: 'runtime.toml live-backed' }
   if (section === 'runtimes') return { mode: 'live', label: 'runtime.toml live-backed' }
@@ -1340,11 +1436,14 @@ export function SettingsSurface() {
           </header>
 
           <div
-            class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'routing' || sec === 'runtimes' || sec === 'paths' || sec === 'mcp' || sec === 'repositories' || sec === 'notify' || sec === 'prompts' || sec === 'fusion' ? 'set-card-b-wide' : 'ss-card'}`}
+            class=${`set-card-b mx-6 my-6 ${sec === 'account' || sec === 'runtime' || sec === 'routing' || sec === 'runtimes' || sec === 'paths' || sec === 'mcp' || sec === 'repositories' || sec === 'notify' || sec === 'prompts' || sec === 'fusion' ? 'set-card-b-wide' : 'ss-card'}`}
             data-preview-locked="false"
             data-settings-mode=${sectionState.mode}
           >
             <${SettingsControlLedger} section=${sec} />
+            ${sec === 'account' && html`
+              <${AccountSettingsSection} />
+            `}
             ${sec === 'mcp' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 현재 대시보드가 사용하는 HTTP MCP 서버 상태와 public MCP 도구 노출 목록입니다. 도구 노출은 서버 capability registry가 SSOT입니다.

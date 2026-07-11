@@ -453,9 +453,19 @@ let ws_upgrade_request headers =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/ws"
 
 let ws_gate_on ~base_path headers =
+  let request = ws_upgrade_request headers in
+  let request_authority =
+    match Server_request_authority.classify_http1_request request with
+    | Server_request_authority.Single authority -> authority
+    | ( Server_request_authority.Missing
+      | Server_request_authority.Multiple
+      | Server_request_authority.Malformed ) ->
+      fail "expected valid authority"
+  in
   Server_routes_http_routes_frontend.websocket_upgrade_authorized
     ~base_path
-    (ws_upgrade_request headers)
+    ~request_authority
+    request
 
 let ws_gate headers = ws_gate_on ~base_path:(ws_absent_base_path ()) headers
 

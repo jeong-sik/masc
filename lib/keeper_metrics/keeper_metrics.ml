@@ -118,7 +118,6 @@ type t =
   | DecisionAuditFlushFailures
   | OasCancel
   | ClaimAutoProvision
-  | TomlInvalid
   | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures
@@ -384,7 +383,6 @@ let to_string = function
   | DecisionAuditFlushFailures -> "masc_keeper_decision_audit_flush_failures_total"
   | OasCancel -> "masc_keeper_oas_cancel_total"
   | ClaimAutoProvision -> "masc_keeper_claim_auto_provision_total"
-  | TomlInvalid -> "masc_keeper_toml_invalid_total"
   | PersonaDriftMissing -> "masc_keeper_persona_drift_missing_total"
   | WorkspaceInitFailures -> "masc_keeper_workspace_init_failures_total"
   | PresenceSyncFailures -> "masc_keeper_presence_sync_failures_total"

@@ -949,11 +949,8 @@ let tag_dispatch_fn
 ;;
 
 let descriptor_active_names active_name_set descriptor =
-  let descriptor_names =
-    Keeper_tool_descriptor.public_names_of_descriptor descriptor
-    @ Keeper_tool_descriptor.internal_names descriptor
-  in
-  List.filter (fun name -> StringSet.mem name active_name_set) descriptor_names
+  Keeper_tool_descriptor.keeper_model_names descriptor
+  |> List.filter (fun name -> StringSet.mem name active_name_set)
 ;;
 
 let descriptor_discovery_json active_name_set descriptor =
@@ -966,37 +963,31 @@ let descriptor_discovery_json active_name_set descriptor =
 ;;
 
 let keeper_tools_list_json ~(meta : keeper_meta) =
-  let names = Keeper_tool_policy.keeper_allowed_tool_names meta in
   let active_name_set =
-    List.fold_left
-      (fun acc name -> StringSet.add name acc)
-      StringSet.empty
-      names
+    Keeper_tool_policy.keeper_model_tool_schemas meta
+    |> List.fold_left
+         (fun names (schema : Masc_domain.tool_schema) ->
+            StringSet.add schema.name names)
+         StringSet.empty
   in
-  let has_prefix prefix name = String.starts_with ~prefix name in
-  (* Display-only grouping for the keeper tools list. The typed [tool_group]
-     classifier was deleted in the surface-cut refactor; this prefix categorizer
-     (formerly the fallback for non-typed names) now categorizes all names. *)
-  let categorize n =
-    if has_prefix "keeper_board_" n || has_prefix "masc_board_" n then "board"
-    else if has_prefix "keeper_voice_" n then "voice"
-    else if has_prefix "keeper_task_" n || has_prefix "keeper_tasks_" n then "workspace"
-    else if has_prefix "keeper_surface_" n || has_prefix "keeper_person_note_" n then "surface"
-    else if String.equal n "tool_execute" then "execute"
-    else if String.equal n "tool_search_files" then "search_files"
-    else if has_prefix "tool_" n then "fs"
-    else if has_prefix "keeper_library_" n || has_prefix "keeper_memory_" n then "memory"
-    else if has_prefix "keeper_" n then "meta"
-    else "core"
+  let active_descriptor_names =
+    Keeper_tool_descriptor.model_visible_descriptors ()
+    |> List.concat_map (fun descriptor ->
+      Keeper_tool_descriptor.keeper_model_names descriptor
+      |> List.filter_map (fun name ->
+        if StringSet.mem name active_name_set then Some (name, descriptor) else None))
   in
   let map =
     List.fold_left
-      (fun acc n ->
-         let cat = categorize n in
+      (fun acc (name, descriptor) ->
+         let cat =
+           Keeper_tool_descriptor.keeper_tool_group_to_string
+             descriptor.Keeper_tool_descriptor.keeper_tool_group
+         in
          let list = StringMap.find_opt cat acc |> Option.value ~default:[] in
-         StringMap.add cat (n :: list) acc)
+         StringMap.add cat (name :: list) acc)
       StringMap.empty
-      names
+      active_descriptor_names
   in
   let assoc =
     StringMap.fold
@@ -1005,7 +996,12 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
       []
   in
   let descriptor_surface =
-    Keeper_tool_descriptor_resolution.descriptors_for_tool_names names
+    active_descriptor_names
+    |> List.map snd
+    |> List.sort_uniq
+         (fun (left : Keeper_tool_descriptor.t)
+              (right : Keeper_tool_descriptor.t) ->
+            String.compare left.id right.id)
     |> List.map (descriptor_discovery_json active_name_set)
   in
   Yojson.Safe.to_string

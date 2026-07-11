@@ -637,8 +637,25 @@ name = "tech_glutton"
 persona_name = "executor"
 goal = "plan coding work"
 |};
-  check string "drift check honors TOML persona_name" "executor"
-    (Sup.persona_name_for_drift_check (make_meta "tech_glutton"))
+  match Sup.persona_name_for_drift_check (make_meta "tech_glutton") with
+  | Ok persona_name ->
+    check string "drift check honors TOML persona_name" "executor" persona_name
+  | Error error ->
+    fail (Keeper_types_profile.keeper_toml_load_error_to_string error)
+
+let test_persona_drift_check_preserves_invalid_config () =
+  with_config_dir @@ fun config_dir ->
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  write_file
+    (Filename.concat keepers_dir "invalid.toml")
+    "[keeper\nname = \"invalid\"\n";
+  match Sup.persona_name_for_drift_check (make_meta "invalid") with
+  | Error _ -> ()
+  | Ok persona_name ->
+    fail
+      (Printf.sprintf
+         "invalid config must not fall back to persona identity %S"
+         persona_name)
 
 let test_persona_drift_path_points_to_profile_json () =
   with_config_dir @@ fun config_dir ->
@@ -760,6 +777,47 @@ let test_declarative_boot_records_goal_required_failure () =
         (KR.boot_meta_failure_cause_label failure.cause);
       check bool "recorded failure keeps raw error" true
         (String_util.contains_substring failure.error "goal is required")
+
+let test_declarative_boot_records_typed_invalid_config_failure () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "invalid-config" in
+  let keeper_path =
+    Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml")
+  in
+  write_file keeper_path "[broken";
+  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  let ctx = keeper_runtime_context env sw config in
+  check bool "invalid configured keeper remains discoverable" true
+    (List.mem name (Keeper_meta_store.configured_keeper_names config));
+  check bool "invalid configured keeper is not executable" false
+    (List.mem name (KR.bootable_keeper_names config));
+  (match KR.load_or_materialize_boot_meta ctx name with
+   | Ok _ -> fail "expected invalid keeper config to block materialization"
+   | Error err ->
+     check bool "operator-facing error retains path" true
+       (String_util.contains_substring err keeper_path));
+  match KR.boot_meta_failure_for ~base_path:config.base_path ~name with
+  | None -> fail "expected invalid config boot failure to be recorded"
+  | Some failure ->
+    check string "generic typed config cause" "config_invalid"
+      (KR.boot_meta_failure_cause_label failure.cause);
+    (match failure.config_error with
+     | None -> fail "expected typed config error on boot failure"
+     | Some error ->
+       check bool "parse kind retained" true
+         (error.kind = Keeper_types_profile.Parse_error);
+       check string "keeper path retained" keeper_path error.keeper_path;
+       check string "failing path retained" keeper_path error.failing_path)
 
 let test_reconcile_materializes_configured_keeper_without_meta () =
   with_config_dir @@ fun config_dir ->
@@ -3785,6 +3843,8 @@ let () =
     "persona_drift", [
       test_case "drift check honors TOML persona_name" `Quick
         test_persona_drift_check_uses_toml_persona_name;
+      test_case "drift check preserves invalid config" `Quick
+        test_persona_drift_check_preserves_invalid_config;
       test_case "drift path points to profile.json" `Quick
         test_persona_drift_path_points_to_profile_json;
       test_case "missing persona with inline TOML is WARN" `Quick
@@ -3797,6 +3857,8 @@ let () =
         test_declarative_boot_materializes_goal_from_instructions;
       test_case "declarative boot records goal-required failure" `Quick
         test_declarative_boot_records_goal_required_failure;
+      test_case "declarative boot records typed invalid-config failure" `Quick
+        test_declarative_boot_records_typed_invalid_config_failure;
       test_case "reconcile materializes configured keeper without meta" `Quick
         test_reconcile_materializes_configured_keeper_without_meta;
       test_case "reconcile does not double-start materialized keeper" `Quick

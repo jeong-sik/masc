@@ -78,27 +78,15 @@ let max_tokens_override ~keeper_name profile_defaults =
     ~keeper_name
     profile_defaults.oas_env
 
-let resolve_max_tokens_for_runtime_with_profile ~keeper_name ~profile_defaults
-      ?max_tokens ~runtime_id:_ ()
-  =
+let resolve_turn_max_tokens ~keeper_name ~profile_defaults ?max_tokens () =
   match max_tokens with
-  (* Explicit caller override passes through unchanged; the OAS provider
-     serializer owns validation/clamp against the catalog ceiling
-     (oas#2517). The former [cap_max_tokens_to_runtime_ceiling] here was an
-     identity stub. *)
-  | Some _ as override -> override
+  | Some _ as caller_override -> caller_override
   | None -> max_tokens_override ~keeper_name profile_defaults
-
-let resolve_max_tokens_for_runtime ~keeper_name ~runtime_id ?max_tokens () =
-  let profile_defaults =
-    Keeper_types_profile.load_keeper_profile_defaults keeper_name
-  in
-  resolve_max_tokens_for_runtime_with_profile
-    ~keeper_name ~profile_defaults ?max_tokens ~runtime_id ()
 
 let prepare_run_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(base_dir : string)
       ~(max_context : int)
       ~(runtime_id : string)
@@ -119,7 +107,6 @@ let prepare_run_context
     else
       meta
   in
-  let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   (* 0. Resolve inference parameters via Runtime_inference *)
   let fallback_temperature () =
     match temperature with
@@ -132,11 +119,13 @@ let prepare_run_context
       ~fallback:fallback_temperature
   in
   let max_tokens =
-    resolve_max_tokens_for_runtime_with_profile
+    (* Freeze caller/profile intent exactly once for this turn. Every runtime
+       candidate receives this immutable value; OAS owns provider-envelope
+       validation and catalog-ceiling clamp policy (oas#2517). *)
+    resolve_turn_max_tokens
       ~keeper_name:meta.name
       ~profile_defaults
       ?max_tokens
-      ~runtime_id
       ()
   in
   (* 0b. Create context injector for temporal awareness *)

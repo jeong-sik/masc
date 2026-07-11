@@ -610,7 +610,7 @@ let user_line_mentions ~extra_mentions content =
   Keeper_lane_mentions.mention_ids_of_content content @ extra_mentions
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 
-let append_turn ~base_dir ~keeper_name ~(user_content : string)
+let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
     ?(assistant_kind = Row_kind.Utterance)
@@ -665,7 +665,8 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     let payload =
       String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
     in
-    Fs_compat.append_file path payload
+    Fs_compat.append_file path payload;
+    Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -673,8 +674,22 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
       Keeper_metrics.(to_string ChatStoreFailures)
       ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
       ();
+    let message = Printexc.to_string exn in
     Log.Keeper.warn "keeper_chat_store: append failed for %s: %s"
-      (sanitize_name keeper_name) (Printexc.to_string exn)
+      (sanitize_name keeper_name) message;
+    Error message
+
+let append_turn ~base_dir ~keeper_name ~(user_content : string)
+    ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
+    ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+    ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
+    ~(assistant_content : string) () =
+  ignore
+    (append_turn_result ~base_dir ~keeper_name ~user_content ~user_attachments
+       ~tool_calls ?surface ?conversation_id ?external_message_id ?speaker
+       ~extra_mentions ~assistant_kind ?blocks ?turn_ref ?stream_lifecycle
+       ~assistant_content ()
+      : (unit, string) result)
 
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with.

@@ -21,6 +21,7 @@ export const IN_FLIGHT_DELIVERY = [
 /** Deliveries representing a failed terminal outcome. */
 export const FAILED_DELIVERY = [
   'error',
+  'transport_failure',
   'timeout',
   'interrupted',
 ] as const satisfies ReadonlyArray<KeeperConversationDelivery>
@@ -33,9 +34,9 @@ export function isInFlightDelivery(delivery: KeeperConversationDelivery): boolea
   return IN_FLIGHT_SET.has(delivery)
 }
 
-/** True when the turn ended in a failed terminal state (error / timeout /
- *  interrupted). Callers that additionally require a non-empty error string
- *  must keep that conjunct at the callsite. */
+/** True when the turn ended in a failed terminal state. Callers that
+ *  additionally require a non-empty error string must keep that conjunct at
+ *  the callsite. */
 export function isFailedDelivery(delivery: KeeperConversationDelivery): boolean {
   return FAILED_SET.has(delivery)
 }

@@ -1046,7 +1046,9 @@ export function IdeShell() {
   const terminalKeeper = keeperFromRoute()
   const railsCollapsed = route.value.params.rails === 'hidden'
   const effectiveRailsCollapsed = railsCollapsed || isMobileViewport
-  const treeCollapsed = route.value.params.tree === 'hidden'
+  const treeCollapsed = isMobileViewport
+    ? route.value.params.tree !== 'open'
+    : route.value.params.tree === 'hidden'
   const [rightRailTab, setRightRailTab] = useState<IdeRightRailTab>('activity')
   const [workContextOpen, setWorkContextOpen] = useState(false)
   const [annotationDraft, setAnnotationDraft] = useState<IdeAnnotationComposerDraft | null>(null)
@@ -1109,8 +1111,14 @@ export function IdeShell() {
       section: 'ide-shell',
       view: activeView,
     }
-    if (treeCollapsed) delete nextParams.tree
-    else nextParams.tree = 'hidden'
+    if (isMobileViewport) {
+      if (treeCollapsed) nextParams.tree = 'open'
+      else delete nextParams.tree
+    } else if (treeCollapsed) {
+      delete nextParams.tree
+    } else {
+      nextParams.tree = 'hidden'
+    }
     navigate('code', nextParams)
   }
 
@@ -1232,11 +1240,13 @@ export function IdeShell() {
       data-tree-collapsed=${treeCollapsed ? 'true' : 'false'}
       data-tree-width=${String(treeWidth)}
     >
+      <h1 class="sr-only">MASC IDE</h1>
       <div class="ide-v2-top">
         <button
           type="button"
           class="ide-v2-action ide-v2-tree-toggle"
-          aria-pressed=${treeCollapsed ? 'true' : 'false'}
+          aria-expanded=${treeCollapsed ? 'false' : 'true'}
+          aria-controls="ide-file-tree"
           aria-label=${treeCollapsed ? '파일 트리 펼치기' : '파일 트리 접기'}
           title=${treeCollapsed ? '파일 트리 펼치기' : '파일 트리 접기'}
           data-testid="ide-tree-toggle"
@@ -1319,7 +1329,7 @@ export function IdeShell() {
         style=${`--ide-tree-width: ${treeWidth}px;`}
       >
         ${treeCollapsed ? null : html`
-          <div class="ide-plane-tree ide-v2-tree v2-ide-panel">
+          <div id="ide-file-tree" class="ide-plane-tree ide-v2-tree v2-ide-panel" data-testid="ide-file-tree">
             <${IdeExplorer}
               fileTreeStore=${workspaceStore.fileTreeStore}
               workspaceSource=${workspaceStore.workspaceSource}

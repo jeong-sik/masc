@@ -180,6 +180,10 @@
   box-shadow: 0 18px 40px rgb(0 0 0 / 0.42);
 }
 
+.v2-logs-advanced-menu:not([open]) .v2-logs-advanced {
+  display: none;
+}
+
 .v2-logs-actions {
   display: flex;
   align-items: center;
@@ -611,6 +615,15 @@
 }
 
 @media (max-width: 900px) {
+  .v2-logs-inline-links .logs-route-link,
+  .v2-logs-tags .logs-route-link,
+  .logs-hide-fsm-label,
+  .logs-auto-label {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+    touch-action: manipulation;
+  }
+
   .v2-logs-surface {
     --v2-logs-cols: 74px minmax(104px, 1fr) 96px minmax(0, 1.4fr) 22px;
   }
@@ -641,8 +654,12 @@
   }
 
   .v2-logs-advanced-menu .v2-logs-advanced {
-    right: auto;
-    left: 0;
+    position: fixed;
+    top: auto;
+    right: 12px;
+    bottom: auto;
+    left: 12px;
+    width: auto;
   }
 
   .v2-logs-detail {
@@ -702,6 +719,18 @@
     -webkit-line-clamp: 2;
     line-height: 1.35;
     white-space: normal;
+  }
+
+  .v2-logs-filter-chip,
+  .v2-logs-attention,
+  .logs-refresh-btn,
+  .v2-logs-advanced-menu > summary,
+  .v2-logs-diagnostics > summary {
+    min-height: var(--mobile-touch-target-min);
+  }
+
+  .v2-logs-refresh {
+    width: var(--mobile-touch-target-min);
   }
 
   .v2-logs-inline-links,

@@ -6,8 +6,8 @@
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Restore a keeper queue snapshot, returning [Keeper_event_queue.empty] when
     no snapshot exists or the snapshot cannot be parsed. [load] is synchronized
-    with pending/inflight writes so callers cannot observe a split snapshot
-    transition. *)
+    by the canonical per-owner lock shared with pending/inflight writes, so
+    callers cannot observe a split snapshot transition. *)
 
 type snapshot_pair =
   { pending : Keeper_event_queue.t
@@ -62,7 +62,9 @@ val load_snapshot_pair_with_errors :
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit
 (** Atomically write the latest queue snapshot. Runtime fibers use a yielding
-    Eio mutex; non-Eio setup/test callers use a Stdlib fallback mutex.
+    per-owner Eio gate; non-Eio setup/test callers synchronize through the same
+    owner's cross-context Stdlib mutex. Different keeper owners do not share an
+    I/O lock.
     Persistence failures are logged and do not roll back the already-applied
     in-memory registry CAS update. *)
 
@@ -131,7 +133,8 @@ val drop_by_post_id :
 
 val fleet_summary_json : now:float -> base_path:string -> Yojson.Safe.t
 (** Diagnostic fleet summary of durable pending and in-flight queue snapshots.
-    This is read-only and does not mutate or de-duplicate files. Parse/read
-    failures are surfaced in the JSON instead of being collapsed to an empty
-    queue, so health probes cannot report a false green while durable queue
-    state is unreadable. *)
+    Each pending/in-flight pair is read under that keeper's owner lock; the
+    fleet is not globally serialized. This is read-only and does not mutate or
+    de-duplicate files. Parse/read failures are surfaced in the JSON instead of
+    being collapsed to an empty queue, so health probes cannot report a false
+    green while durable queue state is unreadable. *)

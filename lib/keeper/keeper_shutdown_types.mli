@@ -51,6 +51,7 @@ type failure_stage =
   | Turn_join
   | Lane_join
   | Record_update
+  | Unhandled_worker
   | Task_settlement
   | Pending_confirm_cleanup
   | Meta_update

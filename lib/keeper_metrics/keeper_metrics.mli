@@ -109,7 +109,6 @@ type t =
   | DecisionAuditFlushFailures
   | OasCancel
   | ClaimAutoProvision
-  | TomlInvalid
   | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures

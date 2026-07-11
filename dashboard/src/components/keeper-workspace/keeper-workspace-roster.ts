@@ -232,6 +232,9 @@ function RosterRow({
   const activity = keeperActivityDisplay(keeper, undefined, { includeCreated: false })
   const activityText = rosterActivityText(activity)
   const phaseLabel = keeperPhaseLabel(keeper)
+  const configErrorTitle = keeper.config_error
+    ? `${keeper.config_error.reported_kind ?? keeper.config_error.kind} · ${keeper.config_error.failing_path} · ${keeper.config_error.detail}`
+    : null
   const beat = phasePulse(keeper.lifecycle_phase)
   const select = () => onSelect(keeper.name)
   return html`
@@ -260,7 +263,9 @@ function RosterRow({
       </div>
       <div class="kw-kp-right">
         ${activityText ? html`<span class="kw-kp-time" title=${rosterActivityTitle(activity)}>${activityText}</span>` : null}
-        ${att > 0
+        ${keeper.config_error
+          ? html`<span class="kw-kp-att kp-att" aria-label="설정 차단 · TOML 수정" title=${configErrorTitle}>설정 차단 · TOML 수정</span>`
+          : att > 0
           ? html`<span class="kw-kp-att kp-att" aria-label=${`주의 신호 ${att}건`} title=${`주의 신호 ${att}건 · 메시지 수가 아니라 blocked/attention 상태입니다`}>▲ ${att}</span>`
           : null}
       </div>
@@ -310,6 +315,7 @@ function MiniRosterRow({
 }
 
 function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
+  if (keeper.config_error?.blocking === true) return []
   const visibility = keeperActionVisibility(keeper)
   const actions: KeeperActionKey[] = []
   if (visibility.canBoot) actions.push('boot')

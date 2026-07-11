@@ -54,6 +54,13 @@ a, button, [role="tab"], [role="button"] {
   touch-action: manipulation;
 }
 
+@media (max-width: 900px) {
+  .rich-composer-tab {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
+}
+
 body {
   font-family: var(--font-sans);
   font-size: var(--fs-base);

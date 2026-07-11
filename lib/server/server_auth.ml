@@ -424,10 +424,18 @@ let sanitized_dashboard_actor_for_request ~base_path request =
     uses https (port 443) but we parse Host with a synthetic "http://" prefix
     (port 80).  Comparing explicit ports avoids this class of bug. *)
 
-let default_port_of_scheme = function
-  | Some "http" -> Some 80
-  | Some "https" -> Some 443
-  | _ -> None
+type browser_scheme =
+  | Http
+  | Https
+
+let browser_scheme_of_uri uri =
+  match Uri.scheme uri |> Option.map String.lowercase_ascii with
+  | Some "http" -> Some Http
+  | Some "https" -> Some Https
+  | Some _ | None -> None
+;;
+
+let default_port_of_scheme = function Http -> Some 80 | Https -> Some 443
 
 let normalize_loopback_host host =
   match String.lowercase_ascii (String.trim host) with
@@ -439,135 +447,26 @@ let normalize_loopback_host host =
 let split_csv_nonempty raw =
   raw |> String.split_on_char ',' |> List.filter_map String_util.trim_nonempty
 
-(** Returns (host, explicit_port, scheme). *)
+(** Returns [(host, explicit_port, scheme)] for an HTTP(S) origin or
+    referrer.  Userinfo is never part of a browser origin and accepting it
+    would make the displayed authority differ from the authenticated one. *)
 let host_port_scheme_of_origin origin =
   try
     let uri = Uri.of_string origin in
-    match Uri.host uri with
-    | None -> None
-    | Some host ->
-        Some (String.trim host |> String.lowercase_ascii,
-              Uri.port uri, Uri.scheme uri)
+    match browser_scheme_of_uri uri, Uri.userinfo uri, Uri.host uri with
+    | Some scheme, None, Some host ->
+      String_util.trim_nonempty host
+      |> Option.map (fun host ->
+        String.lowercase_ascii host, Uri.port uri, scheme)
+    | Some _, Some _, _ | Some _, None, None | None, _, _ -> None
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Auth.debug "host_port_scheme_of_origin: parse failed for %S: %s"
       origin (Printexc.to_string exn);
     None
 
-type request_host_rejection =
-  | Missing_request_host
-  | Malformed_request_host
-  | Non_loopback_request_host of string
-
-type admitted_request_host =
-  { host : string
-  ; port : int option
-  }
-
-let ascii_is_digit c = c >= '0' && c <= '9'
-
-let ascii_is_hex_digit c =
-  ascii_is_digit c
-  || (c >= 'a' && c <= 'f')
-  || (c >= 'A' && c <= 'F')
-;;
-
-let reg_name_char_is_allowed c =
-  ascii_is_digit c
-  || (c >= 'a' && c <= 'z')
-  || (c >= 'A' && c <= 'Z')
-  || String.contains "-._~!$&'()*+,;=" c
-;;
-
-let reg_name_is_valid host =
-  let length = String.length host in
-  let rec consume index =
-    if index = length
-    then true
-    else if Char.equal host.[index] '%'
-    then
-      index + 2 < length
-      && ascii_is_hex_digit host.[index + 1]
-      && ascii_is_hex_digit host.[index + 2]
-      && consume (index + 3)
-    else reg_name_char_is_allowed host.[index] && consume (index + 1)
-  in
-  length > 0 && consume 0
-;;
-
-let parse_request_host_port_suffix suffix =
-  if String.equal suffix ""
-  then Ok None
-  else if not (Char.equal suffix.[0] ':')
-  then Error ()
-  else
-    let raw_port = String.sub suffix 1 (String.length suffix - 1) in
-    if String.equal raw_port "" || not (String.for_all ascii_is_digit raw_port)
-    then Error ()
-    else
-      match int_of_string_opt raw_port with
-      | Some port when port <= 65_535 -> Ok (Some port)
-      | Some _ | None -> Error ()
-;;
-
-let parse_request_host_header raw =
-  let authority = String.trim raw in
-  if String.equal authority ""
-  then None
-  else if Char.equal authority.[0] '['
-  then
-    match String.index_opt authority ']' with
-    | None | Some 1 -> None
-    | Some closing_bracket ->
-      let host = String.sub authority 1 (closing_bracket - 1) in
-      let suffix_start = closing_bracket + 1 in
-      let suffix =
-        String.sub authority suffix_start (String.length authority - suffix_start)
-      in
-      (match Ipaddr.V6.of_string host, parse_request_host_port_suffix suffix with
-       | Ok _, Ok port -> Some { host = String.lowercase_ascii host; port }
-       | Error _, _ | _, Error () -> None)
-  else
-    let colon_count =
-      String.fold_left
-        (fun count char -> if Char.equal char ':' then count + 1 else count)
-        0
-        authority
-    in
-    if colon_count > 1
-    then None
-    else
-      let host, suffix =
-        match String.index_opt authority ':' with
-        | None -> authority, ""
-        | Some separator ->
-          ( String.sub authority 0 separator
-          , String.sub authority separator (String.length authority - separator) )
-      in
-      if not (reg_name_is_valid host)
-      then None
-      else
-        match parse_request_host_port_suffix suffix with
-        | Ok port -> Some { host = String.lowercase_ascii host; port }
-        | Error () -> None
-;;
-
-let admit_loopback_request_host request =
-  match Httpun.Headers.get request.Httpun.Request.headers "host" with
-  | None -> Error Missing_request_host
-  | Some raw ->
-    (match parse_request_host_header raw with
-     | None -> Error Malformed_request_host
-     | Some ({ host; _ } as admitted) when is_loopback_host host -> Ok admitted
-     | Some { host; _ } -> Error (Non_loopback_request_host host))
-;;
-
-let host_port_of_request request =
-  match Httpun.Headers.get request.Httpun.Request.headers "host" with
-  | None -> None
-  | Some host_header ->
-    Option.map
-      (fun { host; port } -> host, port)
-      (parse_request_host_header host_header)
+let host_port_of_authority authority =
+  ( Server_request_authority.host authority
+  , Server_request_authority.port authority )
 
 (* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
    can be toggled without restarting the server process. *)
@@ -591,7 +490,7 @@ let normalized_origin_key origin =
       Some
         ( normalize_loopback_host host,
           (match port with Some _ -> port | None -> default),
-          Option.map String.lowercase_ascii scheme )
+          scheme )
   | None -> None
 
 let is_allowlisted_loopback_dev_origin origin =
@@ -602,28 +501,57 @@ let is_allowlisted_loopback_dev_origin origin =
       |> List.exists (fun allowed -> allowed = candidate)
   | _ -> false
 
-(* Browsers omit Origin for same-origin requests per the Fetch spec, but
-   always include Referer.  If the Referer's host:port matches the
-   request's Host header, the request is same-origin and trusted. *)
-let is_same_server_referer referer request =
-  match host_port_scheme_of_origin referer, host_port_of_request request with
-  | Some (ref_host, ref_port, scheme), Some (req_host, req_port)
-    when String.equal
-           (normalize_loopback_host ref_host)
-           (normalize_loopback_host req_host) ->
-    let default = default_port_of_scheme scheme in
-    let norm p = match p with Some _ -> p | None -> default in
-    norm ref_port = norm req_port
-  | _ -> false
+let origin_matches_request_authority ~request_authority origin =
+  match host_port_scheme_of_origin origin with
+  | Some (origin_host, origin_port, scheme) ->
+    let request_host, request_port =
+      host_port_of_authority request_authority
+    in
+    if
+      String.equal
+        (normalize_loopback_host origin_host)
+        (normalize_loopback_host request_host)
+    then
+      let default = default_port_of_scheme scheme in
+      let normalize_port = function
+        | Some _ as explicit -> explicit
+        | None -> default
+      in
+      normalize_port origin_port = normalize_port request_port
+    else false
+  | None -> false
+;;
 
-let ensure_same_origin_browser_request request :
+let allowlisted_dev_origin_matches_request ~request_authority origin =
+  match host_port_scheme_of_origin origin with
+  | Some (origin_host, _, _) ->
+    let request_host = Server_request_authority.host request_authority in
+    String.equal
+      (normalize_loopback_host origin_host)
+      (normalize_loopback_host request_host)
+    && is_loopback_host (normalize_loopback_host origin_host)
+    && is_allowlisted_loopback_dev_origin origin
+  | None -> false
+;;
+
+let browser_origin_matches_request_authority ~request_authority origin =
+  origin_matches_request_authority ~request_authority origin
+  || allowlisted_dev_origin_matches_request ~request_authority origin
+;;
+
+(* Browsers omit Origin for same-origin requests per the Fetch spec, but
+   always include Referer.  The admitted request authority is already parsed
+   at the request entry; this path never re-reads Host. *)
+let ensure_same_origin_browser_request ~request_authority request :
     (unit, Masc_domain.masc_error) result =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None ->
     (* Same-origin browser requests don't send Origin.  Check Referer
        as a fallback — browsers always include it even for same-origin. *)
     (match Httpun.Headers.get request.Httpun.Request.headers "referer" with
-     | Some referer when is_same_server_referer referer request -> Ok ()
+     | Some referer
+       when origin_matches_request_authority ~request_authority referer ->
+       Ok ()
      | _ ->
        if allow_anonymous_mutations () then Ok ()
        else
@@ -632,46 +560,18 @@ let ensure_same_origin_browser_request request :
            ; message = "Authentication required: provide a bearer token or Origin header. \
                         Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."
            })))
-  | Some origin -> (
-      match host_port_scheme_of_origin origin, host_port_of_request request with
-      | Some (origin_host, origin_port, scheme),
-        Some (request_host, request_port)
-        when String.equal
-               (normalize_loopback_host origin_host)
-               (normalize_loopback_host request_host) ->
-          let default = default_port_of_scheme scheme in
-          let norm p = match p with Some _ -> p | None -> default in
-          (* Loopback same-port remains allowed, but cross-port mutations now
-             require an explicit dev-origin allowlist instead of trusting any
-             localhost page. This preserves the default Vite dashboard proxy
-             flow (5173 -> backend) while shrinking the browser trust boundary. *)
-          if norm origin_port = norm request_port then
-            Ok ()
-          else if
-            is_loopback_host (normalize_loopback_host origin_host)
-            && is_allowlisted_loopback_dev_origin origin
-          then
-            Ok ()
-          else (
-            Log.Auth.debug
-              "same-origin port mismatch: origin=%S host=%s"
-              origin
-              (match Httpun.Headers.get request.Httpun.Request.headers "host" with
-               | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
-            Error
-              (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden
-                 { agent = "browser";
-                   action = "cross-origin HTTP mutation" })))
-      | _ ->
-          Log.Auth.debug
-            "same-origin check failed: origin=%S host=%s"
-            origin
-            (match Httpun.Headers.get request.Httpun.Request.headers "host" with
-             | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
-          Error
-            (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden
-               { agent = "browser";
-                 action = "cross-origin HTTP mutation" })))
+  | Some origin ->
+    if browser_origin_matches_request_authority ~request_authority origin
+    then Ok ()
+    else (
+      Log.Auth.debug
+        "same-origin check failed: origin=%S authority=%S"
+        origin
+        (Server_request_authority.rendered request_authority);
+      Error
+        (Masc_domain.Auth
+           (Masc_domain.Auth_error.Forbidden
+              { agent = "browser"; action = "cross-origin HTTP mutation" })))
 
 (* Mirrors [Masc_error.code] (the typed SSOT in lib/types/masc_error.ml).
    Previously the catch-all [_ -> `Internal_server_error] silently demoted
@@ -711,29 +611,13 @@ let get_origin (request : Httpun.Request.t) =
   Httpun.Headers.get request.headers "origin"
   |> Option.value ~default:"*"
 
-let public_read_cors_origin_opt (request : Httpun.Request.t) =
+let public_read_cors_origin_opt ~request_authority (request : Httpun.Request.t) =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None -> None
-  | Some origin -> (
-      match host_port_scheme_of_origin origin, host_port_of_request request with
-      | Some (origin_host, origin_port, scheme),
-        Some (request_host, request_port)
-        when String.equal
-               (normalize_loopback_host origin_host)
-               (normalize_loopback_host request_host) ->
-          let default = default_port_of_scheme scheme in
-          let norm p = match p with Some _ -> p | None -> default in
-          if norm origin_port = norm request_port then
-            Some origin
-          else if
-            is_loopback_host (normalize_loopback_host origin_host)
-            && is_allowlisted_loopback_dev_origin origin
-          then
-            Some origin
-          else
-            None
-      | _ when is_allowlisted_loopback_dev_origin origin -> Some origin
-      | _ -> None)
+  | Some origin ->
+    if browser_origin_matches_request_authority ~request_authority origin
+    then Some origin
+    else None
 
 (** CORS headers *)
 let cors_allow_headers_value =
@@ -769,9 +653,13 @@ let respond_json_value_with_cors ?(status = `OK) request reqd value =
     ~extra_headers:(cors_headers origin) value reqd
 
 let public_read_cors_headers request =
-  match public_read_cors_origin_opt request with
-  | Some origin -> cors_headers origin
+  match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None -> [ ("vary", "Origin") ]
+  | Some _ ->
+    let request_authority = Server_request_authority.current_exn () in
+    (match public_read_cors_origin_opt ~request_authority request with
+     | Some origin -> cors_headers origin
+     | None -> [ ("vary", "Origin") ])
 
 let respond_public_read_json ?(status = `OK) request reqd body =
   Http_server_eio.Response.json ~status
@@ -955,13 +843,13 @@ let authorize_permission_request ~base_path ~permission request :
 let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
 
-let authorize_tool_request ~base_path ~tool_name request :
+let authorize_tool_request ~base_path ~tool_name ~request_authority request :
     (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   let* () =
     if Option.is_some token then Ok ()
-    else ensure_same_origin_browser_request request
+    else ensure_same_origin_browser_request ~request_authority request
   in
   let* auth_cfg =
     ensure_strict_http_token_auth
@@ -1108,7 +996,14 @@ and with_tool_auth ~tool_name handler request reqd =
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
-      (match authorize_tool_request ~base_path ~tool_name request with
+      let request_authority = Server_request_authority.current_exn () in
+      (match
+         authorize_tool_request
+           ~base_path
+           ~tool_name
+           ~request_authority
+           request
+       with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
           | Ok () -> handler state request reqd

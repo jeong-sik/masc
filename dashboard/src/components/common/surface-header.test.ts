@@ -39,7 +39,9 @@ describe('SurfaceHeader', () => {
     route.value = { tab: 'monitoring', params: {}, postId: null }
     render(h(SurfaceHeader, {}), container)
     expect(container.querySelector('.v2-surface-header-actions')).not.toBeNull()
-    expect(container.querySelector('[data-testid="dashboard-widget-solo-link"]')).not.toBeNull()
+    const solo = container.querySelector('[data-testid="dashboard-widget-solo-link"]')
+    expect(solo).not.toBeNull()
+    expect(solo?.classList.contains('v2-mobile-operator-target')).toBe(true)
   })
 
   it('renders parent breadcrumbs for section routes', () => {

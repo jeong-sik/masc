@@ -18,6 +18,7 @@ import {
   fetchDashboardGoalsTree,
   fetchDashboardBriefing,
   fetchDashboardTools,
+  parseDashboardKeeperWaitingSource,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
   fetchKeeperCompactionSnapshots,
@@ -891,6 +892,13 @@ describe('fetchTlcResults', () => {
 })
 
 describe('fetchDashboardTools', () => {
+  it('parses the shutdown admission source without accepting source drift', () => {
+    expect(parseDashboardKeeperWaitingSource('turn_admission_shutdown')).toBe('turn_admission_shutdown')
+    expect(parseDashboardKeeperWaitingSource(' turn_admission_shutdown ')).toBeNull()
+    expect(parseDashboardKeeperWaitingSource('turn_admission_stopping')).toBeNull()
+    expect(parseDashboardKeeperWaitingSource(null)).toBeNull()
+  })
+
   it('fills missing category and tier with defaults', async () => {
     const rawResponse = {
       tool_inventory: {

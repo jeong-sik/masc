@@ -213,6 +213,14 @@ let update_keeper ?(preserve_prompt_defaults = false)
     autoboot_enabled;
     active_goal_ids;
     paused = if resume_paused_keeper then false else old.paused;
+    (* Operator-sanctioned resume clears the terminal latch (Dead_tombstone
+       included) so a sanctioned keeper_up revives a latched keeper.  Without
+       this [latched_reason] survives a paused-clearing resume and every
+       latch-keyed gate (auto-resume / stale-paused prune / lifecycle
+       admission) keeps denying revival forever even after [paused] is
+       cleared. *)
+    latched_reason =
+      if resume_paused_keeper then None else source_meta.latched_reason;
     auto_resume_after_sec =
       if resume_paused_keeper then None else old.auto_resume_after_sec;
     runtime =

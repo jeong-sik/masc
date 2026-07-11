@@ -51,6 +51,7 @@ val recover_operation :
 
 module For_testing : sig
   val persist_unhandled_failure :
+    now:(unit -> string) ->
     config:Workspace.config ->
     Keeper_shutdown_types.t ->
     exn ->

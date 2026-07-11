@@ -6,6 +6,9 @@
     3. Cleanup — Run registered hooks (cancel fibers, flush state, save checkpoint)
     4. Exit    — Terminate the Eio switch
 
+    The process entrypoint owns the hard [force_timeout_s] watchdog outside
+    the Eio switch; phase execution never disarms its own supervisor.
+
     @since 2.102.0 *)
 
 (** {1 Configuration} *)
@@ -19,6 +22,47 @@ type config = {
 
 val default_config : config
 val config_from_env : unit -> config
+
+(** {1 Process deadline supervision} *)
+
+type deadline_error =
+  | Non_finite_deadline_timeout of float
+  | Non_positive_deadline_timeout of float
+
+val deadline_error_to_string : deadline_error -> string
+
+type watchdog
+
+val process_deadline_exit_code : int
+(** Dedicated non-zero process status for a fired shutdown deadline. Process
+    supervisors and runtime telemetry may use this SSOT to distinguish a hard
+    deadline from generic exit status [1]. *)
+
+type disarm_result =
+  | Disarmed
+  | Already_disarmed
+  | Already_fired
+
+val start_process_deadline_watchdog :
+  timeout_s:float ->
+  (watchdog, deadline_error) result
+(** [start_process_deadline_watchdog] starts an OS-thread deadline authority.
+    When the deadline fires, it terminates the process with failure status via
+    {!Unix._exit}; no
+    logging, channel flushing, [at_exit] callback, or runtime finalization can
+    block the terminal action. It is
+    is not attached to any Eio switch, so a failed switch, a fibre that ignores
+    cooperative cancellation, or a stalled Eio domain cannot cancel its own
+    process deadline. The process entrypoint must own the returned handle and
+    disarm it only after the supervised switch has actually returned. *)
+
+val disarm_deadline_watchdog : watchdog -> disarm_result
+(** Atomically disarm an armed watchdog. The result distinguishes a successful
+    disarm from an already-disarmed or already-fired watchdog. *)
+
+val await_deadline_watchdog : watchdog -> unit
+(** Join the watchdog thread. Intended for deterministic lifecycle tests and
+    callers that need proof that the watchdog callback has finished. *)
 
 (** {1 Phase Tracking} *)
 
@@ -76,6 +120,10 @@ val initiate :
   drain_check:(unit -> bool) ->
   exit_fn:(unit -> unit) ->
   unit
+(** Run the cooperative shutdown phases. This function deliberately does not
+    own the hard process deadline: a caller supervising an Eio switch must
+    start {!start_process_deadline_watchdog} outside that switch and disarm it
+    only after the switch has actually returned. *)
 
 (** {1 Queries} *)
 

@@ -6,8 +6,9 @@
     3. Cleanup — Run registered hooks (cancel fibers, flush state, save checkpoint)
     4. Exit    — Terminate the Eio switch
 
-    Each phase logs its start/end. If total shutdown exceeds force_timeout,
-    the process is forcefully terminated.
+    Each phase logs its start/end. The process entrypoint owns the hard
+    [force_timeout_s] watchdog outside the Eio switch; phase execution never
+    disarms its own supervisor.
 
     @since 2.102.0 *)
 
@@ -39,6 +40,68 @@ let config_from_env () =
     cleanup_timeout_s = get_float "MASC_SHUTDOWN_CLEANUP_TIMEOUT" 3.0;
     force_timeout_s = get_float "MASC_SHUTDOWN_FORCE_TIMEOUT" 10.0;
   }
+
+(** {1 Process deadline supervision} *)
+
+type deadline_error =
+  | Non_finite_deadline_timeout of float
+  | Non_positive_deadline_timeout of float
+
+let deadline_error_to_string = function
+  | Non_finite_deadline_timeout value ->
+      Printf.sprintf "deadline timeout must be finite (received %g)" value
+  | Non_positive_deadline_timeout value ->
+      Printf.sprintf
+        "deadline timeout must be greater than zero (received %g)"
+        value
+
+type watchdog_state =
+  | Armed
+  | Disarmed_state
+  | Fired
+
+type watchdog = {
+  state : watchdog_state Atomic.t;
+  thread : Thread.t;
+}
+
+type disarm_result =
+  | Disarmed
+  | Already_disarmed
+  | Already_fired
+
+let process_deadline_exit_code = 124
+
+let start_process_deadline_watchdog ~timeout_s =
+  if not (Float.is_finite timeout_s) then
+    Error (Non_finite_deadline_timeout timeout_s)
+  else if timeout_s <= 0.0 then
+    Error (Non_positive_deadline_timeout timeout_s)
+  else
+    let state = Atomic.make Armed in
+    let thread =
+      Thread.create
+        (fun () ->
+          Thread.delay timeout_s;
+          if Atomic.compare_and_set state Armed Fired then
+            Unix._exit process_deadline_exit_code)
+        ()
+    in
+    Ok { state; thread }
+
+let rec disarm_deadline_watchdog watchdog =
+  if Atomic.compare_and_set watchdog.state Armed Disarmed_state then
+    Disarmed
+  else
+    match Atomic.get watchdog.state with
+    | Disarmed_state -> Already_disarmed
+    | Fired -> Already_fired
+    | Armed ->
+        (* A concurrent timeout can only move [Armed] to [Fired]. Retry so the
+           caller never receives an observation that contradicts the CAS. *)
+        disarm_deadline_watchdog watchdog
+
+let await_deadline_watchdog watchdog = Thread.join watchdog.thread
 
 (** {1 Phase Tracking} *)
 
@@ -205,24 +268,10 @@ let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
     state.reason <- reason;
     Log.Server.info "[Shutdown] initiated: %s" reason;
 
-    (* INTENTIONAL: force-exit watchdog uses stdlib Thread, NOT Eio.Fiber.
-       Runs outside the Eio domain so it can terminate the process even when
-       Eio is deadlocked or stuck.  Cancelled via done_flag on normal exit. *)
-    let done_flag = Atomic.make false in
-    ignore (Thread.create (fun () ->
-      Unix.sleepf state.config.force_timeout_s;
-      if not (Atomic.get done_flag) then begin
-        Log.Server.error "Shutdown exceeded %.0fs force timeout, forcing exit"
-          state.config.force_timeout_s;
-        exit 1
-      end
-    ) ());
-
     phase_notify state ~clock ~notify_fn;
     phase_drain state ~clock ~drain_check;
     phase_cleanup state ~clock;
-    phase_exit state ~exit_fn;
-    Atomic.set done_flag true
+    phase_exit state ~exit_fn
   end
 
 (** {1 Queries} *)

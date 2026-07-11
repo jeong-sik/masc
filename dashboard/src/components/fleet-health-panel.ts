@@ -244,7 +244,7 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
                   <${RouteLink}
                     tab="monitoring"
                     params=${{ section: 'fleet-health', view: 'tool-quality', tool: row.name }}
-                    class="hover:text-[var(--color-accent-fg)]"
+                    class="inline-flex items-center hover:text-[var(--color-accent-fg)]"
                   >${normalizedToolName(row.name)}<//>
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-secondary)]">${formatNumber(row.calls)}</td>
@@ -639,7 +639,7 @@ function ToolMonitorDefaultBoard() {
             <${RouteLink}
               tab="monitoring"
               params=${{ section: 'fleet-health', view: 'tool-quality' }}
-              class="text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]"
+              class="inline-flex items-center text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]"
             >Full quality table<//>
           </div>
           <${ToolAttentionTable} rows=${summary.attentionRows} />

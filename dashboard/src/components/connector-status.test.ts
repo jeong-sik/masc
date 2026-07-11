@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
@@ -12,6 +14,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.setConfig({
   testTimeout: 90000,
   hookTimeout: 90000,
+})
+
+describe('connector mobile overflow contract', () => {
+  it('keeps the wide audit table reachable through an internal horizontal scroller', () => {
+    const css = readFileSync(resolve(__dirname, '../styles/connectors-v2.css'), 'utf8')
+    const auditRule = css.match(/\.cn-audit\s*\{([^}]*)\}/)?.[1] ?? ''
+    const tableRule = css.match(/\.cn-audit table\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(auditRule).toContain('overflow-x: auto')
+    expect(tableRule).toContain('min-width: 500px')
+  })
 })
 
 function sampleGateResponse(overrides?: Partial<Record<string, unknown>>) {

@@ -804,16 +804,28 @@ let keeper_msg_queue_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_msg_queue ctx args : tool_result =
   keeper_msg_queue_body ~config:ctx.config args
 
+let complete_keeper_msg_stream_result ~name result =
+  if not (tool_result_success result) then result
+  else begin
+    let body = tool_result_body result in
+    invalidate_keeper_list_cache ();
+    invalidate_status_cache name;
+    let json = json_of_body body in
+    tool_result_ok
+      (Yojson.Safe.pretty_to_string
+         (annotate_keeper_json ~runtime_class:"keeper" json))
+  end
+
 let handle_keeper_msg_stream
       ?on_text_delta
       ?on_event
       ?continuation_channel
+      ?on_admission_rejected
       ctx
       args
   : tool_result
   =
-  match
-    let* name = resolve_keeper_name ctx args in
+  let run name =
     let resolved_args = with_keeper_name args name in
     (* Stream turns are synchronous today, but still pin the bus visible at the
        public surface boundary so later refactors cannot reintroduce a nested
@@ -825,24 +837,64 @@ let handle_keeper_msg_stream
         ?on_event
         ?event_bus
         ?continuation_channel
+        ?on_admission_rejected
         ctx
         resolved_args
     in
-    if not (tool_result_success result) then
-      Ok result
-    else begin
-      let body = tool_result_body result in
-      invalidate_keeper_list_cache ();
-      invalidate_status_cache name;
-      let json = json_of_body body in
-      Ok
-        (tool_result_ok
-           (Yojson.Safe.pretty_to_string
-              (annotate_keeper_json ~runtime_class:"keeper" json)))
-    end
-  with
-  | Ok result -> result
-  | Error err -> tool_result_error err
+    complete_keeper_msg_stream_result ~name result
+  in
+  match resolve_keeper_name ctx args with
+  | Ok name -> run name
+  | Error err ->
+      let raw_name = String.trim (get_string args "name" "") in
+      if not (Keeper_config.validate_name raw_name)
+      then tool_result_error err
+      else
+        (* Preserve typed admission truth after lifecycle teardown removes the
+           metadata row: a shutdown-fenced queued receipt must return to
+           Pending, not become a terminal lookup failure. An open lane still
+           runs the admitted body and surfaces its authoritative metadata
+           error. *)
+        run raw_name
+
+let handle_keeper_msg_stream_if_free
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      args
+  =
+  match resolve_keeper_name ctx args with
+  | Error err ->
+    let raw_name = String.trim (get_string args "name" "") in
+    if not (Keeper_config.validate_name raw_name)
+    then `Ran (tool_result_error err)
+    else
+      (* A connector message already accepted for a live/raw Keeper identity
+         must remain queueable even if metadata resolution is temporarily
+         unavailable. Run the resolution error itself through the same
+         post-lock admission boundary: a held slot, parked waiter, active
+         receipt, or queue read error returns Busy; only an atomically free
+         lane returns the original metadata error. *)
+      Keeper_turn_admission.run_chat_if_free
+          ~base_path:ctx.config.base_path
+          ~keeper_name:raw_name
+          (fun () -> tool_result_error err)
+  | Ok name ->
+    let resolved_args = with_keeper_name args name in
+    let event_bus = Keeper_event_bus.get () in
+    (match
+       Turn.handle_keeper_msg_if_free
+         ?on_text_delta
+         ?on_event
+         ?event_bus
+         ?continuation_channel
+         ctx
+         resolved_args
+     with
+     | `Busy rejection -> `Busy rejection
+     | `Ran result ->
+       `Ran (complete_keeper_msg_stream_result ~name result))
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in

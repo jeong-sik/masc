@@ -742,6 +742,10 @@ export type KeeperConversationDelivery =
   | 'timeout'
   | 'cancelled'
   | 'error'
+  // Durable keeper_chat_store row written when a request failed before the
+  // keeper produced an utterance. Unlike generic client/tool errors, this
+  // writer-declared state is watermark-neutral.
+  | 'transport_failure'
   // Stream ended without a terminal RUN_FINISHED / RUN_ERROR event —
   // the transport was cut mid-response, so the text may be incomplete.
   | 'interrupted'
@@ -764,6 +768,22 @@ export type KeeperTurnOutcome =
   | 'continuation_checkpoint'
   | 'no_visible_reply'
 
+export type KeeperQueueReceiptLifecycle =
+  | 'pending'
+  | 'inflight'
+  | 'delivered'
+  | 'failed'
+
+export type KeeperQueueReceiptFailureKind =
+  | 'turn_failed'
+  | 'timed_out'
+  | 'no_visible_reply'
+  | 'transcript_persist_failed'
+  | 'connector_unavailable'
+  | 'delivery_failed'
+  | 'cancelled'
+  | 'internal_error'
+
 export interface KeeperConversationDetails {
   traceId?: string | null
   turnRef?: string | null
@@ -778,6 +798,17 @@ export interface KeeperConversationDetails {
   skillReason?: string | null
   replyText?: string | null
   turnOutcome?: KeeperTurnOutcome | null
+  /** Durable server receipt for a busy chat message accepted into the Keeper
+   * queue. This is distinct from the browser-local draft queue. */
+  queueReceiptId?: string | null
+  /** Shutdown fence that caused this message to be deferred, when present. */
+  queueShutdownOperationId?: string | null
+  queueRevision?: number | null
+  queuePendingCount?: number | null
+  queueInflightCount?: number | null
+  queueState?: KeeperQueueReceiptLifecycle | null
+  queueFailureKind?: KeeperQueueReceiptFailureKind | null
+  queueCorrelationError?: 'missing_outcome_ref' | null
   rawPayload?: unknown
 }
 
@@ -955,6 +986,7 @@ export type KeeperConversationStreamContractStatus =
 
 export type KeeperConversationStreamDeliveryReceipt =
   | 'client_observed_sse_event'
+  | 'server_durable_receipt'
   | 'server_lifecycle_replay_only'
   | 'no_delivery_receipt'
 
@@ -1171,6 +1203,26 @@ export const KEEPER_AUTOBOOT_EXCLUSION_REASONS = [
 export type KeeperAutobootExclusionReason =
   typeof KEEPER_AUTOBOOT_EXCLUSION_REASONS[number]
 
+export type KeeperProfileConfigErrorKind =
+  | 'read_error'
+  | 'parse_error'
+  | 'profile_error'
+  | 'invalid_name'
+  | 'unknown'
+
+export interface KeeperProfileConfigError {
+  keeper: string
+  keeper_path: string
+  failing_path: string
+  kind: KeeperProfileConfigErrorKind
+  reported_kind?: string | null
+  detail: string
+  terminal_reason: 'config_invalid'
+  blocking: true
+  operator_action_required: true
+  next_action: 'fix_keeper_toml_config'
+}
+
 export interface Keeper {
   name: string
   keeper_id?: string | null
@@ -1217,6 +1269,7 @@ export interface Keeper {
   needs_attention?: boolean | null
   attention_reason?: string | null
   next_human_action?: string | null
+  config_error?: KeeperProfileConfigError | null
   active_goal_ids?: string[]
   goal?: string | null
   sandbox_profile?: 'local' | 'docker' | null

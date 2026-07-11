@@ -62,7 +62,7 @@ function ExternalDocLink({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+      class="v2-mobile-operator-target inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
     >
       ${label}
       <span aria-hidden="true">\u2197</span>

@@ -17,8 +17,8 @@ val keeper_universe_tool_names : keeper_meta -> string list
 (** Keeper-facing runtime candidate names before policy filtering. *)
 val keeper_internal_candidate_tool_names : string list
 
-(** Universe model tool schemas.  Returns schemas for all universe tools
-    so [make_tools] can build {!Agent_sdk.Tool.t} for the full search scope. *)
+(** Descriptor-projected universe model schemas. [make_tools] consumes the
+    same closed surface; non-descriptor schema fallback is forbidden. *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
 (** Tool-access scoped universe: configured candidate profile list + core_always - denied.
@@ -81,6 +81,11 @@ val dedupe_tool_names : string list -> string list
 
 (** Test-only hooks for the global recorder/searcher refs converted to Atomic.t. *)
 module For_testing : sig
+  type descriptor_route_kind =
+    | Output
+    | Invariant
+    | Registered_only
+
   val set_on_keeper_tool_call
     : (tool_name:string -> success:bool -> duration_ms:int -> unit) -> unit
 
@@ -91,6 +96,16 @@ module For_testing : sig
     : (query:string -> max_results:int -> Yojson.Safe.t) -> unit
 
   val search_tools : query:string -> max_results:int -> Yojson.Safe.t
+
+  val descriptor_route_invariant_payload
+    :  tool_name:string
+    -> Keeper_tool_descriptor.t
+    -> Yojson.Safe.t
+
+  val descriptor_route_kind
+    :  descriptor:Keeper_tool_descriptor.t
+    -> output:string option
+    -> descriptor_route_kind
 end
 
 (** Inject all masc_* schemas for keeper descriptor/registry surface filtering.

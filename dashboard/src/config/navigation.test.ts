@@ -103,6 +103,7 @@ describe('dashboard surface navigation', () => {
       panel: 'runtime',
     })
     expect(normalizeRouteParams('settings', { section: 'account', panel: 'theme' })).toEqual({
+      section: 'account',
       panel: 'theme',
     })
     expect(normalizeRouteParams('fusion', { section: 'legacy', surface: 'old', run_id: 'fus-1' })).toEqual({

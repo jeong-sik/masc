@@ -145,7 +145,7 @@ export function GoalCreateForm() {
         </div>
 
         <div class="wk-goal-create-sec">
-          <label class="wk-goal-create-check">
+          <label class="wk-goal-create-check v2-mobile-operator-target">
             <input
               type="checkbox"
               data-testid="goal-create-approval-checkbox"

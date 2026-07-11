@@ -276,6 +276,20 @@ let of_wire wire =
         | None -> Unknown { raw_error = other }))
 ;;
 
+let is_success = function
+  | Success -> true
+  | External_cancel
+  | Input_required
+  | Turn_wall_clock_timeout
+  | Runtime_attempts_exhausted
+  | Completion_contract_unsatisfied
+  | Completion_contract_no_progress
+  | Post_commit_ambiguous
+  | Turn_budget_exhausted _
+  | Provider_error _
+  | Unknown _ -> false
+;;
+
 let is_turn_budget_exhausted_wire wire =
   match of_wire (String.lowercase_ascii (String.trim wire)) with
   | Turn_budget_exhausted _ -> true

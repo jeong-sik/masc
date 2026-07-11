@@ -170,6 +170,43 @@ describe('KeeperWorkspaceRoster', () => {
     expect(attention?.getAttribute('title')).toContain('메시지 수가 아니라')
   })
 
+  it('renders invalid configured keepers as a blocking row with one repair action', () => {
+    keepers.value = [
+      mk({
+        name: 'broken',
+        status: 'offline',
+        needs_attention: true,
+        config_error: {
+          keeper: 'broken',
+          keeper_path: '/workspace/.masc/config/keepers/broken.toml',
+          failing_path: '/workspace/.masc/config/keepers/base.toml',
+          kind: 'read_error',
+          detail: 'base file missing',
+          terminal_reason: 'config_invalid',
+          blocking: true,
+          operator_action_required: true,
+          next_action: 'fix_keeper_toml_config',
+        },
+      }),
+    ]
+
+    render(html`<${KeeperWorkspaceRoster} activeName="broken" />`, host)
+
+    const row = host.querySelector('.kw-kp-row') as HTMLElement
+    expect(row.textContent).toContain('설정 차단')
+    expect(row.textContent).toContain('TOML 수정')
+    expect(row.getAttribute('data-tone')).toBe('bad')
+    expect(row.querySelector('.kp-att')?.getAttribute('title')).toContain('base.toml')
+
+    fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-broken"]') as HTMLButtonElement)
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')?.textContent)
+      .toContain('현재 실행 가능한 명령 없음')
+    expect(host.querySelector('[data-testid="kw-roster-menu-config"]')).not.toBeNull()
+    for (const action of ['boot', 'resume', 'wakeup', 'pause', 'shutdown']) {
+      expect(host.querySelector(`[data-testid="kw-roster-menu-${action}"]`)).toBeNull()
+    }
+  })
+
   // The fleet-summary band ([data-testid="kw-roster-summary"] with total/running/
   // paused/offline + 주의/승인/CTX aggregates) was removed in the v2 reskin — the
   // prototype roster opens straight into the .roster-filters band (전체/실행/주의

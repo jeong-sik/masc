@@ -4,6 +4,7 @@ import type {
   KeeperLifecycleState,
   KeeperMetricPoint,
   KeeperPhase,
+  KeeperProfileConfigErrorKind,
   KeeperTrustLatestEvent,
   KeeperTrustTerminalReason,
   PipelineStage,
@@ -41,6 +42,42 @@ function normalizeKeeperLiveActivitySource(raw: unknown): Keeper['last_activity_
       return source
     default:
       return null
+  }
+}
+
+function normalizeKeeperProfileConfigError(raw: unknown): Keeper['config_error'] {
+  if (!isRecord(raw)) return null
+  const reportedKind = asString(raw.kind)
+  if (!reportedKind) return null
+  const kind: KeeperProfileConfigErrorKind =
+    reportedKind === 'read_error'
+    || reportedKind === 'parse_error'
+    || reportedKind === 'profile_error'
+    || reportedKind === 'invalid_name'
+      ? reportedKind
+      : 'unknown'
+  const keeper = asString(raw.keeper)
+  const keeperPath = asString(raw.keeper_path)
+  const failingPath = asString(raw.failing_path)
+  const detail = asString(raw.detail)
+  if (!keeper || !keeperPath || !failingPath || !detail) return null
+  if (
+    raw.terminal_reason !== 'config_invalid'
+    || raw.blocking !== true
+    || raw.operator_action_required !== true
+    || raw.next_action !== 'fix_keeper_toml_config'
+  ) return null
+  return {
+    keeper,
+    keeper_path: keeperPath,
+    failing_path: failingPath,
+    kind,
+    reported_kind: kind === 'unknown' ? reportedKind : null,
+    detail,
+    terminal_reason: 'config_invalid',
+    blocking: true,
+    operator_action_required: true,
+    next_action: 'fix_keeper_toml_config',
   }
 }
 
@@ -721,6 +758,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.needs_attention === 'boolean' ? row.needs_attention : null,
         attention_reason: asString(row.attention_reason) ?? null,
         next_human_action: nextHumanAction,
+        config_error: normalizeKeeperProfileConfigError(row.config_error),
         trust,
         active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
         goal: asString(row.goal) ?? null,

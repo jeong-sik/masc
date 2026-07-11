@@ -203,15 +203,17 @@ end
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback.
-    @param max_tokens Explicit output-token request override. [None] (the
-           default) sends no [max_tokens] field on the request — masc#24067 /
-           oas#2517: the keeper lane never synthesizes one
+    @param max_tokens Explicit caller output-token override. When omitted, the
+           turn-start profile snapshot may provide the validated keeper OAS
+           override; absent both, no [max_tokens] field is sent. The keeper lane
+           never synthesizes a model-derived value (masc#24067 / oas#2517)
     @param is_retry When [true], replays the current user message into the
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
 let run_turn
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(base_dir : string)
       ~(max_context : int)
@@ -351,6 +353,7 @@ let run_turn
     Keeper_run_context.prepare_run_context
       ~config
       ~meta
+      ~profile_defaults
       ~base_dir
       ~max_context
       ~runtime_id
@@ -360,11 +363,12 @@ let run_turn
       ~generation
       ()
   in
-  let requested_max_tokens = max_tokens in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
-  (* Carry explicit caller/profile intent only. OAS owns model ceiling
-     validation and envelope-specific clamp/fallback policy. *)
+  (* The single turn-start snapshot. This exact binding feeds every runtime
+     candidate, OAS provider/lifecycle config, and the Turn_record sampling
+     payload below. OAS owns model-ceiling validation and envelope-specific
+     clamp/fallback policy. *)
   let max_tokens = ctx.max_tokens in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
@@ -691,13 +695,6 @@ let run_turn
               let keeper_oas_guardrails =
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
-              let max_tokens_for_runtime ~runtime_id =
-                Keeper_run_context.resolve_max_tokens_for_runtime
-                  ~keeper_name:meta.name
-                  ~runtime_id
-                  ?max_tokens:requested_max_tokens
-                  ()
-              in
               (* Autonomous cooperative yield: OAS checks [exit_condition]
                  before the first provider dispatch as well as between turns.
                  A scheduled-idle waiting chat may preempt immediately, but a
@@ -796,7 +793,6 @@ let run_turn
                     ~body_timeout_s:timeout_s
                     ~temperature
                     ?max_tokens
-                    ~max_tokens_for_runtime
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
                     ~guardrails:keeper_oas_guardrails

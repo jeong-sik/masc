@@ -15,13 +15,19 @@ type error =
 val pp_error : Format.formatter -> error -> unit
 
 val send_message :
-  token:string -> channel:string -> content:string -> (unit, error) result
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  ?thread_ts:string ->
+  token:string -> channel:string -> content:string -> unit -> (unit, error) result
 (** [send_message ~token ~channel ~content] posts to
     [chat.postMessage]. Logs errors via [Log.Keeper.warn] and returns the
     outcome. *)
 
 val send_message_with_blocks :
-  token:string -> channel:string -> content:string -> blocks:Yojson.Safe.t list -> (unit, error) result
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  ?thread_ts:string ->
+  token:string -> channel:string -> content:string -> blocks:Yojson.Safe.t list -> unit -> (unit, error) result
 (** [send_message_with_blocks ~token ~channel ~content ~blocks] posts to
     [chat.postMessage] with the given Block Kit [blocks]. Logs errors via
     [Log.Keeper.warn] and returns the outcome. *)
@@ -38,8 +44,10 @@ val content_blocks_of_text : string -> Yojson.Safe.t list
     Slack-native projection yet. *)
 
 val adapter_loop :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   token:string ->
   channel:string ->
+  ?thread_ts:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   ?base_url:string ->
   ?on_send_result:((unit, error) result -> unit) ->
@@ -58,10 +66,11 @@ val adapter_loop :
     [base_url] is used to build public voice-audio URLs; when omitted the
     configured {!Env_config_core.masc_http_base_url} is used.
 
-    [on_send_result] is invoked once per outbound attempt with the send
-    outcome, so callers (e.g. the connector gateway) can record delivery
-    observability without this adapter depending on any metric sink. It
-    defaults to a no-op to preserve existing behavior.
+    [on_send_result] is invoked exactly once for the terminal
+    [Run_finished]/[Event_error] delivery. Interim protocol diagnostics do not
+    settle the callback, so an earlier diagnostic cannot hide a later final
+    send failure. Empty terminal output reports a typed [Other] error. The
+    callback defaults to a no-op.
 
     The loop exits after one turn. *)
 
@@ -94,4 +103,25 @@ module For_testing : sig
     content:string -> event_blocks:Yojson.Safe.t list -> Yojson.Safe.t list
   (** Merge text-derived blocks with explicitly emitted rich event blocks in
       final delivery order. *)
+
+  val build_message_body :
+    channel:string ->
+    content:string ->
+    blocks:Yojson.Safe.t list ->
+    ?thread_ts:string ->
+    unit ->
+    string
+  (** Pure chat.postMessage JSON builder used to prove deferred replies retain
+      the originating Slack thread. *)
+
+  val adapter_loop :
+    events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+    send_plain:(content:string -> (unit, error) result) ->
+    send_blocks:(content:string -> blocks:Yojson.Safe.t list -> (unit, error) result) ->
+    ?base_url:string ->
+    ?on_send_result:((unit, error) result -> unit) ->
+    unit ->
+    unit
+  (** Test seam for the outbound transport. It runs the production terminal
+      settlement state machine with injected Slack sends. *)
 end

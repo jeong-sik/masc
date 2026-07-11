@@ -141,6 +141,7 @@ let task_id_list_label = function
   | ids -> "[" ^ String.concat "," ids ^ "]"
 
 let status_summary_string
+    ~(task_list_projection : Tool_capability_projection.task_list)
     ~(ctx : context)
     ~(bound : bool)
     ~(actual_name : string)
@@ -162,6 +163,9 @@ let status_summary_string
     ~(attention_items : string list)
     ~(state : Masc_domain.workspace_state)
     ~(backlog : Masc_domain.backlog) =
+  let task_list_name =
+    Tool_capability_projection.task_list_name task_list_projection
+  in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
   let shown_agents = take_items max_agents_display agents_with_state in
@@ -278,8 +282,9 @@ let status_summary_string
   if List.length active_tasks > max_active_tasks_display then
     Buffer.add_string buf
       (Printf.sprintf
-         "  … and %d more active tasks (use masc_tasks for full list)\n"
-         (List.length active_tasks - max_active_tasks_display));
+         "  … and %d more active tasks (use %s for full list)\n"
+         (List.length active_tasks - max_active_tasks_display)
+         task_list_name);
   Buffer.add_string buf
     (Printf.sprintf "  Summary: active=%d, done=%d, cancelled=%d, total=%d\n"
        (List.length active_tasks) done_count cancelled_count

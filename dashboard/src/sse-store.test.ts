@@ -46,6 +46,7 @@ const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateGoalLoopSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
 const refreshActiveKeeperChatHistory = vi.fn<(opts?: { force?: boolean }) => void>()
+const reconcileKeeperChatReceipts = vi.fn<(name: string) => Promise<void>>(async () => {})
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -102,6 +103,7 @@ async function loadSseStore() {
   }))
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
+    reconcileKeeperChatReceipts,
     refreshActiveKeeperChatHistory,
   }))
   vi.doMock('./router', () => ({ route }))
@@ -134,6 +136,8 @@ describe('setupSSEReaction reconnect hydration', () => {
     replayOasRuntimeTelemetry.mockClear()
     replayOasRuntimeTelemetry.mockResolvedValue(undefined)
     refreshActiveKeeperChatHistory.mockReset()
+    reconcileKeeperChatReceipts.mockReset()
+    reconcileKeeperChatReceipts.mockResolvedValue(undefined)
     hydrateFleetCompositeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
@@ -530,6 +534,29 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, undefined)
+  })
+
+  it('invalidates the authoritative Keeper chat-queue projection once per burst', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshQueue = vi.fn()
+    sseStore.registerKeeperChatQueueRefresh(refreshQueue)
+
+    sseStore.routeServerPushEvent({
+      type: 'keeper_chat_queue_changed',
+      keeper_name: 'echo',
+      revision: 4,
+    })
+    sseStore.routeServerPushEvent({
+      type: 'keeper_chat_queue_changed',
+      keeper_name: 'echo',
+      revision: 5,
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshQueue).toHaveBeenCalledTimes(1)
+    expect(reconcileKeeperChatReceipts).toHaveBeenCalledTimes(1)
+    expect(reconcileKeeperChatReceipts).toHaveBeenCalledWith('echo')
   })
 
   it('forwards RFC-0235 audio clips on keeper_chat_appended to the chat handler', async () => {

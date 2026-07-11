@@ -15,6 +15,10 @@
    [Turn_budget_exhausted]. It is non-vacuous against the original bug: reverting
    the producer to the colon form turns assertion 1 and 3 red. *)
 
+(* The same boundary must keep runtime-stop and final-disposition domains
+   distinct: [Runtime_agent.Completed] remains ["completed"] in runtime
+   telemetry, while a terminal receipt projects it to canonical ["success"]. *)
+
 module D = Masc.Keeper_turn_disposition
 module Receipt = Masc.Keeper_execution_receipt_types
 
@@ -22,6 +26,39 @@ let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
 
 let () =
+  let runtime_stop_wire = Receipt.stop_reason_to_string Runtime_agent.Completed in
+  check
+    (Printf.sprintf "runtime stop keeps completed wire (got %S)" runtime_stop_wire)
+    (String.equal runtime_stop_wire "completed");
+  let success_wire =
+    Receipt.receipt_terminal_reason_code_of_stop_reason Runtime_agent.Completed
+  in
+  check
+    (Printf.sprintf "terminal receipt emits canonical success (got %S)" success_wire)
+    (String.equal success_wire "success");
+  check
+    "canonical success round-trips as Success"
+    (D.is_success (D.of_wire success_wire));
+  check
+    "runtime completed is not a final disposition"
+    (match D.of_wire "completed" with
+     | D.Unknown _ -> true
+     | _ -> false);
+  check
+    "whitespace success is not silently normalized"
+    (match D.of_wire " success " with
+     | D.Unknown _ -> true
+     | _ -> false);
+  check
+    "uppercase legacy spelling is not silently normalized"
+    (match D.of_wire "COMPLETED" with
+     | D.Unknown _ -> true
+     | _ -> false);
+  check
+    "runtime-attempt completion keeps its distinct typed wire"
+    (String.equal
+       (Receipt.runtime_outcome_to_string Receipt.Runtime_completed)
+       "completed");
   let used = 1070 and limit = 1070 in
   let wire =
     Receipt.stop_reason_to_string
@@ -62,5 +99,5 @@ let () =
   | xs ->
     List.iter (fun n -> print_endline ("FAIL: " ^ n)) (List.rev xs);
     failwith
-      (Printf.sprintf "%d budget-wire contract assertion(s) failed" (List.length xs))
+      (Printf.sprintf "%d disposition-wire contract assertion(s) failed" (List.length xs))
 ;;

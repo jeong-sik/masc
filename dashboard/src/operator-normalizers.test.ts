@@ -172,6 +172,7 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers).toEqual([])
     expect(result.persistent_agents).toEqual([])
     expect(result.admission_queue).toBeNull()
+    expect(result.admission_queue_error).toBeNull()
     expect(result.recent_messages).toEqual([])
     expect(result.pending_confirms).toEqual([])
     expect(result.available_actions).toEqual([])
@@ -450,7 +451,6 @@ describe('normalizeOperatorSnapshot', () => {
   it('normalizes admission queue ownership metadata', () => {
     const result = normalizeOperatorSnapshot({
       admission_queue: {
-        mode: 'passthrough',
         throttle_owner: 'oas_runtime',
         max_concurrent: 3,
         active: 1,
@@ -459,13 +459,57 @@ describe('normalizeOperatorSnapshot', () => {
       },
     })
     expect(result.admission_queue).toEqual({
-      mode: 'passthrough',
       throttle_owner: 'oas_runtime',
       max_concurrent: 3,
       active: 1,
       available: 2,
       queue_depth: 0,
     })
+    expect(result.admission_queue_error).toBeNull()
+  })
+
+  it('preserves an oversubscribed admission snapshot as observable runtime truth', () => {
+    const result = normalizeOperatorSnapshot({
+      admission_queue: {
+        throttle_owner: 'oas_runtime',
+        max_concurrent: 3,
+        active: 4,
+        available: 0,
+        queue_depth: 1,
+      },
+    })
+
+    expect(result.admission_queue).toEqual({
+      throttle_owner: 'oas_runtime',
+      max_concurrent: 3,
+      active: 4,
+      available: 0,
+      queue_depth: 1,
+    })
+    expect(result.admission_queue_error).toBeNull()
+  })
+
+  it('rejects incomplete admission queue snapshots instead of fabricating zero capacity', () => {
+    const result = normalizeOperatorSnapshot({
+      admission_queue: {
+        throttle_owner: 'oas_runtime',
+        max_concurrent: 3,
+      },
+    })
+
+    expect(result.admission_queue).toBeNull()
+    expect(result.admission_queue_error).toBe('Admission projection contains invalid counters.')
+  })
+
+  it.each([
+    [{ throttle_owner: '', max_concurrent: 3, active: 1, available: 2, queue_depth: 0 }, 'Admission projection is missing throttle ownership.'],
+    [{ throttle_owner: 'runtime', max_concurrent: 3, active: 4, available: 1, queue_depth: 0 }, 'Admission projection counters are inconsistent.'],
+    [{ throttle_owner: 'runtime', max_concurrent: 3, active: 1, available: 1, queue_depth: 0 }, 'Admission projection counters are inconsistent.'],
+  ])('reports an invalid admission projection instead of silently omitting it', (admissionQueue, error) => {
+    const result = normalizeOperatorSnapshot({ admission_queue: admissionQueue })
+
+    expect(result.admission_queue).toBeNull()
+    expect(result.admission_queue_error).toBe(error)
   })
 
   it('extracts persistent_agents using same keeper normalizer', () => {

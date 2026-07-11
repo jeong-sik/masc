@@ -787,10 +787,12 @@ let reload_meta_from_disk ~base_path name =
       let meta =
         canonicalize_registry_meta ~operation:"reload_meta_from_disk" ~base_path name meta
       in
-      let defaults = load_keeper_profile_defaults_for_base_path ~base_path name in
-      match effective_meta_of_profile_defaults defaults meta with
-      | Error msg -> Error msg
-      | Ok effective_meta -> (
+      (match load_keeper_profile_defaults_result_for_base_path ~base_path name with
+       | Error error -> Error (keeper_toml_load_error_to_string error)
+       | Ok defaults ->
+       match effective_meta_of_profile_defaults defaults meta with
+       | Error msg -> Error msg
+       | Ok effective_meta -> (
           match validate_registry_meta ~base_path name effective_meta with
           | Error reason ->
               record_invalid_registry_entry ~operation:"reload_meta_from_disk" ~name reason;
@@ -800,7 +802,7 @@ let reload_meta_from_disk ~base_path name =
                 update_entry_if_registered ~base_path name (fun e ->
                   { e with base_path; name; meta = effective_meta }, true)
               in
-              if updated then Ok (get ~base_path name) else Ok None))
+              if updated then Ok (get ~base_path name) else Ok None)))
 ;;
 
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)

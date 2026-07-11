@@ -37,6 +37,7 @@ const CRUMB_CLASS = [
 ].join(' ')
 const INTERACTIVE_CLASS = [
   CRUMB_CLASS,
+  'v2-mobile-operator-target inline-flex items-center',
   'cursor-pointer hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)]',
   ringFocusClasses({ tone: 'accent-medium', width: 2 }),
 ].join(' ')

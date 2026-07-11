@@ -123,7 +123,7 @@ let release_worker operation =
     Hashtbl.remove active_workers (worker_key operation))
 ;;
 
-let persist_unhandled_failure ~config operation exn =
+let persist_unhandled_failure ~now ~config operation exn =
   let detail = Printexc.to_string exn in
   Eio.Cancel.protect (fun () ->
     Log.Keeper.error
@@ -135,8 +135,8 @@ let persist_unhandled_failure ~config operation exn =
       Keeper_shutdown_store.persist_blocked_latest
         ~config
         ~identity:operation
-        ~failure:{ stage = Record_update; detail }
-        ~updated_at:(Masc_domain.now_iso ())
+        ~failure:{ stage = Unhandled_worker; detail }
+        ~now
     with
     | Ok (Keeper_shutdown_store.Blocked_persisted blocked) ->
       Log.Keeper.error
@@ -229,7 +229,12 @@ let start_worker ~config ~entry operation =
                       "Keeper shutdown worker cancelled by server teardown; durable recovery retained: keeper=%s operation=%s"
                       operation.keeper_name
                       (worker_key operation)
-                  | exn -> persist_unhandled_failure ~config operation exn));
+                  | exn ->
+                    persist_unhandled_failure
+                      ~now:Masc_domain.now_iso
+                      ~config
+                      operation
+                      exn));
            if Atomic.get started
            then Worker_started
            else

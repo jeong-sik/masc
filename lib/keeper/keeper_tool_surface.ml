@@ -150,7 +150,11 @@ let handle_keeper_sandbox_status ctx args : tool_result =
              | Ok None when List.mem name configured_names -> (
                  match load_or_materialize_boot_meta ctx name with
                  | Ok { meta; _ } -> (
-                     match Keeper_meta_contract.effective_meta_result meta with
+                     match
+                       Keeper_meta_contract.effective_meta_result
+                         ~base_path:ctx.config.base_path
+                         meta
+                     with
                      | Ok effective_meta -> Some (Sandbox_status_meta effective_meta)
                      | Error msg ->
                          Log.Keeper.warn
@@ -696,6 +700,7 @@ let dispatch_stream
       ?on_text_delta
       ?on_event
       ?continuation_channel
+      ?on_admission_rejected
       ctx
       ~name
       ~args
@@ -712,9 +717,37 @@ let dispatch_stream
               ?on_text_delta
               ?on_event
               ?continuation_channel
+              ?on_admission_rejected
               ctx
               args))
   | _ -> None
+
+let dispatch_stream_if_free
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      ~name
+      ~args
+  =
+  maybe_bootstrap_existing_keepalives ctx ~name ~args;
+  let ctx = resolve_ctx ctx ~name args in
+  match name with
+  | "masc_keeper_msg" ->
+      (match
+         handle_keeper_msg_stream_if_free
+           ?on_text_delta
+           ?on_event
+           ?continuation_channel
+           ctx
+           args
+       with
+       | `Busy rejection -> `Busy rejection
+       | `Ran result ->
+         `Ran
+           (Some
+              (tool_result_with_tool_name ~tool_name:name result)))
+  | _ -> `Ran None
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

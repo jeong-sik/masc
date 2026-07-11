@@ -58,6 +58,12 @@ val public_mcp_tools : string list
 val is_public_mcp : string -> bool
 (** O(1) membership check against the public surface. *)
 
+val effective_registered_visibility :
+  name:string -> declared:visibility -> visibility
+(** Apply the immutable system-internal surface override used by
+    {!Tool_spec.register}. Definition builders can use this before runtime
+    registration without depending on mutable catalog initialization order. *)
+
 val full_surface_override : unit -> bool
 (** [true] when MASC_FULL_SURFACE=1 is set. *)
 

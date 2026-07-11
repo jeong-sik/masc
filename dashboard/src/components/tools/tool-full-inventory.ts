@@ -150,7 +150,7 @@ export function FullInventoryView({
           ]}
           onInput=${(v: string) => { categoryFilter.value = v }}
         />
-        <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
+        <label class="v2-mobile-operator-target inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
           <${Checkbox}
             checked=${directOnly.value}
             ariaLabel="직접 호출만"
@@ -158,7 +158,7 @@ export function FullInventoryView({
           />
           <span>직접 호출만</span>
         </label>
-        <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
+        <label class="v2-mobile-operator-target inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
           <${Checkbox}
             checked=${showHidden.value}
             ariaLabel="숨김 표시"
@@ -166,7 +166,7 @@ export function FullInventoryView({
           />
           <span>숨김 표시</span>
         </label>
-        <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
+        <label class="v2-mobile-operator-target inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
           <${Checkbox}
             checked=${showDeprecated.value}
             ariaLabel="지원 중단 표시"

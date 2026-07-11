@@ -43,8 +43,7 @@ type boot_meta_resolution = {
 type boot_meta_failure_cause =
   | Missing_meta
   | Meta_read_error
-  | Config_parse_failed
-  | Invalid_profile
+  | Config_invalid
   | Sandbox_profile_required
   | Goal_required
   | Materialization_failed
@@ -52,23 +51,24 @@ type boot_meta_failure_cause =
 let boot_meta_failure_cause_label = function
   | Missing_meta -> "missing_meta"
   | Meta_read_error -> "meta_read_error"
-  | Config_parse_failed -> "config_parse_failed"
-  | Invalid_profile -> "invalid_profile"
+  | Config_invalid -> "config_invalid"
   | Sandbox_profile_required -> "sandbox_profile_required"
   | Goal_required -> "goal_required"
   | Materialization_failed -> "materialization_failed"
 
 type boot_meta_error = {
   cause : boot_meta_failure_cause;
+  config_error : keeper_toml_load_error option;
   message : string;
 }
 
-let boot_meta_error cause message = { cause; message }
+let boot_meta_error ?config_error cause message = { cause; config_error; message }
 
 type boot_meta_failure = {
   keeper_name : string;
   base_path : string;
   cause : boot_meta_failure_cause;
+  config_error : keeper_toml_load_error option;
   error : string;
   recorded_at : string;
   recorded_at_unix : float;
@@ -84,12 +84,13 @@ let with_boot_meta_failures_lock f =
   Stdlib.Mutex.lock boot_meta_failures_mu;
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock boot_meta_failures_mu) f
 
-let record_boot_meta_failure ~base_path ~name ~cause ~error =
+let record_boot_meta_failure ~base_path ~name ~cause ~config_error ~error =
   let failure =
     {
       keeper_name = name;
       base_path;
       cause;
+      config_error;
       error;
       recorded_at = now_iso ();
       recorded_at_unix = Time_compat.now ();
@@ -121,11 +122,6 @@ let boot_meta_failure_for ~base_path ~name =
       Hashtbl.find_opt boot_meta_failures
         (boot_meta_failure_key ~base_path ~name))
 
-let profile_defaults_for_config config name =
-  load_keeper_profile_defaults_for_base_path
-    ~base_path:config.Workspace.base_path
-    name
-
 let profile_defaults_result_for_config config name =
   load_keeper_profile_defaults_result_for_base_path
     ~base_path:config.Workspace.base_path
@@ -142,8 +138,8 @@ let remember_boot_meta_result ctx name result =
   | Ok value ->
       clear_boot_meta_failure ~base_path ~name;
       Ok value
-  | Error { cause; message } ->
-      record_boot_meta_failure ~base_path ~name ~cause ~error:message;
+  | Error { cause; config_error; message } ->
+      record_boot_meta_failure ~base_path ~name ~cause ~config_error ~error:message;
       Error message
 
 type autoboot_exclusion_reason =
@@ -173,23 +169,34 @@ let autoboot_exclusion_reason config name =
   | Ok (Some meta) ->
     if meta.paused then Some Paused
     else
-      (match (profile_defaults_for_config config name).autoboot_enabled with
-       | Some true -> None
-       | Some false -> Some Declarative_autoboot_disabled
-       | None ->
-         if meta.autoboot_enabled then None else Some Autoboot_disabled)
+      (match profile_defaults_result_for_config config name with
+       | Error _ -> None
+       | Ok defaults ->
+         (match defaults.autoboot_enabled with
+          | Some true -> None
+          | Some false -> Some Declarative_autoboot_disabled
+          | None ->
+            if meta.autoboot_enabled then None else Some Autoboot_disabled))
   | Ok None ->
-    (match (profile_defaults_for_config config name).autoboot_enabled with
-     | Some false -> Some Declarative_autoboot_disabled
-     | Some true | None -> None)
+    (match profile_defaults_result_for_config config name with
+     | Error _ -> None
+     | Ok defaults ->
+       (match defaults.autoboot_enabled with
+        | Some false -> Some Declarative_autoboot_disabled
+        | Some true | None -> None))
   | Error _ ->
     (* Preserve existing behavior: corrupt/unreadable meta still enters the
        boot path so load_or_materialize_boot_meta can emit the precise error. *)
     None
 
-let bootable_keeper_names config =
+let bootstrap_candidate_keeper_names config =
   configured_keeper_names config
   |> List.filter (fun name -> Option.is_none (autoboot_exclusion_reason config name))
+
+let bootable_keeper_names config =
+  bootstrap_candidate_keeper_names config
+  |> List.filter (fun name ->
+       Result.is_ok (profile_defaults_result_for_config config name))
 
 let autoboot_excluded_keeper_reasons config =
   configured_keeper_names config
@@ -212,9 +219,12 @@ let auto_recoverable_paused_keeper_names ?now config =
        | Ok (Some meta)
          when meta.paused
               &&
-              (match (profile_defaults_for_config config name).autoboot_enabled with
-               | Some value -> value
-               | None -> meta.autoboot_enabled)
+              (match profile_defaults_result_for_config config name with
+               | Error _ -> false
+               | Ok defaults ->
+                 (match defaults.autoboot_enabled with
+                  | Some value -> value
+                  | None -> meta.autoboot_enabled))
               && Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta ->
          Some meta.name
        | Ok (Some _) | Ok None -> None
@@ -267,21 +277,12 @@ let declarative_materialization_goal
       defaults.instructions;
     ]
 
-let invalid_profile_defaults_error ~keeper_name detail =
-  if String_util.contains_substring detail "runtime_id" then
-    Printf.sprintf
-      "invalid profile.runtime_id for keeper %s: unknown runtime_id: %s"
-      keeper_name detail
-  else
-    Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
-
-let profile_defaults_boot_error ~keeper_name detail =
-  let cause =
-    match Keeper_types_profile.keeper_toml_config_error_for_name keeper_name with
-    | Some _ -> Config_parse_failed
-    | None -> Invalid_profile
-  in
-  boot_meta_error cause (invalid_profile_defaults_error ~keeper_name detail)
+let profile_defaults_boot_error ~keeper_name error =
+  boot_meta_error ~config_error:error Config_invalid
+    (Printf.sprintf
+       "invalid keeper profile for keeper %s: %s"
+       keeper_name
+       (keeper_toml_load_error_to_string error))
 
 let sandbox_profile_required_boot_error ~keeper_name ~manifest_path =
   let manifest_hint =
@@ -401,8 +402,8 @@ let ensure_keeper_meta_with_cause config name =
       profile_defaults_result_for_config config meta.name
     in
     match defaults_result with
-    | Error detail ->
-        Error (profile_defaults_boot_error ~keeper_name:meta.name detail)
+    | Error error ->
+        Error (profile_defaults_boot_error ~keeper_name:meta.name error)
     | Ok defaults ->
     let target_persona = apply_default_opt defaults.persona_name meta.persona in
 
@@ -593,7 +594,7 @@ let declarative_materialization_args name defaults =
 
 let declarative_materialization_defaults config name =
   match profile_defaults_result_for_config config name with
-  | Error detail -> Error (profile_defaults_boot_error ~keeper_name:name detail)
+  | Error error -> Error (profile_defaults_boot_error ~keeper_name:name error)
   | Ok defaults -> (
       match defaults.sandbox_profile with
       | Some _ -> Ok defaults
@@ -616,7 +617,7 @@ let materialization_failed_boot_error ~name ~toml_path ~body =
        name toml_path body)
 
 let materialized_reload_boot_error ~name ~toml_path (err : boot_meta_error) =
-  boot_meta_error err.cause
+  boot_meta_error ?config_error:err.config_error err.cause
     (Printf.sprintf
        "materialized declarative keeper %s from %s but failed to reload meta: %s"
        name toml_path err.message)
@@ -698,7 +699,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
          else
            max_int)
     in
-    let entries = bootable_keeper_names ctx.config |> take max_scan in
+    let entries = bootstrap_candidate_keeper_names ctx.config |> take max_scan in
     let (scanned, started, stale, recovering) =
       List.fold_left
         (fun (scanned_acc, started_acc, stale_acc, recovering_acc) name ->
@@ -1002,7 +1003,7 @@ let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
   Hashtbl.create 4
 
 let has_boot_entries config =
-  bootable_keeper_names config <> []
+  bootstrap_candidate_keeper_names config <> []
   || auto_recoverable_paused_keeper_names config <> []
 
 (* #10125: extracted predicate so it can be unit-tested without

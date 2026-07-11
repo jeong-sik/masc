@@ -49,6 +49,8 @@ val keeper_names : Workspace.config -> string list
 (** Default autoboot policy when a keeper has TOML config but no
     persisted JSON yet. *)
 val declarative_autoboot_enabled_by_default : Workspace.config -> string -> bool
+val effective_autoboot_enabled :
+  Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> bool
 
 (** Names of keepers eligible for the keepalive fiber set —
     autoboot enabled, not paused. Logs and excludes on read failure

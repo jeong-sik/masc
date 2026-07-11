@@ -868,10 +868,11 @@ function normalizeHistoryEntry(
   const turnRef = asString(raw.turn_ref) ?? null
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
-  // apart from a real reply. Map it to the existing error delivery state so
-  // the bubble renders the error label/styling instead of a saved reply.
+  // apart from a real reply. Preserve that writer-declared provenance as its
+  // own delivery variant: generic client/tool errors have different watermark
+  // semantics and must not inherit the durable-row reassurance.
   const delivery: KeeperConversationDelivery =
-    asString(raw.kind) === 'transport_failure' ? 'error' : 'history'
+    asString(raw.kind) === 'transport_failure' ? 'transport_failure' : 'history'
   const serverBlocks = normalizeBlocks(raw.blocks, role)
   const blocks = serverBlocks
     ?? ((role === 'assistant' || role === 'system') && text
@@ -895,6 +896,7 @@ function normalizeHistoryEntry(
     timestamp,
     turnRef,
     delivery,
+    error: delivery === 'transport_failure' ? rawText : null,
     streamState: null,
     streamContract,
     details: null,
@@ -1366,7 +1368,13 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       // must survive history merges until they finalize. Otherwise a queued
       // assistant with empty text can be mistaken for an older empty-text
       // history row and dropped, making the queued reply look like an error.
-      const shouldKeepLocalEntry = isInFlightDelivery(entry.delivery) || !coveredByHistory
+      // A terminal durable-receipt observation is also operator evidence, not
+      // a duplicate assistant reply: keep it alongside the canonical history
+      // row so its Pending/Inflight/Delivered/Failed lifecycle remains visible.
+      const isReceiptObservation = Boolean(entry.details?.queueReceiptId)
+      const shouldKeepLocalEntry = isInFlightDelivery(entry.delivery)
+        || isReceiptObservation
+        || !coveredByHistory
       return entry.delivery !== 'history' && !isCoveredToolRow && shouldKeepLocalEntry
     },
   )

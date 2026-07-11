@@ -223,6 +223,17 @@ val handle_keeper_get_subroutes :
 (** Dispatch [GET /api/v1/keepers/<name>/<sub>] sub-routes
     (status / tools / checkpoints listing / etc.). *)
 
+val keeper_chat_receipt_route : string -> (string * string) option
+(** Parse the exact
+    [/api/v1/keepers/<name>/chat/receipts/<receipt_id>] read route. *)
+
+val keeper_chat_receipt_json :
+  keeper_name:string ->
+  revision:int64 ->
+  Keeper_chat_queue.receipt_view ->
+  Yojson.Safe.t
+(** Read-only typed receipt projection returned by the route above. *)
+
 (** {1 Memory-OS dashboard JSON} *)
 
 val memory_os_fact_json :

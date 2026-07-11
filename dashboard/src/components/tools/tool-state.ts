@@ -4,6 +4,8 @@ import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import { fetchDashboardTools, type DashboardToolsResponse, type DashboardToolInventoryItem } from '../../api'
 import { createManagedAsyncResource } from '../../lib/async-state'
+import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { registerKeeperChatQueueRefresh } from '../../sse-store'
 
 // Managed (stale-while-revalidate): the previously loaded response stays
 // readable while a refetch is in flight. Panel-level polling — the keeper
@@ -42,6 +44,35 @@ export const SURFACE_LABELS: Record<SurfaceFilter, string> = {
 export async function loadTools() {
   await toolsResource.load(signal => fetchDashboardTools({ signal }))
 }
+
+export const KEEPER_WAITING_INVENTORY_REFRESH_MS = 15_000
+let toolsRefreshSubscriberCount = 0
+let stopToolsRefresh: (() => void) | null = null
+
+/** Share one visibility-aware tools poller across every mounted Keeper lane
+ * and conversation surface. The managed resource deduplicates fetch state;
+ * this subscription also deduplicates the timer and global visibility/focus
+ * listeners that trigger it. */
+export function subscribeToolsAutoRefresh(): () => void {
+  toolsRefreshSubscriberCount += 1
+  if (toolsRefreshSubscriberCount === 1) {
+    if (!toolsData.value && !toolsLoading.value) void loadTools()
+    stopToolsRefresh = setupVisibleAutoRefresh(() => {
+      void loadTools()
+    }, KEEPER_WAITING_INVENTORY_REFRESH_MS)
+  }
+  return () => {
+    toolsRefreshSubscriberCount = Math.max(0, toolsRefreshSubscriberCount - 1)
+    if (toolsRefreshSubscriberCount === 0) {
+      stopToolsRefresh?.()
+      stopToolsRefresh = null
+    }
+  }
+}
+
+registerKeeperChatQueueRefresh(() => {
+  void loadTools()
+})
 
 export function hasSurface(item: DashboardToolInventoryItem, surface: string): boolean {
   return (item.surfaces ?? []).includes(surface)

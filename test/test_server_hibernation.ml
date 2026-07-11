@@ -36,8 +36,19 @@ let test_status_contract () =
 ;;
 
 let test_health_exposes_status () =
-  let request = Httpun.Request.create `GET "/health" in
-  let json = Server_routes_http_runtime.make_health_json request in
+  let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
+  let request = Httpun.Request.create ~headers `GET "/health" in
+  let request_authority =
+    match Server_request_authority.classify_http1_request request with
+    | Server_request_authority.Single authority -> authority
+    | ( Server_request_authority.Missing
+      | Server_request_authority.Multiple
+      | Server_request_authority.Malformed ) ->
+      fail "expected valid authority"
+  in
+  let json =
+    Server_routes_http_runtime.make_health_json ~request_authority request
+  in
   let hibernation = member "server_hibernation" json in
   check string "health status" "not_implemented" (string_field "status" hibernation);
   check string "health mode" "long_running" (string_field "mode" hibernation)

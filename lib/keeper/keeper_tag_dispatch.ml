@@ -116,7 +116,11 @@ let dispatch
     | Mod_run ->
       Tool_run.dispatch { Tool_run.config; agent_name = Some agent_name } ~name ~args
     | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
-    | Mod_state -> Tool_workspace.dispatch { Tool_workspace.config; agent_name } ~name ~args
+    | Mod_state ->
+      Tool_workspace.dispatch_for_keeper
+        { Tool_workspace.config; agent_name }
+        ~name
+        ~args
     | Mod_control ->
       if name = "masc_pause_status"
       then Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
@@ -146,7 +150,7 @@ let dispatch
       Some (if success then ok message else err message)
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
     | Mod_task ->
-      Task.Tool.dispatch
+      Task.Tool.dispatch_for_keeper
         { Task.Tool.config; agent_name; sw = Eio_context.get_switch_opt () }
         ~name
         ~args

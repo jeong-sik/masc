@@ -19,8 +19,8 @@ type tried_source =
   | Registry_internal_candidate (** S5: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** S6: Keeper_tool_registry.effective_core_tools *)
   | Tool_schema                 (** S7: policy tool-schema inventory name extraction *)
-  | Descriptor_registry         (** S7.5: Keeper_tool_descriptor.all_descriptors public_name —
-                                    flat SSOT incl. internal_descriptors (masc_keeper_* live here) *)
+  | Descriptor_registry         (** S7.5: registered names projected by
+                                    Keeper_tool_descriptor.all_descriptors *)
   | System_internal             (** S8: Tool_catalog_surfaces.is_system_internal_hidden —
                                     system-internal tools (masc_gc, masc_reset,
                                     masc_cleanup_zombies, …) dispatched via tool_misc and
@@ -83,16 +83,12 @@ let resolve name =
       else if
         List.exists
           (fun (d : Keeper_tool_descriptor.t) ->
-             String.equal d.Keeper_tool_descriptor.public_name normalized)
+             List.mem normalized (Keeper_tool_descriptor.registered_names d))
           (Keeper_tool_descriptor.all_descriptors ())
       then
-        (* Flat descriptor registry. Descriptor-backed tools live in
-           [public_descriptors @ internal_descriptors]. masc_keeper_* (dispatched
-           via Keeper_tool_surface.dispatch, not the handler registry) sit in
-           internal_descriptors and were orphaned from resolution when #19797
-           purged the surface lists. This flat-name source restores admission
-           without touching dispatch — resolve is a validity gate; [via] is only
-           used for the error string. *)
+        (* This resolver validates names embedded in prompt/continuity text; it
+           does not grant Keeper execution. Registered dispatch-only names must
+           therefore remain valid without entering the candidate projection. *)
         Resolved { canonical = normalized; via = Descriptor_registry }
       else if Tool_catalog_surfaces.is_system_internal_hidden normalized then
         (* System-internal tools (masc_gc, masc_reset, masc_cleanup_zombies, …)
@@ -148,7 +144,7 @@ let all_admitting_sources name =
   if
     List.exists
       (fun (d : Keeper_tool_descriptor.t) ->
-        String.equal d.Keeper_tool_descriptor.public_name normalized)
+        List.mem normalized (Keeper_tool_descriptor.registered_names d))
       (Keeper_tool_descriptor.all_descriptors ())
   then sources := Descriptor_registry :: !sources;
   if Tool_catalog_surfaces.is_system_internal_hidden normalized then

@@ -296,6 +296,26 @@ let test_close_unreleased_client_swallows_release_error () =
   Alcotest.(check int) "release attempted once" 1 !calls;
   Alcotest.(check bool) "marked released before failing" true !released
 
+let test_request_timeout_bounds_never_returning_transport () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let started = Eio.Time.now clock in
+  let result =
+    Masc_http_client.For_testing.with_request_timeout ~clock ~timeout_sec:0.02
+      (fun () ->
+         Eio.Time.sleep clock 60.0;
+         Ok ())
+  in
+  let elapsed = Eio.Time.now clock -. started in
+  (match result with
+   | Error message ->
+     Alcotest.(check bool)
+       "timeout is explicit"
+       true
+       (Astring.String.is_prefix ~affix:"timeout after" message)
+   | Ok () -> Alcotest.fail "never-returning transport must time out");
+  Alcotest.(check bool) "deadline settles promptly" true (elapsed < 0.5)
+
 (* ── Runner ──────────────────────────────────────────────────── *)
 
 let () =
@@ -362,5 +382,10 @@ let () =
             test_close_unreleased_client_closes_once;
           Alcotest.test_case "swallows release failure" `Quick
             test_close_unreleased_client_swallows_release_error;
+        ] );
+      ( "request deadline",
+        [
+          Alcotest.test_case "never-returning transport is bounded" `Quick
+            test_request_timeout_bounds_never_returning_transport;
         ] );
     ]

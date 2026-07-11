@@ -30,6 +30,8 @@ module Keeper_dispatch_ref = Masc.Keeper_dispatch_ref
 module Workspace = Masc.Workspace
 module Task = Masc.Task
 module Keeper_tool_surface = Masc.Keeper_tool_surface
+module Capability_registry = Masc.Capability_registry
+module Tool_shard = Masc.Tool_shard
 
 (* Force-link [Keeper_tool_surface] so its module-load registration of
    keeper tools into [Keeper_dispatch_ref.dispatch] runs before the
@@ -37,6 +39,18 @@ module Keeper_tool_surface = Masc.Keeper_tool_surface
 let () = ignore Masc.Keeper_tool_surface.schemas
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
+
+let required_public_descriptor name =
+  match Descriptor.find_public name with
+  | Some descriptor -> descriptor
+  | None -> Alcotest.failf "missing public descriptor: %s" name
+;;
+
+let required_internal_descriptor name =
+  match Descriptor.descriptors_for_internal name with
+  | descriptor :: _ -> descriptor
+  | [] -> Alcotest.failf "missing internal descriptor: %s" name
+;;
 
 (* RFC-0190 — Descriptor as Visibility/Metadata SSOT.
 
@@ -123,6 +137,221 @@ let test_internal_name_uniqueness () =
       "duplicate internal_name(s) across Keeper_tool_descriptor.all_descriptors: %s"
       (String.concat ", "
          (List.map (fun (n, c) -> Printf.sprintf "%S×%d" n c) dups))
+
+let test_keeper_model_projection_is_single_and_unique () =
+  let model_names =
+    all_descriptors () |> List.concat_map Descriptor.keeper_model_names
+  in
+  let unique_names = List.sort_uniq String.compare model_names in
+  Alcotest.(check int)
+    "one descriptor owns each Keeper model name"
+    (List.length model_names)
+    (List.length unique_names);
+  List.iter
+    (fun (descriptor : Descriptor.t) ->
+       let projected = Descriptor.keeper_model_names descriptor in
+       let candidates = Descriptor.keeper_candidate_names descriptor in
+       match descriptor.keeper_model_projection with
+       | Descriptor.Preferred_public_name ->
+         Alcotest.(check (list string))
+           (descriptor.id ^ " preferred model projection")
+           [ descriptor.public_name ]
+           projected;
+         Alcotest.(check bool)
+           (descriptor.id ^ " keeps internal dispatch candidate")
+           true
+           (List.mem descriptor.internal_name candidates);
+         descriptor.public_aliases
+         |> List.iter (fun alias ->
+           Alcotest.(check bool)
+             (descriptor.id ^ " keeps compatibility dispatch alias " ^ alias)
+             true
+             (List.mem alias candidates))
+       | Descriptor.Internal_name ->
+         Alcotest.(check (list string))
+           (descriptor.id ^ " internal model projection")
+           [ descriptor.internal_name ]
+           projected
+       | Descriptor.Dispatch_only ->
+         Alcotest.(check (list string))
+           (descriptor.id ^ " has no model projection")
+           []
+           projected;
+         Alcotest.(check (list string))
+           (descriptor.id ^ " has no Keeper candidates")
+           []
+           candidates)
+    (all_descriptors ())
+;;
+
+let test_semantic_capability_has_at_most_one_keeper_model_projection () =
+  Capability_registry.all_capabilities_from Masc.Config.raw_all_tool_schemas
+  |> List.iter (fun (capability : Capability_registry.capability_def) ->
+    let descriptors =
+      capability.projections
+      |> List.filter_map (fun (projection : Capability_registry.projection) ->
+        Resolution.descriptor_for_tool_name projection.tool_name)
+      |> List.sort_uniq
+           (fun (left : Descriptor.t) (right : Descriptor.t) ->
+              String.compare left.id right.id)
+    in
+    let model_names =
+      descriptors
+      |> List.concat_map Descriptor.keeper_model_names
+      |> List.sort_uniq String.compare
+    in
+    if List.length model_names > 1
+    then
+      Alcotest.failf
+        "semantic capability %S has multiple Keeper model projections: %s"
+        capability.capability_id
+        (String.concat ", " model_names))
+;;
+
+let test_model_visible_descriptors_have_canonical_input_schemas () =
+  Descriptor.model_visible_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    match descriptor.input_schema_source with
+    | Descriptor.Descriptor_owned | Descriptor.Canonical_registry -> ()
+    | Descriptor.Missing_canonical_registry ->
+      Alcotest.failf
+        "model-visible descriptor %S is missing its canonical input schema"
+        descriptor.id)
+;;
+
+let test_cluster_descriptors_have_no_missing_canonical_schemas () =
+  all_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    match descriptor.input_schema_source with
+    | Descriptor.Descriptor_owned | Descriptor.Canonical_registry -> ()
+    | Descriptor.Missing_canonical_registry ->
+      Alcotest.failf
+        "descriptor %S (%s) is missing its canonical input schema"
+        descriptor.id
+        descriptor.internal_name)
+;;
+
+let test_missing_canonical_schema_is_fail_closed () =
+  let base = required_internal_descriptor "masc_transition" in
+  let missing =
+    { base with
+      input_schema_source = Descriptor.Missing_canonical_registry
+    ; keeper_model_projection = Descriptor.Internal_name
+    }
+  in
+  Alcotest.(check (list string))
+    "missing schema has no model names"
+    []
+    (Descriptor.keeper_model_names missing);
+  Alcotest.(check (list string))
+    "missing schema has no execution candidates"
+    []
+    (Descriptor.keeper_candidate_names missing);
+  Alcotest.(check (list string))
+    "startup diagnostic reports missing canonical schema"
+    [ missing.internal_name ]
+    (Policy.missing_canonical_schema_names [ missing ])
+;;
+
+let test_registered_cluster_model_projections_are_explicit () =
+  let check_projection internal_name expected =
+    let descriptor = required_internal_descriptor internal_name in
+    Alcotest.(check bool)
+      (internal_name ^ " model projection")
+      true
+      (descriptor.keeper_model_projection = expected)
+  in
+  List.iter
+    (fun name -> check_projection name Descriptor.Internal_name)
+    [ "masc_recurring_add"
+    ; "masc_recurring_list"
+    ; "masc_recurring_remove"
+    ; "masc_runtime_verify"
+    ; "masc_runtime_ollama_probe"
+    ; "masc_goal_hygiene_review"
+    ];
+  List.iter
+    (fun name -> check_projection name Descriptor.Dispatch_only)
+    [ "masc_library_add"
+    ; "masc_library_list"
+    ; "masc_library_promote"
+    ; "masc_library_read"
+    ; "masc_library_search"
+    ; "masc_pause"
+    ; "masc_resume"
+    ];
+  List.iter
+    (fun name -> check_projection name Descriptor.Internal_name)
+    [ "keeper_library_read"; "keeper_library_search" ]
+;;
+
+let test_system_internal_descriptors_are_dispatch_only () =
+  all_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    if Tool_catalog_surfaces.is_system_internal_hidden descriptor.internal_name
+    then
+      Alcotest.(check bool)
+        (descriptor.internal_name ^ " stays outside the Keeper model surface")
+        true
+        (descriptor.keeper_model_projection = Descriptor.Dispatch_only))
+;;
+
+let test_dynamic_model_description_projection_is_explicit () =
+  all_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    let expected =
+      if String.equal descriptor.internal_name "masc_transition"
+      then Descriptor.Current_task_state
+      else Descriptor.Static_description
+    in
+    Alcotest.(check bool)
+      (descriptor.id ^ " model description projection")
+      true
+      (descriptor.model_description_projection = expected))
+;;
+
+let test_all_keeper_shard_schemas_are_descriptor_backed () =
+  Tool_shard.all_keeper_tool_schemas
+  |> List.iter (fun (schema : Masc_domain.tool_schema) ->
+    match Descriptor.descriptors_for_internal schema.name with
+    | [ _ ] -> ()
+    | [] -> Alcotest.failf "Keeper shard schema %S has no descriptor" schema.name
+    | descriptors ->
+      Alcotest.failf
+        "Keeper shard schema %S has %d descriptors"
+        schema.name
+        (List.length descriptors))
+;;
+
+let test_supported_masc_schemas_are_descriptor_backed () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  Policy.keeper_supported_masc_schemas Masc.Config.raw_all_tool_schemas
+  |> List.iter (fun (schema : Masc_domain.tool_schema) ->
+    match Descriptor.descriptors_for_internal schema.name with
+    | [ _ ] -> ()
+    | [] ->
+      Alcotest.failf
+        "supported MASC schema %S has no descriptor"
+        schema.name
+    | descriptors ->
+      Alcotest.failf
+        "supported MASC schema %S has %d descriptors"
+        schema.name
+        (List.length descriptors))
+;;
+
+let test_maintenance_descriptors_are_dispatch_only () =
+  all_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    if descriptor.policy.maintenance_only
+    then
+      match descriptor.keeper_model_projection with
+      | Descriptor.Dispatch_only -> ()
+      | Descriptor.Preferred_public_name | Descriptor.Internal_name ->
+        Alcotest.failf
+          "maintenance descriptor %S is model-visible"
+          descriptor.internal_name)
+;;
 
 let is_blank s = String.trim s = ""
 
@@ -243,18 +472,6 @@ let test_internal_name_snake_case () =
 let test_registry_not_empty () =
   if all_descriptors () = []
   then Alcotest.failf "Keeper_tool_descriptor.all_descriptors () returned []"
-
-let required_public_descriptor name =
-  match Descriptor.find_public name with
-  | Some descriptor -> descriptor
-  | None -> Alcotest.failf "missing public descriptor: %s" name
-;;
-
-let required_internal_descriptor name =
-  match Descriptor.descriptors_for_internal name with
-  | descriptor :: _ -> descriptor
-  | [] -> Alcotest.failf "missing internal descriptor: %s" name
-;;
 
 let schema_property_description schema name =
   let open Yojson.Safe.Util in
@@ -638,6 +855,22 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
 ;;
 
 let test_masc_board_registry_has_descriptor_projection () =
+  let expected_resource_writes =
+    let open Tool_name.Board_name in
+    [ Board_post
+    ; Board_post_update
+    ; Board_comment
+    ; Board_vote
+    ; Board_comment_vote
+    ; Board_reaction
+    ; Board_curation_submit
+    ; Board_delete
+    ; Board_cleanup
+    ; Board_sub_board_create
+    ; Board_sub_board_update
+    ; Board_sub_board_delete
+    ]
+  in
   let wire_names =
     List.map Tool_name.Board_name.to_string Tool_name.Board_name.all
   in
@@ -681,7 +914,12 @@ let test_masc_board_registry_has_descriptor_projection () =
           Alcotest.(check int)
             (keeper_name ^ " has exactly one descriptor")
             1
-            (List.length (Descriptor.descriptors_for_internal keeper_name))
+            (List.length (Descriptor.descriptors_for_internal keeper_name));
+          let wrapper_descriptor = required_internal_descriptor keeper_name in
+          Alcotest.(check bool)
+            (keeper_name ^ " is the model projection")
+            true
+            (wrapper_descriptor.keeper_model_projection = Descriptor.Internal_name)
         | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only -> ());
        match Descriptor.descriptors_for_internal schema.name with
        | [ descriptor ] ->
@@ -703,14 +941,46 @@ let test_masc_board_registry_has_descriptor_projection () =
          let expected_visibility =
            match Keeper_tool_name.board_projection_of_masc_board_name board_name with
            | Keeper_tool_name.Direct_masc ->
-             (Tool_catalog.metadata schema.name).visibility
+             let operation_policy = Board_tool_registry.operation_policy board_name in
+             Tool_catalog.effective_registered_visibility
+               ~name:schema.name
+               ~declared:operation_policy.visibility
            | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
              Tool_catalog.Hidden
          in
          Alcotest.(check bool)
            (schema.name ^ " descriptor visibility follows typed projection")
            true
-           (descriptor.policy.visibility = expected_visibility)
+           (descriptor.policy.visibility = expected_visibility);
+         let expected_readonly =
+           not (List.mem board_name expected_resource_writes)
+         in
+         Alcotest.(check bool)
+           (schema.name ^ " typed resource classification follows Board contract")
+           (not expected_readonly)
+           (Tool_name.Board_name.is_resource_write board_name);
+         Alcotest.(check (option bool))
+           (schema.name ^ " descriptor readonly follows typed resource projection")
+           (Some expected_readonly)
+           descriptor.policy.readonly_hint;
+         let expected_effect_domain =
+           if expected_readonly
+           then Some Tool_catalog.Read_only
+           else Some Tool_catalog.Masc_workspace
+         in
+         Alcotest.(check bool)
+           (schema.name ^ " descriptor effect domain follows typed resource projection")
+           true
+           (descriptor.policy.effect_domain = expected_effect_domain);
+         let expected_model_projection =
+           match expected_visibility with
+           | Tool_catalog.Default -> Descriptor.Internal_name
+           | Tool_catalog.Hidden -> Descriptor.Dispatch_only
+         in
+         Alcotest.(check bool)
+           (schema.name ^ " descriptor model projection follows typed projection")
+           true
+           (descriptor.keeper_model_projection = expected_model_projection)
        | [] -> Alcotest.failf "missing descriptor for %s" schema.name
        | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" schema.name)
     Tool_name.Board_name.all
@@ -1182,7 +1452,7 @@ let test_effective_core_tools_without_universe_keeps_only_native_executor_public
     let effective = Registry.effective_core_tools () in
     List.iter
       (fun (d : Descriptor.t) ->
-         let public_names = Descriptor.public_names_of_descriptor d in
+         let model_names = Descriptor.keeper_model_names d in
          match d.Descriptor.executor with
          | Descriptor.Shell_ir | Descriptor.Filesystem ->
            List.iter
@@ -1193,7 +1463,7 @@ let test_effective_core_tools_without_universe_keeps_only_native_executor_public
                     "native-executor public %S missing from effective_core_tools \
                      with empty universe"
                     name)
-             public_names
+             model_names
          | Descriptor.In_process ->
            List.iter
              (fun name ->
@@ -1203,7 +1473,7 @@ let test_effective_core_tools_without_universe_keeps_only_native_executor_public
                     "in-process (masc-backed) public %S present in \
                      effective_core_tools when universe is empty"
                     name)
-             public_names)
+             model_names)
       Descriptor.public_descriptors)
 ;;
 
@@ -1233,6 +1503,50 @@ let () =
       , [ test_case "registry not empty" `Quick test_registry_not_empty
         ; test_case "public_name is unique" `Quick test_public_name_uniqueness
         ; test_case "internal_name is unique" `Quick test_internal_name_uniqueness
+        ; test_case
+            "Keeper model projection is single and unique"
+            `Quick
+            test_keeper_model_projection_is_single_and_unique
+        ; test_case
+            "semantic capability has at most one Keeper model projection"
+            `Quick
+            test_semantic_capability_has_at_most_one_keeper_model_projection
+        ; test_case
+            "model-visible descriptors have canonical input schemas"
+            `Quick
+            test_model_visible_descriptors_have_canonical_input_schemas
+        ; test_case
+            "cluster descriptors have no missing canonical schemas"
+            `Quick
+            test_cluster_descriptors_have_no_missing_canonical_schemas
+        ; test_case
+            "missing canonical schema is fail-closed"
+            `Quick
+            test_missing_canonical_schema_is_fail_closed
+        ; test_case
+            "registered cluster model projections are explicit"
+            `Quick
+            test_registered_cluster_model_projections_are_explicit
+        ; test_case
+            "system-internal descriptors are dispatch-only"
+            `Quick
+            test_system_internal_descriptors_are_dispatch_only
+        ; test_case
+            "dynamic model description projection is explicit"
+            `Quick
+            test_dynamic_model_description_projection_is_explicit
+        ; test_case
+            "all Keeper shard schemas are descriptor-backed"
+            `Quick
+            test_all_keeper_shard_schemas_are_descriptor_backed
+        ; test_case
+            "supported MASC schemas are descriptor-backed"
+            `Quick
+            test_supported_masc_schemas_are_descriptor_backed
+        ; test_case
+            "maintenance descriptors are dispatch-only"
+            `Quick
+            test_maintenance_descriptors_are_dispatch_only
         ] )
     ; ( "format"
       , [ test_case "no blank name fields" `Quick test_no_blank_names

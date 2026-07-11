@@ -1,45 +1,47 @@
-(* test_keeper_chat_coalescing.ml — chat queue coalescing (task-759) +
-   lease/ack/nack delivery semantics (PR-4a, 38-bug campaign #1).
-
-   Messages that accumulate while a keeper's turn is in flight must
-   drain as ONE same-source FIFO batch and merge into a single message;
-   different reply routes (dashboard vs Discord vs Slack, or different
-   channel/user) must never merge. Also covers the read-only
-   [Keeper_turn_admission.in_flight] accessor the consumer gates on, and
-   [Keeper_chat_queue]'s at-least-once lease/ack/nack contract: a leased
-   batch is durably recorded as inflight until it is acked (answered) or
-   nacked (retried), and a lease outstanding across a crash is requeued the
-   next time [configure_persistence] runs. *)
+(* Durable Keeper chat receipt lifecycle regression suite. *)
 
 open Masc
 
 let failures = ref 0
 
+let check name condition =
+  if condition
+  then Printf.printf "  ✓ %s\n%!" name
+  else begin
+    incr failures;
+    Printf.printf "  ✗ %s\n%!" name
+  end
+
 let temp_dir prefix = Filename.temp_dir prefix ""
 
 let rec rm_rf path =
   if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then (
-      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path)
+  then if Sys.is_directory path
+    then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end
     else Unix.unlink path
-;;
 
-let check name cond =
-  if cond
-  then Printf.printf "  ✓ %s\n%!" name
-  else (
-    incr failures;
-    Printf.printf "  ✗ %s\n%!" name)
-;;
+let with_base prefix body =
+  let base_path = temp_dir prefix in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_chat_queue.For_testing.reset ();
+      rm_rf base_path)
+    (fun () -> body base_path)
 
-let msg ?(attachments = []) ~content ~ts source =
-  { Keeper_chat_queue.content; user_blocks = []; attachments; timestamp = ts; source }
-;;
+let message ?(source = Keeper_chat_queue.Dashboard) ?(timestamp = 1.0)
+    ?(user_blocks = []) ?(attachments = []) content =
+  { Keeper_chat_queue.content
+  ; user_blocks
+  ; attachments
+  ; timestamp
+  ; source
+  }
 
-let attachment ~id =
+let attachment id =
   { Keeper_chat_store.id
   ; att_type = "file"
   ; name = id ^ ".txt"
@@ -47,598 +49,724 @@ let attachment ~id =
   ; mime_type = "text/plain"
   ; data = "d"
   }
-;;
 
-let image_block ~attachment_id =
+let image_block attachment_id =
   Keeper_multimodal_input.User_image
-    { attachment_id; name = attachment_id ^ ".png"; mime_type = "image/png"; size = None }
-;;
+    { attachment_id
+    ; name = attachment_id ^ ".png"
+    ; mime_type = "image/png"
+    ; size = None
+    }
 
-let contents batch = List.map (fun m -> m.Keeper_chat_queue.content) batch
+let configure base_path =
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "persistence configure has no load errors" (report.load_errors = []);
+  report
 
-(* [enqueue]'s receipt_id is an ephemeral enqueue-time correlation token
-   (see keeper_chat_queue.mli), not part of the stored message — most tests
-   below don't need it and enqueue as a statement. *)
-let enqueue_ ~keeper_name m = ignore (Keeper_chat_queue.enqueue ~keeper_name m : string)
+let enqueue_exn ~keeper_name message =
+  match Keeper_chat_queue.enqueue ~keeper_name message with
+  | Ok receipt -> receipt
+  | Error error ->
+    check
+      ("enqueue succeeds: " ^ Keeper_chat_queue.mutation_error_to_string error)
+      false;
+    failwith "enqueue failed"
 
-let chat_snapshot_path ~base_path ~keeper_name =
+let lease_exn ~keeper_name =
+  match Keeper_chat_queue.lease_batch ~keeper_name with
+  | `Leased lease -> lease
+  | `Empty ->
+    check "lease is non-empty" false;
+    failwith "empty lease"
+  | `Already_leased lease_id ->
+    check ("no outstanding lease: " ^ lease_id) false;
+    failwith "already leased"
+  | `Error error ->
+    check
+      ("lease succeeds: " ^ Keeper_chat_queue.mutation_error_to_string error)
+      false;
+    failwith "lease failed"
+
+let ids items =
+  List.map
+    (fun (item : Keeper_chat_queue.leased_message) ->
+       Keeper_chat_queue.Receipt_id.to_string item.receipt_id)
+    items
+
+let active_ids items =
+  List.map
+    (fun (item : Keeper_chat_queue.active_receipt) ->
+       Keeper_chat_queue.Receipt_id.to_string item.receipt_id)
+    items
+
+let terminal_ids items =
+  List.map
+    (fun (item : Keeper_chat_queue.receipt_view) ->
+       Keeper_chat_queue.Receipt_id.to_string item.receipt_id)
+    items
+
+let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
     "chat-queue.json"
-;;
 
-let test_same_source () =
-  Printf.printf "Test 1: same_source pairs reply routes correctly\n%!";
-  let open Keeper_chat_queue in
-  check "dashboard ~ dashboard" (same_source Dashboard Dashboard);
-  check
-    "same Discord channel+user"
-    (same_source
-       (Discord { channel_id = "c1"; user_id = "u1" })
-       (Discord { channel_id = "c1"; user_id = "u1" }));
-  check
-    "different Discord user does not merge"
-    (not
-       (same_source
-          (Discord { channel_id = "c1"; user_id = "u1" })
-          (Discord { channel_id = "c1"; user_id = "u2" })));
-  check
-    "different Slack channel does not merge"
-    (not
-       (same_source
-          (Slack { channel = "a"; user_id = "u" })
-          (Slack { channel = "b"; user_id = "u" })));
-  check
-    "dashboard does not merge with Discord"
-    (not (same_source Dashboard (Discord { channel_id = "c"; user_id = "u" })))
-;;
+let save_raw path content =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> ()
+  | Error error -> failwith error
 
-(* [lease_batch] the head run, check its content, then [ack] it before
-   leasing the next run — a second [lease_batch] call while a lease is
-   outstanding returns [`Already_leased], it does not drain further. *)
-let lease_and_ack ~keeper_name =
-  match Keeper_chat_queue.lease_batch ~keeper_name with
-  | `Empty -> []
-  | `Already_leased lease_id ->
-    check
-      (Printf.sprintf "lease_and_ack: unexpected outstanding lease=%s" lease_id)
-      false;
-    []
-  | `Persist_failed msg ->
-    check (Printf.sprintf "lease_and_ack: unexpected persist failure: %s" msg) false;
-    []
-  | `Leased { lease_id; messages } ->
-    (match Keeper_chat_queue.ack ~keeper_name ~lease_id with
-     | `Acked -> ()
-     | `Unknown_lease -> check "lease_and_ack: ack found the lease it just took" false
-     | `Persist_failed msg ->
-       check (Printf.sprintf "lease_and_ack: ack persist failed: %s" msg) false);
-    messages
-;;
+let read_raw path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
 
-let test_lease_batch_runs () =
-  Printf.printf "Test 2: lease_batch drains same-source runs in FIFO order\n%!";
-  let keeper_name = "coalesce-runs" in
-  Keeper_chat_queue.clear ~keeper_name;
-  let discord = Keeper_chat_queue.Discord { channel_id = "c"; user_id = "u" } in
-  List.iter
-    (enqueue_ ~keeper_name)
-    [ msg ~content:"d1" ~ts:1.0 Keeper_chat_queue.Dashboard
-    ; msg ~content:"d2" ~ts:2.0 Keeper_chat_queue.Dashboard
-    ; msg ~content:"x1" ~ts:3.0 discord
-    ; msg ~content:"d3" ~ts:4.0 Keeper_chat_queue.Dashboard
-    ];
-  let first = lease_and_ack ~keeper_name in
-  check "first batch is the dashboard run" (contents first = [ "d1"; "d2" ]);
-  check "queue depth after first lease" (Keeper_chat_queue.length ~keeper_name = 2);
-  let second = lease_and_ack ~keeper_name in
-  check "second batch stops at the route boundary" (contents second = [ "x1" ]);
-  let third = lease_and_ack ~keeper_name in
-  check "third batch picks up the trailing dashboard message"
-    (contents third = [ "d3" ]);
-  check "queue is drained" (Keeper_chat_queue.lease_batch ~keeper_name = `Empty);
-  check "length is zero after drain" (Keeper_chat_queue.length ~keeper_name = 0)
-;;
+let test_durable_receipt_lifecycle () =
+  Printf.printf "Test: durable per-message Pending -> Inflight -> Delivered\n%!";
+  with_base "keeper-chat-receipt" @@ fun base_path ->
+  let keeper_name = "receipt-lifecycle" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  let enqueued = enqueue_exn ~keeper_name (message "keep this message") in
+  let receipt_id = Keeper_chat_queue.Receipt_id.to_string enqueued.receipt_id in
+  check "receipt is minted before committed enqueue returns" (receipt_id <> "");
+  check "enqueue revision is one" (Int64.equal enqueued.revision 1L);
+  let pending = Keeper_chat_queue.snapshot ~keeper_name in
+  check "receipt starts pending" (active_ids pending.pending = [ receipt_id ]);
+  let lease = lease_exn ~keeper_name in
+  check "lease carries the exact receipt" (ids lease.items = [ receipt_id ]);
+  let inflight = Keeper_chat_queue.snapshot ~keeper_name in
+  check "pending is empty while receipt is inflight" (inflight.pending = []);
+  check "diagnostic snapshot exposes inflight" (active_ids inflight.inflight = [ receipt_id ]);
+  (match
+     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+       ~outcome:
+         (Keeper_chat_queue.Mark_delivered
+            { completed_at = 3.0; outcome_ref = Some "chat-row-1" })
+   with
+   | `Finalized receipt_ids ->
+     check
+       "finalize reports every receipt"
+       (List.map Keeper_chat_queue.Receipt_id.to_string receipt_ids = [ receipt_id ])
+   | `Unknown_lease | `Error _ -> check "finalize succeeds" false);
+  let terminal = Keeper_chat_queue.snapshot ~keeper_name in
+  check "terminal receipt leaves active queue" (terminal.pending = [] && terminal.inflight = []);
+  check "terminal receipt remains queryable" (terminal_ids terminal.terminal = [ receipt_id ]);
+  (match terminal.terminal with
+   | [ { state = Delivered { outcome_ref = Some "chat-row-1"; _ }; _ } ] ->
+     check "delivered outcome ref is durable" true
+   | _ -> check "delivered outcome ref is durable" false);
+  (match
+     Keeper_chat_queue.lookup_receipt ~keeper_name
+       ~receipt_id:enqueued.receipt_id
+   with
+   | Ok { revision; receipt = Some { state = Delivered _; _ } } ->
+     check "receipt lookup returns terminal state" true;
+     check "receipt lookup returns its atomic snapshot revision"
+       (Int64.equal revision terminal.revision)
+   | Ok { receipt = Some _; _ } | Ok { receipt = None; _ } | Error _ ->
+     check "receipt lookup returns terminal state" false;
+     check "receipt lookup returns its atomic snapshot revision" false);
+  let persisted =
+    Safe_ops.read_json_file_safe (snapshot_path ~base_path ~keeper_name)
+  in
+  (match persisted with
+   | Error _ -> check "terminal snapshot is readable" false
+   | Ok (`Assoc fields) ->
+     (match List.assoc_opt "receipts" fields with
+      | Some (`List [ `Assoc receipt_fields ]) ->
+        check
+          "terminal record discards message body"
+          (not (List.mem_assoc "message" receipt_fields))
+      | _ -> check "terminal record is present" false)
+   | Ok _ -> check "terminal snapshot is an object" false)
 
-let test_merge_batch () =
-  Printf.printf "Test 3: merge_batch coalesces content and attachments\n%!";
-  let single = msg ~content:"only" ~ts:5.0 Keeper_chat_queue.Dashboard in
-  (match Keeper_chat_queue.merge_batch [ single ] with
-   | Some m -> check "singleton is returned unchanged" (m = single)
-   | None -> check "singleton is returned unchanged" false);
-  check "empty batch merges to None" (Keeper_chat_queue.merge_batch [] = None);
-  let batch =
-    [ msg ~content:"first" ~ts:1.0 ~attachments:[ attachment ~id:"a" ]
-        Keeper_chat_queue.Dashboard
-    ; { (msg ~content:"second" ~ts:2.0 Keeper_chat_queue.Dashboard) with
-        Keeper_chat_queue.user_blocks = [ image_block ~attachment_id:"att-img" ] }
-    ; msg ~content:"third" ~ts:3.0 ~attachments:[ attachment ~id:"b" ]
-        Keeper_chat_queue.Dashboard
+let test_coalesced_finalize_preserves_all_receipts () =
+  Printf.printf "Test: coalescing never erases per-message receipts\n%!";
+  with_base "keeper-chat-coalesce-receipts" @@ fun base_path ->
+  let keeper_name = "coalesced-receipts" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  let first =
+    enqueue_exn ~keeper_name
+      (message ~timestamp:1.0 ~attachments:[ attachment "first" ] "first")
+  in
+  let second =
+    enqueue_exn ~keeper_name
+      (message ~timestamp:2.0 ~user_blocks:[ image_block "second-image" ]
+         ~attachments:[ attachment "second" ] "second")
+  in
+  let expected =
+    [ Keeper_chat_queue.Receipt_id.to_string first.receipt_id
+    ; Keeper_chat_queue.Receipt_id.to_string second.receipt_id
     ]
   in
-  match Keeper_chat_queue.merge_batch batch with
-  | None -> check "merged batch exists" false
-  | Some m ->
-    check
-      "contents join in arrival order with blank lines"
-      (String.equal m.Keeper_chat_queue.content "first\n\nsecond\n\nthird");
-    check
-      "attachments concatenate in order"
-      (List.map
-         (fun (a : Keeper_chat_store.attachment) -> a.Keeper_chat_store.id)
-         m.Keeper_chat_queue.attachments
-       = [ "a"; "b" ]);
-    check
-      "semantic user blocks concatenate in order"
-      (Keeper_multimodal_input.modalities m.Keeper_chat_queue.user_blocks
-       = [ "image" ]);
-    check "timestamp is the first message's" (m.Keeper_chat_queue.timestamp = 1.0);
-    check
-      "source is the shared route"
-      (Keeper_chat_queue.same_source m.Keeper_chat_queue.source
-         Keeper_chat_queue.Dashboard)
-;;
+  let lease = lease_exn ~keeper_name in
+  check "one lease carries both receipt ids" (ids lease.items = expected);
+  (match Keeper_chat_queue.merge_batch lease.items with
+   | Some merged ->
+     check "coalesced content remains FIFO" (merged.content = "first\n\nsecond");
+     check "coalesced attachments remain FIFO"
+       (List.map
+          (fun (item : Keeper_chat_store.attachment) -> item.id)
+          merged.attachments
+        = [ "first"; "second" ]);
+     check "coalesced semantic blocks remain visible"
+       (Keeper_multimodal_input.modalities merged.user_blocks = [ "image" ]);
+     check "coalesced timestamp belongs to the head receipt"
+       (Float.equal merged.timestamp 1.0)
+   | None -> check "coalesced payload exists" false);
+  (match
+     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+       ~outcome:
+         (Mark_failed
+            { completed_at = 4.0
+            ; kind = Turn_failed
+            ; detail = "provider returned a terminal error"
+            ; outcome_ref = Some "failure-row-1"
+            })
+   with
+   | `Finalized receipt_ids ->
+     check
+       "failed coalesced turn finalizes each receipt"
+       (List.map Keeper_chat_queue.Receipt_id.to_string receipt_ids = expected)
+   | `Unknown_lease | `Error _ -> check "coalesced finalization succeeds" false);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "both failed receipts remain queryable" (terminal_ids snapshot.terminal = expected)
 
-let test_in_flight_accessor () =
-  Printf.printf "Test 4: in_flight reflects the slot the consumer gates on\n%!";
-  Keeper_turn_admission.For_testing.reset ();
-  let base_path = "/tmp/masc_test_chat_coalescing" in
-  let keeper_name = "coalesce-keeper" in
-  check
-    "unknown keeper reads as free"
-    (Keeper_turn_admission.in_flight ~base_path ~keeper_name = None);
-  Eio.Switch.run (fun sw ->
-    let started, set_started = Eio.Promise.create () in
-    let release, set_release = Eio.Promise.create () in
-    Eio.Fiber.fork ~sw (fun () ->
-      ignore
-        (Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
-           Eio.Promise.resolve set_started ();
-           Eio.Promise.await release)));
-    Eio.Promise.await started;
-    (match Keeper_turn_admission.in_flight ~base_path ~keeper_name with
-     | Some { Keeper_turn_admission.lane = Chat; _ } ->
-       check "in-flight chat turn is visible" true
-     | Some _ | None -> check "in-flight chat turn is visible" false);
-    Eio.Promise.resolve set_release ());
-  check
-    "slot reads as free again after release"
-    (Keeper_turn_admission.in_flight ~base_path ~keeper_name = None)
-;;
-
-let test_persistence_replay () =
-  Printf.printf "Test 5: queued chat messages persist and replay after restart\n%!";
-  let base_path = temp_dir "keeper-chat-queue-persistence" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "chat-queue-persistence" in
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
-      enqueue_ ~keeper_name
-        { (msg ~content:"persist-1" ~ts:1.0 ~attachments:[ attachment ~id:"persist-a" ]
-             Keeper_chat_queue.Dashboard)
-          with
-          Keeper_chat_queue.user_blocks = [ image_block ~attachment_id:"persist-a" ]
-        };
-      enqueue_ ~keeper_name (msg ~content:"persist-2" ~ts:2.0 Keeper_chat_queue.Dashboard);
-      check
-        "snapshot file is written"
-        (Sys.file_exists (chat_snapshot_path ~base_path ~keeper_name));
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
-      check
-        "restored keeper name is visible to consumer"
-        (List.mem keeper_name (Keeper_chat_queue.all_keeper_names ()));
-      let batch = lease_and_ack ~keeper_name in
-      check "replayed batch preserves FIFO content" (contents batch = [ "persist-1"; "persist-2" ]);
-      check "queue is empty after replay drain" (Keeper_chat_queue.length ~keeper_name = 0);
-      (match batch with
-       | first :: _ ->
-         check
-           "replayed source route is preserved"
-           (Keeper_chat_queue.same_source
-              first.Keeper_chat_queue.source
-              Keeper_chat_queue.Dashboard);
-         check
-           "replayed attachment survives"
-           (List.map
-              (fun (a : Keeper_chat_store.attachment) -> a.Keeper_chat_store.id)
-              first.Keeper_chat_queue.attachments
-            = [ "persist-a" ]);
-         check
-           "replayed semantic user block survives"
-           (Keeper_multimodal_input.modalities first.Keeper_chat_queue.user_blocks
-            = [ "image" ])
-       | [] -> check "replayed batch is non-empty" false);
-      (* The batch above was leased AND acked, so a third restart — with no
-         inflight lease and an empty queue on disk — finds nothing to
-         replay. *)
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
-      check
-        "empty persisted queue does not replay after drain"
-        (Keeper_chat_queue.lease_batch ~keeper_name = `Empty))
-;;
-
-let test_lease_persist_failure_does_not_acknowledge () =
-  Printf.printf
-    "Test 6: a failed lease persist reports Persist_failed and leaves the \
-     queue intact\n%!";
-  let base_path = temp_dir "keeper-chat-queue-persist-failure" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "chat-queue-persist-failure" in
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
-      enqueue_ ~keeper_name (msg ~content:"must-not-ack" ~ts:1.0 Keeper_chat_queue.Dashboard);
-      Keeper_chat_queue.For_testing.fail_next_persist ();
-      (match Keeper_chat_queue.lease_batch ~keeper_name with
-       | `Persist_failed _ ->
-         check "lease_batch reports Persist_failed instead of raising" true
-       | `Leased _ | `Empty | `Already_leased _ ->
-         check "lease_batch reports Persist_failed instead of raising" false);
-      check
-        "in-memory queue rolls back after failed lease persist"
-        (Keeper_chat_queue.length ~keeper_name = 1);
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
-      check
-        "stale snapshot replays the unleased message exactly once"
-        (contents (lease_and_ack ~keeper_name) = [ "must-not-ack" ]))
-;;
-
-let test_configure_persistence_prepends_snapshot_to_live_queue () =
-  Printf.printf "Test 7: restart snapshot prepends ahead of live bootstrap messages\n%!";
-  let base_path = temp_dir "keeper-chat-queue-prepend" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "chat-queue-prepend" in
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
-      enqueue_ ~keeper_name
-        (msg ~content:"snapshot-before-restart" ~ts:1.0 Keeper_chat_queue.Dashboard);
-      Keeper_chat_queue.For_testing.reset ();
-      enqueue_ ~keeper_name
-        (msg ~content:"live-during-bootstrap" ~ts:2.0 Keeper_chat_queue.Dashboard);
-      Keeper_chat_queue.configure_persistence ~base_path;
-      check
-        "snapshot messages are not dropped when live queue is non-empty"
-        (contents (lease_and_ack ~keeper_name)
-         = [ "snapshot-before-restart"; "live-during-bootstrap" ]))
-;;
-
-let test_remove_matching_single_from_head_run () =
-  Printf.printf "Test 8: remove_matching drops exactly one head-run match\n%!";
-  let keeper_name = "remove-matching-single" in
-  Keeper_chat_queue.clear ~keeper_name;
-  let dash content ts = msg ~content ~ts Keeper_chat_queue.Dashboard in
-  (* Two structurally identical dashboard messages plus a same-source tail, all
-     inside one head run. Removing the duplicate target drops exactly one copy. *)
-  let dup = dash "dup" 1.0 in
-  List.iter (enqueue_ ~keeper_name) [ dup; dup; dash "tail" 3.0 ];
-  (match Keeper_chat_queue.remove_matching ~keeper_name dup with
-   | `Removed -> check "duplicate head-run message reports Removed" true
-   | `Not_found | `Persist_failed _ ->
-     check "duplicate head-run message reports Removed" false);
-  check "exactly one duplicate is removed" (Keeper_chat_queue.length ~keeper_name = 2);
-  check
-    "the other duplicate and tail survive in FIFO order"
-    (contents (lease_and_ack ~keeper_name) = [ "dup"; "tail" ]);
-  (* A match in the middle of the head run is removed without touching the
-     messages before it. *)
-  Keeper_chat_queue.clear ~keeper_name;
-  let mid = dash "mid" 2.0 in
+let test_source_boundaries_preserve_fifo_runs () =
+  Printf.printf "Test: lease batches stop at typed connector source boundaries\n%!";
+  with_base "keeper-chat-source-boundary" @@ fun base_path ->
+  let keeper_name = "source-boundary" in
+  let discord =
+    Keeper_chat_queue.Discord { channel_id = "channel"; user_id = "user" }
+  in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
   List.iter
-    (enqueue_ ~keeper_name)
-    [ dash "head" 1.0; mid; dash "after" 3.0 ];
-  (match Keeper_chat_queue.remove_matching ~keeper_name mid with
-   | `Removed -> check "mid-run match reports Removed" true
-   | `Not_found | `Persist_failed _ -> check "mid-run match reports Removed" false);
-  check
-    "mid-run removal keeps the surrounding messages"
-    (contents (lease_and_ack ~keeper_name) = [ "head"; "after" ])
-;;
-
-let test_remove_matching_not_found () =
-  Printf.printf "Test 9: remove_matching reports Not_found off the head run\n%!";
-  let absent = msg ~content:"anything" ~ts:1.0 Keeper_chat_queue.Dashboard in
-  check
-    "absent keeper reports Not_found"
-    (Keeper_chat_queue.remove_matching ~keeper_name:"remove-matching-absent" absent
-     = `Not_found);
-  let keeper_name = "remove-matching-notfound" in
-  Keeper_chat_queue.clear ~keeper_name;
-  check
-    "empty queue reports Not_found"
-    (Keeper_chat_queue.remove_matching ~keeper_name absent = `Not_found);
-  (* A dashboard head run followed by a Discord message: the Discord target is
-     past the head-run boundary, so it is not removed and the queue is intact. *)
-  let discord = Keeper_chat_queue.Discord { channel_id = "c"; user_id = "u" } in
-  let beyond = msg ~content:"x1" ~ts:2.0 discord in
-  List.iter
-    (enqueue_ ~keeper_name)
-    [ msg ~content:"d1" ~ts:1.0 Keeper_chat_queue.Dashboard; beyond ];
-  check
-    "match beyond the head-run boundary reports Not_found"
-    (Keeper_chat_queue.remove_matching ~keeper_name beyond = `Not_found);
-  check "queue is unchanged after Not_found" (Keeper_chat_queue.length ~keeper_name = 2);
-  check
-    "an unqueued target reports Not_found"
-    (Keeper_chat_queue.remove_matching ~keeper_name
-       (msg ~content:"nope" ~ts:9.0 Keeper_chat_queue.Dashboard)
-     = `Not_found);
-  Keeper_chat_queue.clear ~keeper_name;
-  let with_block =
-    { (msg ~content:"same-text" ~ts:3.0 Keeper_chat_queue.Dashboard) with
-      Keeper_chat_queue.user_blocks = [ image_block ~attachment_id:"img-1" ] }
-  in
-  let without_block = msg ~content:"same-text" ~ts:3.0 Keeper_chat_queue.Dashboard in
-  enqueue_ ~keeper_name with_block;
-  check
-    "same text/source/timestamp but different user_blocks reports Not_found"
-    (Keeper_chat_queue.remove_matching ~keeper_name without_block = `Not_found);
-  check
-    "near-match payload stays queued"
-    (match lease_and_ack ~keeper_name with
-     | [ msg ] ->
-       Keeper_multimodal_input.modalities msg.Keeper_chat_queue.user_blocks = [ "image" ]
-     | _ -> false)
-;;
-
-let test_remove_matching_persist_failure_aborts () =
-  Printf.printf "Test 10: failed remove_matching persist leaves the queue intact\n%!";
-  let base_path = temp_dir "keeper-chat-queue-remove-persist-failure" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "chat-queue-remove-persist-failure" in
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
-      let target = msg ~content:"keep-me" ~ts:1.0 Keeper_chat_queue.Dashboard in
-      List.iter
-        (enqueue_ ~keeper_name)
-        [ target; msg ~content:"keep-me-too" ~ts:2.0 Keeper_chat_queue.Dashboard ];
-      Keeper_chat_queue.For_testing.fail_next_persist ();
-      (match Keeper_chat_queue.remove_matching ~keeper_name target with
-       | `Persist_failed _ ->
-         check "snapshot rewrite failure reports Persist_failed" true
-       | `Removed | `Not_found ->
-         check "snapshot rewrite failure reports Persist_failed" false);
-      check
-        "in-memory queue rolls back after failed remove persist"
-        (Keeper_chat_queue.length ~keeper_name = 2);
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
-      check
-        "stale snapshot still replays both messages exactly once"
-        (contents (lease_and_ack ~keeper_name)
-         = [ "keep-me"; "keep-me-too" ]))
-;;
-
-let test_remove_matching_lease_batch_exactly_once () =
-  Printf.printf
-    "Test 11: lease_batch and remove_matching answer each message once\n%!";
-  (* Single-domain Eio serializes remove_matching and lease_batch through the
-     shared per-keeper mutex; the two argument orders below enumerate the two
-     possible linearizations. In each, the target must be answered by exactly
-     one path — removed XOR present in the leased batch, never both, never
-     neither — and the queue must drain fully (no outstanding lease left
-     behind: the winning side's lease is acked immediately in this test). *)
-  let discord = Keeper_chat_queue.Discord { channel_id = "c"; user_id = "u" } in
-  let m1 = msg ~content:"m1" ~ts:1.0 discord in
-  let m2 = msg ~content:"m2" ~ts:2.0 discord in
-  let in_batch content batch =
-    List.exists (fun m -> String.equal m.Keeper_chat_queue.content content) batch
-  in
-  let run_race label ~remove_first =
-    let keeper_name = "remove-race-" ^ label in
-    Keeper_chat_queue.clear ~keeper_name;
-    List.iter (enqueue_ ~keeper_name) [ m1; m2 ];
-    let removed = ref `Not_found in
-    let batch = ref [] in
-    let do_remove () =
-      removed := Keeper_chat_queue.remove_matching ~keeper_name m1
-    in
-    let do_dequeue () = batch := lease_and_ack ~keeper_name in
-    if remove_first
-    then Eio.Fiber.both do_remove do_dequeue
-    else Eio.Fiber.both do_dequeue do_remove;
-    let m1_removed = !removed = `Removed in
-    let m1_dequeued = in_batch "m1" !batch in
-    check (label ^ ": m1 is answered by exactly one path") (m1_removed <> m1_dequeued);
-    check (label ^ ": m2 ends up in the leased batch") (in_batch "m2" !batch);
-    check (label ^ ": queue is fully drained") (Keeper_chat_queue.length ~keeper_name = 0)
-  in
-  run_race "remove-first" ~remove_first:true;
-  run_race "dequeue-first" ~remove_first:false
-;;
-
-let test_receipt_id_round_trip () =
-  Printf.printf
-    "Test 12: enqueue mints a distinct receipt_id per message\n%!";
-  let keeper_name = "receipt-id-keeper" in
-  Keeper_chat_queue.clear ~keeper_name;
-  let r1 =
-    Keeper_chat_queue.enqueue ~keeper_name
-      (msg ~content:"one" ~ts:1.0 Keeper_chat_queue.Dashboard)
-  in
-  let r2 =
-    Keeper_chat_queue.enqueue ~keeper_name
-      (msg ~content:"two" ~ts:2.0 Keeper_chat_queue.Dashboard)
-  in
-  check "receipt_id is non-empty" (String.length r1 > 0 && String.length r2 > 0);
-  check "successive receipt_ids are distinct" (not (String.equal r1 r2));
-  ignore (lease_and_ack ~keeper_name : Keeper_chat_queue.queued_message list)
-;;
-
-let test_lease_ack_nack_lifecycle () =
-  Printf.printf
-    "Test 13: ack removes a lease permanently, nack requeues it for retry\n%!";
-  let ack_keeper = "lease-ack-keeper" in
-  Keeper_chat_queue.clear ~keeper_name:ack_keeper;
-  enqueue_ ~keeper_name:ack_keeper (msg ~content:"answered" ~ts:1.0 Keeper_chat_queue.Dashboard);
-  (match Keeper_chat_queue.lease_batch ~keeper_name:ack_keeper with
-   | `Leased { lease_id; messages } ->
-     check "leased batch carries the queued message" (contents messages = [ "answered" ]);
-     check "leased message no longer counts toward length"
-       (Keeper_chat_queue.length ~keeper_name:ack_keeper = 0);
-     (match Keeper_chat_queue.ack ~keeper_name:ack_keeper ~lease_id with
-      | `Acked -> check "ack succeeds for the current lease" true
-      | `Unknown_lease | `Persist_failed _ -> check "ack succeeds for the current lease" false)
-   | `Empty | `Already_leased _ | `Persist_failed _ ->
-     check "lease_batch leases the enqueued message" false);
-  check "acked message never returns"
-    (Keeper_chat_queue.lease_batch ~keeper_name:ack_keeper = `Empty);
-  let nack_keeper = "lease-nack-keeper" in
-  Keeper_chat_queue.clear ~keeper_name:nack_keeper;
-  enqueue_ ~keeper_name:nack_keeper (msg ~content:"retry-me" ~ts:1.0 Keeper_chat_queue.Dashboard);
-  (match Keeper_chat_queue.lease_batch ~keeper_name:nack_keeper with
-   | `Leased { lease_id; _ } -> (
-     (* A message arrives while the lease is outstanding — it must land
-        behind the nacked (retried) batch, not in front of it, when the
-        lease is returned to the queue. *)
-     enqueue_ ~keeper_name:nack_keeper
-       (msg ~content:"arrived-during-lease" ~ts:2.0 Keeper_chat_queue.Dashboard);
-     match Keeper_chat_queue.nack ~keeper_name:nack_keeper ~lease_id with
-     | `Requeued -> check "nack succeeds for the current lease" true
-     | `Unknown_lease | `Persist_failed _ -> check "nack succeeds for the current lease" false)
-   | `Empty | `Already_leased _ | `Persist_failed _ ->
-     check "lease_batch leases the enqueued message" false);
-  check "nacked message is queued again ahead of newer arrivals"
-    (Keeper_chat_queue.length ~keeper_name:nack_keeper = 2);
-  (match Keeper_chat_queue.lease_batch ~keeper_name:nack_keeper with
-   | `Leased { messages; _ } ->
-     check "retry preserves FIFO order across the nack"
-       (contents messages = [ "retry-me"; "arrived-during-lease" ])
-   | `Empty | `Already_leased _ | `Persist_failed _ ->
-     check "the requeued batch is leaseable again" false)
-;;
-
-let test_lease_already_leased_blocks_second_lease () =
-  Printf.printf
-    "Test 14: a second lease_batch call while one is outstanding reports \
-     Already_leased and does not touch the queue\n%!";
-  let keeper_name = "double-lease-keeper" in
-  Keeper_chat_queue.clear ~keeper_name;
-  List.iter
-    (enqueue_ ~keeper_name)
-    [ msg ~content:"a" ~ts:1.0 Keeper_chat_queue.Dashboard
-    ; msg ~content:"b" ~ts:2.0 Keeper_chat_queue.Dashboard
+    (fun queued -> ignore (enqueue_exn ~keeper_name queued : Keeper_chat_queue.enqueue_receipt))
+    [ message ~timestamp:1.0 "dashboard-1"
+    ; message ~timestamp:2.0 "dashboard-2"
+    ; message ~source:discord ~timestamp:3.0 "discord"
+    ; message ~timestamp:4.0 "dashboard-3"
     ];
-  match Keeper_chat_queue.lease_batch ~keeper_name with
-  | `Leased { lease_id = first_lease_id; _ } -> (
-    match Keeper_chat_queue.lease_batch ~keeper_name with
-    | `Already_leased lease_id ->
-      check "second lease reports the same outstanding lease_id"
-        (String.equal lease_id first_lease_id)
-    | `Leased _ | `Empty | `Persist_failed _ ->
-      check "a second lease_batch call is refused while one is outstanding" false)
-  | `Empty | `Already_leased _ | `Persist_failed _ ->
-    check "lease_batch leases the enqueued run" false
-;;
+  let take expected =
+    let lease = lease_exn ~keeper_name in
+    check "lease keeps one same-source FIFO run"
+      (List.map
+         (fun (item : Keeper_chat_queue.leased_message) -> item.message.content)
+         lease.items
+       = expected);
+    ignore
+      (Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+         ~outcome:
+           (Mark_delivered { completed_at = 4.0; outcome_ref = None }))
+  in
+  take [ "dashboard-1"; "dashboard-2" ];
+  take [ "discord" ];
+  take [ "dashboard-3" ];
+  check "all typed source runs drain without reordering"
+    (match Keeper_chat_queue.lease_batch ~keeper_name with
+     | `Empty -> true
+     | `Leased _ | `Already_leased _ | `Error _ -> false)
 
-let test_ack_nack_unknown_lease () =
-  Printf.printf
-    "Test 15: ack/nack with a stale or absent lease_id report Unknown_lease\n%!";
-  let keeper_name = "unknown-lease-keeper" in
-  Keeper_chat_queue.clear ~keeper_name;
+let test_nack_and_restart_preserve_receipt () =
+  Printf.printf "Test: nack and restart replay preserve receipt identity\n%!";
+  with_base "keeper-chat-replay-receipt" @@ fun base_path ->
+  let keeper_name = "replay-receipt" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  let enqueued = enqueue_exn ~keeper_name (message "retry me") in
+  let expected = Keeper_chat_queue.Receipt_id.to_string enqueued.receipt_id in
+  let first_lease = lease_exn ~keeper_name in
+  (match Keeper_chat_queue.nack ~keeper_name ~lease_id:first_lease.lease_id with
+   | `Requeued receipt_ids ->
+     check
+       "nack reports original receipt"
+       (List.map Keeper_chat_queue.Receipt_id.to_string receipt_ids = [ expected ])
+   | `Unknown_lease | `Error _ -> check "nack succeeds" false);
   check
-    "ack on an absent keeper reports Unknown_lease"
-    (Keeper_chat_queue.ack ~keeper_name:"never-existed" ~lease_id:"lease_x" = `Unknown_lease);
+    "nack returns same receipt to pending"
+    (active_ids (Keeper_chat_queue.snapshot ~keeper_name).pending = [ expected ]);
+  let crash_lease = lease_exn ~keeper_name in
+  check "receipt is inflight before simulated crash" (ids crash_lease.items = [ expected ]);
+  Keeper_chat_queue.For_testing.reset ();
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "restart recovery is reported" (report.recovered_receipt_count = 1);
+  let replay = Keeper_chat_queue.snapshot ~keeper_name in
+  check "restart moves inflight back to pending" (replay.inflight = []);
+  check "restart preserves receipt id" (active_ids replay.pending = [ expected ])
+
+let test_persist_failures_roll_back () =
+  Printf.printf "Test: every lifecycle persistence failure rolls back\n%!";
+  with_base "keeper-chat-rollback" @@ fun base_path ->
+  let keeper_name = "receipt-rollback" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  let first = enqueue_exn ~keeper_name (message "first") in
+  Keeper_chat_queue.For_testing.fail_next_persist ();
+  (match Keeper_chat_queue.enqueue ~keeper_name (message "must roll back") with
+   | Error (Persist_failed _) -> check "failed enqueue is typed" true
+   | Ok _ | Error _ -> check "failed enqueue is typed" false);
   check
-    "nack on an absent keeper reports Unknown_lease"
-    (Keeper_chat_queue.nack ~keeper_name:"never-existed" ~lease_id:"lease_x" = `Unknown_lease);
-  enqueue_ ~keeper_name (msg ~content:"solo" ~ts:1.0 Keeper_chat_queue.Dashboard);
+    "failed enqueue leaves prior pending receipt unchanged"
+    (active_ids (Keeper_chat_queue.snapshot ~keeper_name).pending
+     = [ Keeper_chat_queue.Receipt_id.to_string first.receipt_id ]);
+  Keeper_chat_queue.For_testing.fail_next_persist ();
   (match Keeper_chat_queue.lease_batch ~keeper_name with
-   | `Leased { lease_id; _ } ->
-     check
-       "ack with the wrong lease_id reports Unknown_lease"
-       (Keeper_chat_queue.ack ~keeper_name ~lease_id:(lease_id ^ "-stale") = `Unknown_lease);
-     (match Keeper_chat_queue.ack ~keeper_name ~lease_id with
-      | `Acked -> ()
-      | `Unknown_lease | `Persist_failed _ -> check "ack the real lease to clean up" false);
-     check
-       "acking an already-acked lease reports Unknown_lease"
-       (Keeper_chat_queue.ack ~keeper_name ~lease_id = `Unknown_lease);
-     check
-       "nacking an already-acked lease reports Unknown_lease"
-       (Keeper_chat_queue.nack ~keeper_name ~lease_id = `Unknown_lease)
-   | `Empty | `Already_leased _ | `Persist_failed _ ->
-     check "lease_batch leases the enqueued message" false)
-;;
+   | `Error (Persist_failed _) -> check "failed lease is typed" true
+   | `Leased _ | `Empty | `Already_leased _ | `Error _ -> check "failed lease is typed" false);
+  check "failed lease leaves receipt pending" ((Keeper_chat_queue.snapshot ~keeper_name).inflight = []);
+  let lease = lease_exn ~keeper_name in
+  Keeper_chat_queue.For_testing.fail_next_persist ();
+  (match
+     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+       ~outcome:(Mark_delivered { completed_at = 5.0; outcome_ref = None })
+   with
+   | `Error (Persist_failed _) -> check "failed finalize is typed" true
+   | `Finalized _ | `Unknown_lease | `Error _ -> check "failed finalize is typed" false);
+  check
+    "failed finalize leaves original lease inflight"
+    (active_ids (Keeper_chat_queue.snapshot ~keeper_name).inflight
+     = [ Keeper_chat_queue.Receipt_id.to_string first.receipt_id ]);
+  Keeper_chat_queue.For_testing.fail_next_persist ();
+  (match Keeper_chat_queue.nack ~keeper_name ~lease_id:lease.lease_id with
+   | `Error (Persist_failed _) -> check "failed nack is typed" true
+   | `Requeued _ | `Unknown_lease | `Error _ -> check "failed nack is typed" false);
+  check
+    "failed nack leaves original lease inflight"
+    ((Keeper_chat_queue.snapshot ~keeper_name).inflight <> [])
 
-let test_inflight_lease_requeued_on_restart () =
-  Printf.printf
-    "Test 16: a lease outstanding when the process dies is requeued on the \
-     next configure_persistence (at-least-once redelivery)\n%!";
-  let base_path = temp_dir "keeper-chat-queue-inflight-crash" in
+let v1_message_json ?(source = `Assoc [ "kind", `String "dashboard" ]) content =
+  `Assoc
+    [ "content", `String content
+    ; "user_blocks", `List []
+    ; "attachments", `List []
+    ; "timestamp", `Float 1.0
+    ; "source", source
+    ]
+
+let test_v1_atomic_migration () =
+  Printf.printf "Test: v1 has one explicit atomic migration to strict v2\n%!";
+  with_base "keeper-chat-v1-migration" @@ fun base_path ->
+  let keeper_name = "v1-migration" in
+  let path = snapshot_path ~base_path ~keeper_name in
+  let v1 =
+    `Assoc
+      [ "schema", `String "keeper_chat_queue.v1"
+      ; "items",
+        `List
+          [ v1_message_json "legacy pending"
+          ; v1_message_json
+              ~source:
+                (`Assoc
+                   [ "kind", `String "slack"
+                   ; "channel", `String "C-legacy"
+                   ; "user_id", `String "U-legacy"
+                   ])
+              "legacy slack"
+          ]
+      ; ( "inflight"
+        , `Assoc
+            [ "lease_id", `String "legacy-lease"
+            ; "items", `List [ v1_message_json "legacy inflight" ]
+            ] )
+      ]
+  in
+  save_raw path (Yojson.Safe.pretty_to_string v1);
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "migration is reported once" (report.migrated_keeper_count = 1);
+  let migrated = Keeper_chat_queue.snapshot ~keeper_name in
+  check "legacy inflight is replayed ahead of pending" (List.length migrated.pending = 3);
+  (match List.nth_opt migrated.pending 2 with
+   | Some
+       { message =
+           { source =
+               Keeper_chat_queue.Slack
+                 { channel_id; user_id; user_name; team_id; thread_ts }
+           ; _
+           }
+       ; _
+       } ->
+     check "legacy Slack channel survives migration" (channel_id = "C-legacy");
+     check "legacy Slack user survives migration"
+       (user_id = "U-legacy" && user_name = "U-legacy");
+     check "legacy absent Slack context remains absent"
+       (team_id = None && thread_ts = None)
+   | _ -> check "legacy Slack source migrates explicitly" false);
+  let migrated_ids = active_ids migrated.pending in
+  check "migration mints durable ids" (List.for_all (( <> ) "") migrated_ids);
+  Keeper_chat_queue.For_testing.reset ();
+  let second_report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "v2 is not migrated again" (second_report.migrated_keeper_count = 0);
+  check
+    "migrated ids survive another restart"
+    (active_ids (Keeper_chat_queue.snapshot ~keeper_name).pending = migrated_ids);
+  (match Safe_ops.read_json_file_safe path with
+   | Ok json ->
+     check
+       "migration atomically rewrites strict v2 schema"
+       (Json_util.get_string json "schema" = Some "keeper_chat_queue.v2")
+   | Error _ -> check "migrated snapshot is readable" false)
+
+let test_corrupt_snapshot_is_quarantined () =
+  Printf.printf "Test: corrupt snapshot is explicit and never overwritten as empty\n%!";
+  with_base "keeper-chat-corrupt" @@ fun base_path ->
+  let keeper_name = "corrupt-snapshot" in
+  let path = snapshot_path ~base_path ~keeper_name in
+  let corrupt = "{ definitely-not-json" in
+  save_raw path corrupt;
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "configure reports corrupt keeper" (List.length report.load_errors = 1);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "diagnostic snapshot carries load error" (List.length snapshot.load_errors = 1);
+  (match Keeper_chat_queue.enqueue ~keeper_name (message "must not overwrite") with
+   | Error (Snapshot_unavailable { kind = Read_failed; _ }) ->
+     check "enqueue fails closed on unreadable snapshot" true
+   | Error (Snapshot_unavailable { kind = Parse_failed; _ }) ->
+     check "enqueue fails closed on malformed snapshot" true
+   | Ok _ | Error _ -> check "enqueue fails closed on corrupt snapshot" false);
+  let unknown_id =
+    match
+      Keeper_chat_queue.Receipt_id.of_string
+        "chatq_00000000-0000-4000-8000-000000000001"
+    with
+    | Ok receipt_id -> receipt_id
+    | Error error -> failwith error
+  in
+  (match Keeper_chat_queue.lookup_receipt ~keeper_name ~receipt_id:unknown_id with
+   | Error (Snapshot_unavailable _) ->
+     check "receipt lookup does not collapse unreadable into absent" true
+   | Ok _ | Error _ ->
+     check "receipt lookup does not collapse unreadable into absent" false);
+  check "corrupt bytes remain untouched" (String.equal (read_raw path) corrupt)
+
+let test_invalid_v2_is_not_a_compatibility_fallback () =
+  Printf.printf "Test: malformed v2 is a parse error, never an empty fallback\n%!";
+  with_base "keeper-chat-invalid-v2" @@ fun base_path ->
+  let keeper_name = "invalid-v2" in
+  let path = snapshot_path ~base_path ~keeper_name in
+  let invalid_v2 =
+    `Assoc
+      [ "schema", `String "keeper_chat_queue.v2"
+      ; "revision", `Int 9
+      ; "receipts",
+        `List
+          [ `Assoc
+              [ "receipt_id",
+                `String "chatq_00000000-0000-4000-8000-000000000009"
+              ; "state", `Assoc [ "kind", `String "inflight" ]
+              ]
+          ]
+      ]
+    |> Yojson.Safe.pretty_to_string
+  in
+  save_raw path invalid_v2;
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  (match report.load_errors with
+   | [ (Some name, { kind = Parse_failed; _ }) ] ->
+     check "strict v2 parse failure names the keeper" (name = keeper_name)
+   | _ -> check "strict v2 parse failure is explicit" false);
+  (match Keeper_chat_queue.enqueue ~keeper_name (message "must not replace v2") with
+   | Error (Snapshot_unavailable { kind = Parse_failed; _ }) ->
+     check "malformed v2 keeper is quarantined" true
+   | Ok _ | Error _ -> check "malformed v2 keeper is quarantined" false);
+  check "malformed v2 bytes remain untouched" (String.equal (read_raw path) invalid_v2)
+
+let test_invalid_v2_attachment_is_not_silently_dropped () =
+  Printf.printf "Test: malformed v2 attachments fail instead of disappearing\n%!";
+  with_base "keeper-chat-invalid-attachment" @@ fun base_path ->
+  let keeper_name = "invalid-attachment" in
+  let path = snapshot_path ~base_path ~keeper_name in
+  let invalid =
+    `Assoc
+      [ "schema", `String "keeper_chat_queue.v2"
+      ; "revision", `Int 1
+      ; ( "receipts"
+        , `List
+            [ `Assoc
+                [ ( "receipt_id"
+                  , `String
+                      "chatq_00000000-0000-4000-8000-000000000010" )
+                ; "state", `Assoc [ "kind", `String "pending" ]
+                ; ( "message"
+                  , `Assoc
+                      [ "content", `String "attachment must survive"
+                      ; "user_blocks", `List []
+                      ; ( "attachments"
+                        , `List
+                            [ `Assoc
+                                [ "id", `String ""
+                                ; "type", `String "file"
+                                ; "name", `String "broken.txt"
+                                ; "size", `Int 1
+                                ; "mime_type", `String "text/plain"
+                                ; "data", `String "payload"
+                                ]
+                            ] )
+                      ; "timestamp", `Float 1.0
+                      ; "source", `Assoc [ "kind", `String "dashboard" ]
+                      ] )
+                ]
+            ] )
+      ]
+    |> Yojson.Safe.pretty_to_string
+  in
+  save_raw path invalid;
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  (match report.load_errors with
+   | [ (Some name, { kind = Parse_failed; _ }) ] ->
+     check "malformed attachment quarantines its keeper"
+       (String.equal name keeper_name)
+   | _ -> check "malformed attachment is an explicit parse failure" false);
+  check "malformed attachment bytes remain untouched"
+    (String.equal (read_raw path) invalid)
+
+let test_revision_domain_does_not_wrap () =
+  Printf.printf "Test: revision exhaustion fails closed without int64 wrap\n%!";
+  with_base "keeper-chat-revision-domain" @@ fun base_path ->
+  let keeper_name = "revision-domain" in
+  let path = snapshot_path ~base_path ~keeper_name in
+  let at_limit =
+    `Assoc
+      [ "schema", `String "keeper_chat_queue.v2"
+      ; "revision", `Intlit "9007199254740991"
+      ; "receipts", `List []
+      ]
+    |> Yojson.Safe.pretty_to_string
+  in
+  save_raw path at_limit;
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "maximum exact JSON revision remains readable" (report.load_errors = []);
+  (match Keeper_chat_queue.enqueue ~keeper_name (message "must not wrap") with
+   | Error Keeper_chat_queue.Revision_exhausted ->
+     check "next mutation reports revision exhaustion" true
+   | Ok _ | Error _ -> check "next mutation reports revision exhaustion" false);
+  check "revision exhaustion leaves the snapshot untouched"
+    (String.equal (read_raw path) at_limit)
+
+let test_revision_outside_json_domain_is_rejected () =
+  Printf.printf "Test: revision above the exact JSON domain is quarantined\n%!";
+  with_base "keeper-chat-revision-too-large" @@ fun base_path ->
+  let keeper_name = "revision-too-large" in
+  let path = snapshot_path ~base_path ~keeper_name in
+  let too_large =
+    `Assoc
+      [ "schema", `String "keeper_chat_queue.v2"
+      ; "revision", `Intlit "9007199254740992"
+      ; "receipts", `List []
+      ]
+    |> Yojson.Safe.pretty_to_string
+  in
+  save_raw path too_large;
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  (match report.load_errors with
+   | [ (Some name, { kind = Parse_failed; _ }) ] ->
+     check "unsafe JSON revision names the quarantined keeper"
+       (String.equal name keeper_name)
+   | _ -> check "unsafe JSON revision is an explicit parse failure" false);
+  check "unsafe revision bytes remain untouched"
+    (String.equal (read_raw path) too_large)
+
+let test_revision_recovery_exhaustion_is_quarantined () =
+  Printf.printf "Test: max-revision inflight recovery fails without overwrite\n%!";
+  with_base "keeper-chat-recovery-exhausted" @@ fun base_path ->
+  let keeper_name = "recovery-exhausted" in
+  let path = snapshot_path ~base_path ~keeper_name in
+  let at_limit_inflight =
+    `Assoc
+      [ "schema", `String "keeper_chat_queue.v2"
+      ; "revision", `Intlit "9007199254740991"
+      ; ( "receipts"
+        , `List
+            [ `Assoc
+                [ ( "receipt_id"
+                  , `String
+                      "chatq_00000000-0000-4000-8000-000000000099" )
+                ; ( "state"
+                  , `Assoc
+                      [ "kind", `String "inflight"
+                      ; "lease_id", `String "lease-before-restart"
+                      ; "started_at", `Float 1.0
+                      ] )
+                ; "message", v1_message_json "replay me"
+                ]
+            ] )
+      ]
+    |> Yojson.Safe.pretty_to_string
+  in
+  save_raw path at_limit_inflight;
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  (match report.load_errors with
+   | [ (Some name, { kind = Recovery_failed; _ }) ] ->
+     check "recovery exhaustion names the quarantined keeper"
+       (String.equal name keeper_name)
+   | _ -> check "recovery exhaustion is explicit" false);
+  check "failed recovery preserves the inflight snapshot bytes"
+    (String.equal (read_raw path) at_limit_inflight)
+
+let test_post_commit_observer_is_central_and_unlocked () =
+  Printf.printf "Test: one post-commit observer sees every mutation outside locks\n%!";
+  with_base "keeper-chat-observer" @@ fun base_path ->
+  let keeper_name = "transition-observer" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  let revisions = ref [] in
+  Keeper_chat_queue.set_transition_observer
+    (Some
+       (fun ~keeper_name:observed ~revision ->
+          (* Re-entering snapshot would deadlock if the callback ran under the
+             entry mutex. *)
+          ignore (Keeper_chat_queue.snapshot ~keeper_name:observed : Keeper_chat_queue.diagnostic_snapshot);
+          revisions := revision :: !revisions));
+  ignore (enqueue_exn ~keeper_name (message "observe") : Keeper_chat_queue.enqueue_receipt);
+  let first = lease_exn ~keeper_name in
+  ignore (Keeper_chat_queue.nack ~keeper_name ~lease_id:first.lease_id);
+  let second = lease_exn ~keeper_name in
+  ignore
+    (Keeper_chat_queue.finalize ~keeper_name ~lease_id:second.lease_id
+       ~outcome:(Mark_delivered { completed_at = 6.0; outcome_ref = None }));
+  check
+    "observer sees enqueue, lease, nack, lease, finalize exactly once"
+    (List.rev !revisions = [ 1L; 2L; 3L; 4L; 5L ])
+
+let test_reconfigure_does_not_leak_receipts_across_base_paths () =
+  Printf.printf "Test: BasePath reconfiguration clears the in-memory registry\n%!";
+  with_base "keeper-chat-base-a" @@ fun first_base ->
+  let second_base = temp_dir "keeper-chat-base-b" in
   Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      rm_rf base_path)
+    ~finally:(fun () -> rm_rf second_base)
     (fun () ->
-      let keeper_name = "inflight-crash-keeper" in
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
-      List.iter
-        (enqueue_ ~keeper_name)
-        [ msg ~content:"leased-1" ~ts:1.0 Keeper_chat_queue.Dashboard
-        ; msg ~content:"leased-2" ~ts:2.0 Keeper_chat_queue.Dashboard
-        ];
-      (match Keeper_chat_queue.lease_batch ~keeper_name with
-       | `Leased { messages; _ } ->
-         check "both messages coalesce into the outstanding lease"
-           (contents messages = [ "leased-1"; "leased-2" ])
-       | `Empty | `Already_leased _ | `Persist_failed _ ->
-         check "lease_batch leases both messages" false);
-      (* Crash: the process dies with the lease neither acked nor nacked.
-         [For_testing.reset] drops in-memory state but not the durable
-         snapshot [lease_batch] already wrote before returning. *)
-      Keeper_chat_queue.For_testing.reset ();
-      Keeper_chat_queue.configure_persistence ~base_path;
+      let keeper_name = "base-boundary" in
+      ignore (configure first_base : Keeper_chat_queue.configure_report);
+      let first_receipt = enqueue_exn ~keeper_name (message "first workspace") in
       check
-        "the crashed keeper's queue is visible again after restart"
-        (List.mem keeper_name (Keeper_chat_queue.all_keeper_names ()));
-      (match Keeper_chat_queue.lease_batch ~keeper_name with
-       | `Leased { messages; _ } ->
-         check "the unacknowledged lease is redelivered whole after restart"
-           (contents messages = [ "leased-1"; "leased-2" ])
-       | `Empty | `Already_leased _ | `Persist_failed _ ->
-         check "the redelivered batch is leaseable" false))
-;;
+        "first BasePath has one receipt"
+        (active_ids (Keeper_chat_queue.snapshot ~keeper_name).pending
+         = [ Keeper_chat_queue.Receipt_id.to_string first_receipt.receipt_id ]);
+      let first_path = snapshot_path ~base_path:first_base ~keeper_name in
+      let first_snapshot_bytes = read_raw first_path in
+      ignore
+        (Keeper_chat_queue.configure_persistence ~base_path:second_base
+          : Keeper_chat_queue.configure_report);
+      let second_snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+      check
+        "second BasePath does not inherit the first registry"
+        (second_snapshot.pending = [] && second_snapshot.inflight = []
+         && second_snapshot.terminal = []);
+      ignore (enqueue_exn ~keeper_name (message "second workspace"));
+      check
+        "mutating the second BasePath leaves the first snapshot untouched"
+        (String.equal (read_raw first_path) first_snapshot_bytes))
+
+let test_snapshot_path_rejects_parent_segments () =
+  Printf.printf "Test: queue snapshot paths reject parent-directory segments\n%!";
+  with_base "keeper-chat-invalid-path" @@ fun base_path ->
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  (match Keeper_chat_queue.enqueue ~keeper_name:".." (message "escape") with
+   | Error (Snapshot_unavailable { kind = Invalid_path; _ }) ->
+     check "parent segment is a typed invalid path" true
+   | Ok _ | Error _ -> check "parent segment is a typed invalid path" false);
+  check "invalid Keeper path creates no queue snapshot outside its lane"
+    (not
+       (Sys.file_exists
+          (Filename.concat
+             (Filename.dirname
+                (Common.keepers_runtime_dir_of_base ~base_path))
+             "chat-queue.json")))
+
+let test_writer_rejects_unloadable_values_before_commit () =
+  Printf.printf "Test: writer accepts only values the strict loader can replay\n%!";
+  with_base "keeper-chat-writer-schema" @@ fun base_path ->
+  let keeper_name = "writer-schema" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  (match
+     Keeper_chat_queue.enqueue ~keeper_name
+       (message
+          ~source:
+            (Keeper_chat_queue.Slack
+               { channel_id = ""
+               ; user_id = "U1"
+               ; user_name = "User"
+               ; team_id = None
+               ; thread_ts = Some "171.001"
+               })
+          "invalid source")
+   with
+   | Error (Keeper_chat_queue.Invalid_input _) ->
+     check "invalid source is rejected before acknowledgement" true
+   | Ok _ | Error _ -> check "invalid source is rejected before acknowledgement" false);
+  check "invalid source leaves the queue unchanged"
+    ((Keeper_chat_queue.snapshot ~keeper_name).pending = []);
+  ignore (enqueue_exn ~keeper_name (message "valid") : Keeper_chat_queue.enqueue_receipt);
+  let lease = lease_exn ~keeper_name in
+  (match
+     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+       ~outcome:
+         (Mark_failed
+            { completed_at = 3.0
+            ; kind = Delivery_failed
+            ; detail = "   "
+            ; outcome_ref = None
+            })
+   with
+   | `Error (Keeper_chat_queue.Invalid_input _) ->
+     check "invalid terminal detail is rejected" true
+   | `Finalized _ | `Unknown_lease | `Error _ ->
+     check "invalid terminal detail is rejected" false);
+  check "rejected terminal update leaves receipt inflight"
+    (List.length (Keeper_chat_queue.snapshot ~keeper_name).inflight = 1)
+
+let test_control_bearing_prompt_roundtrips_byte_for_byte () =
+  Printf.printf "Test: JSON persistence does not sanitize prompt strings\n%!";
+  with_base "keeper-chat-control-text" @@ fun base_path ->
+  let keeper_name = "control-text" in
+  let content = "[STATE] Grep\nNEXT\tConstraints BDI\000tail" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  ignore (enqueue_exn ~keeper_name (message content) : Keeper_chat_queue.enqueue_receipt);
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "control-bearing prompt reload has no schema errors" (report.load_errors = []);
+  match (Keeper_chat_queue.snapshot ~keeper_name).pending with
+  | [ { message; _ } ] ->
+    check "prompt bytes are identical before and after restart"
+      (String.equal content message.content)
+  | _ -> check "one prompt receipt reloads" false
+
+let test_slack_threads_are_distinct_fifo_sources () =
+  Printf.printf "Test: Slack thread identity is a coalescing boundary\n%!";
+  let source thread_ts =
+    Keeper_chat_queue.Slack
+      { channel_id = "C1"
+      ; user_id = "U1"
+      ; user_name = "User"
+      ; team_id = Some "T1"
+      ; thread_ts = Some thread_ts
+      }
+  in
+  check "same actor in different Slack threads does not coalesce"
+    (not
+       (Keeper_chat_queue.same_source
+          (source "171.001")
+          (source "171.002")))
 
 let () =
-  Eio_main.run @@ fun _env ->
-  test_same_source ();
-  test_lease_batch_runs ();
-  test_merge_batch ();
-  test_in_flight_accessor ();
-  test_persistence_replay ();
-  test_lease_persist_failure_does_not_acknowledge ();
-  test_configure_persistence_prepends_snapshot_to_live_queue ();
-  test_remove_matching_single_from_head_run ();
-  test_remove_matching_not_found ();
-  test_remove_matching_persist_failure_aborts ();
-  test_remove_matching_lease_batch_exactly_once ();
-  test_receipt_id_round_trip ();
-  test_lease_ack_nack_lifecycle ();
-  test_lease_already_leased_blocks_second_lease ();
-  test_ack_nack_unknown_lease ();
-  test_inflight_lease_requeued_on_restart ();
+  Eio_main.run @@ fun _environment ->
+  test_durable_receipt_lifecycle ();
+  test_coalesced_finalize_preserves_all_receipts ();
+  test_source_boundaries_preserve_fifo_runs ();
+  test_nack_and_restart_preserve_receipt ();
+  test_persist_failures_roll_back ();
+  test_v1_atomic_migration ();
+  test_corrupt_snapshot_is_quarantined ();
+  test_invalid_v2_is_not_a_compatibility_fallback ();
+  test_invalid_v2_attachment_is_not_silently_dropped ();
+  test_revision_domain_does_not_wrap ();
+  test_revision_outside_json_domain_is_rejected ();
+  test_revision_recovery_exhaustion_is_quarantined ();
+  test_post_commit_observer_is_central_and_unlocked ();
+  test_reconfigure_does_not_leak_receipts_across_base_paths ();
+  test_snapshot_path_rejects_parent_segments ();
+  test_writer_rejects_unloadable_values_before_commit ();
+  test_control_bearing_prompt_roundtrips_byte_for_byte ();
+  test_slack_threads_are_distinct_fifo_sources ();
   if !failures > 0
-  then (
+  then begin
     Printf.printf "FAILED: %d check(s)\n%!" !failures;
-    exit 1)
+    exit 1
+  end
   else Printf.printf "All keeper_chat_coalescing checks passed\n%!"
-;;

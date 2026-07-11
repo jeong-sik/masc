@@ -121,6 +121,20 @@ val update_entry :
   (registry_entry -> registry_entry) ->
   (unit, registry_entry_validation_error) result
 
+type exact_update_result =
+  | Exact_updated
+  | Exact_update_missing
+  | Exact_update_replaced
+  | Exact_update_invalid of registry_entry_validation_error
+
+(** Update only while the lane identity captured in [expected] still owns the
+    registry key. CAS conflicts within that lane retry against the latest
+    immutable entry; a same-name replacement is never mutated. *)
+val update_entry_exact :
+  registry_entry ->
+  (registry_entry -> registry_entry) ->
+  exact_update_result
+
 (** Update a registered entry and return [true] only when a validated write
     was installed.  Missing keepers, no-op closures, and validation failures
     return [false]. *)
@@ -313,6 +327,15 @@ val get_turn_failures : base_path:string -> string -> int
 (** Record a crash entry in the crash log (keeps last 5). *)
 val record_crash : base_path:string -> string -> float -> string -> unit
 
+(** Failure mutations scoped to the exact lane captured by [entry]. *)
+val set_failure_reason_exact :
+  registry_entry -> failure_reason option -> exact_update_result
+
+val set_last_error_exact : registry_entry -> string -> exact_update_result
+
+val record_crash_exact :
+  registry_entry -> float -> string -> exact_update_result
+
 (** Set or clear the gRPC close callback. *)
 val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 
@@ -333,6 +356,10 @@ val is_registered : base_path:string -> string -> bool
 
 (** Mark a keeper as dead tombstone and record the transition timestamp. *)
 val mark_dead : base_path:string -> string -> at:float -> unit
+
+(** Mark only [entry]'s lane dead. The running-count transition is applied
+    once, after the exact-lane CAS succeeds. *)
+val mark_dead_exact : registry_entry -> at:float -> exact_update_result
 
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option
@@ -426,6 +453,9 @@ val clear_board_wakeups : base_path:string -> string -> unit
 (** Reset tracking state (agent count + board wakeups) for a keeper. *)
 val cleanup_tracking : base_path:string -> string -> unit
 
+(** Reset tracking only if [entry]'s lane still owns its registry key. *)
+val cleanup_tracking_exact : registry_entry -> exact_update_result
+
 (** Clear the registry. For testing only. *)
 val clear : unit -> unit
 
@@ -477,6 +507,15 @@ val dispatch_event :
   base_path:string ->
   ?origin:lifecycle_event_origin ->
   string -> Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+(** Dispatch only while [entry]'s lane still owns the registry key. The event
+    is recomputed after same-lane CAS conflicts and is rejected before mutating
+    a same-name replacement lane. *)
+val dispatch_event_exact :
+  registry_entry ->
+  ?origin:lifecycle_event_origin ->
+  Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 (** Like [dispatch_event], but preserves richer audit metadata when the event

@@ -243,6 +243,77 @@ let update_entry ~base_path name f =
   loop ()
 ;;
 
+type exact_update_result =
+  | Exact_updated
+  | Exact_update_missing
+  | Exact_update_replaced
+  | Exact_update_invalid of registry_entry_validation_error
+
+let update_entry_exact (expected : registry_entry) f =
+  let base_path = expected.base_path in
+  let name = expected.name in
+  let key = registry_key ~base_path name in
+  let expected_lane = Keeper_lane.id expected.lane in
+  let rec loop () =
+    let current = Atomic.get registry in
+    match StringMap.find_opt key current with
+    | None -> Exact_update_missing
+    | Some entry
+      when not (Keeper_lane.Id.equal expected_lane (Keeper_lane.id entry.lane)) ->
+      Exact_update_replaced
+    | Some entry ->
+      let new_entry = f entry in
+      (match validate_registry_entry ~base_path name new_entry with
+       | Error err ->
+         record_invalid_registry_entry ~operation:"update_exact" ~name err;
+         Exact_update_invalid err
+       | Ok () ->
+         let updated = StringMap.add key new_entry current in
+         if Atomic.compare_and_set registry current updated
+         then (
+           Orphan_drops.clear ~base_path name;
+           Exact_updated)
+         else loop ())
+  in
+  loop ()
+;;
+
+type install_entry_result =
+  | Entry_installed
+  | Entry_install_conflict
+  | Entry_install_missing
+  | Entry_install_replaced
+  | Entry_install_invalid of registry_entry_validation_error
+
+let install_entry_if_current
+      ~(observed : registry_entry)
+      (replacement : registry_entry)
+  =
+  let base_path = observed.base_path in
+  let name = observed.name in
+  match validate_registry_entry ~base_path name replacement with
+  | Error err ->
+    record_invalid_registry_entry ~operation:"install_if_current" ~name err;
+    Entry_install_invalid err
+  | Ok () ->
+    let current = Atomic.get registry in
+    let key = registry_key ~base_path name in
+    (match StringMap.find_opt key current with
+     | None -> Entry_install_missing
+     | Some entry
+       when not
+              (Keeper_lane.Id.equal
+                 (Keeper_lane.id observed.lane)
+                 (Keeper_lane.id entry.lane)) ->
+       Entry_install_replaced
+     | Some entry when entry != observed -> Entry_install_conflict
+     | Some _ ->
+       let updated = StringMap.add key replacement current in
+       if Atomic.compare_and_set registry current updated
+       then Entry_installed
+       else Entry_install_conflict)
+;;
+
 let update_entry_unit ~base_path name f =
   (* fire-and-forget: unit wrapper discards Ok/Error; callers only need side effects and logged metrics. *)
   ignore (update_entry ~base_path name f)
@@ -692,6 +763,61 @@ let mark_dead ~base_path name ~at =
     ~at
     ~decr_running_count_clamped
     ~update_entry:update_entry_unit
+;;
+
+let mark_dead_exact (expected : registry_entry) ~at =
+  let base_path = expected.base_path in
+  let name = expected.name in
+  let key = registry_key ~base_path name in
+  let expected_lane = Keeper_lane.id expected.lane in
+  let rec loop () =
+    let current = Atomic.get registry in
+    match StringMap.find_opt key current with
+    | None -> Exact_update_missing
+    | Some entry
+      when not (Keeper_lane.Id.equal expected_lane (Keeper_lane.id entry.lane)) ->
+      Exact_update_replaced
+    | Some entry ->
+      let replacement =
+        if entry.phase = Dead
+        then
+          { entry with
+            dead_since_ts = Some (Option.value ~default:at entry.dead_since_ts)
+          }
+        else
+          let conditions =
+            { Keeper_state_machine.default_conditions with
+              launch_pending = false
+            ; fiber_alive = false
+            ; restart_budget_remaining = false
+            }
+          in
+          { entry with
+            dead_since_ts = Some at
+          ; phase = Keeper_state_machine.derive_phase conditions
+          ; conditions
+          }
+      in
+      (match validate_registry_entry ~base_path name replacement with
+       | Error error -> Exact_update_invalid error
+       | Ok () ->
+         let updated = StringMap.add key replacement current in
+         if Atomic.compare_and_set registry current updated
+         then (
+           if entry.phase = Running then decr_running_count_clamped ();
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string LifecycleTransitions)
+             ~labels:
+               [ "keeper", name
+               ; "from_phase", Keeper_state_machine.phase_to_string entry.phase
+               ; "to_phase", Keeper_state_machine.phase_to_string replacement.phase
+               ]
+             ();
+           Log.Keeper.error "registry: marked exact keeper lane dead name=%s at=%.0f" name at;
+           Exact_updated)
+         else loop ())
+  in
+  loop ()
 ;;
 
 let record_restart ~base_path name =

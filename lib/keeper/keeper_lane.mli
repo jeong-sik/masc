@@ -40,6 +40,9 @@ val fork :
   run:(Eio.Switch.t -> unit) ->
   cleanup:(outcome -> (unit, string) result) ->
   (unit, start_error) result
+(** A fork rejected by an already-cancelling Eio switch returns
+    [Error (Fork_failed _)] and resolves [exited]. Cleanup and exit resolution
+    are exact-once even if switch cancellation races the child start. *)
 
 (** Resolve a lane for which the launch gate rejected the fiber before it
     started.  This keeps the join contract total for every registry entry. *)

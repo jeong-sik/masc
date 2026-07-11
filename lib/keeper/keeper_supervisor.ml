@@ -705,11 +705,39 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
   List.iter
     (fun ((entry : Keeper_registry.registry_entry), msg) ->
        (* RFC-0002: dispatch budget exhaustion before marking dead *)
-       Keeper_registry.dispatch_event_unit
-         ~base_path
-         entry.name
-         Keeper_state_machine.Restart_budget_exhausted;
-       Keeper_registry.mark_dead ~base_path entry.name ~at:now;
+       (match
+          Keeper_registry.dispatch_event_exact
+            entry
+            Keeper_state_machine.Restart_budget_exhausted
+        with
+        | Ok _ -> ()
+        | Error error ->
+          Log.Keeper.warn
+            "%s: exact restart-budget dispatch rejected: %s"
+            entry.name
+            (Keeper_state_machine.transition_error_to_string error));
+       let exact_dead =
+         match Keeper_registry.mark_dead_exact entry ~at:now with
+         | Keeper_registry.Exact_updated -> true
+         | Keeper_registry.Exact_update_missing ->
+           Log.Keeper.info
+             "%s: dead transition skipped because the observed lane was already removed"
+             entry.name;
+           false
+         | Keeper_registry.Exact_update_replaced ->
+           Log.Keeper.warn
+             "%s: dead transition retained a newer same-name lane"
+             entry.name;
+           false
+         | Keeper_registry.Exact_update_invalid validation_error ->
+           Log.Keeper.warn
+             "%s: dead transition validation failed: %s"
+             entry.name
+             (Keeper_registry.registry_entry_validation_error_to_string validation_error);
+           false
+       in
+       if exact_dead
+       then (
        (* Dead keepers cannot make progress on owned tasks.  Release from the
           backlog's typed ownership state, not from a possibly stale meta
           pointer, so an exhausted keeper cannot strand an InProgress task and
@@ -742,7 +770,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
           operator action required"
          entry.name
          msg
-         entry.restart_count)
+         entry.restart_count))
     final_acc.to_mark_dead;
   (* RFC-0036 Phase A.2: fire Tombstone_reaped after cleanup completes.
      Hook is exception-safe; supervisor never observes failure. *)

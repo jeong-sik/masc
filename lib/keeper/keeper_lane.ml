@@ -93,17 +93,23 @@ let cleanup_result cleanup outcome =
     | exn -> Some (Printexc.to_string exn))
 ;;
 
-let resolve_exit t outcome cleanup_error =
-  Atomic.set t.state Exited;
-  Eio.Promise.resolve t.exited_r { outcome; cleanup_error }
+let resolve_exit_once t outcome cleanup =
+  if Atomic.compare_and_set t.state Running Exited
+  then (
+    let cleanup_error = cleanup_result cleanup outcome in
+    Eio.Promise.resolve t.exited_r { outcome; cleanup_error };
+    true)
+  else false
 ;;
 
 let fork ~sw t ~run ~cleanup =
   match claim_start t with
   | Error _ as error -> error
   | Ok () ->
+    let started = Atomic.make false in
     (try
        Eio.Fiber.fork ~sw (fun () ->
+         Atomic.set started true;
          let outcome =
            try
              Eio.Switch.run (fun lane_sw -> run lane_sw);
@@ -112,14 +118,25 @@ let fork ~sw t ~run ~cleanup =
            | Eio.Cancel.Cancelled cause -> Cancelled_by_parent cause
            | exn -> Failed exn
          in
-         let cleanup_error = cleanup_result cleanup outcome in
-         resolve_exit t outcome cleanup_error);
-       Ok ()
+         ignore (resolve_exit_once t outcome cleanup));
+       if Atomic.get started
+       then Ok ()
+       else
+         match Eio.Switch.get_error sw with
+         | None ->
+           (* [Fiber.fork] accepted the child. It may not have been scheduled
+              yet, but Eio only drops the fork when the target switch is
+              already cancelling. *)
+           Ok ()
+         | Some cause ->
+           let outcome = Cancelled_by_parent cause in
+           if resolve_exit_once t outcome cleanup
+           then Error (Fork_failed cause)
+           else Ok ()
      with
      | exn ->
        let outcome = Failed exn in
-       let cleanup_error = cleanup_result cleanup outcome in
-       resolve_exit t outcome cleanup_error;
+       ignore (resolve_exit_once t outcome cleanup);
        Error (Fork_failed exn))
 ;;
 
@@ -127,6 +144,6 @@ let reject_before_start t ~reason =
   match claim_start t with
   | Error _ as error -> error
   | Ok () ->
-    resolve_exit t (Failed reason) None;
+    ignore (resolve_exit_once t (Failed reason) (fun _ -> Ok ()));
     Ok ()
 ;;

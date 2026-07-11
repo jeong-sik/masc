@@ -7,7 +7,7 @@
     [Keeper_registry.set_last_error_entry] so this module does not need
     to know about the central Atomic. *)
 
-let record ~base_path ?details name err =
+let record_common ~base_path ?details name err persist =
   let details =
     match details with
     | Some _ as details -> details
@@ -42,5 +42,29 @@ let record ~base_path ?details name err =
       ~labels:[ "keeper", name; "error_kind", kind_label ]
       ();
   Keeper_fd_pressure.note_if_fd_exhaustion ~site:"keeper_registry.record_error" err;
-  Keeper_registry.set_last_error_entry ~base_path ~name err
+  persist ()
+;;
+
+let record ~base_path ?details name err =
+  record_common ~base_path ?details name err (fun () ->
+    Keeper_registry.set_last_error_entry ~base_path ~name err)
+;;
+
+let record_exact ?details (entry : Keeper_registry.registry_entry) err =
+  record_common ~base_path:entry.base_path ?details entry.name err (fun () ->
+    match Keeper_registry.set_last_error_exact entry err with
+    | Keeper_registry.Exact_updated -> ()
+    | Keeper_registry.Exact_update_missing ->
+      Log.Keeper.warn
+        "registry: exact error record skipped because lane is no longer registered name=%s"
+        entry.name
+    | Keeper_registry.Exact_update_replaced ->
+      Log.Keeper.warn
+        "registry: exact error record retained newer same-name lane name=%s"
+        entry.name
+    | Keeper_registry.Exact_update_invalid validation_error ->
+      Log.Keeper.warn
+        "registry: exact error record validation failed name=%s error=%s"
+        entry.name
+        (Keeper_registry.registry_entry_validation_error_to_string validation_error))
 ;;

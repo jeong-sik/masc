@@ -62,7 +62,7 @@ let launch_supervised_fiber_body
   let base_path = ctx.config.base_path in
   let keepers_dir = Workspace.keepers_runtime_dir ctx.config in
   if restart_launch_noop_enabled_for_test ()
-  then ()
+  then (* test no-op launch: nothing forked, but not a fork rejection *) Ok ()
   else (
     (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
@@ -117,19 +117,37 @@ let launch_supervised_fiber_body
           ~run:body
           ~cleanup:(fun _ -> Ok ())
       with
-      | Ok () -> ()
+      | Ok () -> Ok ()
       | Error error ->
+        (* Fork was rejected (parent switch already cancelling, or
+           [claim_start] refused): no keepalive fiber is running. Resolve the
+           registry crash path — [Keeper_lane.fork] already settled the lane
+           exit for [Fork_failed] — publish [Crashed] under the same
+           dedupe guard the launch gate uses, and propagate an error so the
+           caller suppresses the Started/Running lifecycle for a keeper whose
+           lane was never forked (mirrors [prepare_fiber_launch]'s rejection
+           path). *)
         let detail = Keeper_lane.start_error_to_string error in
         Keeper_registry.set_failure_reason
           ~base_path
           meta.name
           (Some (Keeper_registry.Exception detail));
-        ignore
-          (Keeper_registry.resolve_done
-             reg
-             ~source:"supervisor_lane_start_rejected"
-             (`Crashed detail)
-           : Keeper_registry.done_resolve_result)
+        if
+          Keeper_registry.resolve_done
+            reg
+            ~source:"supervisor_lane_start_rejected"
+            (`Crashed detail)
+          |> done_signal_of_registry_result
+          |> should_publish_lifecycle_for_done_signal
+        then
+          publish_phase_lifecycle
+            ~phase:Keeper_state_machine.Crashed
+            meta.name
+            detail
+            ();
+        Error
+          (Keeper_state_machine.Precondition_violation
+             { event = "supervisor_lane_fork"; reason = detail })
     in
     fork_body (fun lane_sw ->
       let ctx = { ctx with sw = lane_sw } in
@@ -412,6 +430,60 @@ let launch_supervised_fiber_body
                   (resolve_done
                      ~source:"supervisor_shutdown_cleanup"
                      (`Crashed "shutdown")))
+              else if Keeper_lane.shutdown_requested reg.lane
+              then (
+                (* Codex #24135 finding 1: operator-sanctioned shutdown of this
+                   supervised keeper. [Keeper_shutdown_prepare_join] called
+                   [Keeper_lane.request_cancel], which failed the lane switch
+                   with [Shutdown_cancel]; the body caught the resulting
+                   cancellation and set [cancelled_by_parent]. Global shutdown
+                   is not in progress, so without this branch the keeper would
+                   fall through to the parent-cancel path and be
+                   crashed/tombstoned. A requested shutdown is a graceful stop:
+                   record it as [Stopped] exactly like the normal-exit path so
+                   the operator observes a joined stop, not a crash. *)
+                Log.Keeper.info
+                  "%s: fiber stopped by shutdown request (graceful, not a crash)"
+                  meta.name;
+                (match
+                   Keeper_registry.dispatch_event
+                     ~base_path
+                     meta.name
+                     Keeper_state_machine.Stop_requested
+                 with
+                 | Ok _ -> ()
+                 | Error e ->
+                   Otel_metric_store.inc_counter
+                     Keeper_metrics.(to_string DispatchEventFailures)
+                     ~labels:[ "keeper", meta.name; "event", "stop_requested" ]
+                     ();
+                   Log.Keeper.warn
+                     "supervisor: Stop_requested dispatch failed: %s"
+                     (Keeper_state_machine.transition_error_to_string e));
+                (match
+                   Keeper_registry.dispatch_event
+                     ~base_path
+                     meta.name
+                     Keeper_state_machine.Drain_complete
+                 with
+                 | Ok _ -> ()
+                 | Error e ->
+                   Otel_metric_store.inc_counter
+                     Keeper_metrics.(to_string DispatchEventFailures)
+                     ~labels:[ "keeper", meta.name; "event", "drain_complete" ]
+                     ();
+                   Log.Keeper.warn
+                     "supervisor: Drain_complete dispatch failed: %s"
+                     (Keeper_state_machine.transition_error_to_string e));
+                if
+                  resolve_done ~source:"supervisor_shutdown_requested" `Stopped
+                  |> should_publish_lifecycle_for_done_signal
+                then
+                  publish_phase_lifecycle
+                    ~phase:Keeper_state_machine.Stopped
+                    meta.name
+                    "shutdown requested"
+                    ())
               else if Atomic.get cancelled_by_parent
               then (
                 (* Issue #18901 follow-up: parent-cancel branch. The
@@ -597,8 +669,10 @@ let launch_supervised_fiber
          (Keeper_lane.start_error_to_string lane_error));
     Error err
   | Ok _ ->
-    launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg;
-    Ok ()
+    (* Propagate the fork outcome: a rejected [Keeper_lane.fork] returns
+       [Error] here so the caller suppresses the Started/Running lifecycle
+       for a keeper whose lane was never forked. *)
+    launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
 ;;
 
 (* #10993: persona drift visibility.

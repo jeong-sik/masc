@@ -2659,6 +2659,63 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
       check bool "rejected launch closes lane join contract"
         true (Reg.lane_has_exited reg))
 
+(* Codex #24135 finding 5: a rejected [Keeper_lane.fork] (parent switch already
+   cancelling, or [claim_start] refused) must propagate [Error] from
+   [launch_supervised_fiber] and resolve the done promise through the crash
+   path, so supervise/restart suppress [Started]/[Running] for a keeper whose
+   lane was never forked. Pre-fix the fork error was [ignore]d and [Ok ()] was
+   returned, letting the caller announce Running. Here the fork is refused
+   deterministically by pre-claiming the lane; the registry FSM still accepts
+   [Fiber_started], so this exercises the fork-rejection path (not the launch
+   gate). *)
+let test_launch_fork_rejection_does_not_announce_running () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg =
+        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+      in
+      let name = "launch-fork-reject" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      (match
+         Lane.reject_before_start reg.lane ~reason:(Failure "pre-claimed for test")
+       with
+       | Ok () -> ()
+       | Error error -> fail (Lane.start_error_to_string error));
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.with_restart_launch_noop_for_test (fun () ->
+        match
+          Masc.Keeper_supervisor_launch.launch_supervised_fiber
+            ~proactive_warmup_sec:0 ctx meta reg
+        with
+        | Ok () -> fail "expected lane fork rejection to propagate as Error"
+        | Error _ -> ());
+      check bool
+        "fork-rejected launch resolves done through the crash path"
+        true
+        (Option.is_some (Eio.Promise.peek reg.done_p)))
+
 let test_sweep_waits_for_lane_join_before_unregister () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -3991,6 +4048,8 @@ let () =
         test_stale_storm_pause_persist_failure_keeps_entry_registered;
       test_case "terminal-state launch reject does not announce Running" `Quick
         test_launch_rejected_terminal_state_does_not_announce_running;
+      test_case "lane fork reject does not announce Running" `Quick
+        test_launch_fork_rejection_does_not_announce_running;
       test_case "sweep joins lane before unregister" `Quick
         test_sweep_waits_for_lane_join_before_unregister;
       test_case "start_keepalive launch gate precedes side effects (source guard)" `Quick

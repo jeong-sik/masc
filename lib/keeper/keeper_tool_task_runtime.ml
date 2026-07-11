@@ -157,9 +157,14 @@ let active_goal_scope_json
   =
   let scoped = meta.active_goal_ids <> [] in
   let mode =
-    match effective_mode with
-    | Some mode -> mode
-    | None -> if scoped then "active_goal_ids" else "all_tasks"
+    let scope_mode =
+      match effective_mode with
+      | Some mode -> mode
+      | None ->
+        if scoped then Keeper_runtime_contract.Active_goal_ids
+        else Keeper_runtime_contract.All_tasks
+    in
+    Keeper_runtime_contract.claim_scope_mode_to_string scope_mode
   in
   let effective_goal_ids =
     match effective_goal_ids with
@@ -201,17 +206,16 @@ let active_goal_scope_json
 
 let claim_scope_context_suffix ~(meta : keeper_meta) claim_goal_scope =
   match claim_goal_scope.Keeper_runtime_contract.mode with
-  | "active_goal_ids" ->
+  | Keeper_runtime_contract.Active_goal_ids ->
     (match meta.active_goal_ids with
      | [] -> " in active goal scope"
      | goal_ids ->
        Printf.sprintf
          " within active_goal_ids=[%s]"
          (String.concat ", " goal_ids))
-  | "all_tasks" -> " across all tasks"
-  | "empty_goal_scope_fallback_all_tasks" ->
+  | Keeper_runtime_contract.All_tasks -> " across all tasks"
+  | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks ->
     " after active-goal fallback to all tasks"
-  | mode -> Printf.sprintf " in claim_scope.mode=%s" mode
 ;;
 
 let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
@@ -220,18 +224,20 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
     Printf.sprintf
       "ACTION: Stop scope-lock diagnosis; claim_scope.mode=%s already searched all \
        tasks; resolve blockers/excluded=%d."
-      claim_goal_scope.Keeper_runtime_contract.mode
+      (Keeper_runtime_contract.claim_scope_mode_to_string
+         claim_goal_scope.Keeper_runtime_contract.mode)
       excluded_count
   | None ->
     let scope_hint =
       match claim_goal_scope.Keeper_runtime_contract.mode with
-      | "active_goal_ids" ->
+      | Keeper_runtime_contract.Active_goal_ids ->
         (* Scope only stays in [active_goal_ids] mode when a Todo task IS linked
            to the goal (otherwise the resolver falls back to all_tasks). So a
            no-eligible here means those scoped tasks exist but are blocked /
            awaiting verification — not a scope lock to clear. *)
         " Scoped tasks exist but are blocked or awaiting verification; resolve those blockers."
-      | _ -> ""
+      | Keeper_runtime_contract.All_tasks
+      | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks -> ""
     in
     Printf.sprintf
       "ACTION: Stop task-checking — blocked/excluded=%d.%s"

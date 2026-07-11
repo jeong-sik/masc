@@ -1366,7 +1366,13 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       // must survive history merges until they finalize. Otherwise a queued
       // assistant with empty text can be mistaken for an older empty-text
       // history row and dropped, making the queued reply look like an error.
-      const shouldKeepLocalEntry = isInFlightDelivery(entry.delivery) || !coveredByHistory
+      // A terminal durable-receipt observation is also operator evidence, not
+      // a duplicate assistant reply: keep it alongside the canonical history
+      // row so its Pending/Inflight/Delivered/Failed lifecycle remains visible.
+      const isReceiptObservation = Boolean(entry.details?.queueReceiptId)
+      const shouldKeepLocalEntry = isInFlightDelivery(entry.delivery)
+        || isReceiptObservation
+        || !coveredByHistory
       return entry.delivery !== 'history' && !isCoveredToolRow && shouldKeepLocalEntry
     },
   )

@@ -741,6 +741,17 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
     throw new Error('Keeper chat receipt response is missing identity or state')
   }
   let state: KeeperChatReceiptState
+  const nullableString = (fieldName: string, fieldValue: unknown): string | null => {
+    if (fieldValue === null || fieldValue === undefined) return null
+    if (typeof fieldValue !== 'string') {
+      throw new Error(`Keeper chat receipt ${fieldName} must be a string or null`)
+    }
+    const trimmed = fieldValue.trim()
+    if (!trimmed) {
+      throw new Error(`Keeper chat receipt ${fieldName} must not be empty`)
+    }
+    return trimmed
+  }
   switch (kind) {
     case 'pending':
       state = { kind }
@@ -762,13 +773,13 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
       state = {
         kind,
         completedAt,
-        outcomeRef: asString(rawState.outcome_ref) ?? null,
+        outcomeRef: nullableString('outcome_ref', rawState.outcome_ref),
       }
       break
     }
     case 'failed': {
       const failureKind = asString(rawState.failure_kind, '') as KeeperChatReceiptFailureKind
-      const detail = asString(rawState.detail, '')
+      const detail = asString(rawState.detail, '').trim()
       const completedAt = asNumber(rawState.completed_at)
       if (!KEEPER_CHAT_RECEIPT_FAILURE_KINDS.has(failureKind) || !detail || typeof completedAt !== 'number') {
         throw new Error('Keeper chat failed receipt has invalid failure metadata')
@@ -778,7 +789,7 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
         failureKind,
         detail,
         completedAt,
-        outcomeRef: asString(rawState.outcome_ref) ?? null,
+        outcomeRef: nullableString('outcome_ref', rawState.outcome_ref),
       }
       break
     }

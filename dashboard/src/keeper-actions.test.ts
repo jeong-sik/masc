@@ -219,6 +219,9 @@ describe('reconcileKeeperChatReceipts', () => {
       ],
     }
     keeperActionErrors.value = {}
+    _resetChatHydrationForTests()
+    fetchKeeperChatHistory.mockReset()
+    fetchKeeperChatHistory.mockResolvedValue([])
     fetchKeeperChatReceipt.mockReset()
   })
 
@@ -240,6 +243,28 @@ describe('reconcileKeeperChatReceipts', () => {
       status: 'queue_poll_result',
       deliveryReceipt: 'server_durable_receipt',
     })
+  })
+
+  it('forces transcript convergence when only the terminal queue receipt is observed', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'delivered', completedAt: 42, outcomeRef: null },
+    })
+    fetchKeeperChatHistory.mockResolvedValue([
+      { role: 'assistant', content: 'reply recovered without append SSE', ts: 1_780_000_001 },
+    ])
+
+    await reconcileKeeperChatReceipts('echo')
+
+    expect(fetchKeeperChatHistory).toHaveBeenCalledWith('echo')
+    expect(keeperThreads.value.echo?.some(entry => (
+      entry.text === 'reply recovered without append SSE'
+    ))).toBe(true)
+    expect(keeperThreads.value.echo?.some(entry => (
+      entry.details?.queueState === 'delivered'
+    ))).toBe(true)
   })
 
   it('surfaces a durable failed receipt on the queued chat row', async () => {

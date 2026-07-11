@@ -909,8 +909,7 @@ let test_masc_board_registry_has_descriptor_projection () =
              (List.mem identity_field descriptor_properties));
          let expected_visibility =
            match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-           | Keeper_tool_name.Direct_masc ->
-             (Tool_catalog.metadata schema.name).visibility
+           | Keeper_tool_name.Direct_masc -> Tool_catalog.Default
            | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
              Tool_catalog.Hidden
          in
@@ -918,6 +917,22 @@ let test_masc_board_registry_has_descriptor_projection () =
            (schema.name ^ " descriptor visibility follows typed projection")
            true
            (descriptor.policy.visibility = expected_visibility);
+         let expected_readonly =
+           not (Tool_name.Board_name.is_resource_write board_name)
+         in
+         Alcotest.(check (option bool))
+           (schema.name ^ " descriptor readonly follows typed resource projection")
+           (Some expected_readonly)
+           descriptor.policy.readonly_hint;
+         let expected_effect_domain =
+           if expected_readonly
+           then Some Tool_catalog.Read_only
+           else Some Tool_catalog.Masc_workspace
+         in
+         Alcotest.(check bool)
+           (schema.name ^ " descriptor effect domain follows typed resource projection")
+           true
+           (descriptor.policy.effect_domain = expected_effect_domain);
          let expected_model_projection =
            match Keeper_tool_name.board_projection_of_masc_board_name board_name with
            | Keeper_tool_name.Direct_masc -> Descriptor.Internal_name

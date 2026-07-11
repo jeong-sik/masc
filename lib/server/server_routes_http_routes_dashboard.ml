@@ -1220,7 +1220,7 @@ let add_routes ~sw ~clock router =
              in
              let limit =
                Server_utils.int_query_param req "limit" ~default:50
-               |> clamp ~min_v:1 ~max_v:100
+               |> Server_utils.clamp ~min_v:1 ~max_v:100
              in
              match
                Server_dashboard_http_runtime_info.schedule_execution_history_page_json

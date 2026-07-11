@@ -50,7 +50,8 @@ let execution_receipt_store_cache : (string, Dated_jsonl.t) Hashtbl.t =
 
 let execution_receipt_store_mu = Eio.Mutex.create ()
 
-let execution_receipt_schema = "keeper.execution_receipt.v1"
+let execution_receipt_v1_schema = "keeper.execution_receipt.v1"
+let execution_receipt_schema = execution_receipt_v1_schema
 let execution_receipts_dirname = "execution-receipts"
 
 let keeper_execution_receipt_store config name : Dated_jsonl.t =

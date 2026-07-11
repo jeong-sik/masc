@@ -95,6 +95,38 @@ let operator_disposition_kind_of_string = function
   | _ -> None
 ;;
 
+let terminal_disposition_of_persisted_json json =
+  match Json_util.assoc_string_opt "terminal_reason_code" json with
+  | None -> None
+  | Some terminal_reason_code ->
+    let parsed = Keeper_turn_disposition.of_wire terminal_reason_code in
+    (match parsed with
+     | Keeper_turn_disposition.Unknown _ ->
+       let is_v1_success =
+         match
+           ( Json_util.assoc_string_opt "schema" json
+           , Option.bind
+               (Json_util.assoc_string_opt "operator_disposition" json)
+               operator_disposition_kind_of_string
+           , Option.bind
+               (Json_util.assoc_string_opt "outcome" json)
+               outcome_kind_of_string )
+         with
+         | ( Some schema
+           , Some Disp_pass
+           , Some `Ok )
+           when String.equal
+                  schema
+                  Keeper_types_support.execution_receipt_v1_schema ->
+           true
+         | _ -> false
+       in
+       if is_v1_success
+       then Some Keeper_turn_disposition.Success
+       else Some parsed
+     | _ -> Some parsed)
+;;
+
 type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted

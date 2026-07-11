@@ -101,6 +101,36 @@ let legacy_completed_passive_execution =
   passive_execution_with_terminal_reason "completed"
 ;;
 
+let persisted_v1_completed_pass_execution =
+  match legacy_completed_passive_execution with
+  | `Assoc fields ->
+    `Assoc
+      ([ "schema", `String Masc.Keeper_types_support.execution_receipt_v1_schema
+       ; "outcome", `String "receipt_done"
+       ]
+       @ fields)
+  | _ -> assert false
+;;
+
+let replace_assoc_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> assert false
+;;
+
+let persisted_v1_completed_error_execution =
+  replace_assoc_field
+    "outcome"
+    (`String "receipt_failed")
+    persisted_v1_completed_pass_execution
+;;
+
+let foreign_schema_completed_pass_execution =
+  replace_assoc_field
+    "schema"
+    (`String "keeper.execution_receipt.v2")
+    persisted_v1_completed_pass_execution
+;;
+
 let canonical_success_passive_execution =
   passive_execution_with_terminal_reason "success"
 ;;
@@ -260,6 +290,40 @@ let test_legacy_completed_receipt_is_blocked () =
   check string "state" "blocked" attention.cra_state
 ;;
 
+let test_persisted_v1_completed_pass_receipt_is_not_blocked () =
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention
+      ~snapshot
+      ~execution:persisted_v1_completed_pass_execution
+  in
+  check bool "blocked" false attention.cra_blocked;
+  check bool "needs_attention" false attention.cra_needs_attention;
+  check string "state" "ok" attention.cra_state;
+  check (option string) "reason" None attention.cra_reason
+;;
+
+let test_persisted_v1_completed_error_receipt_is_blocked () =
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention
+      ~snapshot
+      ~execution:persisted_v1_completed_error_execution
+  in
+  check bool "blocked" true attention.cra_blocked;
+  check bool "needs_attention" true attention.cra_needs_attention;
+  check string "state" "blocked" attention.cra_state
+;;
+
+let test_foreign_schema_completed_pass_receipt_is_blocked () =
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention
+      ~snapshot
+      ~execution:foreign_schema_completed_pass_execution
+  in
+  check bool "blocked" true attention.cra_blocked;
+  check bool "needs_attention" true attention.cra_needs_attention;
+  check string "state" "blocked" attention.cra_state
+;;
+
 let test_canonical_success_receipt_is_not_blocked () =
   let attention =
     Server_dashboard_http_composite.composite_runtime_attention
@@ -353,6 +417,18 @@ let () =
             "legacy completed receipt is blocked"
             `Quick
             test_legacy_completed_receipt_is_blocked
+        ; test_case
+            "persisted v1 completed pass receipt is not blocked"
+            `Quick
+            test_persisted_v1_completed_pass_receipt_is_not_blocked
+        ; test_case
+            "persisted v1 completed error receipt stays blocked"
+            `Quick
+            test_persisted_v1_completed_error_receipt_is_blocked
+        ; test_case
+            "foreign schema completed pass receipt stays blocked"
+            `Quick
+            test_foreign_schema_completed_pass_receipt_is_blocked
         ; test_case
             "canonical success receipt is not blocked"
             `Quick

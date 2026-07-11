@@ -29,6 +29,11 @@ val execution_receipts_dirname : string
 (** Runtime subdirectory under each keeper directory for date-split execution
     receipt JSONL. *)
 
+val execution_receipt_v1_schema : string
+(** Stable schema tag for persisted v1 receipts.  Kept separately from the
+    current writer tag so record-level compatibility remains explicit after a
+    future schema bump. *)
+
 val execution_receipt_schema : string
 (** JSONL schema tag for execution receipt rows. *)
 

@@ -75,7 +75,9 @@ let terminal_reason_from_decision json =
         (json_string_opt_member "terminal_reason_code" json)
 
 let terminal_reason_from_receipt receipt =
-  let terminal_reason_code = json_string_opt_member "terminal_reason_code" receipt in
+  let terminal_disposition =
+    Keeper_execution_receipt.terminal_disposition_of_persisted_json receipt
+  in
   let operator_disposition_reason =
     json_string_opt_member "operator_disposition_reason" receipt
     |> Option.map String.lowercase_ascii
@@ -87,16 +89,19 @@ let terminal_reason_from_receipt receipt =
     | _, Some result -> Completion_contract_result.requires_attention result
     | _ -> false
   in
-  match terminal_reason_code with
-  | Some code when receipt_requires_tool_attention
-                   && Keeper_turn_disposition.is_success
-                        (Keeper_turn_disposition.of_wire code) ->
+  match terminal_disposition with
+  | Some disposition
+    when receipt_requires_tool_attention
+         && Keeper_turn_disposition.is_success disposition ->
       Some
         (Keeper_turn_terminal.of_disposition
            ~source:"execution_receipt"
            Keeper_turn_disposition.Completion_contract_unsatisfied)
-  | Some code ->
-      Some (Keeper_turn_terminal.of_code ~source:"execution_receipt" code)
+  | Some disposition ->
+      Some
+        (Keeper_turn_terminal.of_disposition
+           ~source:"execution_receipt"
+           disposition)
   | None when receipt_requires_tool_attention ->
       Some
         (Keeper_turn_terminal.of_disposition

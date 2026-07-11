@@ -245,6 +245,16 @@ type operator_disposition_kind =
 val operator_disposition_kind_to_string : operator_disposition_kind -> string
 val operator_disposition_kind_of_string : string -> operator_disposition_kind option
 
+val terminal_disposition_of_persisted_json :
+  Yojson.Safe.t -> Keeper_turn_disposition.t option
+(** Project a persisted receipt into the typed terminal-disposition SSOT.
+    Canonical terminal wires are parsed directly.  A v1 row whose terminal
+    wire is unknown is projected to [Success] only when the same record carries
+    both typed [Disp_pass] and terminal [`Ok] evidence.  This preserves already
+    persisted normal-completion rows without adding a global
+    ["completed" -> Success] string alias.  Missing or contradictory evidence
+    remains [Unknown] (or [None] when the terminal field is absent). *)
+
 (** Reason paired with [operator_disposition_kind]. Closed set; the wire
     form is byte-compatible with the pre-typing string. *)
 type operator_disposition_reason =

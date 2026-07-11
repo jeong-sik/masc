@@ -421,6 +421,53 @@ let test_passive_only_no_work_receipt_does_not_mark_attention () =
           | _ -> false))
 ;;
 
+let test_persisted_v1_completed_pass_receipt_uses_record_evidence () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       init_runtime_default_for_tests ();
+       let keeper_name = "runtime-trust-v1-completed-pass" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "schema", `String Masc.Keeper_types_support.execution_receipt_v1_schema
+             ; "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "outcome", `String "receipt_done"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "completed"
+             ; "completion_contract_result", `String "passive_only"
+             ; "current_task_id", `Null
+             ; "goal_ids", `List []
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       let terminal = snapshot |> member "latest_terminal_reason" in
+       Alcotest.(check bool)
+         "v1 record-level success does not require attention"
+         false
+         (snapshot |> member "needs_attention" |> to_bool);
+       Alcotest.(check string)
+         "v1 record-level evidence projects canonical success"
+         "success"
+         (terminal |> member "disposition" |> to_string);
+       Alcotest.(check string)
+         "v1 compatibility stays inside the execution receipt boundary"
+         "execution_receipt"
+         (terminal |> member "source" |> to_string))
+;;
+
 let test_passive_only_active_receipt_does_not_mark_attention () =
   Eio_main.run
   @@ fun env ->
@@ -820,6 +867,10 @@ let () =
             "passive-only no-work receipt does not mark attention"
             `Quick
             test_passive_only_no_work_receipt_does_not_mark_attention
+        ; Alcotest.test_case
+            "persisted v1 completed pass uses record evidence"
+            `Quick
+            test_persisted_v1_completed_pass_receipt_uses_record_evidence
         ; Alcotest.test_case
             "passive-only active receipt does not mark attention"
             `Quick

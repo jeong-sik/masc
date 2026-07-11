@@ -62,7 +62,7 @@ let launch_supervised_fiber_body
   let base_path = ctx.config.base_path in
   let keepers_dir = Workspace.keepers_runtime_dir ctx.config in
   if restart_launch_noop_enabled_for_test ()
-  then ()
+  then (* test no-op launch: nothing forked, but not a fork rejection *) Ok ()
   else (
     (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)

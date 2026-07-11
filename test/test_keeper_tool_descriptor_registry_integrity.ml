@@ -638,6 +638,7 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
 ;;
 
 let test_masc_board_registry_has_descriptor_projection () =
+  Board_tool_dispatch.register ();
   let wire_names =
     List.map Tool_name.Board_name.to_string Tool_name.Board_name.all
   in

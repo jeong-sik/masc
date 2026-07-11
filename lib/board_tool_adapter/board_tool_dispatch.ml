@@ -140,6 +140,7 @@ let register () =
       ~module_tag:Tool_dispatch.Mod_inline
       ~input_schema:s.input_schema
       ~handler_binding:(Shared handler)
+      ~visibility:(Tool_catalog.metadata s.name).visibility
       ~is_read_only:ro
       ~is_idempotent:ro
       ~is_destructive:(is_destructive_board_tool s.name)

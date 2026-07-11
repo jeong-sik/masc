@@ -125,7 +125,7 @@ let terminal = function
   | `Crashed detail -> Terminal_crashed detail
 ;;
 
-let run ~config ~(entry : Keeper_registry.registry_entry) ~request =
+let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
   let operation_id = Operation_id.generate () in
   match
     Keeper_turn_admission.begin_shutdown
@@ -185,62 +185,74 @@ let run ~config ~(entry : Keeper_registry.registry_entry) ~request =
           (match persist_result with
            | Error store_error ->
              Error (Prepare_persist_failed store_error)
-           | Ok () ->
-             Keeper_keepalive.request_entry_stop current;
-             let turn_cancel = Keeper_registry.interrupt_current_turn_exact current in
-             let turn_cancel_error =
-               match turn_disposition, turn_cancel with
-               | No_inflight_turn, Keeper_registry.Exact_no_turn_in_flight
-               | ( Inflight_effect_unknown _
-                 , Keeper_registry.Exact_turn_cancelled _ ) -> None
-               | No_inflight_turn, Keeper_registry.Exact_turn_cancelled _ ->
-                 Some "turn appeared after shutdown admission was fenced"
-               | Inflight_effect_unknown _, Keeper_registry.Exact_no_turn_in_flight -> None
-               | _, Keeper_registry.Exact_turn_cancel_failed { detail; _ } -> Some detail
-             in
-             (match turn_cancel_error with
-              | Some detail -> cancellation_error ~config operation Turn_cancel detail
-              | None ->
-                (match Keeper_lane.request_cancel current.lane with
-                 | Keeper_lane.Cancel_signal_failed exn ->
-                   cancellation_error
-                     ~config
-                     operation
-                     Lane_cancel
-                     (Printexc.to_string exn)
-                 | Keeper_lane.Cancel_requested
-                 | Keeper_lane.Cancel_already_requested
-                 | Keeper_lane.Cancel_already_exiting ->
-                   Keeper_turn_admission.await_idle_after_shutdown
-                     ~base_path:config.Workspace.base_path
-                     ~keeper_name:current.name;
-                   let lane_exit = Keeper_lane.await_exit current.lane in
-                   let terminal_result = Eio.Promise.await current.done_p in
-                   let evidence =
-                     { lane_outcome = lane_outcome lane_exit.outcome
-                     ; terminal = terminal terminal_result
-                     ; cleanup_error = lane_exit.cleanup_error
-                     }
-                   in
-                   let phase =
-                     match turn_disposition with
-                     | No_inflight_turn -> Joined_idle
-                     | Inflight_effect_unknown turn -> Reconciliation_required turn
-                   in
-                   let joined =
-                     { operation with
-                       join_evidence = Some evidence
-                     ; phase
-                     ; updated_at = Masc_domain.now_iso ()
-                     }
-                   in
-                   (match lane_exit.cleanup_error with
-                    | Some detail ->
-                      (match persist_blocked ~config joined Lane_join detail with
-                       | Ok blocked -> Error (Join_failed blocked)
-                       | Error error -> Error (Join_record_update_failed error))
-                    | None ->
-                      (match Keeper_shutdown_store.replace ~config joined with
-                       | Ok () -> Ok joined
-                       | Error error -> Error (Join_record_update_failed error)))))))))
+           | Ok () -> Ok operation))))
+;;
+
+let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
+  match current_entry ~config entry with
+  | Error error -> Error error
+  | Ok current
+    when not
+           (Keeper_lane.Id.equal
+              (Keeper_lane.id current.lane)
+              operation.lane_id) -> Error Registry_lane_replaced
+  | Ok current ->
+    Keeper_keepalive.request_entry_stop current;
+    let turn_cancel = Keeper_registry.interrupt_current_turn_exact current in
+    let turn_cancel_error =
+      match operation.turn_disposition, turn_cancel with
+      | No_inflight_turn, Keeper_registry.Exact_no_turn_in_flight
+      | Inflight_effect_unknown _, Keeper_registry.Exact_turn_cancelled _ -> None
+      | No_inflight_turn, Keeper_registry.Exact_turn_cancelled _ ->
+        Some "turn appeared after shutdown admission was fenced"
+      | Inflight_effect_unknown _, Keeper_registry.Exact_no_turn_in_flight -> None
+      | _, Keeper_registry.Exact_turn_cancel_failed { detail; _ } -> Some detail
+    in
+    (match turn_cancel_error with
+     | Some detail -> cancellation_error ~config operation Turn_cancel detail
+     | None ->
+       (match Keeper_lane.request_cancel current.lane with
+        | Keeper_lane.Cancel_signal_failed exn ->
+          cancellation_error ~config operation Lane_cancel (Printexc.to_string exn)
+        | Keeper_lane.Cancel_requested
+        | Keeper_lane.Cancel_already_requested
+        | Keeper_lane.Cancel_already_exiting ->
+          Keeper_turn_admission.await_idle_after_shutdown
+            ~base_path:config.Workspace.base_path
+            ~keeper_name:current.name;
+          let lane_exit = Keeper_lane.await_exit current.lane in
+          let terminal_result = Eio.Promise.await current.done_p in
+          let evidence =
+            { lane_outcome = lane_outcome lane_exit.outcome
+            ; terminal = terminal terminal_result
+            ; cleanup_error = lane_exit.cleanup_error
+            }
+          in
+          let phase =
+            match operation.turn_disposition with
+            | No_inflight_turn -> Joined_idle
+            | Inflight_effect_unknown turn -> Reconciliation_required turn
+          in
+          let joined =
+            { operation with
+              join_evidence = Some evidence
+            ; phase
+            ; updated_at = Masc_domain.now_iso ()
+            }
+          in
+          (match lane_exit.cleanup_error with
+           | Some detail ->
+             (match persist_blocked ~config joined Lane_join detail with
+              | Ok blocked -> Error (Join_failed blocked)
+              | Error error -> Error (Join_record_update_failed error))
+           | None ->
+             (match Keeper_shutdown_store.replace ~config joined with
+              | Ok () -> Ok joined
+              | Error error -> Error (Join_record_update_failed error)))))
+;;
+
+let run ~config ~entry ~request =
+  match prepare ~config ~entry ~request with
+  | Error _ as error -> error
+  | Ok operation -> join_prepared ~config ~entry ~operation
 ;;

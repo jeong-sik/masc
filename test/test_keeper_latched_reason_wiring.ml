@@ -6,7 +6,7 @@
     Sites under test:
     - gRPC pause directive ([Keeper_keepalive.process_directive "pause"]
       -> [directive_paused_meta]) -> [Operator_paused {grpc_directive}]
-    - keeper_down retain ([Keeper_turn_lifecycle.handle_keeper_down_config],
+    - keeper_down retain ([Keeper_shutdown_finalize.For_testing.paused_meta],
       remove_meta=false) -> [Operator_paused {keeper_down}]
     - dead-tombstone cleanup
       ([Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone])
@@ -187,44 +187,16 @@ let test_grpc_pause_directive_records_reason () =
 (* ── Site 2: keeper_down retain (remove_meta=false) ─────────── *)
 
 let test_keeper_down_retain_records_reason () =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_path = Masc_test_deps.setup_test_workspace () in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.clear ();
-      Masc_test_deps.cleanup_test_workspace base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       (* Avoid a leading "keeper-" — identity resolution strips that prefix
-          and the write/read names would diverge. *)
-       let keeper_name = "downretain-owner" in
-       let meta = make_meta keeper_name in
-       Keeper_registry.clear ();
-       (match Keeper_meta_store.write_meta config meta with
-        | Ok () -> ()
-        | Error err -> failf "seed meta write: %s" err);
-       ignore (Keeper_registry.register ~base_path:config.base_path keeper_name meta);
-       let args =
-         `Assoc
-           [ "name", `String keeper_name
-           ; "remove_meta", `Bool false
-           ; "remove_session", `Bool false
-           ]
-       in
-       let _result = Keeper_turn_lifecycle.handle_keeper_down_config ~config args in
-       match Keeper_meta_store.read_meta config keeper_name with
-       | Ok (Some persisted) ->
-         check bool "keeper_down retain pauses keeper" true persisted.paused;
-         check
-           (option string)
-           "keeper_down retain records keeper_down operator pause"
-           (Some wire_keeper_down)
-           (latched_reason_wire persisted)
-       | Ok None -> fail "expected retained keeper meta on disk"
-       | Error err -> failf "read persisted meta: %s" err)
+  let retained =
+    Masc.Keeper_shutdown_finalize.For_testing.paused_meta
+      (make_meta "downretain-owner")
+  in
+  check bool "keeper_down retain pauses keeper" true retained.paused;
+  check
+    (option string)
+    "keeper_down retain records keeper_down operator pause"
+    (Some wire_keeper_down)
+    (latched_reason_wire retained)
 
 (* ── Site 1: dead-tombstone cleanup ─────────────────────────── *)
 

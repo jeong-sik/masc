@@ -848,6 +848,37 @@ let start_keeper_loops
       let config = (Mcp_server.workspace_config state) in
       let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
+      let shutdown_recovery = Keeper_shutdown_runtime.recover_at_boot ~config in
+      List.iter
+        (function
+          | Ok operation ->
+            Log.Keeper.info
+              "autoboot: recovered shutdown operation keeper=%s operation=%s"
+              operation.Keeper_shutdown_types.keeper_name
+              (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+          | Error detail ->
+            Log.Keeper.error "autoboot: shutdown recovery failed: %s" detail)
+        shutdown_recovery;
+      let shutdown_blocked_names =
+        match Keeper_shutdown_store.list_all ~config with
+        | Error error ->
+          Log.Keeper.error
+            "autoboot: shutdown operation inventory failed: %s"
+            (Keeper_shutdown_store.error_to_string error);
+          []
+        | Ok operations ->
+          operations
+          |> List.filter_map (fun operation ->
+            match operation.Keeper_shutdown_types.phase with
+            | Keeper_shutdown_types.Finalized _ -> None
+            | Keeper_shutdown_types.Prepared
+            | Keeper_shutdown_types.Joined_idle
+            | Keeper_shutdown_types.Finalizing_tasks _
+            | Keeper_shutdown_types.Cleanup_ready _
+            | Keeper_shutdown_types.Reconciliation_required _
+            | Keeper_shutdown_types.Blocked _ -> Some operation.keeper_name)
+          |> List.sort_uniq String.compare
+      in
       let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in
       Log.Keeper.info
@@ -856,7 +887,10 @@ let start_keeper_loops
         masc_root
         keeper_dir
         all_count;
-      let names = Keeper_runtime.bootable_keeper_names config in
+      let names =
+        Keeper_runtime.bootable_keeper_names config
+        |> List.filter (fun name -> not (List.mem name shutdown_blocked_names))
+      in
       let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
       let keeper_boot_ctx : _ Keeper_types_profile.context =
         { config

@@ -23,3 +23,21 @@ val run :
   entry:Keeper_registry.registry_entry ->
   request:request ->
   (Keeper_shutdown_types.t, error) result
+
+(** Persist the shutdown admission fence and ownership snapshot without
+    waiting for the current turn or lane. Once this returns [Ok], the durable
+    operation owns admission and must be joined or recovered. *)
+val prepare :
+  config:Workspace.config ->
+  entry:Keeper_registry.registry_entry ->
+  request:request ->
+  (Keeper_shutdown_types.t, error) result
+
+(** Cancel and join the exact lane captured by [prepare]. Never call this
+    from that Keeper's admitted turn; lifecycle tools fork it on the server
+    switch after returning the accepted operation id. *)
+val join_prepared :
+  config:Workspace.config ->
+  entry:Keeper_registry.registry_entry ->
+  operation:Keeper_shutdown_types.t ->
+  (Keeper_shutdown_types.t, error) result

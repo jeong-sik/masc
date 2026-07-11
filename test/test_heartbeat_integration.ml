@@ -28,6 +28,7 @@ module Lane = Masc.Keeper_lane
 module Shutdown_types = Masc.Keeper_shutdown_types
 module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_prepare_join = Masc.Keeper_shutdown_prepare_join
+module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -865,7 +866,10 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
       (match operation.phase with
        | Shutdown_types.Joined_idle -> ()
        | Shutdown_types.Prepared
+       | Shutdown_types.Finalizing_tasks _
+       | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
+       | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _ -> fail "idle lane did not reach Joined_idle");
       check bool
         "shutdown operation records lane join evidence"
@@ -927,6 +931,68 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
       with
       | `Ran () -> ()
       | `Busy _ -> fail "failed shutdown prepare left the keeper admission fence closed")
+
+let test_keeper_shutdown_finalizes_idle_operation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-finalize" in
+  Fun.protect
+    ~finally:(fun () ->
+      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
+      Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      let meta = make_meta "shutdown-finalize-keeper" in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      Shutdown_finalize.register_remove_pending_confirms_by_target
+        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_id = Lane.id (Lane.create ())
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "operator"
+        ; cleanup_intent = { remove_meta = false; remove_session = false }
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase = Shutdown_types.Joined_idle
+        ; created_at = Masc_domain.now_iso ()
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let finalized =
+        match Shutdown_finalize.run ~config ~entry:None operation with
+        | Ok finalized -> finalized
+        | Error error -> fail (Shutdown_finalize.error_to_string error)
+      in
+      (match finalized.phase with
+       | Shutdown_types.Finalized evidence ->
+         check int "no pending confirms" 0 evidence.cleanup.pending_confirms_removed
+       | Shutdown_types.Prepared
+       | Shutdown_types.Joined_idle
+       | Shutdown_types.Finalizing_tasks _
+       | Shutdown_types.Cleanup_ready _
+       | Shutdown_types.Reconciliation_required _
+       | Shutdown_types.Blocked _ -> fail "shutdown did not reach Finalized");
+      match Keeper_meta_store.read_meta config meta.name with
+      | Ok (Some retained) ->
+        check bool "retained Keeper is paused" true retained.paused;
+        check bool "retained Keeper task binding is cleared" true
+          (Option.is_none retained.current_task_id)
+      | Ok None -> fail "retained Keeper metadata disappeared"
+      | Error detail -> fail detail)
 
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
@@ -1353,6 +1419,8 @@ let () =
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown prepare failure rolls back admission fence" `Quick
         test_keeper_shutdown_prepare_failure_rolls_back_fence;
+      test_case "shutdown finalizes idle operation" `Quick
+        test_keeper_shutdown_finalizes_idle_operation;
       test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick

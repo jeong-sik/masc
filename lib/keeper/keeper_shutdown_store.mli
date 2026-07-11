@@ -39,3 +39,7 @@ val list_for_keeper :
   config:Workspace.config ->
   keeper_name:string ->
   (Keeper_shutdown_types.t list, error) result
+
+val list_all :
+  config:Workspace.config ->
+  (Keeper_shutdown_types.t list, error) result

@@ -372,6 +372,7 @@ let task_assignee_of_status = function
   | Claimed { assignee; _ } -> Some assignee
   | InProgress { assignee; _ } -> Some assignee
   | AwaitingVerification { assignee; _ } -> Some assignee
+  | OperatorBlocked { assignee; _ } -> Some assignee
   | Todo | Done _ | Cancelled _ -> None
 
 (** Terminal states: [Done] or [Cancelled]. No further transitions possible.

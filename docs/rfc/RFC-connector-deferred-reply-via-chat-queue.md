@@ -227,6 +227,12 @@ row is retained for diagnosis but the receipt terminates as typed
 emits `Delivered` without one. If a legacy or corrupt snapshot still projects a
 `Delivered` receipt without a nonblank key, the Dashboard surfaces a correlation
 invariant error and stops terminal-convergence retries for that receipt.
+The queue consumer repeats this invariant at its final typed boundary:
+`Delivered` carries a required canonical `turn_ref` string, and an invalid value
+is finalized as `Internal_error`, never as `Delivered` with a missing key. A
+`Failed` outcome may omit correlation, but a supplied value must be the same
+canonical key; invalid values are omitted with explicit failure detail rather
+than sanitized into a different identity.
 
 ### 6.2 Authoritative queue projection
 

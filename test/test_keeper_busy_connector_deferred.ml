@@ -42,6 +42,19 @@ let with_busy_slot ~base ~sw f =
   Eio.Promise.resolve set_release ();
   result
 
+let with_unpublished_busy_slot ~base ~sw f =
+  let started, set_started = Eio.Promise.create () in
+  let release, set_release = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Keeper_turn_admission.For_testing.with_unpublished_turn_lock
+      ~base_path:base ~keeper_name (fun () ->
+        Eio.Promise.resolve set_started ();
+        Eio.Promise.await release));
+  Eio.Promise.await started;
+  let result = f () in
+  Eio.Promise.resolve set_release ();
+  result
+
 let count_user_lines ~base =
   (* The gate inbound boundary records the connector user line as a pending
      (assistant-less) row. Count those rows for the keeper to assert exactly-once
@@ -161,6 +174,52 @@ let test_busy_discord_enqueues () =
            turn has not been drained. *)
         check "gate inbound recorded the connector user line exactly once"
           (count_user_lines ~base = 1)))
+
+let test_unpublished_busy_slot_queues_without_resolved_meta () =
+  Printf.printf
+    "Test: unresolved-meta Gate queues during the lock-before-in-flight window\n%!";
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-unpublished-conn-%d-%d" (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock = Eio.Stdenv.clock env in
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:(Some keeper_name));
+      Keeper_turn_admission.For_testing.reset ();
+      configure_queue ~base;
+      Eio.Switch.run (fun sw ->
+        Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
+        let reply =
+          with_unpublished_busy_slot ~base ~sw (fun () ->
+            check "raw lock has no published in-flight metadata"
+              (Keeper_turn_admission.in_flight ~base_path:base ~keeper_name = None);
+            Gate_keeper_backend.dispatch
+              ~connector_kind:Gate_keeper_backend.Discord
+              ~sw ~clock ~proc_mgr:None ~net:None ~config
+              ~channel:"discord" ~channel_user_id:"user-unpublished"
+              ~channel_user_name:"Tester" ~channel_workspace_id:"chan-unpublished"
+              ~keeper_name ~idempotency_key:"discord-msg-unpublished"
+              ~metadata:[] ~content:"queue me during admission")
+        in
+        (match reply with
+         | Gate_protocol.Reply { message_request = Some request; _ } ->
+           check "unpublished busy slot returns a queued ACK"
+             (request.status = Gate_protocol.Queued)
+         | Gate_protocol.Reply { message_request = None; _ }
+         | Gate_protocol.Keeper_error_result _
+         | Gate_protocol.Unavailable_result ->
+           check "unpublished busy slot returns a queued ACK" false);
+        let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+        check "unpublished busy slot durably preserves the connector message"
+          (List.length snapshot.pending = 1 && snapshot.inflight = [])))
 
 let test_busy_discord_persist_failure_is_explicit () =
   Printf.printf
@@ -311,6 +370,7 @@ let test_busy_slack_preserves_thread_context () =
 
 let () =
   test_busy_discord_enqueues ();
+  test_unpublished_busy_slot_queues_without_resolved_meta ();
   test_busy_discord_persist_failure_is_explicit ();
   test_pending_receipt_prevents_direct_overtake ();
   test_busy_slack_preserves_thread_context ();

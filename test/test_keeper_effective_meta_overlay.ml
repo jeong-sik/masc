@@ -630,9 +630,15 @@ let test_status_surfaces_chat_queue_runtime () =
       Masc.Keeper_chat_queue.For_testing.reset ();
       Eio_guard.disable ())
     (fun () ->
-      Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path;
-      ignore
-        (Masc.Keeper_chat_queue.enqueue
+      let report =
+        Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path
+      in
+      Alcotest.(check int)
+        "queue persistence config has no load errors"
+        0
+        (List.length report.load_errors);
+      (match
+         Masc.Keeper_chat_queue.enqueue
            ~keeper_name:name
            {
              Masc.Keeper_chat_queue.content = "queued status probe";
@@ -641,7 +647,11 @@ let test_status_surfaces_chat_queue_runtime () =
              timestamp = 1.0;
              source = Masc.Keeper_chat_queue.Dashboard;
            }
-          : string);
+       with
+       | Ok _receipt -> ()
+       | Error err ->
+           Alcotest.failf "queue enqueue failed: %s"
+             (Masc.Keeper_chat_queue.mutation_error_to_string err));
       let status_json = status_json_with ~name config in
       let chat_queue = json_assoc_field "chat_queue" status_json in
       Alcotest.(check (option int))

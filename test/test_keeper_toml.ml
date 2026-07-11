@@ -1298,6 +1298,7 @@ let test_oas_env_parses_allowed_keys () =
   let input = {|
 [keeper]
 persona_name = "analyst"
+tool_access = ["masc_board_list"]
 [keeper.oas_env]
 OAS_DEFAULT_MODEL = "provider-a/fast"
 OAS_MAX_TOKENS_DEFAULT = 16384
@@ -1309,6 +1310,8 @@ MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
+      check (option (list string)) "tool access survives max_tokens validation"
+        (Some [ "masc_board_list" ]) d.tool_access;
       check int "oas_env count" 3 (List.length d.oas_env);
       check string "default model value"
         "provider-a/fast" (List.assoc "OAS_DEFAULT_MODEL" d.oas_env);

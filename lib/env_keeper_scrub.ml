@@ -3,15 +3,15 @@
     Default-deny (allowlist) model: only explicitly permitted env vars cross
     the keeper subprocess boundary. This eliminates the infinite-product-type
     problem of maintaining an exhaustive denylist — new secrets are blocked by
-    default, and operators can extend the allowlist via
-    [MASC_KEEPER_ALLOW_EXTRA].
+    default. Credentials enter through [Keeper_secret_projection], never an
+    ambient-environment escape hatch.
 
     Keeper GitHub execution must use the selected MASC credential bundle,
     never the operator's ambient GitHub token/config or SSH agent. *)
 
-(** Exact-match allowlist — env vars that are known-safe and required for
-    keeper / docker CLI / tool execution. *)
-let allow_exact : string list =
+(** Exact-match allowlist for a local Keeper process. Docker daemon control
+    variables are deliberately absent from this boundary. *)
+let keeper_allow_exact : string list =
   [
     (* Process basics *)
     "PATH"; "HOME"; "TMPDIR"; "TMP"; "TEMP"
@@ -21,9 +21,6 @@ let allow_exact : string list =
   ; "XDG_CONFIG_HOME"; "XDG_CACHE_HOME"; "XDG_DATA_HOME"
   ; "OCAMLRUNPARAM"
   ; "OPAMROOT"; "OPAM_SWITCH_PREFIX"
-
-    (* Docker CLI remote daemon connectivity *)
-  ; "DOCKER_HOST"; "DOCKER_TLS_VERIFY"; "DOCKER_CERT_PATH"
 
     (* Corporate proxy / certificate — required in restricted network
        environments. Values are not credentials by themselves. *)
@@ -53,24 +50,18 @@ let allow_exact : string list =
   ; "MASC_TELEMETRY_ENABLED"; "MASC_PARSE_WARN"; "MASC_GOVERNANCE_LEVEL"
   ; "MASC_GIT_FETCH_TIMEOUT_SEC"
   ; "MASC_DATA_DIR"; "MASC_PERSONAS_DIR"
-  ; "MASC_SECRET_DIR"
-  ; "MASC_KEEPER_SCRUB_EXTRA"
-  ; "MASC_TEST_FAKE_DOCKER_PATH"
   ]
 
-(** Prefix allowlist — env families that are safe to pass through.
-    [MASC_KEEPER_] covers runtime knobs (timeouts, thresholds, flags).
-    [LC_] covers locale. *)
-let allow_prefixes : string list =
-  [ "LC_"
-  ; "MASC_KEEPER_"
-  ; "MASC_LOG_"
-  ; "MASC_TELEMETRY_"
-  ; "MASC_GIT_"
-  ; "MASC_ORCHESTRATOR_"
-  ; "MASC_WS_"
-  ; "MASC_WEBRTC_"
+(** Exact additions used only by the Docker control-plane subprocess. They
+    must never enter a local Keeper command environment. *)
+let control_plane_allow_exact =
+  [ "DOCKER_HOST"; "DOCKER_TLS_VERIFY"; "DOCKER_CERT_PATH"
+  ; "MASC_KEEPER_TEST_DOCKER_LOG"
   ]
+
+(** Locale categories are the only open prefix family. Runtime configuration
+    families are resolved by the parent process and are not re-exported. *)
+let common_allow_prefixes : string list = [ "LC_" ]
 
 (** Prefix denials — even under the [MASC_] family, these carry host-server
     tokens and must never reach a keeper subprocess or container. *)
@@ -82,23 +73,16 @@ let deny_prefixes : string list =
 let deny_suffixes : string list =
   [ "_API_KEY"; "_TOKEN"; "_SECRET"; "_PASSWORD"; "_CREDENTIALS" ]
 
-let extra_allow_keys () =
-  match Sys.getenv_opt "MASC_KEEPER_ALLOW_EXTRA" with
-  | None -> []
-  | Some raw ->
-    String.split_on_char ',' raw
-    |> List.map String.trim
-    |> List.filter (fun s -> s <> "")
-
-let allow_exact_table =
-  let t = Hashtbl.create (List.length allow_exact) in
-  List.iter (fun k -> Hashtbl.replace t k ()) allow_exact;
+let table_of_keys keys =
+  let t = Hashtbl.create (List.length keys) in
+  List.iter (fun key -> Hashtbl.replace t key ()) keys;
   t
 
-let is_allowed_exact key = Hashtbl.mem allow_exact_table key
+let keeper_allow_exact_table = table_of_keys keeper_allow_exact
+let control_plane_allow_exact_table = table_of_keys control_plane_allow_exact
 
-let is_allowed_prefix key =
-  List.exists (fun prefix -> String.starts_with ~prefix key) allow_prefixes
+let is_allowed_common_prefix key =
+  List.exists (fun prefix -> String.starts_with ~prefix key) common_allow_prefixes
 
 let is_denied_prefix key =
   List.exists (fun prefix -> String.starts_with ~prefix key) deny_prefixes
@@ -106,10 +90,16 @@ let is_denied_prefix key =
 let is_denied_suffix key =
   List.exists (fun suffix -> String.ends_with ~suffix key) deny_suffixes
 
-let is_allowed key =
-  (is_allowed_exact key
-   || is_allowed_prefix key
-   || List.mem key (extra_allow_keys ()))
+let allowed_by_table table key =
+  (Hashtbl.mem table key || is_allowed_common_prefix key)
+  && not (is_denied_prefix key || is_denied_suffix key)
+
+let is_keeper_process_allowed key =
+  allowed_by_table keeper_allow_exact_table key
+
+let is_control_plane_allowed key =
+  (is_keeper_process_allowed key
+   || Hashtbl.mem control_plane_allow_exact_table key)
   && not (is_denied_prefix key || is_denied_suffix key)
 
 let key_of_entry entry =
@@ -172,11 +162,17 @@ let scrub_entry entry =
   else entry
 ;;
 
-let filter_environment existing =
+let filter_environment ~is_allowed existing =
   Array.to_list existing
   |> List.filter (fun e -> is_allowed (key_of_entry e))
   |> List.map scrub_entry
   |> Array.of_list
+
+let filter_keeper_environment existing =
+  filter_environment ~is_allowed:is_keeper_process_allowed existing
+
+let filter_control_plane_environment existing =
+  filter_environment ~is_allowed:is_control_plane_allowed existing
 
 (* Force a deterministic system-message locale on top of the scrubbed
    env. libc's [strerror] is translated by [LC_MESSAGES]; on a non-C host
@@ -191,9 +187,9 @@ let filter_environment existing =
    categories to [LANG] / [LC_CTYPE]. *)
 let lc_messages_pin = [ "LC_ALL="; "LC_MESSAGES=C" ]
 
-let filter_environment_c_messages existing =
+let filter_control_plane_environment_c_messages existing =
   let scrubbed =
-    filter_environment existing
+    filter_control_plane_environment existing
     |> Array.to_list
     |> List.filter (fun e ->
       match key_of_entry e with

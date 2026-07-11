@@ -158,31 +158,6 @@ let masc_cleanup_zombies_spec : tool_spec =
   }
 ;;
 
-let masc_pause_spec : tool_spec =
-  { name = "masc_pause"
-  ; description =
-      "Pause the workspace until an operator resumes it. Existing state is preserved."
-  ; parameters =
-      [ { p_name = "reason"
-        ; p_type = T_string { enum = None; default = Some "Manual pause" }
-        ; p_description = "Operator-visible reason for pausing the workspace"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_resume_spec : tool_spec =
-  { name = "masc_resume"
-  ; description = "Resume a workspace that was paused by an operator."
-  ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 (* === PR-2: plan group (8 tools) === *)
 
 let masc_plan_init_spec : tool_spec =
@@ -556,7 +531,7 @@ let format_behavior_contract = function
     "\n\nUsage rules:\n" ^ String.concat "\n" bullets
 ;;
 
-let emit_tool_schema_record buf spec =
+let emit_tool_schema buf spec =
   Buffer.add_string buf "  {\n";
   buf_addf buf "    name = %S;\n" spec.name;
   buf_addf
@@ -574,18 +549,7 @@ let emit_tool_schema_record buf spec =
   emit_required buf spec.parameters;
   buf_addf buf "      (\"additionalProperties\", `Bool %b);\n" spec.additional_properties;
   Buffer.add_string buf "    ];\n";
-  Buffer.add_string buf "  }"
-;;
-
-let emit_tool_schema buf spec =
-  emit_tool_schema_record buf spec;
-  Buffer.add_string buf ";\n"
-;;
-
-let emit_named_tool_schema buf binding spec =
-  buf_addf buf "let %s : tool_schema =\n" binding;
-  emit_tool_schema_record buf spec;
-  Buffer.add_string buf "\n;;\n\n"
+  Buffer.add_string buf "  };\n"
 ;;
 
 let emit_schemas_list buf specs =
@@ -599,8 +563,6 @@ let emit_schemas_list buf specs =
 let () =
   let buf = Buffer.create 4096 in
   emit_header buf;
-  emit_named_tool_schema buf "masc_pause_schema" masc_pause_spec;
-  emit_named_tool_schema buf "masc_resume_schema" masc_resume_spec;
   emit_schemas_list buf phase6_specs;
   print_string (Buffer.contents buf)
 ;;

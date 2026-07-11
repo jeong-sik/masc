@@ -139,7 +139,7 @@ docker run -d                              # detached
   --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m
   --cap-drop=ALL --security-opt no-new-privileges
   --pids-limit <cfg>  --memory <cfg>
-  --network <inherit|host|none>
+  --network <host|none>
   -v /Users/dancer/me/.masc/playground/docker/<keeper>:/home/keeper/...:rw
   -v <credential mounts>:ro
   <image> sleep infinity

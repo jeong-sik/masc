@@ -78,7 +78,6 @@ type runtime_handler =
   | Tool_masc_agent_dispatch
   | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
-  | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
@@ -210,7 +209,6 @@ let runtime_handler_to_string = function
   | Tool_masc_agent_dispatch -> "tool_masc_agent_dispatch"
   | Tool_masc_workspace_dispatch -> "tool_masc_workspace_dispatch"
   | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
-  | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
@@ -234,7 +232,6 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_masc_run_dispatch
   | Tool_masc_agent_dispatch
   | Tool_masc_workspace_dispatch
-  | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
@@ -978,8 +975,7 @@ let find_cluster_schema_opt name =
      keeper taskboard wrappers first, then typed board wrappers, voice,
      the generated misc registry, then public masc_* aggregates.
      The namespaces are expected to be disjoint; this order is not a conflict
-     resolver. Control descriptors use their dedicated typed schema projection
-     and do not enter this name-based lookup. *)
+     resolver. *)
   match find_taskboard_schema_opt name with
   | Some _ as schema -> schema
   | None ->
@@ -1503,7 +1499,7 @@ let masc_workspace_maintenance_descriptor id name description ~readonly =
 ;;
 
 (* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
-   misc / control / agent_timeline / local_runtime). *)
+   misc / agent_timeline / local_runtime). *)
 let masc_misc_descriptor id name description ~readonly =
   cluster_descriptor
     ~keeper_model_projection:Internal_name
@@ -1512,22 +1508,6 @@ let masc_misc_descriptor id name description ~readonly =
     ~description
     ~handler:Tool_masc_misc_dispatch
     ~readonly
-    ~inline_safe:false
-    ~maintenance_only:false
-    ()
-;;
-
-let masc_control_descriptor operation =
-  let schema = Tool_schemas_misc.control_schema operation in
-  cluster_descriptor_with_schema_source
-    ~keeper_model_projection:Dispatch_only
-    ~input_schema_source:Canonical_registry
-    ~input_schema:schema.input_schema
-    ~id:("masc.control." ^ Tool_schemas_misc.control_operation_id operation)
-    ~name:schema.name
-    ~description:schema.description
-    ~handler:Tool_masc_control_dispatch
-    ~readonly:false
     ~inline_safe:false
     ~maintenance_only:false
     ()
@@ -1562,8 +1542,8 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
     ()
 ;;
 
-let masc_keeper_descriptor ?(polling_read = false)
-      ?(keeper_model_projection = Internal_name) id name description ~readonly =
+let masc_keeper_descriptor ?(polling_read = false) ~keeper_model_projection
+      id name description ~readonly =
   cluster_descriptor
     ~polling_read
     ~keeper_model_projection
@@ -2072,9 +2052,6 @@ let internal_descriptors : t list =
      MASC-owned web descriptors above. Do not add
      duplicate internal descriptors here; that would make runtime receipt
      projection depend on list order. *)
-  (* ── RFC-0182 §3.1 — masc_control_* cluster (2 entries) ──────── *)
-  ; masc_control_descriptor Tool_schemas_misc.Pause
-  ; masc_control_descriptor Tool_schemas_misc.Resume
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
   ; masc_agent_timeline_descriptor "masc_agent_timeline"
       "Read agent timeline events." ~readonly:true
@@ -2083,43 +2060,52 @@ let internal_descriptors : t list =
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
-    masc_keeper_descriptor "list" "masc_keeper_list"
+    masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      "list" "masc_keeper_list"
       "List configured keepers with optional detailed metadata." ~readonly:true
-  ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      "msg_result" "masc_keeper_msg_result"
       "Poll an async keeper_msg dispatch by request_id." ~readonly:true
       ~polling_read:true
-  ; masc_keeper_descriptor "msg_cancel" "masc_keeper_msg_cancel"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      "msg_cancel" "masc_keeper_msg_cancel"
       "Cancel a running async keeper_msg turn by request_id." ~readonly:false
-  ; masc_keeper_descriptor "msg_queue" "masc_keeper_msg_queue"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      "msg_queue" "masc_keeper_msg_queue"
       "List all pending/running async keeper_msg requests, optionally filtered by keeper_name." ~readonly:true
-  ; masc_keeper_descriptor "compact" "masc_keeper_compact"
+  ; masc_keeper_descriptor ~keeper_model_projection:Dispatch_only
+      "compact" "masc_keeper_compact"
       "Run operator-requested context compaction on a keeper." ~readonly:false
-  ; masc_keeper_descriptor "clear" "masc_keeper_clear"
+  ; masc_keeper_descriptor ~keeper_model_projection:Dispatch_only
+      "clear" "masc_keeper_clear"
       "Last-resort context clear (drops conversation, requires reason)." ~readonly:false
-  ; masc_keeper_descriptor
-      ~keeper_model_projection:Dispatch_only
-      "sandbox_start"
-      "masc_keeper_sandbox_start"
-      "Start the managed sandbox container for a keeper." ~readonly:false
   ; masc_keeper_descriptor
       ~keeper_model_projection:Dispatch_only
       "sandbox_stop"
       "masc_keeper_sandbox_stop"
-      "Stop the managed sandbox container(s) for a keeper or fleet." ~readonly:false
-  ; masc_keeper_descriptor "reset" "masc_keeper_reset"
+      "Stop active turn or one-shot sandbox containers for a keeper or fleet."
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Dispatch_only
+      "reset" "masc_keeper_reset"
       "Reset a keeper's runtime state (usage counters, last_model_used)." ~readonly:false
-  ; masc_keeper_descriptor "persona_audit" "masc_keeper_persona_audit"
+  ; masc_keeper_descriptor ~keeper_model_projection:Dispatch_only
+      "persona_audit" "masc_keeper_persona_audit"
       "Audit configured keepers vs personas." ~readonly:true
-  ; masc_keeper_descriptor "status" "masc_keeper_status"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      "status" "masc_keeper_status"
       "Detailed single-keeper status (defaults to self when name is empty)." ~readonly:true
-  ; masc_keeper_descriptor "adversarial_review" "masc_keeper_adversarial_review"
+  ; masc_keeper_descriptor ~keeper_model_projection:Dispatch_only
+      "adversarial_review" "masc_keeper_adversarial_review"
       "Run fresh-context structural adversarial review on a diff or changed file." ~readonly:true
-  ; masc_keeper_descriptor "down" "masc_keeper_down"
+  ; masc_keeper_descriptor ~keeper_model_projection:Dispatch_only
+      "down" "masc_keeper_down"
       "Stop keeper keepalive, optionally remove meta and session directory." ~readonly:false
   (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools (require sw + clock). *)
-  ; masc_keeper_descriptor "msg" "masc_keeper_msg"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      "msg" "masc_keeper_msg"
       "Submit an async keeper turn (returns request_id for keeper_msg_result polling)." ~readonly:false
-  ; masc_keeper_descriptor "up" "masc_keeper_up"
+  ; masc_keeper_descriptor ~keeper_model_projection:Dispatch_only
+      "up" "masc_keeper_up"
       "Bring a keeper online (create new or update existing)." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_surface_audit singleton ────────────── *)
   ; let schema = Tool_schemas_misc.surface_audit_schema ~remote:false in

@@ -358,7 +358,7 @@ let test_should_cleanup_dead_true () =
         ("trace_id", `String "trace-dead1");
         ("goal", `String "goal");
         ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
+        ("network_mode", `String "host");
         ("tool_access", `List []);
       ] in
       match Keeper_meta_json_parse.meta_of_json json with
@@ -379,7 +379,7 @@ let test_should_cleanup_dead_false_when_recent () =
         ("trace_id", `String "trace-dead2");
         ("goal", `String "goal");
         ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
+        ("network_mode", `String "host");
         ("tool_access", `List []);
       ] in
       match Keeper_meta_json_parse.meta_of_json json with
@@ -468,7 +468,7 @@ let make_meta name =
     ("trace_id", `String ("trace-" ^ name));
     ("goal", `String "test");
     ("sandbox_profile", `String "local");
-    ("network_mode", `String "inherit");
+    ("network_mode", `String "host");
     ("tool_access", `List []);
   ] in
   match Keeper_meta_json_parse.meta_of_json json with

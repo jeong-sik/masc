@@ -10,14 +10,17 @@ type github_app_token_minter =
   now:int ->
   (string, string) result
 
-type secret_root_info =
-  { root : string
-  ; source : string
-  }
-
 type secret_scope =
   | Shared_secret
   | Keeper_secret
+
+type secret_root_info =
+  { root : string
+  ; source : string
+  ; scope : secret_scope
+  }
+
+val secret_scope_to_string : secret_scope -> string
 
 val secret_root_info : base_path:string -> keeper_name:string -> secret_root_info
 
@@ -26,7 +29,9 @@ val secret_root : base_path:string -> keeper_name:string -> string
 val secret_roots : base_path:string -> keeper_name:string -> secret_root_info list
 (** Effective secret roots in projection order. The workspace-level
     [secrets/base] root is loaded first and [secrets/<keeper>] overlays it.
-    For the literal [base] keeper, the root is returned once. *)
+    For the literal [base] keeper, the root is returned once. Both roots are
+    always resolved below the supplied BasePath; there is no environment
+    override. *)
 
 val local_env_for_keeper :
   ?mint_github_app_token:github_app_token_minter ->
@@ -43,13 +48,15 @@ val local_env_for_keeper :
     are validated and env entries are overlaid without writing temp files. If
     the effective env provides [GH_TOKEN] or [GITHUB_TOKEN] and does not
     provide [GIT_CONFIG_GLOBAL], local execution writes a per-keeper gitconfig
-    under the keeper playground that points git-over-HTTPS at
+    below the BasePath-owned managed HOME that points git-over-HTTPS at
     [gh auth git-credential]. If the effective env configures GitHub App
     issuance via [MASC_GITHUB_APP_ID]/[MASC_GITHUB_APP_INSTALLATION_ID],
     missing config, unreadable PEM material, or mint failure is returned as an
-    error instead of falling back to a broader static token. If the keeper does
-    not supply [GH_CONFIG_DIR], local execution points [gh] at an empty system
-    config directory when available to avoid ambient host config fallback.
+    error instead of falling back to a broader static token. Local execution
+    always creates a Keeper-specific managed HOME and XDG/GitHub config tree
+    below BasePath with mode [0700], rejects projected overrides of those
+    boundary variables, and never inherits the operator's HOME/XDG config.
+    This credential boundary does not provide filesystem namespace isolation.
     [?mint_github_app_token] defaults to the production GitHub App token
     issuer and is injectable for deterministic projection tests. *)
 
@@ -108,3 +115,8 @@ val delete_file_entry :
 
 val dashboard_status_json :
   base_path:string -> keeper_name:string -> Yojson.Safe.t
+(** Redacted effective projection with explicit provenance. [env_entries]
+    reports each effective name and its [shared | keeper] scope. [file_entries]
+    reports the effective source scope plus whether the file is a Docker
+    read-only mount or control-plane-only material. Secret values are never
+    returned. *)

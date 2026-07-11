@@ -331,7 +331,12 @@ let sandbox_allowed_path_has_forbidden_segments path =
            | "." | ".." -> true
            | _ -> false))
 
-let validate_sandbox_settings ~allowed_paths =
+let validate_sandbox_settings ~sandbox_profile ~network_mode ~allowed_paths =
+  match
+    validate_network_mode_for_profile ~sandbox_profile ~network_mode
+  with
+  | Error _ as error -> error
+  | Ok () ->
   if allowed_paths = [ "*" ] then
     Error "allowed_paths=[\"*\"] is not supported; enumerate explicit paths instead"
   else

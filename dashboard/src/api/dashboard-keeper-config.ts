@@ -6,7 +6,17 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperFeatureStatus, KeeperHookSlot } from '../types'
+import {
+  parseKeeperSandboxNetworkMode,
+  parseKeeperSandboxProfile,
+} from './schemas/keeper-sandbox-status'
+import type {
+  KeeperConfig,
+  KeeperFeatureStatus,
+  KeeperHookSlot,
+  KeeperSandboxNetworkMode,
+  KeeperSandboxProfile,
+} from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -185,8 +195,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       min_context_override_tokens: asInt(limits.min_context_override_tokens) ?? null,
       max_context_override_tokens: asInt(limits.max_context_override_tokens) ?? null,
     },
-    sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
-    network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
+    sandbox_profile: parseKeeperSandboxProfile(data.sandbox_profile),
+    network_mode: parseKeeperSandboxNetworkMode(data.network_mode),
     sandbox_last_error: asNullableString(data.sandbox_last_error),
     allowed_paths: normalizeStringList(data.allowed_paths),
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
@@ -321,8 +331,8 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
     .then(raw => normalizeKeeperConfig(raw, name))
 }
 
-export type SandboxProfile = 'local' | 'docker'
-export type SandboxNetworkMode = 'none' | 'inherit'
+export type SandboxProfile = KeeperSandboxProfile
+export type SandboxNetworkMode = KeeperSandboxNetworkMode
 
 export type KeeperConfigUpdatePayload = {
   runtime_id?: string

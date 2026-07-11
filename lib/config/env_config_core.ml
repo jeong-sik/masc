@@ -589,7 +589,4 @@ let pubsub_max_messages () =
 
 (** Default sandbox profile for keepers. Default: "local".
     Set to "docker" to default all keepers to containerized execution. *)
-let keeper_default_sandbox_profile_raw () =
-  get_string ~default:"local" "MASC_KEEPER_DEFAULT_SANDBOX_PROFILE"
-
 (** {1 Zombie Detection / Cleanup Configuration} *)

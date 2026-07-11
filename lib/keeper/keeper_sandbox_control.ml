@@ -1,60 +1,36 @@
-(** Operator-facing keeper sandbox control.
+(** Operator-facing keeper sandbox inspection and stop control.
 
-    This module keeps Docker lifecycle operations scoped to MASC keeper labels
-    and the active base path.  Start operations deliberately manage only
-    [container_kind=managed]; stop operations default to that same safe scope,
-    but can target [turn] or [all] when an operator needs to clear abandoned
-    turn containers before TTL cleanup. *)
+    Docker containers are created on demand by the real turn and one-shot
+    runtimes. This module never creates a parallel "managed" container that no
+    execution path consumes. Stop operations are scoped by the active base path,
+    an optional validated keeper name, and an explicit typed container scope. *)
 
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-module Contract = Keeper_sandbox_control_contract
-
-type stop_scope = Contract.stop_scope =
-  | Stop_managed
-  | Stop_turn
+type stop_scope = Keeper_types_profile_sandbox.sandbox_stop_scope =
+  | Stop_kind of Keeper_types_profile_sandbox.sandbox_container_kind
   | Stop_all
 
-let stop_scope_to_string = Contract.stop_scope_to_string
-let parse_stop_scope = Contract.parse_stop_scope
-let managed_kind = stop_scope_to_string Stop_managed
-let turn_kind = stop_scope_to_string Stop_turn
-let all_kind = stop_scope_to_string Stop_all
+let stop_scope_to_string =
+  Keeper_types_profile_sandbox.sandbox_stop_scope_to_string
 
-let now_ms () =
-  int_of_float (Unix.gettimeofday () *. 1000.0)
+let parse_stop_scope raw =
+  match Keeper_types_profile_sandbox.sandbox_stop_scope_of_string raw with
+  | Some scope -> Ok scope
+  | None ->
+      Error
+        (Printf.sprintf
+           "invalid container_kind %S; expected one of: %s"
+           raw
+           (String.concat
+              ", "
+              Keeper_types_profile_sandbox.valid_sandbox_stop_scope_strings))
 
 let normalize_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
-
-let rec ensure_dir path =
-  if path = "" || path = "." || path = "/" then
-    ()
-  else if Sys.file_exists path then
-    ()
-  else (
-    let parent = Filename.dirname path in
-    if parent <> path then ensure_dir parent;
-    Unix.mkdir path 0o755)
-
-(* Monotonically increasing counter to disambiguate managed containers
-   created within the same millisecond by the same process.  Mirrors
-   {!Keeper_turn_sandbox_runtime.container_counter}. *)
-let managed_container_counter : int Atomic.t = Atomic.make 0
-
-let managed_container_name ~(meta : keeper_meta) ~(network_label : string) =
-  let seq = Atomic.fetch_and_add managed_container_counter 1 in
-  Printf.sprintf "masc-keeper-managed-%s-%s-%d-%d-%d"
-    (Workspace_utils.safe_filename meta.name)
-    (Workspace_utils.safe_filename network_label)
-    (Unix.getpid ())
-    (now_ms ())
-    seq
-
-let configured_effective_network network_mode = network_mode
 
 let live_containers ~config ~meta ~timeout_sec =
   Keeper_sandbox_runtime.list_containers
@@ -72,197 +48,17 @@ let live_containers_for_keeper ~(meta : keeper_meta) containers =
       | None -> false)
     containers
 
-let running_managed_container ~network_label containers =
-  List.find_opt
-    (fun (c : Keeper_sandbox_runtime.live_container) ->
-      c.container_kind = Some managed_kind
-      && c.running = Some true
-      && c.network_label = Some network_label)
-    containers
-
-let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_error) =
-  Keeper_sandbox_runtime.docker_image_preflight_failure_message
-    ~prefix:"docker_container_start_failed"
-    failure
-;;
-
-let start_managed_container
-    ~(config : Workspace.config)
-    ~(meta : keeper_meta)
-    ~(network_mode : network_mode)
-    ~(ttl_sec : float)
-    ~(timeout_sec : float)
-    () =
-  if meta.sandbox_profile <> Docker then
-    Error "keeper sandbox start requires sandbox_profile=docker"
-  else
-    let network_mode = configured_effective_network network_mode in
-    let network_args, network_label =
-      Keeper_sandbox_runtime.docker_network_args network_mode
-    in
-    let probe_timeout = timeout_sec in
-    match live_containers ~config ~meta ~timeout_sec:probe_timeout with
-    | Ok containers -> (
-        match running_managed_container ~network_label containers with
-        | Some container ->
-            Ok
-              (`Assoc
-                 [
-                   ("started", `Bool false);
-                   ("already_running", `Bool true);
-                   ("container",
-                    Keeper_sandbox_runtime.live_container_to_yojson container);
-                 ])
-        | None ->
-            let image =
-              match meta.sandbox_image with
-              | Some img when String.trim img <> "" -> img
-              | _ -> Env_config_sandbox.Runtime.docker_image ()
-            in
-            if String.trim image = "" then
-              Error "keeper sandbox docker image is not configured"
-            else
-              match
-                Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
-                  ~image
-                  ~timeout_sec
-              with
-              | Error failure -> Error (image_preflight_start_error failure)
-              | Ok () ->
-              let _cleanup =
-                Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-                  ~base_path:config.base_path
-
-                  ()
-              in
-              match
-                Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime
-                  ~timeout_sec
-              with
-              | Error _ as err -> err
-              | Ok seccomp_args ->
-                  let host_root =
-                    Keeper_sandbox.host_root_abs_of_meta ~config meta
-                    |> normalize_path
-                  in
-                  ensure_dir host_root;
-                  let container_root =
-                    Keeper_sandbox.container_root meta.name
-                    |> Keeper_alerting_path.strip_trailing_slashes
-                  in
-                  let uid = Unix.getuid () in
-                  let gid = Unix.getgid () in
-                  let container_name =
-                    managed_container_name ~meta ~network_label
-                  in
-                  let argv =
-                    Keeper_sandbox_runtime.docker_command_argv ()
-                    @ [
-                        "run";
-                        "-d";
-                        "--rm";
-                        "--name";
-                        container_name;
-                      ]
-                    @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
-                    @ Keeper_sandbox_runtime.docker_label_args
-                        ~ttl_sec
-                        ~base_path:config.base_path
-                        ~keeper_name:meta.name
-                        ~container_kind:managed_kind
-                        ~network_label ()
-                    @ [
-                      "--user";
-                      Printf.sprintf "%d:%d" uid gid;
-                      "--env";
-                      "HOME=/tmp";
-                    ]
-                    @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
-                    @ [
-                      "--tmpfs";
-                      Env_config_sandbox.Hardening.tmpfs_mount ();
-                      "--cap-drop=ALL";
-                      "--security-opt";
-                      "no-new-privileges";
-                    ]
-                    @ seccomp_args
-                    @ [
-                      "--pids-limit";
-                      string_of_int
-                        (Env_config_sandbox.Hardening.pids_limit ());
-                      "--memory";
-                      Env_config_sandbox.Hardening.memory ();
-                      "-v";
-                      host_root ^ ":" ^ container_root ^ ":rw";
-                      "--workdir";
-                      container_root;
-                    ]
-                    @ network_args
-                    @ [ image; "tail"; "-f"; "/dev/null" ]
-                  in
-                  (* Throttle the managed-container [docker run -d] just like
-                     the per-call sandbox spawns (PR #15727). RFC-0097 calls
-                     out the "24+ keepers starting simultaneously after a
-                     server restart" scenario explicitly — without this wrap
-                     it was the only first-class start path bypassing the
-                     fleet-wide spawn semaphore. *)
-                  let st, out =
-                    Docker_spawn_throttle.with_slot (fun () ->
-                      Masc_exec.Exec_gate.run_argv_with_status
-                        ~actor:`System_sandbox
-                        ~raw_source:(String.concat " " argv)
-                        ~summary:"keeper sandbox control exec"
-                        ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-                        ~cwd:(Config_dir_resolver.current_working_dir ())
-                        ~timeout_sec
-                        argv)
-                  in
-                  if st = Unix.WEXITED 0 then (
-                    Keeper_registry.clear_error
-                      ~base_path:config.base_path meta.name;
-                    Ok
-                      (`Assoc
-                         [
-                           ("started", `Bool true);
-                           ("already_running", `Bool false);
-                           ("container_id", `String (String.trim out));
-                           ("container_name", `String container_name);
-                           ("container_kind", `String managed_kind);
-                           ("network_label", `String network_label);
-                           ("ttl_sec", `Float ttl_sec);
-                           ("image", `String image);
-                         ]))
-                  else (
-                    let message =
-                      Printf.sprintf "docker_managed_container_start_failed: %s"
-                        (Exec_policy.truncate_for_log out)
-                    in
-                    Keeper_registry_error_recording.record
-                      ~base_path:config.base_path meta.name message;
-                    Error message))
-    | Error err -> Error err
-
 let stop_containers ?keeper_name ~scope ~(config : Workspace.config)
     ~(timeout_sec : float) () =
   let container_kind =
     match scope with
-    | Stop_managed -> Some managed_kind
-    | Stop_turn -> Some turn_kind
+    | Stop_kind kind ->
+        Some (Keeper_types_profile_sandbox.sandbox_container_kind_to_string kind)
     | Stop_all -> None
   in
   Keeper_sandbox_runtime.stop_containers
     ?keeper_name
     ?container_kind
-    ~base_path:config.base_path
-    ~timeout_sec
-    ()
-
-let stop_managed_containers ?keeper_name ~(config : Workspace.config)
-    ~(timeout_sec : float) () =
-  stop_containers ?keeper_name ~scope:Stop_managed ~config ~timeout_sec ()
-
-let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
-  Keeper_sandbox_runtime.cleanup_stale_containers
     ~base_path:config.base_path
     ~timeout_sec
     ()
@@ -294,6 +90,15 @@ let repo_name_of_json = function
 
 let upsert_assoc key value fields =
   (key, value) :: List.remove_assoc key fields
+
+let nullable_string = function
+  | Some value -> `String value
+  | None -> `Null
+
+let combine_errors errors =
+  match List.filter_map Fun.id errors with
+  | [] -> None
+  | messages -> Some (String.concat "; " messages)
 
 type playground_policy_status =
   | Policy_allowed
@@ -373,26 +178,13 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
   let field status allowed ?repository_id ?error ?mapping_error
         ?(default_scope = false) () =
     let status_text = playground_policy_status_to_string status in
-    let reason_fields =
-      match playground_policy_reason status with
-      | None -> []
-      | Some reason -> [ ("policy_reason", `String reason) ]
-    in
+    let policy_reason = playground_policy_reason status in
     let repository_id_fields =
       match repository_id with
       | None -> []
       | Some repository_id -> [ ("policy_repository_id", `String repository_id) ]
     in
-    let error_fields =
-      match error with
-      | None -> []
-      | Some msg -> [ ("policy_error", `String msg) ]
-    in
-    let mapping_error_fields =
-      match mapping_error with
-      | None -> []
-      | Some msg -> [ ("policy_mapping_error", `String msg) ]
-    in
+    let error = combine_errors [ error; mapping_error ] in
     let default_scope_fields =
       if default_scope then [ ("policy_default_scope", `Bool true) ] else []
     in
@@ -400,8 +192,9 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
     , `String (policy_source_basename_of_status status) )
     :: ("policy_status", `String status_text)
     :: ("policy_allowed", `Bool allowed)
-    :: (default_scope_fields @ repository_id_fields @ reason_fields
-        @ error_fields @ mapping_error_fields)
+    :: ("policy_reason", nullable_string policy_reason)
+    :: ("error", nullable_string error)
+    :: (default_scope_fields @ repository_id_fields)
   in
   let repository_id_in_catalog repository_id =
     match repo_catalog with
@@ -462,42 +255,66 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
 let with_playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
       ~repo_name ~repo_path = function
   | `Assoc fields ->
-      playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
-        ~repo_name ~repo_path
+      let existing_error =
+        match List.assoc_opt "error" fields with
+        | Some (`String msg) -> Some msg
+        | _ -> None
+      in
+      let policy_fields =
+        playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
+          ~repo_name ~repo_path
+      in
+      let policy_error =
+        match List.assoc_opt "error" policy_fields with
+        | Some (`String msg) -> Some msg
+        | _ -> None
+      in
+      let merged_error = combine_errors [ existing_error; policy_error ] in
+      policy_fields
+      |> List.remove_assoc "error"
       |> List.fold_left
            (fun fields (key, value) -> upsert_assoc key value fields)
            fields
+      |> upsert_assoc "error" (nullable_string merged_error)
       |> fun fields -> `Assoc fields
   | json ->
       Log.Misc.warn
         "[KeeperSandboxControl] playground repo entry for %s is not a JSON object; \
          preserving original value (%s)"
         repo_name (Yojson.Safe.to_string json);
-      json
+      `Assoc
+        [ "name", `String repo_name
+        ; "source", `String "cache"
+        ; "path", `String (Filename.concat "repos" repo_name)
+        ; "policy_status", `String "repository_store_error"
+        ; "policy_allowed", `Bool false
+        ; "policy_source", `String Config_dir_resolver.repositories_toml_basename
+        ; "policy_reason", `String "invalid playground repository observation"
+        ; "error", `String "playground repository observation is not an object"
+        ]
 
-let git_metadata_timeout_sec = 2.0
-let max_live_git_enrichment_repos = 20
-
-let git_string_opt repo_path args =
-  (* RFC-0106 P1: Cancelled re-raise centralised via Cancel_safe.protect.
-     The [_ -> None] silent default is pre-existing behaviour (git
-     metadata is treated as optional by callers) and is preserved
-     verbatim. Promoting it to a logged/counted failure is a separate
-     visibility concern outside this PR's migration scope. *)
+let git_string_result ~timeout_sec repo_path args =
   Cancel_safe.protect
-    ~on_exn:(fun _ -> None)
+    ~on_exn:(fun exn -> Error (Printexc.to_string exn))
     (fun () ->
       match
         Repo_git.run_git ~cwd:repo_path
-          ~timeout_sec:git_metadata_timeout_sec args
+          ~timeout_sec args
       with
       | Ok (line :: _) ->
           let trimmed = String.trim line in
-          if String.equal trimmed "" then None else Some trimmed
-      | Ok [] | Error _ -> None)
+          if String.equal trimmed ""
+          then Error "git returned an empty first line"
+          else Ok trimmed
+      | Ok [] -> Error "git returned no output"
+      | Error msg -> Error msg)
+
+let observed_value ~operation = function
+  | Ok value -> Some value, None
+  | Error msg -> None, Some (Printf.sprintf "%s: %s" operation msg)
 
 let enrich_playground_repo_from_git
-      ~(source : string) ~(repo_name : string) ~(repo_path : string)
+      ~timeout_sec ~(repo_name : string) ~(repo_path : string)
       (repo_json : Yojson.Safe.t) =
   let observed_at_unix = Time_compat.now () in
   let fields =
@@ -509,30 +326,56 @@ let enrich_playground_repo_from_git
     fields
     |> upsert_assoc "name" (`String repo_name)
     |> upsert_assoc "path" (`String (Filename.concat "repos" repo_name))
-    |> upsert_assoc "source" (`String source)
+    |> upsert_assoc "source" (`String "git")
     |> upsert_assoc "observed_at"
          (`String (Masc_domain.iso8601_of_unix_seconds observed_at_unix))
     |> upsert_assoc "observed_at_unix" (`Float observed_at_unix)
   in
+  let branch, branch_error =
+    git_string_result ~timeout_sec repo_path [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
+    |> observed_value ~operation:"branch"
+  in
   let fields =
-    match git_string_opt repo_path [ "rev-parse"; "--abbrev-ref"; "HEAD" ] with
+    match branch with
     | Some branch -> upsert_assoc "branch" (`String branch) fields
     | None -> fields
   in
+  let latest_commit, latest_commit_error =
+    git_string_result ~timeout_sec repo_path [ "log"; "--oneline"; "-1" ]
+    |> observed_value ~operation:"latest_commit"
+  in
   let fields =
-    match git_string_opt repo_path [ "log"; "--oneline"; "-1" ] with
+    match latest_commit with
     | Some commit -> upsert_assoc "latest_commit" (`String commit) fields
     | None -> fields
   in
-  let fields =
-    match git_string_opt repo_path [ "rev-parse"; "--is-shallow-repository" ] with
+  let shallow_raw, shallow_error =
+    git_string_result
+      ~timeout_sec
+      repo_path
+      [ "rev-parse"; "--is-shallow-repository" ]
+    |> observed_value ~operation:"shallow"
+  in
+  let shallow, shallow_decode_error =
+    match shallow_raw with
+    | None -> None, None
     | Some raw ->
-        upsert_assoc "shallow"
-          (`Bool (String.equal (String.lowercase_ascii raw) "true"))
-          fields
+      (match bool_of_string_opt (String.lowercase_ascii raw) with
+       | Some value -> Some value, None
+       | None ->
+         None,
+         Some (Printf.sprintf "shallow: invalid boolean output %S" raw))
+  in
+  let fields =
+    match shallow with
+    | Some value -> upsert_assoc "shallow" (`Bool value) fields
     | None -> fields
   in
-  `Assoc fields
+  let error =
+    combine_errors
+      [ branch_error; latest_commit_error; shallow_error; shallow_decode_error ]
+  in
+  `Assoc (upsert_assoc "error" (nullable_string error) fields)
 
 let playground_repo_entry_json ~(source : string) ~(repo_name : string)
     (repo_json : Yojson.Safe.t) =
@@ -546,26 +389,34 @@ let playground_repo_entry_json ~(source : string) ~(repo_name : string)
   |> upsert_assoc "name" (`String repo_name)
   |> upsert_assoc "path" (`String (Filename.concat "repos" repo_name))
   |> upsert_assoc "source" (`String source)
+  |> upsert_assoc "error" `Null
   |> upsert_assoc "observed_at"
        (`String (Masc_domain.iso8601_of_unix_seconds observed_at_unix))
   |> upsert_assoc "observed_at_unix" (`Float observed_at_unix)
   |> fun fields -> `Assoc fields
 
-let cached_playground_repo_entries playground_abs =
+let cached_playground_repo_entries_result playground_abs =
   let cache_path = Filename.concat playground_abs ".playground_state.json" in
-  try
-    match Yojson.Safe.from_file cache_path with
-    | `Assoc _ as json -> (
-        match Json_util.assoc_member_opt "repos" json with
-        | Some (`List repos) -> repos
-        | _ -> [])
-    | _ -> []
-  with
-  | Sys_error _ | Yojson.Json_error _ -> []
+  if not (safe_file_exists cache_path)
+  then Ok []
+  else
+    try
+      match Yojson.Safe.from_file cache_path with
+      | `Assoc _ as json ->
+        (match Json_util.assoc_member_opt "repos" json with
+         | Some (`List repos) -> Ok repos
+         | _ -> Error "playground state must contain a repos array")
+      | _ -> Error "playground state must be a JSON object"
+    with
+    | Sys_error msg -> Error msg
+    | Yojson.Json_error msg -> Error msg
 
-let filesystem_playground_repo_names playground_abs =
+let filesystem_playground_repo_names_result playground_abs =
   let repos_dir = Filename.concat playground_abs "repos" in
-  if not (safe_is_dir repos_dir) then []
+  if not (safe_file_exists repos_dir)
+  then Ok []
+  else if not (safe_is_dir repos_dir)
+  then Error (Printf.sprintf "playground repos path is not a directory: %s" repos_dir)
   else
     try
       Sys.readdir repos_dir
@@ -575,10 +426,20 @@ let filesystem_playground_repo_names playground_abs =
         safe_is_dir repo_path
         && safe_file_exists (Filename.concat repo_path ".git"))
       |> List.sort String.compare
+      |> fun names -> Ok names
     with
-    | Sys_error _ -> []
+    | Sys_error msg -> Error msg
 
-let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
+type playground_repos_observation =
+  { repos : Yojson.Safe.t list
+  ; error : string option
+  }
+
+let playground_repos_observation
+      ~timeout_sec
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+  =
   let playground_abs =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> normalize_path
@@ -588,19 +449,29 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     playground_repo_policy ~base_path:config.base_path ~keeper_name:meta.name
   in
   let repo_catalog = Repo_store.load_all ~base_path:config.base_path in
-  let live_enriched_count = ref 0 in
+  let cached_entries, cache_error =
+    match cached_playground_repo_entries_result playground_abs with
+    | Ok entries -> entries, None
+    | Error msg -> [], Some ("playground cache: " ^ msg)
+  in
+  let cached, invalid_cache_errors =
+    cached_entries
+    |> List.fold_left
+         (fun (repos, errors) repo ->
+            match repo_name_of_json repo with
+            | Some name -> (name, repo) :: repos, errors
+            | None -> repos, "playground cache contains an invalid repo entry" :: errors)
+         ([], [])
+    |> fun (repos, errors) -> List.rev repos, List.rev errors
+  in
   let cached =
-    cached_playground_repo_entries playground_abs
-    |> List.map (fun repo ->
-      match repo_name_of_json repo with
-      | Some name ->
+    cached
+    |> List.map (fun (name, repo) ->
           let repo_path = Filename.concat repos_dir name in
           if safe_is_dir repo_path
              && safe_file_exists (Filename.concat repo_path ".git")
-             && !live_enriched_count < max_live_git_enrichment_repos
           then
-            (incr live_enriched_count;
-            enrich_playground_repo_from_git ~source:"git" ~repo_name:name
+            (enrich_playground_repo_from_git ~timeout_sec ~repo_name:name
               ~repo_path repo
             |> with_playground_repo_policy_fields ~base_path:config.base_path
                  ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
@@ -609,12 +480,16 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
             playground_repo_entry_json ~source:"cache" ~repo_name:name repo
             |> with_playground_repo_policy_fields ~base_path:config.base_path
                  ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
-                 ~repo_path
-      | None -> repo)
+                 ~repo_path)
   in
   let cached_names = List.filter_map repo_name_of_json cached in
+  let filesystem_names, filesystem_error =
+    match filesystem_playground_repo_names_result playground_abs with
+    | Ok names -> names, None
+    | Error msg -> [], Some ("playground filesystem: " ^ msg)
+  in
   let fs_entries =
-    filesystem_playground_repo_names playground_abs
+    filesystem_names
     |> List.filter (fun name -> not (List.mem name cached_names))
     |> List.map (fun name ->
       playground_repo_entry_json ~source:"filesystem" ~repo_name:name
@@ -623,33 +498,137 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
            ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
            ~repo_path:(Filename.concat repos_dir name))
   in
-  `List (cached @ fs_entries)
+  { repos = cached @ fs_entries
+  ; error =
+      combine_errors
+        [ cache_error
+        ; (match invalid_cache_errors with
+           | [] -> None
+           | errors -> Some (String.concat "; " errors))
+        ; filesystem_error
+        ]
+  }
 
-let preflight_status_json ~timeout_sec =
+let playground_repos_json ~timeout_sec ~config ~meta =
+  let observation = playground_repos_observation ~timeout_sec ~config ~meta in
+  (match observation.error with
+   | None -> ()
+   | Some msg -> Log.Misc.warn "[KeeperSandboxControl] %s" msg);
+  `List observation.repos
+
+let preflight_status ~timeout_sec =
   Keeper_sandbox_runtime.docker_preflight ~timeout_sec ()
-  |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
 
-let preflight_ok = function
-  | Some (`Assoc fields) -> (
-      match List.assoc_opt "ok" fields with
-      | Some (`Bool value) -> Some value
-      | _ -> None)
-  | _ -> None
+let preflight_ok = Option.map (fun (status : Keeper_sandbox_runtime.docker_preflight) -> status.ok)
 
-let container_mode (meta : keeper_meta) containers =
-  if meta.sandbox_profile = Local then
-    "local"
-  else if
-    List.exists
-      (fun (c : Keeper_sandbox_runtime.live_container) ->
-        c.container_kind = Some managed_kind && c.running = Some true)
-      containers
-  then
-    "managed_running"
-  else
-    match meta.network_mode with
-    | Network_none -> "turn_scoped_or_managed_none"
-    | Network_inherit -> "oneshot_or_managed_inherit"
+type container_mode =
+  | Local_host
+  | Docker_idle
+  | Docker_active
+  | Docker_listing_failed
+
+let container_mode_to_string = function
+  | Local_host -> "local"
+  | Docker_idle -> "docker_idle"
+  | Docker_active -> "docker_active"
+  | Docker_listing_failed -> "docker_listing_failed"
+;;
+
+let container_mode (meta : keeper_meta) ~container_error containers =
+  match meta.sandbox_profile, container_error, containers with
+  | Local, _, _ -> Local_host
+  | Docker, Some _, _ -> Docker_listing_failed
+  | Docker, None, [] -> Docker_idle
+  | Docker, None, _ :: _ -> Docker_active
+;;
+
+type execution_boundary =
+  | Host_process
+  | Docker_container
+
+type filesystem_boundary =
+  | Host_filesystem_tool_policy
+  | Explicit_container_mounts
+
+type network_boundary =
+  | Host_network_namespace
+  | Isolated_network_namespace
+
+type credential_boundary =
+  | Managed_home_projection
+  | Ephemeral_container_projection
+
+let execution_boundary_to_string = function
+  | Host_process -> "host_process"
+  | Docker_container -> "docker_container"
+;;
+
+let filesystem_boundary_to_string = function
+  | Host_filesystem_tool_policy -> "host_filesystem_tool_policy"
+  | Explicit_container_mounts -> "explicit_container_mounts"
+;;
+
+let network_boundary_to_string = function
+  | Host_network_namespace -> "host_network_namespace"
+  | Isolated_network_namespace -> "isolated_network_namespace"
+;;
+
+let credential_boundary_to_string = function
+  | Managed_home_projection -> "managed_home_projection"
+  | Ephemeral_container_projection -> "ephemeral_container_projection"
+;;
+
+let nullable_bool = function
+  | Some value -> `Bool value
+  | None -> `Null
+;;
+
+let security_boundary_json (meta : keeper_meta) =
+  let
+    execution_boundary,
+    filesystem_boundary,
+    network_boundary,
+    credential_boundary,
+    rootfs_read_only,
+    cap_drop_all,
+    no_new_privileges
+    =
+    match meta.sandbox_profile, meta.network_mode with
+    | Local, Network_host ->
+      ( Host_process
+      , Host_filesystem_tool_policy
+      , Host_network_namespace
+      , Managed_home_projection
+      , None
+      , None
+      , None )
+    | Local, Network_none ->
+      invalid_arg
+        "invalid keeper sandbox policy: local execution cannot enforce network_mode=none"
+    | Docker, network_mode ->
+      let network_boundary =
+        match network_mode with
+        | Network_none -> Isolated_network_namespace
+        | Network_host -> Host_network_namespace
+      in
+      ( Docker_container
+      , Explicit_container_mounts
+      , network_boundary
+      , Ephemeral_container_projection
+      , Some (not (Env_config_sandbox.Hardening.relax_fs ()))
+      , Some true
+      , Some true )
+  in
+  `Assoc
+    [ "execution_boundary", `String (execution_boundary_to_string execution_boundary)
+    ; "filesystem_boundary", `String (filesystem_boundary_to_string filesystem_boundary)
+    ; "network_boundary", `String (network_boundary_to_string network_boundary)
+    ; "credential_boundary", `String (credential_boundary_to_string credential_boundary)
+    ; "rootfs_read_only", nullable_bool rootfs_read_only
+    ; "cap_drop_all", nullable_bool cap_drop_all
+    ; "no_new_privileges", nullable_bool no_new_privileges
+    ]
+;;
 
 let why_no_container (meta : keeper_meta) ~preflight containers =
   if meta.sandbox_profile = Local then
@@ -659,14 +638,9 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
   else
     match preflight_ok preflight with
     | Some false -> Some "docker_preflight_failed"
-    | _ -> (
-        match meta.network_mode with
-        | Network_inherit ->
-            Some
-              "no visible managed sandbox container; network_mode=inherit uses one-shot Docker containers on sandboxed tool calls, and those containers still mount the keeper playground"
-        | Network_none ->
-            Some
-              "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted")
+    | _ ->
+        Some
+          "docker_idle; turn and one-shot containers are created on demand and removed after execution"
 
 let recommendation (meta : keeper_meta) ~preflight containers =
   if meta.sandbox_profile = Local then
@@ -680,9 +654,7 @@ let recommendation (meta : keeper_meta) ~preflight containers =
           "Fix Docker preflight first, then rerun masc_keeper_sandbox_status."
     | _ ->
         Some
-          (Printf.sprintf
-             "Run masc_keeper_sandbox_start with name=%S only when you need a visible prewarmed container; repo access also requires playground_repos to include the target repo."
-             meta.name)
+          "No lifecycle action is required. Run a sandboxed Keeper turn or tool call to create an on-demand container."
 
 let identity_json (meta : keeper_meta) =
   let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
@@ -718,7 +690,7 @@ let live_status_json ?(include_preflight = true)
     | Some cached -> cached
     | None ->
       if include_preflight && meta.sandbox_profile = Docker then
-        preflight_status_json ~timeout_sec
+        preflight_status ~timeout_sec
       else
         None
   in
@@ -746,29 +718,44 @@ let live_status_json ?(include_preflight = true)
         Some "Check Docker daemon availability and retry sandbox status."
     | None -> recommendation meta ~preflight containers
   in
+  let playground_repos, playground_repos_error =
+    if include_playground_repos
+    then
+      let observation =
+        playground_repos_observation ~timeout_sec ~config ~meta
+      in
+      `List observation.repos, observation.error
+    else `List [], None
+  in
   `Assoc
     [
       ("keeper", `String meta.name);
       ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
       ("configured_network_mode", `String (network_mode_to_string meta.network_mode));
-      ("effective_mode", `String (container_mode meta containers));
-      ("managed_container_kind", `String managed_kind);
+      ( "effective_mode",
+        `String
+          (container_mode meta ~container_error containers
+           |> container_mode_to_string) );
+      ("security_boundary", security_boundary_json meta);
       ("container_count", `Int (List.length containers));
       ("containers",
        `List (List.map Keeper_sandbox_runtime.live_container_to_yojson containers));
       ( "preflight",
-        if verbose then Json_util.option_to_yojson Fun.id preflight else `Null );
+        if verbose
+        then
+          Json_util.option_to_yojson
+            Keeper_sandbox_runtime.docker_preflight_to_yojson
+            preflight
+        else `Null );
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
       ("recommendation", Json_util.string_opt_to_json recommendation);
       ( "playground_repos",
-        if include_playground_repos then
-          playground_repos_json ~config ~meta
-        else
-          `List [] );
+        playground_repos );
       ( "playground_repos_source",
         `String
           (if include_playground_repos then "live"
            else "skipped_dashboard_hot_path") );
+      ("playground_repos_error", nullable_string playground_repos_error);
       ("identity", identity_json meta);
     ]

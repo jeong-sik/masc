@@ -14,7 +14,3 @@ val docker_target
   -> meta:Keeper_meta_contract.keeper_meta
   -> cwd:string
   -> (Masc_exec.Sandbox_target.t, target_error) result
-
-val docker_local_fallback_target
-  :  meta:Keeper_meta_contract.keeper_meta
-  -> (Masc_exec.Sandbox_target.t * (string * Yojson.Safe.t) list) option

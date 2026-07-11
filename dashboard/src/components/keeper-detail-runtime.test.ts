@@ -18,6 +18,7 @@ vi.mock('../api/dashboard', async () => {
 import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
+import type { KeeperSecretProjection } from '../api/schemas/keeper-composite'
 import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 import {
   AllowlistPreview,
@@ -1084,6 +1085,7 @@ describe('RuntimeLensSection', () => {
           {
             root: '/mock/workspace/.masc/secrets/base',
             source: 'workspace_masc_secrets',
+            scope: 'shared',
             status: 'ready',
             configured: true,
             env_count: 1,
@@ -1092,6 +1094,7 @@ describe('RuntimeLensSection', () => {
           {
             root: '/mock/workspace/.masc/secrets/sangsu',
             source: 'workspace_masc_secrets',
+            scope: 'keeper',
             status: 'ready',
             configured: true,
             env_count: 1,
@@ -1100,11 +1103,20 @@ describe('RuntimeLensSection', () => {
         ],
         env_count: 1,
         file_count: 1,
-        env_names: ['GH_TOKEN'],
-        file_mounts: [
+        env_entries: [{
+          name: 'GH_TOKEN',
+          scope: 'keeper',
+          overrides_scope: 'shared',
+          projection_targets: ['local', 'docker'],
+        }],
+        file_entries: [
           {
             host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
             container_path: '/home/keeper/.ssh/id_ed25519',
+            scope: 'keeper',
+            overrides_scope: null,
+            projection_policy: 'docker_read_only_mount',
+            projection_targets: ['docker'],
           },
         ],
         values_validated: true,
@@ -1120,13 +1132,13 @@ describe('RuntimeLensSection', () => {
     expect(screen.getAllByText('shared').length).toBeGreaterThan(0)
     expect(screen.getAllByText('keeper').length).toBeGreaterThan(0)
     expect(screen.getByText('/mock/workspace/.masc/secrets/base')).toBeInTheDocument()
-    expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
-    expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
+    expect(screen.getByText(/GH_TOKEN · keeper/)).toBeInTheDocument()
+    expect(screen.getByText(/\/home\/keeper\/\.ssh\/id_ed25519 · keeper · docker ro/)).toBeInTheDocument()
     expect(screen.queryByText(/ghs_/)).toBeNull()
   })
 
   it('sets secret env values without rendering the submitted value', async () => {
-    const nextProjection = {
+    const nextProjection: KeeperSecretProjection = {
       status: 'ready',
       configured: true,
       root: '/mock/workspace/.masc/secrets/sangsu',
@@ -1135,6 +1147,7 @@ describe('RuntimeLensSection', () => {
         {
           root: '/mock/workspace/.masc/secrets/base',
           source: 'workspace_masc_secrets',
+          scope: 'shared',
           status: 'absent',
           configured: false,
           env_count: 0,
@@ -1143,6 +1156,7 @@ describe('RuntimeLensSection', () => {
         {
           root: '/mock/workspace/.masc/secrets/sangsu',
           source: 'workspace_masc_secrets',
+          scope: 'keeper',
           status: 'ready',
           configured: true,
           env_count: 1,
@@ -1151,8 +1165,13 @@ describe('RuntimeLensSection', () => {
       ],
       env_count: 1,
       file_count: 0,
-      env_names: ['ANTHROPIC_API_KEY'],
-      file_mounts: [],
+      env_entries: [{
+        name: 'ANTHROPIC_API_KEY',
+        scope: 'keeper',
+        overrides_scope: null,
+        projection_targets: ['local', 'docker'],
+      }],
+      file_entries: [],
       values_validated: true,
       error: null,
       next_action: 'none',
@@ -1165,7 +1184,7 @@ describe('RuntimeLensSection', () => {
         ...nextProjection,
         status: 'empty',
         env_count: 0,
-        env_names: [],
+        env_entries: [],
         next_action: 'add entries under env/ and/or files/',
       },
       setSecretEnv,
@@ -1194,7 +1213,7 @@ describe('RuntimeLensSection', () => {
   })
 
   it('sets secret file values without rendering the submitted value', async () => {
-    const nextProjection = {
+    const nextProjection: KeeperSecretProjection = {
       status: 'ready',
       configured: true,
       root: '/mock/workspace/.masc/secrets/sangsu',
@@ -1203,6 +1222,7 @@ describe('RuntimeLensSection', () => {
         {
           root: '/mock/workspace/.masc/secrets/base',
           source: 'workspace_masc_secrets',
+          scope: 'shared',
           status: 'absent',
           configured: false,
           env_count: 0,
@@ -1211,6 +1231,7 @@ describe('RuntimeLensSection', () => {
         {
           root: '/mock/workspace/.masc/secrets/sangsu',
           source: 'workspace_masc_secrets',
+          scope: 'keeper',
           status: 'ready',
           configured: true,
           env_count: 0,
@@ -1219,11 +1240,15 @@ describe('RuntimeLensSection', () => {
       ],
       env_count: 0,
       file_count: 1,
-      env_names: [],
-      file_mounts: [
+      env_entries: [],
+      file_entries: [
         {
           host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
           container_path: '/home/keeper/.ssh/id_ed25519',
+          scope: 'keeper',
+          overrides_scope: null,
+          projection_policy: 'docker_read_only_mount',
+          projection_targets: ['docker'],
         },
       ],
       values_validated: true,
@@ -1238,7 +1263,7 @@ describe('RuntimeLensSection', () => {
         ...nextProjection,
         status: 'empty',
         file_count: 0,
-        file_mounts: [],
+        file_entries: [],
         next_action: 'add entries under env/ and/or files/',
       },
       setSecretFile,

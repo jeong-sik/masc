@@ -916,7 +916,9 @@ let test_sandbox_container_label_args_include_owner_scope () =
     Keeper_sandbox_runtime.docker_label_args
       ~base_path:"/tmp/masc"
       ~keeper_name:"min/jae"
-      ~container_kind:"turn"
+      ~container_kind:
+        (Keeper_types_profile_sandbox.sandbox_container_kind_to_string
+           Keeper_types_profile_sandbox.Sandbox_turn)
       ~network_label:"none" ()
   in
   let has_label value = List.mem value args in
@@ -957,22 +959,26 @@ let test_base_path_hash_relative_input_anchors_to_cwd_not_env_base () =
          (Filename.concat (Unix.realpath cwd) "relative-base")
          (Keeper_sandbox_runtime.normalize_base_path_for_hash "relative-base"))
 
-let test_sandbox_container_label_args_include_managed_ttl () =
+let test_sandbox_container_label_args_include_oneshot_ttl () =
+  let container_kind =
+    Keeper_types_profile_sandbox.sandbox_container_kind_to_string
+      Keeper_types_profile_sandbox.Sandbox_oneshot
+  in
   let args =
     Keeper_sandbox_runtime.docker_label_args
       ~ttl_sec:90.0
       ~base_path:"/tmp/masc"
       ~keeper_name:"issue-king"
-      ~container_kind:"managed"
-      ~network_label:"inherit" ()
+      ~container_kind
+      ~network_label:"host" ()
   in
   let has_label value = List.mem value args in
-  Alcotest.(check bool) "managed kind label" true
-    (has_label "masc.mcp.kind=managed");
+  Alcotest.(check bool) "oneshot kind label" true
+    (has_label ("masc.mcp.kind=" ^ container_kind));
   Alcotest.(check bool) "ttl label" true
     (has_label "masc.mcp.ttl_sec=90");
-  Alcotest.(check bool) "inherit network label" true
-    (has_label "masc.mcp.network=inherit")
+  Alcotest.(check bool) "host network label" true
+    (has_label "masc.mcp.network=host")
 
 let test_docker_network_args_follow_masc_policy () =
   let args_none, label_none =
@@ -981,12 +987,12 @@ let test_docker_network_args_follow_masc_policy () =
   Alcotest.(check (list string)) "network none passes docker flag"
     [ "--network"; "none" ] args_none;
   Alcotest.(check string) "network none label" "none" label_none;
-  let args_inherit, label_inherit =
-    Keeper_sandbox_runtime.docker_network_args Keeper_types_profile_sandbox.Network_inherit
+  let args_host, label_host =
+    Keeper_sandbox_runtime.docker_network_args Keeper_types_profile_sandbox.Network_host
   in
-  Alcotest.(check (list string)) "network inherit uses host network (#10431)"
-    [ "--network"; "host" ] args_inherit;
-  Alcotest.(check string) "network inherit label" "inherit" label_inherit
+  Alcotest.(check (list string)) "host network uses host network (#10431)"
+    [ "--network"; "host" ] args_host;
+  Alcotest.(check string) "host network label" "host" label_host
 
 let test_docker_nofile_args_follow_config () =
   with_env "MASC_KEEPER_SANDBOX_NOFILE_LIMIT" "not-a-number" @@ fun () ->
@@ -2379,8 +2385,8 @@ let run_tests ~clock () =
             test_docker_failure_class_is_typed_and_serializes_stable_string;
           Alcotest.test_case "docker workspace state mount exposes safe subset" `Quick
             test_docker_workspace_state_mount_args_expose_safe_subset;
-          Alcotest.test_case "managed label args include ttl" `Quick
-            test_sandbox_container_label_args_include_managed_ttl;
+          Alcotest.test_case "oneshot label args include ttl" `Quick
+            test_sandbox_container_label_args_include_oneshot_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick
             test_sandbox_container_label_args_include_owner_scope;
           Alcotest.test_case "relative base hash anchors to cwd" `Quick

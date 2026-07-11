@@ -3,7 +3,7 @@
 
     Only schemas dispatched by {!Tool_workspace} live here. Other
     schemas have been moved to their owning modules
-    ({!Task.Tool}, {!Tool_control}, {!Tool_plan},
+    ({!Task.Tool}, {!Tool_plan}).
 
     Issue #8636: [assertion_kind_enum_strings] hand-mirrors
     {!Tool_workspace.valid_assertion_strings}; the sync regression test

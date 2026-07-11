@@ -34,7 +34,7 @@ let make_meta name =
       ; ("trace_id", `String ("trace-" ^ name))
       ; ("goal", `String "test")
       ; ("sandbox_profile", `String "local")
-      ; ("network_mode", `String "inherit")
+      ; ("network_mode", `String "host")
       ; ("tool_access", `List [])
       ]
   in

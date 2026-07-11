@@ -243,10 +243,14 @@ type t =
   ...
 
 and masc_keeper =
-  | Sandbox_start | Sandbox_stop | Sandbox_status
+  | Sandbox_stop | Sandbox_status
   | Msg_result
   ...
 ```
+
+The original start variant was later purged: containers are created only by
+real turn/one-shot execution paths, so an operator-facing prewarm/start tool had
+no execution consumer.
 
 `static_tag_of_tool_name`이 `Masc.m`의 모든 variant에 대해 `Some _` 반환 (현재 `None` 반환 variants 제거 또는 명시적 module_tag 부여).
 

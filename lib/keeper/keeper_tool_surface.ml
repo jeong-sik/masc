@@ -65,14 +65,6 @@ let dedupe_sorted_strings = Persona_audit.dedupe_sorted_strings
 let handle_keeper_persona_audit ctx args =
   Persona_audit.handle ~config:ctx.config args
 
-let parse_network_mode_or_error raw =
-  match network_mode_of_string raw with
-  | Some mode -> Ok mode
-  | None ->
-      Error
-        (Printf.sprintf "invalid network_mode %S (allowed: %s)" raw
-           (String.concat ", " valid_network_mode_strings))
-
 let keeper_sandbox_status_fleet_names ctx =
   let registry_names =
     Keeper_registry.all ~base_path:ctx.config.base_path ()
@@ -120,8 +112,7 @@ let keeper_sandbox_status_error_item_json config ~name ~error =
        ("keeper", `String name);
        ("sandbox_profile", `Null);
        ("configured_network_mode", `Null);
-       ("effective_mode", `String "unknown");
-       ("managed_container_kind", `String Keeper_sandbox_control.managed_kind);
+       ("effective_mode", `String "unavailable");
        ("container_count", `Int 0);
        ("containers", `List []);
        ("preflight", `Null);
@@ -135,11 +126,14 @@ let keeper_sandbox_status_error_item_json config ~name ~error =
      @ persisted_fields)
 
 let handle_keeper_sandbox_status ctx args : tool_result =
-  let verbose = get_bool args "verbose" false in
-  let include_preflight = get_bool args "include_preflight" true in
-  let timeout_sec = Stdlib.Float.min 20.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 5.0)) in
-  match String.trim (get_string args "name" "") with
-  | "" ->
+  match Keeper_schema.parse_sandbox_status_request args with
+  | Error error -> tool_result_error error
+  | Ok request ->
+  let verbose = request.verbose in
+  let include_preflight = request.include_preflight in
+  let timeout_sec = request.timeout_sec in
+  match request.keeper_name with
+  | None ->
       let configured_names = configured_keeper_names ctx.config in
       let candidate_names = keeper_sandbox_status_fleet_names ctx in
       let resolved =
@@ -197,7 +191,7 @@ let handle_keeper_sandbox_status ctx args : tool_result =
       in
       let cached_preflight =
         if include_preflight && any_docker then
-          Keeper_sandbox_control.preflight_status_json ~timeout_sec
+          Keeper_sandbox_control.preflight_status ~timeout_sec
         else
           None
       in
@@ -225,7 +219,7 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                 ("count", `Int (List.length items));
                 ("items", `List items);
               ]))
-  | _ ->
+  | Some _ ->
       (match prepare_passive_keeper_identity ctx args with
        | Error err -> tool_result_error err
        | Ok (prepared_args, identity_reseed) -> (
@@ -246,79 +240,29 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                tool_result_ok (Yojson.Safe.pretty_to_string json)))
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
-  match resolve_keeper_meta_config ~config args with
-  | Error err -> tool_result_error err
-  | Ok meta ->
-      let module Contract = Keeper_sandbox_control_contract in
-      let timeout_sec =
-        Contract.clamp
-          Contract.operation_timeout_sec
-          (get_float args "timeout_sec" Contract.operation_timeout_sec.default)
-      in
-      let ttl_sec =
-        Contract.clamp
-          Contract.managed_ttl_sec
-          (get_float args "ttl_sec" Contract.managed_ttl_sec.default)
-      in
-      let network_mode_raw =
-        String.trim
-          (get_string args "network_mode"
-             (network_mode_to_string meta.network_mode))
-      in
-      (match parse_network_mode_or_error network_mode_raw with
-       | Error err -> tool_result_error err
-       | Ok network_mode -> (
-           match
-             Keeper_sandbox_control.start_managed_container
-               ~config ~meta ~network_mode ~ttl_sec ~timeout_sec ()
-           with
-           | Error err -> tool_result_error err
-           | Ok result ->
-               invalidate_status_cache meta.name;
-               tool_result_ok
-                 (Yojson.Safe.pretty_to_string
-                    (`Assoc
-                       [
-                         ("keeper", `String meta.name);
-                         ("action", `String "start");
-                         ("sandbox", result);
-                       ]))))
-
-let handle_keeper_sandbox_start ctx args : tool_result =
-  keeper_sandbox_start_body ~config:ctx.config args
+let sandbox_validation_error message =
+  tool_result_error
+    ~class_:Tool_result.Workflow_rejection
+    (error_response_typed ~code:Validation_error message)
+;;
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
-  let module Contract = Keeper_sandbox_control_contract in
-  let timeout_sec =
-    Contract.clamp
-      Contract.operation_timeout_sec
-      (get_float args "timeout_sec" Contract.operation_timeout_sec.default)
-  in
-  let prune_stale = get_bool args "prune_stale" false in
-  let container_kind_raw =
-    get_string args "container_kind" Keeper_sandbox_control.managed_kind
-  in
-  let keeper_name =
-    match String.trim (get_string args "name" "") with
-    | "" -> None
-    | name -> Some name
-  in
-  match Keeper_sandbox_control.parse_stop_scope container_kind_raw with
-  | Error err -> tool_result_error (error_response_typed ~code:Validation_error err)
-  | Ok scope ->
+  match Keeper_schema.parse_sandbox_stop_request args with
+  | Error error -> sandbox_validation_error error
+  | Ok request ->
+      let keeper_name, target =
+        match request.target with
+        | Keeper_schema.Stop_keeper name -> Some name, "keeper"
+        | Keeper_schema.Stop_fleet -> None, "fleet"
+      in
       let stop_result =
         Keeper_sandbox_control.stop_containers
-          ?keeper_name ~scope ~config ~timeout_sec ()
-      in
-      let stale_cleanup =
-        if prune_stale then
-          Some
-            (Keeper_sandbox_control.cleanup_stale ~config
-               ~timeout_sec:(Stdlib.Float.min timeout_sec 5.0) ())
-        else
-          None
+          ?keeper_name
+          ~scope:request.scope
+          ~config
+          ~timeout_sec:request.timeout_sec
+          ()
       in
       (match keeper_name with
        | Some name -> invalidate_status_cache name
@@ -331,28 +275,23 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
             ("errors", `List (List.map (fun err -> `String err) stop_result.errors));
           ]
       in
-      let stale_json =
-        match stale_cleanup with
-        | None -> `Null
-        | Some cleanup ->
-            `Assoc
-              [
-                ("scanned", `Int cleanup.scanned);
-                ("removed", `Int cleanup.removed);
-                ("errors",
-                 `List (List.map (fun err -> `String err) cleanup.errors));
-              ]
+      let failed = stop_result.errors <> [] in
+      let response =
+        `Assoc
+          [ "status", `String (if failed then "error" else "ok")
+          ; "action", `String "stop"
+          ; "target", `String target
+          ; "keeper", Json_util.string_opt_to_json keeper_name
+          ; ( "container_kind"
+            , `String
+                (Keeper_sandbox_control.stop_scope_to_string request.scope) )
+          ; "stop_result", stop_json
+          ]
+        |> Yojson.Safe.pretty_to_string
       in
-      tool_result_ok
-        (Yojson.Safe.pretty_to_string
-           (`Assoc
-              [
-                ("action", `String "stop");
-                ("keeper", Json_util.string_opt_to_json keeper_name);
-                ("container_kind", `String (Keeper_sandbox_control.stop_scope_to_string scope));
-                ("stop_result", stop_json);
-                ("stale_cleanup", stale_json);
-              ]))
+      if failed
+      then tool_result_error ~class_:Tool_result.Runtime_failure response
+      else tool_result_ok response
 
 let handle_keeper_sandbox_stop ctx args : tool_result =
   keeper_sandbox_stop_body ~config:ctx.config args
@@ -706,6 +645,11 @@ let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
         (tool_result_with_tool_name
            ~tool_name:name
            (handle_keeper_sandbox_status ctx args))
+  | "masc_keeper_sandbox_stop" ->
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (handle_keeper_sandbox_stop ctx args))
   | "masc_keeper_reset" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
   | "masc_keeper_compact" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_compact ctx args))
   | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
@@ -780,13 +724,8 @@ let dispatch_stream_if_free
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only =
-  [ "masc_persona_list"; "masc_keeper_list";
-    "masc_keeper_status"; "masc_keeper_persona_audit";
-    "masc_keeper_sandbox_status"; "masc_keeper_msg_queue";
-    "masc_keeper_adversarial_review" ]
-
 let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
+  let metadata = Tool_catalog.metadata s.name in
   Tool_spec.register
     (Tool_spec.create
        ~name:s.name
@@ -794,9 +733,12 @@ let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
        ~module_tag:Tool_dispatch.Mod_external
        ~input_schema:s.input_schema
        ~handler_binding:Tag_dispatch
-       ~is_read_only:(List.mem s.name tool_spec_read_only)
-       ~is_idempotent:(List.mem s.name tool_spec_read_only)
-       ~is_destructive:(String.equal s.name "masc_keeper_clear")
+       ~is_read_only:(Option.value metadata.readonly ~default:false)
+       ~is_idempotent:(Option.value metadata.idempotent ~default:false)
+       ~is_destructive:(Option.value metadata.destructive ~default:false)
+       ?effect_domain:metadata.effect_domain
+       ?requires_actor_binding:metadata.requires_actor_binding
+       ~required_permission:metadata.required_permission
        ())
 let () =
   List.iter register_keeper_surface_schema schemas
@@ -882,11 +824,6 @@ let () =
               ~tool_name:name
               (handle_keeper_sandbox_status ctx args))
        | _ -> eio_context_missing name)
-    | "masc_keeper_sandbox_start" ->
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (keeper_sandbox_start_body ~config args))
     | "masc_keeper_sandbox_stop" ->
       Some
         (tool_result_with_tool_name

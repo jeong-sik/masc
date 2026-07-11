@@ -38,10 +38,26 @@ function messageFromError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-function hasGithubAppPrivateKey(projection: KeeperSecretProjection | null | undefined): boolean {
-  return (projection?.file_mounts ?? []).some(
-    (mount: { container_path: string }) => mount.container_path === GITHUB_APP_PRIVATE_KEY_PATH,
-  )
+type SecretScope = KeeperSecretProjection['env_entries'][number]['scope']
+
+function envEntryScope(
+  projection: KeeperSecretProjection | null | undefined,
+  name: string,
+): SecretScope | null {
+  return projection?.env_entries.find(entry => entry.name === name)?.scope ?? null
+}
+
+function githubAppPrivateKeyScope(
+  projection: KeeperSecretProjection | null | undefined,
+): SecretScope | null {
+  return projection?.file_entries.find(
+    entry => entry.container_path === GITHUB_APP_PRIVATE_KEY_PATH
+      && entry.projection_policy === 'control_plane_only',
+  )?.scope ?? null
+}
+
+function configuredScopeLabel(scope: SecretScope | null): string {
+  return scope == null ? 'Not Configured' : `${scope} scope`
 }
 
 async function rollbackAppliedGithubAppSecrets({
@@ -96,10 +112,12 @@ export function KeeperGithubAppConfigPanel({
   const [error, setError] = useState<string | null>(null)
 
   // Detect presence in the projection
-  const envNames = projection?.env_names ?? []
-  const hasAppId = envNames.includes(GITHUB_APP_ID_ENV)
-  const hasInstallationId = envNames.includes(GITHUB_APP_INSTALLATION_ID_ENV)
-  const hasPrivateKey = hasGithubAppPrivateKey(projection)
+  const appIdScope = envEntryScope(projection, GITHUB_APP_ID_ENV)
+  const installationIdScope = envEntryScope(projection, GITHUB_APP_INSTALLATION_ID_ENV)
+  const privateKeyScope = githubAppPrivateKeyScope(projection)
+  const hasAppId = appIdScope !== null
+  const hasInstallationId = installationIdScope !== null
+  const hasPrivateKey = privateKeyScope !== null
   const hasCompleteConfig = hasAppId && hasInstallationId && hasPrivateKey
   const appIdValue = appId.trim()
   const installationIdValue = installationId.trim()
@@ -107,7 +125,10 @@ export function KeeperGithubAppConfigPanel({
   const hasCompleteDraft = Boolean(appIdValue && installationIdValue && privateKeyPemValue)
 
   const canSave = Boolean(keeperName) && pending === null && hasCompleteDraft
-  const canDelete = Boolean(keeperName) && pending === null && (hasAppId || hasInstallationId || hasPrivateKey)
+  const hasKeeperOverride = appIdScope === 'keeper'
+    || installationIdScope === 'keeper'
+    || privateKeyScope === 'keeper'
+  const canDelete = Boolean(keeperName) && pending === null && hasKeeperOverride
 
   async function handleSave(event: Event) {
     event.preventDefault()
@@ -205,7 +226,7 @@ export function KeeperGithubAppConfigPanel({
       const steps: string[] = []
 
       // 1. App ID
-      if (hasAppId) {
+      if (appIdScope === 'keeper') {
         const mutation: KeeperSecretEnvMutation = {
           scope: 'keeper',
           name: GITHUB_APP_ID_ENV,
@@ -215,7 +236,7 @@ export function KeeperGithubAppConfigPanel({
       }
 
       // 2. Installation ID
-      if (hasInstallationId) {
+      if (installationIdScope === 'keeper') {
         const mutation: KeeperSecretEnvMutation = {
           scope: 'keeper',
           name: GITHUB_APP_INSTALLATION_ID_ENV,
@@ -225,7 +246,7 @@ export function KeeperGithubAppConfigPanel({
       }
 
       // 3. Private Key PEM
-      if (hasPrivateKey) {
+      if (privateKeyScope === 'keeper') {
         const mutation: KeeperSecretFileMutation = {
           scope: 'keeper',
           path: GITHUB_APP_PRIVATE_KEY_PATH,
@@ -272,7 +293,7 @@ export function KeeperGithubAppConfigPanel({
           <div class="min-w-0 flex-1">
             <div class="text-3xs font-semibold uppercase text-[var(--color-fg-muted)]">App ID</div>
             <div class="truncate text-xs font-medium text-[var(--color-fg-primary)]">
-              ${hasAppId ? html`<span class="text-[var(--color-status-success-fg)] font-semibold">Configured</span>` : 'Not Configured'}
+              ${hasAppId ? html`<span class="text-[var(--color-status-success-fg)] font-semibold">${configuredScopeLabel(appIdScope)}</span>` : 'Not Configured'}
             </div>
           </div>
         </div>
@@ -282,7 +303,7 @@ export function KeeperGithubAppConfigPanel({
           <div class="min-w-0 flex-1">
             <div class="text-3xs font-semibold uppercase text-[var(--color-fg-muted)]">Installation ID</div>
             <div class="truncate text-xs font-medium text-[var(--color-fg-primary)]">
-              ${hasInstallationId ? html`<span class="text-[var(--color-status-success-fg)] font-semibold">Configured</span>` : 'Not Configured'}
+              ${hasInstallationId ? html`<span class="text-[var(--color-status-success-fg)] font-semibold">${configuredScopeLabel(installationIdScope)}</span>` : 'Not Configured'}
             </div>
           </div>
         </div>
@@ -292,7 +313,7 @@ export function KeeperGithubAppConfigPanel({
           <div class="min-w-0 flex-1">
             <div class="text-3xs font-semibold uppercase text-[var(--color-fg-muted)]">Private Key PEM</div>
             <div class="truncate text-xs font-medium text-[var(--color-fg-primary)]">
-              ${hasPrivateKey ? html`<span class="text-[var(--color-status-success-fg)] font-semibold">Uploaded</span>` : 'Not Uploaded'}
+              ${hasPrivateKey ? html`<span class="text-[var(--color-status-success-fg)] font-semibold">${configuredScopeLabel(privateKeyScope)} · server-only</span>` : 'Not Uploaded'}
             </div>
           </div>
         </div>
@@ -363,7 +384,7 @@ export function KeeperGithubAppConfigPanel({
             onClick=${handleDelete}
           >
             <${Trash2} size=${14} strokeWidth=${2.25} aria-hidden="true" />
-            <span>${pending === 'deleting' ? 'Purging...' : 'Purge Credentials'}</span>
+            <span>${pending === 'deleting' ? 'Purging...' : 'Purge Keeper Override'}</span>
           <//>
 
           <${ActionButton}

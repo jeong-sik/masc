@@ -4,11 +4,8 @@
     rationale.  Notes:
 
     - Fresh read per call.
-    - The four currently-hardcoded values
-      ([Cleanup.managed_sleep_sec], [Preflight.min_timeout_sec],
-      [Preflight.max_timeout_sec], [Shell_timeout.Cleanup_rm]) are
-      exposed as getters that return the historical literal —
-      enabling future env-override without behavior change. *)
+    - Every operational timeout is resolved through a typed shell-timeout
+      bucket; callers do not impose a second local clamp. *)
 
 open Env_config_core
 
@@ -68,8 +65,6 @@ module Cleanup = struct
       (max 10
          (get_int ~default:300 "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"))
 
-  (* P2c will optionally wire an env var; today the literal stands. *)
-  let managed_sleep_sec () = 3600
 end
 
 (* --------------------------------------------------------------- *)
@@ -80,23 +75,6 @@ module Runtime = struct
   let docker_image () =
     get_string ~default:"masc-keeper-sandbox:local"
       "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
-
-  let git_dispatch () =
-    get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
-
-  let docker_playground_enabled () =
-    get_bool ~default:false "MASC_KEEPER_DOCKER_PLAYGROUND"
-
-  (** @category Sandbox
-      @ops_class operator *)
-  let docker_playground_container_name () =
-    get_string ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
-
-  (** @category Sandbox
-      @ops_class operator *)
-  let docker_playground_container_root () =
-    get_string ~default:"/home/keeper/playground"
-      "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
 end
 
 (* --------------------------------------------------------------- *)
@@ -106,11 +84,6 @@ end
 module Preflight = struct
   let enabled () =
     get_bool ~default:true "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
-
-  (* P2c will optionally env-wire these; today they are literal-pinned
-     so callers in keeper_sandbox_runtime stay unchanged in P2a. *)
-  let min_timeout_sec () = 5.0
-  let max_timeout_sec () = 20.0
 
   (* Read-only canonical list — see .mli for the why-not-env note. *)
   let required_commands () =
@@ -247,13 +220,6 @@ let entry_floor (value : Yojson.Safe.t) : Yojson.Safe.t =
     ; "env_var", `Null
     ]
 
-let entry_hardcoded (value : Yojson.Safe.t) : Yojson.Safe.t =
-  `Assoc
-    [ "value", value
-    ; "source", `String "hardcoded"
-    ; "env_var", `Null
-    ]
-
 let bool_v b : Yojson.Safe.t = `Bool b
 let int_v i : Yojson.Safe.t = `Int i
 let float_v f : Yojson.Safe.t = `Float f
@@ -300,8 +266,6 @@ let raw_cleanup () : Yojson.Safe.t =
       entry_env_overridable
         ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
         (float_v (Cleanup.interval_sec ()))
-    ; "managed_sleep_sec",
-      entry_hardcoded (int_v (Cleanup.managed_sleep_sec ()))
     ]
 
 let raw_runtime () : Yojson.Safe.t =
@@ -309,19 +273,6 @@ let raw_runtime () : Yojson.Safe.t =
     [ "docker_image",
       entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
         (string_v (Runtime.docker_image ()))
-    ; "git_dispatch",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_GIT_DISPATCH"
-        (bool_v (Runtime.git_dispatch ()))
-    ; "docker_playground_enabled",
-      entry_env_overridable ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND"
-        (bool_v (Runtime.docker_playground_enabled ()))
-    ; "docker_playground_container_name",
-      entry_env_overridable ~env_var:"MASC_KEEPER_DOCKER_CONTAINER"
-        (string_v (Runtime.docker_playground_container_name ()))
-    ; "docker_playground_container_root",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
-        (string_v (Runtime.docker_playground_container_root ()))
     ]
 
 let raw_preflight () : Yojson.Safe.t =
@@ -330,10 +281,6 @@ let raw_preflight () : Yojson.Safe.t =
       entry_env_overridable
         ~env_var:"MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
         (bool_v (Preflight.enabled ()))
-    ; "min_timeout_sec",
-      entry_hardcoded (float_v (Preflight.min_timeout_sec ()))
-    ; "max_timeout_sec",
-      entry_hardcoded (float_v (Preflight.max_timeout_sec ()))
     ; "required_commands",
       entry_floor
         (`List (List.map (fun s -> `String s)

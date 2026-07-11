@@ -78,8 +78,8 @@ Important families:
   `masc_keeper_msg`, `masc_keeper_msg_result`, `masc_keeper_msg_queue`,
   `masc_keeper_msg_cancel`
 - operator/maintenance keeper controls: broader descriptors such as
-  `masc_keeper_compact`, `masc_keeper_clear`, `masc_keeper_sandbox_start`,
-  `masc_keeper_sandbox_stop`, `masc_keeper_reset`,
+  `masc_keeper_compact`, `masc_keeper_clear`, `masc_keeper_sandbox_stop`,
+  `masc_keeper_reset`,
   `masc_keeper_adversarial_review`, `masc_keeper_down`, and `masc_keeper_up`
   may exist in code, but normal keeper prompts must not assume them unless
   those exact names are visible and the operator authorized that class of work

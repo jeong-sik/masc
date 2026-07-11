@@ -352,6 +352,7 @@ describe('parseKeeperCompositeSnapshot', () => {
           {
             root: '/mock/workspace/.masc/secrets/base',
             source: 'workspace_masc_secrets',
+            scope: 'shared',
             status: 'ready',
             configured: true,
             env_count: 1,
@@ -360,6 +361,7 @@ describe('parseKeeperCompositeSnapshot', () => {
           {
             root: '/mock/workspace/.masc/secrets/sangsu',
             source: 'workspace_masc_secrets',
+            scope: 'keeper',
             status: 'ready',
             configured: true,
             env_count: 1,
@@ -368,11 +370,22 @@ describe('parseKeeperCompositeSnapshot', () => {
         ],
         env_count: 1,
         file_count: 1,
-        env_names: ['GH_TOKEN'],
-        file_mounts: [
+        env_entries: [
+          {
+            name: 'GH_TOKEN',
+            scope: 'keeper',
+            overrides_scope: 'shared',
+            projection_targets: ['local', 'docker'],
+          },
+        ],
+        file_entries: [
           {
             host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
             container_path: '/home/keeper/.ssh/id_ed25519',
+            scope: 'keeper',
+            overrides_scope: null,
+            projection_policy: 'docker_read_only_mount',
+            projection_targets: ['docker'],
           },
         ],
         values_validated: true,
@@ -386,7 +399,14 @@ describe('parseKeeperCompositeSnapshot', () => {
       '/mock/workspace/.masc/secrets/base',
       '/mock/workspace/.masc/secrets/sangsu',
     ])
-    expect(result.secret_projection?.env_names).toEqual(['GH_TOKEN'])
+    expect(result.secret_projection?.env_entries).toEqual([
+      {
+        name: 'GH_TOKEN',
+        scope: 'keeper',
+        overrides_scope: 'shared',
+        projection_targets: ['local', 'docker'],
+      },
+    ])
     expect(JSON.stringify(result.secret_projection)).not.toContain('ghs_')
   })
 

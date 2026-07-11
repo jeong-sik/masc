@@ -254,7 +254,7 @@ let test_turn_context_fields_stored () =
       ~sandbox_profile:"docker"
       ~sandbox_root:"/tmp/k-sandbox"
       ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
-      ~network_mode:"inherit"
+      ~network_mode:"host"
       ~approval_mode:"manual"
       ~runtime_profile:"tool_use_strict"
       ();
@@ -325,7 +325,7 @@ let test_turn_context_fields_stored () =
       (Some "docker")
       (Safe_ops.json_string_opt "sandbox_profile" entry);
     Alcotest.(check (option string)) "network_mode field"
-      (Some "inherit")
+      (Some "host")
       (Safe_ops.json_string_opt "network_mode" entry);
     Alcotest.(check (option string)) "approval_mode field"
       (Some "manual")

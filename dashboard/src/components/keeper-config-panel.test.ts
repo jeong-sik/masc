@@ -4,8 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
 import {
   buildRuntimePayload,
-  coerceNetworkMode,
-  coerceSandboxProfile,
   filterHookSlots,
   hookSlotDetails,
   initRuntimeDraftFromConfig,
@@ -39,7 +37,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       max_context_override_tokens: 1_000_000,
     },
     sandbox_profile: 'local',
-    network_mode: 'inherit',
+    network_mode: 'host',
     sandbox_last_error: null,
     allowed_paths: ['/tmp/workspace'],
     effective_allowed_paths: ['/tmp/workspace'],
@@ -255,24 +253,6 @@ describe('hookSlotDetails', () => {
   })
 })
 
-describe('sandbox coerce helpers', () => {
-  it('coerceSandboxProfile maps docker, falls back to local otherwise', () => {
-    expect(coerceSandboxProfile('docker')).toBe('docker')
-    expect(coerceSandboxProfile('local')).toBe('local')
-    expect(coerceSandboxProfile('something_else')).toBe('local')
-    expect(coerceSandboxProfile(undefined)).toBe('local')
-    expect(coerceSandboxProfile('')).toBe('local')
-  })
-
-  it('coerceNetworkMode maps none, falls back to inherit otherwise', () => {
-    expect(coerceNetworkMode('none')).toBe('none')
-    expect(coerceNetworkMode('inherit')).toBe('inherit')
-    expect(coerceNetworkMode('host')).toBe('inherit')
-    expect(coerceNetworkMode(undefined)).toBe('inherit')
-  })
-
-})
-
 describe('keeperRuntimeConfigCanWrite', () => {
   it('allows writes only for a TOML-backed keeper manifest', () => {
     const base = makeKeeperConfig()
@@ -476,7 +456,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       max_context_override_tokens: 1_000_000,
     },
     sandbox_profile: 'local',
-    network_mode: 'inherit',
+    network_mode: 'host',
     allowed_paths: [],
     effective_allowed_paths: [],
     prompt: {} as KeeperConfig['prompt'],
@@ -542,25 +522,6 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
     expect(draft.runtime_id).toBe('runpod_mtp.qwen36-35b-a3b-mtp')
   })
 
-  it('defaults sandbox fields when config is missing them', () => {
-    const c = makeKeeperConfigForSandbox({
-      sandbox_profile: undefined,
-      network_mode: undefined,
-    })
-    const draft = initRuntimeDraftFromConfig(c)
-    expect(draft.sandbox_profile).toBe('local')
-    expect(draft.network_mode).toBe('inherit')
-  })
-
-  it('normalises unknown sandbox values via coerce helpers', () => {
-    const c = makeKeeperConfigForSandbox({
-      sandbox_profile: 'weird',
-      network_mode: 'host',
-    })
-    const draft = initRuntimeDraftFromConfig(c)
-    expect(draft.sandbox_profile).toBe('local')
-    expect(draft.network_mode).toBe('inherit')
-  })
 })
 
 describe('buildRuntimePayload — sandbox diffing', () => {
@@ -571,7 +532,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
   it('omits sandbox fields when unchanged', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: 'local',
-      network_mode: 'inherit',
+      network_mode: 'host',
     })
     const payload = buildRuntimePayload(draftFrom(c), c)
     expect(payload.sandbox_profile).toBeUndefined()
@@ -609,7 +570,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
   })
 
   it('emits network_mode when switched to none', () => {
-    const c = makeKeeperConfigForSandbox({ network_mode: 'inherit' })
+    const c = makeKeeperConfigForSandbox({ network_mode: 'host' })
     const payload = buildRuntimePayload(draftFrom(c, { network_mode: 'none' }), c)
     expect(payload.network_mode).toBe('none')
   })
@@ -617,7 +578,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
   it('emits all three when switching to hardened+none+workspace in one save', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: 'local',
-      network_mode: 'inherit',
+      network_mode: 'host',
     })
     const payload = buildRuntimePayload(draftFrom(c, {
       sandbox_profile: 'docker',
@@ -625,14 +586,6 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     }), c)
     expect(payload.sandbox_profile).toBe('docker')
     expect(payload.network_mode).toBe('none')
-  })
-
-  it('treats unknown backend sandbox value as local for diffing', () => {
-    const c = makeKeeperConfigForSandbox({ sandbox_profile: 'some_future_profile' })
-    const draft = draftFrom(c)
-    expect(draft.sandbox_profile).toBe('local')
-    const payload = buildRuntimePayload(draft, c)
-    expect(payload.sandbox_profile).toBeUndefined()
   })
 
   it('emits active_goal_ids when goal bindings change', () => {
@@ -1019,6 +972,11 @@ vi.mock('./common/toast', () => ({
   showToast: mocks.showToast,
 }))
 
+vi.mock('./keeper-sandbox-panel', () => ({
+  KeeperSandboxPanel: ({ keeperName }: { keeperName: string }) =>
+    `sandbox:${keeperName}`,
+}))
+
 import {
   KeeperConfigPanel,
   buildKcfAssemblySegments,
@@ -1094,6 +1052,20 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('GitHub App 자격증명')
     // The panel's initial projection is loaded from the keeper composite.
     expect(mocks.fetchKeeperComposite).toHaveBeenCalledWith('keeper-sangsu', expect.anything())
+  })
+
+  it('surfaces credential projection fetch failure instead of rendering inactive credentials', async () => {
+    mocks.fetchKeeperComposite.mockRejectedValueOnce(new Error('projection endpoint unavailable'))
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+
+    expect(container.textContent).toContain('projection endpoint unavailable')
+    expect(container.textContent).toContain('다시 조회')
+    expect(container.querySelector('[data-testid="keeper-github-app-config-panel"]')).toBeNull()
   })
 
   it('separates editable prompt controls from read-only runtime metadata', async () => {
@@ -1783,7 +1755,7 @@ describe('KeeperConfigPanel', () => {
     )
   })
 
-  it('shows the sandbox preflight guide when docker is selected', async () => {
+  it('defaults Docker to isolated networking and warns only for explicit host networking', async () => {
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
@@ -1792,6 +1764,7 @@ describe('KeeperConfigPanel', () => {
     await flush()
 
     expect(container.textContent).not.toContain('Docker Sandbox 프리플라이트')
+    expect(container.textContent).toContain('sandbox:keeper-sangsu')
 
     const sandboxProfile = container.querySelector('select[aria-label="sandbox_profile"]') as HTMLSelectElement | null
     expect(sandboxProfile).not.toBeNull()
@@ -1800,7 +1773,18 @@ describe('KeeperConfigPanel', () => {
     sandboxProfile!.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
 
-    expect(container.textContent).toContain('Docker Sandbox 프리플라이트')
+    expect(container.textContent).not.toContain('Docker Sandbox 프리플라이트')
+    expect(container.textContent).not.toContain('Host network 경고')
+    const networkMode = container.querySelector('select[aria-label="network_mode"]') as HTMLSelectElement | null
+    expect(networkMode).not.toBeNull()
+    expect(networkMode!.value).toBe('none')
+
+    networkMode!.value = 'host'
+    networkMode!.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+
+    expect(container.textContent).toContain('Host network 경고')
+    expect(container.textContent).toContain('network_mode=host')
   })
 
   it('supports forced config refresh for already-loaded keepers', async () => {

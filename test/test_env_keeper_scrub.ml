@@ -6,19 +6,16 @@ let allowed_basic_envs () =
     ; "USER"; "LOGNAME"; "SHELL"
     ; "TERM"; "EDITOR"; "VISUAL"; "PAGER"
     ; "XDG_CONFIG_HOME"; "XDG_CACHE_HOME"; "XDG_DATA_HOME"
-    ; "DOCKER_HOST"; "DOCKER_TLS_VERIFY"; "DOCKER_CERT_PATH"
     ; "HTTP_PROXY"; "HTTPS_PROXY"; "NO_PROXY"; "SSL_CERT_FILE"
     ; "GIT_AUTHOR_NAME"; "GIT_AUTHOR_EMAIL"
     ; "GIT_COMMITTER_NAME"; "GIT_COMMITTER_EMAIL"
     ; "MASC_BASE_PATH"; "MASC_CONFIG_DIR"
-    ; "MASC_KEEPER_BOOTSTRAP_ENABLED"
-    ; "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
     ]
   in
   List.iter
     (fun key ->
        Alcotest.(check bool) (Printf.sprintf "%s is allowed" key) true
-         (Env_keeper_scrub.is_allowed key))
+         (Env_keeper_scrub.is_keeper_process_allowed key))
     must_allow
 ;;
 
@@ -38,15 +35,34 @@ let denied_secret_suffixes () =
   List.iter
     (fun key ->
        Alcotest.(check bool) (Printf.sprintf "%s is denied" key) false
-         (Env_keeper_scrub.is_allowed key))
+         (Env_keeper_scrub.is_keeper_process_allowed key))
     must_deny
 ;;
 
 let denied_masc_admin_prefix () =
   Alcotest.(check bool) "MASC_ADMIN_TOKEN denied" false
-    (Env_keeper_scrub.is_allowed "MASC_ADMIN_TOKEN");
+    (Env_keeper_scrub.is_keeper_process_allowed "MASC_ADMIN_TOKEN");
   Alcotest.(check bool) "MASC_INTERNAL_MCP_TOKEN denied" false
-    (Env_keeper_scrub.is_allowed "MASC_INTERNAL_MCP_TOKEN")
+    (Env_keeper_scrub.is_keeper_process_allowed "MASC_INTERNAL_MCP_TOKEN");
+  Alcotest.(check bool) "MASC_SECRET_DIR denied" false
+    (Env_keeper_scrub.is_keeper_process_allowed "MASC_SECRET_DIR")
+;;
+
+let docker_control_plane_is_separate () =
+  List.iter
+    (fun key ->
+       Alcotest.(check bool) (key ^ " denied to Keeper") false
+         (Env_keeper_scrub.is_keeper_process_allowed key);
+       Alcotest.(check bool) (key ^ " allowed to Docker control plane") true
+         (Env_keeper_scrub.is_control_plane_allowed key))
+    [ "DOCKER_HOST"; "DOCKER_TLS_VERIFY"; "DOCKER_CERT_PATH"
+    ; "MASC_KEEPER_TEST_DOCKER_LOG"
+    ];
+  List.iter
+    (fun key ->
+       Alcotest.(check bool) (key ^ " runtime prefix is not re-exported") false
+         (Env_keeper_scrub.is_keeper_process_allowed key))
+    [ "MASC_KEEPER_BOOTSTRAP_ENABLED"; "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" ]
 ;;
 
 let filter_environment_keeps_only_allowed () =
@@ -59,7 +75,7 @@ let filter_environment_keeps_only_allowed () =
      ; "GIT_AUTHOR_NAME=keeper"
     |]
   in
-  let filtered = Env_keeper_scrub.filter_environment input in
+  let filtered = Env_keeper_scrub.filter_keeper_environment input in
   let keys =
     Array.to_list filtered
     |> List.map (fun entry ->
@@ -81,7 +97,7 @@ let filter_environment_keeps_only_allowed () =
 
 let filter_environment_drops_entries_without_equals () =
   let input = [| "WEIRD_NO_EQUALS"; "ANTHROPIC_API_KEY=secret" |] in
-  let filtered = Env_keeper_scrub.filter_environment input in
+  let filtered = Env_keeper_scrub.filter_keeper_environment input in
   let has_weird =
     Array.to_list filtered |> List.exists (fun e -> e = "WEIRD_NO_EQUALS")
   in
@@ -92,22 +108,19 @@ let filter_environment_drops_entries_without_equals () =
   Alcotest.(check bool) "ANTHROPIC_API_KEY stripped" false has_anthropic
 ;;
 
-let extra_allow_env_override () =
+let removed_extra_allow_env_cannot_open_credential_boundary () =
   let prior = Sys.getenv_opt "MASC_KEEPER_ALLOW_EXTRA" in
-  Unix.putenv "MASC_KEEPER_ALLOW_EXTRA" "CUSTOM_OK,ANOTHER_OK";
+  Unix.putenv "MASC_KEEPER_ALLOW_EXTRA" "AWS_ACCESS_KEY_ID,CUSTOM_OK";
   Fun.protect
     ~finally:(fun () ->
       match prior with
-      | Some v -> Unix.putenv "MASC_KEEPER_ALLOW_EXTRA" v
+      | Some value -> Unix.putenv "MASC_KEEPER_ALLOW_EXTRA" value
       | None -> Unix.putenv "MASC_KEEPER_ALLOW_EXTRA" "")
     (fun () ->
-       Alcotest.(check bool) "CUSTOM_OK allowed by extra" true
-         (Env_keeper_scrub.is_allowed "CUSTOM_OK");
-       Alcotest.(check bool) "ANOTHER_OK allowed by extra" true
-         (Env_keeper_scrub.is_allowed "ANOTHER_OK");
-       (* extra allow does not bypass deny suffix *)
-       Alcotest.(check bool) "CUSTOM_OK_SECRET still denied" false
-         (Env_keeper_scrub.is_allowed "CUSTOM_OK_SECRET"))
+       Alcotest.(check bool) "ambient access-key id stays denied" false
+         (Env_keeper_scrub.is_keeper_process_allowed "AWS_ACCESS_KEY_ID");
+       Alcotest.(check bool) "arbitrary ambient key stays denied" false
+         (Env_keeper_scrub.is_keeper_process_allowed "CUSTOM_OK"))
 ;;
 
 let mem entry env = Array.to_list env |> List.exists (fun e -> e = entry)
@@ -124,7 +137,9 @@ let c_messages_pins_message_locale () =
      ; "LC_CTYPE=ko_KR.UTF-8"
     |]
   in
-  let out = Env_keeper_scrub.filter_environment_c_messages input in
+  let out =
+    Env_keeper_scrub.filter_control_plane_environment_c_messages input
+  in
   Alcotest.(check bool) "LC_MESSAGES pinned to C" true (mem "LC_MESSAGES=C" out);
   Alcotest.(check bool) "LC_ALL neutralised to empty" true (mem "LC_ALL=" out);
   Alcotest.(check bool) "host LC_ALL value dropped" false
@@ -137,7 +152,10 @@ let c_messages_pins_message_locale () =
 ;;
 
 let c_messages_pins_even_without_host_locale () =
-  let out = Env_keeper_scrub.filter_environment_c_messages [| "PATH=/usr/bin" |] in
+  let out =
+    Env_keeper_scrub.filter_control_plane_environment_c_messages
+      [| "PATH=/usr/bin" |]
+  in
   Alcotest.(check bool) "LC_MESSAGES=C appended" true (mem "LC_MESSAGES=C" out);
   Alcotest.(check bool) "LC_ALL= appended" true (mem "LC_ALL=" out)
 ;;
@@ -150,7 +168,7 @@ let filter_environment_scrubs_proxy_credentials () =
      ; "NO_PROXY=localhost,.example.com"
     |]
   in
-  let out = Env_keeper_scrub.filter_environment input in
+  let out = Env_keeper_scrub.filter_keeper_environment input in
   Alcotest.(check bool) "HTTP_PROXY value redacted" true
     (mem "HTTP_PROXY=https://[REDACTED]@proxy.example.com:8080" out);
   Alcotest.(check bool) "HTTPS_PROXY value redacted" true
@@ -172,8 +190,10 @@ let () =
             denied_secret_suffixes
         ; Alcotest.test_case "MASC_ADMIN_ prefix is denied" `Quick
             denied_masc_admin_prefix
-        ; Alcotest.test_case "MASC_KEEPER_ALLOW_EXTRA override" `Quick
-            extra_allow_env_override
+        ; Alcotest.test_case "Docker control plane is separate" `Quick
+            docker_control_plane_is_separate
+        ; Alcotest.test_case "removed extra allow cannot open credentials" `Quick
+            removed_extra_allow_env_cannot_open_credential_boundary
         ] )
     ; ( "filter_environment"
       , [ Alcotest.test_case "keeps allowed keys only" `Quick

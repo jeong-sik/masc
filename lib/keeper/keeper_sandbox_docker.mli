@@ -75,17 +75,10 @@ type docker_shell_result =
   ; semantic_ok : bool
   }
 
-(** Cold-start floor (seconds) for [docker run --rm].  The wall-clock
-    budget covers slot_wait + spawn + container cold start + actual
-    cmd + drain; the default ([20.0]) is the sandbox's own internal
-    budget — the caller does not observe this.  Operators can override
-    via [MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC] (read once at module
-    load, clamped to [20.0]). *)
-val docker_run_min_timeout_sec : float
-
-(** Run [cmd] inside the keeper Docker sandbox; clamps
-    [timeout_sec] to [docker_run_min_timeout_sec], honours
-    [network_mode], records errors via [Keeper_registry]. *)
+(** Run [cmd] inside the keeper Docker sandbox. [timeout_sec] is the
+    caller-owned wall-clock budget and must be finite and positive; it is
+    never silently clamped. The runner honours [network_mode] and records
+    errors via [Keeper_registry]. *)
 val run_docker_shell_command_with_status :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

@@ -26,6 +26,7 @@ import {
   number,
   object,
   optional,
+  picklist,
   string,
   unknown,
   type BaseIssue,
@@ -198,30 +199,46 @@ const KeeperRuntimeAttentionSchema = object({
   live_turn_last_progress_at: optional(nullable(number())),
 })
 
-const KeeperSecretFileMountSchema = object({
+const KeeperSecretScopeSchema = picklist(['shared', 'keeper'])
+const KeeperSecretProjectionStatusSchema = picklist(['absent', 'empty', 'ready', 'error'])
+const KeeperSecretProjectionTargetSchema = picklist(['local', 'docker'])
+
+const KeeperSecretEnvEntrySchema = object({
+  name: string(),
+  scope: KeeperSecretScopeSchema,
+  overrides_scope: nullable(KeeperSecretScopeSchema),
+  projection_targets: array(KeeperSecretProjectionTargetSchema),
+})
+
+const KeeperSecretFileEntrySchema = object({
   host_path: string(),
   container_path: string(),
+  scope: KeeperSecretScopeSchema,
+  overrides_scope: nullable(KeeperSecretScopeSchema),
+  projection_policy: picklist(['docker_read_only_mount', 'control_plane_only']),
+  projection_targets: array(KeeperSecretProjectionTargetSchema),
 })
 
 const KeeperSecretRootSchema = object({
   root: string(),
   source: string(),
-  status: string(),
+  scope: KeeperSecretScopeSchema,
+  status: KeeperSecretProjectionStatusSchema,
   configured: boolean(),
   env_count: number(),
   file_count: number(),
 })
 
 const KeeperSecretProjectionSchema = object({
-  status: string(),
+  status: KeeperSecretProjectionStatusSchema,
   configured: boolean(),
   root: string(),
   source: string(),
   effective_roots: fallback(array(KeeperSecretRootSchema), []),
   env_count: number(),
   file_count: number(),
-  env_names: fallback(array(string()), []),
-  file_mounts: fallback(array(KeeperSecretFileMountSchema), []),
+  env_entries: fallback(array(KeeperSecretEnvEntrySchema), []),
+  file_entries: fallback(array(KeeperSecretFileEntrySchema), []),
   values_validated: boolean(),
   error: nullable(string()),
   next_action: string(),
@@ -332,7 +349,8 @@ export type KeeperBoardCursor = InferOutput<typeof KeeperBoardCursorSchema>
 export type KeeperCompositeExecution = InferOutput<typeof KeeperCompositeExecutionSchema>
 export type KeeperRuntimeAttention = InferOutput<typeof KeeperRuntimeAttentionSchema>
 export type KeeperSecretProjection = InferOutput<typeof KeeperSecretProjectionSchema>
-export type KeeperSecretFileMount = InferOutput<typeof KeeperSecretFileMountSchema>
+export type KeeperSecretEnvEntry = InferOutput<typeof KeeperSecretEnvEntrySchema>
+export type KeeperSecretFileEntry = InferOutput<typeof KeeperSecretFileEntrySchema>
 export type KeeperCompositePhase = InferOutput<typeof KeeperCompositePhaseSchema>
 export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPhaseSchema>
 export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>

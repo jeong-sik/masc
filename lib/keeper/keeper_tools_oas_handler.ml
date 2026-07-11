@@ -49,7 +49,7 @@ let make_keeper_tool_handler
       (* OAS input validation runs outside guarded_dispatch, so emit the
          shared dispatch observers explicitly with the same shape as the
          exec error path ([Handled] with the error result).  The rejection
-         class (Policy_rejection) rides in [validation_result] so observers
+         class (Workflow_rejection) rides in [validation_result] so observers
          that inspect [Tool_result.failure_class] can still distinguish it.
          Using [Handled (Some ...)] keeps the failure in the unified observer
          view; the earlier [Handler_error] arm was dropped by every observer

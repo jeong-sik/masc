@@ -222,5 +222,3 @@ val build_git_commit_opt : unit -> string option
 val pubsub_max_messages : unit -> int
 
 (** {1 Keeper defaults} *)
-
-val keeper_default_sandbox_profile_raw : unit -> string

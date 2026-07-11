@@ -1,17 +1,15 @@
-type sandbox_profile =
+type sandbox_profile = Keeper_sandbox_config.sandbox_profile =
   | Local
     (** Host-process execution. Filesystem scope is bound to
         [<base-path>/.masc/playground/<keeper>/] (see [Playground_paths]).
-        Network inherits the server's namespace. Intended for keepers
+        Network uses the host namespace explicitly. Intended for keepers
         whose work stays on local files and does not need container-grade
         isolation. *)
   | Docker
     (** Containerized execution with hardened defaults: cap-drop,
         no-new-privs, read-only rootfs, tmpfs, pids/memory limits.
-        Network defaults to [Network_none]; the internal git/gh
-        dispatcher (see [Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd])
-        uses network egress plus read-only mounts from the selected
-        credential bundle for the duration of a git/gh command. *)
+        Network defaults to [Network_none]. Host networking is never inferred
+        from a command; it requires the explicit [Network_host] policy. *)
 
 module Sandbox_profile_tla = struct
   type t = sandbox_profile =
@@ -27,76 +25,89 @@ end
 
 type network_mode =
   | Network_none [@tla.symbol "Network_none"]
-  | Network_inherit [@tla.symbol "Network_inherit"]
+  | Network_host [@tla.symbol "Network_host"]
 [@@deriving tla]
 
-let sandbox_profile_to_config = function
-  | Local -> Keeper_sandbox_config.Local
-  | Docker -> Keeper_sandbox_config.Docker
-
-let sandbox_profile_of_config = function
-  | Keeper_sandbox_config.Local -> Local
-  | Keeper_sandbox_config.Docker -> Docker
-
-let sandbox_profile_to_string profile =
-  profile
-  |> sandbox_profile_to_config
-  |> Keeper_sandbox_config.sandbox_profile_to_string
-;;
+let sandbox_profile_to_string =
+  Keeper_sandbox_config.sandbox_profile_to_string
 
 (** Parse a sandbox profile string. Canonical values are ["local"] and
     ["docker"]. *)
 let sandbox_profile_of_string raw =
-  raw
-  |> Keeper_sandbox_config.sandbox_profile_of_string
-  |> Option.map sandbox_profile_of_config
+  Keeper_sandbox_config.sandbox_profile_of_string raw
 ;;
 
 (* Issue #8467: Variant SSOT — adding a constructor to [sandbox_profile]
    forces [sandbox_profile_to_string] exhaustiveness AND extends
    [valid_sandbox_profile_strings] so [keeper_schema] picks it up via
    the mirror declared there. *)
-let all_sandbox_profiles = [ Local; Docker ]
+let all_sandbox_profiles = Keeper_sandbox_config.all_sandbox_profiles
 let valid_sandbox_profile_strings = Keeper_sandbox_config.valid_sandbox_profile_strings
 
 let network_mode_to_string = function
   | Network_none -> "none"
-  | Network_inherit -> "inherit"
+  | Network_host -> "host"
 ;;
 
 let network_mode_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "none" -> Some Network_none
-  | "inherit" -> Some Network_inherit
+  | "host" -> Some Network_host
   | _ -> None
 ;;
 
 (* Issue #8467: Variant SSOT for [network_mode]. *)
-let all_network_modes = [ Network_none; Network_inherit ]
+let all_network_modes = [ Network_none; Network_host ]
 let valid_network_mode_strings = List.map network_mode_to_string all_network_modes
-let default_sandbox_profile = Local
+let default_sandbox_profile = Keeper_sandbox_config.default_sandbox_profile
 
 let default_network_mode_for_profile = function
-  | Local -> Network_inherit
+  | Local -> Network_host
   | Docker -> Network_none
-  (* git/gh dispatch in Docker upgrades to Network_inherit at runtime
-     via Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd; that upgrade is not
-     visible here because it's a per-command decision, not a profile
-     default. *)
+;;
+
+let validate_network_mode_for_profile ~sandbox_profile ~network_mode =
+  match sandbox_profile, network_mode with
+  | Local, Network_host | Docker, (Network_none | Network_host) -> Ok ()
+  | Local, Network_none ->
+    Error
+      "network_mode=none is only enforceable for sandbox_profile=docker; local execution uses the host network"
+;;
+
+type sandbox_container_kind =
+  | Sandbox_oneshot
+  | Sandbox_turn
+
+let sandbox_container_kind_to_string = function
+  | Sandbox_oneshot -> "oneshot"
+  | Sandbox_turn -> "turn"
+;;
+
+let all_sandbox_container_kinds = [ Sandbox_oneshot; Sandbox_turn ]
+
+let valid_sandbox_container_kind_strings =
+  List.map sandbox_container_kind_to_string all_sandbox_container_kinds
+;;
+
+let sandbox_container_kind_of_string raw =
+  let normalized = String.lowercase_ascii (String.trim raw) in
+  List.find_opt
+    (fun kind -> String.equal normalized (sandbox_container_kind_to_string kind))
+    all_sandbox_container_kinds
 ;;
 
 type sandbox_stop_scope =
-  | Stop_managed
-  | Stop_turn
+  | Stop_kind of sandbox_container_kind
   | Stop_all
 
 let sandbox_stop_scope_to_string = function
-  | Stop_managed -> "managed"
-  | Stop_turn -> "turn"
+  | Stop_kind kind -> sandbox_container_kind_to_string kind
   | Stop_all -> "all"
 ;;
 
-let all_sandbox_stop_scopes = [ Stop_managed; Stop_turn; Stop_all ]
+let all_sandbox_stop_scopes =
+  List.map (fun kind -> Stop_kind kind) all_sandbox_container_kinds @ [ Stop_all ]
+;;
 
 let sandbox_stop_scope_of_string raw =
   let normalized = String.lowercase_ascii (String.trim raw) in
@@ -108,8 +119,6 @@ let sandbox_stop_scope_of_string raw =
 let valid_sandbox_stop_scope_strings =
   List.map sandbox_stop_scope_to_string all_sandbox_stop_scopes
 ;;
-
-let default_sandbox_stop_scope = Stop_managed
 
 (* RFC vision-delegation §2.4 — persisted mechanism-selection axis. Decides how a
    keeper handles image input, resolved independently of the live runtime

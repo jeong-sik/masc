@@ -626,13 +626,12 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 별도 worktree MCP tool은 없다. repo/worktree 조작은 `Execute`에서
 `executable="git"`와 typed `argv`를 사용한다.
 
-### 14.6 Control (`tool_control`)
+### 14.6 Operator control
 
-| Tool | 동작 |
-|------|------|
-| `masc_pause` | Workspace 일시 정지 |
-| `masc_resume` | Workspace 재개 |
-| `masc_pause_status` | 정지 상태 조회 |
+Workspace automation 제어는 별도 control tool family가 아니라
+`masc_operator_action`의 typed action(`namespace_pause` / `namespace_resume`)으로만
+진입한다. 변경 요청은 operator snapshot에 기록되고, 정책이 요구하는 경우
+`masc_operator_confirm`으로 명시 승인한다. 현재 상태의 SSOT도 operator snapshot이다.
 
 ### 14.6 Social (`tool_social`, vote 부분)
 

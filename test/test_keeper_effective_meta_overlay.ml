@@ -482,13 +482,13 @@ let test_keepalive_meta_selection_overlays_disk_meta () =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "docker"
-network_mode = "inherit"
+network_mode = "host"
 |};
   let config = Workspace.default_config base in
   let raw_meta = seed_runtime_meta config name in
   Alcotest.(check string)
-    "fixture raw meta starts from persisted/default sandbox"
-    "local"
+    "runtime JSON placeholder uses fail-safe Docker"
+    "docker"
     (Profile.sandbox_profile_to_string raw_meta.sandbox_profile);
   let effective =
     Heartbeat_presence.effective_keepalive_meta
@@ -502,7 +502,7 @@ network_mode = "inherit"
     (Profile.sandbox_profile_to_string effective.sandbox_profile);
   Alcotest.(check string)
     "keepalive disk meta selection applies TOML network overlay"
-    "inherit"
+    "host"
     (Profile.network_mode_to_string effective.network_mode)
 
 let test_missing_sandbox_profile_fails_loud_for_profile_source () =

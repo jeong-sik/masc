@@ -1304,7 +1304,7 @@ let test_runtime_contract_policy_uses_workspace_base_path () =
                   ("name", `String keeper_name);
                   ("trace_id", `String "runtime-contract-policy-trace");
                   ("sandbox_profile", `String "docker");
-                  ("network_mode", `String "inherit");
+                  ("network_mode", `String "host");
                 ])
           in
           let runtime_contract =
@@ -1655,7 +1655,7 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
           ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
           ("trace_id", `String "sandbox-write-trace");
           ("sandbox_profile", `String "docker");
-          ("network_mode", `String "inherit");
+          ("network_mode", `String "host");
           ("current_task_id", `String "task-210");
           ("always_approve", `Bool true);
         ])
@@ -1987,7 +1987,7 @@ let test_callback_manual_mode_preserves_always_approve_threshold () =
         ("name", `String keeper_name);
         ("trace_id", `String "test-trace");
         ("sandbox_profile", `String "docker");
-        ("network_mode", `String "inherit");
+        ("network_mode", `String "host");
         ("always_approve", `Bool true);
       ])
   in
@@ -2028,7 +2028,7 @@ let test_callback_typed_last_blocker_rejects_hard_forbidden () =
                 ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
                 ("trace_id", `String "runtime-blocked-trace");
                 ("sandbox_profile", `String "docker");
-                ("network_mode", `String "inherit");
+                ("network_mode", `String "host");
                 ("always_approve", `Bool true);
               ])
         in
@@ -2079,7 +2079,7 @@ let test_callback_transient_last_blocker_preserves_always_approve () =
             ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
             ("trace_id", `String "transient-blocked-trace");
             ("sandbox_profile", `String "docker");
-            ("network_mode", `String "inherit");
+            ("network_mode", `String "host");
             ("always_approve", `Bool true);
           ])
     in
@@ -2118,7 +2118,7 @@ let test_runtime_trust_classifies_always_approve_flag () =
             ("name", `String keeper_name);
             ("trace_id", `String "trace-always-flag");
             ("sandbox_profile", `String "docker");
-            ("network_mode", `String "inherit");
+            ("network_mode", `String "host");
             ("always_approve", `Bool true);
           ])
       in
@@ -2155,7 +2155,7 @@ let test_callback_always_approve_respects_hard_forbidden () =
             ("name", `String keeper_name);
             ("trace_id", `String "test-trace");
             ("sandbox_profile", `String "docker");
-            ("network_mode", `String "inherit");
+            ("network_mode", `String "host");
             ("always_approve", `Bool true);
           ])
       in
@@ -2421,7 +2421,7 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
             ("name", `String keeper_name);
             ("trace_id", `String "trace-runtime-trust-audit-target");
             ("sandbox_profile", `String "docker");
-            ("network_mode", `String "inherit");
+            ("network_mode", `String "host");
           ])
       in
       AQ.audit_approval_event ~base_path:config.base_path

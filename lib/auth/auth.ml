@@ -233,7 +233,12 @@ let record_strict_unknown_tool_denial ~agent_name ~tool_name =
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   if is_known_or_internal_tool_name tool_name
-  then check_permission config ~agent_name ~token ~permission:CanBroadcast
+  then
+    check_permission
+      config
+      ~agent_name
+      ~token
+      ~permission:(Tool_catalog.required_permission tool_name)
   else (
     let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
     Error
@@ -283,9 +288,16 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
   if is_known_or_internal_tool_name tool_name
   then
-    if has_permission role CanBroadcast
+    let required_permission = Tool_catalog.required_permission tool_name in
+    if has_permission role required_permission
     then Ok ()
-    else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
+    else
+      Error
+        (Auth
+           (Auth_error.Forbidden
+              { agent = agent_name
+              ; action = permission_to_string required_permission ^ ":" ^ tool_name
+              }))
   else (
     let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
     Error
@@ -298,8 +310,8 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
     Resolves the caller role and enforces generic internal-tool access.
     Invalid/expired tokens are rejected (not silently downgraded).
 
-    Known or [masc_*] tools require at least Worker; unknown external tools are
-    forbidden. *)
+    Known tools require the permission declared by [Tool_catalog]; unknown
+    internal names default to Worker-level [CanBroadcast]. *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e
@@ -367,5 +379,4 @@ let is_auth_enabled config : bool =
   let cfg = load_auth_config config in
   cfg.enabled
 ;;
-
 

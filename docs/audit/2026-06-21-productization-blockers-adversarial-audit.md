@@ -92,7 +92,7 @@ For a multi-agent system, this was not just a debug knob. A single process-level
 - `lib/config/env_config_core.ml:500-506` implements that default.
 - `scripts/check-feature-flag-consistency.sh:24-36` leaves `CALLS` empty, so duplicate-default detection never inspects real calls.
 - `scripts/check-feature-flag-consistency.sh:64-68` scans only registry calls plus direct `get_bool` calls in `env_config_core.ml`; it misses direct `get_bool` calls in sibling config modules.
-- Local run reports `MASC_KEEPER_DOCKER_PLAYGROUND` as stale, while `lib/config/env_config_sandbox.ml:88` and `lib/config/feature_flag_registry.ml:133` show it is live and registered.
+- Resolved 2026-07-12: the inert Docker-playground feature flag and its false "live" registry entry were purged; keeper TOML `sandbox_profile` is the only execution-profile SSOT.
 - `lib/config/env_config_runtime.ml:337-339`, `lib/config/feature_flag_registry.ml:202-204`, and `docs/runtime-tunables.md:209` disagree on the `MASC_CDAL_GATE_ENABLED` default text/value.
 
 **Impact**:
@@ -231,7 +231,7 @@ Verification limitation: the `rg` probes above are rule-based string searches, n
 
 Observed guard results:
 
-- `scripts/check-feature-flag-consistency.sh`: PASS, but falsely reports `MASC_KEEPER_DOCKER_PLAYGROUND` as stale.
+- Resolved 2026-07-12: the stale flag was removed instead of teaching the consistency check to preserve an unimplemented path.
 - `scripts/check-ssot.sh`: PASS/NOTE only; R1 and R4 baselines should be lowered from 11 to 2.
 - `scripts/audit-path-ssot.sh`: OK, but misses split concat at `bin/main_eio.ml:981`.
 

@@ -88,15 +88,6 @@ let is_keeper_mcp_context_required name =
        Tool_capability.Mcp_context_required
        name
 
-let keeper_supported_keeper_masc_tools =
-  [ "masc_keeper_list"
-  ; "masc_keeper_status"
-  ; "masc_keeper_msg"
-  ; "masc_keeper_msg_result"
-  ; "masc_keeper_msg_cancel"
-  ; "masc_keeper_msg_queue"
-  ]
-
 let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
   (* #19797 follow-up: keeper-management-tool identification is keeper-owned,
      not derived from a [Tool_dispatch] tag. Membership in
@@ -111,10 +102,11 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
       (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
       Keeper_types_profile.schemas
   in
-  let is_descriptor_backed_tool name =
+  let descriptor_projects_to_keeper name =
     match Keeper_tool_descriptor.descriptors_for_internal name with
-    | _ :: _ -> true
-    | [] -> false
+    | [ descriptor ] ->
+      List.mem name (Keeper_tool_descriptor.keeper_candidate_names descriptor)
+    | [] | _ :: _ :: _ -> false
   in
   let supported_in_keeper name =
     if is_keeper_safe_inline_tool name then
@@ -124,8 +116,8 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
          independent of tag-registry initialization. Placed before the
          [is_registered]/not-initialized fallbacks so management tools are
          never over-exposed during boot. *)
-      List.mem name keeper_supported_keeper_masc_tools
-    else if is_descriptor_backed_tool name then
+      descriptor_projects_to_keeper name
+    else if descriptor_projects_to_keeper name then
       (* Descriptor-backed in-process tools are dispatched by
          Keeper_tool_runtime, not the legacy Tool_dispatch tag registry.
          Requiring a Tool_dispatch tag here admits a name into
@@ -143,8 +135,7 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
        (* Privileged / internal surfaces denied from keeper exposure. *)
        | Some Tool_dispatch.Mod_inline
        | Some Tool_dispatch.Mod_compact
-       | Some Tool_dispatch.Mod_operator
-       | Some Tool_dispatch.Mod_control ->
+       | Some Tool_dispatch.Mod_operator ->
            false
        (* Keeper-allowed surfaces enumerated explicitly (no [Some _ ->]
           wildcard) so that adding a new [Tool_dispatch.module_tag] variant

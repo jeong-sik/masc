@@ -1563,6 +1563,99 @@ let test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname () =
 
   cleanup_dir base_path
 
+let check_tool_failure_class label expected result =
+  Alcotest.(check (option string))
+    label
+    (Some (Tool_result.tool_failure_class_to_string expected))
+    (Option.map
+       Tool_result.tool_failure_class_to_string
+       (Tool_result.failure_class result))
+
+let test_resolve_tag_dispatch_preserves_failure_variants () =
+  let module T = Masc.Mcp_server_eio_execute.For_testing in
+  (match
+     T.resolve_tag_dispatch
+       ~lookup_tag:(fun _ -> None)
+       ~dispatch_tag:(fun _ -> Alcotest.fail "dispatch must not run without a tag")
+       ~name:"missing_route"
+   with
+   | Error T.Missing_tag -> ()
+   | Error T.No_handler -> Alcotest.fail "missing tag collapsed into no handler"
+   | Ok _ -> Alcotest.fail "missing tag unexpectedly dispatched");
+  (match
+     T.resolve_tag_dispatch
+       ~lookup_tag:(fun _ -> Some Tool_dispatch.Mod_misc)
+       ~dispatch_tag:(fun _ -> None)
+       ~name:"unhandled_route"
+   with
+   | Error T.No_handler -> ()
+   | Error T.Missing_tag -> Alcotest.fail "no handler collapsed into missing tag"
+   | Ok _ -> Alcotest.fail "unhandled route unexpectedly returned a result");
+  let check_runtime_failure failure expected_message =
+    let result = T.dispatch_failure_result ~tool_name:"typed_route" failure in
+    check_tool_failure_class
+      "dispatch infrastructure failure class"
+      Tool_result.Runtime_failure
+      result;
+    Alcotest.(check string)
+      "dispatch infrastructure failure evidence"
+      expected_message
+      (Tool_result.message result)
+  in
+  check_runtime_failure
+    T.Missing_tag
+    "Tool dispatch registry inconsistency: typed_route minted successfully but tag lookup failed";
+  check_runtime_failure
+    T.No_handler
+    "Tool dispatch route failure: registered route returned no handler result for typed_route"
+
+let test_execute_tool_visibility_and_unknown_failure_classes () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let visibility_result =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"sidecar"
+      ~arguments:(`Assoc [])
+  in
+  check_tool_failure_class
+    "hidden direct-call denial is policy rejection"
+    Tool_result.Policy_rejection
+    visibility_result;
+  let unknown_result =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_definitely_unknown"
+      ~arguments:(`Assoc [])
+  in
+  check_tool_failure_class
+    "unknown tool name is workflow rejection"
+    Tool_result.Workflow_rejection
+    unknown_result;
+  let runtime_result =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"tool_execute"
+      ~arguments:
+        (`Assoc
+          [ "executable", `String "pwd"
+          ; "argv", `List []
+          ])
+  in
+  check_tool_failure_class
+    "registered route without a handler result is runtime failure"
+    Tool_result.Runtime_failure
+    runtime_result;
+  Alcotest.(check string)
+    "registered route failure evidence"
+    "Tool dispatch route failure: registered route returned no handler result for tool_execute"
+    (Tool_result.message runtime_result);
+  cleanup_dir base_path
+
 let test_execute_tool_generated_agent_name_uses_token_identity () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1629,12 +1722,19 @@ let check_task_still_todo config task_id =
         (Masc_domain.task_status_to_string task.task_status)
   | None -> Alcotest.failf "expected task %s to exist" task_id
 
-let check_auth_preflight_result ~tool_name ok msg =
-  Alcotest.(check bool) (tool_name ^ " rejected before handler") false ok;
+let check_auth_preflight_result ~tool_name result =
+  Alcotest.(check bool)
+    (tool_name ^ " rejected before handler")
+    false
+    (Tool_result.is_success result);
   Alcotest.(check bool) (tool_name ^ " reports auth/credential blocker") true
-    (contains_substring msg "Token required"
-     || contains_substring msg "Unauthorized"
-     || contains_substring msg "No credential")
+    (contains_substring (Tool_result.message result) "Token required"
+     || contains_substring (Tool_result.message result) "Unauthorized"
+     || contains_substring (Tool_result.message result) "No credential");
+  check_tool_failure_class
+    (tool_name ^ " auth denial is policy rejection")
+    Tool_result.Policy_rejection
+    result
 
 let check_rejected_without_mutation ~tool_name ok msg =
   Alcotest.(check bool) (tool_name ^ " rejected before mutation") false ok;
@@ -1768,8 +1868,7 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "uncredentialed-agent") ])
   in
-  check_auth_preflight_result ~tool_name:"keeper_task_claim"
-    (Tool_result.is_success result) ((Tool_result.message result));
+  check_auth_preflight_result ~tool_name:"keeper_task_claim" result;
   check_task_still_todo (Mcp_server.workspace_config state) "task-001";
   Alcotest.(check (option string)) "no current task after rejected claim_next" None
     (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
@@ -1802,8 +1901,7 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
             ("action", `String "claim");
           ])
   in
-  check_auth_preflight_result ~tool_name:"masc_transition"
-    (Tool_result.is_success result) ((Tool_result.message result));
+  check_auth_preflight_result ~tool_name:"masc_transition" result;
   check_task_still_todo (Mcp_server.workspace_config state) "task-001";
   Alcotest.(check (option string)) "no current task after rejected transition" None
     (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
@@ -2248,8 +2346,8 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
       in
       Alcotest.(check bool) "mentions retired tool_execute" true
         (contains_substring msg "Unknown tool: tool_execute");
-      Alcotest.(check bool) "mentions registry inconsistency" true
-        (contains_substring msg "registry inconsistency"))
+      Alcotest.(check bool) "mentions registered route without handler result" true
+        (contains_substring msg "registered route returned no handler result"))
 
 let test_internal_keeper_runtime_cleanup_preserves_primary_exception () =
   let module T = Masc.Mcp_server_eio_execute.For_testing in
@@ -3061,6 +3159,10 @@ let eio_tests = [
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "tool-domain agent_name does not reuse bound nickname", `Quick,
     test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname;
+  "tag dispatch failure variants", `Quick,
+    test_resolve_tag_dispatch_preserves_failure_variants;
+  "execute boundary failure classes", `Quick,
+    test_execute_tool_visibility_and_unknown_failure_classes;
   "generated agent_name uses token identity", `Quick,
     test_execute_tool_generated_agent_name_uses_token_identity;
   "internal _agent_name is caller identity", `Quick,

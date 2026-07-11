@@ -90,7 +90,7 @@ module Sandbox_profile_tla =
 type network_mode =
   Keeper_types_profile_sandbox.network_mode =
     Network_none
-  | Network_inherit
+  | Network_host
 val to_tla_symbol : network_mode -> string
 val all_symbols : string list
 val all_states : network_mode list
@@ -110,6 +110,10 @@ val all_network_modes : network_mode list
 val valid_network_mode_strings : string list
 val default_sandbox_profile : sandbox_profile
 val default_network_mode_for_profile : sandbox_profile -> network_mode
+val validate_network_mode_for_profile :
+  sandbox_profile:sandbox_profile ->
+  network_mode:network_mode ->
+  (unit, string) result
 type per_provider_timeout_state =
   Keeper_types_profile_defaults.per_provider_timeout_state =
     Per_provider_timeout_unset

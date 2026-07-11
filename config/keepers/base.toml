@@ -12,7 +12,7 @@ autoboot_enabled = true
 # routing must add the keeper(s) inheriting this base to runtime.toml
 # [[runtime.assignments]] (otherwise they fall back to [runtime].default).
 sandbox_profile = "docker"
-network_mode = "inherit"
+network_mode = "none"
 
 instructions = """
 MASC 기본 소양 — 모든 keeper의 공통 행동 기반. persona instructions는 이 위에 stack.

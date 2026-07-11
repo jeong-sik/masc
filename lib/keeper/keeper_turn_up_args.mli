@@ -100,7 +100,9 @@ val resolve_network_mode :
     sandbox allowed-path entries. *)
 val sandbox_allowed_path_has_forbidden_segments : string -> bool
 
-(** Validate allowed_paths without changing behavior by sandbox backend. *)
+(** Validate the persisted sandbox policy as one typed contract. *)
 val validate_sandbox_settings :
+  sandbox_profile:sandbox_profile ->
+  network_mode:network_mode ->
   allowed_paths:string list ->
   (unit, string) result

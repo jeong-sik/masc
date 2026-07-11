@@ -38,7 +38,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_HOST_FD_PRESSURE_STATE_FILE` | string_literal | n/a | n/a | 326 | {1 Host pressure integration} |
 | `MASC_HTTP_BASE_URL` | string_literal | n/a | n/a | 289 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 | `MASC_HTTP_PORT` | string_literal | n/a | n/a | 248 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
-| `MASC_KEEPER_DEFAULT_SANDBOX_PROFILE` | typed:string | unclassified | unclassified | 588 | Default sandbox profile for keepers. Default: "local". Set to "docker" to default all keepers to containerized execut... |
 | `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 539 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 540 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 489 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |
@@ -308,14 +307,10 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_KEEPER_DOCKER_CONTAINER` | typed:string | Sandbox | operator | 93 | @category Sandbox @ops_class operator |
-| `MASC_KEEPER_DOCKER_PLAYGROUND` | typed:bool | unclassified | unclassified | 88 |  |
-| `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | Sandbox | operator | 99 | @category Sandbox @ops_class operator |
 | `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED` | typed:bool | unclassified | unclassified | 59 |  |
 | `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC` | typed:int | unclassified | unclassified | 69 |  |
 | `MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC` | typed:int | unclassified | unclassified | 64 |  |
 | `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` | typed:string | unclassified | unclassified | 82 |  |
-| `MASC_KEEPER_SANDBOX_GIT_DISPATCH` | typed:bool | unclassified | unclassified | 85 |  |
 | `MASC_KEEPER_SANDBOX_MEMORY` | typed:string | unclassified | unclassified | 27 |  |
 | `MASC_KEEPER_SANDBOX_NOFILE_LIMIT` | typed:int | unclassified | unclassified | 24 |  |
 | `MASC_KEEPER_SANDBOX_PIDS_LIMIT` | typed:int | unclassified | unclassified | 21 |  |

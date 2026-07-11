@@ -319,37 +319,41 @@ let pending_confirms_json ?actor config =
   let scope = pending_confirm_scope ?actor config in
   `List (List.map pending_confirm_to_yojson scope.visible_entries)
 
+let operator_action_tool_name =
+  Tool_name.Operator_name.to_string Tool_name.Operator_name.Operator_action
+;;
+
 let available_actions : available_action list =
   [
-    make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
+    make_available_action ~action_type:"broadcast" ~tool_name:operator_action_tool_name
       ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Namespace-wide operator broadcast.";
-    make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
+    make_available_action ~action_type:"namespace_pause" ~tool_name:operator_action_tool_name
       ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Pause namespace automation and spawning.";
-    make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
+    make_available_action ~action_type:"namespace_resume" ~tool_name:operator_action_tool_name
       ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Resume a paused namespace.";
-    make_available_action ~action_type:"social_sweep" ~tool_name:"social_sweep"
+    make_available_action ~action_type:"social_sweep" ~tool_name:operator_action_tool_name
       ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Run one immediate social sweep across keepers.";
-    make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
+    make_available_action ~action_type:"task_inject" ~tool_name:operator_action_tool_name
       ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Inject a backlog task into the namespace.";
     make_available_action
       ~action_type:Operator_action_constants.goal_completion_decision
-      ~tool_name:Operator_action_constants.goal_transition_tool
+      ~tool_name:operator_action_tool_name
       ~target_type:Operator_action_constants.goal_target_type
       ~description:"Approve or reject a goal completion approval gate.";
-    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
+    make_available_action ~action_type:"keeper_message" ~tool_name:operator_action_tool_name
       ~target_type:Operator_action_constants.keeper_target_type
       ~description:"Send a direct operator message to a keeper.";
-    make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"
+    make_available_action ~action_type:"keeper_probe" ~tool_name:operator_action_tool_name
       ~target_type:Operator_action_constants.keeper_target_type
       ~description:"Immediate keeper diagnostic snapshot.";
     make_available_action
       ~action_type:Operator_action_constants.keeper_recover
-      ~tool_name:"masc_keeper_recover"
+      ~tool_name:operator_action_tool_name
       ~target_type:Operator_action_constants.keeper_target_type
       ~description:"Safe down/up recovery for stale/degraded keeper.";
   ]

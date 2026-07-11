@@ -51,7 +51,7 @@
 | **Keepers** | ✅ | 페르소나·목표·지시문을 가진 상주 에이전트. 서버 기동 시 자동 부팅, 상태는 디스크에 영속 | `.masc/config/keepers/*.toml` |
 | **HITL + Automatic** | 🟡 | 위험 도구 호출 승인 대기열. 우회 가능하며 security boundary가 아님. Critical은 현재 운영자 결정까지 대기 | 대시보드 승인 큐 |
 | **Board** | ✅ | Keeper들이 글·댓글·투표로 비동기 협업, 게시가 관련 Keeper를 깨움 | `masc_board_*` 툴 / 대시보드 |
-| **Sandbox (Docker)** | 🟡 | Docker profile 셸 실행은 컨테이너를 쓰지만, local profile과 fallback 경로가 있어 security boundary가 아님 | keeper toml `sandbox_profile` |
+| **Sandbox (Docker)** | 🟡 | Docker profile 셸 실행은 fail-closed 컨테이너 경로이고, 명시적으로 선택한 `local` profile만 host 실행 | keeper TOML `sandbox_profile` + live `security_boundary` |
 | **Dashboard** | ✅ | Keeper/Goal/Task/Board를 실시간으로 보고 명령을 내리는 웹 SPA | `dashboard/` (vite) |
 | **TUI** | ❌ | Not working — `masc-tui` 실행 파일이 있으나, CJK/emoji 레이아웃·스트리밍 진행·rich-block 렌더링 등 주요 공백으로 실제로 사용할 수 없음 | `masc-tui` |
 | **CODE / IDE (관망형)** | ❌ | Not working — LSP 프록시·주석 오버레이·대시보드 CODE 셸은 구현되어 있으나, 사람이 명령만 내리는 관망형 흐름이 검증되지 않아 실제로 사용할 수 없음 | 대시보드 Code |
@@ -66,7 +66,7 @@
 
 - **Keepers** — 각 Keeper는 서버가 살아 있는 동안 상주하는 장기 실행 에이전트입니다. heartbeat로 깨어나 turn을 돌고, 메모리·결정 로그는 디스크에 남아 재시작에도 복원됩니다. **한 Keeper는 한 번에 turn 하나만 돕니다**(동시에 두 일을 하지 않음) — 병렬은 여러 Keeper가 함께 도는 데서 옵니다. *한계*: `runtime.toml`의 `[autonomous] concurrency`는 코드가 읽지 않는 죽은 설정이고, fleet 크기는 `[bootstrap] autoboot_max` / `max_active_keepers`로 조절합니다.
 - **HITL** — 프롬프트 지시가 아니라 도구 디스패치 경계에서 `Eio.Promise.await`로 강제됩니다. *한계*: `MASC_DISABLE_HITL=true`(기본 false)와 keeper `always_approve` 규칙으로 우회 가능합니다. 무응답 시 비Critical 도구는 approval silence timeout 뒤 거부되지만, **Critical 위험 도구는 현재 타임아웃이 없어 운영자가 결정할 때까지 turn이 정체될 수 있습니다.** HITL은 운영 workflow일 뿐이며 autonomous execution을 안전하게 만들어주지 않습니다.
-- **Sandbox** — `docker run --rm`을 실제로 호출하고 cap-drop / no-new-privileges / read-only rootfs + 동시 실행 슬롯 제한을 적용합니다. 네트워크는 keeper의 `network_mode`로 제어합니다(기본 `inherit`, `none`으로 격리 가능). *한계*: 모든 Keeper가 docker가 아닙니다(일부는 `local`=호스트 실행). 이미지가 없고 playground 안이면 host 실행으로 강등됩니다(텔레메트리 기록). security boundary로 취급하지 마세요.
+- **Sandbox** — `docker run --rm`을 실제로 호출하고 cap-drop / no-new-privileges / read-only rootfs + 동시 실행 슬롯 제한을 적용합니다. 네트워크는 keeper의 `network_mode`로 제어합니다(`host`는 호스트 네트워크 namespace 공유, `none`은 loopback만 유지). Docker가 fail-safe 기본값이며 이미지/preflight 실패는 명시적 오류이고 host로 강등되지 않습니다. *한계*: 명시적으로 선택한 `local` profile은 host process입니다. BasePath 소유 managed HOME/XDG와 default-deny env를 쓰지만 filesystem namespace 격리는 없습니다.
 - **Multi-Runtime** — `runtime.toml`의 `runtime.assignments`에 `keeper = provider.model` 한 줄이면 그 Keeper의 매 turn이 해당 provider로 갑니다.
 - **Provider Failover** — provider 장애 시 순서 failover는 미구현입니다. 장애가 나면 default/assignment를 손으로 고치고 서버를 재시작해야 합니다.
 - **Fusion + JoJ** — Keeper가 `masc_fusion`을 호출하면 패널 모델들이 같은 질문에 각자 답고 심판 모델이 합의/모순/맹점을 종합합니다. *한계*: JoJ(Judge of Judges) 위상은 코드·호출 경로가 있으나, 라이브 설정에 1차 심판 목록이 없어 호출 시 **fail-closed로 에러를 반환합니다**. 결과 registry는 in-memory라 재시작 시 사라집니다.
@@ -336,7 +336,7 @@ masc/
 | 5 | **TUI** | `masc-tui`를 실제로 사용 가능한 상태로 만듭니다. 실행 파일은 있으나 CJK/emoji 레이아웃·스트리밍 진행·rich-block 렌더링 공백으로 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
 | 6 | **IDE** | 관망형 IDE를 실제로 사용 가능한 상태로 만듭니다. LSP 프록시·주석 오버레이·대시보드 IDE 셸은 있으나, 사람이 명령만 내리는 흐름이 검증되지 않아 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
 | 7 | **Multi-Channel** | Slack·Telegram 등 Discord 외 채널용 **사이드카**를 추가하고, gate message 스키마를 채널별로 확장합니다. | 🟡→✅ |
-| 8 | **Sandbox** | docker 이미지 미설치·playground 내 fallback 시 host 실행 비율을 줄이고, `sandbox_profile=local` 사용처를 명시적으로 문서화합니다. | ✅ 안정화 |
+| 8 | **Sandbox** | Docker 이미지/preflight 실패는 fail-closed 처리하고, `sandbox_profile=local`은 비격리임이 명시된 operator 선택으로만 둡니다. | ✅ 안정화 |
 | 9 | **HITL** | Critical 위험 도구의 **타임아웃/에스컬레이션 정책**을 정의합니다. 영구 정체를 방지하면서도 중요한 결정은 사람이 내릴 수 있도록 합니다. | ✅ 안정화 |
 | 10 | **Governance** | `MASC_DISABLE_HITL=true`와 keeper `always_approve` 규칙의 사용 범위를 제한하고, 운영자 감사 로그를 강화합니다. | ✅ 안정화 |
 | 11 | **OpenTelemetry** | Keeper turn 낮은 수준 이벤트, fusion 나이부 metric, provider별 latency breakdown 등 누락된 signal과 instrumentation을 추가합니다. | 🟡→✅ |

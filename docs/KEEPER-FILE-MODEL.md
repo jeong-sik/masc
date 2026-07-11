@@ -121,8 +121,8 @@ persona_name = "analyst"
 | --- | --- | --- | --- |
 | `persona_name` | Required | Which persona blueprint this keeper uses | Primary field in the target model. |
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
-| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container. Hard mode requires `docker`. |
-| `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none`; `local` defaults to `inherit`. Hard mode requires `none`. |
+| `sandbox_profile` | Required for an operational keeper | Process/filesystem sandbox profile | `docker` is the fail-safe bootstrap default and runs in a hardened on-demand container. `local` is an explicit host-process choice with tool-policy path scope, not namespace isolation. |
+| `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none`; `local` defaults to `host`. `host` explicitly shares the host network namespace. Hard mode requires `none`. |
 | `tool_access` | Optional | Deployment-specific tool candidate profile override | Only when intentionally overriding persona default. |
 | `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` only claims tasks linked to these goals and reports scope health in audit/status surfaces. |
 
@@ -156,7 +156,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | Field | Allowed values |
 | --- | --- |
 | `sandbox_profile` | `local`, `docker` |
-| `network_mode` | `none`, `inherit` |
+| `network_mode` | `none`, `host` |
 | `tool_access` | string array of registered tool names used as the candidate profile list |
 
 Deprecated personality-state axes are not allowed public keeper TOML values.

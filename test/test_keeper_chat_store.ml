@@ -390,7 +390,6 @@ let test_append_turn_redacts_projected_secrets () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      with_env "MASC_SECRET_DIR" "" @@ fun () ->
       let keeper_name = "keeper-chat-redact" in
       let root = secret_root_default ~base_dir ~keeper_name in
       let env_secret = "chat.secret!" in
@@ -432,7 +431,6 @@ let test_load_redacts_legacy_raw_secret_rows () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      with_env "MASC_SECRET_DIR" "" @@ fun () ->
       let keeper_name = "keeper-chat-read-redact" in
       let root = secret_root_default ~base_dir ~keeper_name in
       let secret = "legacy.secret!" in
@@ -1127,7 +1125,6 @@ let test_append_turn_redacts_supplied_thinking_blocks () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      with_env "MASC_SECRET_DIR" "" @@ fun () ->
       let keeper_name = "keeper-chat-thinking-redact" in
       let root = secret_root_default ~base_dir ~keeper_name in
       let secret = "thinking.secret!" in
@@ -1168,7 +1165,6 @@ let test_append_turn_redacts_all_supplied_block_strings () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      with_env "MASC_SECRET_DIR" "" @@ fun () ->
       let keeper_name = "keeper-chat-rich-block-redact" in
       let root = secret_root_default ~base_dir ~keeper_name in
       let secret = "rich-block.secret!" in
@@ -1266,7 +1262,6 @@ let test_append_turn_preserves_fusion_lookup_ids () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      with_env "MASC_SECRET_DIR" "" @@ fun () ->
       let keeper_name = "keeper-chat-fusion-ids" in
       let root = secret_root_default ~base_dir ~keeper_name in
       let secret = "fusion-id.secret!" in
@@ -1308,7 +1303,6 @@ let test_load_redacts_legacy_raw_blocks_and_audio () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      with_env "MASC_SECRET_DIR" "" @@ fun () ->
       let keeper_name = "keeper-chat-legacy-blocks-audio-redact" in
       let root = secret_root_default ~base_dir ~keeper_name in
       let secret = "legacy-blocks-audio.secret!" in
@@ -1377,7 +1371,6 @@ let test_append_assistant_message_redacts_audio () =
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      with_env "MASC_SECRET_DIR" "" @@ fun () ->
       let keeper_name = "keeper-chat-assistant-audio-redact" in
       let root = secret_root_default ~base_dir ~keeper_name in
       let secret = "assistant-audio.secret!" in

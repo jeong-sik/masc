@@ -306,12 +306,12 @@ step_game_view_contract() {
     return 1
   fi
 
-  local pause_raw pause_json
-  pause_raw="$(viewer_call_tool 2102 "masc_pause_status" "{}")"
-  pause_json="$(printf '%s' "$pause_raw" | viewer_extract_text | jq -c 'try fromjson catch {}')"
-  if ! printf '%s' "$pause_json" | jq -e '.ok == true and (.paused == false or .status == "running")' >/dev/null; then
-    echo "masc_pause_status returned unexpected payload"
-    printf '%s\n' "$pause_json"
+  local operator_raw operator_json
+  operator_raw="$(viewer_call_tool 2102 "masc_operator_snapshot" '{"view":"summary","include_messages":false,"include_keepers":false}')"
+  operator_json="$(printf '%s' "$operator_raw" | viewer_extract_text | jq -c 'try fromjson catch {}')"
+  if ! printf '%s' "$operator_json" | jq -e '.ok == true and (.workspace.initialized | type == "boolean") and ((.workspace.paused // false) | type == "boolean")' >/dev/null; then
+    echo "masc_operator_snapshot returned unexpected workspace payload"
+    printf '%s\n' "$operator_json"
     return 1
   fi
 

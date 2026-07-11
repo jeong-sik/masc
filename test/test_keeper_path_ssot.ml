@@ -56,32 +56,6 @@ let make_config () =
   Unix.mkdir (Filename.concat base ".masc") 0o755;
   Workspace.default_config base
 
-let rec mkdir_p path =
-  if Sys.file_exists path then ()
-  else (
-    let parent = Filename.dirname path in
-    if not (String.equal parent path) then mkdir_p parent;
-    Unix.mkdir path 0o755)
-
-let write_file path content =
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content)
-
-let write_keeper_toml ~config ~name ~sandbox_profile =
-  let dir =
-    Filename.concat
-      (Filename.concat
-         (Filename.concat config.Workspace.base_path ".masc")
-         "config")
-      "keepers"
-  in
-  mkdir_p dir;
-  write_file
-    (Filename.concat dir (name ^ ".toml"))
-    (Printf.sprintf "[keeper]\nsandbox_profile = %S\n" sandbox_profile)
-
 (* ── Invariant: host_root_abs_of_meta == base_path / allowed_root_rel_of_meta ── *)
 
 let assert_ssot ~name ~sandbox =
@@ -151,65 +125,6 @@ let test_ssot_idempotent () =
   let r2 = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Alcotest.(check string) "host_root_abs_of_meta is pure / idempotent" r1 r2
 
-let test_config_agent_projection_docker () =
-  let config = make_config () in
-  write_keeper_toml ~config ~name:"sangsu" ~sandbox_profile:"docker";
-  let agent_name = "keeper-sangsu-agent" in
-  Alcotest.(check string)
-    "config-backed backend"
-    "docker"
-    (Keeper_sandbox.backend_of_config_agent ~config ~agent_name
-     |> Keeper_sandbox.backend_to_string);
-  Alcotest.(check string)
-    "config-backed host root rel"
-    ".masc/playground/docker/sangsu/"
-    (Keeper_sandbox.host_root_rel_of_config_agent ~config ~agent_name);
-  let visible =
-    Filename.concat
-      (Keeper_sandbox.container_root agent_name)
-      "repos/masc/lib/foo.ml"
-  in
-  let expected =
-    Filename.concat
-      config.Workspace.base_path
-      ".masc/playground/docker/sangsu/repos/masc/lib/foo.ml"
-  in
-  Alcotest.(check string)
-    "sandbox-visible path maps to backend-scoped host path"
-    expected
-    (Keeper_sandbox.host_path_of_visible_path ~config ~agent_name visible)
-
-let test_config_agent_projection_local () =
-  let config = make_config () in
-  let agent_name = "keeper-sangsu-agent" in
-  Alcotest.(check string)
-    "missing config defaults to local backend"
-    "local"
-    (Keeper_sandbox.backend_of_config_agent ~config ~agent_name
-     |> Keeper_sandbox.backend_to_string);
-  Alcotest.(check string)
-    "local host root rel"
-    ".masc/playground/sangsu/"
-    (Keeper_sandbox.host_root_rel_of_config_agent ~config ~agent_name)
-
-let test_config_agent_projection_rejects_legacy_alias () =
-  let config = make_config () in
-  write_keeper_toml ~config ~name:"sangsu" ~sandbox_profile:"docker_hardened";
-  Alcotest.check_raises
-    "legacy sandbox_profile aliases are rejected"
-    (Keeper_sandbox_config.Invalid_keeper_sandbox_config
-       (Printf.sprintf
-          "%s: invalid sandbox_profile %S (allowed: local, docker)"
-          (Keeper_sandbox_config.keeper_toml_path
-             ~base_path:config.Workspace.base_path
-             ~agent_name:"keeper-sangsu-agent")
-          "docker_hardened"))
-    (fun () ->
-       ignore
-         (Keeper_sandbox_config.sandbox_profile_of_agent
-            ~base_path:config.Workspace.base_path
-            ~agent_name:"keeper-sangsu-agent"))
-
 let () =
   Alcotest.run "Keeper Path SSOT" [
     ( "host_root_abs invariant",
@@ -230,14 +145,5 @@ let () =
       [
         Alcotest.test_case "same meta twice => same root" `Quick
           test_ssot_idempotent;
-      ] );
-    ( "config-backed sandbox contract",
-      [
-        Alcotest.test_case "docker projection" `Quick
-          test_config_agent_projection_docker;
-        Alcotest.test_case "local projection" `Quick
-          test_config_agent_projection_local;
-        Alcotest.test_case "legacy profile rejected" `Quick
-          test_config_agent_projection_rejects_legacy_alias;
       ] );
   ]

@@ -544,6 +544,41 @@ multimodal_policy = "silent_default"
        check bool "mentions allowed values" true
          (contains_substring msg "delegate"))
 
+let test_profile_rejects_removed_inherit_network_mode () =
+  let input = {|
+[keeper]
+goal = "sandbox network contract"
+network_mode = "inherit"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected removed network_mode value to be rejected"
+     | Error msg ->
+       check bool
+         "mentions canonical network values"
+         true
+         (contains_substring msg "allowed: none, host"))
+
+let test_profile_rejects_local_none_network_pair () =
+  let input = {|
+[keeper]
+goal = "sandbox network contract"
+sandbox_profile = "local"
+network_mode = "none"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected local + none to be rejected"
+     | Error msg ->
+       check bool
+         "explains local host-network invariant"
+         true
+         (contains_substring msg "only enforceable"))
+
 let test_profile_rejects_partial_proactive_interval_pair () =
   let input = {|
 [keeper]
@@ -697,7 +732,7 @@ let test_load_keeper_toml_inherits_base_defaults () =
       write_file base_path {|
 [keeper]
 sandbox_profile = "docker"
-network_mode = "inherit"
+network_mode = "host"
 |};
       write_file child_path {|
 [keeper]
@@ -711,7 +746,7 @@ persona_name = "sangsu"
           check string "name from filename" "sangsu" name;
           check (option string) "base sandbox" (Some "docker")
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-          check (option string) "base network" (Some "inherit")
+          check (option string) "base network" (Some "host")
             (Option.map KTP.network_mode_to_string defaults.network_mode);
           ())
 
@@ -847,7 +882,7 @@ let test_bundled_issue_king_uses_local_sandbox () =
           | Ok defaults ->
             check (option string) "issue_king sandbox" (Some "local")
               (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-            check (option string) "issue_king network" (Some "inherit")
+            check (option string) "issue_king network" (Some "host")
               (Option.map KTP.network_mode_to_string defaults.network_mode)))
 
 let with_temp_dir prefix f =
@@ -2042,6 +2077,10 @@ let () =
             test_profile_parses_multimodal_policy;
           test_case "rejects invalid multimodal_policy" `Quick
             test_profile_rejects_invalid_multimodal_policy;
+          test_case "rejects removed inherit network_mode" `Quick
+            test_profile_rejects_removed_inherit_network_mode;
+          test_case "rejects local + none network pair" `Quick
+            test_profile_rejects_local_none_network_pair;
           test_case "rejects partial proactive interval pair" `Quick
             test_profile_rejects_partial_proactive_interval_pair;
           test_case "rejects removed model keys" `Quick

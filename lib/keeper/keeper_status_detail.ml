@@ -37,19 +37,6 @@ type cache_entry = {
 
 let _cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
 
-type docker_preflight_status_cache_entry = {
-  key : string;
-  observed_at : float;
-  value : Yojson.Safe.t option;
-}
-
-let docker_preflight_status_cache :
-    docker_preflight_status_cache_entry option ref =
-  ref None
-
-let docker_preflight_status_cache_mu = Eio.Mutex.create ()
-let docker_preflight_status_cache_ttl_sec = 60.0
-
 (** Mutex protecting [_cache].  [handle_keeper_status] runs from an MCP
     tool-dispatch fiber, one per concurrent [masc_keeper_status]
     request, and [invalidate_status_cache_{for,all}] is called from
@@ -75,10 +62,7 @@ let invalidate_status_cache_for name =
       _cache)
 
 let invalidate_status_cache_all () =
-  Eio_guard.with_mutex cache_mu (fun () ->
-    Hashtbl.clear _cache);
-  Eio_guard.with_mutex docker_preflight_status_cache_mu (fun () ->
-    docker_preflight_status_cache := None)
+  Eio_guard.with_mutex cache_mu (fun () -> Hashtbl.clear _cache)
 
 let status_cache_key ~base_path ~name = base_path ^ ":" ^ name
 
@@ -95,36 +79,6 @@ let status_name_lookup_candidates raw_name =
       | Some _ | None -> []
     in
     trimmed :: aliases
-
-let docker_preflight_status_cache_key ~timeout_sec =
-  String.concat "|"
-    [
-      string_of_bool (Env_config_sandbox.Preflight.enabled ());
-      Env_config_sandbox.Runtime.docker_image ();
-      Env_config_sandbox.Hardening.seccomp_profile ();
-      string_of_bool (Env_config_sandbox.Hardening.require_rootless ());
-      string_of_bool (Env_config_sandbox.Hardening.require_userns ());
-      string_of_bool
-        (Env_config_sandbox.Runtime.git_dispatch ());
-      Printf.sprintf "%.3f" timeout_sec;
-    ]
-
-let cached_docker_preflight_status_json ~timeout_sec =
-  if not (Env_config_sandbox.Preflight.enabled ()) then
-    None
-  else
-    let key = docker_preflight_status_cache_key ~timeout_sec in
-    Eio_guard.with_mutex docker_preflight_status_cache_mu (fun () ->
-      let now = Time_compat.now () in
-      match !docker_preflight_status_cache with
-      | Some entry
-        when String.equal entry.key key
-             && now -. entry.observed_at < docker_preflight_status_cache_ttl_sec ->
-          entry.value
-      | _ ->
-          let value = Keeper_sandbox_control.preflight_status_json ~timeout_sec in
-          docker_preflight_status_cache := Some { key; observed_at = now; value };
-          value)
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let effective_status_name_config ~(agent_name : string) args =
@@ -810,6 +764,16 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
              ~verbose:false ()
          in
+         let sandbox_playground_repos =
+           match Json_util.assoc_member_opt "playground_repos" sandbox_live with
+           | Some (`List _ as repos) -> repos
+           | Some value ->
+             invalid_arg
+               (Printf.sprintf
+                  "sandbox_live.playground_repos must be a list, got %s"
+                  (Yojson.Safe.to_string value))
+           | None -> invalid_arg "sandbox_live.playground_repos is missing"
+         in
          let runtime_blocker_fields =
           runtime_blocker_fields_json config m
          in
@@ -1053,9 +1017,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                Json_util.string_opt_to_json sandbox_last_error);
              ("sandbox_live", sandbox_live);
              ("allowed_paths", Json_util.json_string_list m.allowed_paths);
-             ("playground_repos",
-               Keeper_sandbox_control.playground_repos_json
-                 ~config:config ~meta:m);
+             ("playground_repos", sandbox_playground_repos);
              ("pr_history",
                let pr_path = Filename.concat playground_abs
                  ".playground_pr_history.jsonl" in

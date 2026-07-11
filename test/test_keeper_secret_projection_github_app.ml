@@ -73,6 +73,34 @@ let write_keeper_file ~base_path ~keeper_name rel value =
   write_file path value
 ;;
 
+let shared_secret_root ~base_path ~keeper_name =
+  match
+    Projection.secret_roots ~base_path ~keeper_name
+    |> List.find_map (fun info ->
+      match info.Projection.scope with
+      | Projection.Shared_secret -> Some info.root
+      | Projection.Keeper_secret -> None)
+  with
+  | Some root -> root
+  | None -> Alcotest.fail "shared secret root missing from effective projection"
+;;
+
+let write_shared_env ~base_path ~keeper_name name value =
+  let env_dir = Filename.concat (shared_secret_root ~base_path ~keeper_name) "env" in
+  ensure_dir_chain env_dir;
+  write_file (Filename.concat env_dir name) value
+;;
+
+let write_shared_file ~base_path ~keeper_name rel value =
+  let path =
+    Filename.concat
+      (Filename.concat (shared_secret_root ~base_path ~keeper_name) "files")
+      rel
+  in
+  ensure_dir_chain (Filename.dirname path);
+  write_file path value
+;;
+
 let starts_with ~prefix value =
   let prefix_len = String.length prefix in
   String.length value >= prefix_len
@@ -179,6 +207,46 @@ let test_no_github_app_config_keeps_static_token () =
       (env_value "GH_TOKEN" env)
 ;;
 
+let test_shared_github_app_bundle_projects_effectively () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "keeper-shared-app" in
+  write_shared_env ~base_path ~keeper_name "MASC_GITHUB_APP_ID" "shared-app\n";
+  write_shared_env
+    ~base_path
+    ~keeper_name
+    "MASC_GITHUB_APP_INSTALLATION_ID"
+    "shared-installation\n";
+  write_shared_file
+    ~base_path
+    ~keeper_name
+    "github-app/private-key.pem"
+    "shared-pem";
+  let mint_github_app_token ~app_id ~installation_id ~pem ~now:_ =
+    Alcotest.(check string) "shared app id" "shared-app" app_id;
+    Alcotest.(check string)
+      "shared installation id"
+      "shared-installation"
+      installation_id;
+    Alcotest.(check string) "shared effective PEM" "shared-pem" pem;
+    Ok "ghs_shared_installation_token"
+  in
+  match
+    Projection.local_env_for_keeper
+      ~mint_github_app_token
+      ~host_env:[||]
+      ~base_path
+      ~keeper_name
+      ()
+  with
+  | Error err -> Alcotest.failf "shared GitHub App projection failed: %s" err
+  | Ok None -> Alcotest.fail "expected shared GitHub App env projection"
+  | Ok (Some env) ->
+    Alcotest.(check (option string))
+      "shared bundle mints effective token"
+      (Some "ghs_shared_installation_token")
+      (env_value "GH_TOKEN" env)
+;;
+
 let test_docker_projection_excludes_github_app_pem () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "keeper-docker" in
@@ -193,6 +261,27 @@ let test_docker_projection_excludes_github_app_pem () =
     "github-app/private-key.pem"
     "fake-pem";
   write_keeper_file ~base_path ~keeper_name "config/visible.txt" "visible";
+  let open Yojson.Safe.Util in
+  let dashboard_projection =
+    Projection.dashboard_status_json ~base_path ~keeper_name
+  in
+  let github_pem_entry =
+    dashboard_projection
+    |> member "file_entries"
+    |> to_list
+    |> List.find (fun entry ->
+      String.equal
+        (entry |> member "container_path" |> to_string)
+        "/github-app/private-key.pem")
+  in
+  Alcotest.(check string)
+    "dashboard reports GitHub PEM as control-plane-only"
+    "control_plane_only"
+    (github_pem_entry |> member "projection_policy" |> to_string);
+  Alcotest.(check (list string))
+    "dashboard reports no direct PEM projection target"
+    []
+    (github_pem_entry |> member "projection_targets" |> to_list |> List.map to_string);
   let mint_github_app_token ~app_id ~installation_id ~pem ~now:_ =
     Alcotest.(check string) "app id" "1" app_id;
     Alcotest.(check string) "installation id" "2" installation_id;
@@ -260,6 +349,10 @@ let () =
             "no app config keeps static token"
             `Quick
             test_no_github_app_config_keeps_static_token
+        ; Alcotest.test_case
+            "shared app bundle is an effective overlay"
+            `Quick
+            test_shared_github_app_bundle_projects_effectively
         ] )
     ; ( "docker_projection"
       , [ Alcotest.test_case

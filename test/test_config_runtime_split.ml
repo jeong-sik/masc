@@ -29,7 +29,7 @@ let () =
      read for compatibility, then scrubbed from the next write. *)
   let existing = Yojson.Safe.from_string {|
 {"name": "analyst", "agent_name": "keeper-analyst", "trace_id": "trace-001",
- "goal": "test goal", "sandbox_profile": "docker", "network_mode": "inherit",
+ "goal": "test goal", "sandbox_profile": "docker", "network_mode": "host",
  "tool_access": ["masc_status"],
  "compaction_profile": "balanced",
  "total_turns": 42, "total_input_tokens": 1000}

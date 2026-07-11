@@ -118,7 +118,7 @@ let test_config_to_json () =
     (fun name ->
       check bool (name ^ " omitted from public names") false
         (List.mem name names))
-    [ "masc_pause"; "masc_resume" ]
+    [ "masc_pause"; "masc_resume"; "masc_pause_status" ]
 
 let test_config_of_json () =
   let visible = Config.visible_tool_schemas () in
@@ -129,13 +129,10 @@ let test_config_of_json_custom () =
   check bool "mode tools removed" false (List.mem "masc_switch_mode" names)
 
 let test_config_of_json_invalid () =
-  (* Control tools are not in public discovery, but remain callable on the
-     explicit admin/catalog surface. *)
-  List.iter
-    (fun name ->
-      check bool (name ^ " allowed on admin/catalog surface") true
-        (Config.is_tool_allowed name))
-    [ "masc_pause"; "masc_resume" ]
+  check bool
+    "typed operator action remains the control entry point"
+    true
+    (Config.is_tool_allowed "masc_operator_action")
 
 (* ============================================================
    Env_config Tests

@@ -137,6 +137,94 @@ let test_operator_action_rejects_legacy_action_aliases () =
                 message)
         retired_actions)
 
+let test_keeper_sandbox_stop_operator_dispatch_is_wired () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let dispatch_exn args =
+        match
+          Keeper_tool_boundary.dispatch
+            ctx
+            ~name:"masc_keeper_sandbox_stop"
+            ~args
+        with
+        | Some result -> result
+        | None -> Alcotest.fail "sandbox stop has a schema/tag but no handler"
+      in
+      let check_failure_class label expected result =
+        Alcotest.(check bool)
+          label
+          true
+          (Tool_result.failure_class result = Some expected)
+      in
+      [ `Assoc []
+      ; `Assoc
+          [ "name", `String "one"
+          ; "fleet", `Bool true
+          ; "container_kind", `String "all"
+          ]
+      ; `Assoc [ "name", `String "one" ]
+      ; `Assoc
+          [ "name", `String "one"
+          ; "container_kind", `String "invalid"
+          ]
+      ; `Assoc
+          [ "name", `String "victim!"
+          ; "container_kind", `String "all"
+          ]
+      ; `Assoc
+          [ "name", `String "one"
+          ; "fleet", `Bool false
+          ; "container_kind", `String "all"
+          ]
+      ; `Assoc
+          [ "fleet", `Bool true
+          ; "container_kind", `String "all"
+          ; "cleanup_stale_fleet", `Bool true
+          ]
+      ]
+      |> List.iteri (fun index args ->
+        check_failure_class
+          (Printf.sprintf "invalid stop contract %d is rejected" index)
+          Tool_result.Workflow_rejection
+          (dispatch_exn args));
+      let fake_docker_env = "MASC_TEST_FAKE_DOCKER_PATH" in
+      let original_fake_docker = Sys.getenv_opt fake_docker_env in
+      let failed_stop =
+        Fun.protect
+          ~finally:(fun () ->
+            Unix.putenv
+              fake_docker_env
+              (Option.value original_fake_docker ~default:""))
+          (fun () ->
+            Unix.putenv fake_docker_env "/definitely/missing/masc-docker";
+            dispatch_exn
+              (`Assoc
+                [ "fleet", `Bool true
+                ; "container_kind", `String "all"
+                ]))
+      in
+      check_failure_class
+        "Docker stop failures are not reported as success"
+        Tool_result.Runtime_failure
+        failed_stop;
+      Alcotest.(check (option string))
+        "failed stop payload is explicitly error"
+        (Some "error")
+        (match Tool_result.data failed_stop with
+         | `Assoc fields ->
+           (match List.assoc_opt "status" fields with
+            | Some (`String status) -> Some status
+            | _ -> None)
+         | _ -> None))
+
 (* review_queue / deferred_queue / review_summary fields were emitted for
    a retired dashboard surface; the producers (split_review_items,
    *_review_item) were also removed. Review decisions still reach the UI
@@ -158,6 +246,10 @@ let () =
             "legacy action aliases are rejected"
             `Quick
             test_operator_action_rejects_legacy_action_aliases
+        ; Alcotest.test_case
+            "sandbox stop operator dispatch is wired"
+            `Quick
+            test_keeper_sandbox_stop_operator_dispatch_is_wired
         ] )
     ; ( "confirmation"
       , [ Alcotest.test_case

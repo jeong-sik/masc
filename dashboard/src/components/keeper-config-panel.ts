@@ -13,6 +13,8 @@ import {
 } from '../api/dashboard'
 import { fetchKeeperComposite, pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { KeeperGithubAppConfigPanel } from './keeper-github-app-config'
+import { KeeperSecretProjectionPanel } from './keeper-detail-runtime'
+import { KeeperSandboxPanel } from './keeper-sandbox-panel'
 import type { KeeperSecretProjection } from '../api/schemas/keeper-composite'
 import type { DashboardRuntimeProviderSnapshot, DashboardToolInventoryItem, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
@@ -40,7 +42,6 @@ import {
 } from '../lib/runtime-provider-summary'
 import { refreshKeeperRuntimeStatus } from '../store'
 import { navigate } from '../router'
-import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
 import { StatusDot } from './common/status-dot'
 import { KeeperBadge } from './keeper-badge'
@@ -363,14 +364,6 @@ function retainKeeperConfigPanelSubscriptions(): () => void {
   }
 }
 
-export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
-  return raw === 'docker' ? 'docker' : 'local'
-}
-
-export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
-  return raw === 'none' ? 'none' : 'inherit'
-}
-
 export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     runtime_id: c.execution.selected_runtime_id ?? '',
@@ -379,12 +372,12 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
       c.max_context_override ?? 0,
       c.limits.max_context_override_tokens,
     ),
-    sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
+    sandbox_profile: c.sandbox_profile,
     active_goal_ids: c.workspace.active_goal_ids.length > 0
       ? c.workspace.active_goal_ids
       : c.active_goal_ids,
     mention_targets_text: c.workspace.mention_targets.join('\n'),
-    network_mode: coerceNetworkMode(c.network_mode),
+    network_mode: c.network_mode,
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
@@ -875,8 +868,8 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
   if (!sameStringArray(newPaths, origPaths)) payload.allowed_paths = newPaths
-  if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
-  if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
+  if (draft.sandbox_profile !== orig.sandbox_profile) payload.sandbox_profile = draft.sandbox_profile
+  if (draft.network_mode !== orig.network_mode) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
   if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
   if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
@@ -895,11 +888,11 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
   const d = runtimeDraft.value
   if (!d) return
   const next = { ...d, [field]: value } as RuntimeDraft
-  if (field === 'sandbox_profile' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
-    next.network_mode = 'inherit'
+  if (field === 'sandbox_profile') {
+    next.network_mode = next.sandbox_profile === 'docker' ? 'none' : 'host'
   }
   if (field === 'network_mode' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
-    next.network_mode = 'inherit'
+    next.network_mode = 'host'
   }
   runtimeDraft.value = next
 }
@@ -1708,16 +1701,35 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   // panel can detect existing config; mutations return the fresh projection and
   // update this state without a refetch.
   const [secretProjection, setSecretProjection] = useState<KeeperSecretProjection | null>(null)
+  const [secretProjectionStatus, setSecretProjectionStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [secretProjectionError, setSecretProjectionError] = useState<string | null>(null)
+  const [secretProjectionReload, setSecretProjectionReload] = useState(0)
   useEffect(() => {
     const controller = new AbortController()
+    setSecretProjection(null)
+    setSecretProjectionStatus('loading')
+    setSecretProjectionError(null)
     fetchKeeperComposite(keeperName, { signal: controller.signal })
-      .then((snapshot) => setSecretProjection(snapshot.secret_projection ?? null))
-      .catch(() => {
-        // A failed/aborted secret fetch leaves the panel in its empty-projection
-        // state (save still works); it must not break the rest of the config UI.
+      .then((snapshot) => {
+        if (controller.signal.aborted) return
+        setSecretProjection(snapshot.secret_projection ?? null)
+        setSecretProjectionStatus('ready')
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setSecretProjectionStatus('error')
+        setSecretProjectionError(
+          error instanceof Error ? error.message : 'Keeper credential projection 조회 실패',
+        )
       })
     return () => controller.abort()
-  }, [keeperName])
+  }, [keeperName, secretProjectionReload])
+
+  const adoptSecretProjection = (projection: KeeperSecretProjection) => {
+    setSecretProjection(projection)
+    setSecretProjectionStatus('ready')
+    setSecretProjectionError(null)
+  }
 
   // Trigger load on first render or name change
   if (configKeeperName.value !== keeperName || state.status === 'idle') {
@@ -2326,10 +2338,17 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${InlineSelectRow}
         label="network_mode"
         value=${rd.network_mode}
-        options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
+        options=${rd.sandbox_profile === 'docker' ? ['host', 'none'] as const : ['host'] as const}
         onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         dirty=${dirtyFlags.network_mode}
       />
+      ${rd.sandbox_profile === 'docker' && rd.network_mode === 'host' ? html`
+        <${Callout}
+          title="Host network 경고"
+          body="Docker network_mode=host는 --network host입니다. 컨테이너가 호스트 네트워크 네임스페이스를 사용합니다."
+          tone="warn"
+        />
+      ` : null}
       <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.allowed_paths ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
         <div class="flex items-center justify-between mb-2">
           <span class="text-sm text-[var(--color-fg-secondary)]">allowed_paths</span>
@@ -2347,16 +2366,13 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
         </div>
       ` : null}
-      ${rd.sandbox_profile === 'docker' ? html`
-        <${SetupGuideCard} connectorId="sandbox_hardened" />
-      ` : null}
       <${Callout}
         title="기본 경로 앵커"
         body="상대 allowed_paths는 keeper 작업 경로 기준으로 해석됩니다."
       />
     ` : html`
-      <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
-      <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
+      <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile} />
+      <${ConfigRow} label="network_mode" value=${c.network_mode} />
 
       <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
       <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
@@ -2369,6 +2385,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         tone="warn"
       />
     ` : null}
+
+    <${KeeperSandboxPanel} keeperName=${keeperName} />
 
     <${SectionHeader} title="멘션 · 네임스페이스" />
     ${rd && runtimeCanEdit ? html`
@@ -2395,16 +2413,40 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${ModelList} models=${c.workspace.bound_workspace_ids} />
     </div>
 
-    ${'' /* GitHub App per-keeper credentials — surfaced here in 설정 → 권한·샌드박스
-       alongside the monitoring detail's 진단/운영 copy, because credentials are a
-       settings concept and this is where operators look for them. Both call sites
-       render the same KeeperGithubAppConfigPanel against secret_projection. */}
+    <${MajorSectionHeader} title="Projected credentials" />
+    ${secretProjectionStatus === 'loading' ? html`
+      <${LoadingState}>Keeper credential projection 조회 중<//>
+    ` : null}
+    ${secretProjectionStatus === 'error' ? html`
+      <div class="flex flex-col gap-2">
+        <${ErrorState} message=${secretProjectionError ?? 'Keeper credential projection 조회 실패'} />
+        <button
+          type="button"
+          class="self-end text-xs text-[var(--color-accent-fg)] hover:underline"
+          onClick=${() => setSecretProjectionReload(value => value + 1)}
+        >다시 조회</button>
+      </div>
+    ` : null}
+    ${secretProjectionStatus === 'ready' ? html`
+      <${KeeperSecretProjectionPanel}
+        keeperName=${keeperName}
+        projection=${secretProjection}
+        onProjectionChange=${adoptSecretProjection}
+      />
+    ` : null}
+
     <${MajorSectionHeader} title="GitHub App 자격증명" />
-    <${KeeperGithubAppConfigPanel}
-      keeperName=${keeperName}
-      projection=${secretProjection}
-      onProjectionChange=${setSecretProjection}
-    />
+    ${secretProjectionStatus === 'ready' ? html`
+      <${KeeperGithubAppConfigPanel}
+        keeperName=${keeperName}
+        projection=${secretProjection}
+        onProjectionChange=${adoptSecretProjection}
+      />
+    ` : html`
+      <div class="text-xs text-[var(--color-fg-muted)]">
+        Projection truth를 불러오기 전에는 credential 상태와 삭제 동작을 활성화하지 않습니다.
+      </div>
+    `}
   `
 
   // goals ◎ — assigned goal-store bindings (active_goal_ids picker)

@@ -2,6 +2,11 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+let turn_container_kind =
+  Keeper_types_profile_sandbox.sandbox_container_kind_to_string
+    Keeper_types_profile_sandbox.Sandbox_turn
+;;
+
 type state =
   | Not_started
   | Running of { container_name : string }
@@ -82,7 +87,7 @@ let container_name_of (t : t) =
   let net_suffix =
     match t.network_mode with
     | Network_none -> "none"
-    | Network_inherit -> "inherit"
+    | Network_host -> "host"
   in
   let seq = Atomic.fetch_and_add container_counter 1 in
   Printf.sprintf
@@ -223,7 +228,9 @@ let run_argv_with_status_retry_eintr ?timeout_sec argv =
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox command"
-          ~env:(Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
+          ~env:
+            (Env_keeper_scrub.filter_control_plane_environment_c_messages
+               (Unix.environment ()))
           ~cwd:(Config_dir_resolver.current_working_dir ())
           argv
       in
@@ -553,7 +560,10 @@ let run_argv_with_status_split_retry_eintr
       ?on_stderr_chunk
       ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
         let raw_source = String.concat " " argv in
-        let env = Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()) in
+        let env =
+          Env_keeper_scrub.filter_control_plane_environment_c_messages
+            (Unix.environment ())
+        in
         let cwd = Config_dir_resolver.current_working_dir () in
         match on_stdout_chunk, on_stderr_chunk with
         | None, None ->
@@ -596,7 +606,9 @@ let run_argv_with_stdin_and_status_retry_eintr ?timeout_sec ~stdin_content argv 
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox stdin command"
-          ~env:(Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
+          ~env:
+            (Env_keeper_scrub.filter_control_plane_environment_c_messages
+               (Unix.environment ()))
           ~cwd:(Config_dir_resolver.current_working_dir ())
           ~stdin_content
           argv
@@ -624,7 +636,10 @@ let run_argv_with_stdin_and_status_split_retry_eintr
       ?on_stderr_chunk
       ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
         let raw_source = String.concat " " argv in
-        let env = Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()) in
+        let env =
+          Env_keeper_scrub.filter_control_plane_environment_c_messages
+            (Unix.environment ())
+        in
         let cwd = Config_dir_resolver.current_working_dir () in
         Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
           ?timeout_sec
@@ -755,7 +770,7 @@ let start_container (t : t) ~timeout_sec =
            @ Keeper_sandbox_runtime.docker_label_args
                ~base_path:t.config.base_path
                ~keeper_name:t.meta.name
-               ~container_kind:"turn"
+               ~container_kind:turn_container_kind
                ~network_label
                ~turn_id:t.turn_id
                ()
@@ -842,7 +857,7 @@ let start_container (t : t) ~timeout_sec =
                 ~keeper_name:t.meta.name
                 ~image
                 ~status_label
-                ~container_kind:"turn"
+                ~container_kind:turn_container_kind
                 ~network_label
                 out
             in
@@ -1060,7 +1075,10 @@ let run_exec_pipeline_with_status_once
           let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
           let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
           { Process_eio.argv
-          ; env = Some (Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
+          ; env =
+              Some
+                (Env_keeper_scrub.filter_control_plane_environment_c_messages
+                   (Unix.environment ()))
           ; cwd = Some (Config_dir_resolver.current_working_dir ())
           })
         stages

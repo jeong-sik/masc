@@ -1286,7 +1286,17 @@ let test_offline_keeper_composite_exposes_secret_projection () =
   Alcotest.(check (list string))
     "offline composite reports projected env names"
     [ "GH_TOKEN" ]
-    (projection |> member "env_names" |> to_list |> List.map to_string);
+    (projection
+     |> member "env_entries"
+     |> to_list
+     |> List.map (fun entry -> entry |> member "name" |> to_string));
+  Alcotest.(check (list string))
+    "offline composite reports projected env scopes"
+    [ "shared" ]
+    (projection
+     |> member "env_entries"
+     |> to_list
+     |> List.map (fun entry -> entry |> member "scope" |> to_string));
   Alcotest.(check bool)
     "offline composite redacts secret values"
     false

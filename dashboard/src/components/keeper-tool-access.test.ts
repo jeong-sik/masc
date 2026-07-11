@@ -9,7 +9,7 @@ function makeConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
     execution: { selected_runtime_id: 'spark' },
     sandbox_profile: 'local',
-    network_mode: 'inherit',
+    network_mode: 'host',
     handoff: { auto: true, threshold: 0.8 },
     proactive: { enabled: true, idle_sec: 300 },
     workspace: { mention_targets: ['alpha', 'beta'] },

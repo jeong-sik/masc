@@ -317,14 +317,6 @@ let decision_entries =
       "Decision layer level (0=off, 1=audit, 2+=extended)";
   ]
 
-let docker_playground_entries =
-  [
-    entry ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
-      "Docker container name for keeper playground";
-    entry ~default:"(none)" "MASC_KEEPER_DOCKER_PLAYGROUND"
-      "Route Execute through Docker container (feature flag)";
-  ]
-
 let keeper_sandbox_entries =
   [
     entry
@@ -346,8 +338,6 @@ let keeper_sandbox_entries =
       "Fail closed unless Docker reports rootless mode";
     entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
       "Fail closed unless Docker reports userns support";
-    entry ~default:"true" "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
-      "Enable legacy Docker git/gh bridge dispatch when hard mode is off";
     entry ~default:"true" "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
       "Best-effort cleanup for stale MASC keeper sandbox containers";
     entry ~default:"21600" "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"
@@ -824,8 +814,7 @@ let zombie_cleanup_entries =
 let all_categories () =
   [
     category "server"
-      (server_entries @ path_entries
-       @ docker_playground_entries @ test_entries);
+      (server_entries @ path_entries @ test_entries);
     category "auth" auth_entries;
     category "transport" transport_entries;
     category "storage" (storage_entries @ cache_entries @ memory_entries @ board_entries);
@@ -842,7 +831,6 @@ let all_categories () =
       (keeper_entries @ keeper_bootstrap_entries
        @ keeper_keepalive_entries @ keeper_metrics_entries
        @ keeper_health_entries
-       @ docker_playground_entries
        @ keeper_sandbox_entries);
     category "keeper_execution"
       (keeper_execution_entries @ compaction_entries @ decision_entries

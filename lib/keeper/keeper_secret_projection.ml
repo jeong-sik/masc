@@ -18,14 +18,15 @@ type file_projection_policy =
   | Mount_into_keeper
   | Projection_layer_only
 
-type secret_root_info =
-  { root : string
-  ; source : string
-  }
-
 type secret_scope =
   | Shared_secret
   | Keeper_secret
+
+type secret_root_info =
+  { root : string
+  ; source : string
+  ; scope : secret_scope
+  }
 
 type loaded_secret_root =
   { info : secret_root_info
@@ -36,30 +37,28 @@ type loaded_secret_root =
 
 let base_secret_scope = "base"
 
-let trim_env_opt key =
-  match Sys.getenv_opt key with
-  | Some value ->
-    let trimmed = String.trim value in
-    if String.equal trimmed "" then None else Some trimmed
-  | None -> None
+let secret_scope_to_string = function
+  | Shared_secret -> "shared"
+  | Keeper_secret -> "keeper"
 ;;
 
-let secret_root_info_of_dir ~base_path ~keeper_dir =
-  match trim_env_opt "MASC_SECRET_DIR" with
-  | Some root -> { root = Filename.concat root keeper_dir; source = "MASC_SECRET_DIR" }
-  | None ->
-    { root =
-        Filename.concat
-          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "secrets")
-          keeper_dir
-    ; source = "workspace_masc_secrets"
-    }
+let secret_root_info_of_dir ~base_path ~keeper_dir ~scope =
+  { root =
+      Filename.concat
+        (Filename.concat (Common.masc_dir_from_base_path ~base_path) "secrets")
+        keeper_dir
+  ; source = "workspace_masc_secrets"
+  ; scope
+  }
 ;;
 
 let keeper_secret_dir keeper_name = Workspace_utils.safe_filename keeper_name
 
 let secret_root_info ~base_path ~keeper_name =
-  secret_root_info_of_dir ~base_path ~keeper_dir:(keeper_secret_dir keeper_name)
+  secret_root_info_of_dir
+    ~base_path
+    ~keeper_dir:(keeper_secret_dir keeper_name)
+    ~scope:Keeper_secret
 ;;
 
 let secret_root ~base_path ~keeper_name =
@@ -67,14 +66,19 @@ let secret_root ~base_path ~keeper_name =
 ;;
 
 let base_secret_root_info ~base_path =
-  secret_root_info_of_dir ~base_path ~keeper_dir:base_secret_scope
+  secret_root_info_of_dir
+    ~base_path
+    ~keeper_dir:base_secret_scope
+    ~scope:Shared_secret
 ;;
 
 let secret_roots ~base_path ~keeper_name =
   let keeper_dir = keeper_secret_dir keeper_name in
-  let keeper_root = secret_root_info_of_dir ~base_path ~keeper_dir in
+  let keeper_root =
+    secret_root_info_of_dir ~base_path ~keeper_dir ~scope:Keeper_secret
+  in
   if String.equal keeper_dir base_secret_scope
-  then [ keeper_root ]
+  then [ base_secret_root_info ~base_path ]
   else [ base_secret_root_info ~base_path; keeper_root ]
 ;;
 
@@ -253,19 +257,8 @@ let overlay_env_entries base entries =
   Array.of_list (inherited @ overrides)
 ;;
 
-(* Prevent [gh] from falling back to the operator's HOME/XDG config when the
-   keeper supplies token env credentials but no explicit GH_CONFIG_DIR. *)
-let local_empty_gh_config_dir = "/var/empty"
-
 let env_entries_have key entries =
   List.exists (fun (name, _) -> String.equal name key) entries
-;;
-
-let local_env_entries_with_defaults entries =
-  if env_entries_have "GH_CONFIG_DIR" entries
-     || not (path_exists local_empty_gh_config_dir && is_directory local_empty_gh_config_dir)
-  then entries
-  else ("GH_CONFIG_DIR", local_empty_gh_config_dir) :: entries
 ;;
 
 let local_base_host_env ?host_env () =
@@ -275,7 +268,7 @@ let local_base_host_env ?host_env () =
     | None -> Unix.environment ()
   in
   base
-  |> Env_keeper_scrub.filter_environment
+  |> Env_keeper_scrub.filter_keeper_environment
   |> Env_git_noninteractive.inject_into_environment
 ;;
 
@@ -289,6 +282,29 @@ let valid_rel_component component =
 
 let container_path_of_rel rel =
   "/" ^ String.concat "/" rel
+;;
+
+let github_app_pem_rel = [ "github-app"; "private-key.pem" ]
+let github_app_pem_container_path = container_path_of_rel github_app_pem_rel
+
+let file_projection_policy ~container_path =
+  if String.equal container_path github_app_pem_container_path
+  then Projection_layer_only
+  else Mount_into_keeper
+;;
+
+let file_projection_policy_to_string = function
+  | Mount_into_keeper -> "docker_read_only_mount"
+  | Projection_layer_only -> "control_plane_only"
+;;
+
+let keeper_mount_file_entries entries =
+  List.filter
+    (fun (_, container_path) ->
+       match file_projection_policy ~container_path with
+       | Mount_into_keeper -> true
+       | Projection_layer_only -> false)
+    entries
 ;;
 
 let collect_file_entries files_root =
@@ -369,48 +385,144 @@ let load_secret_roots ~base_path ~keeper_name =
   loop [] (secret_roots ~base_path ~keeper_name)
 ;;
 
-let overlay_by_key key_of base overlay =
-  let overlay_keys = List.map key_of overlay in
-  base |> List.filter (fun item -> not (List.mem (key_of item) overlay_keys)) |> fun base ->
-  base @ overlay
+type effective_env_entry =
+  { env_name : string
+  ; env_value : string
+  ; env_scope : secret_scope
+  ; env_overrides_scope : secret_scope option
+  }
+
+type effective_file_entry =
+  { file_host_path : string
+  ; file_container_path : string
+  ; file_scope : secret_scope
+  ; file_overrides_scope : secret_scope option
+  }
+
+let merge_env_entries_with_provenance roots =
+  List.fold_left
+    (fun acc loaded ->
+       List.fold_left
+         (fun acc (name, value) ->
+            let overridden =
+              List.find_opt (fun entry -> String.equal entry.env_name name) acc
+            in
+            let entry =
+              { env_name = name
+              ; env_value = value
+              ; env_scope = loaded.info.scope
+              ; env_overrides_scope = Option.map (fun item -> item.env_scope) overridden
+              }
+            in
+            List.filter (fun item -> not (String.equal item.env_name name)) acc
+            @ [ entry ])
+         acc
+         loaded.env_entries)
+    []
+    roots
 ;;
 
 let merge_env_entries roots =
+  merge_env_entries_with_provenance roots
+  |> List.map (fun entry -> entry.env_name, entry.env_value)
+;;
+
+let merge_file_entries_with_provenance roots =
   List.fold_left
-    (fun acc loaded -> overlay_by_key fst acc loaded.env_entries)
+    (fun acc loaded ->
+       List.fold_left
+         (fun acc (host_path, container_path) ->
+            let overridden =
+              List.find_opt
+                (fun entry -> String.equal entry.file_container_path container_path)
+                acc
+            in
+            let entry =
+              { file_host_path = host_path
+              ; file_container_path = container_path
+              ; file_scope = loaded.info.scope
+              ; file_overrides_scope =
+                  Option.map (fun item -> item.file_scope) overridden
+              }
+            in
+            List.filter
+              (fun item -> not (String.equal item.file_container_path container_path))
+              acc
+            @ [ entry ])
+         acc
+         loaded.file_entries)
     []
     roots
 ;;
 
 let merge_file_entries roots =
-  List.fold_left
-    (fun acc loaded -> overlay_by_key snd acc loaded.file_entries)
-    []
-    roots
+  merge_file_entries_with_provenance roots
+  |> List.map (fun entry -> entry.file_host_path, entry.file_container_path)
 ;;
 
 let any_configured roots = List.exists (fun loaded -> loaded.configured) roots
+
+type projection_status =
+  | Projection_absent
+  | Projection_empty
+  | Projection_ready
+  | Projection_error
+
+let projection_status_to_string = function
+  | Projection_absent -> "absent"
+  | Projection_empty -> "empty"
+  | Projection_ready -> "ready"
+  | Projection_error -> "error"
+;;
 
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 ;;
 
-let file_mount_json (host_path, container_path) =
-  `Assoc [ "host_path", `String host_path; "container_path", `String container_path ]
+let secret_scope_option_json = function
+  | Some scope -> `String (secret_scope_to_string scope)
+  | None -> `Null
+;;
+
+let effective_env_entry_json entry =
+  `Assoc
+    [ "name", `String entry.env_name
+    ; "scope", `String (secret_scope_to_string entry.env_scope)
+    ; "overrides_scope", secret_scope_option_json entry.env_overrides_scope
+    ; "projection_targets", json_string_list [ "local"; "docker" ]
+    ]
+;;
+
+let effective_file_entry_json entry =
+  let policy = file_projection_policy ~container_path:entry.file_container_path in
+  let targets =
+    match policy with
+    | Mount_into_keeper -> [ "docker" ]
+    | Projection_layer_only -> []
+  in
+  `Assoc
+    [ "host_path", `String entry.file_host_path
+    ; "container_path", `String entry.file_container_path
+    ; "scope", `String (secret_scope_to_string entry.file_scope)
+    ; "overrides_scope", secret_scope_option_json entry.file_overrides_scope
+    ; "projection_policy", `String (file_projection_policy_to_string policy)
+    ; "projection_targets", json_string_list targets
+    ]
 ;;
 
 let secret_root_json loaded =
   let status =
     if not loaded.configured
-    then "absent"
+    then Projection_absent
     else if loaded.env_entries = [] && loaded.file_entries = []
-    then "empty"
-    else "ready"
+    then Projection_empty
+    else Projection_ready
   in
   `Assoc
     [ "root", `String loaded.info.root
     ; "source", `String loaded.info.source
-    ; "status", `String status
+    ; "scope", `String (secret_scope_to_string loaded.info.scope)
+    ; "status", `String (projection_status_to_string status)
     ; "configured", `Bool loaded.configured
     ; "env_count", `Int (List.length loaded.env_entries)
     ; "file_count", `Int (List.length loaded.file_entries)
@@ -423,21 +535,21 @@ let status_json
       ~effective_roots
       ~status
       ~configured
-      ~env_names
+      ~env_entries
       ~file_entries
       ~error
       ~next_action
   =
   `Assoc
-    [ "status", `String status
+    [ "status", `String (projection_status_to_string status)
     ; "configured", `Bool configured
     ; "root", `String root
     ; "source", `String source
     ; "effective_roots", `List (List.map secret_root_json effective_roots)
-    ; "env_count", `Int (List.length env_names)
+    ; "env_count", `Int (List.length env_entries)
     ; "file_count", `Int (List.length file_entries)
-    ; "env_names", json_string_list env_names
-    ; "file_mounts", `List (List.map file_mount_json file_entries)
+    ; "env_entries", `List (List.map effective_env_entry_json env_entries)
+    ; "file_entries", `List (List.map effective_file_entry_json file_entries)
     ; "values_validated", `Bool true
     ; "error", (match error with Some err -> `String err | None -> `Null)
     ; "next_action", `String next_action
@@ -452,33 +564,34 @@ let dashboard_status_json ~base_path ~keeper_name =
       ~root
       ~source
       ~effective_roots:[]
-      ~status:"error"
+      ~status:Projection_error
       ~configured:true
-      ~env_names:[]
+      ~env_entries:[]
       ~file_entries:[]
       ~error:(Some err)
       ~next_action:"fix keeper secret roots"
   | Ok roots ->
-    let env_entries = merge_env_entries roots in
-    let file_entries = merge_file_entries roots in
+    let env_entries = merge_env_entries_with_provenance roots in
+    let file_entries = merge_file_entries_with_provenance roots in
     let status =
       if not (any_configured roots)
-      then "absent"
+      then Projection_absent
       else if env_entries = [] && file_entries = []
-      then "empty"
-      else "ready"
+      then Projection_empty
+      else Projection_ready
     in
     let next_action =
       match status with
-      | "ready" -> "none"
-      | "absent" ->
+      | Projection_ready -> "none"
+      | Projection_absent ->
         "create "
         ^ root
         ^ "/env and/or "
         ^ root
         ^ "/files, or configure "
         ^ (base_secret_root_info ~base_path).root
-      | _ -> "add entries under env/ and/or files/"
+      | Projection_empty -> "add entries under env/ and/or files/"
+      | Projection_error -> "fix keeper secret roots"
     in
     status_json
       ~root
@@ -486,7 +599,7 @@ let dashboard_status_json ~base_path ~keeper_name =
       ~effective_roots:roots
       ~status
       ~configured:(any_configured roots)
-      ~env_names:(List.map fst env_entries)
+      ~env_entries
       ~file_entries
       ~error:None
       ~next_action
@@ -508,6 +621,98 @@ let unix_error_message err fn arg =
     (Unix.error_message err)
     (if String.equal fn "" then "" else ": " ^ fn)
     (if String.equal arg "" then "" else " " ^ arg)
+;;
+
+type local_managed_home =
+  { home : string
+  ; config_home : string
+  ; cache_home : string
+  ; data_home : string
+  ; gh_config_dir : string
+  }
+
+let ensure_private_directory ~label path =
+  try
+    ensure_dir path;
+    match lstat path with
+    | Error _ as err -> err
+    | Ok st ->
+      (match st.Unix.st_kind with
+       | Unix.S_DIR ->
+         if st.Unix.st_uid <> Unix.geteuid ()
+         then
+           Error
+             (Printf.sprintf
+                "%s is not owned by the MASC process user: %s"
+                label
+                path)
+         else (
+           Unix.chmod path 0o700;
+           Ok ())
+       | Unix.S_LNK ->
+         Error (Printf.sprintf "%s must not be a symlink: %s" label path)
+       | _ -> Error (Printf.sprintf "%s is not a directory: %s" label path))
+  with
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
+;;
+
+let prepare_local_managed_home ~base_path ~keeper_name =
+  let homes_root =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path)
+      "keeper-homes"
+  in
+  let home = Filename.concat homes_root (Workspace_utils.safe_filename keeper_name) in
+  let config_home = Filename.concat home ".config" in
+  let cache_home = Filename.concat home ".cache" in
+  let local_home = Filename.concat home ".local" in
+  let data_home = Filename.concat local_home "share" in
+  let gh_config_dir = Filename.concat config_home "gh" in
+  let directories =
+    [ "keeper managed-home root", homes_root
+    ; "keeper managed HOME", home
+    ; "keeper managed XDG_CONFIG_HOME", config_home
+    ; "keeper managed XDG_CACHE_HOME", cache_home
+    ; "keeper managed data root", local_home
+    ; "keeper managed XDG_DATA_HOME", data_home
+    ; "keeper managed GH_CONFIG_DIR", gh_config_dir
+    ]
+  in
+  let rec ensure_all = function
+    | [] -> Ok { home; config_home; cache_home; data_home; gh_config_dir }
+    | (label, path) :: rest ->
+      (match ensure_private_directory ~label path with
+       | Error _ as err -> err
+       | Ok () -> ensure_all rest)
+  in
+  ensure_all directories
+;;
+
+let local_managed_env_names =
+  [ "HOME"; "XDG_CONFIG_HOME"; "XDG_CACHE_HOME"; "XDG_DATA_HOME"; "GH_CONFIG_DIR" ]
+;;
+
+let local_env_entries_with_managed_home managed_home entries =
+  match
+    List.find_opt
+      (fun (name, _) -> List.exists (String.equal name) local_managed_env_names)
+      entries
+  with
+  | Some (name, _) ->
+    Error
+      (Printf.sprintf
+         "local_managed_home_env_conflict: projected env %s is reserved by the local credential boundary"
+         name)
+  | None ->
+    Ok
+      ([ "HOME", managed_home.home
+       ; "XDG_CONFIG_HOME", managed_home.config_home
+       ; "XDG_CACHE_HOME", managed_home.cache_home
+       ; "XDG_DATA_HOME", managed_home.data_home
+       ; "GH_CONFIG_DIR", managed_home.gh_config_dir
+       ]
+       @ entries)
 ;;
 
 let ensure_secret_directory ~label path =
@@ -904,50 +1109,28 @@ let git_config_helper_content =
   "[credential \"https://github.com\"]\n\thelper = \"!gh auth git-credential\"\n"
 ;;
 
-let local_git_config_global_path ~base_path ~keeper_name =
-  let playground =
-    Filename.concat base_path (Playground_paths.bundle_root keeper_name)
-  in
-  Filename.concat playground ".gitconfig"
+let local_git_config_global_path managed_home =
+  Filename.concat managed_home.home ".gitconfig"
 ;;
 
 let ensure_local_git_config_global ~path =
-  try
-    ensure_dir (Filename.dirname path);
-    match Fs_compat.save_file_atomic path git_config_helper_content with
-    | Ok () -> Ok ()
-    | Error err -> Error err
+  match
+    ensure_private_directory
+      ~label:"keeper managed HOME"
+      (Filename.dirname path)
   with
-  | Sys_error msg -> Error msg
-  | Unix.Unix_error (err, fn, arg) ->
-    Error
-      (Printf.sprintf
-         "%s%s%s"
-         (Unix.error_message err)
-         (if String.equal fn "" then "" else ": " ^ fn)
-         (if String.equal arg "" then "" else " " ^ arg))
-;;
-
-let github_app_pem_rel = [ "github-app"; "private-key.pem" ]
-let github_app_pem_subpath = String.concat "/" github_app_pem_rel
-let github_app_pem_container_path = container_path_of_rel github_app_pem_rel
-
-let file_projection_policy ~container_path =
-  if String.equal container_path github_app_pem_container_path
-  then Projection_layer_only
-  else Mount_into_keeper
-
-let keeper_mount_file_entries entries =
-  List.filter
-    (fun (_, container_path) ->
-       match file_projection_policy ~container_path with
-       | Mount_into_keeper -> true
-       | Projection_layer_only -> false)
-    entries
-
-let github_app_pem_host_path ~base_path ~keeper_name =
-  let root = secret_root ~base_path ~keeper_name in
-  Filename.concat (Filename.concat root "files") github_app_pem_subpath
+  | Error _ as err -> err
+  | Ok () ->
+    (try
+       match Fs_compat.save_file_atomic path git_config_helper_content with
+       | Error _ as err -> err
+       | Ok () ->
+         Unix.chmod path 0o600;
+         Ok ()
+     with
+     | Sys_error msg -> Error msg
+     | Unix.Unix_error (err, fn, arg) ->
+       Error (unix_error_message err fn arg))
 ;;
 
 let read_file_result path =
@@ -957,6 +1140,12 @@ let read_file_result path =
     try Ok (read_file path) with
     | Sys_error msg -> Error msg
     | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
+;;
+
+let effective_file_host_path ~container_path file_entries =
+  file_entries
+  |> List.find_opt (fun (_, projected_path) -> String.equal projected_path container_path)
+  |> Option.map fst
 ;;
 
 let default_github_app_token_minter ~app_id ~installation_id ~pem ~now =
@@ -982,9 +1171,9 @@ let default_github_app_token_minter ~app_id ~installation_id ~pem ~now =
    broader static PAT. *)
 let github_app_token_overlay
       ?(mint_github_app_token = default_github_app_token_minter)
-      ~base_path
       ~keeper_name
       ~env_entries
+      ~file_entries
       ()
   =
   let app_id = List.assoc_opt "MASC_GITHUB_APP_ID" env_entries in
@@ -994,26 +1183,33 @@ let github_app_token_overlay
   match (app_id, installation_id) with
   | Some app_id, Some installation_id ->
     (match
-       github_app_pem_host_path ~base_path ~keeper_name |> read_file_result
+       effective_file_host_path
+         ~container_path:github_app_pem_container_path
+         file_entries
      with
-     | Error reason ->
+     | None ->
        Error
-         (Printf.sprintf
-            "github_app_private_key_unavailable: %s"
-            reason)
-     | Ok pem ->
-       let now = Time_compat.now () |> int_of_float in
-       mint_github_app_token ~app_id ~installation_id ~pem ~now
-       |> (function
-        | Ok token -> Ok (Some token)
+         "github_app_private_key_unavailable: no effective github-app/private-key.pem"
+     | Some pem_path ->
+       (match read_file_result pem_path with
         | Error reason ->
-          Log.Keeper.warn
-            "GitHub App installation token mint failed for keeper %s: %s"
-            keeper_name reason;
           Error
             (Printf.sprintf
-               "github_app_installation_token_unavailable: %s"
-               reason)))
+               "github_app_private_key_unavailable: %s"
+               reason)
+        | Ok pem ->
+          let now = Time_compat.now () |> int_of_float in
+          mint_github_app_token ~app_id ~installation_id ~pem ~now
+          |> (function
+           | Ok token -> Ok (Some token)
+           | Error reason ->
+             Log.Keeper.warn
+               "GitHub App installation token mint failed for keeper %s: %s"
+               keeper_name reason;
+             Error
+               (Printf.sprintf
+                  "github_app_installation_token_unavailable: %s"
+                  reason))))
   | None, None -> Ok None
   | Some _, None -> Error "github_app_config_incomplete: missing MASC_GITHUB_APP_INSTALLATION_ID"
   | None, Some _ -> Error "github_app_config_incomplete: missing MASC_GITHUB_APP_ID"
@@ -1035,16 +1231,16 @@ let with_github_app_token_env ~token entries =
 
 let env_entries_with_github_app_overlay
       ?mint_github_app_token
-      ~base_path
       ~keeper_name
+      ~file_entries
       env_entries
   =
   match
     github_app_token_overlay
       ?mint_github_app_token
-      ~base_path
       ~keeper_name
       ~env_entries
+      ~file_entries
       ()
   with
   | Error _ as err -> err
@@ -1057,35 +1253,41 @@ let local_env_for_keeper ?mint_github_app_token ?host_env ~base_path ~keeper_nam
   | Error _ as err -> err
   | Ok roots ->
     let env_entries = merge_env_entries roots in
+    let file_entries = merge_file_entries roots in
     (match
        env_entries_with_github_app_overlay
          ?mint_github_app_token
-         ~base_path
          ~keeper_name
+         ~file_entries
          env_entries
      with
      | Error _ as err -> err
      | Ok env_entries ->
-       let git_config_path = local_git_config_global_path ~base_path ~keeper_name in
-    let needs_managed_git_config =
-      has_github_token env_entries
-      && not (env_entries_have git_config_global_env_name env_entries)
-    in
-    if needs_managed_git_config
-    then (
-      match ensure_local_git_config_global ~path:git_config_path with
-      | Error _ as err -> err
-      | Ok () ->
-        let env_entries =
-          (git_config_global_env_name, git_config_path) :: env_entries
-        in
-        let env_entries = local_env_entries_with_defaults env_entries in
-        let base = local_base_host_env ?host_env () in
-        Ok (Some (overlay_env_entries base env_entries)))
-    else
-      let env_entries = local_env_entries_with_defaults env_entries in
-      let base = local_base_host_env ?host_env () in
-       Ok (Some (overlay_env_entries base env_entries)))
+       (match prepare_local_managed_home ~base_path ~keeper_name with
+        | Error reason -> Error ("local_managed_home_failed: " ^ reason)
+        | Ok managed_home ->
+          let git_config_path = local_git_config_global_path managed_home in
+          let needs_managed_git_config =
+            has_github_token env_entries
+            && not (env_entries_have git_config_global_env_name env_entries)
+          in
+          let env_entries_result =
+            if needs_managed_git_config
+            then (
+              match ensure_local_git_config_global ~path:git_config_path with
+              | Error _ as err -> err
+              | Ok () ->
+                Ok ((git_config_global_env_name, git_config_path) :: env_entries))
+            else Ok env_entries
+          in
+          (match env_entries_result with
+           | Error _ as err -> err
+           | Ok env_entries ->
+             (match local_env_entries_with_managed_home managed_home env_entries with
+              | Error _ as err -> err
+              | Ok env_entries ->
+                let base = local_base_host_env ?host_env () in
+                Ok (Some (overlay_env_entries base env_entries))))))
 ;;
 
 let docker_git_config_global_path =
@@ -1126,16 +1328,17 @@ let docker_args_for_keeper ?mint_github_app_token ~base_path ~keeper_name ~conta
   | Error _ as err -> err
   | Ok roots ->
     let env_entries = merge_env_entries roots in
+    let effective_file_entries = merge_file_entries roots in
     (match
        env_entries_with_github_app_overlay
          ?mint_github_app_token
-         ~base_path
          ~keeper_name
+         ~file_entries:effective_file_entries
          env_entries
      with
      | Error _ as err -> err
      | Ok env_entries ->
-       let file_entries = merge_file_entries roots |> keeper_mount_file_entries in
+       let file_entries = keeper_mount_file_entries effective_file_entries in
     let git_config =
       if env_entries_have git_config_global_env_name env_entries
          || not (has_github_token env_entries)

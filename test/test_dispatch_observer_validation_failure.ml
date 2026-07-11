@@ -15,14 +15,14 @@ open Alcotest
 
     1. A failure result delivered as [Handled (Some r)] reaches the
        [Tool_metrics] observer and is counted as a failure.
-    2. The [Policy_rejection] failure class survives in the result so
+    2. The [Workflow_rejection] failure class survives in the result so
        observers can still distinguish a validation rejection. *)
 
 let mk_validation_failure ~tool_name =
   (* Mirrors the result Tool_input_validation.validate_args returns: an
-     Error with class_ = Policy_rejection. *)
+     Error with class_ = Workflow_rejection. *)
   Tool_result.error
-    ~failure_class:(Some Tool_result.Policy_rejection)
+    ~failure_class:(Some Tool_result.Workflow_rejection)
     ~tool_name
     ~start_time:(Unix.gettimeofday ())
     "validation_failed: missing required field"
@@ -65,14 +65,14 @@ let test_handler_error_shape_is_dropped () =
   | Some _ -> fail "No_handler outcome must not be recorded by Tool_metrics"
 ;;
 
-let test_policy_rejection_class_survives () =
+let test_workflow_rejection_class_survives () =
   let tool_name = "test_validation_observer_class_tool" in
   let result = mk_validation_failure ~tool_name in
   match Tool_result.failure_class result with
-  | Some Tool_result.Policy_rejection -> ()
+  | Some Tool_result.Workflow_rejection -> ()
   | Some other ->
     failf
-      "expected Policy_rejection failure class, got %s"
+      "expected Workflow_rejection failure class, got %s"
       (Tool_result.tool_failure_class_to_string other)
   | None -> fail "validation failure must carry a failure class"
 ;;
@@ -90,9 +90,9 @@ let () =
             `Quick
             test_handler_error_shape_is_dropped
         ; test_case
-            "Policy_rejection class survives"
+            "Workflow_rejection class survives"
             `Quick
-            test_policy_rejection_class_survives
+            test_workflow_rejection_class_survives
         ] )
     ]
 ;;

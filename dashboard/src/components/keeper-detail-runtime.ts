@@ -378,13 +378,6 @@ function truncateSecretProjectionList(values: readonly string[], limit: number):
   return `${visible.join(', ')}${suffix}`
 }
 
-function secretRootScopeLabel(index: number, total: number): string {
-  if (total <= 1) return 'keeper'
-  if (index === 0) return 'shared'
-  if (index === total - 1) return 'keeper'
-  return `scope ${index + 1}`
-}
-
 function secretRootCounts(root: KeeperSecretProjection['effective_roots'][number]): string {
   return `${root.env_count} env · ${root.file_count} files`
 }
@@ -549,13 +542,21 @@ export function KeeperSecretProjectionPanel({
 
   const projectionView = visibleProjection
   const tone = secretProjectionTone(projectionView.status)
-  const filePaths = projectionView.file_mounts.map(mount => mount.container_path)
-  const envSummary = truncateSecretProjectionList(projectionView.env_names, 5)
+  const filePaths = projectionView.file_entries.map(file => {
+    const delivery = file.projection_policy === 'docker_read_only_mount'
+      ? 'docker ro'
+      : 'control-plane only'
+    return `${file.container_path} · ${file.scope} · ${delivery}`
+  })
+  const envSummary = truncateSecretProjectionList(
+    projectionView.env_entries.map(entry => `${entry.name} · ${entry.scope}`),
+    5,
+  )
   const fileSummary = truncateSecretProjectionList(filePaths, 4)
   const effectiveRoots = projectionView.effective_roots ?? []
-  const rootRows = effectiveRoots.map((root, index) => ({
+  const rootRows = effectiveRoots.map(root => ({
     ...root,
-    label: secretRootScopeLabel(index, effectiveRoots.length),
+    label: root.scope,
   }))
   const scopeSummary = rootRows.length > 0 ? rootRows.map(row => row.label).join(' -> ') : 'keeper'
   const rootSummary = rootRows.length > 0
@@ -592,9 +593,17 @@ export function KeeperSecretProjectionPanel({
         <${SignalRow} label="effective roots" value=${rootSummary} title=${rootTitle} />
         <${SignalRow} label="keeper root" value=${projectionView.root} />
         <${SignalRow} label="env names" value=${envSummary} />
-        <${SignalRow} label="file mounts" value=${fileSummary} />
+        <${SignalRow} label="file entries" value=${fileSummary} />
         <${SignalRow} label="validation" value=${projectionView.values_validated ? 'values validated · values redacted' : 'structure only'} />
       </div>
+
+      ${projectionView.file_entries.length > 0 ? html`
+        <div class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
+          File secrets are never projected into Local host execution. Docker mounts only entries marked
+          <span class="mx-1 font-mono text-[var(--color-fg-secondary)]">docker_read_only_mount</span>;
+          <span class="font-mono text-[var(--color-fg-secondary)]">control_plane_only</span> material stays server-side.
+        </div>
+      ` : null}
 
       ${rootRows.length > 1
         ? html`

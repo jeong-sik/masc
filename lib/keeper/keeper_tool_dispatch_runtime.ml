@@ -423,7 +423,6 @@ let tool_tutor_for_validation ~tool_name ~input =
      | Keeper_tool_descriptor.Tool_masc_agent_dispatch
      | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
      | Keeper_tool_descriptor.Tool_masc_misc_dispatch
-     | Keeper_tool_descriptor.Tool_masc_control_dispatch
      | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
      | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
      | Keeper_tool_descriptor.Tool_masc_keeper_dispatch

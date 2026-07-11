@@ -526,11 +526,19 @@ async fn fetch_workspace_runtime(workspace_id: &str) -> Result<(String, u32, Str
         .unwrap_or("-")
         .to_string();
 
-    if let Ok(pause_status) =
-        mcp_tool_call("masc_pause_status", json!({ "workspace_id": workspace_id })).await
+    if let Ok(operator_snapshot) = mcp_tool_call(
+        "masc_operator_snapshot",
+        json!({
+            "view": "summary",
+            "include_messages": false,
+            "include_keepers": false,
+        }),
+    )
+    .await
     {
-        if pause_status
-            .get("paused")
+        if operator_snapshot
+            .get("workspace")
+            .and_then(|workspace| workspace.get("paused"))
             .and_then(Value::as_bool)
             .unwrap_or(false)
         {

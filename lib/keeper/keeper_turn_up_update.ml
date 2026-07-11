@@ -84,7 +84,10 @@ let update_keeper ?(preserve_prompt_defaults = false)
       | Some nm -> Ok nm
       | None ->
         Error
-          (Printf.sprintf "invalid network_mode: %S (expected: inherit or none)" raw)
+          (Printf.sprintf
+             "invalid network_mode: %S (expected: %s)"
+             raw
+             (String.concat " or " valid_network_mode_strings))
   with
   | Error msg -> tool_result_error msg
   | Ok network_mode ->
@@ -287,7 +290,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
     updated_at = now_iso ();
   } in
   match
-    validate_sandbox_settings ~allowed_paths
+    validate_sandbox_settings ~sandbox_profile ~network_mode ~allowed_paths
   with
   | Error err ->
       Otel_metric_store.inc_counter
@@ -300,7 +303,10 @@ let update_keeper ?(preserve_prompt_defaults = false)
   | Ok () ->
       (match
          Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-           ~timeout_sec:(Env_config_sandbox.Preflight.max_timeout_sec ())
+           ~timeout_sec:
+             (Env_config_sandbox.Shell_timeout.timeout_sec
+                ~bucket:Env_config_sandbox.Shell_timeout.Io
+                ())
            ~sandbox_profile
        with
        | Error err ->

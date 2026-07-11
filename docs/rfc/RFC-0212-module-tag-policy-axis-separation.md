@@ -40,9 +40,8 @@ carrier by a catch-all match. The load-bearing failure here is the
 
 `module_tag` is consumed in three roles:
 
-1. **Routing (legitimate).** `keeper_tag_dispatch.ml:116` matches
-   `Mod_agent/Mod_state/Mod_control/...` to select `Tool_*.dispatch`. This is
-   the tag's real job.
+1. **Routing (legitimate).** `keeper_tag_dispatch.ml` matches typed module tags
+   to select a dispatch module. This is the tag's real job.
 
 2. **Keeper-exposure policy (the bug).** `keeper_tool_policy.ml:183-190`:
 
@@ -50,8 +49,7 @@ carrier by a catch-all match. The load-bearing failure here is the
    (match Tool_dispatch.lookup_tag name with
     | Some Tool_dispatch.Mod_inline
     | Some Tool_dispatch.Mod_compact
-    | Some Tool_dispatch.Mod_operator
-    | Some Tool_dispatch.Mod_control -> false   (* keeper-hidden *)
+    | Some Tool_dispatch.Mod_operator -> false  (* keeper-hidden *)
     | Some _ -> true                            (* keeper-exposed *)
     | None  -> false)
    ```

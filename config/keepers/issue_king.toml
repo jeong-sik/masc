@@ -5,4 +5,4 @@ base = "base.toml"
 autoboot_enabled = true
 persona_name = "issue_king"
 sandbox_profile = "local"
-network_mode = "inherit"
+network_mode = "host"

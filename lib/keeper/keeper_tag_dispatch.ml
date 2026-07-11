@@ -54,7 +54,6 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_run -> "run"
   | Mod_agent -> "agent"
   | Mod_state -> "state"
-  | Mod_control -> "control"
   | Mod_agent_timeline -> "agent_timeline"
   | Mod_schedule -> "schedule"
   | Mod_misc -> "misc"
@@ -121,16 +120,6 @@ let dispatch
         { Tool_workspace.config; agent_name }
         ~name
         ~args
-    | Mod_control ->
-      if name = "masc_pause_status"
-      then Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
-      else
-        Some
-          (err
-             (Printf.sprintf
-                "tool '%s' is blocked in keeper context (lifecycle-mutating Mod_control \
-                 tools are operator-only)"
-                name))
     | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch
         ~load_chat:(fun ~agent_name:requested_agent_name ->

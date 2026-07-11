@@ -20,7 +20,6 @@ type module_tag =
   | Mod_agent
   | Mod_task
   | Mod_state
-  | Mod_control
   | Mod_agent_timeline
   | Mod_schedule
   | Mod_misc

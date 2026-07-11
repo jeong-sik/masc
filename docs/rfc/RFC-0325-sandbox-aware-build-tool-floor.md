@@ -17,11 +17,11 @@ verify any code.
 
 Investigation found three distinct layers, not one:
 
-1. **Silent Docker→Host fallback.** The keeper requested `sandbox_profile=docker`
-   but the docker image was absent, so `docker_local_fallback_target`
-   (`keeper_sandbox_shell_ir_target.ml:134-149`) silently fell back to Host
-   execution. The keeper had no signal it was outside a container. *(Out of
-   scope here — see §7; tracked separately.)*
+1. **Resolved prerequisite: Docker is fail-closed.** The keeper requested
+   `sandbox_profile=docker` while its image was absent. The former implicit Host
+   downgrade has been purged; image/preflight failure now rejects execution
+   before any command runs. The remaining analysis below therefore applies to
+   an explicitly selected Host profile or a healthy Docker target.
 2. **Dead-end block message.** On Host, blocking bare `dune` is correct, but the
    typed Shell IR floor emits a terminal "no approval resolver" message instead
    of the actionable rewrite (`Run scripts/dune-local.sh build <target>`) that
@@ -96,19 +96,18 @@ serialization through a lock wrapper.)
 
 ### 4.2 Floor decision keys on the resolved `Sandbox_target`
 
-`dispatch_classified` already receives `~sandbox` (the resolved target, computed
-*after* the Docker→Host fallback). The build-tool rule:
+`dispatch_classified` already receives `~sandbox` (the fail-closed resolved
+target). The build-tool rule:
 
 - `~sandbox = Docker _` (genuine container): `dune` executes directly
   (`Audited` → autonomous `Allow`). No wrapper, no floor block.
-- `~sandbox = Host` (incl. Docker-requested-but-fell-back): `dune` is **not**
+- `~sandbox = Host` (an explicitly selected Local profile): `dune` is **not**
   executed directly. Return an actionable typed rejection carrying the existing
   `Direct_dune_invocation` rewrite: "Run scripts/dune-local.sh build <target>
   from the repo root." This preserves the host build-lock invariant.
 
-Because the decision uses the *resolved* target, a Docker request that fell back
-to Host is treated as Host — the fallback cannot be used to reach bare dune on
-the host.
+Because Docker resolution never returns Host, a Docker-profile keeper cannot
+use image failure to reach bare dune on the host.
 
 ### 4.3 No new approval resolver
 
@@ -122,7 +121,6 @@ wrapper), consistent with RFC-0254's "no `Ask` in the autonomous lane".
 - Wiring a general Shell IR approval resolver (RFC-0318/0319 territory).
 - Changing the catastrophic floor (force-push, mkfs) — unchanged on both
   profiles.
-- Fixing the Docker→Host fallback provisioning (layer 1) — see §7.
 
 ## 6. Verification
 
@@ -140,14 +138,13 @@ wrapper), consistent with RFC-0254's "no `Ask` in the autonomous lane".
     program and same disposition.
   - Catastrophic floor regression: `git push --force` still `Deny` under both
     profiles.
-- **Behavior:** keeper on host-fallback receives the rewrite and can proceed via
+- **Behavior:** an explicit Local keeper receives the rewrite and can proceed via
   `scripts/dune-local.sh`; keeper in a real container builds with bare `dune`.
 
-## 7. Follow-ups (separate)
+## 7. Resolved prerequisite
 
-- **Layer 1 (provisioning):** why the docker image was absent, and whether a
-  silent Host fallback for a Docker-profile keeper is acceptable or should be a
-  visible degraded-state signal. Tracked in issue #23685.
+Docker image absence is an observable preflight/runtime error. There is no Host
+downgrade path to revisit in this RFC.
 
 ## 8. Risks / trade-offs
 

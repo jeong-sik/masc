@@ -46,7 +46,7 @@ let pending_confirm_fixture token =
   ; target_type = Operator_action_constants.workspace_target_type
   ; target_id = None
   ; payload = `Assoc []
-  ; delegated_tool = "masc_pause"
+  ; delegated_tool = "masc_operator_action"
   ; created_at = Masc_domain.now_iso ()
   ; expires_at = None
   }

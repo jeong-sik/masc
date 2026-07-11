@@ -117,13 +117,14 @@ Add 113 entries to `internal_descriptors` in `lib/keeper/agent_tool_descriptor.m
 | `masc_run_*` | ~4 | `Tool_masc_run_dispatch` |
 | `masc_agent_*` | ~5 | `Tool_masc_agent_dispatch` |
 | `masc_library_*` | ~5 | `Tool_masc_library_dispatch` |
-| `masc_control_*` (pause/resume) | ~3 | `Tool_masc_control_dispatch` |
 | `masc_shard_*` (tool_grant/revoke) | ~2 | `Tool_masc_shard_dispatch` |
 | `masc_local_runtime_*` | ~2 | `Tool_masc_local_runtime_dispatch` |
 | `masc_agent_timeline` | 1 | `Tool_masc_agent_timeline` |
 | Singletons (`masc_bind`, `masc_broadcast`, `masc_execute`, etc.) | ~32 | individual variants |
 
-Net new `runtime_handler` variants: ~14 cluster + ~25 singletons = **~39**. Net new descriptor entries: **113**. After this RFC: `internal_descriptors` = 39 + 113 = **152**.
+The direct workspace-control cluster described by the original draft has since
+been removed. Workspace control now enters through the typed operator action
+descriptor and confirmation path; it has no independent dispatch variant.
 
 > Update (2026-06-09): the `masc_run_*` cluster dropped from 6 to 4
 > tools — `masc_run_log` and `masc_run_deliverable` were removed (0

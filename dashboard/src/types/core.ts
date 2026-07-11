@@ -1663,14 +1663,17 @@ interface KeeperHookIntrospection {
   cost_budget: { max_cost_usd?: number | null; active: boolean }
 }
 
+export type KeeperSandboxProfile = 'local' | 'docker'
+export type KeeperSandboxNetworkMode = 'none' | 'host'
+
 export interface KeeperConfig {
   name: string
   active_goal_ids: string[]
   autoboot_enabled: boolean
   max_context_override: number | null
   limits: KeeperConfigLimits
-  sandbox_profile?: 'local' | 'docker' | string
-  network_mode?: 'none' | 'inherit' | string
+  sandbox_profile: KeeperSandboxProfile
+  network_mode: KeeperSandboxNetworkMode
   sandbox_last_error?: string | null
   allowed_paths: string[]
   effective_allowed_paths: string[]

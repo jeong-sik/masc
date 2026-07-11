@@ -51,6 +51,7 @@ import { KeeperMemoryOsRecallPanel, KeeperTurnInspector } from './keeper-turn-in
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
+import { KeeperSandboxPanel } from './keeper-sandbox-panel'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
 import { KeeperGithubAppConfigPanel } from './keeper-github-app-config'
@@ -197,6 +198,7 @@ export function KeeperDetailBody({
         >
           ${'' /* ── 런타임 model (RFC-0207 persona runtime_id) — read-only card surfaced here one expand away; edits deep-link to the 설정(.kcf) 런타임 tab, the single write path ── */}
           <${KeeperRuntimeModelEditor} keeperName=${keeper.name} onOpenRuntimeConfig=${onOpenRuntimeConfig} />
+          <${KeeperSandboxPanel} keeperName=${keeper.name} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperSecretProjectionPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
           <${KeeperGithubAppConfigPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />

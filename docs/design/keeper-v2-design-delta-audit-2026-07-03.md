@@ -47,7 +47,7 @@ Baseline: `docs/design/keeper-v2-standalone-gap-current.md` (2026-06-21) + vendo
 
 ## 디자인 측 정정 필요 (역피드백)
 
-1. **sandbox_profile 값 drift**: 디자인 `local/container/none` vs 실제 closed variant `local|docker` (keeper_sandbox_config.mli). network_mode도 `off/allow` vs 실제 `none|inherit`.
+1. **sandbox_profile 값 drift**: 디자인 `local/container/none` vs 실제 closed variant `local|docker` (keeper_sandbox_config.mli). network_mode도 `off/allow` vs 실제 `none|host`.
 2. **grounding.md 구버전**: 06-30판 "Settings 16섹션 완전 일치·병합 금지" vs export 13섹션 재편 (mcp/policy/ide/display가 nav에서 빠지고 render 블록 orphan). mcp/display는 dashboard에서 live-backed이므로 삭제 반대.
 3. Gate 섹션 mutation(트리거 정책/채널 토글/base URL)은 전부 게이트웨이 기동 시 1회 설정 — 런타임 setter 없음.
 

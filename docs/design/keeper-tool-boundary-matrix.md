@@ -90,8 +90,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_containment.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_control.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_control.mli` - sandbox-runtime
-- `lib/keeper/keeper_sandbox_control_contract.ml` - sandbox-runtime
-- `lib/keeper/keeper_sandbox_control_contract.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker_container_name.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker_container_name.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_docker_nested_runtime.ml` - sandbox-runtime

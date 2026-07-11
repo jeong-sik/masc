@@ -44,8 +44,6 @@ type docker_preflight = {
   missing_commands : string list;
   next_actions : string list;
 }
-val docker_preflight_min_sec : float
-val docker_preflight_max_sec : float
 val docker_preflight_timeout : timeout_sec:float -> float
 val required_commands : string list
 type cleanup_result = { scanned : int; removed : int; errors : string list; }

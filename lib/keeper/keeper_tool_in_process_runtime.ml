@@ -441,11 +441,6 @@ let handle_masc_misc ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~a
   Tool_misc.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-let handle_masc_control ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
-  let ctx : Tool_control.context = { config; agent_name = meta.name } in
-  Tool_control.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
-;;
-
 let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent_timeline.context = { config; agent_name = meta.name } in
   Tool_agent_timeline.dispatch

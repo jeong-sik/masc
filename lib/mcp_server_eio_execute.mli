@@ -41,6 +41,22 @@ val resolve_bind_state :
 (** {1 Test hooks} *)
 
 module For_testing : sig
+  type dispatch_failure =
+    | Missing_tag
+    | No_handler
+
+  val resolve_tag_dispatch :
+    lookup_tag:(string -> Tool_dispatch.module_tag option) ->
+    dispatch_tag:(Tool_dispatch.module_tag -> Tool_result.result option) ->
+    name:string ->
+    (Tool_result.result, dispatch_failure) result
+  (** Resolves one registered route without collapsing a missing tag and a
+      registered route that returns no handler result. *)
+
+  val dispatch_failure_result :
+    tool_name:string -> dispatch_failure -> Tool_result.result
+  (** Lowers a typed dispatch failure to an explicit [Runtime_failure]. *)
+
   val cleanup_internal_keeper_runtime_resource :
     during_exception:bool -> label:string -> (unit -> unit) -> unit
   (** Runs one internal keeper runtime cleanup action.  Non-cancellation

@@ -21,7 +21,7 @@ let names_to_probe =
   [ "tool_execute"
   ; "tool_edit_file"
   ; "masc_keeper_msg"
-  ; "masc_keeper_sandbox_start"
+  ; "masc_keeper_sandbox_stop"
   ; "masc_status"
   ; "masc_add_task"
   ; "mcp__masc__tool_execute"

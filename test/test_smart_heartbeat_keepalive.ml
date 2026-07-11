@@ -162,7 +162,7 @@ let make_keepalive_meta ~name ~agent_name =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "test");
         ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
+        ("network_mode", `String "host");
         ("tool_access", `List []);
       ]
   in
@@ -388,7 +388,7 @@ let make_board_resume_meta ?(paused = false) ?auto_resume_after_sec name =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "test");
         ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
+        ("network_mode", `String "host");
         ("tool_access", `List []);
       ]
   in

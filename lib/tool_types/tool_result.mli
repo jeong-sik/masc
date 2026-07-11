@@ -18,8 +18,9 @@
 type tool_failure_class =
   | Transient_error (** Network/timeout/rate-limit — retryable *)
   | Policy_rejection (** Auth/permission/boundary — permanent *)
-  | Runtime_failure (** Internal error/bug — non-retryable *)
-  | Workflow_rejection (** Business rule violation — non-retryable *)
+  | Runtime_failure (** Execution/infrastructure error — non-retryable *)
+  | Workflow_rejection
+      (** Input/schema contract or business-rule violation — non-retryable *)
 
 val tool_failure_class_to_yojson : tool_failure_class -> Yojson.Safe.t
 val tool_failure_class_of_yojson :

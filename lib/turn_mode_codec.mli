@@ -5,7 +5,7 @@
     [lib/keeper], which created a [Tool_agent_timeline -> Keeper_*] back
     edge through [work_kind_of_json]. That back edge formed a dependency
     cycle when [Keeper_tool_in_process_runtime] (in [lib/keeper]) tried
-    to call [Tool_misc.dispatch] / [Tool_control.dispatch] /
+    to call [Tool_misc.dispatch] /
     [Tool_agent_timeline.dispatch] through descriptor projection.
 
     Moving the pure parsing helpers into [lib] (above [lib/keeper] in

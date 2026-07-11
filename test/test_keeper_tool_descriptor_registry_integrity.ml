@@ -278,8 +278,6 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "masc_library_promote"
     ; "masc_library_read"
     ; "masc_library_search"
-    ; "masc_pause"
-    ; "masc_resume"
     ];
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
@@ -520,17 +518,6 @@ let schema_property_names schema =
       (Yojson.Safe.to_string other)
 ;;
 
-let schema_property_field schema property field =
-  let open Yojson.Safe.Util in
-  schema |> member "properties" |> member property |> member field
-;;
-
-let schema_property_enum_strings schema property =
-  let open Yojson.Safe.Util in
-  schema |> member "properties" |> member property |> member "enum" |> to_list
-  |> List.map to_string
-;;
-
 let schema_forbids_additional_properties schema =
   match schema with
   | `Assoc fields ->
@@ -538,100 +525,6 @@ let schema_forbids_additional_properties schema =
      | Some (`Bool false) -> true
      | _ -> false)
   | other -> Alcotest.failf "input_schema is not an object: %s" (Yojson.Safe.to_string other)
-;;
-
-let required_keeper_schema name =
-  match
-    List.find_opt
-      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
-      Masc.Keeper_schema.schemas
-  with
-  | Some schema -> schema
-  | None -> Alcotest.failf "missing keeper schema: %s" name
-;;
-
-let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
-  let check_json label expected actual =
-    Alcotest.(check bool) label true (Yojson.Safe.equal expected actual)
-  in
-  let check_descriptor name expected_properties expected_required =
-    let descriptor = required_internal_descriptor name in
-    let canonical = required_keeper_schema name in
-    Alcotest.(check bool)
-      (name ^ " uses the canonical registry")
-      true
-      (descriptor.input_schema_source = Descriptor.Canonical_registry);
-    check_json
-      (name ^ " descriptor preserves the owning schema")
-      canonical.input_schema
-      descriptor.input_schema;
-    Alcotest.(check (list string))
-      (name ^ " exposes exactly the handler arguments")
-      (List.sort String.compare expected_properties)
-      (List.sort String.compare (schema_property_names descriptor.input_schema));
-    Alcotest.(check (list string))
-      (name ^ " required arguments match the handler")
-      expected_required
-      (schema_required_fields descriptor.input_schema);
-    Alcotest.(check bool)
-      (name ^ " rejects unknown arguments")
-      true
-      (schema_forbids_additional_properties descriptor.input_schema);
-    descriptor.input_schema
-  in
-  let start_schema =
-    check_descriptor
-      "masc_keeper_sandbox_start"
-      [ "name"; "network_mode"; "ttl_sec"; "timeout_sec" ]
-      [ "name" ]
-  in
-  Alcotest.(check (list string))
-    "sandbox start network modes match the owning keeper contract"
-    Masc.Keeper_schema.network_mode_enum_strings
-    (schema_property_enum_strings start_schema "network_mode");
-  check_json
-    "sandbox start ttl default"
-    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.default)
-    (schema_property_field start_schema "ttl_sec" "default");
-  check_json
-    "sandbox start ttl minimum"
-    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.minimum)
-    (schema_property_field start_schema "ttl_sec" "minimum");
-  check_json
-    "sandbox start ttl maximum"
-    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.maximum)
-    (schema_property_field start_schema "ttl_sec" "maximum");
-  check_json
-    "sandbox start timeout default"
-    (`Float Masc.Keeper_sandbox_control_contract.operation_timeout_sec.default)
-    (schema_property_field start_schema "timeout_sec" "default");
-  let stop_schema =
-    check_descriptor
-      "masc_keeper_sandbox_stop"
-      [ "container_kind"; "name"; "prune_stale"; "timeout_sec" ]
-      []
-  in
-  let runtime_stop_scopes =
-    Masc.Keeper_sandbox_control_contract.stop_scope_strings
-  in
-  Alcotest.(check (list string))
-    "sandbox stop enum matches the runtime parser"
-    runtime_stop_scopes
-    (schema_property_enum_strings stop_schema "container_kind");
-  check_json
-    "sandbox stop scope default"
-    (`String
-      (Masc.Keeper_sandbox_control_contract.stop_scope_to_string
-         Masc.Keeper_sandbox_control_contract.default_stop_scope))
-    (schema_property_field stop_schema "container_kind" "default");
-  check_json
-    "sandbox stop prune default"
-    (`Bool false)
-    (schema_property_field stop_schema "prune_stale" "default");
-  check_json
-    "sandbox stop timeout default"
-    (`Float Masc.Keeper_sandbox_control_contract.operation_timeout_sec.default)
-    (schema_property_field stop_schema "timeout_sec" "default")
 ;;
 
 let required_board_schema name =
@@ -1347,7 +1240,6 @@ let cluster_projection_table =
   ; "masc_keeper_msg_queue", "tool_masc_keeper_dispatch"
   ; "masc_keeper_compact", "tool_masc_keeper_dispatch"
   ; "masc_keeper_clear", "tool_masc_keeper_dispatch"
-  ; "masc_keeper_sandbox_start", "tool_masc_keeper_dispatch"
   ; "masc_keeper_sandbox_stop", "tool_masc_keeper_dispatch"
   ; "masc_keeper_reset", "tool_masc_keeper_dispatch"
   ; "masc_keeper_persona_audit", "tool_masc_keeper_dispatch"
@@ -1409,7 +1301,11 @@ let test_sandbox_lifecycle_contract_is_canonical_and_privileged () =
       Alcotest.(check (option bool))
         (name ^ " catalog destructive metadata")
         (Some true)
-        (Tool_catalog.metadata name).destructive)
+        (Tool_catalog.metadata name).destructive;
+      Alcotest.(check bool)
+        (name ^ " catalog permission")
+        true
+        (Tool_catalog.required_permission name = Masc_domain.CanAdmin))
     Keeper_schema.all_sandbox_lifecycle_operations
 ;;
 
@@ -1420,11 +1316,11 @@ let test_sandbox_stop_target_is_explicit () =
   (match parse [] with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "empty sandbox stop must not select the fleet");
-  (match parse [ "name", `String "base" ] with
+  (match parse [ "name", `String "base"; "container_kind", `String "oneshot" ] with
    | Ok { target = Keeper_schema.Stop_keeper "base"; _ } -> ()
    | Ok _ -> Alcotest.fail "name target did not parse as one Keeper"
    | Error error -> Alcotest.failf "valid Keeper stop rejected: %s" error);
-  (match parse [ "fleet", `Bool true ] with
+  (match parse [ "fleet", `Bool true; "container_kind", `String "all" ] with
    | Ok { target = Keeper_schema.Stop_fleet; _ } -> ()
    | Ok _ -> Alcotest.fail "fleet=true did not parse as fleet target"
    | Error error -> Alcotest.failf "valid fleet stop rejected: %s" error);
@@ -1433,10 +1329,94 @@ let test_sandbox_stop_target_is_explicit () =
       match parse fields with
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "ambiguous sandbox stop target was accepted")
-    [ [ "fleet", `Bool false ]
-    ; [ "name", `String "base"; "fleet", `Bool true ]
-    ; [ "name", `String "base"; "cleanup_stale_fleet", `Bool true ]
+    [ [ "fleet", `Bool false; "container_kind", `String "all" ]
+    ; [ "name", `String "base"; "fleet", `Bool true; "container_kind", `String "all" ]
+    ; [ "name", `String "base"; "container_kind", `String "all"; "cleanup_stale_fleet", `Bool true ]
+    ; [ "name", `String "victim!"; "container_kind", `String "all" ]
+    ; [ "name", `String "base" ]
     ]
+;;
+
+let test_sandbox_status_request_is_closed_and_caller_owned () =
+  let open Yojson.Safe.Util in
+  let parse fields =
+    Keeper_schema.parse_sandbox_status_request (`Assoc fields)
+  in
+  (match parse [] with
+   | Ok request ->
+     Alcotest.(check (option string)) "fleet is the omitted-name target" None
+       request.keeper_name;
+     Alcotest.(check bool) "preflight defaults on" true request.include_preflight;
+     Alcotest.(check bool) "verbose defaults off" false request.verbose;
+     Alcotest.(check bool) "default timeout is positive" true
+       (Float.is_finite request.timeout_sec && request.timeout_sec > 0.0)
+   | Error error -> Alcotest.failf "empty status request rejected: %s" error);
+  (match
+     parse
+       [ "name", `String "base"
+       ; "verbose", `Bool true
+       ; "include_preflight", `Bool false
+       ; "timeout_sec", `Float 0.25
+       ]
+   with
+   | Ok request ->
+     Alcotest.(check (option string)) "single keeper target" (Some "base")
+       request.keeper_name;
+     Alcotest.(check (float 0.0)) "caller timeout is not clamped" 0.25
+       request.timeout_sec
+   | Error error -> Alcotest.failf "valid status request rejected: %s" error);
+  List.iter
+    (fun fields ->
+      match parse fields with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "invalid sandbox status request was accepted")
+    [ [ "unknown", `Bool true ]
+    ; [ "name", `String "" ]
+    ; [ "verbose", `String "true" ]
+    ; [ "timeout_sec", `Float 0.0 ]
+    ; [ "timeout_sec", `Float Float.nan ]
+    ];
+  let schema =
+    match
+      List.find_opt
+        (fun (schema : Masc_domain.tool_schema) ->
+          String.equal schema.name "masc_keeper_sandbox_status")
+        Keeper_schema.schemas
+    with
+    | Some schema -> schema.input_schema
+    | None -> Alcotest.fail "sandbox status schema is missing"
+  in
+  Alcotest.(check bool) "status schema rejects unknown fields" true
+    (schema |> member "additionalProperties" |> to_bool = false)
+;;
+
+let test_dead_sandbox_start_is_purged_and_stop_schema_is_closed () =
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "dead managed sandbox start descriptor is absent"
+    false
+    (all_descriptors ()
+     |> List.exists (fun descriptor ->
+       String.equal descriptor.internal_name "masc_keeper_sandbox_start"));
+  let stop = required_internal_descriptor "masc_keeper_sandbox_stop" in
+  let properties = stop.input_schema |> member "properties" in
+  Alcotest.(check bool)
+    "legacy cleanup field is absent"
+    true
+    (properties |> member "cleanup_stale_fleet" = `Null);
+  Alcotest.(check bool)
+    "container kind has no implicit default"
+    true
+    (properties |> member "container_kind" |> member "default" = `Null);
+  Alcotest.(check (list string))
+    "container kind is required"
+    [ "container_kind" ]
+    (stop.input_schema |> member "required" |> to_list |> List.map to_string);
+  Alcotest.(check (list string))
+    "stop scope enum projects typed contract"
+    Keeper_types_profile_sandbox.valid_sandbox_stop_scope_strings
+    (properties |> member "container_kind" |> member "enum" |> to_list
+     |> List.map to_string)
 ;;
 
 let test_keeper_message_followups_remain_model_visible () =
@@ -1706,10 +1686,6 @@ let () =
             `Quick
             test_cluster_descriptors_have_no_missing_canonical_schemas
         ; test_case
-            "sandbox control descriptors use exact canonical schemas"
-            `Quick
-            test_sandbox_control_descriptors_use_exact_canonical_schemas
-        ; test_case
             "missing canonical schema is fail-closed"
             `Quick
             test_missing_canonical_schema_is_fail_closed
@@ -1812,6 +1788,14 @@ let () =
             "sandbox stop requires an explicit target"
             `Quick
             test_sandbox_stop_target_is_explicit
+        ; test_case
+            "sandbox status request is closed and caller-owned"
+            `Quick
+            test_sandbox_status_request_is_closed_and_caller_owned
+        ; test_case
+            "dead sandbox start is purged and stop schema is closed"
+            `Quick
+            test_dead_sandbox_start_is_purged_and_stop_schema_is_closed
         ; test_case
             "keeper message follow-ups remain model-visible"
             `Quick

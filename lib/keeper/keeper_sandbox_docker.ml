@@ -10,6 +10,16 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
+let oneshot_container_kind =
+  Keeper_types_profile_sandbox.sandbox_container_kind_to_string
+    Keeper_types_profile_sandbox.Sandbox_oneshot
+;;
+
+let turn_container_kind =
+  Keeper_types_profile_sandbox.sandbox_container_kind_to_string
+    Keeper_types_profile_sandbox.Sandbox_turn
+;;
+
 (* Inlined from keeper_sandbox_docker_semantic (P1: 1 consumer via include). *)
 
 let docker_command_semantic_status ~cmd ~status ~output =
@@ -150,28 +160,10 @@ let docker_result_pair = function
   | Error msg -> Unix.WEXITED 127, msg
 ;;
 
-(* docker run --rm wall-clock covers slot_wait + spawn + container
-   cold start + actual cmd + drain. The floor is hardcoded at 20s because
-   the hang modes (docker daemon stall, container start stall, command
-   stall) are the same domain — the sandbox's own.  Caller does not
-   observe this: tool dispatch path owns its hang protection via
-   git --no-optional-locks / ollama OLLAMA_LOAD_TIMEOUT, not via a
-   caller-side timeout knob. *)
-
 let resolve_sandbox_image (meta : keeper_meta) =
   match meta.sandbox_image with
   | Some img when String.trim img <> "" -> img
   | _ -> Env_config_sandbox.Runtime.docker_image ()
-;;
-
-let docker_run_min_timeout_sec =
-  let floor = 20.0 in
-  let raw =
-    match Sys.getenv_opt "MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC" with
-    | Some s -> (match float_of_string_opt s with Some f -> f | None -> floor)
-    | None -> floor
-  in
-  max floor raw
 ;;
 
 let docker_cleanup_rm_timeout_sec () =
@@ -181,7 +173,7 @@ let docker_cleanup_rm_timeout_sec () =
 ;;
 
 let docker_oneshot_ttl_sec ~timeout_sec =
-  timeout_sec +. docker_cleanup_rm_timeout_sec () +. 10.0
+  timeout_sec +. docker_cleanup_rm_timeout_sec ()
 ;;
 
 let docker_rm_no_such_container text =
@@ -197,7 +189,7 @@ let cleanup_oneshot_container ~container_name =
         ~actor:`System_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper docker oneshot cleanup"
-        ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+        ~env:(Env_keeper_scrub.filter_control_plane_environment (Unix.environment ()))
         ~cwd:(Config_dir_resolver.current_working_dir ())
         ~timeout_sec:(docker_cleanup_rm_timeout_sec ())
         argv)
@@ -295,7 +287,7 @@ let docker_run_argv
   @ Keeper_sandbox_runtime.docker_label_args
       ~base_path:config.base_path
       ~keeper_name:meta.name
-      ~container_kind:"oneshot"
+      ~container_kind:oneshot_container_kind
       ~network_label
       ~ttl_sec
       ()
@@ -427,10 +419,13 @@ let run_docker_shell_command_with_status_internal
       ~(cmd : string)
       ~(network_mode : network_mode)
   =
-  let timeout_sec = max timeout_sec docker_run_min_timeout_sec in
   let image = resolve_sandbox_image meta in
   let sandbox_error = sandbox_error ~config ~meta in
-  if String.trim image = ""
+  if (not (Float.is_finite timeout_sec)) || timeout_sec <= 0.0
+  then
+    sandbox_error
+      "docker_shell_failed: timeout_sec must be finite and positive"
+  else if String.trim image = ""
   then sandbox_error "keeper sandbox docker image is not configured"
   else (
     let cmd = rewrite_docker_command_paths ~config ~meta cmd in
@@ -481,7 +476,7 @@ let run_docker_shell_command_with_status_internal
                     ~config
                     ~meta
                     ~image
-                    ~container_kind:"oneshot"
+                    ~container_kind:oneshot_container_kind
                     ~network_label
                     ~mount_path
                     ~reason
@@ -497,7 +492,7 @@ let run_docker_shell_command_with_status_internal
                      (Keeper_sandbox_runtime.base_path_hash config.base_path)
                      meta.name
                      image
-                     "oneshot"
+                     oneshot_container_kind
                      network_label
                      detail_msg)
               in
@@ -622,7 +617,7 @@ let run_docker_shell_command_with_status_internal
                                           ~config
                                           ~meta
                                           ~image
-                                          ~container_kind:"oneshot"
+                                          ~container_kind:oneshot_container_kind
                                           ~network_label
                                           ~status
                                           ~output
@@ -771,7 +766,7 @@ let run_docker_bash
                 ~config
                 ~meta
                 ~image
-                ~container_kind:"turn"
+                ~container_kind:turn_container_kind
                 ~network_label:(network_mode_to_string network_mode)
                 ~status:st
                 ~output:out

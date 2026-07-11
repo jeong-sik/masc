@@ -1070,6 +1070,44 @@ let test_authorize_tool_v2_unknown_internal_worker_allowed () =
   | Ok () -> ()
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
+let test_authorize_tool_v2_admin_tool_rejects_worker () =
+  let admin_tools =
+    [ "masc_operator_action"
+    ; "masc_operator_confirm"
+    ; "masc_keeper_sandbox_stop"
+    ]
+  in
+  List.iter
+    (fun tool_name ->
+      (match
+         Auth.authorize_tool_for_role
+           ~agent_name:"worker"
+           ~role:Masc_domain.Worker
+           ~tool_name
+       with
+       | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+       | Error error ->
+         fail
+           (Printf.sprintf
+              "%s returned wrong error: %s"
+              tool_name
+              (Masc_domain.masc_error_to_string error))
+       | Ok () -> fail (tool_name ^ " must reject Worker credentials"));
+      match
+        Auth.authorize_tool_for_role
+          ~agent_name:"admin"
+          ~role:Masc_domain.Admin
+          ~tool_name
+      with
+      | Ok () -> ()
+      | Error error ->
+        fail
+          (Printf.sprintf
+             "%s rejected Admin: %s"
+             tool_name
+             (Masc_domain.masc_error_to_string error)))
+    admin_tools
+
 let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   let result =
     Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
@@ -1206,6 +1244,8 @@ let () =
         `Quick test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed;
       test_case "strict v2 unknown internal tool allows worker"
         `Quick test_authorize_tool_v2_unknown_internal_worker_allowed;
+      test_case "strict v2 admin tools reject worker"
+        `Quick test_authorize_tool_v2_admin_tool_rejects_worker;
       test_case "strict v2 fake keeper prefix denied"
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
       test_case "tool auth strict env cannot disable fail-closed"

@@ -8,7 +8,6 @@ describe("CONNECTOR_SETUP_GUIDES", () => {
     expect(Object.keys(CONNECTOR_SETUP_GUIDES).sort()).toEqual([
       "discord",
       "imessage",
-      "sandbox_hardened",
       "slack",
       "telegram",
     ])
@@ -19,7 +18,6 @@ describe("CONNECTOR_SETUP_GUIDES", () => {
     ["imessage", "iMessage 권한 (macOS only)"],
     ["slack", "Slack App + Socket Mode"],
     ["telegram", "Telegram BotFather"],
-    ["sandbox_hardened", "Keeper Docker Sandbox 프리플라이트"],
   ])("%s has a title", (key, expectedTitle) => {
     expect(CONNECTOR_SETUP_GUIDES[key].title).toBe(expectedTitle)
   })

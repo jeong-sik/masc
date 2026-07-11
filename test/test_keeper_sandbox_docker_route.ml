@@ -430,7 +430,7 @@ let test_readonly_ops_route_through_docker () =
   @@ fun ~config ~meta ~playground ->
   assert_docker_route_fires ~config ~meta ~playground
 
-let test_cat_legacy_keeper_skips_docker () =
+let test_cat_local_profile_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
@@ -442,7 +442,7 @@ let test_cat_legacy_keeper_skips_docker () =
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
   in
   Alcotest.(check bool)
-    "legacy keeper does not surface docker image error"
+    "local profile does not surface docker image error"
     false
     (response_mentions raw "error" "docker image")
 
@@ -782,26 +782,6 @@ let test_execute_typed_repeated_executable_arg_is_preserved () =
     true
     (response_mentions raw "output" "echo hello")
 
-let test_execute_typed_pipeline_falls_back_to_local_playground () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
-  setup ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~config ~meta ~playground ->
-  let raw =
-    Keeper_tool_command_runtime.handle_tool_execute
-      ~turn_sandbox_factory:None
-      ~exec_cache:None
-      ~config
-      ~meta
-      ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
-      ()
-  in
-  check_typed_pipeline_response raw;
-  Alcotest.(check (option string)) "requested docker" (Some "docker")
-    (parse_string_field raw "requested_sandbox");
-  Alcotest.(check (option string)) "fallback local playground"
-    (Some "local_playground")
-    (parse_string_field raw "sandbox_fallback")
-
 let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
   setup ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
@@ -840,25 +820,7 @@ let test_execute_typed_pipeline_uses_turn_sandbox_docker_runner () =
     Alcotest.(check (option string)) "no local fallback when docker works" None
       (parse_string_field raw "sandbox_fallback")
 
-let test_execute_routes_through_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~config ~meta ~playground ->
-  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
-  let raw =
-    Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
-      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
-      ()
-  in
-  Alcotest.(check (option bool)) "typed Execute succeeds via local fallback" (Some true)
-    (parse_bool_field raw "ok");
-  Alcotest.(check (option string)) "requested docker" (Some "docker")
-    (parse_string_field raw "requested_sandbox");
-  Alcotest.(check (option string)) "fallback local playground"
-    (Some "local_playground")
-    (parse_string_field raw "sandbox_fallback")
-
-let test_execute_legacy_skips_docker () =
+let test_execute_local_profile_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
@@ -870,7 +832,7 @@ let test_execute_legacy_skips_docker () =
       ()
   in
   Alcotest.(check bool)
-    "legacy Execute does not surface docker image error"
+    "local Execute does not surface docker image error"
     false
     (response_mentions raw "error" "docker image")
 
@@ -1036,6 +998,29 @@ let test_docker_run_does_not_retry_generic_timeout () =
     Alcotest.(check bool) "second run was not replayed" false
       (contains_substring result.output "retry-ok")
 
+let test_docker_run_rejects_invalid_timeout () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let check_invalid_timeout timeout_sec =
+    match
+      Keeper_sandbox_docker.run_docker_shell_command_with_status
+        ~config
+        ~meta
+        ~cwd:playground
+        ~timeout_sec
+        ~cmd:"echo hi"
+        ~network_mode:Keeper_types_profile_sandbox.Network_none
+    with
+    | Ok _ -> Alcotest.fail "expected invalid Docker timeout to fail"
+    | Error msg ->
+      Alcotest.(check bool)
+        "invalid timeout is explicit"
+        true
+        (contains_substring msg "timeout_sec must be finite and positive")
+  in
+  check_invalid_timeout 0.0;
+  check_invalid_timeout Float.nan
+
 let test_docker_run_retries_on_daemon_unavailable () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_daemon_unavailable_then_ok_script @@ fun () ->
@@ -1058,24 +1043,6 @@ let test_docker_run_retries_on_daemon_unavailable () =
        | _ -> -1);
     Alcotest.(check bool) "output from daemon retry" true
       (contains_substring result.output "retry-ok")
-
-let test_execute_git_routes_through_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
-  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
-  let raw =
-    Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
-      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
-      ()
-  in
-  Alcotest.(check (option bool)) "typed git bash uses local fallback" (Some true)
-    (parse_bool_field raw "ok");
-  Alcotest.(check (option string)) "requested docker" (Some "docker")
-    (parse_string_field raw "requested_sandbox");
-  Alcotest.(check (option string)) "fallback local playground"
-    (Some "local_playground")
-    (parse_string_field raw "sandbox_fallback")
 
 let test_execute_git_uses_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -1185,7 +1152,7 @@ let test_execute_missing_playground_blocks_before_docker () =
       ~cwd:playground
       ~timeout_sec:5.0
       ~cmd:"pwd"
-      ~network_mode:Keeper_types_profile_sandbox.Network_inherit
+      ~network_mode:Keeper_types_profile_sandbox.Network_host
     with
     | Ok _ -> Alcotest.fail "expected missing playground to block before docker"
     | Error err -> err
@@ -1416,7 +1383,7 @@ let test_docker_shell_ir_parse_failure_blocks_before_run () =
       false
       (Sys.file_exists log_path)
 
-let test_execute_missing_image_falls_back_to_local_playground () =
+let test_execute_missing_image_fails_closed () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1427,20 +1394,23 @@ let test_execute_missing_image_falls_back_to_local_playground () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute
-      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None
       ~config
       ~meta
       ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
       ()
   in
-  check_typed_pipeline_response raw;
+  Alcotest.(check (option bool)) "missing image is rejected" (Some false)
+    (parse_bool_field raw "ok");
   Alcotest.(check (option string)) "requested docker" (Some "docker")
     (parse_string_field raw "requested_sandbox");
-  Alcotest.(check (option string)) "fallback local playground"
-    (Some "local_playground")
+  Alcotest.(check bool) "explicit image-not-found error" true
+    (response_mentions raw "error" "image_not_found");
+  Alcotest.(check (option string)) "no host fallback field" None
     (parse_string_field raw "sandbox_fallback");
   let log = read_file log_path in
   Alcotest.(check bool) "image inspect attempted" true
@@ -1574,7 +1544,7 @@ let run_docker_shell_command ~config ~(meta : Keeper_meta_contract.keeper_meta) 
     Keeper_sandbox_docker.run_docker_shell_command_with_status
       ~config ~meta ~cwd:playground ~timeout_sec:5.0
       ~cmd:"git status"
-      ~network_mode:Keeper_types_profile_sandbox.Network_inherit
+      ~network_mode:Keeper_types_profile_sandbox.Network_host
   with
   | Error msg ->
       Alcotest.failf "expected fake docker shell run, got %s" msg
@@ -1899,7 +1869,7 @@ let test_docker_shell_skips_missing_ssh_auth_sock () =
   Alcotest.(check bool) "missing ssh-agent env is not forwarded" false
     (contains_substring line "SSH_AUTH_SOCK=")
 
-let test_docker_shell_inherit_network_omits_invalid_network_flag () =
+let test_docker_shell_host_network_uses_canonical_network_flag () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1907,8 +1877,8 @@ let test_docker_shell_inherit_network_omits_invalid_network_flag () =
   let line =
     run_docker_shell_command ~config ~meta ~playground ~log_path
   in
-  Alcotest.(check bool) "network inherit never uses invalid flag value" false
-    (contains_substring line "--network inherit")
+  Alcotest.(check bool) "host network uses canonical Docker flag value" true
+    (contains_substring line "--network host")
 
 let test_docker_shell_mounts_numeric_user_identity () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -2264,7 +2234,9 @@ let test_docker_mount_failure_structured_details () =
       ~keeper_name:"ramarama"
       ~image:"masc-keeper-sandbox:local"
       ~status_label:"exit=125"
-      ~container_kind:"turn"
+      ~container_kind:
+        (Keeper_types_profile_sandbox.sandbox_container_kind_to_string
+           Keeper_types_profile_sandbox.Sandbox_turn)
       ~network_label:"none"
       ~output
       ()
@@ -2326,12 +2298,6 @@ let () =
           Alcotest.test_case
             "docker tool execute ops route through docker"
             `Quick test_readonly_ops_route_through_docker;
-          Alcotest.test_case
-            "docker Execute routes through docker"
-            `Quick test_execute_routes_through_docker;
-          Alcotest.test_case
-            "docker Execute git cmd routes through docker"
-            `Quick test_execute_git_routes_through_docker;
           Alcotest.test_case
             "docker Execute git uses turn runtime"
             `Quick test_execute_git_uses_turn_runtime;
@@ -2395,10 +2361,10 @@ let () =
         ] );
       ( "docker_route_skipped",
         [
-          Alcotest.test_case "legacy keeper skips docker route" `Quick
-            test_cat_legacy_keeper_skips_docker;
-          Alcotest.test_case "legacy Execute skips docker route" `Quick
-            test_execute_legacy_skips_docker;
+          Alcotest.test_case "local profile skips docker route" `Quick
+            test_cat_local_profile_skips_docker;
+          Alcotest.test_case "local Execute skips docker route" `Quick
+            test_execute_local_profile_skips_docker;
         ] );
       ( "docker_route_contract",
         [
@@ -2428,17 +2394,14 @@ let () =
             "tool_execute typed repeated executable arg is preserved"
             `Quick test_execute_typed_repeated_executable_arg_is_preserved;
           Alcotest.test_case
-            "tool_execute typed pipeline falls back to local playground"
-            `Quick test_execute_typed_pipeline_falls_back_to_local_playground;
-          Alcotest.test_case
             "tool_execute typed pipeline uses turn sandbox docker runner"
             `Quick test_execute_typed_pipeline_uses_turn_sandbox_docker_runner;
           Alcotest.test_case
             "docker shell skips missing SSH_AUTH_SOCK"
             `Quick test_docker_shell_skips_missing_ssh_auth_sock;
           Alcotest.test_case
-            "docker shell inherit network omits invalid docker flag"
-            `Quick test_docker_shell_inherit_network_omits_invalid_network_flag;
+            "docker shell host network uses canonical docker flag"
+            `Quick test_docker_shell_host_network_uses_canonical_network_flag;
           Alcotest.test_case
             "docker shell mounts MASC config runtime paths"
             `Quick test_docker_shell_mounts_masc_config_runtime_paths;
@@ -2448,8 +2411,8 @@ let () =
             "docker shell parse failure blocks before run"
             `Quick
             test_docker_shell_ir_parse_failure_blocks_before_run;
-          Alcotest.test_case "tool_execute missing image falls back locally" `Quick
-            test_execute_missing_image_falls_back_to_local_playground;
+          Alcotest.test_case "tool_execute missing image fails closed" `Quick
+            test_execute_missing_image_fails_closed;
           Alcotest.test_case
             "tool_execute outside playground rejects before image preflight"
             `Quick
@@ -2528,6 +2491,10 @@ let () =
             "docker run does not retry generic timeout"
             `Quick
             test_docker_run_does_not_retry_generic_timeout;
+          Alcotest.test_case
+            "docker run rejects invalid caller timeout"
+            `Quick
+            test_docker_run_rejects_invalid_timeout;
           Alcotest.test_case
             "docker run retries once on daemon unavailable"
             `Quick

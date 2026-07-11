@@ -36,6 +36,7 @@ type metadata = {
   idempotent : bool option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
+  required_permission : Masc_domain.permission;
 }
 
 (** {1 Configuration} *)
@@ -73,6 +74,7 @@ val metadata : string -> metadata
 val implementation_status : string -> implementation_status
 val effect_domain : string -> effect_domain option
 val requires_actor_binding : string -> bool
+val required_permission : string -> Masc_domain.permission
 val canonical_tool_name : string -> string
 val is_placeholder : string -> bool
 val is_visible : ?include_hidden:bool -> string -> bool

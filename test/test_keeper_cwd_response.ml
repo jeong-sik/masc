@@ -33,7 +33,7 @@ let mk_local_sandbox () : Keeper_sandbox.t =
   ; sandbox_id = "keeper:test-local"
   ; backend = Local
   ; sandbox_profile = "local"
-  ; network_mode = "inherit"
+  ; network_mode = "host"
   ; host_root_rel = ".masc/playground/test-local/"
   ; host_root_abs = host_root_marker ^ "/.masc/playground/test-local"
   ; container_root = None
@@ -48,7 +48,7 @@ let mk_docker_sandbox () : Keeper_sandbox.t =
   ; sandbox_id = "keeper:test-docker"
   ; backend = Docker
   ; sandbox_profile = "docker"
-  ; network_mode = "inherit"
+  ; network_mode = "host"
   ; host_root_rel = ".masc/playground/docker/test-docker/"
   ; host_root_abs =
       host_root_marker ^ "/.masc/playground/docker/test-docker"

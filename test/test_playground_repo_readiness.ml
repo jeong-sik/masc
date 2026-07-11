@@ -135,7 +135,12 @@ let create_playground_repo_marker ~config ~meta repo_name =
 
 let playground_repo_entry ~config ~meta ~repo_name =
   let repos =
-    Masc.Keeper_sandbox_control.playground_repos_json ~config ~meta
+    Masc.Keeper_sandbox_control.playground_repos_json
+      ~timeout_sec:
+        (Env_config_sandbox.Shell_timeout.timeout_sec
+           ~bucket:Env_config_sandbox.Shell_timeout.Io
+           ())
+      ~config ~meta
     |> Yojson.Safe.Util.to_list
   in
   match

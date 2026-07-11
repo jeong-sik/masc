@@ -26,10 +26,10 @@ module Float = Stdlib.Float
 type tool_failure_class =
   | Transient_error (** Network/timeout/rate-limit — retryable *)
   | Policy_rejection
-      (** Permission, guardrail, validation reject (RFC-0062 §3.2) — permanent.
-          Covers caller-input/argument validation, not only auth/boundary. *)
-  | Runtime_failure (** Internal error/bug — non-retryable *)
-  | Workflow_rejection (** Business rule violation — non-retryable *)
+      (** Permission, guardrail, or visibility boundary — permanent. *)
+  | Runtime_failure (** Execution/infrastructure error — non-retryable *)
+  | Workflow_rejection
+      (** Input/schema contract or business-rule violation — non-retryable *)
 [@@deriving yojson, show]
 
 let tool_failure_class_to_string = function

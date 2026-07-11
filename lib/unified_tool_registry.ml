@@ -87,7 +87,6 @@ let tag_of_name name : TD.module_tag option =
   else if prefix "masc_agent_" then Some Mod_agent
   else if prefix "masc_task_" then Some Mod_task
   else if prefix "masc_workspace_" then Some Mod_state
-  else if prefix "masc_control_" then Some Mod_control
   else if prefix "masc_agent_timeline_" then Some Mod_agent_timeline
   else if prefix "masc_schedule_" then Some Mod_schedule
   else if prefix "masc_misc_" then Some Mod_misc

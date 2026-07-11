@@ -135,11 +135,6 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.50.0" };
 
-  { env_name = "MASC_KEEPER_DOCKER_PLAYGROUND";
-    description = "Route Execute commands through Docker container";
-    default = false; category = "keeper";
-    lifecycle = Active; since = "2.233.0" };
-
   (* ── Dashboard & Governance ───────────────────────────────── *)
   { env_name = "MASC_DISABLE_HITL";
     description = "Disable Human-in-the-loop (HITL) approval gates globally";

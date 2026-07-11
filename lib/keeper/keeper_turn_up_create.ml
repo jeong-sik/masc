@@ -92,7 +92,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   | Some msg -> tool_result_error msg
   | None ->
     match
-      validate_sandbox_settings ~allowed_paths
+      validate_sandbox_settings ~sandbox_profile ~network_mode ~allowed_paths
     with
     | Error err ->
         Otel_metric_store.inc_counter
@@ -105,7 +105,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Ok () ->
         match
           Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-            ~timeout_sec:(Env_config_sandbox.Preflight.max_timeout_sec ())
+            ~timeout_sec:
+              (Env_config_sandbox.Shell_timeout.timeout_sec
+                 ~bucket:Env_config_sandbox.Shell_timeout.Io
+                 ())
             ~sandbox_profile
         with
         | Error err ->

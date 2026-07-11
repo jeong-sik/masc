@@ -52,7 +52,7 @@ let run_docker_argv_with_status ~summary ~timeout_sec argv =
       ~actor:`System_sandbox
       ~raw_source:(String.concat " " argv)
       ~summary
-      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+      ~env:(Env_keeper_scrub.filter_control_plane_environment (Unix.environment ()))
       ~cwd:(docker_command_cwd ())
       ~timeout_sec
       argv)
@@ -152,39 +152,13 @@ type docker_preflight =
   ; next_actions : string list
   }
 
-(* P2c: literals lifted to Env_config_sandbox.Preflight (#10426 P2c).
-   Today the SSOT getters return the same hardcoded values; future env
-   wiring (per Env_config_sandbox.Preflight doc) tunes these without
-   touching this file. *)
-let docker_preflight_min_sec = Env_config_sandbox.Preflight.min_timeout_sec ()
-let docker_preflight_max_sec = Env_config_sandbox.Preflight.max_timeout_sec ()
-
 let docker_preflight_timeout ~timeout_sec =
-  min docker_preflight_max_sec (max docker_preflight_min_sec timeout_sec)
+  if Float.is_finite timeout_sec && timeout_sec > 0.0
+  then timeout_sec
+  else invalid_arg "docker preflight timeout_sec must be finite and positive"
 ;;
 
-let required_commands =
-  [ "sh"
-  ; "bash"
-  ; "cat"
-  ; "find"
-  ; "head"
-  ; "tail"
-  ; "wc"
-  ; "git"
-  ; "gh"
-  ; "rg"
-  ; "tree"
-  ; "jq"
-  ; "python3"
-  ; "node"
-  ; "npm"
-  ; "make"
-  ; "opam"
-  ; "dune"
-  ; "ssh"
-  ]
-;;
+let required_commands = Env_config_sandbox.Preflight.required_commands ()
 
 type cleanup_result =
   { scanned : int
@@ -257,13 +231,13 @@ let docker_label_args
 
 let docker_network_args = function
   | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ], "none"
-  | Keeper_types_profile_sandbox.Network_inherit ->
-    (* Host network — matches the variant name and the docstring on
-         [keeper_types_profile.ml:20-24]. Empty args
-         (docker default) gives bridge mode (NAT, no host egress) which
-         broke `git clone` / `gh push` for keepers running under this
+  | Keeper_types_profile_sandbox.Network_host ->
+    (* Empty args would select Docker's bridge network.  [Network_host]
+         explicitly shares the host network namespace, matching the persisted
+         value and container label. Docker's default bridge mode (NAT) broke
+         `git clone` / `gh push` for keepers running under this
          profile. See #10431. *)
-    [ "--network"; "host" ], "inherit"
+    [ "--network"; "host" ], "host"
 ;;
 
 let docker_nofile_args () =

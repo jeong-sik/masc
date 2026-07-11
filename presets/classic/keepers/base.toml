@@ -20,7 +20,7 @@ autoboot_enabled = false
 # override to sandbox_profile = "docker" per keeper for real Execute isolation,
 # or mount /var/run/docker.sock into the server container and switch back.
 sandbox_profile = "local"
-network_mode = "inherit"
+network_mode = "host"
 
 # persona⊥{model,runtime}: keeper TOML carries no model/runtime selection. The
 # four team keepers inherit [runtime].default from runtime.toml, which ships as

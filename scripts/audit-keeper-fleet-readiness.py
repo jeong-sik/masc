@@ -114,6 +114,7 @@ class PrCreationEvidence:
     def created(self) -> bool:
         return bool(self.refs)
 
+
 @dataclass
 class PersistentWorkEvidence:
     latest_ts: float | None
@@ -1074,7 +1075,7 @@ def audit_keeper(
 
     if sandbox_profile != "docker":
         failures.append("sandbox_not_docker")
-    if network_mode != "inherit":
+    if network_mode != "host":
         failures.append("network_not_inherit")
     failures.extend(config_tool_access_failures)
     failures.extend(runtime_tool_access_failures)

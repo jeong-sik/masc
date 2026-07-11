@@ -463,7 +463,11 @@ let test_validate_args_uses_explicit_schema_without_registry () =
     Alcotest.(check bool) "mentions missing path" true
       (string_contains msg "path");
     Alcotest.(check bool) "marks oas validation" true
-      (string_contains msg "oas_tool_middleware")
+      (string_contains msg "oas_tool_middleware");
+    Alcotest.(check bool)
+      "missing required field is workflow rejection"
+      true
+      (Tool_result.failure_class result = Some Tool_result.Workflow_rejection)
   | Ok _ -> Alcotest.fail "Expected Error for missing required field"
 
 let find_schema_exn name schemas =
@@ -507,7 +511,7 @@ let assoc_string key json =
   | `String value -> value
   | _ -> failwith ("expected string field: " ^ key)
 
-let assert_policy_validation_payload ~label result =
+let assert_workflow_validation_payload ~label result =
   let data = Tool_result.data result in
   Alcotest.(check string)
     (label ^ " reason")
@@ -515,12 +519,12 @@ let assert_policy_validation_payload ~label result =
     (assoc_string "reason" data);
   Alcotest.(check string)
     (label ^ " failure_class payload")
-    "policy_rejection"
+    "workflow_rejection"
     (assoc_string "failure_class" data);
   Alcotest.(check bool)
     (label ^ " typed failure_class")
     true
-    (Tool_result.failure_class result = Some Tool_result.Policy_rejection)
+    (Tool_result.failure_class result = Some Tool_result.Workflow_rejection)
 
 let test_registered_hook_tool_edit_file_patch_args () =
   let args =
@@ -706,7 +710,7 @@ let test_tool_execute_schema_exposes_typed_boundary () =
         (Option.is_none (param_by_name field params)))
     execute_async_lifecycle_field_names
 
-let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
+let test_validate_args_tool_execute_rejects_empty_object_with_workflow_class () =
   let args = `Assoc [] in
   match
     Tool_input_validation.validate_args
@@ -721,7 +725,7 @@ let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
       "empty Execute mentions exact-one-of"
       true
       (string_contains msg "exactly one of");
-    assert_policy_validation_payload ~label:"empty Execute" result
+    assert_workflow_validation_payload ~label:"empty Execute" result
   | Ok forwarded ->
     Alcotest.failf
       "expected empty tool_execute args to fail, got %s"
@@ -743,7 +747,7 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
       "validation error returned"
       true
       (String.length msg > 0);
-    assert_policy_validation_payload ~label:"cmd string" result;
+    assert_workflow_validation_payload ~label:"cmd string" result;
     Alcotest.(check bool)
       "validation error points to typed argv"
       true
@@ -2254,7 +2258,7 @@ let () =
       Alcotest.test_case "tool_execute exposes typed boundary" `Quick
         test_tool_execute_schema_exposes_typed_boundary;
       Alcotest.test_case "tool_execute rejects empty args with class" `Quick
-        test_validate_args_tool_execute_rejects_empty_object_with_policy_class;
+        test_validate_args_tool_execute_rejects_empty_object_with_workflow_class;
       Alcotest.test_case "tool_execute rejects cmd string" `Quick
         test_validate_args_tool_execute_rejects_cmd_string;
       Alcotest.test_case "tool_execute rejects command string" `Quick

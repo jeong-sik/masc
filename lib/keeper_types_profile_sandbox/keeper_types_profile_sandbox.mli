@@ -1,4 +1,4 @@
-type sandbox_profile =
+type sandbox_profile = Keeper_sandbox_config.sandbox_profile =
   | Local
   | Docker
 
@@ -11,7 +11,7 @@ end
 
 type network_mode =
   | Network_none [@tla.symbol "Network_none"]
-  | Network_inherit [@tla.symbol "Network_inherit"]
+  | Network_host [@tla.symbol "Network_host"]
 [@@deriving tla]
 
 val sandbox_profile_to_string : sandbox_profile -> string
@@ -24,20 +24,34 @@ val all_network_modes : network_mode list
 val valid_network_mode_strings : string list
 val default_sandbox_profile : sandbox_profile
 val default_network_mode_for_profile : sandbox_profile -> network_mode
+val validate_network_mode_for_profile :
+  sandbox_profile:sandbox_profile ->
+  network_mode:network_mode ->
+  (unit, string) result
+(** Rejects profile/network pairs whose persisted label cannot be enforced.
+    Local execution necessarily uses the host network; Docker supports either
+    explicit [none] or explicit [host]. *)
 
-(** Typed scope for explicit sandbox stop operations.  This lower-level
-    contract is shared by the schema and Docker-control layers so the accepted
-    wire values cannot drift into separately maintained string lists. *)
+(** Typed kinds created by the real on-demand Docker execution paths. *)
+type sandbox_container_kind =
+  | Sandbox_oneshot
+  | Sandbox_turn
+
+val sandbox_container_kind_to_string : sandbox_container_kind -> string
+val sandbox_container_kind_of_string : string -> sandbox_container_kind option
+val all_sandbox_container_kinds : sandbox_container_kind list
+val valid_sandbox_container_kind_strings : string list
+
+(** Typed scope for explicit sandbox stop operations. This lower-level
+    contract is shared by schema, producers, and Docker control. *)
 type sandbox_stop_scope =
-  | Stop_managed
-  | Stop_turn
+  | Stop_kind of sandbox_container_kind
   | Stop_all
 
 val sandbox_stop_scope_to_string : sandbox_stop_scope -> string
 val sandbox_stop_scope_of_string : string -> sandbox_stop_scope option
 val all_sandbox_stop_scopes : sandbox_stop_scope list
 val valid_sandbox_stop_scope_strings : string list
-val default_sandbox_stop_scope : sandbox_stop_scope
 
 (** RFC vision-delegation §2.4 — persisted image-handling mechanism axis,
     resolved independently of the live runtime assignment. Same layering as

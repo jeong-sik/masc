@@ -10,11 +10,7 @@
    ; Avoid non-deterministic external network calls during unit tests.
    (GRAPHQL_API_KEY "")
    (ZAI_API_KEY "")
-   (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false)
-   ; Standard tests keep the Docker playground disabled. A dedicated
-   ; regression test below pins that sandbox_profile=local still resolves
-   ; to local even when MASC_KEEPER_DOCKER_PLAYGROUND=true.
-   (MASC_KEEPER_DOCKER_PLAYGROUND false))))
+   (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false))))
 
 ; All standard tests share the masc_test_deps wrapper library
 ; (see test/deps/dune for the full dependency list).
@@ -1071,7 +1067,6 @@
   test_personality_field_diff_10269
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
-  test_keeper_tag_dispatch
   test_mcp_server_eio
   test_mcp_auth_gate
   test_mcp_server_eio_call_tool
@@ -1268,7 +1263,6 @@
   test_personality_field_diff_10269
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
-  test_keeper_tag_dispatch
   test_mcp_server_eio
   test_mcp_auth_gate
   test_mcp_server_eio_call_tool
@@ -1640,7 +1634,6 @@
   test_tool_agent_coverage
   test_tool_task_coverage
   test_tool_workspace_coverage
-  test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
   test_tool_library_coverage
@@ -1688,7 +1681,6 @@
   test_tool_agent_coverage
   test_tool_task_coverage
   test_tool_workspace_coverage
-  test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
   test_tool_library_coverage
@@ -2693,17 +2685,9 @@
   (source_tree ../lib)
   (source_tree ../bin)))
 
-; Regression for local-overrotation: Execute / tool_execute must not route
-; sandbox_profile=local through Docker merely because DockerPlayground is on.
-
 (test
- (name test_keeper_local_profile_docker_playground)
- (modules test_keeper_local_profile_docker_playground)
- (action
-  (setenv
-   MASC_KEEPER_DOCKER_PLAYGROUND
-   true
-   (run %{test})))
+ (name test_keeper_sandbox_profile_contract)
+ (modules test_keeper_sandbox_profile_contract)
  (libraries masc_test_deps))
 
 (include stanzas/test_tool_resource_gate.inc)

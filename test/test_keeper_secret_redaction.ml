@@ -59,7 +59,6 @@ let contains label haystack needle =
 let test_snapshot_redacts_env_and_file_values () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let keeper_name = "minjae" in
   let root = secret_root_default ~base ~keeper_name in
   let env_secret = "keeper.secret!" in
@@ -81,7 +80,6 @@ let test_snapshot_redacts_env_and_file_values () =
 let test_short_values_are_not_exact_redacted () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let keeper_name = "shorty" in
   let root = secret_root_default ~base ~keeper_name in
   write_file (Filename.concat (Filename.concat root "env") "PIN") "1234567";
@@ -93,7 +91,6 @@ let test_short_values_are_not_exact_redacted () =
 let test_snapshot_redacts_base_secret_values () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let base_root = base_secret_root_default ~base in
   let base_secret = "base.secret!" in
   write_file (Filename.concat (Filename.concat base_root "env") "GH_TOKEN")
@@ -106,7 +103,6 @@ let test_snapshot_redacts_base_secret_values () =
 let test_json_redaction_preserves_shape () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let keeper_name = "json" in
   let root = secret_root_default ~base ~keeper_name in
   let env_secret = "json.secret!" in
@@ -128,7 +124,6 @@ let test_json_redaction_preserves_shape () =
 let test_execute_output_redaction_uses_keeper_snapshot () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let keeper_name = "execute" in
   let root = secret_root_default ~base ~keeper_name in
   let stdout_secret = "stdout.secret!" in
@@ -154,7 +149,6 @@ let test_execute_output_redaction_uses_keeper_snapshot () =
 let test_stream_redaction_reassembles_split_secret () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let keeper_name = "stream" in
   let root = secret_root_default ~base ~keeper_name in
   let secret = "stream.secret!" in
@@ -175,7 +169,6 @@ let test_stream_redaction_reassembles_split_secret () =
 let test_stream_redaction_finish_redacts_held_tail () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let keeper_name = "stream-tail" in
   let root = secret_root_default ~base ~keeper_name in
   let secret = "tail.secret!" in

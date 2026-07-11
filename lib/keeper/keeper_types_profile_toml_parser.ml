@@ -64,6 +64,20 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let result =
     Result.bind result (fun () ->
+      match
+        Option.bind (str "sandbox_profile") sandbox_profile_of_string,
+        Option.bind (str "network_mode") network_mode_of_string
+      with
+      | Some sandbox_profile, Some network_mode ->
+        validate_network_mode_for_profile ~sandbox_profile ~network_mode
+      | Some sandbox_profile, None ->
+        validate_network_mode_for_profile
+          ~sandbox_profile
+          ~network_mode:(default_network_mode_for_profile sandbox_profile)
+      | None, _ -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
         match str "network_mode" with
         | Some raw -> (
             match network_mode_of_string raw with
@@ -71,8 +85,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | None ->
                 Error
                   (Printf.sprintf
-                     "invalid network_mode '%s' (allowed: none, inherit)"
-                     raw))
+                     "invalid network_mode '%s' (allowed: %s)"
+                     raw
+                     (String.concat ", " valid_network_mode_strings)))
         | None -> Ok ())
   in
   let result =

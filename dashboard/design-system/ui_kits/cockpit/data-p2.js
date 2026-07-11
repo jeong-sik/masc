@@ -193,7 +193,7 @@ window.MASC_P2 = (function () {
       { sev:"low",    keeper:"masc-improver", rule:"plan w/o evidence link",                file:"board_comments.jsonl",           line:14 },
       { sev:"low",    keeper:"ramarama",      rule:"trace_id reused across turns",          file:"keepers/ramarama.decisions.jsonl",line:88 },
       { sev:"low",    keeper:"nick0cave",     rule:"required_tool_surface unmet",           file:"keepers/nick0cave.json",         line:22 },
-      { sev:"low",    keeper:"ollama-local",  rule:"network_mode inherit (warn)",           file:"keepers/ollama-local.json",      line:19 },
+      { sev:"low",    keeper:"ollama-local",  rule:"network_mode host (explicit)",          file:"keepers/ollama-local.json",      line:19 },
     ],
     history: [82,80,79,77,80,79,76,78,81,79,77,75,78,76,78],  // last 15 runs
   };

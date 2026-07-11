@@ -259,8 +259,8 @@ spawn 시 인자로 직접 설정하는 필드.
 | `auto_handoff` | bool | `true` | context 초과 시 자동 handoff | `masc_keeper_up`의 `auto_handoff` 인자 |
 | `handoff_threshold` | float | `0.85` | handoff 트리거 context_ratio | `masc_keeper_up`의 `handoff_threshold` 인자 |
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
-| `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). hard mode에서는 `docker`만 허용된다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
-| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none`이고 hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
+| `sandbox_profile` | string | `docker` | 실행 샌드박스 프로필 (`local`, `docker`). 누락 시 lower-level bootstrap은 Docker로 fail-safe하지만, 운영 keeper TOML은 값을 명시해야 한다. | keeper TOML |
+| `network_mode` | string | `host` 또는 `none` | 샌드박스 네트워크 정책. `host`는 호스트 네트워크 namespace를 명시적으로 공유한다. `docker`는 기본 `none`이고 hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
 | `active_goal_ids` | string[] | 없음 | 설정 시 `keeper_task_claim`이 goal-linked task만 claim. scoped pool에 현재 capability로 claim 가능한 task가 없으면 claim을 멈춘다. 전체 claimable task fallback은 없다. TOML 선언은 bootstrap 시 live meta에 overlay되며 runtime JSON으로 복제되지 않는다. | `keeper.toml` 선언 |
 
 ### 3.1.1 Sandbox Core V1 사용법
@@ -282,21 +282,23 @@ spawn 시 인자로 직접 설정하는 필드.
 - keeper shell write는 자기 sandbox 안에서만 허용된다. 현재 local/docker backend의 디스크 구현은 `.masc/playground/<keeper>/`이지만 keeper-facing 경로는 `.` / `mind` / `repos`이다.
 - `sandbox_profile=docker`는 keeper identity 전체에 적용된다. `tool_execute`, `tool_read_file`, `tool_edit_file`, `tool_write_file`, `tool_search_files`의 sandboxed read/write 흐름이 Docker로 라우팅된다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private sandbox mount, network=`none`이다.
 - Docker 내부에서 더 자유로운 부트스트랩/설치가 필요하면 `MASC_KEEPER_SANDBOX_RELAX_FS=true`로 rootfs writable + executable `/tmp` 조합을 켤 수 있다. 이 경우에도 host mount 범위, `cap-drop=ALL`, `no-new-privileges`, pids/memory limit은 유지된다. hard mode에서는 이 완화가 거부된다.
-- Docker profile은 host credential을 암묵적으로 상속하지 않는다. GitHub/Git 명령도 keeper TOML의 별도 identity 필드가 아니라 현재 tool/sandbox policy와 runtime route의 일반 검증을 따른다.
+- Local과 Docker 모두 operator process의 ambient token, Git config, SSH agent를 상속하지 않는다. Local child process는 host env를 default-deny scrub하고 `<base_path>/.masc/keeper-homes/<keeper>`의 mode `0700` managed HOME/XDG/GitHub config를 사용한다. 단, Local은 host process이므로 filesystem namespace 격리는 없다. Docker는 임시 `--env-file`/read-only file mount로, `<base_path>/.masc/secrets/base`의 shared 값 위에 `<base_path>/.masc/secrets/<keeper>` 값을 overlay한다. GitHub App private key는 token minting에만 쓰이며 container에 mount하지 않는다. Dashboard의 Keeper secret API는 `shared | keeper` scope의 env/file 항목을 CRUD하고 응답에는 값이 아닌 projection 상태만 노출한다.
+- Docker profile에서 image/preflight가 실패하면 실행을 거부한다. playground 경로라는 이유로 Local host execution으로 fallback하지 않는다.
 - hard mode: `MASC_KEEPER_SANDBOX_HARD_MODE=true`는 `sandbox_profile=docker`, `network_mode=none`을 강제한다. Docker container는 Git/GitHub 작업 때문에 bridge/host network로 승격되지 않고, ambient operator credential도 비활성화된다.
 - hard mode runtime preflight는 Docker `SecurityOptions`에서 `rootless`와 `userns`를 모두 요구한다. 현재 Docker Desktop/rootful daemon처럼 둘 중 하나라도 없으면 keeper startup/runtime validation에서 fail-closed 된다.
 - 기본 sandbox 이미지는 `masc-keeper-sandbox:local`이다. Docker keeper를 올리기 전에 `scripts/build-keeper-sandbox-image.sh`를 실행해 이미지를 만들고, smoke 검증은 `scripts/keeper-sandbox-smoke.sh`를 사용한다.
 - keeper Docker 컨테이너에는 `masc.mcp.component=keeper-sandbox`와 base path hash 라벨이 붙는다. 새 컨테이너 시작 전 같은 base path 범위의 오래된 MASC keeper 컨테이너만 best-effort로 정리한다. 조정값은 `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED`, `MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC`, `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC`이다.
 
-#### Docker profile vs one-shot/managed 실행
+#### Local/Docker와 on-demand container 실행
 
 Docker 사용 여부와 컨테이너 유지 방식은 서로 다른 결정이다.
 
 - `sandbox_profile`은 keeper config/meta에서 정해지는 boot-time policy다. `sandbox_profile=docker` keeper는 sandboxed tool 실행 시 Docker 경로를 사용한다. 이 값은 keeper LLM turn 자체를 Docker 안에서 돌린다는 뜻은 아니다.
 - 실제 컨테이너 route는 tool call 시점에 정해진다. `tool_execute`, `tool_search_files`, `tool_read_file`, `tool_edit_file`, `tool_write_file`처럼 sandboxed execution 또는 brokered GitHub access가 필요한 tool만 Docker/brokered 실행 경로를 탄다. board/task/goal 같은 control-plane tool은 서버 내부 상태 변경이라 컨테이너를 띄우지 않는다.
-- managed container가 없으면 sandboxed tool call은 one-shot Docker container를 만들고 명령 종료 후 사라진다. 그래서 `docker ps`에 계속 보이는 컨테이너가 없어도 Docker가 사용 중일 수 있다.
-- `masc_keeper_sandbox_start`로 visible managed container를 미리 띄우면 이후 sandboxed tool call은 그 container/runtime에 붙을 수 있다. 디버깅, 연속 shell 작업, container 상태 관찰이 필요할 때 쓰는 운영 모드다.
-- `masc_keeper_sandbox_status`에서 `sandbox_profile=docker`, `effective_mode=oneshot_or_managed_inherit`, `container_count=0`이면 "Docker keeper지만 현재 prewarmed container는 없고, sandboxed tool call 때 one-shot Docker를 쓴다"는 뜻이다.
+- Docker sandboxed tool call은 `oneshot` container를 만들고 명령 종료 후 제거한다. Docker-backed Keeper turn은 turn lifetime에 묶인 `turn` container를 사용한다. 두 종류 모두 base-path hash, keeper, kind, owner/TTL label로 격리된다.
+- 별도의 prewarmed/managed container는 없다. 실제 execution path는 on-demand container만 생성하므로 `docker ps`에 계속 보이는 container가 없어도 정상이다.
+- `masc_keeper_sandbox_status`의 `effective_mode`는 `local | docker_idle | docker_active | docker_listing_failed` 중 하나다. `docker_idle`은 실패나 pause가 아니라 현재 on-demand 실행이 없다는 뜻이다.
+- 운영자가 container를 정리할 때는 Admin 전용 `masc_keeper_sandbox_stop`에 `name` 또는 `fleet=true` 중 하나와 `container_kind=oneshot | turn | all`을 모두 명시한다. 기본 kind나 암묵적 fleet cleanup은 없다.
 
 ### 3.1.2 hard mode 예시
 
@@ -801,7 +803,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
 - **Overlay fields**: `goal`, `tool_access`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용. Runtime/model selection은 keeper TOML overlay가 아니라 `runtime.toml [runtime.assignments]`가 소유한다.
-- **Allowed value sets**: `tool_access`는 candidate profile tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`. 실제 실행 가능 여부는 descriptor/registry availability, `tool_denylist`, per-turn OAS allowlist, eval gate까지 통과해야 한다.
+- **Allowed value sets**: `tool_access`는 candidate profile tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, host}`. 실제 실행 가능 여부는 descriptor/registry availability, `tool_denylist`, per-turn OAS allowlist, eval gate까지 통과해야 한다.
 - **Removed / hard-rejected**: `runtime_id`, `model`, `runtime_ref`, `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 

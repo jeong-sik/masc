@@ -74,13 +74,6 @@ module Cleanup : sig
       Env: [MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC].  Default: 300
       (5m). *)
 
-  val managed_sleep_sec : unit -> int
-  (** Marker sleep duration for the [managed] container init loop
-      (currently [sleep 3600] in {!Keeper_sandbox_control}).
-      Exposed here so a future PR can env-override; today this
-      getter still returns the historical literal 3600 because no
-      caller is wired yet.
-      Env: not yet read.  Default: 3600. *)
 end
 
 (** {1 Runtime — image and execution mode} *)
@@ -88,29 +81,6 @@ module Runtime : sig
   val docker_image : unit -> string
   (** Env: [MASC_KEEPER_SANDBOX_DOCKER_IMAGE].  Default:
       ["masc-keeper-sandbox:local"]. *)
-
-  val git_dispatch : unit -> bool
-  (** When true, Execute commands beginning with ["git "] or
-      ["gh "] run in a dedicated container with network egress and
-      read-only mounts from the selected credential bundle.
-      Env: [MASC_KEEPER_SANDBOX_GIT_DISPATCH].  Default: [true]. *)
-
-  val docker_playground_enabled : unit -> bool
-  (** Route Execute through a Docker container instead of local
-      subprocess.
-      Env: [MASC_KEEPER_DOCKER_PLAYGROUND].  Default: [false]. *)
-
-  val docker_playground_container_name : unit -> string
-  (** Docker container name for keeper playground execution.
-      Env: [MASC_KEEPER_DOCKER_CONTAINER].
-      Default: ["keeper-playground"]. *)
-
-  val docker_playground_container_root : unit -> string
-  (** Container-side root under which keeper playground bundles are
-      mounted.  Host [<base_path>/.masc/playground/<keeper>/…] maps to
-      [<container_playground_root>/<keeper>/…] inside the container.
-      Env: [MASC_KEEPER_DOCKER_PLAYGROUND_ROOT].
-      Default: ["/home/keeper/playground"]. *)
 end
 
 (** {1 Preflight — runtime feasibility check} *)
@@ -118,18 +88,6 @@ module Preflight : sig
   val enabled : unit -> bool
   (** Master switch for keeper_up / diagnostics preflight.
       Env: [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED].  Default: [true]. *)
-
-  val min_timeout_sec : unit -> float
-  (** Lower bound applied via [max] on the caller-supplied timeout
-      when running preflight commands.  Currently hardcoded 5.0 in
-      {!Keeper_sandbox_runtime}; this getter exposes it for future
-      env-override (P2c).
-      Env: not yet read.  Default: 5.0. *)
-
-  val max_timeout_sec : unit -> float
-  (** Upper bound applied via [min] on the caller-supplied timeout.
-      Currently hardcoded 20.0.
-      Env: not yet read.  Default: 20.0. *)
 
   val required_commands : unit -> string list
   (** The 18 CLI tools the keeper image contract guarantees

@@ -192,16 +192,6 @@ let test_risk_medium_stop () =
   Alcotest.(check string) "stop is medium"
     "medium" (Gp.risk_level_to_string risk)
 
-let test_risk_medium_pause () =
-  let risk = Gp.assess_risk ~tool_name:"masc_pause_workspace" ~input:no_args in
-  Alcotest.(check string) "pause is medium"
-    "medium" (Gp.risk_level_to_string risk)
-
-let test_risk_medium_resume () =
-  let risk = Gp.assess_risk ~tool_name:"masc_resume_workspace" ~input:no_args in
-  Alcotest.(check string) "resume is medium"
-    "medium" (Gp.risk_level_to_string risk)
-
 let test_risk_low_status () =
   let risk = Gp.assess_risk ~tool_name:"masc_status" ~input:no_args in
   Alcotest.(check string) "status is low"
@@ -1216,8 +1206,6 @@ let () =
       Alcotest.test_case "medium: leave" `Quick test_risk_medium_leave;
       Alcotest.test_case "medium: start" `Quick test_risk_medium_start;
       Alcotest.test_case "medium: stop" `Quick test_risk_medium_stop;
-      Alcotest.test_case "medium: pause" `Quick test_risk_medium_pause;
-      Alcotest.test_case "medium: resume" `Quick test_risk_medium_resume;
       Alcotest.test_case "medium: transition start" `Quick
         test_risk_medium_transition_start;
       Alcotest.test_case "critical: tool_execute default" `Quick

@@ -4,7 +4,7 @@
    - [Env_git_noninteractive] canonical env pairs (presence + format)
    - [Env_git_noninteractive.inject_into_environment] override semantics
    - [Env_keeper_scrub] scrub list membership and exact-match rule
-   - [Env_keeper_scrub.filter_environment] strips scrubbed keys while
+   - [Env_keeper_scrub.filter_keeper_environment] strips scrubbed keys while
      preserving pass-through entries and entries without ['='] *)
 
 open Masc
@@ -73,34 +73,34 @@ let test_inject_injects_when_missing () =
 
 let test_scrub_membership () =
   assert_true "ANTHROPIC_API_KEY denied"
-    (not (Env_keeper_scrub.is_allowed "ANTHROPIC_API_KEY"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "ANTHROPIC_API_KEY"));
   assert_true "AWS_SECRET_ACCESS_KEY denied"
-    (not (Env_keeper_scrub.is_allowed "AWS_SECRET_ACCESS_KEY"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "AWS_SECRET_ACCESS_KEY"));
   assert_true "ACTIONS_ID_TOKEN_REQUEST_TOKEN denied"
-    (not (Env_keeper_scrub.is_allowed "ACTIONS_ID_TOKEN_REQUEST_TOKEN"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "ACTIONS_ID_TOKEN_REQUEST_TOKEN"));
   assert_true "OTEL_EXPORTER_OTLP_HEADERS denied"
-    (not (Env_keeper_scrub.is_allowed "OTEL_EXPORTER_OTLP_HEADERS"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "OTEL_EXPORTER_OTLP_HEADERS"));
   assert_true "GH_TOKEN denied"
-    (not (Env_keeper_scrub.is_allowed "GH_TOKEN"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "GH_TOKEN"));
   assert_true "GITHUB_TOKEN denied"
-    (not (Env_keeper_scrub.is_allowed "GITHUB_TOKEN"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "GITHUB_TOKEN"));
   assert_true "GH_CONFIG_DIR denied"
-    (not (Env_keeper_scrub.is_allowed "GH_CONFIG_DIR"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "GH_CONFIG_DIR"));
   assert_true "SSH_AUTH_SOCK denied"
-    (not (Env_keeper_scrub.is_allowed "SSH_AUTH_SOCK"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "SSH_AUTH_SOCK"));
   assert_true "GIT_CONFIG_GLOBAL denied"
-    (not (Env_keeper_scrub.is_allowed "GIT_CONFIG_GLOBAL"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "GIT_CONFIG_GLOBAL"));
   assert_true "GIT_CONFIG_COUNT denied"
-    (not (Env_keeper_scrub.is_allowed "GIT_CONFIG_COUNT"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "GIT_CONFIG_COUNT"));
   assert_true "PATH allowed"
-    (Env_keeper_scrub.is_allowed "PATH")
+    (Env_keeper_scrub.is_keeper_process_allowed "PATH")
 
 let test_scrub_exact_match_only () =
   (* Suffix pattern now blocks anything ending in _API_KEY. *)
   assert_true "ANTHROPIC_API_KEY_SUFFIX denied (suffix match)"
-    (not (Env_keeper_scrub.is_allowed "ANTHROPIC_API_KEY_SUFFIX"));
+    (not (Env_keeper_scrub.is_keeper_process_allowed "ANTHROPIC_API_KEY_SUFFIX"));
   assert_true "PREFIX_ANTHROPIC_API_KEY denied (suffix match)"
-    (not (Env_keeper_scrub.is_allowed "PREFIX_ANTHROPIC_API_KEY"))
+    (not (Env_keeper_scrub.is_keeper_process_allowed "PREFIX_ANTHROPIC_API_KEY"))
 
 let test_scrub_and_pass_disjoint () =
   let safe =
@@ -112,7 +112,7 @@ let test_scrub_and_pass_disjoint () =
     (fun p ->
       assert_true
         (Printf.sprintf "safe entry %s must be allowed" p)
-        (Env_keeper_scrub.is_allowed p))
+        (Env_keeper_scrub.is_keeper_process_allowed p))
     safe
 
 let test_filter_environment () =
@@ -129,7 +129,7 @@ let test_filter_environment () =
     "FOO=bar";
     "malformed_entry_no_equals";  (* no '=' — key equals the whole entry *)
   |] in
-  let out = Env_keeper_scrub.filter_environment env in
+  let out = Env_keeper_scrub.filter_keeper_environment env in
   let out_list = Array.to_list out in
   assert_contains ~msg:"PATH preserved" out_list "PATH=/usr/bin";
   assert_false "FOO dropped (not on allowlist)"

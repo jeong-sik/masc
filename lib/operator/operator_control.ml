@@ -77,10 +77,8 @@ let keeper_recovery_outcome after_diagnostic =
 (** {1 Domain-specific action handlers} *)
 
 let workspace_action_result request result =
-  Ok (`Assoc [
-    ("tool_name", `String (delegated_tool_for request.action_type));
-    ("result", result);
-  ])
+  let* delegated_tool = delegated_tool_for request.action_type in
+  Ok (`Assoc [ ("tool_name", `String delegated_tool); ("result", result) ])
 
 let execute_workspace_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
@@ -380,7 +378,7 @@ let action_json ?actor_hint (ctx : _ context) args :
   let* request = action_request_of_args ?actor_hint ctx args in
   let* () = validate_request request in
   let* request = normalize_request_target_type request in
-  let delegated_tool = delegated_tool_for request.action_type in
+  let* delegated_tool = delegated_tool_for request.action_type in
   let trace_id = trace_id "ops" in
   let started_at = Unix.gettimeofday () in
   if confirm_required request.action_type then (

@@ -2096,6 +2096,8 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          sandbox_profile: 'local',
+          network_mode: 'host',
           prompt: {
             goal: 'raw goal only',
           },
@@ -2125,6 +2127,8 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          sandbox_profile: 'local',
+          network_mode: 'host',
           field_presence: {
             schema: 'keeper.config.field_presence.v1',
             producer: 'dashboard_http_keeper_snapshot',
@@ -2157,6 +2161,8 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          sandbox_profile: 'local',
+          network_mode: 'host',
           execution: {
             per_provider_timeout_sec: null,
             per_provider_timeout_mode: 'legacy-value',
@@ -2189,6 +2195,8 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+            sandbox_profile: 'local',
+            network_mode: 'host',
             metrics,
           }),
           {
@@ -2233,6 +2241,8 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+            sandbox_profile: 'local',
+            network_mode: 'host',
             runtime: {
               runtime_blocker_class: blockerClass,
               runtime_blocker_summary: blockerClass,
@@ -2252,6 +2262,25 @@ describe('fetchKeeperConfig', () => {
       expect(keeperRuntimeBlockerLabel(result.runtime.runtime_blocker_class)).toBe(label)
     }
   })
+
+  it('rejects unknown sandbox config values instead of coercing them to local host execution', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'keeper-sangsu',
+          sandbox_profile: 'future-sandbox',
+          network_mode: 'host',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrow(/keeper sandbox schema drift/)
+  })
 })
 
 describe('keeper config mutation API', () => {
@@ -2259,6 +2288,8 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+        sandbox_profile: 'docker',
+        network_mode: 'none',
         execution: {
           selected_runtime_id: 'b.two',
           selected_runtime_canonical: 'b.two',

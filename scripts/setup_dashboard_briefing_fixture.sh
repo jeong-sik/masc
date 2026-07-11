@@ -330,7 +330,7 @@ function seedPendingConfirm() {
       payload: {
         reason: 'Fixture pending confirmation for mission dashboard',
       },
-      delegated_tool: 'masc_pause',
+      delegated_tool: 'masc_operator_action',
       created_at: nowIso(),
       expires_at: null,
     },

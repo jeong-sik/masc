@@ -33,7 +33,8 @@ export function FlowControlPanel() {
   const isPaused = state === 'paused'
   const isRunning = state === 'running'
   const isInitializing = state === 'initializing'
-  const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  const lifecycleAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
+  const maintenanceAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const admission = operatorSnapshot.value?.admission_queue ?? null
   const admissionError = operatorSnapshot.value?.admission_queue_error ?? null
   return html`
@@ -53,15 +54,15 @@ export function FlowControlPanel() {
           Admission observation unavailable: ${admissionError}
         </p>
       ` : null}
-      ${mutationAccess.allowed ? null : html`
+      ${lifecycleAccess.allowed ? null : html`
         <p class="mb-3 text-2xs text-[var(--color-status-warn)]">
-          Control blocked: ${mutationAccess.reason ?? 'worker role is required.'}
+          Control blocked: ${lifecycleAccess.reason ?? 'admin role is required.'}
         </p>
       `}
       <div class="flex flex-wrap gap-2">
-        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing || !mutationAccess.allowed} onClick=${() => void pauseWorkspace()}>
+        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing || !lifecycleAccess.allowed} onClick=${() => void pauseWorkspace()}>
           ${loading && !isPaused ? '...' : 'Pause'}<//>
-        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing || !mutationAccess.allowed} onClick=${() => void resumeWorkspace()}>
+        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing || !lifecycleAccess.allowed} onClick=${() => void resumeWorkspace()}>
           ${loading && isPaused ? '...' : 'Resume'}<//>
       </div>
     <//>
@@ -71,13 +72,13 @@ export function FlowControlPanel() {
       <details>
         <summary class="cursor-pointer text-sm text-[var(--color-fg-secondary)] font-medium select-none py-1">Maintenance</summary>
         <div class="mt-3 flex flex-wrap gap-2">
-          <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value || !mutationAccess.allowed}
+          <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value || !maintenanceAccess.allowed}
             onClick=${async () => {
               const confirmed = await requestConfirm({ title: 'Maintenance', message: 'Run GC?' })
               if (confirmed) void runGarbageCollection()
             }}>
             ${maintenanceLoading.value ? '...' : 'Run GC'}<//>
-          <${ActionButton} variant="danger" size="md" disabled=${maintenanceLoading.value || !mutationAccess.allowed}
+          <${ActionButton} variant="danger" size="md" disabled=${maintenanceLoading.value || !maintenanceAccess.allowed}
             onClick=${async () => {
               const confirmed = await requestConfirm({ title: 'Maintenance', message: 'Clean up zombie agents?', tone: 'danger' })
               if (confirmed) void cleanupZombies()

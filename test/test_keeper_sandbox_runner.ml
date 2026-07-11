@@ -122,14 +122,14 @@ let test_functor_delegates_trusted_tool () =
       match
         Runner.run_trusted_shell_command_with_status ~config ~meta ~cwd:"/work"
           ~timeout_sec:5.0 ~cmd:"gh pr view"
-          ~network_mode:Keeper_types_profile_sandbox.Network_inherit
+          ~network_mode:Keeper_types_profile_sandbox.Network_host
       with
       | Error e -> Alcotest.fail e
       | Ok result ->
         check int "status" 0
           (match result.status with Unix.WEXITED n -> n | _ -> -1);
         check string "output" "trusted:gh pr view" result.output;
-        check string "network label" "inherit" result.network_label;
+        check string "network label" "host" result.network_label;
         check (list string) "calls"
           [ "trusted:gh pr view" ]
           (List.rev !Fake_backend.calls))

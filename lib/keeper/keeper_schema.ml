@@ -2,26 +2,284 @@
 
 open Masc_domain
 
-(** Network mode strings exposed only by explicit sandbox-management tools.
-    Keeper creation/update no longer accepts sandbox posture knobs. *)
-let network_mode_enum_strings =
-  Keeper_types_profile_sandbox.valid_network_mode_strings
+type sandbox_lifecycle_operation =
+  | Sandbox_stop
+
+type sandbox_lifecycle_policy =
+  { required_permission : permission
+  ; destructive : bool
+  }
+
+type sandbox_stop_target =
+  | Stop_keeper of string
+  | Stop_fleet
+
+type sandbox_stop_request =
+  { target : sandbox_stop_target
+  ; scope : Keeper_types_profile_sandbox.sandbox_stop_scope
+  ; timeout_sec : float
+  }
+
+type sandbox_status_request =
+  { keeper_name : string option
+  ; verbose : bool
+  ; include_preflight : bool
+  ; timeout_sec : float
+  }
+
+let all_sandbox_lifecycle_operations = [ Sandbox_stop ]
+
+let sandbox_lifecycle_tool_name = function
+  | Sandbox_stop -> "masc_keeper_sandbox_stop"
 ;;
 
-module Sandbox_contract = Keeper_sandbox_control_contract
+let sandbox_lifecycle_operation_of_tool_name name =
+  List.find_opt
+    (fun operation ->
+      String.equal name (sandbox_lifecycle_tool_name operation))
+    all_sandbox_lifecycle_operations
+;;
 
-let sandbox_stop_scope_enum_strings = Sandbox_contract.stop_scope_strings
+let sandbox_lifecycle_policy = function
+  | Sandbox_stop -> { required_permission = CanAdmin; destructive = true }
+;;
 
-let bounded_number_schema (bounds : Sandbox_contract.bounded_float) description =
+let sandbox_control_default_timeout_sec () =
+  Env_config_sandbox.Shell_timeout.timeout_sec
+    ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+    ()
+
+let sandbox_status_default_timeout_sec () =
+  Env_config_sandbox.Shell_timeout.timeout_sec
+    ~bucket:Env_config_sandbox.Shell_timeout.Read
+    ()
+
+let duplicate_field fields =
+  let rec first_duplicate = function
+    | left :: (right :: _ as rest) ->
+      if String.equal left right then Some left else first_duplicate rest
+    | [] | [ _ ] -> None
+  in
+  fields |> List.map fst |> List.sort String.compare |> first_duplicate
+;;
+
+let sandbox_object_fields ~allowed = function
+  | `Assoc fields ->
+    (match duplicate_field fields with
+     | Some name -> Error (Printf.sprintf "duplicate sandbox argument %S" name)
+     | None ->
+       let unsupported =
+         fields
+         |> List.filter_map (fun (name, _) ->
+           if List.mem name allowed then None else Some name)
+         |> List.sort_uniq String.compare
+       in
+       (match unsupported with
+        | [] -> Ok fields
+        | names ->
+          Error
+            (Printf.sprintf
+               "unsupported sandbox argument(s): %s"
+               (String.concat ", " names))))
+  | _ -> Error "sandbox lifecycle arguments must be a JSON object"
+;;
+
+let optional_nonempty_string fields name =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`String value) ->
+    let value = String.trim value in
+    if String.equal value ""
+    then Error (Printf.sprintf "%s must not be empty" name)
+    else Ok (Some value)
+  | Some _ -> Error (Printf.sprintf "%s must be a string" name)
+;;
+
+let optional_bool fields name =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`Bool value) -> Ok (Some value)
+  | Some _ -> Error (Printf.sprintf "%s must be a boolean" name)
+;;
+
+let positive_number_with_default fields name ~default =
+  let parsed =
+    match List.assoc_opt name fields with
+    | None -> Ok default
+    | Some (`Int value) -> Ok (float_of_int value)
+    | Some (`Intlit value) ->
+      (match float_of_string_opt value with
+       | Some parsed -> Ok parsed
+       | None -> Error (Printf.sprintf "%s must be a number" name))
+    | Some (`Float value) -> Ok value
+    | Some _ -> Error (Printf.sprintf "%s must be a number" name)
+  in
+  match parsed with
+  | Error _ as error -> error
+  | Ok value when not (Float.is_finite value) ->
+    Error (Printf.sprintf "%s must be finite" name)
+  | Ok value when value <= 0.0 ->
+    Error (Printf.sprintf "%s must be greater than zero" name)
+  | Ok value -> Ok value
+;;
+
+let parse_sandbox_stop_request args =
+  match
+    sandbox_object_fields
+      ~allowed:[ "name"; "fleet"; "container_kind"; "timeout_sec" ]
+      args
+  with
+  | Error _ as error -> error
+  | Ok fields ->
+    let scope =
+      match List.assoc_opt "container_kind" fields with
+      | None -> Error "container_kind is required"
+      | Some (`String raw) ->
+        (match Keeper_types_profile_sandbox.sandbox_stop_scope_of_string raw with
+         | Some scope -> Ok scope
+         | None ->
+           Error
+             (Printf.sprintf
+                "container_kind must be one of: %s"
+                (String.concat
+                   ", "
+                   Keeper_types_profile_sandbox.valid_sandbox_stop_scope_strings)))
+      | Some _ -> Error "container_kind must be a string"
+    in
+    (match
+       optional_nonempty_string fields "name",
+       optional_bool fields "fleet",
+       scope,
+       positive_number_with_default
+         fields
+         "timeout_sec"
+         ~default:(sandbox_control_default_timeout_sec ())
+     with
+     | Error error, _, _, _
+     | _, Error error, _, _
+     | _, _, Error error, _
+     | _, _, _, Error error -> Error error
+     | ( Ok keeper_name
+       , Ok fleet
+       , Ok scope
+       , Ok timeout_sec ) ->
+       let target =
+         match keeper_name, fleet with
+         | Some name, None when Safe_identifier.is_portable_name name ->
+           Ok (Stop_keeper name)
+         | Some _, None -> Error (Safe_identifier.portable_name_error ~field:"name")
+         | None, Some true -> Ok Stop_fleet
+         | Some _, Some _ | None, Some false | None, None ->
+           Error "provide exactly one sandbox stop target: name or fleet=true"
+       in
+       (match target with
+        | Error _ as error -> error
+       | Ok target -> Ok { target; scope; timeout_sec }))
+;;
+
+let parse_sandbox_status_request args =
+  match
+    sandbox_object_fields
+      ~allowed:[ "name"; "verbose"; "include_preflight"; "timeout_sec" ]
+      args
+  with
+  | Error _ as error -> error
+  | Ok fields ->
+    (match
+       optional_nonempty_string fields "name",
+       optional_bool fields "verbose",
+       optional_bool fields "include_preflight",
+       positive_number_with_default
+         fields
+         "timeout_sec"
+         ~default:(sandbox_status_default_timeout_sec ())
+     with
+     | Error error, _, _, _
+     | _, Error error, _, _
+     | _, _, Error error, _
+     | _, _, _, Error error -> Error error
+     | ( Ok keeper_name
+       , Ok verbose
+       , Ok include_preflight
+       , Ok timeout_sec ) ->
+       Ok
+         { keeper_name
+         ; verbose = Option.value ~default:false verbose
+         ; include_preflight = Option.value ~default:true include_preflight
+         ; timeout_sec
+         })
+;;
+
+let number_property ~description ~default =
   `Assoc
     [ "type", `String "number"
-    ; "minimum", `Float bounds.minimum
-    ; "maximum", `Float bounds.maximum
-    ; "default", `Float bounds.default
+    ; "exclusiveMinimum", `Float 0.0
+    ; "default", `Float default
     ; "description", `String description
     ]
 ;;
 
+let sandbox_stop_schema =
+  { name = sandbox_lifecycle_tool_name Sandbox_stop
+  ; description =
+      "Stop active turn or one-shot sandbox containers for exactly one keeper or an explicitly selected fleet."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "name"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "minLength", `Int 1
+                    ; ( "description"
+                      , `String
+                          "Keeper handle for a single-keeper stop. Mutually exclusive with fleet=true." )
+                    ] )
+              ; ( "fleet"
+                , `Assoc
+                    [ "type", `String "boolean"
+                    ; "const", `Bool true
+                    ; ( "description"
+                      , `String
+                          "Set true to target all matching keeper containers in this base path. Mutually exclusive with name." )
+                    ] )
+              ; ( "container_kind"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "enum"
+                      , `List
+                          (List.map
+                             (fun value -> `String value)
+                             Keeper_types_profile_sandbox.valid_sandbox_stop_scope_strings) )
+                    ; "description", `String "Required container scope: oneshot, turn, or all."
+                    ] )
+              ; ( "timeout_sec"
+                , number_property
+                    ~description:"Docker stop timeout in seconds."
+                    ~default:(sandbox_control_default_timeout_sec ()) )
+              ] )
+        ; "required", `List [ `String "container_kind" ]
+        ; ( "oneOf"
+          , `List
+              [ `Assoc
+                  [ "required", `List [ `String "name" ]
+                  ; "not", `Assoc [ "required", `List [ `String "fleet" ] ]
+                  ]
+              ; `Assoc
+                  [ "required", `List [ `String "fleet" ]
+                  ; ( "properties"
+                    , `Assoc
+                        [ "fleet", `Assoc [ "const", `Bool true ] ] )
+                  ; "not", `Assoc [ "required", `List [ `String "name" ] ]
+                  ]
+              ] )
+        ; "additionalProperties", `Bool false
+        ]
+  }
+;;
+
+let sandbox_lifecycle_schemas = [ sandbox_stop_schema ]
 (** Issue #8486: hand-mirrored from
     [Keeper_status_detail.valid_tail_order_strings].  Same cycle
     constraint — Keeper_schema is upstream of Keeper_status_detail.
@@ -45,67 +303,45 @@ let tool_access_schema description =
     ("items", `Assoc [ ("type", `String "string") ]);
   ]
 
+let sandbox_status_schema =
+  { name = "masc_keeper_sandbox_status"
+  ; description =
+      "Inspect the effective Keeper sandbox boundary, Docker preflight, active on-demand containers, credential projection, and playground repository policy. Omit name for fleet status."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "name"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "minLength", `Int 1
+                    ; "description", `String "Optional Keeper handle. Omit for fleet status."
+                    ] )
+              ; ( "verbose"
+                , `Assoc
+                    [ "type", `String "boolean"
+                    ; "default", `Bool false
+                    ; "description", `String "Include verbose container diagnostics."
+                    ] )
+              ; ( "include_preflight"
+                , `Assoc
+                    [ "type", `String "boolean"
+                    ; "default", `Bool true
+                    ; "description", `String "Probe Docker readiness for Docker profiles."
+                    ] )
+              ; ( "timeout_sec"
+                , number_property
+                    ~description:"Caller-owned timeout for each sandbox status probe."
+                    ~default:(sandbox_status_default_timeout_sec ()) )
+              ] )
+        ; "additionalProperties", `Bool false
+        ]
+  }
+;;
+
 let keeper_schemas : tool_schema list = [
-  {
-    name = "masc_keeper_sandbox_start";
-    description = "Start the managed sandbox container for a keeper.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle whose managed sandbox should be started.");
-        ]);
-        ("network_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun value -> `String value) network_mode_enum_strings));
-          ("description", `String "Optional sandbox network mode. Defaults to the keeper's configured network mode.");
-        ]);
-        ( "ttl_sec",
-          bounded_number_schema
-            Sandbox_contract.managed_ttl_sec
-            "Managed sandbox lifetime in seconds." );
-        ( "timeout_sec",
-          bounded_number_schema
-            Sandbox_contract.operation_timeout_sec
-            "Sandbox start timeout in seconds." );
-      ]);
-      ("required", `List [`String "name"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
-    name = "masc_keeper_sandbox_stop";
-    description = "Stop the managed sandbox container(s) for a keeper or fleet.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional keeper handle. When omitted, stop matching containers across the active fleet.");
-        ]);
-        ("container_kind", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun value -> `String value) sandbox_stop_scope_enum_strings));
-          ( "default",
-            `String
-              (Sandbox_contract.stop_scope_to_string
-                 Sandbox_contract.default_stop_scope) );
-          ("description", `String "Container scope to stop: managed, turn, or all (default: managed).");
-        ]);
-        ( "timeout_sec",
-          bounded_number_schema
-            Sandbox_contract.operation_timeout_sec
-            "Sandbox stop timeout in seconds." );
-        ("prune_stale", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool false);
-          ("description", `String "Also remove stale managed sandbox containers after the targeted stop.");
-        ]);
-      ]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
+  sandbox_status_schema;
   {
     name = "masc_persona_list";
     description = "List available persona profiles that can be used to create keepers via masc_keeper_create_from_persona.";
@@ -658,7 +894,7 @@ persona does not exist.";
     ];
   };
 
-]
+] @ sandbox_lifecycle_schemas
 
 let schemas : tool_schema list =
   keeper_schemas

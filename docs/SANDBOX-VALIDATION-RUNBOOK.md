@@ -1,49 +1,41 @@
 # Sandbox Validation Runbook
 
-After the sandbox root-fix family lands (#11594 PR-1, #11610 PR-3,
-#11627 PR-2, #11679 PR-3b), the keeper Docker isolation must be
-verified end-to-end — not just at the static config layer.  This
-runbook is the standard procedure.
+Keeper execution boundaries must be verified from the resolved contract and
+the live runtime. A TOML value alone does not prove that a tool ran in the
+declared boundary.
 
 ## Background
 
-The five reports under `~/Downloads/Kimi_Agent_샌드박스 설정 문제/`
-identified three independent defects whose composition produced a
-silent host-fallback bypass:
+`sandbox_profile`, `network_mode`, `sandbox_image`, and `allowed_paths` are
+configuration fields owned by the resolved Keeper TOML. Runtime keeper JSON is
+an execution-state snapshot and deliberately does not persist those fields.
+The runtime never falls back from a Docker profile to a host process.
 
-| ID | Defect | Closed by |
-|----|--------|-----------|
-| A  | Native dispatch route ignored sandbox carrier | #11627 (PR-2) |
-| B  | `keeper_meta.json` parsing fell back to `local` on missing `sandbox_profile` | #11594 (PR-1) |
-| C  | Two profile resolvers (`meta.sandbox_profile` direct vs `effective_sandbox_profile`) disagreed | #11610 (PR-3) |
-| —  | `make_tool_bundle` cold-started a new container per tool call | #11679 (PR-3b) |
+## Resolved and live validation
 
-Static validation (counting `sandbox_profile` fields across
-`<base-path>/.masc/keepers/*.json` and `<repo>/.masc/keepers/*.json`) is
-necessary but not sufficient.  The dynamic check below confirms the
-container actually executes the tool call.
+Call the canonical status tool without `name` to inspect the fleet:
 
-## Static validation
-
-```bash
-for k in /path/to/base/.masc/keepers/*.json /path/to/masc/.masc/keepers/*.json; do
-  name=$(basename "$k" .json)
-  profile=$(jq -r '.sandbox_profile // "<missing>"' "$k" 2>/dev/null)
-  network=$(jq -r '.network_mode // "<missing>"' "$k" 2>/dev/null)
-  printf '%-30s %-8s %s\n' "$name" "$profile" "$network"
-done
+```text
+masc_keeper_sandbox_status {
+  "include_preflight": true,
+  "verbose": true
+}
 ```
 
 Pass criteria:
-- Every keeper JSON declares both `sandbox_profile` and `network_mode`
-  explicitly (no `<missing>`).
-- Profiles are one of `local` or `docker`.
-- `(profile, network)` pairs are consistent: `docker + none` (hard),
-  `docker + inherit` (soft), or `local + inherit`.
+- Every item reports `sandbox_profile`, `configured_network_mode`,
+  `security_boundary`, and an explicit live mode.
+- Valid pairs are `docker + none`, `docker + host`, and `local + host`.
+  `local + none` is rejected during configuration parsing and CRUD writes.
+- Docker items report typed preflight status or a visible preflight error.
+- `security_boundary.execution_boundary` is `docker_container` for Docker and
+  `host_process` for Local.
+- `why_no_container=docker_idle` means there is no active on-demand turn or
+  one-shot container; it is not a fallback or a failed start.
 
-If any keeper reports `<missing>`, run
-`scripts/migrate-keeper-meta-sandbox.sh --apply` and restart that
-keeper before continuing.
+If an item reports `effective_meta_error`, repair the Keeper TOML through the
+current Keeper CRUD surface. There is no legacy metadata migration or inferred
+host execution.
 
 ## Dynamic validation — container hostname proof
 

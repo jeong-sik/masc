@@ -36,15 +36,6 @@ describe('SetupGuideCard', () => {
     expect(container.textContent ?? '').toBe('')
   })
 
-  it('renders the sandbox_hardened guide when requested (non-connector operator guide)', () => {
-    render(html`<${SetupGuideCard} connectorId="sandbox_hardened" />`, container)
-    const toggle = container.querySelector('button[aria-expanded]')
-    expect(toggle).not.toBeNull()
-    expect(toggle?.getAttribute('aria-expanded')).toBe('false')
-    expect(container.textContent).toContain('Docker Sandbox 프리플라이트')
-    expect(container.textContent).toMatch(/\d+ steps/)
-  })
-
   it('renders a collapsed toggle by default for a known connector', () => {
     render(html`<${SetupGuideCard} connectorId="discord" />`, container)
 

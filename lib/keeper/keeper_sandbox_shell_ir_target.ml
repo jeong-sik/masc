@@ -47,13 +47,10 @@ let image_preflight_target_error (failure : Keeper_sandbox_runtime.classified_er
        failure)
 ;;
 
-(* Per PR cleanup spirit (caller does not observe the tool's hang
-   protection): the docker target hardcodes its own internal timeout.
-   The image-presence check, [docker exec] of a single command, and the
-   pipeline dispatch all share the same internal budget because the
-   hang modes (docker daemon stall, container start stall, command
-   stall) are the same domain — the sandbox's own. *)
-let internal_sandbox_timeout_sec = 30.0
+let internal_sandbox_timeout_sec () =
+  Env_config_sandbox.Shell_timeout.timeout_sec
+    ~bucket:Env_config_sandbox.Shell_timeout.Io
+    ()
 
 let docker_target ~turn_sandbox_factory ~meta ~cwd =
   let default_cwd = cwd in
@@ -61,7 +58,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
     | Some stage_cwd -> stage_cwd
     | None -> default_cwd
   in
-  let timeout_sec = internal_sandbox_timeout_sec in
+  let timeout_sec = internal_sandbox_timeout_sec () in
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | No_factory ->
     Error
@@ -129,21 +126,4 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
            | Error err -> Unix.WEXITED 1, "", err
        in
        Ok (Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()))
-;;
-
-let docker_local_fallback_target ~meta =
-  let image = docker_image meta in
-  match
-    Keeper_sandbox_runtime.docker_image_present
-      ~image
-      ~timeout_sec:internal_sandbox_timeout_sec
-  with
-  | Ok () -> None
-  | Error message ->
-    Some
-      ( Masc_exec.Sandbox_target.host ()
-      , [ "requested_sandbox", `String "docker"
-        ; "sandbox_fallback", `String "local_playground"
-        ; "sandbox_fallback_reason", `String (Exec_policy.truncate_for_log message)
-        ] )
 ;;

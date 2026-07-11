@@ -3,4 +3,4 @@ base = "base.toml"
 autoboot_enabled = true
 persona_name = "frontend"
 sandbox_profile = "local"
-network_mode = "inherit"
+network_mode = "host"

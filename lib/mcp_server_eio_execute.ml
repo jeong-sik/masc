@@ -41,9 +41,49 @@ let run_with_cleanup_preserving_primary ~cleanup f =
     Printexc.raise_with_backtrace exn bt
 ;;
 
+type dispatch_failure =
+  | Missing_tag
+  | No_handler
+
+let resolve_tag_dispatch ~lookup_tag ~dispatch_tag ~name =
+  match lookup_tag name with
+  | None -> Error Missing_tag
+  | Some tag ->
+    (match dispatch_tag tag with
+     | Some result -> Ok result
+     | None -> Error No_handler)
+;;
+
+let dispatch_failure_message ~tool_name = function
+  | Missing_tag ->
+    Printf.sprintf
+      "Tool dispatch registry inconsistency: %s minted successfully but tag lookup failed"
+      tool_name
+  | No_handler ->
+    Printf.sprintf
+      "Tool dispatch route failure: registered route returned no handler result for %s"
+      tool_name
+;;
+
+let dispatch_failure_result ~tool_name failure =
+  let message = dispatch_failure_message ~tool_name failure in
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
+    ~start_time:(Time_compat.now ())
+    ~data:(`String message)
+    message
+;;
+
 module For_testing = struct
+  type nonrec dispatch_failure = dispatch_failure =
+    | Missing_tag
+    | No_handler
+
   let cleanup_internal_keeper_runtime_resource = cleanup_internal_keeper_runtime_resource
   let run_with_cleanup_preserving_primary = run_with_cleanup_preserving_primary
+  let resolve_tag_dispatch = resolve_tag_dispatch
+  let dispatch_failure_result = dispatch_failure_result
 end
 
 let execute_tool_eio
@@ -118,10 +158,10 @@ let execute_tool_eio
       |> List.map (fun key -> `String key)
     | _ -> []
   in
-  let runtime_error_result ?(tool_name = name) msg =
+  let error_result ?(tool_name = name) ~class_ msg =
     Tool_result.make_err
       ~tool_name
-      ~class_:Tool_result.Runtime_failure
+      ~class_
       ~start_time:(Time_compat.now ())
       ~data:(`String msg)
       msg
@@ -153,7 +193,10 @@ let execute_tool_eio
     result
   in
   match mode_gate_error with
-  | Some msg -> with_system_internal_audit ~agent_name (runtime_error_result msg)
+  | Some msg ->
+    with_system_internal_audit
+      ~agent_name
+      (error_result ~class_:Tool_result.Policy_rejection msg)
   | None ->
     (* Enforce tool authorization when enabled *)
     let auth_enabled = Auth.is_auth_enabled config.base_path in
@@ -185,7 +228,9 @@ let execute_tool_eio
      | Error err ->
        with_system_internal_audit
          ~agent_name
-         (runtime_error_result (Masc_domain.masc_error_to_string err))
+         (error_result
+            ~class_:Tool_result.Policy_rejection
+            (Masc_domain.masc_error_to_string err))
      | Ok () ->
           let is_read_only =
             Keeper_tool_descriptor_resolution.capability_has
@@ -317,11 +362,6 @@ let execute_tool_eio
                  | Mod_state ->
                    Tool_workspace.dispatch
                      { Tool_workspace.config; agent_name }
-                     ~name
-                     ~args:coerced_args
-                 | Mod_control ->
-                   Tool_control.dispatch
-                     { Tool_control.config; agent_name }
                      ~name
                      ~args:coerced_args
                  | Mod_agent_timeline ->
@@ -570,13 +610,16 @@ let execute_tool_eio
                | Error reason ->
                  with_system_internal_audit
                    ~agent_name
-                   (runtime_error_result
+                   (error_result
                       ~tool_name:name
+                      ~class_:Tool_result.Workflow_rejection
                       (format_unknown_tool_error ~reason))
                | Ok _token ->
-                 (* Token proves the name is registered in at least one registry.
-         lookup_tag None after mint is a registry inconsistency (tool in
-         handler registry but not tag registry), not a user error. *)
+                 (* Token minting and route lookup are distinct critical
+                    sections. Preserve the two typed runtime failures:
+                    [Missing_tag] is a registry invariant violation after a
+                    successful mint; [No_handler] means the registered route
+                    declined the tool. *)
                  (* RFC-0084 §2.2 (PR-8) — wrap the tag-based dispatch with
                     Tool_telemetry.with_span for 4-tuple emission. *)
                  let dispatch_tag_with_telemetry tag =
@@ -595,20 +638,26 @@ let execute_tool_eio
                    in
                    result
                  in
-                 let tag_result =
-                   match Tool_dispatch.lookup_tag name with
-                   | Some tag -> dispatch_tag_with_telemetry tag
-                   | None -> None
-                 in
-                 (match tag_result with
-                  | Some result -> with_system_internal_audit ~agent_name result
-                  | None ->
-                    Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
+                 (match
+                    resolve_tag_dispatch
+                      ~lookup_tag:Tool_dispatch.lookup_tag
+                      ~dispatch_tag:dispatch_tag_with_telemetry
+                      ~name
+                  with
+                  | Ok result -> with_system_internal_audit ~agent_name result
+                  | Error failure ->
+                    (match failure with
+                     | Missing_tag ->
+                       Log.Mcp.warn
+                         "registry inconsistency: %s minted successfully but tag lookup failed"
+                         name
+                     | No_handler ->
+                       Log.Mcp.warn
+                         "dispatch route failure: %s registered but returned no handler result"
+                         name);
                     with_system_internal_audit
                       ~agent_name
-                      (runtime_error_result
-                         ~tool_name:name
-                         (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))
+                      (dispatch_failure_result ~tool_name:name failure))))
 ;;
 
 (* RFC-0182 §3.1 — register Tool_workspace.dispatch with the dependency

@@ -68,7 +68,7 @@ let keeper_meta_fixture keeper_name =
       ; "agent_name", `String keeper_name
       ; "goal", `String "waiting inventory test"
       ; "sandbox_profile", `String "local"
-      ; "network_mode", `String "inherit"
+      ; "network_mode", `String "host"
       ])
 ;;
 

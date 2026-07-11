@@ -438,20 +438,16 @@ let ensure_keeper_meta_with_cause config name =
     let target_active_goal_ids =
       apply_default defaults.active_goal_ids meta.active_goal_ids in
     (* Defense-in-depth (#11080 sibling): keeper sandbox_profile MUST be
-       declared. The previous behaviour silently fell through to
-       [default_sandbox_profile = Local] when TOML omitted the key,
-       which strips docker isolation from any operator who forgets to
-       set it (or copies a stale persona JSON: persona profiles are
-       declared elsewhere as not allowed to own this field). Reject at
-       reconcile time so the keeper visibly fails to boot rather than
-       running un-sandboxed.
+       declared. Missing policy must not be inferred even though lower-level
+       bootstrap readers have a fail-safe Docker default: the durable keeper
+       contract still requires an operator-visible TOML declaration. Reject at
+       reconcile time so the keeper visibly fails to boot instead of silently
+       selecting an execution boundary.
 
        Persona-only keepers cannot satisfy this check today and must
        gain a TOML wrapper that sets [sandbox_profile]. The
-       [Keeper_types_profile.default_sandbox_profile] constant is left
-       in place because other read paths (JSON parser, env override,
-       turn_up_args) still need a value when reading already-persisted
-       meta. *)
+       [Keeper_types_profile.default_sandbox_profile] constant remains only for
+       lower-level bootstrap parsing and resolves to Docker. *)
     let target_sandbox_profile_result =
       match defaults.sandbox_profile with
       | Some sp -> Ok sp

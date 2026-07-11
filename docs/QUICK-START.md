@@ -224,7 +224,7 @@ retired orchestration surfaces are historical only. 새 사용자는 repo worksp
 
 ```bash
 # Add specific tools to the public surface
-MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause
+MASC_PUBLIC_TOOLS_EXTRA=masc_board_search
 
 # Restore the full inventory (debugging)
 MASC_FULL_SURFACE=1

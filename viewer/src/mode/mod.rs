@@ -27,9 +27,6 @@ use crate::dom::escape::html_escape;
 use crate::game::lifecycle::TrpgLifecycleState;
 use crate::game::state::ConnectionStatus;
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::JsFuture;
-
-#[cfg(target_arch = "wasm32")]
 const VIEWER_LAST_MODE_STORAGE_KEY: &str = "masc.viewer.last_mode";
 #[cfg(target_arch = "wasm32")]
 const VIEWER_LAYOUT_PREFS_STORAGE_KEY: &str = "masc.viewer.layout.v2";
@@ -622,109 +619,56 @@ fn set_session_control_busy(doc: &web_sys::Document, busy: bool) {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn post_tool_action(tool_name: &str, args: Value) -> Result<String, String> {
-    let url = crate::config::build_masc_url("mcp");
-    let body = json!({
-        "jsonrpc": "2.0",
-        "id": (js_sys::Date::now() as i64),
-        "method": "tools/call",
-        "params": {
-            "name": tool_name,
-            "arguments": args,
-        }
-    })
-    .to_string();
-
-    let opts = web_sys::RequestInit::new();
-    opts.set_method("POST");
-    opts.set_mode(web_sys::RequestMode::Cors);
-    opts.set_body(&JsValue::from_str(&body));
-
-    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
-        .map_err(|e| format!("request 생성 실패: {:?}", e))?;
-    request
-        .headers()
-        .set("Content-Type", "application/json")
-        .map_err(|e| format!("헤더 설정 실패: {:?}", e))?;
-    request
-        .headers()
-        .set("Accept", "application/json, text/event-stream")
-        .map_err(|e| format!("헤더 설정 실패: {:?}", e))?;
-
-    let window = web_sys::window().ok_or_else(|| "window unavailable".to_string())?;
-    let resp_value = JsFuture::from(window.fetch_with_request(&request))
-        .await
-        .map_err(|e| format!("fetch 실패: {:?}", e))?;
-    let resp: web_sys::Response = resp_value
-        .dyn_into()
-        .map_err(|_| "response 변환 실패".to_string())?;
-
-    let body_js = JsFuture::from(
-        resp.text()
-            .map_err(|e| format!("response.text() 실패: {:?}", e))?,
+async fn execute_workspace_operator_action(
+    action_type: &str,
+    payload: Value,
+) -> Result<Option<Value>, String> {
+    let action = mcp_tool_call(
+        "masc_operator_action",
+        json!({
+            "action_type": action_type,
+            "target_type": "workspace",
+            "payload": payload,
+        }),
     )
-    .await
-    .map_err(|e| format!("본문 읽기 실패: {:?}", e))?;
-    let text = body_js.as_string().unwrap_or_default();
-
-    if !resp.ok() {
-        if text.trim().is_empty() {
-            return Err(format!("HTTP {}", resp.status()));
-        }
-        return Err(format!("HTTP {}: {}", resp.status(), text.trim()));
-    }
-
-    let parsed = parse_embedded_tool_payload(&text)
-        .or_else(|_| serde_json::from_str::<Value>(text.trim()).map_err(|e| e.to_string()))
-        .map_err(|e| format!("{} 응답 파싱 실패: {}", tool_name, e))?;
-
-    if let Some(err_msg) = parsed
-        .get("error")
-        .and_then(|err| err.get("message"))
-        .and_then(Value::as_str)
-    {
-        return Err(err_msg.to_string());
-    }
-
-    let result = parsed.get("result").cloned().unwrap_or_else(|| json!({}));
-    if result
-        .get("isError")
+    .await?;
+    if !action
+        .get("confirm_required")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        let err_text = result
-            .get("content")
-            .and_then(Value::as_array)
-            .and_then(|rows| {
-                rows.iter().find_map(|row| {
-                    if row.get("type").and_then(Value::as_str) == Some("text") {
-                        row.get("text").and_then(Value::as_str)
-                    } else {
-                        None
-                    }
-                })
-            })
-            .unwrap_or("tool call failed");
-        return Err(err_text.to_string());
+        return Ok(Some(action));
     }
 
-    if let Some(ok_text) = result
-        .get("content")
-        .and_then(Value::as_array)
-        .and_then(|rows| {
-            rows.iter().find_map(|row| {
-                if row.get("type").and_then(Value::as_str) == Some("text") {
-                    row.get("text").and_then(Value::as_str)
-                } else {
-                    None
-                }
-            })
-        })
-    {
-        return Ok(ok_text.trim().to_string());
+    let confirm_token = action
+        .get("confirm_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| {
+            "operator action requires confirmation but returned no confirm token".to_string()
+        })?;
+    let preview = action
+        .get("preview")
+        .map(Value::to_string)
+        .unwrap_or_else(|| "Pause namespace automation?".to_string());
+    let window = web_sys::window().ok_or_else(|| "window unavailable".to_string())?;
+    let approved = window
+        .confirm_with_message(&preview)
+        .map_err(|e| format!("확인 다이얼로그 실패: {:?}", e))?;
+    let confirmation = mcp_tool_call(
+        "masc_operator_confirm",
+        json!({
+            "confirm_token": confirm_token,
+            "decision": if approved { "confirm" } else { "deny" },
+        }),
+    )
+    .await?;
+    if approved {
+        Ok(Some(confirmation))
+    } else {
+        Ok(None)
     }
-
-    Ok(String::new())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -741,23 +685,19 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
 
                 let doc_async = doc_for_pause.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    let workspace_id = crate::config::current_workspace_id();
-                    match post_tool_action(
-                        "masc_pause",
-                        json!({
-                            "workspace_id": workspace_id,
-                            "reason": "viewer trpg manual pause"
-                        }),
+                    match execute_workspace_operator_action(
+                        "namespace_pause",
+                        json!({ "reason": "viewer trpg manual pause" }),
                     )
                     .await
                     {
-                        Ok(raw) => {
+                        Ok(Some(raw)) => {
                             if let Some(dashboard) = doc_async.get_element_by_id("dashboard") {
                                 let _ = dashboard.set_attribute("data-auto-round", "0");
                             }
                             render_auto_round_toggle(&doc_async);
                             crate::game::round_runner::set_auto_round_running(false);
-                            let detail = summarize_session_control_payload(&raw);
+                            let detail = summarize_session_control_payload(&raw.to_string());
                             let status = if detail.is_empty() {
                                 "세션 멈춤 완료".to_string()
                             } else {
@@ -768,6 +708,13 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
                             wasm_bindgen_futures::spawn_local(async move {
                                 let _ = refresh_workspaces_from_server(&doc_for_refresh).await;
                             });
+                        }
+                        Ok(None) => {
+                            set_session_control_status(
+                                &doc_async,
+                                "세션 멈춤 요청을 거부했습니다",
+                                "status-info",
+                            );
                         }
                         Err(err) => {
                             set_session_control_status(
@@ -797,12 +744,9 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
 
                 let doc_async = doc_for_resume.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    let workspace_id = crate::config::current_workspace_id();
-                    match post_tool_action("masc_resume", json!({ "workspace_id": workspace_id }))
-                        .await
-                    {
-                        Ok(raw) => {
-                            let detail = summarize_session_control_payload(&raw);
+                    match execute_workspace_operator_action("namespace_resume", json!({})).await {
+                        Ok(Some(raw)) => {
+                            let detail = summarize_session_control_payload(&raw.to_string());
                             let status = if detail.is_empty() {
                                 "세션 재개 완료".to_string()
                             } else {
@@ -813,6 +757,13 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
                             wasm_bindgen_futures::spawn_local(async move {
                                 let _ = refresh_workspaces_from_server(&doc_for_refresh).await;
                             });
+                        }
+                        Ok(None) => {
+                            set_session_control_status(
+                                &doc_async,
+                                "세션 재개 요청을 거부했습니다",
+                                "status-info",
+                            );
                         }
                         Err(err) => {
                             set_session_control_status(
@@ -1749,7 +1700,7 @@ mod transport_classify;
 #[cfg(target_arch = "wasm32")]
 mod mcp_rpc;
 #[cfg(target_arch = "wasm32")]
-use mcp_rpc::{mcp_tool_call, parse_embedded_tool_payload};
+use mcp_rpc::mcp_tool_call;
 
 #[cfg(target_arch = "wasm32")]
 mod workspace_hub;

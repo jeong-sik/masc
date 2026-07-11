@@ -536,7 +536,7 @@ let reject_validation ~name ~reason ~message =
   Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
   Tool_dispatch.Reject
     (Error
-       { Tool_result.class_ = Tool_result.Policy_rejection
+       { Tool_result.class_ = Tool_result.Workflow_rejection
        ; message
        ; data =
            `Assoc
@@ -546,7 +546,7 @@ let reject_validation ~name ~reason ~message =
              ; ( "failure_class"
                , `String
                    (Tool_result.tool_failure_class_to_string
-                      Tool_result.Policy_rejection) )
+                      Tool_result.Workflow_rejection) )
              ]
        ; tool_name = name
        ; duration_ms = 0.0
@@ -667,12 +667,12 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
     | Agent_sdk.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
       Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
-      (* Input-schema / policy rejection — classify so the
+      (* Input-schema contract rejection — classify so the
          dispatch-level metric label (failure_class) reflects the
          actual category instead of bucketing as "unclassified". *)
       Tool_dispatch.Reject
         (Error
-           { Tool_result.class_ = Tool_result.Policy_rejection
+           { Tool_result.class_ = Tool_result.Workflow_rejection
            ; message
            ; data =
                `Assoc
@@ -682,7 +682,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
                  ; ( "failure_class"
                    , `String
                        (Tool_result.tool_failure_class_to_string
-                          Tool_result.Policy_rejection) )
+                          Tool_result.Workflow_rejection) )
                  ]
            ; tool_name = name
            ; duration_ms = 0.0

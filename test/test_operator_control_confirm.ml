@@ -32,7 +32,7 @@ let test_confirm_rejects_expired_token () =
                        , `String Operator_action_constants.workspace_target_type );
                        ("target_id", `Null);
                        ("payload", `Assoc []);
-                       ("delegated_tool", `String "masc_pause");
+                       ("delegated_tool", `String "masc_operator_action");
                        ("created_at", `String "2026-03-06T00:00:00Z");
                        ("expires_at", `String "2026-03-06T00:00:01Z");
                      ];

@@ -42,8 +42,6 @@ let sandbox_env_names =
   ; "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"
   ; "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
   ; "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
-  ; "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
-  ; "MASC_KEEPER_DOCKER_PLAYGROUND"
   ; "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
   ; "MASC_KEEPER_SHELL_TIMEOUT_IO_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_READ_SEC"
@@ -117,8 +115,6 @@ let test_defaults_pinned () =
     (S.Cleanup.stale_after_sec ());
   check approx "Cleanup.interval_sec default" 300.0
     (S.Cleanup.interval_sec ());
-  check int "Cleanup.managed_sleep_sec default" 3600
-    (S.Cleanup.managed_sleep_sec ());
   (* Runtime *)
   check string "Runtime.docker_image default" "masc-keeper-sandbox:local"
     (S.Runtime.docker_image ());
@@ -127,10 +123,6 @@ let test_defaults_pinned () =
     (S.Runtime.docker_playground_enabled ());
   (* Preflight *)
   check bool "Preflight.enabled default" true (S.Preflight.enabled ());
-  check approx "Preflight.min_timeout_sec default" 5.0
-    (S.Preflight.min_timeout_sec ());
-  check approx "Preflight.max_timeout_sec default" 20.0
-    (S.Preflight.max_timeout_sec ());
   check int "Preflight.required_commands count" 19
     (List.length (S.Preflight.required_commands ()));
   check (option string) "Preflight.required_commands has 'gh'" (Some "gh")

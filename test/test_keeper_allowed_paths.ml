@@ -12,7 +12,7 @@ let make_meta ?(allowed_paths = []) ~name () =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "test");
         ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
+        ("network_mode", `String "host");
         ("tool_access", `List []);
         ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]

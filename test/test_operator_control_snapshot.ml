@@ -505,7 +505,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 [
                   ("kind", `String "docker");
                   ("sandbox_root", `String base_dir);
-                  ("network_mode", `String "inherit");
+                  ("network_mode", `String "host");
                 ] );
             ( "runtime",
               `Assoc

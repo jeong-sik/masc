@@ -2,7 +2,7 @@
 
     All schemas are now owned by individual modules.
     This file assembles cycle-free schemas; config.ml adds
-    modules that depend on Config (Tool_control, Tool_misc). *)
+    modules that depend on Config (Tool_misc). *)
 
 open Masc_domain
 

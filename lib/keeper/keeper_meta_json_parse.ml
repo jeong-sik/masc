@@ -102,24 +102,39 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
 let parse_sandbox_policy_fields (json : Yojson.Safe.t)
   : (sandbox_profile * string option * network_mode, string) result
   =
-  let sp =
+  let sandbox_profile_result =
     match Safe_ops.json_string_opt "sandbox_profile" json with
-    | None -> default_sandbox_profile
+    | None -> Ok default_sandbox_profile
     | Some sp_raw ->
       (match sandbox_profile_of_string sp_raw with
-       | Some p -> p
-       | None -> default_sandbox_profile)
+       | Some profile -> Ok profile
+       | None ->
+         Error
+           (Printf.sprintf
+              "invalid sandbox_profile: %S (expected: %s)"
+              sp_raw
+              (String.concat " or " valid_sandbox_profile_strings)))
   in
   let si = Safe_ops.json_string_opt "sandbox_image" json in
-  let nm =
-    match Safe_ops.json_string_opt "network_mode" json with
-    | None -> default_network_mode_for_profile sp
-    | Some nm_raw ->
-      (match network_mode_of_string nm_raw with
-       | Some m -> m
-       | None -> default_network_mode_for_profile sp)
-  in
-  Ok (sp, si, nm)
+  match sandbox_profile_result with
+  | Error _ as error -> error
+  | Ok sp ->
+    (let finish network_mode =
+       match validate_network_mode_for_profile ~sandbox_profile:sp ~network_mode with
+       | Ok () -> Ok (sp, si, network_mode)
+       | Error _ as error -> error
+     in
+     match Safe_ops.json_string_opt "network_mode" json with
+     | None -> finish (default_network_mode_for_profile sp)
+     | Some nm_raw ->
+       (match network_mode_of_string nm_raw with
+        | Some network_mode -> finish network_mode
+        | None ->
+          Error
+            (Printf.sprintf
+               "invalid network_mode: %S (expected: %s)"
+               nm_raw
+               (String.concat " or " valid_network_mode_strings))))
 ;;
 
 let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)

@@ -76,7 +76,7 @@ def write_ready_keeper(root: Path, name: str) -> None:
             [
                 "[keeper]",
                 'sandbox_profile = "docker"',
-                'network_mode = "inherit"',
+                'network_mode = "host"',
                 "tool_access = [",
                 '  "tool_execute",',
                 '  "tool_edit_file",',
@@ -92,7 +92,7 @@ def write_ready_keeper(root: Path, name: str) -> None:
         json.dumps(
             {
                 "sandbox_profile": "docker",
-                "network_mode": "inherit",
+                "network_mode": "host",
                 "tool_access": [
                     "tool_execute",
                     "tool_edit_file",
@@ -543,7 +543,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     [
                         "[keeper]",
                         'sandbox_profile = "docker"',
-                        'network_mode = "inherit"',
+                        'network_mode = "host"',
                         "",
                     ]
                 ),

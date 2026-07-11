@@ -283,7 +283,7 @@ type module_tag = Tool_tag_types.module_tag =
   | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_state
-  | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_misc
+  | Mod_agent_timeline | Mod_schedule | Mod_misc
   | Mod_library | Mod_recurring | Mod_external
   | Mod_inline
   | Mod_shard

@@ -14,8 +14,8 @@ describe('KeeperGithubAppConfigPanel', () => {
     effective_roots: [],
     env_count: 0,
     file_count: 0,
-    env_names: [],
-    file_mounts: [],
+    env_entries: [],
+    file_entries: [],
     values_validated: true,
     error: null,
     next_action: 'none',
@@ -29,11 +29,28 @@ describe('KeeperGithubAppConfigPanel', () => {
     effective_roots: [],
     env_count: 2,
     file_count: 1,
-    env_names: ['MASC_GITHUB_APP_ID', 'MASC_GITHUB_APP_INSTALLATION_ID'],
-    file_mounts: [
+    env_entries: [
+      {
+        name: 'MASC_GITHUB_APP_ID',
+        scope: 'keeper',
+        overrides_scope: null,
+        projection_targets: ['local', 'docker'],
+      },
+      {
+        name: 'MASC_GITHUB_APP_INSTALLATION_ID',
+        scope: 'keeper',
+        overrides_scope: null,
+        projection_targets: ['local', 'docker'],
+      },
+    ],
+    file_entries: [
       {
         host_path: '/mock/workspace/.masc/secrets/sangsu/files/github-app/private-key.pem',
         container_path: '/github-app/private-key.pem',
+        scope: 'keeper',
+        overrides_scope: null,
+        projection_policy: 'control_plane_only',
+        projection_targets: [],
       },
     ],
     values_validated: true,
@@ -65,8 +82,8 @@ describe('KeeperGithubAppConfigPanel', () => {
 
     expect(screen.getByText('configured / unvalidated')).toBeInTheDocument()
     expect(screen.queryByText('active')).not.toBeInTheDocument()
-    expect(screen.getAllByText('Configured').length).toBe(2)
-    expect(screen.getByText('Uploaded')).toBeInTheDocument()
+    expect(screen.getAllByText('keeper scope').length).toBe(2)
+    expect(screen.getByText('keeper scope · server-only')).toBeInTheDocument()
   })
 
   it('calls setSecretEnv and setSecretFile when form is submitted', async () => {
@@ -152,7 +169,12 @@ describe('KeeperGithubAppConfigPanel', () => {
     const partialProjection: KeeperSecretProjection = {
       ...mockProjectionEmpty,
       env_count: 1,
-      env_names: ['MASC_GITHUB_APP_ID'],
+      env_entries: [{
+        name: 'MASC_GITHUB_APP_ID',
+        scope: 'keeper',
+        overrides_scope: null,
+        projection_targets: ['local', 'docker'],
+      }],
     }
     const setSecretEnv = vi
       .fn()
@@ -216,7 +238,7 @@ describe('KeeperGithubAppConfigPanel', () => {
       onProjectionChange,
     }))
 
-    const purgeBtn = screen.getByText('Purge Credentials')
+    const purgeBtn = screen.getByText('Purge Keeper Override')
     fireEvent.click(purgeBtn)
 
     await waitFor(() => {
@@ -225,5 +247,28 @@ describe('KeeperGithubAppConfigPanel', () => {
       expect(deleteSecretFile).toHaveBeenCalledTimes(1)
       expect(onProjectionChange).toHaveBeenCalledWith(mockProjectionEmpty)
     })
+  })
+
+  it('shows inherited shared credentials without enabling keeper purge', () => {
+    const sharedProjection: KeeperSecretProjection = {
+      ...mockProjectionConfigured,
+      env_entries: mockProjectionConfigured.env_entries.map(entry => ({
+        ...entry,
+        scope: 'shared',
+      })),
+      file_entries: mockProjectionConfigured.file_entries.map(entry => ({
+        ...entry,
+        scope: 'shared',
+      })),
+    }
+
+    render(h(KeeperGithubAppConfigPanel, {
+      projection: sharedProjection,
+      keeperName: 'sangsu',
+    }))
+
+    expect(screen.getAllByText('shared scope').length).toBe(2)
+    expect(screen.getByText('shared scope · server-only')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Purge Keeper Override' })).toBeDisabled()
   })
 })

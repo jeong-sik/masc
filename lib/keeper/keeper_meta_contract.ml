@@ -695,7 +695,6 @@ let effective_meta_of_profile_defaults
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) : (keeper_meta, string) result =
   let open Keeper_types_profile in
-  let has_profile_source = Option.is_some defaults.manifest_path in
   let target_sandbox_profile =
     match defaults.sandbox_profile, defaults.manifest_path with
     | Some profile, _ -> Ok profile
@@ -704,19 +703,22 @@ let effective_meta_of_profile_defaults
   match target_sandbox_profile with
   | Error _ as err -> err
   | Ok sandbox_profile ->
-      let default_network_mode =
-        if has_profile_source then default_network_mode_for_profile sandbox_profile
-        else meta.network_mode
-      in
       let network_mode =
-        apply_profile_default defaults.network_mode default_network_mode
+        apply_profile_default
+          defaults.network_mode
+          (default_network_mode_for_profile sandbox_profile)
+      in
+      let network_mode_result =
+        validate_network_mode_for_profile ~sandbox_profile ~network_mode
       in
       let tool_access =
         match defaults.tool_access with
         | Some tools -> normalize_tool_names tools
         | None -> meta.tool_access
       in
-      Ok
+      (match network_mode_result with
+       | Error _ as error -> error
+       | Ok () -> Ok
         { meta with
           persona = apply_profile_default_opt defaults.persona_name meta.persona;
           proactive =
@@ -770,7 +772,7 @@ let effective_meta_of_profile_defaults
             (match defaults.oas_env with
              | [] -> meta.oas_env
              | env -> env);
-        }
+        })
 ;;
 
 let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string) result =

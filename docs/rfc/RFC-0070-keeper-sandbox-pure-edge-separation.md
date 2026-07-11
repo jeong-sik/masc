@@ -326,7 +326,7 @@ type t  (** abstract — like Oneshot_plan; accessors below, no exposed record *
      mounts           : t -> mount list                  (* workspace + identity mount ARGS *)
      identity_files   : t -> (string * string) list      (* (path, content) for the edge to write *)
      env_overrides    : t -> (string * string) list      (* 4 hardcoded defaults + ?extra_env *)
-     network_mode     : t -> network                     (* Network_none | Network_inherit | … *)
+     network_mode     : t -> network                     (* Network_none | Network_host *)
      user             : t -> (int * int) option          (* uid:gid → --user *)
      ulimits          : t -> ulimit list
      read_only_rootfs : t -> bool

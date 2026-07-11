@@ -746,12 +746,12 @@ let run_named
             }
           in
           let provider_attempt_started_at = Mtime_clock.now () in
-          let result, checkpoint_after, _success_sample =
+          let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider
               try_provider_ctx ?resume_checkpoint ?per_provider_timeout_s candidate
           in
           let result =
-            match result with
+            match provider_result with
             | Error _ as error -> error
             | Ok run_result ->
               (match run_result.Runtime_agent.checkpoint with
@@ -779,7 +779,11 @@ let run_named
             in
             Int64.to_float ns /. 1_000_000.
           in
-          (match result with
+          (* Binding health describes the provider attempt, not MASC-local
+             checkpoint projection.  A fail-closed replay-prefix error must
+             fail the turn without falsely degrading a provider that returned
+             successfully. *)
+          (match provider_result with
            | Ok _ ->
              record_candidate_health_success
                ~keeper_name

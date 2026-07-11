@@ -4,9 +4,9 @@
 
 type tool_result = Keeper_types_profile.tool_result
 
-(** Handle the [masc_keeper_down] MCP tool call: stop keepalive,
-    optionally remove meta and/or session directory, broadcast
-    Operator_pause to the registry. *)
+(** Handle the [masc_keeper_down] MCP tool call.  A retained shutdown persists
+    its operator-paused next-boot intent before stopping the live registry
+    entry; full removal may also remove meta and/or the session directory. *)
 val handle_keeper_down :
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 

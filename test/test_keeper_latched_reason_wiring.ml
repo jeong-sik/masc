@@ -214,7 +214,18 @@ let test_keeper_down_retain_records_reason () =
            ; "remove_session", `Bool false
            ]
        in
-       let _result = Keeper_turn_lifecycle.handle_keeper_down_config ~config args in
+       let result = Keeper_turn_lifecycle.handle_keeper_down_config ~config args in
+       check
+         bool
+         "keeper_down reports success"
+         true
+         (Keeper_types_profile.tool_result_success result);
+       check
+         bool
+         "keeper_down removes the stopped live registry entry"
+         true
+         (Option.is_none
+            (Keeper_registry.get ~base_path:config.base_path keeper_name));
        match Keeper_meta_store.read_meta config keeper_name with
        | Ok (Some persisted) ->
          check bool "keeper_down retain pauses keeper" true persisted.paused;
@@ -225,6 +236,54 @@ let test_keeper_down_retain_records_reason () =
            (latched_reason_wire persisted)
        | Ok None -> fail "expected retained keeper meta on disk"
        | Error err -> failf "read persisted meta: %s" err)
+
+let test_keeper_down_cleanup_failure_keeps_lane_registered () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_turn_lifecycle.For_testing.reset_remove_pending_confirms_by_target ();
+      Keeper_registry.clear ();
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "downretain-cleanup-failure" in
+       let meta = make_meta keeper_name in
+       Keeper_registry.clear ();
+       (match Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error err -> failf "seed meta write: %s" err);
+       ignore (Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
+         (fun _config ~target_type:_ ~target_id:_ -> Error "cleanup unavailable");
+       let result =
+         Keeper_turn_lifecycle.handle_keeper_down_config
+           ~config
+           (`Assoc
+              [ "name", `String keeper_name
+              ; "remove_meta", `Bool false
+              ; "remove_session", `Bool false
+              ])
+       in
+       check
+         bool
+         "cleanup failure is explicit"
+         false
+         (Keeper_types_profile.tool_result_success result);
+       check
+         bool
+         "cleanup failure leaves the live registry entry intact"
+         true
+         (Option.is_some
+            (Keeper_registry.get ~base_path:config.base_path keeper_name));
+       match Keeper_meta_store.read_meta config keeper_name with
+       | Ok (Some persisted) ->
+         check bool "cleanup failure does not persist a pause" false persisted.paused
+       | Ok None -> fail "expected original keeper meta on disk"
+       | Error err -> failf "read original meta: %s" err)
 
 (* ── Site 1: dead-tombstone cleanup ─────────────────────────── *)
 
@@ -526,6 +585,8 @@ let () =
             test_grpc_pause_directive_records_reason
         ; test_case "keeper_down retain records keeper_down reason" `Quick
             test_keeper_down_retain_records_reason
+        ; test_case "keeper_down cleanup failure keeps lane registered" `Quick
+            test_keeper_down_cleanup_failure_keeps_lane_registered
         ; test_case "dead-tombstone cleanup records Dead_tombstone reason" `Quick
             test_dead_tombstone_cleanup_records_reason
         ; test_case "dead-tombstone cleanup overwrites existing pause reason" `Quick

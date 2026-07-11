@@ -157,6 +157,24 @@ val handle_keeper_chat_stream :
 
 (** {1 Turn execution (shared between HTTP handler and queue consumer)} *)
 
+type queued_turn_failure_kind =
+  | Turn_failed
+  | Turn_timed_out
+  | Turn_cancelled
+  | No_visible_reply
+  | Continuation_checkpoint_without_reply
+  | Transcript_persist_failed
+  | Stream_projection_failed
+
+type queued_turn_outcome =
+  | Delivered
+  | Failed of
+      { kind : queued_turn_failure_kind
+      ; detail : string
+      }
+
+val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
+
 val process_single_turn :
   connector_user_line_recorded_upstream:bool ->
   queued_turn:bool ->
@@ -173,7 +191,7 @@ val process_single_turn :
   message_id:string ->
   agent_name:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
-  unit
+  queued_turn_outcome option
 (** Execute a single keeper turn, publishing events to the provided
     event stream. [sw] owns the async keeper_msg worker and must outlive
     a single HTTP stream when resumable dashboard requests are used.
@@ -200,22 +218,9 @@ val process_single_turn :
     ([persist_user_message_only]), matching its existing "the keeper will
     answer on the next turn" semantics; a queued turn instead persists a
     typed failure row via [persist_failure_reply]. A queued message was
-    already dequeued off [Keeper_chat_queue] — there is no "next turn" for
+    already leased from [Keeper_chat_queue] — there is no "next turn" for
     it to ride along with, so silence here is terminal, not merely
     deferred. *)
-
-val persist_queued_turn_stalled :
-  base_path:string ->
-  connector_user_line_recorded_upstream:bool ->
-  payload:keeper_chat_stream_request ->
-  unit
-(** Durably records that a queued turn never reached a terminal outcome
-    within [Keeper_chat_consumer]'s dispatch watchdog deadline: a typed
-    failure row (mirroring [persist_failure_reply]'s dashboard/connector
-    split), a [ChatTransportFailures] counter increment, and a
-    [Keeper_chat_broadcast.chat_appended] broadcast. Called from
-    [Server_bootstrap_loops]'s [on_stalled] wiring — see
-    [Keeper_chat_consumer.start] for when this fires and why. *)
 
 (** {1 Testing helpers} *)
 
@@ -245,7 +250,7 @@ module For_testing : sig
     base_path:string ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     keeper_chat_stream_request ->
-    [ `Not_busy | `Queued of int ]
+    [ `Not_busy | `Queued of int | `Queue_error of string ]
   val extract_visible_reply : string -> Yojson.Safe.t option * string
   val direct_reply_terminal_error :
     ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option

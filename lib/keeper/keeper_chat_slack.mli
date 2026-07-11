@@ -58,10 +58,11 @@ val adapter_loop :
     [base_url] is used to build public voice-audio URLs; when omitted the
     configured {!Env_config_core.masc_http_base_url} is used.
 
-    [on_send_result] is invoked once per outbound attempt with the send
-    outcome, so callers (e.g. the connector gateway) can record delivery
-    observability without this adapter depending on any metric sink. It
-    defaults to a no-op to preserve existing behavior.
+    [on_send_result] is invoked exactly once for the terminal
+    [Run_finished]/[Event_error] delivery. Interim protocol diagnostics do not
+    settle the callback, so an earlier diagnostic cannot hide a later final
+    send failure. Empty terminal output reports a typed [Other] error. The
+    callback defaults to a no-op.
 
     The loop exits after one turn. *)
 
@@ -94,4 +95,15 @@ module For_testing : sig
     content:string -> event_blocks:Yojson.Safe.t list -> Yojson.Safe.t list
   (** Merge text-derived blocks with explicitly emitted rich event blocks in
       final delivery order. *)
+
+  val adapter_loop :
+    events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+    send_plain:(content:string -> (unit, error) result) ->
+    send_blocks:(content:string -> blocks:Yojson.Safe.t list -> (unit, error) result) ->
+    ?base_url:string ->
+    ?on_send_result:((unit, error) result -> unit) ->
+    unit ->
+    unit
+  (** Test seam for the outbound transport. It runs the production terminal
+      settlement state machine with injected Slack sends. *)
 end

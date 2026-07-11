@@ -29,7 +29,9 @@ type retry_loop_input =
 let autonomous_yield_request ~base_path ~keeper_name ~channel =
   if
     Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
-    || Keeper_chat_queue.length ~keeper_name > 0
+    || (match Keeper_chat_queue.pending_count ~keeper_name with
+        | Ok count -> count > 0
+        | Error _ -> true)
   then
     let boundary =
       match channel with

@@ -52,6 +52,12 @@ let count_user_lines ~base =
           match m.role with Keeper_chat_store.Role.User -> true | _ -> false)
        (Keeper_chat_store.load ~base_dir:base ~keeper_name))
 
+let configure_queue ~base =
+  Keeper_chat_queue.For_testing.reset ();
+  let report = Keeper_chat_queue.configure_persistence ~base_path:base in
+  check "chat queue persistence configured without load errors"
+    (report.load_errors = [])
+
 let test_busy_discord_enqueues () =
   Printf.printf
     "Test: busy Discord dispatch enqueues onto Keeper_chat_queue (not async poll)\n%!";
@@ -62,7 +68,8 @@ let test_busy_discord_enqueues () =
   in
   Unix.mkdir base 0o755;
   Fun.protect
-    ~finally:(fun () -> ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -70,8 +77,9 @@ let test_busy_discord_enqueues () =
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
-      Keeper_chat_queue.clear ~keeper_name;
+      configure_queue ~base;
       Eio.Switch.run (fun sw ->
+        Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
           with_busy_slot ~base ~sw (fun () ->
             Gate_keeper_backend.dispatch
@@ -83,42 +91,125 @@ let test_busy_discord_enqueues () =
               ~metadata:[] ~content:"are you there?")
         in
         (* The connector receives a busy ACK now; the deferred reply arrives
-           later via the consumer, so there is no async-poll request_id. *)
+           later via the consumer. The existing message-request envelope carries
+           the durable queue receipt instead of an async-poll request id. *)
+        let ack_receipt_id = ref None in
         (match reply with
-         | Gate_protocol.Reply { message_request; content; _ } ->
-             check "busy connector reply carries no async-poll request_id"
-               (message_request = None);
+         | Gate_protocol.Reply
+             { message_request = Some request; content; _ } ->
+             ack_receipt_id := Some request.request_id;
+             check "busy connector ACK is queued"
+               (request.status = Gate_protocol.Queued);
+             check "busy connector ACK carries queue status source"
+               (List.assoc_opt "status_source" request.metadata
+                = Some "keeper_chat_queue");
+             check "busy connector ACK carries queue revision"
+               (List.assoc_opt "queue_revision" request.metadata <> None);
              check "busy ACK text is non-empty" (String.length content > 0)
+         | Gate_protocol.Reply { message_request = None; _ } ->
+             check "busy connector ACK carries durable receipt" false
          | Gate_protocol.Keeper_error_result _
          | Gate_protocol.Unavailable_result ->
              check "busy Discord dispatch returns a Reply (not error/unavailable)"
                false);
         (* The message lands on the chat queue with the typed Discord source so
            the serial consumer can drain it and route the reply to the channel. *)
-        check "exactly one message enqueued"
-          (Keeper_chat_queue.length ~keeper_name = 1);
-        (match Keeper_chat_queue.dequeue ~keeper_name with
-         | Some
-             { Keeper_chat_queue.source =
-                 Keeper_chat_queue.Discord { channel_id; user_id }
-             ; content
+        let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+        check "exactly one durable receipt is pending"
+          (List.length snapshot.pending = 1);
+        check "no durable receipt is inflight yet"
+          (snapshot.inflight = []);
+        check "queue snapshot has no load errors" (snapshot.load_errors = []);
+        (match snapshot.pending with
+         | [ { Keeper_chat_queue.receipt_id; message =
+                 { Keeper_chat_queue.source =
+                     Keeper_chat_queue.Discord { channel_id; user_id }
+                 ; content
+                 ; _
+                 }
              ; _
-             } ->
+             } ] ->
+             check "ACK and pending receipt ids match"
+               (Some (Keeper_chat_queue.Receipt_id.to_string receipt_id)
+                = !ack_receipt_id);
              check "queued source is the Discord channel_id"
                (channel_id = "chan-777");
              check "queued source carries the user_id" (user_id = "user-42");
              check "queued content is the user's message"
                (content = "are you there?")
-         | Some _ -> check "queued source is Discord" false
-         | None -> check "queue holds the busy message" false);
+         | _ -> check "queue holds one Discord receipt" false);
+        (match Keeper_chat_queue.lease_batch ~keeper_name with
+         | `Leased lease ->
+             check "lease carries the pending receipt"
+               (List.length lease.items = 1);
+             (match
+                Keeper_chat_queue.finalize ~keeper_name
+                  ~lease_id:lease.lease_id
+                  ~outcome:
+                    (Keeper_chat_queue.Mark_delivered
+                       { completed_at = Time_compat.now (); outcome_ref = None })
+              with
+              | `Finalized receipt_ids ->
+                  check "finalize records the delivered receipt"
+                    (List.length receipt_ids = 1)
+              | `Unknown_lease | `Error _ ->
+                  check "leased receipt finalizes" false)
+         | `Empty | `Already_leased _ | `Error _ ->
+             check "pending receipt leases" false);
         (* Ownership invariant (RFC §3.4): the gate inbound boundary recorded the
            user line exactly once; no paired assistant row exists yet because the
            turn has not been drained. *)
         check "gate inbound recorded the connector user line exactly once"
           (count_user_lines ~base = 1)))
 
+let test_busy_discord_persist_failure_is_explicit () =
+  Printf.printf
+    "Test: busy Discord dispatch fails closed when durable enqueue fails\n%!";
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-busy-conn-fail-%d-%d" (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock = Eio.Stdenv.clock env in
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:(Some keeper_name));
+      Keeper_turn_admission.For_testing.reset ();
+      configure_queue ~base;
+      Eio.Switch.run (fun sw ->
+        Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
+        let reply =
+          with_busy_slot ~base ~sw (fun () ->
+            Keeper_chat_queue.For_testing.fail_next_persist ();
+            Gate_keeper_backend.dispatch
+              ~connector_kind:Gate_keeper_backend.Discord
+              ~sw ~clock ~proc_mgr:None ~net:None ~config
+              ~channel:"discord" ~channel_user_id:"user-42"
+              ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
+              ~keeper_name ~idempotency_key:"discord-msg-persist-fail"
+              ~metadata:[] ~content:"do not lose me")
+        in
+        (match reply with
+         | Gate_protocol.Keeper_error_result message ->
+             check "persistence failure is returned explicitly"
+               (String.length message > 0)
+         | Gate_protocol.Reply _ | Gate_protocol.Unavailable_result ->
+             check "persistence failure never claims queued" false);
+        let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+        check "failed enqueue leaves no pending receipt"
+          (snapshot.pending = []);
+        check "failed enqueue does not advance queue revision"
+          (snapshot.revision = 0L)))
+
 let () =
   test_busy_discord_enqueues ();
+  test_busy_discord_persist_failure_is_explicit ();
   if !failures > 0 then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;
     exit 1)

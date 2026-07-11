@@ -210,6 +210,81 @@ let test_final_message_blocks_merges_text_and_event_blocks () =
   check bool "event block preserved" true
     (contains second "https://event.example.com")
 
+let run_adapter events ~send_plain ~send_blocks =
+  Eio_main.run @@ fun _env ->
+  let stream = Masc.Keeper_chat_events.create () in
+  List.iter (Masc.Keeper_chat_events.publish stream) events;
+  let outcomes = ref [] in
+  S.adapter_loop ~events:stream ~send_plain ~send_blocks
+    ~on_send_result:(fun result -> outcomes := result :: !outcomes)
+    ();
+  List.rev !outcomes
+
+let test_adapter_terminal_success_once () =
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-1"; thread_id = "thread-1" }
+      ; Masc.Keeper_chat_events.Text_delta "done"
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-1" }
+      ]
+      ~send_plain:(fun ~content ->
+        sends := ("plain", content) :: !sends;
+        Ok ())
+      ~send_blocks:(fun ~content ~blocks:_ ->
+        sends := ("blocks", content) :: !sends;
+        Ok ())
+  in
+  check int "one terminal callback" 1 (List.length outcomes);
+  check bool "terminal callback succeeds" true (outcomes = [ Ok () ]);
+  check (list (pair string string)) "one final blocks send"
+    [ "blocks", "done" ] (List.rev !sends)
+
+let test_protocol_diagnostic_cannot_mask_final_failure () =
+  let protocol_error : Masc.Keeper_chat_events.stream_protocol_error =
+    { kind = Masc.Keeper_chat_events.Sse_error
+    ; index = None
+    ; tool_call_id = None
+    ; event_type = Some "error"
+    ; reason = Some "upstream warning"
+    ; raw_bytes = None
+    }
+  in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Oas_stream_protocol_error protocol_error
+      ; Masc.Keeper_chat_events.Text_delta "final"
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-2" }
+      ]
+      ~send_plain:(fun ~content:_ -> Ok ())
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        Error (Masc.Keeper_chat_slack.Other "final send failed"))
+  in
+  match outcomes with
+  | [ Error (Masc.Keeper_chat_slack.Other message) ] ->
+    check string "final error wins" "final send failed" message
+  | _ -> fail "only the terminal final-send failure settles the callback"
+
+let test_adapter_empty_terminal_is_error () =
+  let sends = ref 0 in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_finished { run_id = "run-empty" } ]
+      ~send_plain:(fun ~content:_ ->
+        incr sends;
+        Ok ())
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        incr sends;
+        Ok ())
+  in
+  check int "empty terminal makes no Slack call" 0 !sends;
+  match outcomes with
+  | [ Error (Masc.Keeper_chat_slack.Other message) ] ->
+    check bool "empty terminal failure is explicit" true
+      (contains message "no text or blocks")
+  | _ -> fail "empty terminal must settle exactly once with an error"
+
 let () =
   run "keeper_chat_slack"
     [
@@ -257,5 +332,13 @@ let () =
             test_content_blocks_suppresses_credential_url
         ; test_case "final delivery merges text and event blocks" `Quick
             test_final_message_blocks_merges_text_and_event_blocks
+        ] )
+    ; ( "terminal-receipt"
+      , [ test_case "terminal success settles once" `Quick
+            test_adapter_terminal_success_once
+        ; test_case "protocol diagnostic cannot mask final failure" `Quick
+            test_protocol_diagnostic_cannot_mask_final_failure
+        ; test_case "empty terminal is explicit failure" `Quick
+            test_adapter_empty_terminal_is_error
         ] )
     ]

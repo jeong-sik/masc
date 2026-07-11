@@ -764,6 +764,22 @@ export type KeeperTurnOutcome =
   | 'continuation_checkpoint'
   | 'no_visible_reply'
 
+export type KeeperQueueReceiptLifecycle =
+  | 'pending'
+  | 'inflight'
+  | 'delivered'
+  | 'failed'
+
+export type KeeperQueueReceiptFailureKind =
+  | 'turn_failed'
+  | 'timed_out'
+  | 'no_visible_reply'
+  | 'transcript_persist_failed'
+  | 'connector_unavailable'
+  | 'delivery_failed'
+  | 'cancelled'
+  | 'internal_error'
+
 export interface KeeperConversationDetails {
   traceId?: string | null
   turnRef?: string | null
@@ -778,6 +794,14 @@ export interface KeeperConversationDetails {
   skillReason?: string | null
   replyText?: string | null
   turnOutcome?: KeeperTurnOutcome | null
+  /** Durable server receipt for a busy chat message accepted into the Keeper
+   * queue. This is distinct from the browser-local draft queue. */
+  queueReceiptId?: string | null
+  queueRevision?: number | null
+  queuePendingCount?: number | null
+  queueInflightCount?: number | null
+  queueState?: KeeperQueueReceiptLifecycle | null
+  queueFailureKind?: KeeperQueueReceiptFailureKind | null
   rawPayload?: unknown
 }
 
@@ -955,6 +979,7 @@ export type KeeperConversationStreamContractStatus =
 
 export type KeeperConversationStreamDeliveryReceipt =
   | 'client_observed_sse_event'
+  | 'server_durable_receipt'
   | 'server_lifecycle_replay_only'
   | 'no_delivery_receipt'
 

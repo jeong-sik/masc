@@ -1,366 +1,412 @@
-(* test_keeper_chat_consumer_delivery.ml — the back half of the connector
-   deferred-reply pipeline (RFC-connector-deferred-reply-via-chat-queue).
+(* Durable receipt lifecycle tests for Keeper_chat_consumer.
 
-   The merged fix enqueues a busy connector message onto Keeper_chat_queue; the
-   front half (enqueue + queued ACK) is covered by
-   test_keeper_busy_connector_deferred. This pins the back half:
-   Keeper_chat_consumer drains the queue once the keeper's turn slot frees, routes
-   each same-source run as ONE coalesced turn, and hands handle_turn the typed
-   Discord source carrying the channel_id — the routing key the Discord delivery
-   adapter (Keeper_chat_discord.adapter_loop -> Discord_rest_client) posts to.
-
-   handle_turn is the consumer's injection seam, so this is deterministic with no
-   provider and no Discord REST call: a capturing handle_turn records what the
-   consumer would have delivered. The literal HTTP POST is Discord_rest_client's
-   transport responsibility and is out of scope for this unit (no DI seam). *)
+   These tests exercise the consumer through Keeper_chat_queue's public durable
+   API.  They intentionally assert receipt states instead of transient queue
+   depth so delivery, typed failure, cancellation, and finalization retry remain
+   observable across the persistence boundary. *)
 
 open Masc
 
 let failures = ref 0
 
-let check name cond =
-  if cond then Printf.printf "  \xe2\x9c\x93 %s\n%!" name
+let check name condition =
+  if condition
+  then Printf.printf "  ✓ %s\n%!" name
   else (
     incr failures;
-    Printf.printf "  \xe2\x9c\x97 %s\n%!" name)
+    Printf.printf "  ✗ %s\n%!" name)
 
-let keeper_name = "consumer-delivery-keeper"
+let check_failure name detail =
+  incr failures;
+  Printf.printf "  ✗ %s: %s\n%!" name detail
 
-let discord_msg ~content ~channel_id ~user_id ~ts =
+let keeper_name = "consumer-receipt-keeper"
+
+let discord_msg ~content ~channel_id ~user_id ~timestamp =
   { Keeper_chat_queue.content
   ; user_blocks = []
   ; attachments = []
-  ; timestamp = ts
+  ; timestamp
   ; source = Keeper_chat_queue.Discord { channel_id; user_id }
   }
 
-(* Run [body] with a fresh temp base path, an Eio env, and a clean queue +
-   admission slot. *)
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Unix.unlink path
+
 let with_env body =
   let base =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-consumer-deliv-%d-%d" (Unix.getpid ())
+      (Printf.sprintf "masc-consumer-receipt-%d-%d" (Unix.getpid ())
          (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
   in
   Unix.mkdir base 0o755;
   Fun.protect
-    ~finally:(fun () ->
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    ~finally:(fun () -> rm_rf base)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let clock = Eio.Stdenv.clock env in
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
-      Keeper_turn_admission.For_testing.reset ();
-      (* Full registry reset, not just [clear ~keeper_name]: several tests
-         below use derived names ([keeper_name ^ "-a"/"-b"]) that a prior
-         test's dispatch fiber can leave with a message requeued by
-         [Keeper_chat_consumer]'s at-least-once nack-on-cancel path (the
-         switch teardown between tests can race a fiber that was mid-ack).
-         [Keeper_chat_queue.all_keeper_names] is process-global, so the next
-         test's consumer would otherwise pick up and dispatch that leaked
-         entry too. *)
       Keeper_chat_queue.For_testing.reset ();
-      body ~base ~clock)
-
-(* Generously above every [await_or_timeout] window this suite uses (longest
-   is 5.0s), so the dispatch watchdog never preempts a [handle_turn] fake that
-   is only waiting on a test-controlled promise. *)
-let test_dispatch_deadline_sec = 10.0
-
-(* None of these tests exercise a [handle_turn] that outlives
-   [test_dispatch_deadline_sec] — that path is [test_dispatch_stall] below.
-   Failing loudly here turns a silent hang into a clear assertion if a future
-   change makes a fake [handle_turn] block longer than intended. *)
-let unexpected_on_stalled ~keeper_name ~queued_message:_ =
-  check
-    (Printf.sprintf "on_stalled must not fire for keeper=%s in this test" keeper_name)
-    false
-
-(* Capture handle_turn calls; resolve [first] on the first call so the test can
-   wait without polling. The queue is emptied by the first drain, so the consumer
-   does not call handle_turn again. *)
-let capturing () =
-  let captured = ref [] in
-  let resolved = ref false in
-  let first, set_first = Eio.Promise.create () in
-  let handle_turn ~sw:_ ~keeper_name:kn ~queued_message =
-    captured := (kn, queued_message) :: !captured;
-    if not !resolved then (
-      resolved := true;
-      Eio.Promise.resolve set_first ())
-  in
-  (captured, first, handle_turn)
-
-(* Await [p] but never hang the suite: lose to a timeout and report it. *)
-let await_or_timeout ~clock ~secs p =
-  Eio.Fiber.first
-    (fun () ->
-      Eio.Promise.await p;
-      `Got)
-    (fun () ->
-      Eio.Time.sleep clock secs;
-      `Timeout)
-
-let await_queue_depth_or_timeout ~clock ~keeper_name ~expected ~secs =
-  Eio.Fiber.first
-    (fun () ->
-      let rec wait () =
-        if Keeper_chat_queue.length ~keeper_name = expected
-        then `Got
-        else (
-          Eio.Time.sleep clock 0.05;
-          wait ())
+      Keeper_turn_admission.For_testing.reset ();
+      let report : Keeper_chat_queue.configure_report =
+        Keeper_chat_queue.configure_persistence ~base_path:base
       in
-      wait ())
+      check "persistence configured without load errors" (report.load_errors = []);
+      Fun.protect
+        ~finally:(fun () ->
+          Keeper_chat_queue.For_testing.reset ();
+          Keeper_turn_admission.For_testing.reset ())
+        (fun () -> body ~base ~clock))
+
+let enqueue_checked ~label ~keeper_name message =
+  match Keeper_chat_queue.enqueue ~keeper_name message with
+  | Ok receipt -> Some receipt
+  | Error error ->
+    check_failure label (Keeper_chat_queue.mutation_error_to_string error);
+    None
+
+let await_promise ~clock ~seconds promise =
+  Eio.Fiber.first
     (fun () ->
-      Eio.Time.sleep clock secs;
-      `Timeout)
+      Eio.Promise.await promise;
+      true)
+    (fun () ->
+      Eio.Time.sleep clock seconds;
+      false)
 
-(* [Keeper_chat_consumer.start] forks a non-daemon poll fiber that never returns,
-   so a normal [Switch.run] would wait on it forever (in production the
-   server-wide switch lives for the process lifetime). Force teardown by raising
-   inside the switch body, which cancels the poll fiber. *)
-exception Stop
+let await_receipt ~clock ~seconds ~keeper_name ~receipt_id ~accept =
+  Eio.Fiber.first
+    (fun () ->
+      let rec loop () =
+        match Keeper_chat_queue.lookup_receipt ~keeper_name ~receipt_id with
+        | Ok { receipt = Some ({ state; _ } as receipt); _ } when accept state ->
+          Some receipt
+        | Ok { receipt = Some _ | None; _ } ->
+          Eio.Time.sleep clock 0.02;
+          loop ()
+        | Error error ->
+          check_failure "receipt lookup"
+            (Keeper_chat_queue.mutation_error_to_string error);
+          None
+      in
+      loop ())
+    (fun () ->
+      Eio.Time.sleep clock seconds;
+      None)
 
-let with_consumer_switch f =
-  try Eio.Switch.run (fun sw -> f sw; raise Stop) with Stop -> ()
+let is_delivered = function
+  | Keeper_chat_queue.Delivered _ -> true
+  | Pending | Inflight _ | Failed _ -> false
 
-let test_drains_discord_to_handle_turn () =
-  Printf.printf "Test: consumer drains a Discord queue entry to handle_turn\n%!";
+let is_failed = function
+  | Keeper_chat_queue.Failed _ -> true
+  | Pending | Inflight _ | Delivered _ -> false
+
+let is_inflight = function
+  | Keeper_chat_queue.Inflight _ -> true
+  | Pending | Delivered _ | Failed _ -> false
+
+let receipt_id_in_active receipt_id receipts =
+  List.exists
+    (fun (receipt : Keeper_chat_queue.active_receipt) ->
+       Keeper_chat_queue.Receipt_id.equal receipt.receipt_id receipt_id)
+    receipts
+
+let receipt_id_in_terminal receipt_id receipts =
+  List.exists
+    (fun (receipt : Keeper_chat_queue.receipt_view) ->
+       Keeper_chat_queue.Receipt_id.equal receipt.receipt_id receipt_id)
+    receipts
+
+let check_terminal_snapshot ~label ~keeper_name ~receipt_id =
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check (label ^ " has no pending receipt")
+    (not (receipt_id_in_active receipt_id snapshot.pending));
+  check (label ^ " has no inflight receipt")
+    (not (receipt_id_in_active receipt_id snapshot.inflight));
+  check (label ^ " retains terminal receipt")
+    (receipt_id_in_terminal receipt_id snapshot.terminal)
+
+(* [Keeper_chat_consumer.start] owns a process-lifetime polling fiber.  Raising
+   from the switch body gives each test a structured teardown and, when a turn
+   is active, exercises the same cancellation path as server shutdown. *)
+exception Stop_consumer
+
+let with_consumer_switch body =
+  try Eio.Switch.run (fun sw -> body sw; raise Stop_consumer) with
+  | Stop_consumer -> ()
+
+let test_delivery_finalizes_terminal_receipt () =
+  Printf.printf "Test: delivery finalizes a durable terminal receipt\n%!";
   with_env (fun ~base ~clock ->
-    ignore
-      (Keeper_chat_queue.enqueue ~keeper_name
-         (discord_msg ~content:"are you free now?" ~channel_id:"chan-1"
-            ~user_id:"u-1" ~ts:1.0)
-        : string);
-    let captured, first, handle_turn = capturing () in
-    with_consumer_switch (fun sw ->
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
-        ~dispatch_deadline_sec:test_dispatch_deadline_sec
-        ~on_stalled:unexpected_on_stalled ~handle_turn;
-      (match await_or_timeout ~clock ~secs:5.0 first with
-       | `Got -> ()
-       | `Timeout -> check "consumer drained within timeout" false));
-    match !captured with
-    | [ (kn, qm) ] ->
-        check "delivered to the bound keeper" (kn = keeper_name);
-        (match qm.Keeper_chat_queue.source with
-         | Keeper_chat_queue.Discord { channel_id; user_id } ->
-             check "routing key is the Discord channel_id" (channel_id = "chan-1");
-             check "routing key carries the user_id" (user_id = "u-1")
-         | _ -> check "delivered source is Discord" false);
-        check "delivered the user's content" (qm.content = "are you free now?")
-    | _ -> check "exactly one handle_turn call" false)
+    match
+      enqueue_checked ~label:"delivery enqueue" ~keeper_name
+        (discord_msg ~content:"deliver me" ~channel_id:"channel-delivered"
+           ~user_id:"user-delivered" ~timestamp:1.0)
+    with
+    | None -> ()
+    | Some accepted ->
+      let captured = ref None in
+      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message =
+        captured := Some (dispatched_keeper, queued_message);
+        Keeper_chat_consumer.Delivered
+          { outcome_ref = Some "turn:delivered-1" }
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        match
+          await_receipt ~clock ~seconds:5.0 ~keeper_name
+            ~receipt_id:accepted.receipt_id ~accept:is_delivered
+        with
+        | None -> check "delivery reaches terminal state" false
+        | Some receipt ->
+          (match receipt.state with
+           | Keeper_chat_queue.Delivered completion ->
+             check "delivery stores the typed outcome reference"
+               (completion.outcome_ref = Some "turn:delivered-1")
+           | Pending | Inflight _ | Failed _ ->
+             check "delivery state is Delivered" false));
+      (match !captured with
+       | Some (dispatched_keeper, queued_message) ->
+         check "delivery dispatches to the accepted keeper"
+           (String.equal dispatched_keeper keeper_name);
+         check "delivery preserves queued content"
+           (String.equal queued_message.content "deliver me");
+         (match queued_message.source with
+          | Keeper_chat_queue.Discord { channel_id; user_id } ->
+            check "delivery preserves Discord channel"
+              (String.equal channel_id "channel-delivered");
+            check "delivery preserves Discord user"
+              (String.equal user_id "user-delivered")
+          | Dashboard | Slack _ -> check "delivery source is Discord" false)
+       | None -> check "delivery invokes handle_turn" false);
+      check_terminal_snapshot ~label:"delivery" ~keeper_name
+        ~receipt_id:accepted.receipt_id)
 
-let test_coalesces_same_source_run () =
-  Printf.printf
-    "Test: same-source messages coalesce into one delivered turn\n%!";
+let test_explicit_failure_finalizes_failed_receipt () =
+  Printf.printf "Test: explicit turn failure finalizes a Failed receipt\n%!";
   with_env (fun ~base ~clock ->
-    ignore
-      (Keeper_chat_queue.enqueue ~keeper_name
-         (discord_msg ~content:"first" ~channel_id:"chan-9" ~user_id:"u-9" ~ts:1.0)
-        : string);
-    ignore
-      (Keeper_chat_queue.enqueue ~keeper_name
-         (discord_msg ~content:"second" ~channel_id:"chan-9" ~user_id:"u-9" ~ts:2.0)
-        : string);
-    let captured, first, handle_turn = capturing () in
-    with_consumer_switch (fun sw ->
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
-        ~dispatch_deadline_sec:test_dispatch_deadline_sec
-        ~on_stalled:unexpected_on_stalled ~handle_turn;
-      ignore (await_or_timeout ~clock ~secs:5.0 first));
-    match !captured with
-    | [ (_, qm) ] ->
-        check "two same-source messages became one turn"
-          (Keeper_chat_queue.length ~keeper_name = 0);
-        check "coalesced content keeps the first message"
-          (String_util.string_contains_substring ~needle:"first" qm.content);
-        check "coalesced content keeps the second message"
-          (String_util.string_contains_substring ~needle:"second" qm.content)
-    | _ -> check "exactly one coalesced handle_turn call" false)
+    match
+      enqueue_checked ~label:"failure enqueue" ~keeper_name
+        (discord_msg ~content:"fail explicitly" ~channel_id:"channel-failed"
+           ~user_id:"user-failed" ~timestamp:2.0)
+    with
+    | None -> ()
+    | Some accepted ->
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+        Keeper_chat_consumer.Failed
+          { kind = Keeper_chat_queue.Delivery_failed
+          ; detail = "connector rejected outbound delivery"
+          ; outcome_ref = Some "delivery:failed-1"
+          }
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        match
+          await_receipt ~clock ~seconds:5.0 ~keeper_name
+            ~receipt_id:accepted.receipt_id ~accept:is_failed
+        with
+        | None -> check "explicit failure reaches terminal state" false
+        | Some receipt ->
+          (match receipt.state with
+           | Keeper_chat_queue.Failed failure ->
+             check "failure kind is preserved"
+               (failure.kind = Keeper_chat_queue.Delivery_failed);
+             check "failure detail is preserved"
+               (String.equal failure.detail
+                  "connector rejected outbound delivery");
+             check "failure outcome reference is preserved"
+               (failure.outcome_ref = Some "delivery:failed-1")
+           | Pending | Inflight _ | Delivered _ ->
+             check "explicit failure state is Failed" false));
+      check_terminal_snapshot ~label:"explicit failure" ~keeper_name
+        ~receipt_id:accepted.receipt_id)
 
-let test_gates_while_turn_in_flight () =
-  Printf.printf "Test: queue is not drained while a turn is in flight\n%!";
+let test_structured_cancellation_nacks_and_preserves_receipt () =
+  Printf.printf "Test: structured cancellation nacks the unchanged receipt\n%!";
   with_env (fun ~base ~clock ->
-    ignore
-      (Keeper_chat_queue.enqueue ~keeper_name
-         (discord_msg ~content:"during busy" ~channel_id:"chan-5" ~user_id:"u-5"
-            ~ts:1.0)
-        : string);
-    let captured, first, handle_turn = capturing () in
-    with_consumer_switch (fun sw ->
-      (* Hold the admission slot busy in a sibling fiber. *)
-      let started, set_started = Eio.Promise.create () in
-      let release, set_release = Eio.Promise.create () in
-      Eio.Fiber.fork ~sw (fun () ->
-        ignore
-          (Keeper_turn_admission.run_serialized ~base_path:base ~keeper_name
-             (fun () ->
-               Eio.Promise.resolve set_started ();
-               Eio.Promise.await release)));
-      Eio.Promise.await started;
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
-        ~dispatch_deadline_sec:test_dispatch_deadline_sec
-        ~on_stalled:unexpected_on_stalled ~handle_turn;
-      (* The first poll runs immediately; if the consumer ignored the in-flight
-         gate it would drain within this window. *)
-      (match await_or_timeout ~clock ~secs:0.3 first with
-       | `Got -> check "consumer must not drain while a turn is in flight" false
-       | `Timeout ->
-           check "queue stayed put while the turn was in flight"
-             (Keeper_chat_queue.length ~keeper_name = 1));
-      (* Release the slot; the next poll drains. *)
-      Eio.Promise.resolve set_release ();
-      (match await_or_timeout ~clock ~secs:5.0 first with
-       | `Got -> ()
-       | `Timeout -> check "consumer drains once the slot frees" false));
-    check "delivered exactly once after release" (List.length !captured = 1))
+    match
+      enqueue_checked ~label:"cancellation enqueue" ~keeper_name
+        (discord_msg ~content:"cancel this turn" ~channel_id:"channel-cancel"
+           ~user_id:"user-cancel" ~timestamp:3.0)
+    with
+    | None -> ()
+    | Some accepted ->
+      let started, resolve_started = Eio.Promise.create () in
+      let never, _resolve_never = Eio.Promise.create () in
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+        Eio.Promise.resolve resolve_started ();
+        Eio.Promise.await never
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        check "cancellable turn starts"
+          (await_promise ~clock ~seconds:5.0 started);
+        check "receipt is inflight before cancellation"
+          (match
+             await_receipt ~clock ~seconds:1.0 ~keeper_name
+               ~receipt_id:accepted.receipt_id ~accept:is_inflight
+           with
+           | Some _ -> true
+           | None -> false));
+      (match
+         Keeper_chat_queue.lookup_receipt ~keeper_name
+           ~receipt_id:accepted.receipt_id
+       with
+       | Ok
+           { receipt = Some { state = Keeper_chat_queue.Pending; receipt_id }
+           ; _
+           } ->
+         check "cancellation preserves the accepted receipt id"
+           (Keeper_chat_queue.Receipt_id.equal receipt_id accepted.receipt_id)
+       | Ok
+           { receipt =
+               Some { state = Inflight _ | Delivered _ | Failed _; _ }
+             | None
+           ; _
+           }
+       | Error _ ->
+         check "cancellation returns the receipt to Pending" false);
+      let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+      check "cancelled receipt remains pending"
+        (receipt_id_in_active accepted.receipt_id snapshot.pending);
+      check "cancelled receipt is not left inflight"
+        (not (receipt_id_in_active accepted.receipt_id snapshot.inflight));
+      check "cancelled receipt is not terminal"
+        (not (receipt_id_in_terminal accepted.receipt_id snapshot.terminal)))
 
-let test_queued_dispatch_is_per_keeper () =
-  Printf.printf "Test: queued dispatch is independent per keeper\n%!";
+let test_dispatch_is_concurrent_per_keeper () =
+  Printf.printf "Test: queued turns dispatch concurrently across keepers\n%!";
   with_env (fun ~base ~clock ->
     let keeper_a = keeper_name ^ "-a" in
     let keeper_b = keeper_name ^ "-b" in
-    Keeper_chat_queue.clear ~keeper_name:keeper_a;
-    Keeper_chat_queue.clear ~keeper_name:keeper_b;
-    ignore
-      (Keeper_chat_queue.enqueue ~keeper_name:keeper_a
-         (discord_msg ~content:"alpha waits" ~channel_id:"chan-a" ~user_id:"u-a"
-            ~ts:1.0)
-        : string);
-    ignore
-      (Keeper_chat_queue.enqueue ~keeper_name:keeper_b
-         (discord_msg ~content:"beta should pass" ~channel_id:"chan-b"
-            ~user_id:"u-b" ~ts:2.0)
-        : string);
-    let first_keeper = ref None in
-    let second_keeper = ref None in
-    let first_started, set_first_started = Eio.Promise.create () in
-    let release_first, set_release_first = Eio.Promise.create () in
-    let second_seen, set_second_seen = Eio.Promise.create () in
-    let first_resolved = ref false in
-    let second_resolved = ref false in
-    let handle_turn ~sw:_ ~keeper_name:kn ~queued_message:_ =
-      match !first_keeper with
-      | None ->
-          first_keeper := Some kn;
-          if not !first_resolved then (
-            first_resolved := true;
-            Eio.Promise.resolve set_first_started ());
-          Eio.Promise.await release_first
-      | Some first when String.equal first kn ->
-          check "same keeper is not dispatched again while its queued turn runs"
-            false
-      | Some _ ->
-          second_keeper := Some kn;
-          if not !second_resolved then (
-            second_resolved := true;
-            Eio.Promise.resolve set_second_seen ())
-    in
-    with_consumer_switch (fun sw ->
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
-        ~dispatch_deadline_sec:test_dispatch_deadline_sec
-        ~on_stalled:unexpected_on_stalled ~handle_turn;
-      (match await_or_timeout ~clock ~secs:5.0 first_started with
-       | `Got -> ()
-       | `Timeout -> check "first queued keeper dispatch started" false);
-      (match await_or_timeout ~clock ~secs:0.5 second_seen with
-       | `Got ->
-           check "another keeper dispatches while first handler is blocked" true
-       | `Timeout ->
-           check "another keeper dispatches while first handler is blocked" false);
-      Eio.Promise.resolve set_release_first);
-    match (!first_keeper, !second_keeper) with
-    | Some first, Some second ->
-        check "second dispatch uses the other keeper"
-          ((String.equal first keeper_a && String.equal second keeper_b)
-          || (String.equal first keeper_b && String.equal second keeper_a))
-    | _ -> check "both keeper dispatches were observed" false)
+    match
+      ( enqueue_checked ~label:"keeper A enqueue" ~keeper_name:keeper_a
+          (discord_msg ~content:"alpha waits" ~channel_id:"channel-a"
+             ~user_id:"user-a" ~timestamp:4.0)
+      , enqueue_checked ~label:"keeper B enqueue" ~keeper_name:keeper_b
+          (discord_msg ~content:"beta proceeds" ~channel_id:"channel-b"
+             ~user_id:"user-b" ~timestamp:5.0) )
+    with
+    | Some accepted_a, Some accepted_b ->
+      let first_keeper = ref None in
+      let second_keeper = ref None in
+      let calls = ref 0 in
+      let first_started, resolve_first_started = Eio.Promise.create () in
+      let release_first, resolve_release_first = Eio.Promise.create () in
+      let second_started, resolve_second_started = Eio.Promise.create () in
+      let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message:_ =
+        incr calls;
+        match !first_keeper with
+        | None ->
+          first_keeper := Some dispatched_keeper;
+          Eio.Promise.resolve resolve_first_started ();
+          Eio.Promise.await release_first;
+          Keeper_chat_consumer.Delivered
+            { outcome_ref = Some ("turn:" ^ dispatched_keeper) }
+        | Some first when String.equal first dispatched_keeper ->
+          check "one keeper is not dispatched twice concurrently" false;
+          Keeper_chat_consumer.Failed
+            { kind = Keeper_chat_queue.Internal_error
+            ; detail = "duplicate concurrent dispatch in test"
+            ; outcome_ref = None
+            }
+        | Some _ ->
+          second_keeper := Some dispatched_keeper;
+          Eio.Promise.resolve resolve_second_started ();
+          Keeper_chat_consumer.Delivered
+            { outcome_ref = Some ("turn:" ^ dispatched_keeper) }
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        check "first keeper dispatch starts"
+          (await_promise ~clock ~seconds:5.0 first_started);
+        check "other keeper starts while first keeper is blocked"
+          (await_promise ~clock ~seconds:2.0 second_started);
+        Eio.Promise.resolve resolve_release_first ();
+        check "keeper A receipt reaches Delivered"
+          (match
+             await_receipt ~clock ~seconds:5.0 ~keeper_name:keeper_a
+               ~receipt_id:accepted_a.receipt_id ~accept:is_delivered
+           with
+           | Some _ -> true
+           | None -> false);
+        check "keeper B receipt reaches Delivered"
+          (match
+             await_receipt ~clock ~seconds:5.0 ~keeper_name:keeper_b
+               ~receipt_id:accepted_b.receipt_id ~accept:is_delivered
+           with
+           | Some _ -> true
+           | None -> false));
+      (match (!first_keeper, !second_keeper) with
+       | Some first, Some second ->
+         check "the concurrent dispatches use different keepers"
+           (not (String.equal first second));
+         check "both accepted keepers were dispatched"
+           ((String.equal first keeper_a && String.equal second keeper_b)
+            || (String.equal first keeper_b && String.equal second keeper_a))
+       | None, _ | _, None -> check "both keeper dispatches are observed" false);
+      check "each keeper turn is handled exactly once" (!calls = 2);
+      check_terminal_snapshot ~label:"keeper A delivery" ~keeper_name:keeper_a
+        ~receipt_id:accepted_a.receipt_id;
+      check_terminal_snapshot ~label:"keeper B delivery" ~keeper_name:keeper_b
+        ~receipt_id:accepted_b.receipt_id
+    | None, _ | _, None -> ())
 
-(* PR-4a (busy-queue lease/ack/nack): a [handle_turn] that never returns must
-   not wedge this keeper's queue forever (the L1/L2 root cause — see
-   Keeper_chat_queue.mli and Keeper_chat_consumer.mli). The dispatch
-   watchdog races [handle_turn] against [dispatch_deadline_sec]; on timeout
-   it calls [on_stalled] then acks (not nacks) the lease, since retrying a
-   turn [Keeper_msg_async]'s own timeout has already abandoned would not
-   help. *)
-let test_dispatch_stall_calls_on_stalled_and_acks () =
+let test_finalization_persistence_retry_does_not_redeliver () =
   Printf.printf
-    "Test: a handle_turn that never returns triggers on_stalled and acks \
-     (not nacks)\n%!";
+    "Test: failed terminal persistence retries without re-running the turn\n%!";
   with_env (fun ~base ~clock ->
-    ignore
-      (Keeper_chat_queue.enqueue ~keeper_name
-         (discord_msg ~content:"stuck turn" ~channel_id:"chan-stall"
-            ~user_id:"u-stall" ~ts:1.0)
-        : string);
-    let never, _never_resolve = Eio.Promise.create () in
-    let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ = Eio.Promise.await never in
-    let stalled, set_stalled = Eio.Promise.create () in
-    let stalled_call = ref None in
-    let on_stalled ~keeper_name:kn ~queued_message:qm =
-      stalled_call := Some (kn, qm);
-      Eio.Promise.resolve set_stalled ()
-    in
-    with_consumer_switch (fun sw ->
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
-        ~dispatch_deadline_sec:0.2 ~on_stalled ~handle_turn;
-      (match await_or_timeout ~clock ~secs:5.0 stalled with
-       | `Got -> ()
-       | `Timeout -> check "on_stalled fires once the dispatch deadline elapses" false);
-      (* Let the synchronous ack that follows on_stalled land. *)
-      Eio.Time.sleep clock 0.3);
-    (match !stalled_call with
-     | Some (kn, qm) ->
-         check "on_stalled sees the bound keeper" (kn = keeper_name);
-         check "on_stalled sees the stuck message"
-           (String.equal qm.Keeper_chat_queue.content "stuck turn")
-     | None -> check "on_stalled was called" false);
-    check "the stalled lease is acked, not requeued"
-      (Keeper_chat_queue.length ~keeper_name = 0))
-
-let test_failed_nack_persist_retries_without_wedging_keeper () =
-  Printf.printf
-    "Test: failed nack persistence is retried instead of wedging the keeper\n%!";
-  with_env (fun ~base ~clock ->
-    Keeper_chat_queue.configure_persistence ~base_path:base;
-    ignore
-      (Keeper_chat_queue.enqueue ~keeper_name
-         (discord_msg ~content:"retry after nack persist" ~channel_id:"chan-retry"
-            ~user_id:"u-retry" ~ts:1.0)
-        : string);
-    let never, _never_resolve = Eio.Promise.create () in
-    let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ = Eio.Promise.await never in
-    let stalled, set_stalled = Eio.Promise.create () in
-    let on_stalled ~keeper_name:_ ~queued_message:_ =
-      Keeper_chat_queue.For_testing.fail_next_persist ();
-      Eio.Promise.resolve set_stalled ();
-      failwith "force nack path"
-    in
-    with_consumer_switch (fun sw ->
-      Keeper_chat_consumer.start ~sw ~clock ~base_path:base
-        ~dispatch_deadline_sec:0.2 ~on_stalled ~handle_turn;
-      (match await_or_timeout ~clock ~secs:5.0 stalled with
-       | `Got -> ()
-       | `Timeout -> check "stalled callback fires before nack retry" false);
-      match
-        await_queue_depth_or_timeout ~clock ~keeper_name ~expected:1 ~secs:3.0
-      with
-      | `Got -> check "failed nack persistence is retried and requeues" true
-      | `Timeout ->
-        check "failed nack persistence is retried and requeues" false))
+    match
+      enqueue_checked ~label:"finalization retry enqueue" ~keeper_name
+        (discord_msg ~content:"finalize after retry"
+           ~channel_id:"channel-finalize-retry" ~user_id:"user-finalize-retry"
+           ~timestamp:6.0)
+    with
+    | None -> ()
+    | Some accepted ->
+      let calls = ref 0 in
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+        incr calls;
+        Keeper_chat_queue.For_testing.fail_next_persist ();
+        Keeper_chat_consumer.Delivered
+          { outcome_ref = Some "turn:finalized-after-retry" }
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        match
+          await_receipt ~clock ~seconds:5.0 ~keeper_name
+            ~receipt_id:accepted.receipt_id ~accept:is_delivered
+        with
+        | None -> check "terminal persistence is retried" false
+        | Some receipt ->
+          (match receipt.state with
+           | Keeper_chat_queue.Delivered completion ->
+             check "retried finalization preserves the outcome reference"
+               (completion.outcome_ref = Some "turn:finalized-after-retry")
+           | Pending | Inflight _ | Failed _ ->
+             check "retried finalization reaches Delivered" false));
+      check "finalization retry does not re-run handle_turn" (!calls = 1);
+      check_terminal_snapshot ~label:"retried finalization" ~keeper_name
+        ~receipt_id:accepted.receipt_id)
 
 let () =
-  test_drains_discord_to_handle_turn ();
-  test_coalesces_same_source_run ();
-  test_gates_while_turn_in_flight ();
-  test_queued_dispatch_is_per_keeper ();
-  test_dispatch_stall_calls_on_stalled_and_acks ();
-  test_failed_nack_persist_retries_without_wedging_keeper ();
-  if !failures > 0 then (
+  test_delivery_finalizes_terminal_receipt ();
+  test_explicit_failure_finalizes_failed_receipt ();
+  test_structured_cancellation_nacks_and_preserves_receipt ();
+  test_dispatch_is_concurrent_per_keeper ();
+  test_finalization_persistence_retry_does_not_redeliver ();
+  if !failures > 0
+  then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;
     exit 1)
-  else Printf.printf "All keeper_chat_consumer_delivery checks passed\n%!"
+  else Printf.printf "All keeper_chat_consumer receipt checks passed\n%!"

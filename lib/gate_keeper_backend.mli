@@ -55,9 +55,13 @@ val dispatch :
     When the target keeper already has an admitted turn in flight, the busy
     message is routed per {!route_busy_connector}: a [Discord]/[Slack]
     [connector_kind] enqueues onto [Keeper_chat_queue] for deferred delivery via
-    the serial consumer's outbound adapter (RFC-connector-deferred-reply-via-chat-queue); [Generic] (the default)
+    the serial consumer's outbound adapter
+    (RFC-connector-deferred-reply-via-chat-queue). The enqueue is acknowledged
+    only after its durable snapshot commits; the reply's [message_request]
+    carries the queue receipt id and revision. Persistence failure returns an
+    explicit [Keeper_error_result], never a queued ACK. [Generic] (the default)
     returns an accepted async request envelope ([Keeper_msg_async]) instead of
-    blocking the connector request behind that turn.  The [channel] and
+    blocking the connector request behind that turn. The [channel] and
     [channel_user_id] are used to construct the agent name
     ([gate:<channel>:<workspace_id>:<user_id>]).  The other connector fields are
     injected into the keeper-visible message body so external user identity

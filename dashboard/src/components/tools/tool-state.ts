@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import { fetchDashboardTools, type DashboardToolsResponse, type DashboardToolInventoryItem } from '../../api'
 import { createManagedAsyncResource } from '../../lib/async-state'
+import { registerKeeperChatQueueRefresh } from '../../sse-store'
 
 // Managed (stale-while-revalidate): the previously loaded response stays
 // readable while a refetch is in flight. Panel-level polling — the keeper
@@ -42,6 +43,10 @@ export const SURFACE_LABELS: Record<SurfaceFilter, string> = {
 export async function loadTools() {
   await toolsResource.load(signal => fetchDashboardTools({ signal }))
 }
+
+registerKeeperChatQueueRefresh(() => {
+  void loadTools()
+})
 
 export function hasSurface(item: DashboardToolInventoryItem, surface: string): boolean {
   return (item.surfaces ?? []).includes(surface)

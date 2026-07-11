@@ -3,6 +3,7 @@ import { runOperatorAction } from './api/core'
 import {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchKeeperChatReceipt,
   fetchQueuedKeeperMessageResult,
   interruptKeeperTurn as apiInterruptKeeperTurn,
   isTerminalQueuedKeeperMessage,
@@ -299,10 +300,12 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
 // the merge are the fresher copy, and re-merging mid-session would
 // race the in-flight stream entries.
 const hydratedChatKeepers = new Set<string>()
+const keeperReceiptReconciliationGeneration = new Map<string, number>()
 
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
+  keeperReceiptReconciliationGeneration.clear()
 }
 
 /** Merge the server-persisted chat transcript
@@ -326,8 +329,9 @@ export async function hydrateKeeperChatHistory(
     // when chat history is empty so a keeper panel can still join recently
     // fetched tool rows from the rail/inspector.
     void hydrateKeeperToolOutputs(keeperName)
-    if (history.length === 0) return
-    mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
+    if (history.length > 0) {
+      mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
+    }
   } catch (err) {
     // Allow a later mount to retry instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
@@ -337,6 +341,7 @@ export async function hydrateKeeperChatHistory(
   } finally {
     setRecordValue(keeperHydrating, keeperName, false)
   }
+  await reconcileKeeperChatReceipts(keeperName)
 }
 
 // Match the visible chat history window. A keeper that calls many tools can
@@ -728,6 +733,127 @@ export async function resumePendingKeeperChatRequests(name: string): Promise<voi
   await Promise.all(pendingKeeperChatRequestsForKeeper(keeperName).map(resumePendingKeeperChatRequest))
 }
 
+/** Reconcile locally visible busy-ACK rows against the server's durable queue
+ * receipt ledger. Queue-change SSE is only an invalidation signal; this GET is
+ * the lifecycle truth for the exact receipt. */
+export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
+  const keeperName = name.trim()
+  if (!keeperName) return
+  const generation = (keeperReceiptReconciliationGeneration.get(keeperName) ?? 0) + 1
+  keeperReceiptReconciliationGeneration.set(keeperName, generation)
+  const queuedEntries = (keeperThreads.value[keeperName] ?? []).filter(entry => (
+    entry.role === 'assistant'
+    && entry.delivery === 'queued'
+    && Boolean(entry.details?.queueReceiptId)
+  ))
+  if (queuedEntries.length === 0) {
+    if (keeperActionErrors.value[keeperName]?.startsWith('큐 receipt 조회 실패:')) {
+      setRecordValue(keeperActionErrors, keeperName, null)
+    }
+    return
+  }
+  const failures: string[] = []
+  await Promise.all(queuedEntries.map(async (entry) => {
+    const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
+    if (!receiptId) return
+    try {
+      const receipt = await fetchKeeperChatReceipt(keeperName, receiptId)
+      if (receipt.keeperName !== keeperName || receipt.receiptId !== receiptId) {
+        throw new Error('receipt identity mismatch')
+      }
+      const currentEntry = (keeperThreads.value[keeperName] ?? [])
+        .find(candidate => candidate.id === entry.id)
+      if (!currentEntry || currentEntry.details?.queueReceiptId !== receiptId) return
+      const currentRevision = currentEntry.details.queueRevision
+      const currentState = currentEntry.details.queueState
+      if (typeof currentRevision === 'number' && receipt.revision < currentRevision) {
+        return
+      }
+      if (
+        typeof currentRevision === 'number'
+        && receipt.revision === currentRevision
+        && currentState
+        && currentState !== receipt.state.kind
+      ) {
+        throw new Error(
+          `receipt lifecycle conflict at revision ${receipt.revision}: ${currentState} -> ${receipt.state.kind}`,
+        )
+      }
+      if (
+        (currentState === 'delivered' || currentState === 'failed')
+        && currentState !== receipt.state.kind
+      ) {
+        throw new Error(
+          `terminal receipt lifecycle regressed at revision ${receipt.revision}: ${currentState} -> ${receipt.state.kind}`,
+        )
+      }
+      const details = {
+        ...(entry.details ?? {}),
+        queueRevision: receipt.revision,
+        queueState: receipt.state.kind,
+        queueFailureKind:
+          receipt.state.kind === 'failed' ? receipt.state.failureKind : null,
+      }
+      const streamContract = keeperStreamContract('queue_poll', 'queue_poll_result', {
+        deliveryReceipt: 'server_durable_receipt',
+        reason: `receipt ${receiptId} is ${receipt.state.kind}`,
+      })
+      switch (receipt.state.kind) {
+        case 'pending':
+        case 'inflight':
+          finalizeAssistantEntry(keeperName, entry.id, {
+            delivery: 'queued',
+            streamState: null,
+            details,
+            streamContract,
+          })
+          break
+        case 'delivered':
+          finalizeAssistantEntry(keeperName, entry.id, {
+            delivery: 'delivered',
+            streamState: null,
+            details,
+            error: null,
+            streamContract,
+          })
+          break
+        case 'failed':
+          finalizeAssistantEntry(keeperName, entry.id, {
+            delivery: 'error',
+            streamState: null,
+            details,
+            error: `큐 처리 실패 (${receipt.state.failureKind}): ${receipt.state.detail}`,
+            streamContract,
+          })
+          break
+      }
+    } catch (err) {
+      failures.push(
+        `${receiptId}: ${err instanceof Error ? err.message : 'receipt lookup failed'}`,
+      )
+    }
+  }))
+  const stillQueued = (keeperThreads.value[keeperName] ?? []).some(entry => (
+    entry.role === 'assistant'
+    && entry.delivery === 'queued'
+    && Boolean(entry.details?.queueReceiptId)
+  ))
+  if (!stillQueued) {
+    if (keeperActionErrors.value[keeperName]?.startsWith('큐 receipt 조회 실패:')) {
+      setRecordValue(keeperActionErrors, keeperName, null)
+    }
+    return
+  }
+  if (keeperReceiptReconciliationGeneration.get(keeperName) !== generation) return
+  if (failures.length > 0) {
+    const message = `큐 receipt 조회 실패: ${failures.join('; ')}`
+    setRecordValue(keeperActionErrors, keeperName, message)
+    console.warn(`[keeper] ${message}`)
+  } else if (keeperActionErrors.value[keeperName]?.startsWith('큐 receipt 조회 실패:')) {
+    setRecordValue(keeperActionErrors, keeperName, null)
+  }
+}
+
 /** React to a server `keeper_chat_appended` push: re-merge the
  *  persisted transcript so messages arriving through other connectors
  *  (Discord, Slack, agent MCP) appear without a page reload.
@@ -775,7 +901,9 @@ export function noteKeeperChatAppended(name: string, audio?: unknown, _blocks?: 
   if (pending) clearTimeout(pending)
   chatRefreshTimers.set(keeperName, setTimeout(() => {
     chatRefreshTimers.delete(keeperName)
-    void hydrateKeeperChatHistory(keeperName, { force: true })
+    void (async () => {
+      await hydrateKeeperChatHistory(keeperName, { force: true })
+    })()
   }, CHAT_APPENDED_REFRESH_DELAY_MS))
 }
 
@@ -1069,7 +1197,7 @@ export async function sendKeeperThreadMessage(
     }
 
     const finalDelivery =
-      !finalText && finalEntry?.delivery === 'queued'
+      finalEntry?.delivery === 'queued'
         ? 'queued' as KeeperConversationDelivery
         : 'delivered' as KeeperConversationDelivery
     if (!finalText && finalDelivery !== 'queued' && !toolCallEnded) {
@@ -1111,6 +1239,9 @@ export async function sendKeeperThreadMessage(
     if (requestId) {
       removePendingKeeperChatRequest(requestId)
       releaseActiveStreamRequestId(requestId)
+    }
+    if (finalDelivery === 'queued') {
+      void reconcileKeeperChatReceipts(keeperName)
     }
   } catch (err) {
     flushPendingKeeperStreamDeltas(keeperName, assistantId)

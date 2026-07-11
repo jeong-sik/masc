@@ -621,7 +621,7 @@ let test_status_surfaces_chat_queue_runtime () =
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Eio_main.run @@ fun _env ->
   (* Mirror production: the status handler runs under [Eio_main.run] with the
-     guard enabled (bin/main_eio.ml), so [Keeper_chat_queue.length] is read.
+     guard enabled (bin/main_eio.ml), so the durable queue snapshot is read.
      Disable on exit so other (non-Eio) cases keep reporting [`Null]. *)
   Eio_guard.enable ();
   Masc.Keeper_chat_queue.For_testing.reset ();

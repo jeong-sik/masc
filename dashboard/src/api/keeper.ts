@@ -1,12 +1,16 @@
 // MASC Dashboard — Keeper messaging (operator-mediated queue, SSE streaming)
 
-import { asString, isRecord } from '../components/common/normalize'
+import { asNumber, asString, isRecord } from '../components/common/normalize'
 import {
   formatKeeperVisibleReply,
   keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
 } from '../keeper-message'
-import type { KeeperConversationDetails, KeeperUserInputBlock } from '../types'
+import type {
+  KeeperConversationDetails,
+  KeeperQueueReceiptFailureKind,
+  KeeperUserInputBlock,
+} from '../types'
 import type { DashboardAuthErrorCode } from '../types/dashboard-execution'
 import {
   currentDashboardActor,
@@ -23,6 +27,7 @@ import {
   DEFAULT_POST_TIMEOUT_MS,
 } from './core'
 import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
+import { isKeeperChatReceiptId } from '../lib/keeper-chat-receipt'
 import type {
   KeeperCompositeSnapshot,
   FleetCompositeSnapshot,
@@ -683,6 +688,120 @@ export async function streamKeeperMessage(
 }
 
 // --- Chat history ---
+
+export type KeeperChatReceiptFailureKind = KeeperQueueReceiptFailureKind
+
+export type KeeperChatReceiptState =
+  | { kind: 'pending' }
+  | { kind: 'inflight'; leaseId: string; startedAt: number }
+  | { kind: 'delivered'; completedAt: number; outcomeRef: string | null }
+  | {
+      kind: 'failed'
+      failureKind: KeeperChatReceiptFailureKind
+      detail: string
+      completedAt: number
+      outcomeRef: string | null
+    }
+
+export interface KeeperChatReceipt {
+  keeperName: string
+  receiptId: string
+  revision: number
+  state: KeeperChatReceiptState
+}
+
+const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
+  'turn_failed',
+  'timed_out',
+  'no_visible_reply',
+  'transcript_persist_failed',
+  'connector_unavailable',
+  'delivery_failed',
+  'cancelled',
+  'internal_error',
+])
+
+export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
+  if (!isRecord(value) || value.schema !== 'keeper_chat_queue.receipt.v1') {
+    throw new Error('Keeper chat receipt response has an unsupported schema')
+  }
+  const keeperName = asString(value.keeper_name, '').trim()
+  const receiptId = asString(value.receipt_id, '').trim()
+  const revision = asNumber(value.revision)
+  const rawState = isRecord(value.state) ? value.state : null
+  const kind = asString(rawState?.kind, '').trim()
+  if (
+    !keeperName
+    || !isKeeperChatReceiptId(receiptId)
+    || !rawState
+    || typeof revision !== 'number'
+    || !Number.isSafeInteger(revision)
+    || revision < 0
+  ) {
+    throw new Error('Keeper chat receipt response is missing identity or state')
+  }
+  let state: KeeperChatReceiptState
+  switch (kind) {
+    case 'pending':
+      state = { kind }
+      break
+    case 'inflight': {
+      const leaseId = asString(rawState.lease_id, '').trim()
+      const startedAt = asNumber(rawState.started_at)
+      if (!leaseId || typeof startedAt !== 'number') {
+        throw new Error('Keeper chat inflight receipt is missing lease metadata')
+      }
+      state = { kind, leaseId, startedAt }
+      break
+    }
+    case 'delivered': {
+      const completedAt = asNumber(rawState.completed_at)
+      if (typeof completedAt !== 'number') {
+        throw new Error('Keeper chat delivered receipt is missing completion time')
+      }
+      state = {
+        kind,
+        completedAt,
+        outcomeRef: asString(rawState.outcome_ref) ?? null,
+      }
+      break
+    }
+    case 'failed': {
+      const failureKind = asString(rawState.failure_kind, '') as KeeperChatReceiptFailureKind
+      const detail = asString(rawState.detail, '')
+      const completedAt = asNumber(rawState.completed_at)
+      if (!KEEPER_CHAT_RECEIPT_FAILURE_KINDS.has(failureKind) || !detail || typeof completedAt !== 'number') {
+        throw new Error('Keeper chat failed receipt has invalid failure metadata')
+      }
+      state = {
+        kind,
+        failureKind,
+        detail,
+        completedAt,
+        outcomeRef: asString(rawState.outcome_ref) ?? null,
+      }
+      break
+    }
+    default:
+      throw new Error(`Keeper chat receipt has unknown state: ${kind || '<empty>'}`)
+  }
+  return { keeperName, receiptId, revision, state }
+}
+
+export async function fetchKeeperChatReceipt(
+  keeperName: string,
+  receiptId: string,
+): Promise<KeeperChatReceipt> {
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}`,
+    { headers: jsonHeaders() },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) {
+    throw new Error(`fetchKeeperChatReceipt: HTTP ${resp.status} ${resp.statusText}`)
+  }
+  return parseKeeperChatReceipt(await resp.json())
+}
 
 export async function fetchKeeperChatHistory(
   name: string,

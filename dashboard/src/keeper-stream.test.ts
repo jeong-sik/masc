@@ -91,6 +91,70 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
   })
 
+  it('retains the durable receipt when a busy chat message enters the server queue', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        keeper_name: 'sangsu',
+        status: 'queued',
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
+        queue_revision: 12,
+        pending_count: 3,
+        inflight_count: 1,
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('queued')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.details).toMatchObject({
+      queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000007',
+      queueRevision: 12,
+      queuePendingCount: 3,
+      queueInflightCount: 1,
+    })
+    expect(entry?.streamContract).toMatchObject({
+      source: 'queue_event',
+      eventName: 'KEEPER_CHAT_QUEUED',
+      deliveryReceipt: 'client_observed_sse_event',
+    })
+  })
+
+  it('rejects a busy queue acceptance event without a durable receipt', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: { status: 'queued', pending_count: 1, inflight_count: 0 },
+    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
+  })
+
+  it('rejects malformed or partial durable queue acceptance metadata', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        receipt_id: 'not-a-chat-receipt',
+        queue_revision: 1,
+        pending_count: 1,
+        inflight_count: 0,
+      },
+    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
+        pending_count: 1,
+        inflight_count: 0,
+      },
+    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
+  })
+
   it('surfaces failed request terminal events before stream error close', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

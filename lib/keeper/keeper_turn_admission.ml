@@ -147,10 +147,19 @@ let run_if_free ~base_path ~keeper_name f =
      lock-only, non-suspending peek and is the SSOT signal that closes the
      gap: the autonomous lane cooperates on the same backlog the consumer
      drains, so the consumer's [in_flight = None] window opens
-     deterministically instead of racing the next autonomous cycle. *)
+     deterministically instead of racing the next autonomous cycle. A leased
+     receipt remains active until its terminal decision commits, so the
+     autonomous lane must also yield during the short lease-to-admission and
+     admission-to-finalization windows. *)
   if waiting_count slot > 0
   then `Busy (peek_info slot)
-  else if Keeper_chat_queue.length ~keeper_name > 0
+  else if not (Keeper_chat_queue.persistence_configured ())
+  then `Busy (peek_info slot)
+  else if
+    let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+    snapshot.load_errors <> []
+    || snapshot.pending <> []
+    || snapshot.inflight <> []
   then `Busy (peek_info slot)
   else if Eio.Mutex.try_lock slot.turn_mu
   then run_locked slot ~lane:Autonomous f

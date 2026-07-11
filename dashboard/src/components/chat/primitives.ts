@@ -578,6 +578,12 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     typeof details.usage?.totalTokens === 'number' ? { label: '토큰', value: `${details.usage.totalTokens}` } : null,
     formatCurrency(details.costUsd) ? { label: '비용', value: formatCurrency(details.costUsd)! } : null,
     details.traceId ? { label: '트레이스', value: details.traceId } : null,
+    details.queueReceiptId ? { label: '큐 receipt', value: details.queueReceiptId } : null,
+    details.queueState ? { label: '큐 상태', value: details.queueState } : null,
+    details.queueFailureKind ? { label: '큐 실패', value: details.queueFailureKind } : null,
+    typeof details.queueRevision === 'number' ? { label: '큐 revision', value: `${details.queueRevision}` } : null,
+    typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,
+    typeof details.queueInflightCount === 'number' ? { label: '접수 시 inflight', value: `${details.queueInflightCount}` } : null,
     typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
@@ -2394,6 +2400,11 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-speaker-name=${entry.speakerName ?? undefined}
       data-chat-speaker-authority=${entry.speakerAuthority ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-queue-receipt-id=${entry.details?.queueReceiptId ?? undefined}
+      data-chat-queue-state=${entry.details?.queueState ?? undefined}
+      data-chat-queue-revision=${entry.details?.queueRevision ?? undefined}
+      data-chat-queue-pending-count=${entry.details?.queuePendingCount ?? undefined}
+      data-chat-queue-inflight-count=${entry.details?.queueInflightCount ?? undefined}
       data-chat-attachment-count=${attachments.length}
       data-chat-server-attach-block-count=${attachBlocks.length}
       data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}

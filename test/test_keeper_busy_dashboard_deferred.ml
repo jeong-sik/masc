@@ -56,7 +56,12 @@ let with_env body =
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
       Keeper_chat_queue.For_testing.reset ();
-      body ~base ~clock)
+      let report = Keeper_chat_queue.configure_persistence ~base_path:base in
+      check "chat queue persistence configured without load errors"
+        (report.load_errors = []);
+      Eio.Switch.run (fun sw ->
+        Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
+        body ~base ~clock))
 ;;
 
 let with_busy_slot ~base ~sw ?(keeper_name = keeper_name) f =
@@ -110,13 +115,19 @@ let test_busy_dashboard_enqueues () =
        (payload ())
    with
    | `Queued len -> check "queue length is reported" (len = 1)
-   | `Not_busy -> check "busy keeper was deferred" false);
-  check "exactly one dashboard message enqueued" (Keeper_chat_queue.length ~keeper_name = 1);
-  (match Keeper_chat_queue.dequeue ~keeper_name with
-   | Some { Keeper_chat_queue.content; source = Dashboard; _ } ->
+   | `Not_busy | `Queue_error _ -> check "busy keeper was deferred" false);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "exactly one dashboard receipt is pending"
+    (List.length snapshot.pending = 1);
+  check "dashboard queue has no inflight receipt" (snapshot.inflight = []);
+  check "dashboard queue revision advances" (snapshot.revision = 1L);
+  (match snapshot.pending with
+   | [ { Keeper_chat_queue.message =
+           { Keeper_chat_queue.content; source = Dashboard; _ }
+       ; _
+       } ] ->
      check "queued content is the user's message" (String.equal content "are you there?")
-   | Some _ -> check "queued source is dashboard" false
-   | None -> check "queue holds the dashboard message" false)
+   | _ -> check "queue holds one dashboard receipt" false)
 ;;
 
 let test_free_dashboard_not_enqueued () =
@@ -130,23 +141,28 @@ let test_free_dashboard_not_enqueued () =
        (payload ~content:"run now" ())
    with
    | `Not_busy -> check "free keeper stays on direct stream path" true
-   | `Queued _ -> check "free keeper must not enqueue" false);
-  check "queue remains empty" (Keeper_chat_queue.length ~keeper_name = 0)
+   | `Queued _ | `Queue_error _ -> check "free keeper must not enqueue" false);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "queue remains empty" (snapshot.pending = [] && snapshot.inflight = [])
 ;;
 
 let test_existing_backlog_defers_new_dashboard_message () =
   Printf.printf "Test: existing dashboard backlog keeps newer messages queued\n%!";
   with_env
   @@ fun ~base ~clock ->
-  ignore
-    (Keeper_chat_queue.enqueue ~keeper_name
+  (match
+     Keeper_chat_queue.enqueue ~keeper_name
        { Keeper_chat_queue.content = "older queued message"
        ; user_blocks = []
        ; attachments = []
        ; timestamp = Eio.Time.now clock
        ; source = Dashboard
        }
-      : string);
+   with
+   | Ok receipt ->
+     check "older message receives the first durable revision"
+       (receipt.revision = 1L)
+   | Error _ -> check "older message enqueue succeeds" false);
   (match
      Server_routes_http_keeper_stream.For_testing.defer_dashboard_payload_if_busy
        ~base_path:base
@@ -154,15 +170,17 @@ let test_existing_backlog_defers_new_dashboard_message () =
        (payload ~content:"newer dashboard message" ())
    with
    | `Queued len -> check "newer message joins existing backlog" (len = 2)
-   | `Not_busy -> check "existing backlog should force queue path" false);
-  (match Keeper_chat_queue.dequeue ~keeper_name with
-   | Some { Keeper_chat_queue.content; _ } ->
-     check "older queued message stays first" (String.equal content "older queued message")
-   | None -> check "older queued message is present" false);
-  (match Keeper_chat_queue.dequeue ~keeper_name with
-   | Some { Keeper_chat_queue.content; _ } ->
-     check "newer dashboard message stays second" (String.equal content "newer dashboard message")
-   | None -> check "newer queued message is present" false)
+   | `Not_busy | `Queue_error _ ->
+     check "existing backlog should force queue path" false);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  let pending_contents =
+    List.map
+      (fun (receipt : Keeper_chat_queue.active_receipt) ->
+         receipt.message.content)
+      snapshot.pending
+  in
+  check "durable snapshot preserves FIFO order"
+    (pending_contents = [ "older queued message"; "newer dashboard message" ])
 ;;
 
 let test_concurrent_busy_dashboard_enqueues_are_per_keeper () =
@@ -205,7 +223,7 @@ let test_concurrent_busy_dashboard_enqueues_are_per_keeper () =
     | Some (`Queued 1) ->
       check
         (Printf.sprintf "keeper %s queued exactly one message" keeper_name)
-        (Keeper_chat_queue.length ~keeper_name = 1)
+        (List.length (Keeper_chat_queue.snapshot ~keeper_name).pending = 1)
     | Some (`Queued n) ->
       check
         (Printf.sprintf "keeper %s queued exactly one message (got %d)" keeper_name n)
@@ -214,6 +232,10 @@ let test_concurrent_busy_dashboard_enqueues_are_per_keeper () =
       check
         (Printf.sprintf "keeper %s was busy and should defer" keeper_name)
         false
+    | Some (`Queue_error message) ->
+      check
+        (Printf.sprintf "keeper %s enqueue succeeded: %s" keeper_name message)
+        false
     | None ->
       check
         (Printf.sprintf "keeper %s defer fiber completed" keeper_name)
@@ -221,10 +243,37 @@ let test_concurrent_busy_dashboard_enqueues_are_per_keeper () =
   let total_queued =
     keeper_names
     |> List.fold_left
-         (fun acc keeper_name -> acc + Keeper_chat_queue.length ~keeper_name)
+         (fun acc keeper_name ->
+            acc + List.length (Keeper_chat_queue.snapshot ~keeper_name).pending)
          0
   in
   check "all busy dashboard messages are preserved" (total_queued = 8)
+;;
+
+let test_busy_dashboard_persist_failure_is_explicit () =
+  Printf.printf "Test: busy dashboard durable enqueue failure is explicit\n%!";
+  with_env
+  @@ fun ~base ~clock ->
+  Eio.Switch.run
+  @@ fun sw ->
+  with_busy_slot ~base ~sw
+  @@ fun () ->
+  Keeper_chat_queue.For_testing.fail_next_persist ();
+  (match
+     Server_routes_http_keeper_stream.For_testing.defer_dashboard_payload_if_busy
+       ~base_path:base
+       ~clock
+       (payload ~content:"do not acknowledge this as queued" ())
+   with
+   | `Queue_error message ->
+     check "dashboard receives the persistence error" (String.length message > 0)
+   | `Queued _ | `Not_busy ->
+     check "dashboard persistence failure never claims queued" false);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "dashboard failed enqueue leaves no pending receipt"
+    (snapshot.pending = []);
+  check "dashboard failed enqueue leaves revision unchanged"
+    (snapshot.revision = 0L)
 ;;
 
 let test_stream_headers_close_per_turn_response () =
@@ -243,6 +292,7 @@ let () =
   test_free_dashboard_not_enqueued ();
   test_existing_backlog_defers_new_dashboard_message ();
   test_concurrent_busy_dashboard_enqueues_are_per_keeper ();
+  test_busy_dashboard_persist_failure_is_explicit ();
   test_stream_headers_close_per_turn_response ();
   if !failures > 0
   then (

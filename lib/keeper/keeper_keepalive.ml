@@ -763,8 +763,11 @@ let record_keeper_stopped
   =
   if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
   then (
-    ignore (dispatch_event_exact_unit entry Keeper_state_machine.Stop_requested);
-    ignore (dispatch_event_exact_unit entry Keeper_state_machine.Drain_complete);
+    (match dispatch_event_exact_unit entry Keeper_state_machine.Stop_requested with
+     | false -> ()
+     | true ->
+       (match dispatch_event_exact_unit entry Keeper_state_machine.Drain_complete with
+        | true | false -> ()));
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Stopped
       ~keeper_name

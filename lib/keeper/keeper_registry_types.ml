@@ -252,7 +252,7 @@ let rec settle_unlaunched_fiber_exit entry =
   | Fiber_not_started ->
     if Atomic.compare_and_set entry.fiber_lifecycle_state current Fiber_exited
     then (
-      ignore (resolve_fiber_exited entry : bool);
+      let (_was_first_resolver : bool) = resolve_fiber_exited entry in
       true)
     else settle_unlaunched_fiber_exit entry
   | Fiber_running | Fiber_exited -> false

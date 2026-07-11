@@ -53,6 +53,20 @@ let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enable
 let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
 let domain_pool_ignored_warning_emitted = Atomic.make false
 
+let resolve_physical_lane_exit (entry : Keeper_registry.registry_entry) =
+  let (_was_first_resolver : bool) =
+    Keeper_registry.resolve_fiber_exited entry
+  in
+  ()
+;;
+
+let settle_lane_before_launch (entry : Keeper_registry.registry_entry) =
+  let (_settled : bool) =
+    Keeper_registry.settle_unlaunched_fiber_exit entry
+  in
+  ()
+;;
+
 let launch_supervised_fiber_body
       ~proactive_warmup_sec
       ctx
@@ -62,7 +76,7 @@ let launch_supervised_fiber_body
   let base_path = ctx.config.base_path in
   let keepers_dir = Workspace.keepers_runtime_dir ctx.config in
   if restart_launch_noop_enabled_for_test ()
-  then ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+  then resolve_physical_lane_exit reg
   else (
     (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
@@ -530,7 +544,7 @@ let launch_supervised_fiber_body
                Fun.Finally_raised): %s"
               meta.name
               (Printexc.to_string exn));
-          ignore (Keeper_registry.resolve_fiber_exited reg : bool))))
+          resolve_physical_lane_exit reg)))
 ;;
 
 (** Launch gate: the physical-lane CAS and registry FSM must both accept the
@@ -551,7 +565,7 @@ let launch_supervised_fiber
   in
   if Keeper_registry.shutdown_requested reg
   then (
-    ignore (Keeper_registry.settle_unlaunched_fiber_exit reg : bool);
+    settle_lane_before_launch reg;
     Error
       (launch_precondition_error
          "shutdown transaction claimed the lane before fiber launch"))
@@ -592,10 +606,10 @@ let launch_supervised_fiber
       |> should_publish_lifecycle_for_done_signal
     then
       publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed meta.name reason ();
-    ignore (Keeper_registry.resolve_fiber_exited reg : bool);
+    resolve_physical_lane_exit reg;
     Error err
   | Ok _ when Keeper_registry.shutdown_requested reg ->
-    ignore (Keeper_registry.settle_unlaunched_fiber_exit reg : bool);
+    settle_lane_before_launch reg;
     Error
       (launch_precondition_error
          "shutdown transaction won the launch race after Fiber_started")
@@ -611,7 +625,7 @@ let launch_supervised_fiber
             "fiber launch attempted after the physical lane was settled")
      | Keeper_registry.Fiber_launch_claimed
        when Keeper_registry.shutdown_requested reg ->
-       ignore (Keeper_registry.resolve_fiber_exited reg : bool);
+       resolve_physical_lane_exit reg;
        Error
          (launch_precondition_error
             "shutdown transaction won the launch race after the launch claim")
@@ -622,7 +636,7 @@ let launch_supervised_fiber
         with
         | exn ->
           let backtrace = Printexc.get_raw_backtrace () in
-          ignore (Keeper_registry.resolve_fiber_exited reg : bool);
+          resolve_physical_lane_exit reg;
           Printexc.raise_with_backtrace exn backtrace)))
 ;;
 

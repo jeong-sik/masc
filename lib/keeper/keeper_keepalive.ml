@@ -709,6 +709,13 @@ let resolve_registry_done
   | Keeper_registry.Done_already_resolved _ -> false
 ;;
 
+let resolve_physical_lane_exit (entry : Keeper_registry.registry_entry) =
+  let (_was_first_resolver : bool) =
+    Keeper_registry.resolve_fiber_exited entry
+  in
+  ()
+;;
+
 let record_keeper_stopped
       (entry : Keeper_registry.registry_entry)
       ~base_path
@@ -850,7 +857,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
          rejected launch — the same half-commit class this change removes
          from the fiber-fork path. *)
       if Keeper_registry.shutdown_requested reg
-      then ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+      then resolve_physical_lane_exit reg
       else
       match dispatch_fiber_started ~base_path:ctx.config.base_path m.name with
       | Error err ->
@@ -884,12 +891,12 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             ~keeper_name:m.name
             ~detail:reason
             ();
-        ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+        resolve_physical_lane_exit reg
       | Ok () when Keeper_registry.shutdown_requested reg ->
         (* Shutdown won the register-to-fork race.  No lane fiber exists, so
            resolve the physical join signal and leave terminal FSM/done
            settlement to the shutdown transaction. *)
-        ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+        resolve_physical_lane_exit reg
       | Ok () ->
         let launch_claimed =
           match Keeper_registry.claim_fiber_launch reg with
@@ -910,7 +917,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         if not launch_claimed
         then ()
         else if Keeper_registry.shutdown_requested reg
-        then ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+        then resolve_physical_lane_exit reg
         else
         let stop = reg.fiber_stop in
         let wakeup = reg.fiber_wakeup in
@@ -988,7 +995,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         in
         let finalize_fiber_exit () =
           safe_cleanup_tracking ();
-          ignore (Keeper_registry.resolve_fiber_exited reg : bool)
+          resolve_physical_lane_exit reg
         in
         Eio_guard.protect
           (fun () ->
@@ -1055,7 +1062,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
              ~failure_reason:
                (Keeper_registry.Exception
                   ("direct lane fork failed: " ^ Printexc.to_string exn));
-           ignore (Keeper_registry.resolve_fiber_exited reg : bool);
+           resolve_physical_lane_exit reg;
            Printexc.raise_with_backtrace exn backtrace))
 ;;
 
@@ -1181,12 +1188,16 @@ let request_shutdown_and_await_exit ~base_path name =
   | Some entry when Keeper_registry.current_fiber_owns_turn entry ->
     Shutdown_self_join_rejected
   | Some entry ->
-    ignore (Keeper_registry.begin_shutdown entry : Keeper_registry.shutdown_begin_result);
+    (match Keeper_registry.begin_shutdown entry with
+     | Keeper_registry.Shutdown_started
+     | Keeper_registry.Shutdown_already_started _ -> ());
     let grpc_close_error = signal_entry_stop entry in
     let interrupt =
       Keeper_registry.interrupt_current_turn_for_shutdown ~base_path name
     in
-    ignore (Keeper_registry.settle_unlaunched_fiber_exit entry : bool);
+    let (_settled_before_launch : bool) =
+      Keeper_registry.settle_unlaunched_fiber_exit entry
+    in
     Keeper_registry.await_fiber_exit entry;
     Shutdown_lane_joined { entry; interrupt; grpc_close_error }
 ;;

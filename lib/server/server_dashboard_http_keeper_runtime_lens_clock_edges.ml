@@ -4,18 +4,19 @@ open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
+type manifest_row = Keeper_runtime_manifest.t
 
 let clock_refs decision =
   match Json_util.assoc_member_opt "clock_refs" decision with
   | Some (`Assoc _ as obj) -> Some obj
   | _ -> None
 
-let clock_string row key =
+let clock_string (row : manifest_row) key =
   match clock_refs row.Keeper_runtime_manifest.decision with
   | Some refs -> Json_util.get_string refs key
   | None -> None
 
-let clock_string_non_empty row key =
+let clock_string_non_empty (row : manifest_row) key =
   match clock_string row key with
   | Some value -> String_util.trim_to_option value
   | _ -> None
@@ -32,34 +33,34 @@ let basename_opt = function
     let base = Filename.basename path in
     String_util.trim_to_option base
 
-let turn_label row =
+let turn_label (row : manifest_row) =
   match row.Keeper_runtime_manifest.keeper_turn_id with
   | Some value -> string_of_int value
   | None -> "unknown"
 
-let oas_turn_label row =
+let oas_turn_label (row : manifest_row) =
   match row.Keeper_runtime_manifest.oas_turn_count with
   | Some value -> string_of_int value
   | None -> "0"
 
-let fallback_edge_id row idx =
+let fallback_edge_id (row : manifest_row) idx =
   Printf.sprintf "%s:%s:%d" row.Keeper_runtime_manifest.trace_id
     (Keeper_runtime_manifest.event_kind_to_string row.Keeper_runtime_manifest.event)
     idx
 
-let fallback_tool_batch_id row =
+let fallback_tool_batch_id (row : manifest_row) =
   Printf.sprintf "%s:keeper-%s:tool-batch-oas-%s"
     row.Keeper_runtime_manifest.trace_id
     (turn_label row)
     (oas_turn_label row)
 
-let fallback_provider_attempt_id row attempt_index =
+let fallback_provider_attempt_id (row : manifest_row) attempt_index =
   Printf.sprintf "%s:keeper-%s:provider-attempt-%d"
     row.Keeper_runtime_manifest.trace_id
     (turn_label row)
     attempt_index
 
-let fallback_checkpoint_id row =
+let fallback_checkpoint_id (row : manifest_row) =
   let decision = row.Keeper_runtime_manifest.decision in
   first_string_opt
     [
@@ -73,13 +74,13 @@ let fallback_checkpoint_id row =
       |> Option.map (fun base -> "checkpoint:" ^ base);
     ]
 
-let fallback_compaction_id row idx =
+let fallback_compaction_id (row : manifest_row) idx =
   Printf.sprintf "%s:keeper-%s:compaction-%d"
     row.Keeper_runtime_manifest.trace_id
     (turn_label row)
     idx
 
-let event_started_at row =
+let event_started_at (row : manifest_row) =
   match row.Keeper_runtime_manifest.event with
   | Keeper_runtime_manifest.Turn_started
   | Keeper_runtime_manifest.Phase_gate_decided
@@ -101,7 +102,7 @@ let event_started_at row =
   | Keeper_runtime_manifest.Turn_finished ->
     None
 
-let event_finished_at row =
+let event_finished_at (row : manifest_row) =
   match row.Keeper_runtime_manifest.event with
   | Keeper_runtime_manifest.Runtime_completed
   | Keeper_runtime_manifest.Runtime_failed
@@ -128,7 +129,7 @@ let event_source_clock = function
     Keeper_runtime_manifest.source_clock_of_event event
     |> Keeper_runtime_manifest.source_clock_to_string
 
-let clock_edge_json ~idx ~provider_attempt_index row =
+let clock_edge_json ~idx ~provider_attempt_index (row : manifest_row) =
   let event = row.Keeper_runtime_manifest.event in
   let decision = row.Keeper_runtime_manifest.decision in
   let explicit_provider_attempt_id = clock_string row "provider_attempt_id" in

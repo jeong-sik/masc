@@ -220,7 +220,7 @@ let max_int_opt current value =
   | None -> Some value
   | Some existing -> Some (max existing value)
 
-let update_runtime_manifest_scan scan row =
+let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
   scan.total_rows <- scan.total_rows + 1;
   push_bounded scan.returned_rows scan.limit row;
   increment_event_count scan row.Keeper_runtime_manifest.event;

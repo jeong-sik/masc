@@ -28,6 +28,7 @@ interface IdeExplorerProps {
   readonly subscribeWorkspaceSource?: (listener: () => void) => () => void
   readonly repositories?: () => ReadonlyArray<Repository>
   readonly activeRepositoryId?: () => string | null
+  readonly subscribeActiveRepositoryId?: (listener: () => void) => () => void
   readonly onRepositoryChange?: (repoId: string | null) => void
   readonly onRepositoryScan?: () => Promise<ReadonlyArray<Repository>>
   readonly subscribeRepositories?: (listener: () => void) => () => void
@@ -90,6 +91,7 @@ export function IdeExplorer({
   subscribeWorkspaceSource,
   repositories,
   activeRepositoryId,
+  subscribeActiveRepositoryId,
   onRepositoryChange,
   onRepositoryScan,
   subscribeRepositories,
@@ -115,9 +117,14 @@ export function IdeExplorer({
     if (!subscribeRepositories || !repositories) return
     return subscribeRepositories(() => {
       setRepoList(repositories())
-      setSelectedRepoId(activeRepositoryId ? activeRepositoryId() : null)
     })
-  }, [activeRepositoryId, repositories, subscribeRepositories])
+  }, [repositories, subscribeRepositories])
+  useEffect(() => {
+    if (!subscribeActiveRepositoryId || !activeRepositoryId) return
+    return subscribeActiveRepositoryId(() => {
+      setSelectedRepoId(activeRepositoryId())
+    })
+  }, [activeRepositoryId, subscribeActiveRepositoryId])
 
   const [tick, setTick] = useState(0)
   useEffect(() => {

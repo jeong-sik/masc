@@ -1326,6 +1326,7 @@ export function IdeShell() {
               subscribeWorkspaceSource=${workspaceStore.subscribeWorkspaceSource}
               repositories=${workspaceStore.repositories}
               activeRepositoryId=${workspaceStore.activeRepositoryId}
+              subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
               onRepositoryChange=${workspaceStore.setActiveRepositoryId}
               onRepositoryScan=${workspaceStore.scanRepositories}
               subscribeRepositories=${workspaceStore.subscribeRepositories}

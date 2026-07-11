@@ -3,6 +3,7 @@ import {
   activeIdeFile,
   activeIdeFocus,
   activeIdeWorkspaceIdentity,
+  clearIdeContextFocus,
   clearIdeFileFocus,
   focusIdeFile,
   ideWorkspaceIdentityForSelection,
@@ -334,6 +335,10 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
   /** Track repo IDs that returned unreachable workspace sources, to avoid re-selecting them. */
   const unreachableRepoIds = new Set<string>()
+  // Repository discovery can overlap the initial list fetch. Only the newest
+  // list request may publish repository identity or its failure projection;
+  // otherwise a late startup response can rewind a completed scan.
+  let repositoryRefreshGeneration = 0
 
   let abortController = new AbortController()
   // Identity of the workspace source the file tree was last seeded for.
@@ -350,15 +355,20 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   }
 
   const refreshRepositories = async (): Promise<ReadonlyArray<Repository>> => {
+    const generation = ++repositoryRefreshGeneration
     try {
       const repositories = await fetchRepositoriesList()
-      clearIssue('repositories')
-      applyRepositories(repositories)
+      if (generation === repositoryRefreshGeneration) {
+        clearIssue('repositories')
+        applyRepositories(repositories)
+      }
       return repositories
     } catch (error) {
-      recordIssue('repositories', error, {
-        fallbackMessage: 'repository list fetch failed',
-      })
+      if (generation === repositoryRefreshGeneration) {
+        recordIssue('repositories', error, {
+          fallbackMessage: 'repository list fetch failed',
+        })
+      }
       throw error
     }
   }
@@ -370,11 +380,13 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   }
 
   refreshRepositories()
+    // The current-generation failure is already projected into workspaceIssues.
+    // Contain the background startup rejection without overwriting a newer scan.
     .catch(error => {
-      recordIssue('repositories', error, {
-        fallbackMessage: 'repository list fetch failed',
-      })
-      repositoriesSignal.value = []
+      console.warn(
+        '[IDE] initial repository refresh failed',
+        error instanceof Error ? error.message : error,
+      )
     })
 
   // Fetch the workspace snapshot for the current file/keeper/repo/task.
@@ -413,6 +425,11 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       && !sameIdeWorkspaceIdentity(focus.workspace_identity, workspaceIdentity)
     if (workspaceIdentityChanged || focusWorkspaceChanged) {
       invalidateWorkspaceDocument()
+      // Context-anchor labels, keeper attribution, and route links describe
+      // the workspace in which the anchor was selected. They cannot be safely
+      // rebound by path alone when a repository/project/keeper identity
+      // changes, even if the target workspace contains the same path.
+      clearIdeContextFocus()
     }
     if (workspaceIdentityChanged) {
       fileTreeStore.seed([])
@@ -840,6 +857,9 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       runWorkspaceFetches()
     },
     dispose: () => {
+      // Invalidate a non-abortable repository list request before tearing down
+      // subscriptions so a late completion cannot publish into a disposed store.
+      repositoryRefreshGeneration += 1
       abortController.abort()
       unregisterLiveRefresh()
       disposeEffect()

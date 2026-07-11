@@ -44,8 +44,10 @@ import type { FileTreeNode } from './file-tree-store'
 import {
   activeIdeFocus,
   activeIdeWorkspaceIdentity,
+  clearIdeContextFocus,
   clearIdeFileFocus,
   focusIdeFile,
+  ideContextFocus,
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
@@ -148,6 +150,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   seedWorkspaceApiMocks()
   clearIdeFileFocus()
+  clearIdeContextFocus()
   synchronizeIdeWorkspaceIdentity({ kind: 'project' })
   activeKeeperName.value = ''
   selectedTask.value = null
@@ -314,6 +317,36 @@ describe('selectPreferredIdeRepositoryId', () => {
 })
 
 describe('IDE focus workspace provenance', () => {
+  it('keeps the newest repository refresh when the startup list resolves late', async () => {
+    const startupList = deferred<ReadonlyArray<Repository>>()
+    const scannedList = deferred<ReadonlyArray<Repository>>()
+    repositoryApiMocks.fetchRepositoriesList
+      .mockReturnValueOnce(startupList.promise)
+      .mockReturnValueOnce(scannedList.promise)
+    repositoryApiMocks.discoverRepositories.mockResolvedValue([
+      repo('repo-b', '/workspace/repo-b'),
+    ])
+    const store = createIdeDataWorkspaceStore()
+
+    try {
+      const scan = store.scanRepositories()
+      scannedList.resolve([repo('repo-b', '/workspace/repo-b')])
+      await scan
+
+      expect(store.repositories().map(repository => repository.id)).toEqual(['repo-b'])
+      expect(store.activeRepositoryId()).toBe('repo-b')
+
+      startupList.resolve([repo('repo-a', '/workspace/repo-a')])
+      await startupList.promise
+      await Promise.resolve()
+
+      expect(store.repositories().map(repository => repository.id)).toEqual(['repo-b'])
+      expect(store.activeRepositoryId()).toBe('repo-b')
+    } finally {
+      store.dispose()
+    }
+  })
+
   it('reselects observed focus for repo B and invalidates the repo A document before B resolves', async () => {
     const repoBTree = deferred<WorkspaceTreeResult>()
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
@@ -354,6 +387,17 @@ describe('IDE focus workspace provenance', () => {
         expect(store.documentStore.document().content).toContain('repo-a')
       })
 
+      ideContextFocus.value = {
+        file_path: 'lib/a.ml',
+        line: 1,
+        surface: 'Activity',
+        label: 'repo A event',
+        source_id: 'repo-a-event',
+        keeper_id: 'keeper-a',
+        route_links: [],
+        activated_at_ms: 1,
+      }
+
       store.setActiveRepositoryId('repo-b')
 
       expect(store.documentStore.document()).toMatchObject({
@@ -363,6 +407,7 @@ describe('IDE focus workspace provenance', () => {
       })
       expect(store.fileTreeStore.nodeCount()).toBe(0)
       expect(activeIdeFocus.value).toBeNull()
+      expect(ideContextFocus.value).toBeNull()
 
       repoBTree.resolve(repositoryTree('repo-b', [changedFile('lib/b.ml')]))
       await vi.waitFor(() => {

@@ -144,6 +144,10 @@ export interface IdeContextFocus {
 
 export const ideContextFocus = signal<IdeContextFocus | null>(null)
 
+export function clearIdeContextFocus(): void {
+  ideContextFocus.value = null
+}
+
 export function focusIdeContextAnchor(
   anchor: Omit<IdeContextFocus, 'activated_at_ms'>,
   origin: ExplicitIdeFileFocusOrigin,

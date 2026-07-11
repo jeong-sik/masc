@@ -352,6 +352,7 @@ let string_of_task_status = task_status_to_string
 let task_status_icon = function
   | Todo -> "📋"
   | Claimed _ | InProgress _ -> "🔄"
+  | OperatorBlocked _ -> "🚧"
   | AwaitingVerification _ -> "🔍"
   | Done _ -> "✅"
   | Cancelled _ -> "🚫"

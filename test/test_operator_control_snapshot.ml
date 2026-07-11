@@ -350,6 +350,27 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
   ignore (Workspace.init config ~agent_name:(Some "operator"));
   ignore
     (Workspace.bind_session config ~agent_name:"operator" ~capabilities:[] ());
+  (* A resumable keeper resolves its sandbox_profile from a keeper profile TOML;
+     masc_keeper_up fails closed without one — this is intentional
+     (keeper_meta_contract [effective_meta_of_profile_defaults], and the
+     "missing profile source fails loudly" contract test). Seed the profile the
+     way a real workspace persists it so this test exercises the operator-resume
+     clearing path rather than the missing-profile rejection. *)
+  let () =
+    let keepers_dir =
+      List.fold_left Filename.concat base_dir [ ".masc"; "config"; "keepers" ]
+    in
+    let rec mkdir_p dir =
+      if not (Sys.file_exists dir) then begin
+        mkdir_p (Filename.dirname dir);
+        (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+      end
+    in
+    mkdir_p keepers_dir;
+    let oc = open_out (Filename.concat keepers_dir (keeper_name ^ ".toml")) in
+    output_string oc "[keeper]\nsandbox_profile = \"local\"\n";
+    close_out oc
+  in
   let keeper_ctx : _ Keeper_tool_surface.context =
     {
       config;

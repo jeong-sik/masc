@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MASC live System/Keeper log adversarial audit — 2026-07-10</title>
+  <title>MASC live System/Keeper log adversarial audit — 2026-07-11 update</title>
   <style>
     :root { color-scheme: light; --ink:#17202a; --muted:#5f6b76; --line:#d8dee4; --bg:#f6f8fa; --card:#fff; --p0:#8b1e1e; --p1:#a33a00; --p2:#735c00; --ok:#12633c; }
     * { box-sizing:border-box; }
@@ -40,20 +40,32 @@
 <body>
 <main>
   <h1>MASC live System/Keeper log adversarial audit</h1>
-  <p class="sub">Capture: 2026-07-10 10:24:43 KST / 2026-07-10T01:24:43Z · Latest recheck: 2026-07-10 16:30:07 KST · Runtime root: <code>&lt;base_path&gt;/.masc</code> · Source window: 2026-07-07 through latest recheck</p>
+  <p class="sub">Capture: 2026-07-10 10:24:43 KST / 2026-07-10T01:24:43Z · Latest recheck: 2026-07-11 14:46 KST · Runtime root: <code>&lt;base_path&gt;/.masc</code> · Source window: 2026-07-07 through latest recheck</p>
 
   <div class="summary">
     <div class="stat"><strong>degraded</strong><span>health overall status</span></div>
-    <div class="stat"><strong>7</strong><span>latest durable queue entries: 6 pending, 1 inflight</span></div>
-    <div class="stat"><strong>4,700+</strong><span>pending-HITL warning records</span></div>
-    <div class="stat"><strong>193</strong><span>keeper-cycle failures with no usable progress</span></div>
-    <div class="stat"><strong>320</strong><span>release from cancelled transition failures</span></div>
-    <div class="stat"><strong>677</strong><span>latest prompt metadata drift warnings</span></div>
+    <div class="stat"><strong>15</strong><span>latest durable queue: 14 pending, 1 inflight</span></div>
+    <div class="stat"><strong>4 / 6</strong><span>healthy / executable reaction capacity</span></div>
+    <div class="stat"><strong>8</strong><span>Kimi HTTP 403 calls misclassified as invalid request</span></div>
+    <div class="stat"><strong>5</strong><span>post-success checkpoint prefix failures</span></div>
+    <div class="stat"><strong>20,616</strong><span>sidecar event rows warned and skipped by manifest scan</span></div>
   </div>
 
   <h2>결론</h2>
   <p>현재 런타임은 프로세스 자체가 죽은 상태는 아니지만, 독립 Keeper lane의 진행 보장과 관측 데이터 보존을 만족하지 못하는 결함이 확인된다. 가장 명확한 소스 결함은 <strong>구조화된 world observation을 tool-token 문자열로 재해석하고 삭제하는 프롬프트 경계</strong>다. HITL 경계에는 <strong>pending approval과 Keeper lane ownership의 혼동</strong>뿐 아니라, <strong>blocking approval을 확인하기 전에 durable event를 lease하여 같은 이벤트를 매 heartbeat마다 consume/requeue하는 순서 결함</strong>도 있다. 또한 장기 autonomous OAS run은 새 durable stimulus가 쌓여도 turn boundary에서 lane을 양보하지 않아 독립 cycle을 기아시킨다. MASC 수정은 worktree에 구현했지만 라이브 실행 파일에는 아직 반영하지 않았다.</p>
   <p>OAS stop reason 문제와 provider의 empty/thinking-only 응답은 MASC가 문자열 예외를 임의로 해석해서 고칠 영역이 아니다. OAS가 provider terminal outcome을 타입으로 보존하고, MASC는 그 타입을 받아 fallback 또는 cycle 결과를 결정해야 한다. 아래에서 MASC/OAS 경계를 분리했다.</p>
+
+  <h2>2026-07-11 14:46 KST delta — current live truth</h2>
+  <table>
+    <tr><th>항목</th><th>현재 관찰값</th><th>판정</th></tr>
+    <tr><td>Health</td><td><code>status=ok</code>, <code>overall_status=degraded</code>, operator action required</td><td>HTTP health 응답과 fleet 진행성은 별개다. 현재 reasons는 active task owner without executable fiber, pending reaction stimulus, stale durable queue다.</td></tr>
+    <tr><td>Keeper fleet</td><td>bootable/executable 6, healthy running 4, recovering 2, effective reaction capacity 4</td><td>전체 프로세스 정지는 아니지만 <code>albini</code>가 active <code>task-2185</code>를 소유한 채 executable fiber가 없다.</td></tr>
+    <tr><td>Durable queue</td><td>pending 14, inflight 1, total 15, read errors 0</td><td><code>verifier</code> 7개 oldest 105,916초, <code>garnet</code> 4개 oldest 73,900초, <code>rondo</code> 1개 72,810초. stale threshold 0 정책과 별개로 장기 backlog 자체는 실제다.</td></tr>
+    <tr><td>Config</td><td>직전 full health snapshot에서 parse/schema/startup 오류 없음</td><td class="oktext">현재 장애를 config parser 또는 BasePath 오설정으로 돌릴 증거 없음</td></tr>
+    <tr><td>Runtime process</td><td><code>main_eio</code> PID 24561, <code>127.0.0.1:8935</code> listener 확인</td><td>한 번의 연결 실패는 재확인 시 listener가 살아 있어 process crash로 확정하지 않았다.</td></tr>
+  </table>
+  <p>이 snapshot 직후 dashboard actor가 여러 Keeper를 shutdown했다. 로그에는 <code>running → draining → stopped</code> 완료 뒤 다시 <code>operator_pause</code>를 dispatch해 typed terminal-state rejection을 만드는 순서와, 이미 unregister된 Keeper의 in-flight turn이 뒤늦게 완료되며 event를 offline registry에 dispatch하는 경합이 함께 보인다. 이는 fleet-wide stop이 아니라 lane lifecycle/ownership 결함이다.</p>
+  <p><strong>[근거]</strong> live <code>/health?full=1</code>, <code>lsof -nP -iTCP:8935 -sTCP:LISTEN</code>, System Log 2026-07-11 14:42–14:46 KST, read-only 확인, 신뢰도 High.</p>
 
   <h2>라이브 상태 — initial snapshot</h2>
   <table>
@@ -123,6 +135,43 @@
   <h2>확인된 버그 및 장애</h2>
 
   <section class="finding p0">
+    <h3>F-09 · P1 · HTTP 403 authorization refusal is misclassified as deterministic request failure</h3>
+    <div class="meta">Confidence: High · Owner boundary: OAS HTTP classification → MASC typed provider policy</div>
+    <p>Kimi Code의 billing-cycle quota exhaustion 8회가 OAS에서 <code>InvalidRequest(unknown)</code>으로 표면화됐고, MASC는 이 타입을 <code>deterministic_request</code> failure judgment로 올렸다. 같은 provider lane이 <code>base</code>/<code>ramarama</code>에서 반복 호출됐다.</p>
+    <p>공식 Kimi Code 문서는 해당 응답을 HTTP 403 permission error로 정의한다. OAS의 <code>classify_error</code>에는 401과 402만 있고 403이 catch-all <code>InvalidRequest</code>로 떨어졌다. MASC가 quota 문구를 문자열 매칭하는 것은 경계 위반이다.</p>
+    <p><strong>수정:</strong> OAS Draft PR <a href="https://github.com/jeong-sik/oas/pull/2520">#2520</a>은 HTTP status만으로 403을 기존 non-retryable <code>AuthError</code>에 매핑하고 provider detail을 보존한다. MASC Draft PR <a href="https://github.com/jeong-sik/masc/pull/24105">#24105</a>은 typed <code>AuthError</code>를 즉시 terminal provider cooldown으로 격리하고 runtime fallback을 유지한다. 어느 쪽도 provider prose를 판단하지 않으며, OAS에는 MASC 의존성이 없다.</p>
+    <p><strong>[근거]</strong> <a href="https://www.kimi.com/code/docs/en/kimi-code/error-reference.html">Kimi Code official error reference</a>, System Log 8 exact OAS terminal turns, 2026-07-11 확인, 신뢰도 High.</p>
+  </section>
+
+  <section class="finding">
+    <h3>F-10 · P1 · Runtime manifest scan floods logs while rejecting producer-side sidecar events</h3>
+    <div class="meta">Confidence: High for observability defect · Owner boundary: MASC runtime manifest schema/reader SSOT</div>
+    <p>약 2시간 26분 동안 <code>working_state_sidecar_saved</code> 10,309건과 <code>state_snapshot_sidecar_saved</code> 10,307건이 <code>unknown event</code>로 경고되고 scan에서 빠졌다. 동일 trace tail을 dashboard가 반복 조회할 때 같은 row를 매번 다시 경고하여 System Log를 20,616건 이상 오염시켰다.</p>
+    <p>현재 main의 closed <code>Keeper_runtime_manifest.event_kind</code>에는 두 event가 없고 parser는 unknown event를 문자열 Error로 평탄화한다. live producer와 dashboard reader의 schema가 갈라진 상태다. 임의 문자열 allowlist를 추가할 것이 아니라 producer/reader가 하나의 typed event SSOT를 사용하고, 진짜 future event는 typed unknown telemetry로 한 번만 관측해야 한다.</p>
+  </section>
+
+  <section class="finding">
+    <h3>F-11 · P1 · Keeper shutdown completes before operator-pause dispatch</h3>
+    <div class="meta">Confidence: High · Owner boundary: MASC lifecycle command sequencing</div>
+    <p>2026-07-11 로그에 <code>stopped cannot accept operator_pause</code>가 10회 있다. 대표 흐름은 dashboard shutdown이 <code>running → draining → stopped</code>를 완료한 직후 동일 command path가 <code>operator_pause</code>를 dispatch하는 것이다. FSM은 올바르게 terminal-state rejection을 반환하지만 command orchestration 순서가 불가능한 transition을 생성한다.</p>
+    <p>shutdown과 pause를 두 번의 독립 state mutation으로 직렬화하지 말고, operator intent를 typed lifecycle command 하나로 만들고 최종 durable meta/registry state를 한 경계에서 commit해야 한다. rejection을 경고만 하고 성공 응답하는 silent partial success도 금지해야 한다.</p>
+  </section>
+
+  <section class="finding p0">
+    <h3>F-12 · P1 · In-flight turn survives Keeper unregister and loses executable ownership</h3>
+    <div class="meta">Confidence: High · Owner boundary: MASC Lane Per Keeper lifecycle and task ownership</div>
+    <p><code>albini</code>는 unregister된 뒤에도 기존 autonomous turn이 751초까지 진행됐고, 완료 경로는 <code>keeper not registered; persisting stimulus for replay</code>와 <code>invalid_transition: offline → offline</code>을 남겼다. 같은 health snapshot은 active <code>task-2185</code> owner가 <code>albini</code>지만 executable fiber가 없다고 operator blocker로 보고했다.</p>
+    <p>lane shutdown은 자식 fiber의 cancellation/join, durable continuation commit, task ownership handoff를 하나의 구조화된 lifecycle scope로 묶어야 한다. registry row만 먼저 제거하면 in-flight result가 도착할 경계와 task owner가 분리된다. 한 Keeper shutdown이 다른 lane을 막지는 않았지만 해당 lane의 결과와 ownership 진행성은 깨졌다.</p>
+  </section>
+
+  <section class="finding p0">
+    <h3>F-13 · P1 · Successful provider turns repeatedly fail canonical checkpoint persistence</h3>
+    <div class="meta">Confidence: High for failure · Root cause narrowed to replay/persistence boundary</div>
+    <p><code>sangsu</code>에서 provider success 뒤 <code>canonical replay persistence requires checkpoint messages to match pre-turn history prefix</code>가 5회 발생했다. latest incident는 media-degrade가 image 2개를 제외하고 text-only로 진행한 뒤 9.5초 provider success를 얻었지만 checkpoint save가 실패해 cycle 전체가 error가 된 경우다.</p>
+    <p>모델 호출 성공과 durable continuation commit 사이에 history representation이 달라진다. checkpoint writer가 mismatch를 거부한 것은 fail-closed로 정당하지만, 같은 lane이 계속 재실행되어 성공 결과를 버리는 것은 기능 결함이다. multimodal degradation 결과와 canonical replay history를 동일 typed projection에서 만들고, post-success persistence 실패는 ambiguous commit/repair queue로 분리해야 한다.</p>
+  </section>
+
+  <section class="finding p0">
     <h3>F-01 · P1 · Prompt data corruption: observation token false positive</h3>
     <div class="meta">Confidence: High · Owner boundary: MASC prompt assembly</div>
     <p>2026-07-07~07-10 System Log에서 <code>keeper_turn_id</code>가 user message 안의 unknown keeper token으로 기록된 레코드가 11,672건, 같은 토큰이 prompt에서 stripped된 레코드가 13,954건이다. <code>masc_oas_error</code>와 <code>keeper_repo_mappings</code> 등 진단 필드도 같은 패턴으로 오탐된다.</p>
@@ -159,6 +208,7 @@
     <p><strong>[근거]</strong> Xiaomi MiMo 공식 API 문서 2개, 2026-07-10 14:52 KST 확인, 신뢰도 High. OpenAI 문서는 <code>choices.finish_reason</code>에, Anthropic 문서는 <code>stop_reason</code>에 두 값을 열거한다. <a href="https://ocaml.org/manual/5.4/typedecl.html">OCaml 5.4 variant type definitions</a>와 <a href="https://ocaml.org/manual/5.4/patterns.html">variant patterns</a>를 기준으로 public constructor와 모든 exhaustive match를 함께 갱신했다(2026-07-10 확인, 신뢰도 High).</p>
     <p><strong>수정 경계:</strong> OAS에서 <code>ContentFilter</code>와 <code>RepetitionTruncation</code>을 first-class constructor로 추가하고 OpenAI/Anthropic wire를 하나의 stop-reason SSOT로 수렴한다. 임의의 <code>Unknown _</code>과 tool block 없는 <code>UnmatchedToolCalls</code>은 계속 fail-closed다. MASC는 raw string을 match하지 않고 OAS의 typed terminal outcome만 소비하며, OAS는 MASC를 모른다.</p>
     <p><strong>현재 worktree 수정:</strong> OAS type/wire/pipeline 경계에 위 두 constructor를 추가했고, Responses incomplete parser는 자신의 wire enum에서 <code>content_filter</code>만 typed 처리한다. <code>repetition_truncation</code>은 <code>on_stop</code>을 거친 <code>Complete</code>로 보존하지만 임의 <code>Unknown</code>은 <code>UnrecognizedStopReason</code>으로 남는다. focused build와 Types 61개, stop-reason SSOT 4개, OpenAI streaming 40개, pipeline 50개 테스트가 성공했다. full suite/OCaml 5.4·5.5 proof는 PR CI authority로 남고, MASC live binary에는 아직 반영되지 않았다.</p>
+    <p><strong>2026-07-11 delta:</strong> OAS typed stop-reason 수정은 live에 반영되어 더 이상 unknown/fatal로 분류되지 않는다. 그러나 MASC가 thinking-only 완료를 no-progress로 거부한 cycle은 오늘만 28회였고, latest <code>albini</code> turn은 751초와 thinking 128,867자를 쓴 뒤 실패했다. F-03의 catalog 결함은 landed됐지만 F-04/F-05의 cross-turn lane pacing 문제는 해소되지 않았다.</p>
   </section>
 
   <section class="finding">
@@ -167,6 +217,7 @@
     <p><code>keeper cycle FAILED ... no_usable_progress</code>가 193건이다. 최대 발생 Keeper는 <code>mad-improver</code> 106건, <code>idealist</code> 51건, <code>issue_king</code> 18건이다. 예시에는 empty response + <code>max_tokens</code>, thinking-only + <code>end_turn</code>, 208~732초 지연이 포함된다.</p>
     <p>현재 accept guard와 degraded retry log는 존재하지만, 생산적인 tool/text 결과가 없다는 사실을 수백 초를 소비한 뒤에야 cycle 실패로 표면화한다. 이는 단순히 retry 횟수를 늘릴 문제가 아니다. OAS typed result, runtime slot phase, MASC lane receipt가 “진행 없음”을 독립적으로 관측하고, 장기 대기 lane을 다른 reactive 활동과 분리해야 한다.</p>
     <p><strong>14:40 KST 추가 증거:</strong> <code>idealist</code>는 empty response + <code>max_tokens</code> 한 attempt에 255,051ms, cycle에 267,481ms를 썼다. <code>analyst</code>는 62,601자의 thinking-only + <code>end_turn</code> response에 1,593,268ms를 쓴 뒤 cycle이 1,601,119ms(약 26.7분)에 <code>no_usable_progress</code>로 실패했다. 임의 retry 수치가 아니라 phase receipt와 비동기 continuation이 필요한 증거다.</p>
+    <p><strong>2026-07-11 delta:</strong> typed <code>repetition_truncation</code> + thinking-only cycle failure 28회가 <code>albini</code>/<code>mad-improver</code>에서 반복됐다. typed terminal reason을 보존하는 것만으로는 다음 autonomous cycle이 동일 lane을 다시 선택하는 것을 막지 못한다.</p>
   </section>
 
   <section class="finding">
@@ -177,6 +228,7 @@
     <p>watchdog가 결국 lane을 회수하는 것은 안전장치이지 정상 동작이 아니다. 어떤 provider call, tool call, approval wait, stream read가 시간을 소비했는지 typed phase별로 보이고, 독립 lane이 한 stalled call 때문에 사용자 응답·connector ack를 잃지 않도록 cancellation과 continuation을 분리해야 한다.</p>
     <p><strong>소스 경계 추적:</strong> MASC의 전체 provider/tool 시도에는 누적 wall-clock watchdog을 걸지 않고, OAS의 <code>stream_idle_timeout_s</code>는 stream line 간 정적만 감지한다. OAS Agent-level execution-idle timeout은 지원되지만 MASC Keeper 경로는 active tool 실행과 idle accounting을 분리했다는 증거가 없어 전달하지 않는다. Supervisor의 <code>Idle_turn</code>은 turn observation이 없는 no-turn 정지, <code>Mid_turn_no_progress</code>는 opt-in이며 deliverable progress가 없는 in-turn 상태이고 active tool count는 제외한다. 따라서 현재 증거는 하나의 잘못된 timeout 숫자보다 provider/thinking·tool·approval·continuation phase의 관측/분리 공백을 가리킨다. arbitrary turn/timeout cutoff은 추가하지 않는다.</p>
     <p><strong>14:52 KST 추가 증거:</strong> <code>sangsu</code>에는 <code>idle_turn(5488s)</code> stale timeout이 기록됐고, 현재 fleet은 10/10으로 회복했지만 <code>mad-improver</code> autonomous lane은 약 39분째 in-flight다. 한 Keeper의 장기 turn과 fleet 전체 liveness를 분리해 관측해야 한다.</p>
+    <p><strong>2026-07-11 delta:</strong> <code>taskmaster</code>의 runpod MTP candidate는 terminal failure까지 <code>latency_ms=1323363</code>(약 22분)를 소비했다. 이 값은 단순 HTTP timeout이 아니라 provider/runtime slot 전체가 Keeper lane을 장시간 점유한 증거다.</p>
   </section>
 
   <section class="finding p2">
@@ -234,12 +286,13 @@
     <p><strong>F-01 1차 수정 landed:</strong> merged PR <a href="https://github.com/jeong-sik/masc/pull/23923">#23923</a>에서 unified prompt 경로가 structured world-state user message를 더 이상 token scanner/registry strip에 넣지 않고, system/continuity instruction surfaces만 검사하도록 분리했다.</p>
     <p><strong>F-02 1차 수정 landed:</strong> merged PR <a href="https://github.com/jeong-sik/masc/pull/23923">#23923</a>에서 approval queue에 typed blocking/nonblocking boundary를 추가하고 일반 Keeper tool approval을 nonblocking 경로로 연결했다. 명시적 critical continuation gate의 blocking policy는 유지한다.</p>
     <p><strong>F-03 1차 수정 landed:</strong> OAS stop-reason SSOT에 공식 <code>ContentFilter</code>/<code>RepetitionTruncation</code> constructor를 추가하고 pipeline은 두 값만 typed terminal result로 보존한다. 임의 <code>Unknown</code>과 tool block 없는 <code>UnmatchedToolCalls</code>은 fail-closed를 유지한다. <a href="https://github.com/jeong-sik/oas/pull/2506">OAS PR #2506</a>은 merge됐고, 후속 repair를 포함한 current main <code>c4255efe5</code>의 CI run <a href="https://github.com/jeong-sik/oas/actions/runs/29075791219">29075791219</a>가 성공했다.</p>
-    <p><strong>F-07 수정 구현:</strong> Draft PR <a href="https://github.com/jeong-sik/masc/pull/23950">#23950</a>에서 heartbeat가 typed Blocking approval을 event intake 전에 분류하고, autonomous run은 exact durable queue가 비어 있지 않으면 첫 provider turn 뒤 typed checkpoint를 만든다. 새 <code>Yielded_to_durable_stimulus</code> stop reason은 receipt, outcome, metric, dashboard cancellation surface까지 exhaustive하게 전파한다. global OAS turn count를 0으로 가정하지 않는 boundary regression과 queue/intake regression을 추가했다.</p>
+    <p><strong>F-07 source 수정 landed:</strong> merged PR <a href="https://github.com/jeong-sik/masc/pull/23950">#23950</a>, merge commit <code>5fcc17115c</code>에서 heartbeat가 typed Blocking approval을 event intake 전에 분류하고, autonomous run은 exact durable queue가 비어 있지 않으면 첫 provider turn 뒤 typed checkpoint를 만든다. 현재 15개 backlog는 별도 current-state 증거이며 source merge만으로 live drain을 주장하지 않는다.</p>
+    <p><strong>F-09 수정 진행 중:</strong> OAS Draft PR <a href="https://github.com/jeong-sik/oas/pull/2520">#2520</a>과 MASC Draft PR <a href="https://github.com/jeong-sik/masc/pull/24105">#24105</a>이 각각 403 typed classification과 terminal provider cooldown을 소유한다. 두 PR 모두 로컬 Dune 없이 parser/format 검증 후 CI authority에서 build/test 중이다.</p>
     <p><strong>F-08 source 수정 landed:</strong> prompt metadata의 obsolete <code>trait_lines</code> 제거는 merged PR <a href="https://github.com/jeong-sik/masc/pull/23929">#23929</a>이 소유한다. 이번 후속 변경은 같은 영역을 중복 수정하지 않으며 live 배포 후 warning 소멸만 확인한다.</p>
     <p>기존 remediation 검증: MASC approval queue 12개, HITL approval 51개, supervisor 87개, unified verification surface 18개, prompt token integrity 15개, F-06 tool-result 25개, Keeper tool-dispatch runtime 36개 테스트가 성공했다. OAS Types 61개, stop-reason SSOT 4개, OpenAI streaming 40개, pipeline 50개 테스트도 성공했다.</p>
-    <p>F-07 current-head 검증: changed OCaml parser, <code>ocamlformat --check</code>, <code>git diff --check</code>, no-actionable-signal policy lint, HTML parse가 성공했다. focused Dune은 unrelated worktree 두 곳이 repo-local lock에서 build 중이어서 대기 프로세스만 중단했고 lock holder를 kill하거나 우회하지 않았다. OCaml 5.4 full build/test proof는 Draft PR #23950 CI authority로 남긴다.</p>
+    <p>F-07은 merge됐으며 당시 changed OCaml parser, <code>ocamlformat --check</code>, <code>git diff --check</code>, policy lint와 CI를 통과했다. 이 보고서의 새 F-09 변경은 OCaml parser/format/determinism guard를 통과했고 full Dune build/test는 PR CI authority에 맡겼다.</p>
     <p><strong>[근거]</strong> OAS current main CI run 29075791219, 2026-07-10 16:30 KST 확인, 신뢰도 High.</p>
-    <p>현재 live executable은 이 worktree 변경을 포함하지 않으므로 live warning 감소나 runtime 개선으로 해석하면 안 된다. 배포/재시작 및 후속 MASC PR CI green 전에는 F-07 remediation을 완료 상태로 주장하지 않는다.</p>
+    <p>현재 live executable은 F-09 Draft PR 변경을 포함하지 않으므로 Kimi 재시도 감소를 아직 runtime 개선으로 해석하면 안 된다. F-10~F-13은 이번 보고서에서 source boundary를 확정했지만 별도 소스 수정과 CI가 필요하다.</p>
   </div>
 
   <h2>검증 근거</h2>
@@ -247,11 +300,12 @@
 rg 'keeper cycle FAILED.*no_usable_progress' &lt;base_path&gt;/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl
 rg 'pending HITL approval|Unrecognized stop_reason|stale_turn_timeout|release.*cancelled' &lt;base_path&gt;/.masc/logs/system_log_2026-07-07.jsonl ... system_log_2026-07-10.jsonl
 rg 'hitl-approval:appr_ec78ca2d4398|latency_ms=1096626|template_variables drift' &lt;base_path&gt;/.masc/logs/system_log_2026-07-10.jsonl
+jq/rg 'usage limit for this billing cycle|working_state_sidecar_saved|state_snapshot_sidecar_saved|stopped cannot accept operator_pause|canonical replay persistence requires checkpoint messages to match pre-turn history prefix|latency_ms=1323363' &lt;base_path&gt;/.masc/logs/system_log_2026-07-11.jsonl
 tail/jq &lt;base_path&gt;/.masc/keepers/issue_king/execution-receipts/2026-07/10.jsonl
 tail/jq &lt;base_path&gt;/.masc/keepers/issue_king/raw-traces/turn-1783665258367-cc61-002882.jsonl</pre>
   <p class="small">로그 line count는 동일 사건이 structured message/details/supervisor 전파로 여러 번 기록된 경우를 deduplicate하지 않는다. 사건 수를 주장할 때는 위의 패턴과 source flow를 함께 보아야 한다. Durable queue와 Keeper Chat execution receipt/raw trace는 read-only evidence로만 확인했으며 원문 thinking이나 private payload를 보고서에 복제하지 않았다. queue 삭제·ack·resume 및 Keeper restart는 수행하지 않았다. 12:35, 13:11, 14:52, 16:30 KST recheck health evidence는 build commit <code>61a643565b</code> 기준이며, 각 snapshot의 동적 상태 차이를 보존하기 위해 분리했다.</p>
 
-  <footer>초기 보고서와 F-01/F-02/F-06 MASC 수정은 merged PR <a href="https://github.com/jeong-sik/masc/pull/23923">#23923</a>, OAS provider-catalog 수정은 merged PR <a href="https://github.com/jeong-sik/oas/pull/2506">#2506</a>에서 추적한다. F-07은 최신 main 기반 Draft PR <a href="https://github.com/jeong-sik/masc/pull/23950">#23950</a>, F-08 source 수정은 merged PR <a href="https://github.com/jeong-sik/masc/pull/23929">#23929</a>이 소유한다. Dune full build는 CI authority로 남기고, 소스 수정 후에는 touched target 중심의 narrow validation만 수행한다.</footer>
+  <footer>F-01/F-02/F-06은 merged MASC PR <a href="https://github.com/jeong-sik/masc/pull/23923">#23923</a>, F-03은 merged OAS PR <a href="https://github.com/jeong-sik/oas/pull/2506">#2506</a>, F-07은 merged MASC PR <a href="https://github.com/jeong-sik/masc/pull/23950">#23950</a>, F-08은 merged MASC PR <a href="https://github.com/jeong-sik/masc/pull/23929">#23929</a>에서 추적한다. F-09는 OAS Draft <a href="https://github.com/jeong-sik/oas/pull/2520">#2520</a>과 MASC Draft <a href="https://github.com/jeong-sik/masc/pull/24105">#24105</a>가 소유한다. Dune full build는 CI authority다.</footer>
 </main>
 </body>
 </html>

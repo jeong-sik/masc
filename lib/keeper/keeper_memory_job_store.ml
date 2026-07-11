@@ -1103,7 +1103,7 @@ let reconcile_atomic_orphans_in_dir dir =
     loop entries
 ;;
 
-let job_equal left right =
+let job_equal (left : job) (right : job) =
   String.equal left.id right.id
   && String.equal left.keeper_name right.keeper_name
   && String.equal left.trace_id right.trace_id

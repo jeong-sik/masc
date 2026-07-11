@@ -786,6 +786,93 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
           "../bad"))
 ;;
 
+let create_recurring_keeper_wake_schedule config =
+  match
+    Schedule_service.create config ~schedule_id:"keeper-wake-history-sched"
+      ~requested_at:100.0 ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
+      ~payload:keeper_wake_payload ~risk_class:Schedule_domain.Read_only
+      ~source:Schedule_domain.Operator_request
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 }) ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let dashboard_execution_ids row =
+  let open Yojson.Safe.Util in
+  row
+  |> member "executions"
+  |> to_list
+  |> List.map (fun execution -> execution |> member "execution_id" |> to_string)
+;;
+
+let stored_execution_ids config ~schedule_id =
+  Schedule_store.executions_for_schedule (Schedule_store.read_state config)
+    ~schedule_id
+  |> List.map (fun (execution : Schedule_domain.execution_record) ->
+    execution.execution_id)
+;;
+
+let test_dashboard_projects_bounded_execution_history () =
+  with_workspace
+  @@ fun config ->
+  let request = create_recurring_keeper_wake_schedule config in
+  (* Each tick lands far past the next Interval occurrence, so every tick
+     dispatches exactly one new execution attempt for this schedule. *)
+  let tick_at i = 201.0 +. (1000.0 *. float_of_int i) in
+  let dispatch_occurrence i =
+    let result = tick_ok config ~now:(tick_at i) in
+    check int "one dispatch per occurrence" 1 (List.length result.dispatches)
+  in
+  let dashboard_row () =
+    let dashboard =
+      Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    in
+    dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id
+  in
+  let open Yojson.Safe.Util in
+  dispatch_occurrence 0;
+  dispatch_occurrence 1;
+  let below_cap = dashboard_row () in
+  check
+    (list string)
+    "below the cap the projection carries the full store history"
+    (stored_execution_ids config ~schedule_id:request.schedule_id)
+    (dashboard_execution_ids below_cap);
+  check int "two executions projected" 2
+    (List.length (dashboard_execution_ids below_cap));
+  check bool "limit marker stays false below the cap" false
+    (below_cap |> member "execution_history_limit_reached" |> to_bool);
+  (match below_cap |> member "executions" |> to_list with
+   | first :: second :: _ ->
+     let started json = json |> member "started_at" |> to_number in
+     check bool "projection is newest first" true
+       (started first > started second)
+   | projected ->
+     failf "expected two projected executions, got %d" (List.length projected));
+  for i = 2 to 11 do
+    dispatch_occurrence i
+  done;
+  let stored = stored_execution_ids config ~schedule_id:request.schedule_id in
+  check int "store keeps every execution" 12 (List.length stored);
+  let at_cap = dashboard_row () in
+  let projected = dashboard_execution_ids at_cap in
+  check int "projection truncates at the history limit" 10 (List.length projected);
+  check bool "limit marker reports truncation" true
+    (at_cap |> member "execution_history_limit_reached" |> to_bool);
+  check (list string) "cap keeps the newest records in store order"
+    (List.filteri (fun i _ -> i < 10) stored)
+    projected;
+  match at_cap |> member "last_execution" with
+  | `Null -> fail "last_execution missing after executions"
+  | last ->
+    check string "last_execution matches executions[0]"
+      (last |> member "execution_id" |> to_string)
+      (List.hd projected)
+;;
+
 let test_dashboard_schedule_resolve_uses_authenticated_operator () =
   with_workspace
   @@ fun config ->
@@ -841,6 +928,8 @@ let () =
             test_keeper_wake_consumer_rejects_invalid_keeper_name
         ; test_case "dashboard resolve uses authenticated operator" `Quick
             test_dashboard_schedule_resolve_uses_authenticated_operator
+        ; test_case "dashboard projects bounded execution history" `Quick
+            test_dashboard_projects_bounded_execution_history
         ] )
     ]
 ;;

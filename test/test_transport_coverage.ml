@@ -537,7 +537,7 @@ let test_rest_parse_request_operator_digest () =
       ~path:"/api/v1/operator/digest"
       ~query_params:
         [ ( "target_type"
-          , `String Operator_action_constants.workspace_target_type ) ]
+          , `String Masc.Operator_action_constants.workspace_target_type ) ]
       ~body:""
   in
   check string "method_name" "masc_operator_digest" req.method_name

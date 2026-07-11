@@ -49,7 +49,30 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> In_channel.input_all ic)
 
+let normalize_ws s =
+  (* Collapse every run of whitespace (including the newlines ocamlformat
+     inserts when it wraps a comment across lines) into a single space, so a
+     source-presence assertion checks the defensive pattern's *content*, not
+     its incidental line breaks.  Without this, reformatting a present-and-
+     correct guard could turn CI red purely on layout. *)
+  let buf = Buffer.create (String.length s) in
+  let in_ws = ref false in
+  String.iter
+    (fun c ->
+       match c with
+       | ' ' | '\t' | '\n' | '\r' ->
+         if not !in_ws then Buffer.add_char buf ' ';
+         in_ws := true
+       | _ ->
+         Buffer.add_char buf c;
+         in_ws := false)
+    s;
+  Buffer.contents buf
+;;
+
 let assert_contains ~label haystack needle =
+  let haystack = normalize_ws haystack in
+  let needle = normalize_ws needle in
   let n = String.length needle in
   let h = String.length haystack in
   let rec scan i =

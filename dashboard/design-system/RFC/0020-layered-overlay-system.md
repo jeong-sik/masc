@@ -67,9 +67,8 @@ export interface LayeredOverlayController {
 export function createLayeredOverlay(layers: ReadonlyArray<OverlayLayer>): LayeredOverlayController
 ```
 
-Adapters:
-- `headless-preact/use-layered-overlay.ts` — `signal<Set<LayerKind>>`-backed, returns the `active` signal directly.
-- `headless-solid/use-layered-overlay.ts` — `createSignal` wrapper returning an `Accessor<Set<LayerKind>>`.
+Adapter: `headless-preact/use-layered-overlay.ts` —
+`signal<Set<LayerKind>>`-backed and returns the `active` signal directly.
 
 ## 4. Mutual exclusivity
 
@@ -94,7 +93,7 @@ Order in the query is canonicalized (alphabetical) so deep links don't churn. Un
 
 ## 7. Migration & rollout
 
-- Phase A (this RFC): land headless controller + 2 adapters + tests. No editor wiring.
+- Phase A (this RFC): land the headless controller + Preact adapter + tests. No editor wiring.
 - Phase B (PR-3 of Phase 1): mount the toggle bar in the editor mock with all 6 layer kinds; overlays are no-ops.
 - Phase C (PR-5+): wire each layer to its data source — `time`/`approve` to RFC 0019 ownership store, `tools` to keeper tool-event stream, etc.
 

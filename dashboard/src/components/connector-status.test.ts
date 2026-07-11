@@ -2,8 +2,6 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { KpiStrip } from './kpi-strip'
-import { KpiCell } from './kpi-cell'
 
 // 90s window absorbs cold-build transform overhead (observed 60-140s on
 // the first run) for the first/heaviest test in this file — render of a
@@ -211,30 +209,8 @@ async function loadComponentWithApi(api: {
   vi.doMock('./common/toast', () => ({
     showToast: api.showToast ?? vi.fn(),
   }))
-  // Synchronous Preact shim — KpiStripIsland's real implementation
-  // imports solid-js/web. Under vitest.config.ts (no Solid plugin and
-  // no `browser` resolver condition) that resolves to the SSR build,
-  // whose `render` throws "Client-only API called on the server side"
-  // from inside the wrapper's useEffect. The shim short-circuits the
-  // chain — Solid is never loaded — and renders the same cells via
-  // the original Preact KpiStrip + KpiCell. Production keeps the real
-  // island; this swap exists only for the Preact-side test runner.
-  vi.doMock('./kpi-strip-island', () => ({
-    KpiStripIsland: (props: {
-      ariaLabel: string
-      variant?: 'standard' | 'compact' | 'stacked'
-      cols?: number
-      cells: ReadonlyArray<Record<string, unknown>>
-    }) => html`
-      <${KpiStrip}
-        ariaLabel=${props.ariaLabel}
-        variant=${props.variant}
-        cols=${props.cols}
-      >
-        ${props.cells.map((cell) => html`<${KpiCell} ...${cell} />`)}
-      <//>
-    `,
-  }))
+  // The data-driven KPI strip is plain Preact, so the caller test exercises
+  // its real implementation instead of substituting a framework shim.
   const module = await import('./connector-status')
   module.resetConnectorStatusState()
   return module

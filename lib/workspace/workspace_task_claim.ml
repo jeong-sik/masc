@@ -33,7 +33,8 @@ let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.ba
          | InProgress _
          | AwaitingVerification _
          | Done _
-         | Cancelled _ -> None)
+         | Cancelled _
+         | Operator_blocked _ -> None)
   |> List.sort_uniq String.compare
 ;;
 

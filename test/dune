@@ -766,7 +766,7 @@
 (test
  (name test_server_request_authority)
  (modules test_server_request_authority)
- (libraries alcotest masc_test_deps eio_main))
+ (libraries alcotest masc_test_deps eio_main h2))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 

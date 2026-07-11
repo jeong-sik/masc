@@ -32,6 +32,7 @@ module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_runtime = Masc.Keeper_shutdown_runtime
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_types_support = Masc.Keeper_types_support
 module Lifecycle_hooks = Masc.Keeper_lifecycle_hooks
 module Subprocess_registry = Masc.Keeper_subprocess_registry
 module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
@@ -185,6 +186,8 @@ let shutdown_schema3_fixture (operation : Shutdown_types.t) =
     | Shutdown_types.Dead_tombstone_cleanup -> "retain_dead_tombstone"
     | Shutdown_types.Stale_paused_prune _ ->
       fail "schema 3 fixture cannot encode stale paused cleanup"
+    | Shutdown_types.Dashboard_keeper_purge _ ->
+      fail "schema 3 fixture cannot encode dashboard Keeper purge"
   in
   match Shutdown_store.to_json operation with
   | `Assoc fields ->

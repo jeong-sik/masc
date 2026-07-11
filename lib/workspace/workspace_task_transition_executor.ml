@@ -21,7 +21,9 @@ let action_persists_handoff_context = function
   | Masc_domain.Start
   | Masc_domain.Cancel
   | Masc_domain.Approve_verification
-  | Masc_domain.Reject_verification ->
+  | Masc_domain.Reject_verification
+  | Masc_domain.Block_for_operator
+  | Masc_domain.Unblock ->
     true
 ;;
 
@@ -30,6 +32,8 @@ let normalize_task_before_status ~action task =
   | Masc_domain.Claim ->
     Workspace_task_claim.clear_reclaim_decision task
   | Masc_domain.Release -> task
+  | Masc_domain.Block_for_operator
+  | Masc_domain.Unblock -> task
   | Masc_domain.Start
   | Masc_domain.Done_action
   | Masc_domain.Cancel
@@ -57,7 +61,9 @@ let release_counters ~action task handoff_context =
   | Masc_domain.Done_action
   | Masc_domain.Submit_for_verification
   | Masc_domain.Approve_verification
-  | Masc_domain.Reject_verification ->
+  | Masc_domain.Reject_verification
+  | Masc_domain.Block_for_operator
+  | Masc_domain.Unblock ->
     task.cycle_count, task.reclaim_policy, task.do_not_reclaim_reason
 ;;
 

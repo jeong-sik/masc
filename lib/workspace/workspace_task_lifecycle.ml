@@ -70,7 +70,8 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
       Verifier_claim
         (Masc_domain.bind_verifier
            ~verifier:agent_name ~assignee ~submitted_at ~verification_id)
-  | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
+  | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }
+  | Masc_domain.OperatorBlocked { assignee; _ } ->
     if same_actor assignee then Self_owned else Held_by_other assignee
   | Masc_domain.Done _ ->
     (* RFC-0323: a completed task is terminal for every actor — the #23632

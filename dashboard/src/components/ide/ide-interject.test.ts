@@ -85,6 +85,19 @@ describe('IdeInterject', () => {
     expect(buttons[2]?.getAttribute('aria-label')).toContain('Keeper-scoped pause')
   })
 
+  it('uses a compact chat entry point until the terminal-first shell expands it', async () => {
+    const container = document.createElement('div')
+    await act(async () => {
+      render(h(IdeInterject, { compact: true }), container)
+    })
+
+    expect(container.querySelector('[data-testid="ide-interject-fab"]')?.textContent).toBe('✦ Chat')
+    expect(container.querySelector('input')).toBeNull()
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="ide-interject-fab"]')!)
+    expect(container.querySelector('input')?.getAttribute('aria-label')).toBe('Interject input')
+  })
+
   it('enables Send after text is entered', async () => {
     const container = document.createElement('div')
     await act(async () => {
@@ -174,4 +187,3 @@ describe('IdeInterject', () => {
     expect(routeHashParams().get('q')).toBe('interject keeper:sangsu mode:reviewing tool:ocamllsp')
   })
 })
-

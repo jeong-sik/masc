@@ -2,12 +2,14 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { get } from '../../api/core'
+import { fetchIdePresence } from '../../api/ide'
 import { KeeperBadge } from '../keeper-badge'
 import {
   createKeeperPresenceStore,
   disconnectedSnapshot,
   globalPresenceSnapshot,
   LOADING_SNAPSHOT,
+  normalizeKeeperPresenceSnapshot,
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
@@ -91,18 +93,30 @@ export function unwrapEnvelope<T>(raw: unknown): T | undefined {
 }
 
 async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
-  try {
-    const [agentsRaw, statusRaw] = await Promise.all([
-      get<unknown>('/api/v1/agents?limit=20'),
-      get<unknown>('/api/v1/status'),
-    ])
+  const [idePresence, agentsResponse, statusResponse] = await Promise.allSettled([
+    fetchIdePresence(),
+    get<unknown>('/api/v1/agents?limit=20'),
+    get<unknown>('/api/v1/status'),
+  ])
+
+  // The IDE endpoint is the only source that has the runtime/branch and
+  // keeper-presence contract together. Prefer it when valid; the generic
+  // agents/status pair remains a compatibility fallback for older servers.
+  if (idePresence.status === 'fulfilled') {
+    const snapshot = normalizeKeeperPresenceSnapshot(idePresence.value)
+    if (snapshot !== null) return snapshot
+  }
+
+  if (agentsResponse.status === 'fulfilled' && statusResponse.status === 'fulfilled') {
+    const agentsRaw = agentsResponse.value
+    const statusRaw = statusResponse.value
     const agentsData = unwrapEnvelope<{ agents?: ApiAgent[] }>(agentsRaw)
     const statusData = unwrapEnvelope<ApiStatus>(statusRaw)
     const agents: ApiAgent[] = Array.isArray(agentsData?.agents) ? agentsData.agents : []
     return agentsToPresence(agents, statusData ?? {})
-  } catch {
-    return disconnectedSnapshot('fetch_failed')
   }
+
+  return disconnectedSnapshot('fetch_failed')
 }
 
 function presenceHeader(snap: KeeperPresenceSnapshot) {

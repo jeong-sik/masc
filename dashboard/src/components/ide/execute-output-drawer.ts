@@ -28,6 +28,9 @@ interface OutputLine {
 
 interface ExecuteOutputDrawerProps {
   keeperName: string
+  /** Render the persistent IDE drawer without opening a live stream until the
+      operator explicitly requests terminal execution for the current route. */
+  readonly streamEnabled?: boolean
 }
 
 type ExecuteOutputStatus = 'idle' | 'streaming' | 'closed' | 'error'
@@ -238,7 +241,10 @@ function ExecuteOutputSummaryStrip({
   `
 }
 
-export function ExecuteOutputDrawer({ keeperName }: ExecuteOutputDrawerProps) {
+export function ExecuteOutputDrawer({
+  keeperName,
+  streamEnabled = true,
+}: ExecuteOutputDrawerProps) {
   const keeper = keeperName.trim()
   const [lines, setLines] = useState<OutputLine[]>([])
   const [status, setStatus] = useState<ExecuteOutputStatus>('idle')
@@ -263,6 +269,12 @@ export function ExecuteOutputDrawer({ keeperName }: ExecuteOutputDrawerProps) {
   }, [])
 
   useEffect(() => {
+    if (!streamEnabled) {
+      setLines([{ text: 'waiting for an active Execute output task', stream: 'meta' }])
+      setStatus('idle')
+      setTaskId(null)
+      return
+    }
     if (!keeper) {
       setLines([{ text: 'no keeper selected', stream: 'meta' }])
       setStatus('idle')
@@ -294,7 +306,7 @@ export function ExecuteOutputDrawer({ keeperName }: ExecuteOutputDrawerProps) {
     })
 
     return () => controller.abort()
-  }, [keeper])
+  }, [keeper, streamEnabled])
 
   useEffect(() => {
     if (prefersReducedMotion) return

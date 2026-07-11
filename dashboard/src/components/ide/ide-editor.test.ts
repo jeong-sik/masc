@@ -74,6 +74,40 @@ describe('IdeEditor', () => {
     })
   })
 
+  it('shows observed keeper ownership in Source view, not only Blame view', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    ownershipStore.ingest({
+      file_path: 'runtime.ts',
+      line_start: 1,
+      line_end: 1,
+      keeper_id: 'sangsu',
+      timestamp_ms: 1,
+      kind: 'observed',
+    })
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-blame-gutter')).not.toBeNull()
+      expect(container.querySelector('[data-testid="ide-observation-summary"]')?.textContent)
+        .toContain('metadata pending')
+    })
+    expect(container.querySelector('.ide-codemirror-shell')?.getAttribute('data-view'))
+      .toBe('source-ownership')
+  })
+
   it('finds current-file matches with case and whole-word options', () => {
     const documentStore = createCodeDocumentStore({
       file_path: 'runtime.ts',

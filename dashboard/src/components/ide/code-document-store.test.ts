@@ -83,4 +83,64 @@ describe('createCodeDocumentStore', () => {
       repoId: 'masc',
     })
   })
+
+  it('notifies metadata subscribers as region loading settles', async () => {
+    fetchIdeRegionsMock.mockResolvedValueOnce([])
+    const store = createCodeDocumentStore({
+      file_path: 'a.ts',
+      language: 'typescript',
+      content: 'export {}',
+    })
+    let calls = 0
+    const unsubscribe = store.subscribeRegions(() => {
+      calls += 1
+    })
+
+    await store.loadRegions('a.ts')
+
+    unsubscribe()
+    expect(calls).toBeGreaterThan(0)
+    expect(store.regionsLoading()).toBe(false)
+    expect(store.regionsState()).toBe('ready')
+  })
+
+  it('clears region metadata when a different file becomes active', async () => {
+    fetchIdeRegionsMock.mockResolvedValueOnce([{
+      file_path: 'a.ts',
+      line_start: 1,
+      line_end: 1,
+      keeper_id: 'sangsu',
+      source_type: 'tool_call',
+      source_tool_name: 'tool_edit_file',
+      source_turn: 1,
+      source_note: null,
+      timestamp_ms: 1,
+    }])
+    const store = createCodeDocumentStore({
+      file_path: 'a.ts',
+      language: 'typescript',
+      content: 'export {}',
+    })
+
+    await store.loadRegions('a.ts')
+    expect(store.regions()).toHaveLength(1)
+
+    store.load({ file_path: 'b.ts', language: 'typescript', content: 'export {}' })
+    expect(store.regions()).toEqual([])
+    expect(store.regionsState()).toBe('idle')
+  })
+
+  it('exposes region fetch failure instead of presenting an empty result as ready', async () => {
+    fetchIdeRegionsMock.mockRejectedValueOnce(new Error('regions offline'))
+    const store = createCodeDocumentStore({
+      file_path: 'a.ts',
+      language: 'typescript',
+      content: 'export {}',
+    })
+
+    await expect(store.loadRegions('a.ts')).rejects.toThrow('regions offline')
+
+    expect(store.regionsState()).toBe('error')
+    expect(store.regionsLoading()).toBe(false)
+  })
 })

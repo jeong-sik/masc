@@ -31,6 +31,7 @@ module Workspace = Masc.Workspace
 module Task = Masc.Task
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Capability_registry = Masc.Capability_registry
+module Tool_shard = Masc.Tool_shard
 
 (* Force-link [Keeper_tool_surface] so its module-load registration of
    keeper tools into [Keeper_dispatch_ref.dispatch] runs before the

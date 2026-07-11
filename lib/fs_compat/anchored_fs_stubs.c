@@ -13,8 +13,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#if !defined(O_CLOEXEC) || !defined(O_DIRECTORY) || !defined(O_NOFOLLOW) || !defined(O_NOCTTY)
-#error "descriptor-anchored filesystem requires O_CLOEXEC, O_DIRECTORY, O_NOFOLLOW, and O_NOCTTY"
+#if !defined(O_CLOEXEC) || !defined(O_DIRECTORY) || !defined(O_NOFOLLOW) || !defined(O_NOCTTY) || !defined(O_NONBLOCK)
+#error "descriptor-anchored filesystem requires O_CLOEXEC, O_DIRECTORY, O_NOFOLLOW, O_NOCTTY, and O_NONBLOCK"
 #endif
 
 #if !defined(AT_SYMLINK_NOFOLLOW)
@@ -71,12 +71,21 @@ CAMLprim value masc_anchored_open_read(value directory, value name)
   CAMLparam1(name);
   char *copied_name;
   int fd;
+  struct stat metadata;
+  int stat_result;
 
   caml_unix_check_path(name, "anchored_open_read");
   copied_name = caml_stat_strdup(String_val(name));
   caml_enter_blocking_section();
-  fd = openat(anchored_fd(directory), copied_name,
-              O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  stat_result = fstatat(anchored_fd(directory), copied_name, &metadata,
+                        AT_SYMLINK_NOFOLLOW);
+  if (stat_result == 0 && !S_ISREG(metadata.st_mode)) {
+    errno = S_ISLNK(metadata.st_mode) ? ELOOP : EINVAL;
+    fd = -1;
+  } else {
+    fd = openat(anchored_fd(directory), copied_name,
+                O_RDONLY | O_NONBLOCK | O_NOCTTY | O_NOFOLLOW | O_CLOEXEC);
+  }
   caml_leave_blocking_section();
   stat_free_preserving_errno(copied_name);
   if (fd == -1) uerror("anchored_open_read", name);

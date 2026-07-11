@@ -21,6 +21,11 @@ exception Lock_file_cleanup_failed of
   ; close_error : exn
   }
 
+exception Flock_release_failed of
+  { unlock_error : exn option
+  ; close_error : exn option
+  }
+
 (** Observability hook fired after each [acquire_flock_retry*] attempt
     sequence completes — once on success, once on timeout.  Wired at
     startup ([lib/workspace.ml]) to a Otel_metric_store counter + histogram so
@@ -81,7 +86,7 @@ let rec atomic_update_with_result atomic f =
 type lock_entry = {
   mu : Eio.Mutex.t;
   pre_eio_mu : Stdlib.Mutex.t;
-  mutable last_used : float;
+  last_used : float Atomic.t;
   active : int Atomic.t;   (** Number of fibers currently holding or waiting on this mutex *)
 }
 
@@ -108,30 +113,29 @@ let prune_stale_entries () =
     if SMap.cardinal state.entries > max_lock_entries then
       let now = Time_compat.now () in
       let entries = SMap.filter (fun _path entry ->
-        Atomic.get entry.active > 0 || now -. entry.last_used <= stale_lock_seconds
+        Atomic.get entry.active > 0
+        || now -. Atomic.get entry.last_used <= stale_lock_seconds
       ) state.entries in
       publish_entries state entries
     else state
   )
 
-(** Get or create a lock entry for the given file path.
+(** Get or create a process-local lock entry for the given file identity.
     Increments [active] to prevent prune_stale_entries from removing
-    in-use entries (see TLA+ FileLockStarvation spec).
-    Falls back to direct Hashtbl access when no Eio context is available
-    (e.g. in unit tests that don't use Eio_main.run). *)
+    in-use entries (see TLA+ FileLockStarvation spec). *)
 let get_entry path =
   prune_stale_entries ();
   let entry =
     atomic_update_with_result table (fun state ->
       match SMap.find_opt path state.entries with
       | Some entry ->
-        entry.last_used <- Time_compat.now ();
+        Atomic.set entry.last_used (Time_compat.now ());
         (state, entry)
       | None ->
         let entry =
           { mu = Eio.Mutex.create ()
           ; pre_eio_mu = Stdlib.Mutex.create ()
-          ; last_used = Time_compat.now ()
+          ; last_used = Atomic.make (Time_compat.now ())
           ; active = Atomic.make 0
           }
         in
@@ -144,17 +148,43 @@ let get_entry path =
 let release_entry entry =
   ignore (Atomic.fetch_and_add entry.active (-1))
 
-let with_cooperative_entry entry f =
+let protect_from_cancel f =
+  if Eio_guard.is_ready () then Eio.Cancel.protect f else f ()
+;;
+
+let require_eio_context () =
   if Eio_guard.is_ready ()
   then
-    try Eio.Mutex.use_ro entry.mu f with
+    try Eio.Cancel.protect (fun () -> ()) with
     | Effect.Unhandled _ as exn ->
       raise
         (Failure
            (Printf.sprintf
               "File_lock_eio requires an Eio fiber after runtime startup: %s"
               (Printexc.to_string exn)))
-  else Stdlib.Mutex.protect entry.pre_eio_mu f
+;;
+
+let with_eio_entry entry f =
+  (* A pre-Eio caller holds [pre_eio_mu] for its full critical section.
+     Taking and immediately releasing it here is a transition barrier: once
+     [Eio_guard.enable] is visible, no later pre-Eio caller can enter without
+     rechecking the guard while holding the same mutex. Normal Eio operation
+     sees an uncontended constant-time gate and waits only on [entry.mu]. *)
+  require_eio_context ();
+  Stdlib.Mutex.protect entry.pre_eio_mu (fun () -> ());
+  Eio.Mutex.use_ro entry.mu f
+;;
+
+let rec with_cooperative_entry entry f =
+  if Eio_guard.is_ready ()
+  then with_eio_entry entry f
+  else
+    match
+      Stdlib.Mutex.protect entry.pre_eio_mu (fun () ->
+        if Eio_guard.is_ready () then None else Some (f ()))
+    with
+    | Some value -> value
+    | None -> with_cooperative_entry entry f
 ;;
 
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f
@@ -195,8 +225,13 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
   in
   try acquire max_attempts
   with exn ->
-    (try Unix.close fd with Unix.Unix_error _ -> ());
-    raise exn
+    let primary_backtrace = Printexc.get_raw_backtrace () in
+    (match Unix.close fd with
+     | () -> Printexc.raise_with_backtrace exn primary_backtrace
+     | exception close_error ->
+       raise
+         (Lock_file_cleanup_failed
+            { primary = exn; primary_backtrace; close_error }))
 
 (** Fiber-friendly wrapper around [acquire_flock_retry].
     Opening/closing the descriptor uses a systhread, and the F_TLOCK attempt
@@ -247,7 +282,11 @@ let acquire_flock_on_fd_cooperative
 
 let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
-  let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
+  require_eio_context ();
+  let fd =
+    protect_from_cancel (fun () ->
+      run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm))
+  in
   try
     acquire_flock_on_fd_cooperative
       ?clock
@@ -258,8 +297,14 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
       ~caller
       ()
   with exn ->
-    run_blocking_lock_op (fun () -> try Unix.close fd with Unix.Unix_error _ -> ());
-    raise exn
+    let primary_backtrace = Printexc.get_raw_backtrace () in
+    protect_from_cancel (fun () ->
+      match run_blocking_lock_op (fun () -> Unix.close fd) with
+      | () -> Printexc.raise_with_backtrace exn primary_backtrace
+      | exception close_error ->
+        raise
+          (Lock_file_cleanup_failed
+             { primary = exn; primary_backtrace; close_error }))
 
 let acquire_flock_fd ?clock lock_path =
   acquire_flock_retry_cooperative ?clock ~lock_path
@@ -268,8 +313,19 @@ let acquire_flock_fd ?clock lock_path =
 
 let release_flock_fd fd =
   run_blocking_lock_op (fun () ->
-      (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
-      Unix.close fd)
+      let unlock_error =
+        match Unix.lockf fd Unix.F_ULOCK 0 with
+        | () -> None
+        | exception exn -> Some exn
+      in
+      let close_error =
+        match Unix.close fd with
+        | () -> None
+        | exception exn -> Some exn
+      in
+      match unlock_error, close_error with
+      | None, None -> ()
+      | _ -> raise (Flock_release_failed { unlock_error; close_error }))
 
 (** Run [f] while holding only the cooperative per-path mutex.
     Use this for in-memory backends that need single-process fiber
@@ -288,11 +344,13 @@ let with_lock ?clock path f =
   let run_with_flock () =
     let lock_path = path ^ ".lock" in
     let dir = Filename.dirname lock_path in
-    if not (Sys.file_exists dir) then
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    run_blocking_lock_op (fun () ->
+      if not (Sys.file_exists dir) then
+        (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()));
     let fd = acquire_flock_fd ?clock lock_path in
     Common.protect ~module_name:"file_lock_eio" ~finally_label:"finalizer"
-      ~finally:(fun () -> release_flock_fd fd)
+      ~finally:(fun () ->
+        protect_from_cancel (fun () -> release_flock_fd fd))
       f
   in
   with_mutex path (fun () -> run_with_flock ())
@@ -301,22 +359,34 @@ let file_registry_key ~device ~inode =
   Printf.sprintf "descriptor-inode:%Lx:%Lx" device inode
 ;;
 
-let with_lock_file
+type close_state =
+  | Open
+  | Close_attempted
+  | Closed
+
+let with_anchored_file_lock
       ?clock
       ~path
-      ~open_file
-      ~descriptor
-      ~identity
-      ~close_file
+      ~directory
+      ~name
+      ~perm
       f
   =
-  let file = run_blocking_lock_op open_file in
-  let closed = ref false in
+  require_eio_context ();
+  let module Dir = Fs_compat.Anchored_dir in
+  let file =
+    protect_from_cancel (fun () ->
+      Dir.open_lock_file directory ~name ~perm)
+  in
+  let close_state = ref Open in
   let close_once () =
-    if not !closed
-    then (
-      closed := true;
-      run_blocking_lock_op (fun () -> close_file file))
+    match !close_state with
+    | Closed | Close_attempted -> ()
+    | Open ->
+      close_state := Close_attempted;
+      protect_from_cancel (fun () ->
+        Dir.close_lock_file file;
+        close_state := Closed)
   in
   let finish outcome =
     let close_outcome =
@@ -335,32 +405,35 @@ let with_lock_file
         (Lock_file_cleanup_failed
            { primary; primary_backtrace; close_error })
   in
-  let device, inode = identity file in
-  let entry = get_entry (file_registry_key ~device ~inode) in
-  let run () =
-    let outcome =
-      try
-        ignore
-          (acquire_flock_on_fd_cooperative
-             ?clock
-             ~fd:(descriptor file)
-             ~lock_path:path
-             ~caller:"File_lock_eio"
-             ()
-           : Unix.file_descr);
-        Ok (f ())
-      with
-      | exn -> Error (exn, Printexc.get_raw_backtrace ())
+  let run_scoped () =
+    let device, inode = Dir.lock_file_identity file in
+    let entry = get_entry (file_registry_key ~device ~inode) in
+    let run () =
+      let outcome =
+        try
+          ignore
+            (acquire_flock_on_fd_cooperative
+               ?clock
+               ~fd:(Dir.lock_file_descriptor file)
+               ~lock_path:path
+               ~caller:"File_lock_eio"
+               ()
+             : Unix.file_descr);
+          Ok (f ())
+        with
+        | exn -> Error (exn, Printexc.get_raw_backtrace ())
+      in
+      finish outcome
     in
-    finish outcome
-  in
-  try
     Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
       ~finally:(fun () -> release_entry entry)
       (fun () -> with_cooperative_entry entry run)
+  in
+  try
+    run_scoped ()
   with
   | exn ->
-    if !closed
+    if !close_state <> Open
     then raise exn
     else finish (Error (exn, Printexc.get_raw_backtrace ()))
 

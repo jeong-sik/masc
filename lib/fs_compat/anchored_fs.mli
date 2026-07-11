@@ -64,7 +64,7 @@ val open_lock_file : t -> name:Segment.t -> perm:int -> lock_file
 (** Open or create one regular lock file relative to the directory capability,
     without following a final symlink. A newly-created file and directory entry
     are fsynced before this returns. The returned artifact must be closed with
-    {!close_lock_file}; {!File_lock_eio.with_lock_file} owns that lifecycle for
+    {!close_lock_file}; {!File_lock_eio.with_anchored_file_lock} owns that lifecycle for
     ordinary lock users. *)
 
 val lock_file_descriptor : lock_file -> Unix.file_descr

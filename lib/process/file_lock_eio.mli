@@ -35,6 +35,14 @@ exception Lock_file_cleanup_failed of
   ; close_error : exn
   }
 
+exception Flock_release_failed of
+  { unlock_error : exn option
+  ; close_error : exn option
+  }
+(** Unlock and close both ran but at least one failed. Neither failure is
+    discarded; [close_error = Some _] means the descriptor's final state is
+    unknown and must not be retried. *)
+
 (** Non-blocking [F_TLOCK] with retry. On success returns the open
     file descriptor holding the lock. On timeout closes the fd and
     raises {!Flock_timeout}. [clock] is accepted but ignored in this
@@ -72,41 +80,50 @@ val acquire_flock_fd :
   string ->
   Unix.file_descr
 
-(** [release_flock_fd fd] unlocks (best-effort) and closes [fd]. *)
+(** [release_flock_fd fd] unlocks and closes [fd]. Failures from either step
+    are reported as {!Flock_release_failed}; close is attempted even if unlock
+    failed. *)
 val release_flock_fd : Unix.file_descr -> unit
 
 (** {1 High-level scoped locking} *)
 
 (** [with_mutex path f] runs [f] while holding the cooperative
     per-[path] Eio.Mutex only. Use for in-memory backends that need
-    single-process fiber serialisation but have no filesystem
-    artifact to flock. *)
+    single-process fiber serialisation but have no filesystem artifact to
+    flock. Before Eio starts, it uses a transition gate; an Eio caller drains
+    that gate before acquiring the cooperative mutex, so the two modes never
+    overlap for one key. *)
 val with_mutex : string -> (unit -> 'a) -> 'a
 
 (** [with_lock ?clock path f] runs [f] while holding both the
     cooperative Eio.Mutex and an OS-level flock on [path ^ ".lock"].
     The flock uses non-blocking F_TLOCK retries — max 200 attempts,
-    ~2s total with default sleeps. *)
+    ~2s total with default sleeps. A pre-Eio caller and a later Eio caller use
+    the same transition gate before the latter acquires its cooperative mutex.
+    *)
 val with_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   string ->
   (unit -> 'a) ->
   'a
 
-val with_lock_file :
+val with_anchored_file_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> path:string
-  -> open_file:(unit -> 'resource)
-  -> descriptor:('resource -> Unix.file_descr)
-  -> identity:('resource -> int64 * int64)
-  -> close_file:('resource -> unit)
+  -> directory:Fs_compat.Anchored_dir.t
+  -> name:Fs_compat.Anchored_dir.Segment.t
+  -> perm:int
   -> (unit -> 'a)
   -> 'a
-(** Descriptor-relative counterpart of {!with_lock}. The caller provides a
-    blocking-only [open_file]/[close_file] pair; opening and close run in a
-    system thread under Eio. Same-process serialization is derived from the
-    opened regular file's actual [(device, inode)], so path and hard-link aliases
-    cannot select different cooperative mutexes. [path] is diagnostic only. *)
+(** Descriptor-relative lock scoped to an anchored directory capability. It
+    opens, identifies, locks, and closes one regular lock artifact as a single
+    ownership unit. Same-process serialization is derived from that opened
+    file's actual [(device, inode)], so hard-link aliases cannot select
+    different cooperative mutexes. [path] is diagnostic only.
+
+    The lock artifact closes in a cancellation-protected cleanup scope. If the
+    close syscall reports an error, its descriptor is never retried because a
+    retry could close a reused descriptor. *)
 
 (** {1 Observability hook} *)
 

@@ -19,6 +19,7 @@
  (libraries
   masc_core
   masc_log
+  fs_compat
   time_compat
   masc_cancel_safe
   eio

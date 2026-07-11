@@ -630,7 +630,10 @@ let persist_new ~config operation =
            |> Result.map_error (fun detail -> Io_error detail)))
 ;;
 
-let same_identity left right =
+let same_identity
+    (left : Keeper_shutdown_types.t)
+    (right : Keeper_shutdown_types.t)
+  =
   Operation_id.equal left.operation_id right.operation_id
   && String.equal left.keeper_name right.keeper_name
   && Keeper_lane.Id.equal left.lane_id right.lane_id

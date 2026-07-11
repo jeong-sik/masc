@@ -335,9 +335,12 @@ let terminal_reason_requires_attention trust =
     (match terminal_reason_severity trust with
      | Some ("bad" | "warn") -> true
      | _ ->
-       (match terminal_reason_code trust |> Option.map String.lowercase_ascii with
-        | Some ("success" | "completed") | None -> false
-        | Some _ -> true))
+       (match terminal_reason_code trust with
+        | None -> false
+        | Some code ->
+          not
+            (Keeper_turn_disposition.is_success
+               (Keeper_turn_disposition.of_wire code))))
 ;;
 
 let trust_disposition_requires_attention trust =

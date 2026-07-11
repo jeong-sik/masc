@@ -1070,13 +1070,16 @@ let () =
     Fun.protect
       ~finally:(fun () ->
         Masc.Keeper_registry.clear ();
-        Masc.Keeper_chat_queue.clear ~keeper_name:"keeper-event-queue-yield-test";
+        Masc.Keeper_chat_queue.For_testing.reset ();
         rm_rf base_path)
       (fun () ->
         let keeper_name = "keeper-event-queue-yield-test" in
         let meta = meta_for_keeper keeper_name "trace-event-queue-yield-test" in
         Masc.Keeper_registry.clear ();
-        Masc.Keeper_chat_queue.clear ~keeper_name;
+        Masc.Keeper_chat_queue.For_testing.reset ();
+        ignore
+          (Masc.Keeper_chat_queue.configure_persistence ~base_path
+            : Masc.Keeper_chat_queue.configure_report);
         ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
         (match
            Masc.Keeper_unified_turn_execution.autonomous_yield_request

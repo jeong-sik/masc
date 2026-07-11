@@ -20,6 +20,7 @@ describe('RouteLink', () => {
     render(h(RouteLink, { tab: 'home' as any }, 'Home'), container)
     const a = container.querySelector('a')
     expect(a?.getAttribute('href')).toBe('#home')
+    expect(a?.classList.contains('v2-mobile-operator-target')).toBe(true)
   })
 
   it('renders children', () => {

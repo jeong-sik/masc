@@ -190,21 +190,20 @@ let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
           ~channel_workspace_id:channel_id
           ~channel_user_id:user_id;
     }
-  | Keeper_chat_queue.Slack { channel; user_id } ->
+  | Keeper_chat_queue.Slack { channel_id; user_id; user_name; _ } ->
     {
-      payload_channel = channel;
+      payload_channel = "slack";
       payload_channel_user_id = user_id;
-      payload_channel_user_name = "";
-      payload_channel_workspace_id = "";
+      payload_channel_user_name = user_name;
+      payload_channel_workspace_id = channel_id;
       agent_name =
         Gate_keeper_backend.agent_name_for_channel_actor
-          ~channel
-          ~channel_workspace_id:""
+          ~channel:"slack"
+          ~channel_workspace_id:channel_id
           ~channel_user_id:user_id;
     }
 
-(* Shared by both the queue consumer's [handle_turn] and [on_stalled]
-   wiring below: both need the same synthetic
+(* Queue-consumer turns need the same synthetic
    [Server_routes_http_keeper_stream.keeper_chat_stream_request] built from
    a dequeued/leased [Keeper_chat_queue.queued_message], and a duplicated
    copy would silently drift out of sync with [queued_chat_projection] the
@@ -282,16 +281,6 @@ let log_dashboard_fiber_crash =
 let filteri_with_fair_yield =
   Server_bootstrap_loops_fiber.filteri_with_fair_yield
 let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
-
-(* [Keeper_chat_consumer]'s per-turn dispatch watchdog margin, added on top
-   of [Keeper_runtime_resolved.turn_timeout_sec] to bound [handle_turn]. It
-   exists only to unwedge the consumer's dispatch gate if [handle_turn]
-   itself never returns (see [Keeper_chat_consumer.start]'s .mli); it is not
-   meant to race the turn's own internal timeout, so it must stay
-   comfortably larger than that timeout — 30s covers
-   [Keeper_msg_async.submit]'s own [Eio.Time.with_timeout_exn] race plus its
-   status-write cleanup (Hashtbl/Atomic updates, no I/O) finishing. *)
-let queue_dispatch_watchdog_margin_sec = 30.0
 
 let start_keeper_loops
       ~sw
@@ -1136,19 +1125,26 @@ let start_keeper_loops
          handle_turn wires process_single_turn for actual turn execution. *)
       (try
          let base_path = (Mcp_server.workspace_config state).base_path in
-         Keeper_chat_queue.configure_persistence ~base_path;
+         Keeper_chat_queue.set_transition_observer
+           (Some
+              (fun ~keeper_name ~revision ->
+                 Keeper_chat_broadcast.queue_changed ~keeper_name
+                   ~revision ()));
+         let queue_report = Keeper_chat_queue.configure_persistence ~base_path in
+         List.iter
+           (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
+              let keeper_label =
+                match keeper_name with
+                | Some keeper_name -> keeper_name
+                | None -> "<registry>"
+              in
+              Log.Keeper.error
+                "keeper_chat_queue: snapshot unavailable keeper=%s: %s"
+                keeper_label
+                error.Keeper_chat_queue.message)
+           queue_report.load_errors;
          Keeper_chat_consumer.start ~sw ~clock
            ~base_path
-           ~dispatch_deadline_sec:
-             (Keeper_runtime_resolved.turn_timeout_sec ()
-              +. queue_dispatch_watchdog_margin_sec)
-           ~on_stalled:(fun ~keeper_name ~queued_message ->
-             let payload = payload_of_queued_message ~keeper_name queued_message in
-             let connector_user_line_recorded_upstream =
-               connector_user_line_recorded_upstream_of_source queued_message.source
-             in
-             Server_routes_http_keeper_stream.persist_queued_turn_stalled ~base_path
-               ~connector_user_line_recorded_upstream ~payload)
            ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
@@ -1165,12 +1161,64 @@ let start_keeper_loops
              let events = Keeper_chat_events.create () in
              let closed = ref false in
              let thread_id = "keeper-consumer:" ^ keeper_name in
+             let delivery, delivery_resolver = Eio.Promise.create () in
+             let resolve_delivery result =
+               ignore
+                 (Eio.Promise.try_resolve delivery_resolver result : bool)
+             in
+             let drain_events () =
+               let rec loop () =
+                 match Keeper_chat_events.subscribe events with
+                 | Keeper_chat_events.Run_finished _
+                 | Keeper_chat_events.Event_error _ -> ()
+                 | _ -> loop ()
+               in
+               loop ()
+             in
+             let fork_delivery_adapter ~label ~run =
+               fork_logged_fiber ~sw
+                 ~on_error:(fun exn ->
+                   let detail =
+                     Printf.sprintf "%s adapter crashed for keeper=%s: %s"
+                       label keeper_name (Printexc.to_string exn)
+                   in
+                   resolve_delivery
+                     (Error (Keeper_chat_queue.Delivery_failed, detail));
+                   Log.Keeper.error "keeper_chat_consumer: %s" detail;
+                   (* Keep consuming the bounded event stream after an
+                      unexpected adapter crash so producer backpressure cannot
+                      deadlock the turn before it emits its terminal outcome. *)
+                   drain_events ())
+                 (fun () ->
+                   let callback_observed = ref false in
+                   run (fun result ->
+                     callback_observed := true;
+                     resolve_delivery result);
+                   if not !callback_observed then
+                     resolve_delivery
+                       (Error
+                          ( Keeper_chat_queue.Delivery_failed,
+                            Printf.sprintf
+                              "%s adapter terminated without a terminal delivery receipt"
+                              label )))
+             in
              (match queued_message.source with
               | Keeper_chat_queue.Dashboard ->
                   Log.Keeper.info
                     "keeper_chat_consumer: processing dashboard queue \
                      message for keeper=%s"
-                    keeper_name
+                    keeper_name;
+                  fork_logged_fiber ~sw
+                    ~on_error:(fun exn ->
+                      resolve_delivery
+                        (Error
+                           ( Keeper_chat_queue.Internal_error,
+                             Printf.sprintf
+                               "dashboard event drain crashed for keeper=%s: %s"
+                               keeper_name (Printexc.to_string exn) )))
+                    (fun () ->
+                      drain_events ();
+                      resolve_delivery (Ok ()))
               | Keeper_chat_queue.Discord { channel_id; _ } ->
                   Log.Keeper.info
                     "keeper_chat_consumer: forking Discord adapter \
@@ -1178,56 +1226,63 @@ let start_keeper_loops
                     keeper_name;
                   (match discord_bot_token_opt () with
                    | Some token ->
-                       (* fork_logged_fiber, not bare Eio.Fiber.fork: the
-                          adapter body runs after this synchronous frame
-                          returns, so the enclosing try/with cannot catch an
-                          exception it raises later. A bare fork would fail
-                          the shared [sw] and cancel every sibling fiber under
-                          it. [on_error] contains non-Cancelled exceptions;
-                          [fork_logged_fiber] re-raises Cancelled to preserve
-                          structured teardown. *)
-                       fork_logged_fiber ~sw
-                         ~on_error:(fun exn ->
-                           Log.Keeper.error
-                             "keeper_chat_consumer: Discord adapter fiber \
-                              crashed for keeper=%s: %s"
-                             keeper_name (Printexc.to_string exn))
-                         (fun () ->
-                           Keeper_chat_discord.adapter_loop ~token
-                             ~channel_id ~events ())
+                       fork_delivery_adapter ~label:"Discord"
+                         ~run:(fun settle ->
+                           Keeper_chat_discord.adapter_loop ~clock ~token
+                             ~channel_id ~events
+                             ~on_send_result:(fun result ->
+                               settle
+                                 (Result.map_error
+                                    (fun error ->
+                                      ( Keeper_chat_queue.Delivery_failed,
+                                        Format.asprintf "%a"
+                                          Keeper_chat_discord.pp_error error ))
+                                    result))
+                             ())
                    | None ->
+                       resolve_delivery
+                         (Error
+                            ( Keeper_chat_queue.Connector_unavailable,
+                              "DISCORD_BOT_TOKEN is not configured" ));
+                       fork_logged_fiber ~sw
+                         ~on_error:(fun _ -> ()) drain_events;
                        Log.Keeper.warn
                          "keeper_chat_consumer: \
                           DISCORD_BOT_TOKEN not set, \
                           skipping Discord delivery for keeper=%s"
                          keeper_name)
-              | Keeper_chat_queue.Slack { channel; _ } ->
+              | Keeper_chat_queue.Slack { channel_id; thread_ts; _ } ->
                   Log.Keeper.info
                     "keeper_chat_consumer: forking Slack adapter \
                      for keeper=%s"
                     keeper_name;
                   (match Env_config_slack.bot_token_opt () with
                    | Some token ->
-                       (* Isolate from the shared [sw] like the Discord arm
-                          above; a bare fork would cancel sibling fibers if
-                          the adapter raises a non-Cancelled exception. *)
-                       fork_logged_fiber ~sw
-                         ~on_error:(fun exn ->
-                           Log.Keeper.error
-                             "keeper_chat_consumer: Slack adapter fiber \
-                              crashed for keeper=%s: %s"
-                             keeper_name (Printexc.to_string exn))
-                         (fun () ->
-                           Keeper_chat_slack.adapter_loop ~token
-                             ~channel ~events
+                       fork_delivery_adapter ~label:"Slack"
+                         ~run:(fun settle ->
+                           Keeper_chat_slack.adapter_loop ~clock ~token
+                             ~channel:channel_id ?thread_ts ~events
                              ~on_send_result:(fun result ->
                                Slack_observability.record_reply
                                  (match result with
                                   | Ok () -> Slack_observability.Reply_send_ok
                                   | Error _ ->
-                                      Slack_observability.Reply_send_failed))
+                                      Slack_observability.Reply_send_failed);
+                               settle
+                                 (Result.map_error
+                                    (fun error ->
+                                      ( Keeper_chat_queue.Delivery_failed,
+                                        Format.asprintf "%a"
+                                          Keeper_chat_slack.pp_error error ))
+                                    result))
                              ())
                    | None ->
+                       resolve_delivery
+                         (Error
+                            ( Keeper_chat_queue.Connector_unavailable,
+                              "SLACK_BOT_TOKEN is not configured" ));
+                       fork_logged_fiber ~sw
+                         ~on_error:(fun _ -> ()) drain_events;
                        Log.Keeper.error
                          "keeper_chat_consumer: \
                           SLACK_BOT_TOKEN not set; \
@@ -1247,11 +1302,69 @@ let start_keeper_loops
                  ~dashboard_thread_id:thread_id
                  queued_message.source
              in
-             process_single_turn ~connector_user_line_recorded_upstream
-               ~queued_turn:true
-               ~state ~clock ~sw ~auth_token:None
-               ~thread_id ~continuation_channel ~closed ~client_disconnects:None
-               ~payload ~run_id ~message_id ~agent_name ~events)
+             let turn_outcome =
+               match
+                 process_single_turn ~connector_user_line_recorded_upstream
+                   ~queued_turn:true
+                   ~state ~clock ~sw ~auth_token:None
+                   ~thread_id ~continuation_channel ~closed
+                   ~client_disconnects:None
+                   ~payload ~run_id ~message_id ~agent_name ~events
+               with
+               | outcome -> outcome
+               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+               | exception exn ->
+                   Keeper_chat_events.publish events
+                     (Keeper_chat_events.Event_error
+                        { message = Printexc.to_string exn });
+                   let _delivery_outcome = Eio.Promise.await delivery in
+                   raise exn
+             in
+             let delivery_outcome = Eio.Promise.await delivery in
+             match turn_outcome, delivery_outcome with
+             | Some (Deferred { rejection }), _ ->
+                 Keeper_chat_consumer.Deferred { rejection }
+             | Some (Delivered { outcome_ref }), Ok () ->
+                 Keeper_chat_consumer.Delivered
+                   { outcome_ref }
+             | Some (Delivered { outcome_ref }), Error (kind, detail) ->
+                 Keeper_chat_consumer.Failed
+                   { kind; detail; outcome_ref = Some outcome_ref }
+             | Some (Failed { kind = turn_kind; detail = turn_detail }),
+               Error (delivery_kind, delivery_detail) ->
+                 Keeper_chat_consumer.Failed
+                   { kind = delivery_kind
+                   ; detail =
+                       Printf.sprintf
+                         "turn failed (%s): %s; terminal connector delivery also failed: %s"
+                         (queued_turn_failure_kind_to_string turn_kind)
+                         turn_detail delivery_detail
+                   ; outcome_ref = None
+                   }
+             | Some (Failed { kind; detail }), Ok () ->
+                 let kind =
+                   match kind with
+                   | Turn_failed -> Keeper_chat_queue.Turn_failed
+                   | Turn_timed_out -> Keeper_chat_queue.Timed_out
+                   | Turn_cancelled -> Keeper_chat_queue.Cancelled
+                   | No_visible_reply
+                   | Continuation_checkpoint_without_reply ->
+                       Keeper_chat_queue.No_visible_reply
+                   | Missing_turn_ref -> Keeper_chat_queue.Internal_error
+                   | Transcript_persist_failed ->
+                       Keeper_chat_queue.Transcript_persist_failed
+                   | Stream_projection_failed ->
+                       Keeper_chat_queue.Internal_error
+                 in
+                 Keeper_chat_consumer.Failed
+                   { kind; detail; outcome_ref = None }
+             | None, _ ->
+                 Keeper_chat_consumer.Failed
+                   { kind = Keeper_chat_queue.Internal_error
+                   ; detail =
+                       "queued turn returned no terminal outcome (invariant violation)"
+                   ; outcome_ref = None
+                   })
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

@@ -109,8 +109,10 @@ let finalize
     match turn_result with
     | Ok _ ->
       (match !receipt_stop_reason_ref with
-       | Some sr -> Keeper_execution_receipt.stop_reason_to_string sr
-       | None -> "success")
+       | Some sr ->
+         Keeper_execution_receipt.receipt_terminal_reason_code_of_stop_reason sr
+       | None ->
+         Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success)
     | Error err ->
       Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err
       |> Keeper_turn_terminal_code.to_wire

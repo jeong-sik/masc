@@ -252,7 +252,7 @@ export function KeeperCheckpointPanel({
               return html`
                 <div class="flex flex-col">
                   ${visibleHistory.map(item => html`
-                    <label class="flex gap-3 border-b border-[var(--color-border-default)] px-3 py-3 text-xs last:border-b-0 v2-monitoring-row">
+                    <label class="v2-mobile-operator-target flex gap-3 border-b border-[var(--color-border-default)] px-3 py-3 text-xs last:border-b-0 v2-monitoring-row">
                       <${Checkbox}
                         class="mt-1"
                         checked=${selectedIds.includes(item.snapshot_id)}

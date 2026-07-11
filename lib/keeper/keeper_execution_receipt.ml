@@ -209,8 +209,8 @@ let passive_only_without_work_scope receipt =
 ;;
 
 let terminal_reason_is_success receipt =
-  let code = String.lowercase_ascii (String.trim receipt.terminal_reason_code) in
-  String.equal code "completed" || String.equal code "success"
+  Keeper_turn_disposition.is_success
+    (Keeper_turn_disposition.of_wire receipt.terminal_reason_code)
 ;;
 
 let operator_disposition (receipt : t)
@@ -456,9 +456,12 @@ let operator_disposition (receipt : t)
         Disp_unknown, Reason_unmapped_runtime_state)
 ;;
 
-let to_json (receipt : t) =
+let to_json_with_operator_disposition
+      (receipt : t)
+      ~disposition
+      ~disposition_reason
+  =
   let terminal_reason_code = enrich_contract_violation_reason receipt in
-  let disposition, disposition_reason = operator_disposition receipt in
   let operator_disposition = operator_disposition_kind_to_string disposition in
   let operator_disposition_reason =
     operator_disposition_reason_to_string disposition_reason
@@ -592,6 +595,11 @@ let to_json (receipt : t) =
     ]
 ;;
 
+let to_json receipt =
+  let disposition, disposition_reason = operator_disposition receipt in
+  to_json_with_operator_disposition receipt ~disposition ~disposition_reason
+;;
+
 (* Operator broadcast hook (#fleet-stall 2026-04-26): operator_disposition
    was a derived display field — emitted nowhere. A pause_human/alert_exhausted
    verdict therefore had no transition out: dashboard turned a chip red, but
@@ -648,6 +656,16 @@ let needs_operator_broadcast = function
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped -> false
+;;
+
+let reaction_kind_of_operator_disposition = function
+  | Disp_pass | Disp_skipped -> Keeper_reaction_ledger.Execution_receipt
+  | Disp_pause_human
+  | Disp_alert_exhausted
+  | Disp_fail_open_next_runtime
+  | Disp_pass_next_model
+  | Disp_user_cancelled
+  | Disp_unknown -> Keeper_reaction_ledger.Terminal_reason
 ;;
 
 module Broadcast_dedupe = struct
@@ -916,7 +934,13 @@ let append (config : Workspace.config) (receipt : t) =
   let store =
     Keeper_types_support.keeper_execution_receipt_store config receipt.keeper_name
   in
-  let receipt_json = to_json receipt in
+  let disposition, reason = operator_disposition receipt in
+  let receipt_json =
+    to_json_with_operator_disposition
+      receipt
+      ~disposition
+      ~disposition_reason:reason
+  in
   Dated_jsonl.append store receipt_json;
   (try
      Keeper_reaction_ledger.record_execution_receipt_reaction
@@ -927,6 +951,7 @@ let append (config : Workspace.config) (receipt : t) =
        ~current_task_id:receipt.current_task_id
        ~goal_ids:receipt.goal_ids
        ~outcome:(outcome_kind_to_tla_receipt receipt.outcome)
+       ~reaction_kind:(reaction_kind_of_operator_disposition disposition)
        ~terminal_reason_code:receipt.terminal_reason_code
        ~receipt_json
        ()
@@ -939,7 +964,6 @@ let append (config : Workspace.config) (receipt : t) =
        receipt.keeper_name
        receipt.trace_id
        (Printexc.to_string exn));
-  let disposition, reason = operator_disposition receipt in
   if needs_operator_broadcast disposition
   then (
     let disposition_s = operator_disposition_kind_to_string disposition in

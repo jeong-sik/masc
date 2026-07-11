@@ -828,7 +828,9 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="notify-permission-request"]')).toBeNull()
 
     for (const kind of ['keeper_guardrail', 'keeper_handoff', 'approval:pending', 'oas:agent_failed']) {
-      expect(container.querySelector(`[data-testid="notify-rule-toggle-${kind}"]`)).not.toBeNull()
+      const toggle = container.querySelector(`[data-testid="notify-rule-toggle-${kind}"]`)
+      expect(toggle).not.toBeNull()
+      expect(toggle?.closest('label')?.classList.contains('v2-mobile-operator-target')).toBe(true)
     }
   })
 

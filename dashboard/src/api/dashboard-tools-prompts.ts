@@ -271,9 +271,62 @@ export interface DashboardScheduledAutomation {
   requests: DashboardScheduledAutomationRequest[]
 }
 
+export type DashboardKeeperWaitingSource =
+  | 'event_queue_pending'
+  | 'event_queue_inflight'
+  | 'chat_queue_pending'
+  | 'chat_queue_inflight'
+  | 'hitl_pending'
+  | 'external_attention'
+  | 'fusion_running'
+  | 'background_task'
+  | 'schedule_waiting'
+  | 'turn_admission_waiting'
+  | 'turn_admission_shutdown'
+  | 'operator_pending_confirm'
+  | 'read_error'
+
+export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
+  'event_queue_pending',
+  'event_queue_inflight',
+  'chat_queue_pending',
+  'chat_queue_inflight',
+  'hitl_pending',
+  'external_attention',
+  'fusion_running',
+  'background_task',
+  'schedule_waiting',
+  'turn_admission_waiting',
+  'turn_admission_shutdown',
+  'operator_pending_confirm',
+  'read_error',
+] as const satisfies ReadonlyArray<DashboardKeeperWaitingSource>
+
+type NoMissingWaitingSource<Missing extends never> = Missing
+export type _DashboardKeeperWaitingSourceComplete = NoMissingWaitingSource<
+  Exclude<
+    DashboardKeeperWaitingSource,
+    (typeof DASHBOARD_KEEPER_WAITING_SOURCE_VALUES)[number]
+  >
+>
+
+const DASHBOARD_KEEPER_WAITING_SOURCE_SET: ReadonlySet<string> =
+  new Set(DASHBOARD_KEEPER_WAITING_SOURCE_VALUES)
+
+/** Exact parser for the backend's closed waiting-inventory source vocabulary. */
+export function parseDashboardKeeperWaitingSource(
+  value: unknown,
+): DashboardKeeperWaitingSource | null {
+  return typeof value === 'string' && DASHBOARD_KEEPER_WAITING_SOURCE_SET.has(value)
+    ? value as DashboardKeeperWaitingSource
+    : null
+}
+
+export type DashboardKeeperWaitingState = 'idle' | 'busy' | 'waiting' | 'deferred'
+
 export interface DashboardKeeperWaitingRow {
   keeper_name?: string | null
-  source: string
+  source: DashboardKeeperWaitingSource
   waiting_on: string
   wake_producer?: string | null
   since?: number | null
@@ -286,7 +339,7 @@ export interface DashboardKeeperWaitingRow {
 
 export interface DashboardKeeperWaitingKeeper {
   keeper_name: string
-  state: 'idle' | 'busy' | 'waiting' | 'deferred' | string
+  state: DashboardKeeperWaitingState
   waiting_on: DashboardKeeperWaitingRow[]
   waiting_count: number
   waiting_count_truncated?: boolean
@@ -529,12 +582,34 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
     // filter simply degrades to zero counts. Mirrors category/tier above.
     surfaces: t.surfaces ?? [],
   }))
+  const normalizeWaitingRow = (row: DashboardKeeperWaitingRow): DashboardKeeperWaitingRow => {
+    const source = parseDashboardKeeperWaitingSource(row.source)
+    if (!source) {
+      throw new Error(`Unknown keeper waiting inventory source: ${JSON.stringify(row.source)}`)
+    }
+    return { ...row, source }
+  }
+  const normalizedWaitingInventory = raw.keeper_waiting_inventory
+    ? {
+        ...raw.keeper_waiting_inventory,
+        keepers: raw.keeper_waiting_inventory.keepers.map(keeper => ({
+          ...keeper,
+          waiting_on: keeper.waiting_on.map(normalizeWaitingRow),
+        })),
+        ...(raw.keeper_waiting_inventory.global_waiting_on
+          ? { global_waiting_on: raw.keeper_waiting_inventory.global_waiting_on.map(normalizeWaitingRow) }
+          : {}),
+      }
+    : undefined
   return {
     ...raw,
     tool_inventory: {
       ...raw.tool_inventory,
       ...(normalizedTools ? { tools: normalizedTools } : {}),
     },
+    ...(normalizedWaitingInventory
+      ? { keeper_waiting_inventory: normalizedWaitingInventory }
+      : {}),
   }
 }
 

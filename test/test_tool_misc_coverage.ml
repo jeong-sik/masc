@@ -160,7 +160,7 @@ let () = test "dispatch_keeper_waiting_inventory" (fun () ->
       assert
         (String.equal
            (json_string_member "schema" data)
-           "masc.dashboard.keeper_waiting_inventory.v1");
+           "masc.dashboard.keeper_waiting_inventory.v2");
       assert
         (String.equal
            (json_string_member "source" data)

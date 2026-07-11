@@ -335,6 +335,61 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
   }
 }
 
+export async function fetchJsonWithTimeout(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<{ response: Response; data: unknown | null }> {
+  const controller = new AbortController()
+  const upstreamSignal = init.signal
+  let rejectBoundary: (reason: unknown) => void = () => undefined
+  const boundary = new Promise<never>((_resolve, reject) => {
+    rejectBoundary = reject
+  })
+  const abortFromUpstream = () => {
+    controller.abort()
+    rejectBoundary(upstreamSignal?.reason ?? new DOMException('Aborted', 'AbortError'))
+  }
+  const timer = setTimeout(() => {
+    controller.abort()
+    const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
+    rejectBoundary(new ApiRequestError({ method, path, timeout: true, timeoutMs }))
+  }, timeoutMs)
+
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) {
+      controller.abort()
+    } else {
+      upstreamSignal.addEventListener('abort', abortFromUpstream, { once: true })
+    }
+  }
+
+  try {
+    const request = (async () => {
+      const response = await fetch(path, {
+        ...init,
+        cache: init.cache ?? 'no-store',
+        signal: controller.signal,
+      })
+      return {
+        response,
+        data: response.ok ? await response.json() : null,
+      }
+    })()
+    return await Promise.race([request, boundary])
+  } catch (err) {
+    if (isAbortError(err)) {
+      if (upstreamSignal?.aborted) throw err
+      const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
+      throw new ApiRequestError({ method, path, timeout: true, timeoutMs })
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+    upstreamSignal?.removeEventListener('abort', abortFromUpstream)
+  }
+}
+
 const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
   '/api/v1/dashboard/shell',
   '/api/v1/dashboard/project-snapshot',

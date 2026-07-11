@@ -709,6 +709,30 @@ let test_keeper_lane_identity_is_typed_and_unique () =
   | Ok decoded -> check bool "lane id round-trip" true (Lane.Id.equal first_id decoded)
   | Error detail -> fail detail
 
+(* Codex #24135 finding 1 (predicate half): [request_cancel] records a shutdown
+   request so a supervised body can classify the resulting cancellation as an
+   operator shutdown (graceful stop) rather than a parent/restart cancel. The
+   supervised-body routing that consumes this flag is covered by review against
+   the tested normal-exit path (a full fork+cancel finally harness is not
+   available: the supervisor tests mock [supervise_keepalive]). *)
+let test_lane_records_shutdown_request_on_cancel () =
+  Eio_main.run @@ fun _env ->
+  let lane = Lane.create () in
+  check bool "fresh lane has no shutdown request" false
+    (Lane.shutdown_requested lane);
+  (match Lane.request_cancel lane with
+   | Lane.Cancel_requested -> ()
+   | Lane.Cancel_already_requested
+   | Lane.Cancel_already_exiting
+   | Lane.Cancel_signal_failed _ ->
+     fail "expected request_cancel to be accepted on a fresh lane");
+  check bool "request_cancel records the shutdown request" true
+    (Lane.shutdown_requested lane);
+  match Lane.await_exit lane with
+  | { outcome = Lane.Shutdown_before_start; _ } -> ()
+  | { outcome = _; _ } ->
+    fail "expected a not-started lane cancel to resolve Shutdown_before_start"
+
 let test_keeper_lane_cancel_is_lane_local_and_joinable () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun parent_sw ->
@@ -825,6 +849,8 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "shutdown store accepted a different lane identity");
       let worker_failure = Failure "worker exploded after durable join" in
+      let failure_timestamp = "2026-07-11T11:00:01Z" in
+      let failure_clock_sampled = Atomic.make false in
       let holder_locked_p, holder_locked_r = Eio.Promise.create () in
       let release_holder_p, release_holder_r = Eio.Promise.create () in
       let holder_done_p, holder_done_r = Eio.Promise.create () in
@@ -845,10 +871,18 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
            Eio.Fiber.fork ~sw:worker_sw (fun () ->
              Eio.Promise.resolve worker_started_r ();
              Shutdown_runtime.For_testing.persist_unhandled_failure
+               ~now:(fun () ->
+                 Atomic.set failure_clock_sampled true;
+                 failure_timestamp)
                ~config
                operation
                worker_failure);
            Eio.Promise.await worker_started_p;
+           Eio.Fiber.yield ();
+           check bool
+             "failure clock is not sampled while the write lock is held"
+             false
+             (Atomic.get failure_clock_sampled);
            Eio.Switch.fail worker_sw Cancel_worker;
            Eio.Promise.resolve release_holder_r ())
        with
@@ -863,8 +897,16 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         "unhandled worker failure advances the latest durable revision"
         (joined.revision + 1)
         blocked.revision;
+      check bool
+        "failure clock is sampled after the write lock is acquired"
+        true
+        (Atomic.get failure_clock_sampled);
+      check string
+        "blocked evidence owns its post-lock timestamp"
+        failure_timestamp
+        blocked.updated_at;
       (match blocked.phase with
-       | Shutdown_types.Blocked { stage = Shutdown_types.Record_update; detail } ->
+       | Shutdown_types.Blocked { stage = Shutdown_types.Unhandled_worker; detail } ->
          check string
            "unhandled worker failure detail"
            (Printexc.to_string worker_failure)
@@ -878,6 +920,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Shutdown_types.Blocked _ ->
          fail "unhandled worker failure did not persist typed blocked evidence");
       Shutdown_runtime.For_testing.persist_unhandled_failure
+        ~now:Masc_domain.now_iso
         ~config
         operation
         (Failure "later worker failure");
@@ -1772,6 +1815,8 @@ let () =
         test_keeper_lane_identity_is_typed_and_unique;
       test_case "lane cancellation is local and joinable" `Quick
         test_keeper_lane_cancel_is_lane_local_and_joinable;
+      test_case "lane records shutdown request on cancel" `Quick
+        test_lane_records_shutdown_request_on_cancel;
       test_case "shutdown store round-trip and identity guard" `Quick
         test_keeper_shutdown_store_round_trip_and_identity_guard;
       test_case "shutdown prepare joins idle lane" `Quick

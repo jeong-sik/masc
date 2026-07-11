@@ -359,7 +359,7 @@ export function KeeperRepoMapping() {
                 </div>
 
                 <div class="p-3">
-                  <label class="flex items-center gap-2 mb-3 cursor-pointer select-none v2-monitoring-row">
+                  <label class="v2-mobile-operator-target flex items-center gap-2 mb-3 cursor-pointer select-none v2-monitoring-row">
                     <input
                       type="checkbox"
                       checked=${allowAll}
@@ -378,7 +378,7 @@ export function KeeperRepoMapping() {
                         return html`
                           <label
                             key="${keeperId}-${repo.id}"
-                            class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--color-bg-elevated)] transition-colors v2-monitoring-row"
+                            class="v2-mobile-operator-target flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--color-bg-elevated)] transition-colors v2-monitoring-row"
                           >
                             <input
                               type="checkbox"

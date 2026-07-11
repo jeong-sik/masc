@@ -108,8 +108,8 @@ val run_if_free
 
     Also returns [`Busy] without attempting the lock when a chat request is
     already parked on this slot ([chat_waiting] is true), or when a busy
-    connector/dashboard message is deferred in [Keeper_chat_queue] for this
-    keeper ([Keeper_chat_queue.length] > 0). Eio.Mutex hands a released slot
+    connector/dashboard receipt is active in [Keeper_chat_queue] for this
+    keeper (pending or inflight). Eio.Mutex hands a released slot
     directly to the next parked waiter, so a new autonomous cycle would not
     overtake a queued chat regardless; these pre-checks make the yield
     explicit and keep a heartbeat-scheduled cycle from competing for a slot
@@ -118,7 +118,8 @@ val run_if_free
     back-to-back autonomous turn could otherwise busy-ACK a connector
     forever: the autonomous lane yields on the same backlog the consumer
     drains, so the consumer's [in_flight = None] window opens
-    deterministically. *)
+    deterministically. Queue persistence/read errors fail closed rather than
+    being mistaken for an empty queue. *)
 
 val chat_waiting : base_path:string -> keeper_name:string -> bool
 (** [true] when at least one chat request is parked on this keeper's slot
@@ -167,7 +168,12 @@ val run_chat_if_free
     durable chat queue. Existing parked chat waiters have priority: when
     [chat_waiting] is true this returns [`Busy] without attempting the lock.
     [Busy.shutdown_operation_id] distinguishes lifecycle fencing from
-    ordinary turn contention. *)
+    ordinary turn contention.
+
+    After acquiring the turn slot it rechecks both parked waiters and active
+    durable receipts. This post-lock check is the direct-admission
+    linearization point: a receipt committed or leased after an outer route
+    peek cannot be overtaken, and queue read errors fail closed as [`Busy]. *)
 
 val in_flight
   :  base_path:string
@@ -244,6 +250,12 @@ val fleet_health_json :
 module For_testing : sig
   val reset : unit -> unit
   (** Drop every slot. Only safe when no turn is in flight. *)
+
+  val with_unpublished_turn_lock :
+    base_path:string -> keeper_name:string -> (unit -> 'a) -> 'a
+  (** Hold the raw turn mutex without publishing [in_flight_info]. Constructs
+      the documented lock-to-observability window for deterministic admission
+      regression tests. *)
 
   val peek
     :  base_path:string

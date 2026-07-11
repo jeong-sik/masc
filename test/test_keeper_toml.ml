@@ -1855,8 +1855,12 @@ let test_health_json_surfaces_typed_keeper_config_error () =
   let base_path = Filename.concat keepers_dir "missing-base.toml" in
   write_file keeper_path
     "[keeper]\nbase = \"missing-base.toml\"\ngoal = \"test\"\n";
-  let request = Httpun.Request.create `GET "/health" in
-  let json = Runtime.make_health_json request in
+  let request = health_request () in
+  let json =
+    Runtime.make_health_json
+      ~request_authority:(request_authority_exn request)
+      request
+  in
   let open Yojson.Safe.Util in
   check int "config error count" 1
     (json |> member "keeper_config_error_count" |> to_int);

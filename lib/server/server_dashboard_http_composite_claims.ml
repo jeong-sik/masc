@@ -440,10 +440,12 @@ let composite_execution_blocked execution =
   || composite_execution_contract_blocked execution
   || Option.is_some (composite_execution_completion_unsatisfied_reason execution)
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
-  || (match lower_string_opt (json_string "terminal_reason_code" execution) with
+  || (match json_string "terminal_reason_code" execution with
       | Some terminal ->
-        terminal <> ""
-        && terminal <> "completed"
+        not (String.equal terminal "")
+        && not
+             (Keeper_turn_disposition.is_success
+                (Keeper_turn_disposition.of_wire terminal))
         && not (composite_execution_budget_exhausted_pass execution)
       | None -> false)
   ||

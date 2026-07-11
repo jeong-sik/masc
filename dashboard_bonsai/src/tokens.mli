@@ -330,6 +330,7 @@ type semantic =
   | `Ctrl_h_sm
   | `Ctrl_h
   | `Ctrl_h_lg
+  | `Mobile_touch_target_min
   | `_density_scope
   | `Elev_0_bg
   | `Elev_0_border

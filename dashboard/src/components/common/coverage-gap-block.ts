@@ -164,7 +164,7 @@ export function CoverageGapBlock({ display }: { display: CoverageGapDisplay }) {
           href=${hint.href}
           target="_blank"
           rel="noopener noreferrer"
-          class="inline-flex items-center gap-1 self-start rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--warn-10)] px-1.5 py-0.5 font-medium text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]"
+          class="v2-mobile-operator-target inline-flex items-center gap-1 self-start rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--warn-10)] px-1.5 py-0.5 font-medium text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]"
           data-testid=${`coverage-gap-hint-${hint.reason}`}
         >
           <span>${hint.label}</span>

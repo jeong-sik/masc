@@ -48,6 +48,8 @@ describe('SubBoardSurface', () => {
     expect(screen.getAllByText('Members only').length).toBeGreaterThan(0)
     expect(screen.getByText('2 members')).toBeTruthy()
     expect(screen.getByText('3 posts')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '서브보드 열기: Operations' }))
+      .toHaveClass('v2-mobile-operator-target')
     expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
     expect(container.querySelector('.v2-workspace-panel')).not.toBeNull()
   })

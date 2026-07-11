@@ -637,6 +637,151 @@ judge_system_prompt = "j"
       (List.mem (Fusion_config.Invalid_staged_judge_group_size 1) es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_staged_judge_group_size"
 
+(* council 프리셋 계약 (config/runtime.toml [fusion.presets.council] 미러):
+   judge 6명 = staged_judge_group_size(3)의 정확한 배수이자 >= group_size*2 —
+   staged_judge_of_judges 자격을 만족하는 최초의 shipped preset shape.
+   staged_judge_groups가 lens 입력 순서를 보존한 2 그룹을 만드는 것까지 고정해,
+   프리셋을 줄이거나(ragged) group_size를 키우는 회귀가 여기서 잡히게 한다. *)
+let council_shaped_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "council"
+staged_judge_group_size = 3
+[fusion.presets.council]
+panel = ["pa", "pb", "pc"]
+judge = "meta-reducer"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "reconcile the stage syntheses"
+
+[[fusion.presets.council.judges]]
+model = "j1"
+label = "evidence"
+system_prompt = "evidence lens"
+
+[[fusion.presets.council.judges]]
+model = "j2"
+label = "coverage"
+system_prompt = "coverage lens"
+
+[[fusion.presets.council.judges]]
+model = "j3"
+label = "risk"
+system_prompt = "risk lens"
+
+[[fusion.presets.council.judges]]
+model = "j1"
+label = "feasibility"
+system_prompt = "feasibility lens"
+
+[[fusion.presets.council.judges]]
+model = "j2"
+label = "simplicity"
+system_prompt = "simplicity lens"
+
+[[fusion.presets.council.judges]]
+model = "j3"
+label = "adversarial"
+system_prompt = "adversarial lens"
+|}
+
+let test_config_council_preset_is_staged_eligible () =
+  match Fusion_config.of_toml (parse council_shaped_toml) with
+  | Error es ->
+    Alcotest.failf "council fixture must parse+validate, got: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       let preset = raw vp in
+       Alcotest.(check int) "six first-round judges" 6
+         (List.length preset.Fusion_policy.judges);
+       (match
+          Fusion_policy.staged_judge_groups
+            ~group_size:p.Fusion_policy.staged_judge_group_size
+            preset.Fusion_policy.judges
+        with
+        | Error e ->
+          Alcotest.failf "council must be staged-eligible, got: %s"
+            (Fusion_policy.staged_judge_group_error_message e)
+        | Ok groups ->
+          Alcotest.(check int) "two exact stages" 2 (List.length groups);
+          Alcotest.(check (list (list string)))
+            "stage grouping preserves lens input order"
+            [ [ "evidence"; "coverage"; "risk" ]
+            ; [ "feasibility"; "simplicity"; "adversarial" ]
+            ]
+            (List.map
+               (List.map (fun j -> j.Fusion_policy.jlabel))
+               groups))
+     | presets ->
+       Alcotest.failf "expected exactly one preset, got %d" (List.length presets))
+
+let test_shipped_runtime_council_is_staged_eligible () =
+  let runtime_toml =
+    In_channel.with_open_bin "../../config/runtime.toml" In_channel.input_all
+  in
+  match Fusion_config.of_toml (parse runtime_toml) with
+  | Error errors ->
+    Alcotest.failf "shipped runtime.toml must validate, got: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error errors))
+  | Ok policy ->
+    (match
+       List.find_opt
+         (fun validated ->
+            String.equal
+              (raw validated).Fusion_policy.name
+              "council")
+         policy.Fusion_policy.presets
+     with
+     | None -> Alcotest.fail "shipped runtime.toml has no council preset"
+     | Some validated ->
+       let preset = raw validated in
+       match
+         Fusion_policy.staged_judge_groups
+           ~group_size:policy.Fusion_policy.staged_judge_group_size
+           preset.Fusion_policy.judges
+       with
+       | Ok [ first_stage; second_stage ] ->
+         Alcotest.(check (list string))
+           "shipped first stage lenses"
+           [ "evidence"; "coverage"; "risk" ]
+           (List.map (fun judge -> judge.Fusion_policy.jlabel) first_stage);
+         Alcotest.(check (list string))
+           "shipped second stage lenses"
+           [ "feasibility"; "simplicity"; "adversarial" ]
+           (List.map (fun judge -> judge.Fusion_policy.jlabel) second_stage)
+       | Ok groups ->
+         Alcotest.failf "shipped council must have two stages, got %d"
+           (List.length groups)
+       | Error error ->
+         Alcotest.failf "shipped council is not staged-eligible: %s"
+           (Fusion_policy.staged_judge_group_error_message error))
+
+(* 회귀 가드: quorum 형태(2 judges)는 staged 비자격 — 이 fail-closed가 council
+   추가 전 모든 shipped preset의 상태였다. *)
+let test_config_two_judges_not_staged_eligible () =
+  let judge ~model ~label =
+    { Fusion_policy.jmodel = model
+    ; jlabel = label
+    ; jsystem_prompt = label ^ " lens"
+    ; jweb_tools = false
+    ; jmax_tool_calls = 0
+    ; jmax_output_tokens = None
+    ; jtimeout_s = 300.0
+    ; jmax_timeout_s = None
+    }
+  in
+  let judges =
+    [ judge ~model:"j1" ~label:"evidence"; judge ~model:"j2" ~label:"coverage" ]
+  in
+  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
+  | Error (Fusion_policy.Staged_too_few_judges { group_size = 3; judges = 2 }) -> ()
+  | Error e ->
+    Alcotest.failf "expected Staged_too_few_judges, got: %s"
+      (Fusion_policy.staged_judge_group_error_message e)
+  | Ok _ -> Alcotest.fail "two judges must not be staged-eligible"
+
 let test_config_invalid_max_tool_calls () =
   let s =
     {|
@@ -1665,6 +1810,12 @@ let () =
             test_config_bad_judge_concurrency
         ; Alcotest.test_case "bad_staged_judge_group_size" `Quick
             test_config_bad_staged_judge_group_size
+        ; Alcotest.test_case "council_staged_eligible" `Quick
+            test_config_council_preset_is_staged_eligible
+        ; Alcotest.test_case "shipped_runtime_council_staged_eligible" `Quick
+            test_shipped_runtime_council_is_staged_eligible
+        ; Alcotest.test_case "two_judges_not_staged_eligible" `Quick
+            test_config_two_judges_not_staged_eligible
         ; Alcotest.test_case "invalid_max_tool_calls" `Quick
             test_config_invalid_max_tool_calls
         ; Alcotest.test_case "invalid_max_output_tokens" `Quick

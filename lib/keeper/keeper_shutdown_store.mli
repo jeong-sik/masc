@@ -41,12 +41,13 @@ val replace :
 
 (** Read the latest durable revision and persist [Blocked failure] while
     holding the operation's write lock. Existing [Finalized], [Blocked], and
-    effect-unknown reconciliation states are preserved. *)
+    effect-unknown reconciliation states are preserved. [now] is sampled only
+    after the lock is acquired and the latest revision is loaded. *)
 val persist_blocked_latest :
   config:Workspace.config ->
   identity:Keeper_shutdown_types.t ->
   failure:Keeper_shutdown_types.failure ->
-  updated_at:string ->
+  now:(unit -> string) ->
   (persist_blocked_result, error) result
 
 val load :

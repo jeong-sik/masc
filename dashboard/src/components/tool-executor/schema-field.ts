@@ -70,12 +70,12 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
 
   if (schema.type === 'boolean') {
     return html`
-      <div class="v2-lab-row flex items-center gap-2 py-1">
+      <label class="v2-lab-row v2-mobile-operator-target flex items-center gap-2 py-1">
         <${Checkbox} checked=${(value as boolean) ?? (schema.default as boolean) ?? false}
           onChange=${(v: boolean) => onChange(name, v)} />
-        <label class="text-xs text-[var(--color-fg-primary)]">${name}${requiredMark}</label>
+        <span class="text-xs text-[var(--color-fg-primary)]">${name}${requiredMark}</span>
         ${schema.description ? html`<span class="text-3xs text-[var(--color-fg-muted)]">- ${schema.description}</span>` : null}
-      </div>
+      </label>
     `
   }
 

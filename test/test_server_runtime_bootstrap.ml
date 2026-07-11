@@ -3222,6 +3222,21 @@ let test_health_json_reaction_ledger_unavailable_shape () =
           |> to_list
           |> List.length))
 
+let test_health_json_turn_admission_unavailable_shape () =
+  let previous_state = !Server_auth.server_state in
+  Fun.protect
+    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    (fun () ->
+       Server_auth.server_state := None;
+       let request = Httpun.Request.create `GET "/health" in
+       let json = Server_routes_http_runtime.make_health_json request in
+       let open Yojson.Safe.Util in
+       let admission = json |> member "keeper_turn_admission" in
+       Alcotest.(check string) "unavailable turn admission status" "unavailable"
+         (admission |> member "status" |> to_string);
+       Alcotest.(check int) "unavailable shutdown keeper count" 0
+         (admission |> member "shutdown_keeper_count" |> to_int))
+
 let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;
   Log.emit Log.Warn ~module_name:"HealthTest"
@@ -4769,6 +4784,9 @@ let () =
           Alcotest.test_case
             "health json reaction ledger unavailable shape"
             `Quick test_health_json_reaction_ledger_unavailable_shape;
+          Alcotest.test_case
+            "health json turn admission unavailable shape"
+            `Quick test_health_json_turn_admission_unavailable_shape;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case

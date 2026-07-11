@@ -1,7 +1,7 @@
 # Keeper Tool Boundary Matrix
 
 Status: P0 ratchet source for keeper agent tool boundaries.
-Last updated: 2026-06-12.
+Last updated: 2026-07-12.
 
 This matrix freezes the owner map for keeper modules that participate in the
 agent tool path. A new file in scope must be added here with exactly one owner
@@ -202,6 +202,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tools_oas_json.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_markers.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_markers.mli` - oas-tool-bridge
+- `lib/keeper/keeper_tool_failure_recovery_judge.ml` - oas-tool-bridge
+- `lib/keeper/keeper_tool_failure_recovery_judge.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_workflow.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_workflow.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas.ml` - oas-tool-bridge

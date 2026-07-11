@@ -738,6 +738,80 @@ let test_keeper_lane_cancel_is_lane_local_and_joinable () =
     fail ("lane cancellation escaped to parent: " ^ Printexc.to_string cause)
   | Lane.Failed exn -> fail ("lane cancellation failed: " ^ Printexc.to_string exn)
 
+(* Regression for the "one temp file fails the whole listing" bug: an
+   [.atomic_*.tmp] orphan left by [Fs_compat.save_file_atomic] (crash between
+   temp-create and rename) landing in the records directory must be skipped,
+   not turn [list_for_keeper] into [Decode_error] for every operation. *)
+let test_shutdown_store_list_skips_atomic_orphans () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-store-orphan" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let meta = make_meta "shutdown-orphan-keeper" in
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let lane = Lane.create () in
+      let now = Masc_domain.now_iso () in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_id = Lane.id lane
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "tester"
+        ; cleanup_intent = { remove_meta = false; remove_session = false }
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase = Shutdown_types.Prepared
+        ; created_at = now
+        ; updated_at = now
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let records_dir =
+        Filename.dirname (Shutdown_store.path ~config operation_id)
+      in
+      let orphan = Filename.concat records_dir ".atomic_orphan_crash.tmp" in
+      let oc = open_out orphan in
+      output_string oc "partial atomic write";
+      close_out oc;
+      check bool
+        "orphan filename matches the atomic-write temp shape"
+        true
+        (Fs_compat.is_atomic_orphan_name (Filename.basename orphan));
+      match Shutdown_store.list_for_keeper ~config ~keeper_name:meta.name with
+      | Ok [ listed ] ->
+        check string
+          "listing skips the atomic orphan and returns the durable operation"
+          (Shutdown_types.Operation_id.to_string operation_id)
+          (Shutdown_types.Operation_id.to_string listed.operation_id)
+      | Ok operations ->
+        fail
+          (Printf.sprintf
+             "expected exactly one durable operation, got %d"
+             (List.length operations))
+      | Error error ->
+        fail
+          (Printf.sprintf
+             "atomic orphan made list_for_keeper fail: %s"
+             (Shutdown_store.error_to_string error)))
+
 let test_keeper_shutdown_store_round_trip_and_identity_guard () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1793,6 +1867,8 @@ let () =
         test_keeper_lane_cancel_is_lane_local_and_joinable;
       test_case "shutdown store round-trip and identity guard" `Quick
         test_keeper_shutdown_store_round_trip_and_identity_guard;
+      test_case "shutdown store listing skips atomic orphans" `Quick
+        test_shutdown_store_list_skips_atomic_orphans;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown prepare joins not-started lane" `Quick

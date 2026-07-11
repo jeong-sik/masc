@@ -315,7 +315,13 @@ type t =
   }
 
 let stop_reason_to_string = function
-  | Runtime_agent.Completed -> "completed"
+  (* Canonical success wire via the same [Keeper_turn_disposition.to_wire] SSOT
+     the budget case below uses (#24073 point 5). The prior raw "completed"
+     literal was unknown to [Keeper_turn_disposition.of_wire] (only "success"
+     maps to [Success]), so a genuinely completed turn decoded to [Unknown] and
+     displayed severity=bad. Legacy receipts persisted "completed" are still
+     accepted on read by [terminal_reason_is_success]. *)
+  | Runtime_agent.Completed -> Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success
   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
     (* Single SSOT for the budget-exhausted wire grammar: serialise through
        [Keeper_turn_disposition.to_wire] so this producer and the dashboard /

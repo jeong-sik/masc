@@ -275,7 +275,11 @@ let append_decision_record
               in
                 let stop_reason_str =
                   match r.stop_reason with
-                  | Runtime_agent.Completed -> "completed"
+                  (* Canonical success wire via SSOT [to_wire], consistent with
+                     the receipt producer and the budget case below (#24073
+                     point 5). Raw "completed" decoded to [Unknown]/bad. *)
+                  | Runtime_agent.Completed ->
+                      Keeper_turn_disposition.(to_wire Success)
                   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
                       (* Detail-less wire form via the single SSOT [to_wire]:
                          [Runtime_agent.TurnBudgetExhausted] carries only

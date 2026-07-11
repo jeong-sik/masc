@@ -225,25 +225,54 @@ let test_get_filters_corrupted_entry () =
 
 let test_wakeup_running_reports_typed_outcome () =
   KR.clear ();
-  (match KR.wakeup_running ~base_path "missing" with
+  (match
+     KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "missing"
+   with
    | KR.Deferred_unregistered -> ()
-   | KR.Signaled | KR.Deferred_not_running _ ->
+   | KR.Signaled | KR.Deferred_not_running _ | KR.Deferred_lifecycle _ ->
      fail "missing keeper did not return Deferred_unregistered");
   let running = register "running" in
   Atomic.set running.fiber_wakeup false;
-  (match KR.wakeup_running ~base_path "running" with
+  (match
+     KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "running"
+   with
    | KR.Signaled -> check bool "running keeper is signaled" true (Atomic.get running.fiber_wakeup)
-   | KR.Deferred_unregistered | KR.Deferred_not_running _ ->
+   | KR.Deferred_unregistered | KR.Deferred_not_running _
+   | KR.Deferred_lifecycle _ ->
      fail "running keeper was not signaled");
   let offline_meta = make_meta "offline" in
   let offline = KR.register_offline ~base_path offline_meta.name offline_meta in
   Atomic.set offline.fiber_wakeup false;
-  (match KR.wakeup_running ~base_path "offline" with
+  (match
+     KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "offline"
+   with
    | KR.Deferred_not_running phase ->
      check string "deferred phase is explicit" "offline" (KSM.phase_to_string phase);
      check bool "offline keeper is not signaled" false (Atomic.get offline.fiber_wakeup)
-   | KR.Signaled | KR.Deferred_unregistered ->
+   | KR.Signaled | KR.Deferred_unregistered | KR.Deferred_lifecycle _ ->
      fail "offline keeper did not return Deferred_not_running")
+;;
+
+let test_wakeup_denies_dead_tombstone_without_signaling () =
+  KR.clear ();
+  let meta =
+    { (make_meta "dead-wakeup") with
+      paused = true
+    ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+    }
+  in
+  let entry = KR.register ~base_path meta.name meta in
+  Atomic.set entry.fiber_wakeup false;
+  (match KR.wakeup ~intent:KR.Scheduled_signal ~base_path meta.name with
+   | KR.Deferred_lifecycle
+       Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
+   | KR.Signaled
+   | KR.Deferred_unregistered
+   | KR.Deferred_not_running _
+   | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) ->
+     fail "dead tombstone wake was not lifecycle-deferred");
+  check bool "dead tombstone wake flag remains false" false
+    (Atomic.get entry.fiber_wakeup)
 ;;
 
 let temp_dir prefix =
@@ -370,6 +399,10 @@ let () =
             "reports signaled and deferred outcomes"
             `Quick
             test_wakeup_running_reports_typed_outcome
+        ; test_case
+            "dead tombstone never receives runnable signal"
+            `Quick
+            test_wakeup_denies_dead_tombstone_without_signaling
         ] )
     ; ( "tool_dispatch_fallback"
       , [ test_case "uses original meta on corrupted registry entry" `Quick

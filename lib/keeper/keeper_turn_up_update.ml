@@ -434,7 +434,8 @@ let update_keeper ?(preserve_prompt_defaults = false)
                        stop_detail
                        (start_keepalive_outcome_to_string
                           (Keepalive_already_registered entry)))
-                | ( Keepalive_identity_unrepairable
+                | ( Keepalive_lifecycle_denied _
+                  | Keepalive_identity_unrepairable
                   | Keepalive_spawn_slot_denied _
                   | Keepalive_registration_rejected _
                   | Keepalive_fiber_start_rejected _

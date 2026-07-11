@@ -1914,6 +1914,37 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
       | Ok _ -> fail "task receipt recovery did not reach Finalized"
       | Error error -> fail (Shutdown_finalize.error_to_string error))
 
+let test_start_keepalive_denies_dead_tombstone_before_registration () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.clear ();
+  let base_dir = temp_dir "dead-tombstone-keepalive-admission" in
+  let keeper_name = "dead-tombstone-admission" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let meta =
+        { (make_meta keeper_name) with
+          paused = true
+        ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+        }
+      in
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        }
+      in
+      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      check bool "dead keeper never reaches registry registration" false
+        (R.is_registered ~base_path:config.base_path keeper_name))
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2259,39 +2290,68 @@ let test_pacing_block_delays_requested_turn () =
   check bool "default pacing closure never blocks" true admitted.should_run_turn
 
 let test_blocking_gates_are_classified_before_intake () =
+  let lifecycle =
+    Keeper_lifecycle_admission.Autonomous_admitted
+  in
   (match
      KHL.classify_turn_intake_admission
+       ~lifecycle
        ~pressure:Keeper_pressure_admission.Admitted
        ~blocking_approval_pending:true
-       ~keeper_paused:false
    with
    | KHL.Intake_blocking_approval_pending -> ()
    | KHL.Intake_admitted
-   | KHL.Intake_pressure_blocked _
-   | KHL.Intake_keeper_paused ->
+   | KHL.Intake_lifecycle_blocked _
+   | KHL.Intake_pressure_blocked _ ->
      fail "blocking approval must stop intake before durable dequeue");
   (match
      KHL.classify_turn_intake_admission
+       ~lifecycle:
+         (Keeper_lifecycle_admission.Autonomous_denied
+            (Keeper_lifecycle_admission.Autonomous_paused
+               Keeper_lifecycle_admission.Unclassified))
        ~pressure:Keeper_pressure_admission.Admitted
        ~blocking_approval_pending:false
-       ~keeper_paused:true
    with
-   | KHL.Intake_keeper_paused -> ()
+   | KHL.Intake_lifecycle_blocked
+       (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
    | KHL.Intake_admitted
+   | KHL.Intake_lifecycle_blocked
+       Keeper_lifecycle_admission.Autonomous_dead_tombstone
    | KHL.Intake_blocking_approval_pending
    | KHL.Intake_pressure_blocked _ ->
      fail "explicit Keeper pause must stop intake before durable dequeue");
   match
     KHL.classify_turn_intake_admission
+      ~lifecycle
       ~pressure:Keeper_pressure_admission.Admitted
       ~blocking_approval_pending:false
-      ~keeper_paused:false
   with
   | KHL.Intake_admitted -> ()
+  | KHL.Intake_lifecycle_blocked _
   | KHL.Intake_blocking_approval_pending
-  | KHL.Intake_pressure_blocked _
-  | KHL.Intake_keeper_paused ->
+  | KHL.Intake_pressure_blocked _ ->
     fail "no blocking approval should leave intake admitted"
+
+let test_lifecycle_is_classified_before_intake () =
+  let lifecycle =
+    Keeper_lifecycle_admission.Autonomous_denied
+      Keeper_lifecycle_admission.Autonomous_dead_tombstone
+  in
+  match
+    KHL.classify_turn_intake_admission
+      ~lifecycle
+      ~pressure:Keeper_pressure_admission.Admitted
+      ~blocking_approval_pending:false
+  with
+  | KHL.Intake_lifecycle_blocked
+      Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
+  | KHL.Intake_admitted
+  | KHL.Intake_lifecycle_blocked
+      (Keeper_lifecycle_admission.Autonomous_paused _)
+  | KHL.Intake_blocking_approval_pending
+  | KHL.Intake_pressure_blocked _ ->
+    fail "dead lifecycle must stop intake before durable dequeue"
 
 let test_crashed_cycle_records_health_failure () =
   Eio_main.run @@ fun env ->
@@ -2376,6 +2436,8 @@ let () =
         test_keeper_shutdown_cleanup_replays_after_meta_removal;
       test_case "shutdown recovers committed task receipt" `Quick
         test_keeper_shutdown_recovers_committed_task_receipt;
+      test_case "dead tombstone denied before registration" `Quick
+        test_start_keepalive_denies_dead_tombstone_before_registration;
       test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick
@@ -2406,6 +2468,8 @@ let () =
         test_pacing_block_delays_requested_turn;
       test_case "blocking gates are classified before intake" `Quick
         test_blocking_gates_are_classified_before_intake;
+      test_case "lifecycle is classified before intake" `Quick
+        test_lifecycle_is_classified_before_intake;
       test_case "crashed cycles feed agent health breaker" `Quick
         test_crashed_cycle_records_health_failure;
     ];

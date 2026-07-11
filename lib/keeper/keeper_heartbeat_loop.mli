@@ -75,11 +75,13 @@ type single_claim_admission =
     a blocked cycle does not repeatedly lease and requeue the same stimulus. *)
 type turn_intake_admission =
   | Intake_admitted
+  | Intake_lifecycle_blocked of Keeper_lifecycle_admission.autonomous_denial
   | Intake_pressure_blocked of Keeper_pressure_admission.block
   | Intake_blocking_approval_pending
   | Intake_keeper_paused
 
 val classify_turn_intake_admission :
+  lifecycle:Keeper_lifecycle_admission.autonomous_admission ->
   pressure:Keeper_pressure_admission.decision ->
   blocking_approval_pending:bool ->
   keeper_paused:bool ->
@@ -179,7 +181,7 @@ val turn_status_event :
   turn_fail_count:int -> max_allowed:int -> Keeper_state_machine.event
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
-    The caller classifies fd/disk pressure and typed Blocking HITL ownership
+    The caller classifies lifecycle state, fd/disk pressure, and typed Blocking HITL ownership
     with {!classify_turn_intake_admission} BEFORE this is invoked, so this
     function must not re-add inline admission gates: doing so would reinstate
     the consume-before-gate churn that hoisting the decision removed. *)

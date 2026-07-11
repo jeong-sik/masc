@@ -1626,8 +1626,8 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
         }
       in
       sweep_and_recover_no_materialize ctx;
-      check (float 0.001) "restart attempt metric incremented"
-        (attempts_before +. 1.0)
+      check (float 0.001) "restart attempt not recorded without admission meta"
+        attempts_before
         (Masc.Otel_metric_store.metric_value_or_zero
            Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
@@ -1697,6 +1697,85 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
            ~labels:outcome_labels ());
       check bool "keeper unregistered after missing meta" false
         (Reg.is_registered ~base_path:config.base_path name))
+
+let test_restart_denies_persisted_dead_tombstone () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
+  let base_dir = temp_dir () in
+  let name = "restart-dead-tombstone-admission" in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg =
+        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+      in
+      write_keeper_toml config_dir ~name;
+      let active_meta = make_meta name in
+      let dead_meta =
+        { active_meta with
+          paused = true
+        ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+        }
+      in
+      (match Keeper_meta_store.write_meta config dead_meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name active_meta in
+      resolve_done_for_test reg (`Crashed "crash before terminal persist");
+      Reg.restore_supervisor_state
+        ~base_path:config.base_path
+        name
+        ~restart_count:0
+        ~last_restart_ts:0.0
+        ~crash_log:[];
+      let attempt_labels = [ "keeper", name ] in
+      let denied_labels = [ "keeper", name; "outcome", "lifecycle_denied" ] in
+      let attempts_before =
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartAttempts)
+          ~labels:attempt_labels
+          ()
+      in
+      let denied_before =
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartOutcomes)
+          ~labels:denied_labels
+          ()
+      in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      check (float 0.001) "terminal lane consumes no restart attempt"
+        attempts_before
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartAttempts)
+           ~labels:attempt_labels
+           ());
+      check (float 0.001) "typed lifecycle denial is observed"
+        (denied_before +. 1.0)
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartOutcomes)
+           ~labels:denied_labels
+           ());
+      match Reg.get ~base_path:config.base_path name with
+      | None -> fail "terminal registry entry unexpectedly disappeared"
+      | Some entry ->
+        check int "restart count unchanged" 0 entry.restart_count;
+        check bool "terminal lane never becomes Running" false
+          (entry.phase = Keeper_state_machine.Running))
 
 (* ── Dead-state loud alert (PR-C) ──────────────────────── *)
 
@@ -4127,6 +4206,8 @@ let () =
         test_restart_path_emits_attempt_and_started_outcome_metrics;
       test_case "restart path emits missing-meta outcome metrics" `Quick
         test_restart_path_emits_meta_unavailable_outcome_metric;
+      test_case "restart denies persisted dead tombstone" `Quick
+        test_restart_denies_persisted_dead_tombstone;
     ];
     "dead_state_alert", [
       test_case "max_restarts exhaustion emits Dead alert" `Quick

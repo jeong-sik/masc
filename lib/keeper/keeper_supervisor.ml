@@ -794,19 +794,57 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
   List.iter
     (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
        let attempt = old_entry.restart_count + 1 in
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string RestartAttempts)
-         ~labels:[ "keeper", old_entry.name ]
-         ();
        match read_effective_meta ctx.config old_entry.name with
        | Ok (Some meta) ->
-         (* RFC-0002: dispatch restart attempt event *)
-         Keeper_registry.dispatch_event_unit
-           ~base_path
-           old_entry.name
-           (Keeper_state_machine.Supervisor_restart_attempt { attempt });
-         let old_crash_log = old_entry.crash_log in
-         (* R-A-6.a guard: register_restarting refuses revival when the
+         let lifecycle_state =
+           Keeper_lifecycle_admission.state
+             ~paused:meta.paused
+             ~latched_reason:meta.latched_reason
+         in
+         (match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+          | Keeper_lifecycle_admission.Autonomous_denied denial ->
+            let reason =
+              Keeper_lifecycle_admission.autonomous_denial_to_wire denial
+            in
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string LifecycleDispatchRejections)
+              ~labels:
+                [ "keeper", old_entry.name
+                ; "event", "supervisor_restart"
+                ; "reason", reason
+                ]
+              ();
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "lifecycle_denied" ]
+              ();
+            publish_lifecycle
+              ~event:
+                (Keeper_lifecycle_events.Custom_event
+                   { verb = Keeper_lifecycle_events.Admission_denied
+                   ; phase = Some old_entry.phase
+                   })
+              old_entry.name
+              reason
+              ();
+            Log.Keeper.info
+              "%s: supervisor restart denied by lifecycle admission: %s"
+              old_entry.name
+              reason
+          | Keeper_lifecycle_admission.Autonomous_admitted ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartAttempts)
+              ~labels:[ "keeper", old_entry.name ]
+              ();
+            (* RFC-0002: dispatch restart attempt event only after lifecycle
+               admission. A paused/terminal lane must not consume restart
+               budget or enter the restarting FSM. *)
+            Keeper_registry.dispatch_event_unit
+              ~base_path
+              old_entry.name
+              (Keeper_state_machine.Supervisor_restart_attempt { attempt });
+            let old_crash_log = old_entry.crash_log in
+            (* R-A-6.a guard: register_restarting refuses revival when the
             prior entry's restart_budget was already exhausted (TLA+ §S3
             BudgetNeverRevives).  In normal sweeps this never fires —
             the [restart_count >= max_restarts] gate at line ~1468 routes
@@ -905,7 +943,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string NearExhaustionTotal)
                 ~labels:[ "keeper", old_entry.name ]
-                ()))
+                ())))
        | _ ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)
@@ -1052,6 +1090,10 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                 resumed_meta
             with
             | Ok () ->
+              Keeper_registry.update_meta
+                ~base_path:ctx.config.base_path
+                name
+                resumed_meta;
               Keeper_turn_livelock.reset_keeper_livelock
                 ~base_path:ctx.config.base_path
                 ~keeper:name;
@@ -1061,7 +1103,13 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                    ~base_path:ctx.config.base_path
                    name
                    Keeper_state_machine.Operator_resume;
-                 Keeper_registry.wakeup ~base_path:ctx.config.base_path name
+                 let (_ : Keeper_registry.wakeup_outcome) =
+                   Keeper_registry.wakeup
+                     ~intent:Keeper_registry.Supervisor_resume
+                     ~base_path:ctx.config.base_path
+                     name
+                 in
+                 ()
                | None -> ());
               publish_lifecycle
                 ~event:

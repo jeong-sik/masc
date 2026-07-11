@@ -435,37 +435,92 @@ let record_spawn_slot_denied ~keeper_name ~surface reason =
   Spawn_slots.record_denied ~keeper_name ~surface reason
 ;;
 
-let wakeup ~base_path name =
-  (* RFC-0303 Phase 3: the no-progress wake-tombstone gate is removed (the
-     detector that fed it is retired), so a wake always signals the fiber. *)
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  (* tla-lint: allow-mutation: fiber signal — public wakeup API for a single keeper *)
-  | Some entry -> Atomic.set entry.fiber_wakeup true
-  | None -> ()
+type wakeup_intent =
+  | Reactive_signal
+  | Scheduled_signal
+  | Goal_signal
+  | Supervisor_resume
+  | Hitl_resolution
+  | Broadcast_signal
+
+let wakeup_intent_to_wire = function
+  | Reactive_signal -> "reactive_signal"
+  | Scheduled_signal -> "scheduled_signal"
+  | Goal_signal -> "goal_signal"
+  | Supervisor_resume -> "supervisor_resume"
+  | Hitl_resolution -> "hitl_resolution"
+  | Broadcast_signal -> "broadcast_signal"
 ;;
 
-type wakeup_running_outcome =
+type wakeup_outcome =
   | Signaled
   | Deferred_unregistered
   | Deferred_not_running of Keeper_state_machine.phase
+  | Deferred_lifecycle of Keeper_lifecycle_admission.autonomous_denial
 
-let wakeup_running ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | None -> Deferred_unregistered
-  | Some entry when entry.phase = Keeper_state_machine.Running ->
-    Atomic.set entry.fiber_wakeup true;
-    Signaled
-  | Some entry -> Deferred_not_running entry.phase
+let record_lifecycle_wakeup_denial ~intent (entry : registry_entry) denial =
+  let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
+  let intent = wakeup_intent_to_wire intent in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:
+      [ "keeper", entry.name
+      ; "event", "registry_wakeup"
+      ; "reason", reason
+      ; "intent", intent
+      ]
+    ();
+  Log.Keeper.info
+    "%s: registry wake deferred by lifecycle admission intent=%s reason=%s"
+    entry.name
+    intent
+    reason
 ;;
 
-let wakeup_all ?base_path () =
+let wakeup_entry ~intent ~require_running (entry : registry_entry) =
+  let lifecycle_state =
+    Keeper_lifecycle_admission.state
+      ~paused:entry.meta.paused
+      ~latched_reason:entry.meta.latched_reason
+  in
+  match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    record_lifecycle_wakeup_denial ~intent entry denial;
+    Deferred_lifecycle denial
+  | Keeper_lifecycle_admission.Autonomous_admitted ->
+    if require_running && entry.phase <> Keeper_state_machine.Running
+    then Deferred_not_running entry.phase
+    else (
+      (* tla-lint: allow-mutation: lifecycle-admitted fiber hint signal *)
+      Atomic.set entry.fiber_wakeup true;
+      Signaled)
+;;
+
+let wakeup ~intent ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> Deferred_unregistered
+  | Some entry -> wakeup_entry ~intent ~require_running:true entry
+;;
+
+let wakeup_running ~intent ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> Deferred_unregistered
+  | Some entry -> wakeup_entry ~intent ~require_running:true entry
+;;
+
+let wakeup_all ~intent ?base_path () =
   let base_path = Option.map canonical_base_path_exn base_path in
   StringMap.iter
     (fun _k entry ->
        match base_path with
        | Some expected when not (String.equal expected entry.base_path) -> ()
-       (* tla-lint: allow-mutation: fiber signal — bulk wakeup for Running keepers under base_path filter *)
-       | _ -> if entry.phase = Running then Atomic.set entry.fiber_wakeup true)
+       | _ ->
+         if entry.phase = Running
+         then
+           let (_ : wakeup_outcome) =
+             wakeup_entry ~intent ~require_running:true entry
+           in
+           ())
     (Atomic.get registry)
 ;;
 

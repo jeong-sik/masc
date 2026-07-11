@@ -399,12 +399,75 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
+let test_invalid_delivery_diagnostic_does_not_block_lane () =
+  Printf.printf
+    "Test: malformed delivery diagnostics terminate and release the Keeper lane\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"invalid diagnostic enqueue" ~keeper_name
+        (discord_msg ~content:"invalid diagnostic" ~channel_id:"channel-invalid"
+           ~user_id:"user-invalid" ~timestamp:7.0)
+    with
+    | None -> ()
+    | Some first ->
+      let calls = ref 0 in
+      let first_started, resolve_first_started = Eio.Promise.create () in
+      let release_first, resolve_release_first = Eio.Promise.create () in
+      let handle_turn ~sw:_ ~keeper_name:_
+          ~(queued_message : Keeper_chat_queue.queued_message) =
+        incr calls;
+        if String.equal queued_message.content "invalid diagnostic"
+        then (
+          Eio.Promise.resolve resolve_first_started ();
+          Eio.Promise.await release_first;
+          Keeper_chat_consumer.Failed
+            { kind = Keeper_chat_queue.Delivery_failed
+            ; detail = "HTTP response body: \255"
+            ; outcome_ref = Some " delivery:\255 "
+            })
+        else Keeper_chat_consumer.Delivered { outcome_ref = Some "turn:next" }
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        check "invalid diagnostic turn starts"
+          (await_promise ~clock ~seconds:5.0 first_started);
+        match
+          enqueue_checked ~label:"next lane message enqueue" ~keeper_name
+            (discord_msg ~content:"next lane message" ~channel_id:"channel-next"
+               ~user_id:"user-next" ~timestamp:8.0)
+        with
+        | None -> Eio.Promise.resolve resolve_release_first ()
+        | Some second ->
+          Eio.Promise.resolve resolve_release_first ();
+          (match
+             await_receipt ~clock ~seconds:5.0 ~keeper_name
+               ~receipt_id:first.receipt_id ~accept:is_failed
+           with
+           | Some { state = Keeper_chat_queue.Failed failure; _ } ->
+             check "malformed diagnostic is repaired to valid UTF-8"
+               (String.is_valid_utf_8 failure.detail);
+             check "original failure kind is preserved"
+               (failure.kind = Keeper_chat_queue.Delivery_failed)
+           | Some { state = Pending | Inflight _ | Delivered _; _ } | None ->
+             check "malformed diagnostic reaches terminal Failed" false);
+          check "next queued turn dispatches after repaired terminal outcome"
+            (match
+               await_receipt ~clock ~seconds:5.0 ~keeper_name
+                 ~receipt_id:second.receipt_id ~accept:is_delivered
+             with
+             | Some _ -> true
+             | None -> false));
+      check "each lane turn is handled exactly once" (!calls = 2);
+      check_terminal_snapshot ~label:"invalid diagnostic" ~keeper_name
+        ~receipt_id:first.receipt_id)
+
 let () =
   test_delivery_finalizes_terminal_receipt ();
   test_explicit_failure_finalizes_failed_receipt ();
   test_structured_cancellation_nacks_and_preserves_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
+  test_invalid_delivery_diagnostic_does_not_block_lane ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

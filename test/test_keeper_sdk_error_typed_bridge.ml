@@ -310,6 +310,71 @@ let test_payment_required_is_hard_quota () =
   | None -> Alcotest.fail "expected hard_quota recoverable reason"
 ;;
 
+let test_authorization_errors_are_terminal_provider_failures () =
+  let api_error =
+    SdkE.Api
+      (Retry.AuthError
+         { message = "provider refused the current account entitlement" })
+  in
+  let provider_error =
+    SdkE.Provider
+      (Llm_provider.Error.AuthError
+         { provider = "authorization-test"
+         ; detail = "provider refused the current account entitlement"
+         })
+  in
+  List.iter
+    (fun (label, err) ->
+       Alcotest.(check bool)
+         (label ^ " is terminal")
+         true
+         (KTD.sdk_error_is_terminal_provider_runtime_failure err);
+       match EC.recoverable_runtime_failure_reason err with
+       | Some EC.Auth_error -> ()
+       | Some reason ->
+         Alcotest.failf
+           "%s expected auth_error, got %s"
+           label
+           (EC.degraded_retry_reason_to_string reason)
+       | None -> Alcotest.failf "%s expected auth_error recovery route" label)
+    [ "api", api_error; "provider", provider_error ];
+  let candidate =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"authorization-terminal-test"
+      ~base_url:"https://authorization-terminal.example/v1"
+      ()
+    |> RC.of_provider_config ~max_concurrent:None
+  in
+  let keeper_name = "authorization-terminal-cooldown-test" in
+  let provider_key =
+    match RC.health_keys candidate with
+    | [ key ] -> keeper_name ^ "@" ^ key
+    | keys ->
+      Alcotest.failf
+        "expected one health key, got [%s]"
+        (String.concat "; " keys)
+  in
+  KTD.For_testing.record_candidate_health_error ~keeper_name candidate api_error;
+  let info =
+    match BH.provider_info BH.global ~provider_key with
+    | Some info -> info
+    | None -> Alcotest.failf "expected provider info for %s" provider_key
+  in
+  Alcotest.(check bool)
+    "authorization refusal opens immediate cooldown"
+    true
+    info.in_cooldown;
+  Alcotest.(check int)
+    "authorization refusal counted as terminal failure"
+    1
+    (BH.recent_outcome_count
+       BH.global
+       ~provider_key
+       ~outcome:BH.Outcome_terminal_failure
+       ~window_s:BH.window_sec)
+;;
+
 (* Regression: a transient Overloaded (529/CapacityExhausted) whose prose
    coincidentally contains a hard-quota indicator must NOT be classified as hard
    quota. The typed variant already says transient; the message scan previously
@@ -1223,6 +1288,10 @@ let () =
             "payment required is classified as hard quota"
             `Quick
             test_payment_required_is_hard_quota
+        ; Alcotest.test_case
+            "authorization refusals are terminal provider failures"
+            `Quick
+            test_authorization_errors_are_terminal_provider_failures
         ; Alcotest.test_case
             "transient overload with quota prose is not hard quota"
             `Quick

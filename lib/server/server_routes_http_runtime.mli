@@ -302,7 +302,7 @@ val board_post_detail_json :
   config:Workspace.config option ->
   voter:string option ->
   reaction_actor:string option ->
-  response_format:string ->
+  response_format:Server_board_post_response_format.t ->
   post_id:string ->
   [> `OK | `Not_found ] * string
 (** [board_post_detail_json ~voter ~reaction_actor ~response_format ~post_id] returns
@@ -316,12 +316,14 @@ val board_post_detail_json :
     When [blind_votes] is [true], rows hide score fields until that
     voter has voted.
 
-    {2 response_format values (case-insensitive, trimmed)}
+    [response_format] is decoded once at the HTTP boundary by
+    {!Server_board_post_response_format.of_query}; unsupported wire values are
+    rejected rather than silently projected as [nested].
 
     | Format | Shape |
     |---|---|
-    | [["flat"]] | post fields + [comments] sibling |
-    | otherwise (default [["nested"]]) | [{"post": ..., "comments": [...]}] |
+    | {!Server_board_post_response_format.Flat} | post fields + [comments] sibling |
+    | {!Server_board_post_response_format.Nested} | [{"post": ..., "comments": [...]}] |
 
     {2 Status / body}
 

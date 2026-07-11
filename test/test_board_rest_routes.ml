@@ -45,6 +45,12 @@ let reaction_internal_auth_request token =
     `GET
     "/api/v1/board/reactions"
 
+let reaction_raw_auth_request header value =
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list [ header, value ])
+    `GET
+    "/api/v1/board/reactions"
+
 (* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts.
    Kept in sync with that file — see module doc. *)
 let dashboard_board_tool_routes =
@@ -133,10 +139,10 @@ let test_board_reaction_catalog_uses_board_ssot () =
   match Server_board_reaction_http.catalog_json () with
   | `Assoc fields ->
     let actual =
-      match List.assoc_opt "supported_emojis" fields with
+      match List.assoc_opt "supported_reaction_emojis" fields with
       | Some (`List values) ->
         List.filter_map (function `String value -> Some value | _ -> None) values
-      | Some _ | None -> fail "supported_emojis must be a JSON array"
+      | Some _ | None -> fail "supported_reaction_emojis must be a JSON array"
     in
     check (list string) "catalog" Masc.Board.board_reaction_emojis actual
   | _ -> fail "reaction catalog must be a JSON object"
@@ -181,6 +187,33 @@ let test_board_reaction_optional_auth_rejects_invalid_internal_header () =
         (Server_auth.http_status_of_auth_error error = `Unauthorized)
     | Ok None -> fail "invalid internal bearer fell back to anonymous"
     | Ok (Some actor) -> failf "invalid internal bearer resolved actor %s" actor)
+
+let test_board_reaction_optional_auth_rejects_malformed_credentials () =
+  with_reaction_auth_base (fun base_path ->
+    List.iter
+      (fun (label, request) ->
+         check bool
+           (label ^ " is detected as a credential")
+           true
+           (Server_auth.request_carries_auth_credential request);
+         match
+           Server_auth.authorize_optional_token_bound_permission_request
+             ~base_path
+             ~permission:Masc_domain.CanReadState
+             request
+         with
+         | Error error ->
+           check bool
+             (label ^ " is unauthorized")
+             true
+             (Server_auth.http_status_of_auth_error error = `Unauthorized)
+         | Ok None -> failf "%s fell back to anonymous" label
+         | Ok (Some actor) -> failf "%s resolved actor %s" label actor)
+      [ ( "malformed Authorization"
+        , reaction_raw_auth_request "authorization" "Basic not-a-bearer" )
+      ; ( "empty internal credential"
+        , reaction_raw_auth_request "x-masc-internal-token" " " )
+      ])
 
 let test_dashboard_dev_token_can_vote_as_credential_owner () =
   with_reaction_auth_base (fun base_path ->
@@ -230,6 +263,10 @@ let () =
             "optional reaction auth rejects invalid internal header"
             `Quick
             test_board_reaction_optional_auth_rejects_invalid_internal_header
+        ; test_case
+            "optional reaction auth rejects malformed credentials"
+            `Quick
+            test_board_reaction_optional_auth_rejects_malformed_credentials
         ; test_case
             "dashboard dev-token can vote as credential owner"
             `Quick

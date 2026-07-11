@@ -19,19 +19,15 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
   let with_optional_board_reaction_actor f =
     match config with
     | None ->
-      (match
-         Httpun.Headers.get
-           httpun_request.Httpun.Request.headers
-           "authorization"
-       with
-       | None -> f None
-       | Some _ ->
+      if Server_auth.request_carries_auth_credential httpun_request
+      then (
          h2_respond_json
            h2_reqd
            (Server_auth.not_initialized_response path)
            ~status:`Internal_server_error
            ~extra_headers:cors;
          true)
+      else f None
     | Some (config : Workspace.config) ->
       (match
          Server_auth.authorize_optional_token_bound_permission_request
@@ -189,18 +185,28 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
          && String.length p > 14 ->
       with_optional_board_reaction_actor (fun reaction_actor ->
       let post_id = String.sub p 14 (String.length p - 14) in
-      let format = Option.value ~default:"nested" (query_param httpun_request "format") in
-      let voter = board_voter_query httpun_request in
-      let blind_votes =
-        bool_query_param httpun_request "blind_votes" ~default:false
-      in
-      let (status, body) =
-        board_post_detail_json ~include_moderation:false ~blind_votes ~voter
-          ~reaction_actor ~config
-          ~response_format:format ~post_id
-      in
-      h2_respond_json h2_reqd body ~status ~extra_headers:cors;
-      true)
+      match
+        Server_board_post_response_format.of_query
+          (query_param httpun_request "format")
+      with
+      | Error error ->
+        h2_respond_json_value
+          h2_reqd
+          (Server_board_post_response_format.error_json error)
+          ~status:`Bad_request
+          ~extra_headers:cors;
+        true
+      | Ok response_format ->
+        let voter = board_voter_query httpun_request in
+        let blind_votes =
+          bool_query_param httpun_request "blind_votes" ~default:false
+        in
+        let status, body =
+          board_post_detail_json ~include_moderation:false ~blind_votes ~voter
+            ~reaction_actor ~config ~response_format ~post_id
+        in
+        h2_respond_json h2_reqd body ~status ~extra_headers:cors;
+        true)
 
   | `GET, "/api/v1/karma" ->
       let karma_list = Board_dispatch.get_all_karma () in

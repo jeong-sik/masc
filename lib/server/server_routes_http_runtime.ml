@@ -1387,11 +1387,12 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
         ) comments)
       in
       let json =
-        if String.equal (String.lowercase_ascii (String.trim response_format)) "flat" then
-          match post_json with
-          | `Assoc fields -> `Assoc (fields @ [ ("comments", comments_json) ])
-          | _ -> `Assoc [ ("post", post_json); ("comments", comments_json) ]
-        else
+        match response_format with
+        | Server_board_post_response_format.Flat ->
+          (match post_json with
+           | `Assoc fields -> `Assoc (fields @ [ ("comments", comments_json) ])
+           | _ -> `Assoc [ ("post", post_json); ("comments", comments_json) ])
+        | Server_board_post_response_format.Nested ->
           `Assoc [ ("post", post_json); ("comments", comments_json) ]
       in
       (`OK, Yojson.Safe.to_string json)

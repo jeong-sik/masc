@@ -1025,9 +1025,9 @@ export async function fetchBoardReactionState(
     if (summaries.some(row => row === null)) {
       throw new Error('Malformed board reaction state: invalid reaction summary')
     }
-    const supportedEmojis = normalizeSupportedReactionEmojis(raw.supported_emojis)
+    const supportedEmojis = normalizeSupportedReactionEmojis(raw.supported_reaction_emojis)
     if (!supportedEmojis || supportedEmojis.length === 0) {
-      throw new Error('Malformed board reaction state: supported_emojis is required')
+      throw new Error('Malformed board reaction state: supported_reaction_emojis is required')
     }
     return {
       summaries: summaries as BoardReactionSummary[],

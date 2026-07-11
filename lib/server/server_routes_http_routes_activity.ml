@@ -899,27 +899,35 @@ let add_routes ~sw ~clock router =
                 req
                 reqd
                 (fun reaction_actor ->
-                   let format =
-                     query_param req "format" |> Option.value ~default:"nested"
-                   in
-                   let voter = board_voter_query req in
-                   let blind_votes =
-                     bool_query_param req "blind_votes" ~default:false
-                   in
-                   let include_moderation =
-                     include_moderation_projection ~base_path:config.base_path req
-                   in
-                   let status, body =
-                     board_post_detail_json
-                       ~include_moderation
-                       ~blind_votes
-                       ~voter
-                       ~reaction_actor
-                       ~config:(Some config)
-                       ~response_format:format
-                       ~post_id
-                   in
-                   respond_json_with_cors ~status request reqd body))
+                   match
+                     Server_board_post_response_format.of_query
+                       (query_param req "format")
+                   with
+                   | Error error ->
+                     respond_json_value_with_cors
+                       ~status:`Bad_request
+                       request
+                       reqd
+                       (Server_board_post_response_format.error_json error)
+                   | Ok response_format ->
+                     let voter = board_voter_query req in
+                     let blind_votes =
+                       bool_query_param req "blind_votes" ~default:false
+                     in
+                     let include_moderation =
+                       include_moderation_projection ~base_path:config.base_path req
+                     in
+                     let status, body =
+                       board_post_detail_json
+                         ~include_moderation
+                         ~blind_votes
+                         ~voter
+                         ~reaction_actor
+                         ~config:(Some config)
+                         ~response_format
+                         ~post_id
+                     in
+                     respond_json_with_cors ~status request reqd body))
        ) request reqd)
 
   (* Board write APIs — used by dashboard + Bevy Viewer.

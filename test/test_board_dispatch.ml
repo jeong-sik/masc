@@ -1200,7 +1200,7 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
       ~config:None
       ~voter:(Some "forgeable-query-voter")
       ~reaction_actor:(Some "credential-owner")
-      ~response_format:"flat"
+      ~response_format:Server_board_post_response_format.Flat
       ~post_id
   in
   Alcotest.(check bool) "detail status" true (status = `OK);
@@ -1216,8 +1216,36 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
   | Some summary ->
     Alcotest.(check bool)
       "reacted is bound to authenticated credential, not query voter"
-      true
-      (summary |> member "reacted" |> to_bool)
+       true
+       (summary |> member "reacted" |> to_bool)
+
+let test_board_post_response_format_query_contract () =
+  let check_format label expected query =
+    match Server_board_post_response_format.of_query query with
+    | Error _ -> Alcotest.fail (label ^ ": expected a supported format")
+    | Ok actual ->
+      Alcotest.(check string)
+        label
+        (Server_board_post_response_format.to_wire expected)
+        (Server_board_post_response_format.to_wire actual)
+  in
+  check_format
+    "missing format defaults to nested"
+    Server_board_post_response_format.Nested
+    None;
+  check_format
+    "flat format is normalized at the boundary"
+    Server_board_post_response_format.Flat
+    (Some " FLAT ");
+  match Server_board_post_response_format.of_query (Some "yaml") with
+  | Ok _ -> Alcotest.fail "unsupported format must be rejected"
+  | Error error ->
+    let open Yojson.Safe.Util in
+    let json = Server_board_post_response_format.error_json error in
+    Alcotest.(check string)
+      "typed error code"
+      "unsupported_board_post_response_format"
+      (json |> member "code" |> to_string)
 
 let test_board_sse_reaction_changed () =
   let post_id =
@@ -1867,9 +1895,11 @@ let () =
         (with_eio test_reaction_summary_recent_user_ids);
       Alcotest.test_case "summary batch" `Quick
         (with_eio test_reaction_summary_batch);
-      Alcotest.test_case "dashboard detail binds reaction actor" `Quick
-        (with_eio test_dashboard_detail_uses_authenticated_reaction_actor);
-      Alcotest.test_case "SSE reaction_changed" `Quick
+       Alcotest.test_case "dashboard detail binds reaction actor" `Quick
+         (with_eio test_dashboard_detail_uses_authenticated_reaction_actor);
+       Alcotest.test_case "post detail response format boundary" `Quick
+         test_board_post_response_format_query_contract;
+       Alcotest.test_case "SSE reaction_changed" `Quick
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "board signal reaction_changed resolves comment parent" `Quick
         (with_eio test_board_signal_reaction_changed_resolves_comment_parent);

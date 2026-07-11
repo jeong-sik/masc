@@ -160,19 +160,19 @@ let of_board_error board_error =
     message
 ;;
 
+let supported_reaction_emojis_json () =
+  `List (List.map (fun emoji -> `String emoji) Board.board_reaction_emojis)
+;;
+
 let catalog_json () =
-  `Assoc
-    [ ( "supported_emojis"
-      , `List (List.map (fun emoji -> `String emoji) Board.board_reaction_emojis) )
-    ]
+  `Assoc [ "supported_reaction_emojis", supported_reaction_emojis_json () ]
 ;;
 
 let reaction_state_json summaries =
   `Assoc
     [ ( "reactions"
       , `List (List.map Board.reaction_summary_to_yojson summaries) )
-    ; ( "supported_emojis"
-      , `List (List.map (fun emoji -> `String emoji) Board.board_reaction_emojis) )
+    ; "supported_reaction_emojis", supported_reaction_emojis_json ()
     ]
 ;;
 

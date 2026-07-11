@@ -1241,7 +1241,7 @@ describe('board reactions', () => {
           has_reacted: true,
           recent_user_ids: ['agent-b', 'agent-a'],
         }],
-        supported_emojis: ['👍', '🚀'],
+        supported_reaction_emojis: ['👍', '🚀'],
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1331,7 +1331,7 @@ describe('board reactions', () => {
     ))
 
     await expect(fetchBoardReactionState('post', 'post-1')).rejects.toThrow(
-      'supported_emojis is required',
+      'supported_reaction_emojis is required',
     )
   })
 })

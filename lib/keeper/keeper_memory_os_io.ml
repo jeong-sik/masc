@@ -139,14 +139,12 @@ let with_descriptor_lock ?clock root name f =
   let diagnostic_path =
     Filename.concat root.path (Anchored.Segment.to_string name)
   in
-  File_lock_eio.with_lock_file
+  File_lock_eio.with_anchored_file_lock
     ?clock
     ~path:diagnostic_path
-    ~open_file:(fun () ->
-      Anchored.open_lock_file root.handle ~name ~perm:0o644)
-    ~descriptor:Anchored.lock_file_descriptor
-    ~identity:Anchored.lock_file_identity
-    ~close_file:Anchored.close_lock_file
+    ~directory:root.handle
+    ~name
+    ~perm:0o644
     f
 ;;
 

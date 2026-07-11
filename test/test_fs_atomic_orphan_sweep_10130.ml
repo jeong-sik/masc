@@ -213,6 +213,30 @@ let test_direct_recovery_rejects_symlinked_destination () =
     0
     (Array.length (Sys.readdir target))
 
+let test_direct_recovery_rejects_symlinked_source () =
+  with_temp_base @@ fun base_path ->
+  let target = Filename.concat base_path "target" in
+  let orphan = Filename.concat base_path ".atomic_symlink.tmp" in
+  let recovered_root = Filename.concat base_path "recovered" in
+  let recovered = Filename.concat recovered_root "root" in
+  write_file ~path:target ~content:"must remain outside recovery";
+  Unix.mkdir recovered_root 0o755;
+  Unix.mkdir recovered 0o755;
+  Unix.symlink target orphan;
+  (match
+     Fs_compat.recover_atomic_orphan
+       ~path:orphan
+       ~recovered_root
+       ~bucket:"root"
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "symlinked orphan source was accepted");
+  Alcotest.(check bool) "source symlink retained" true (Sys.file_exists orphan);
+  Alcotest.(check string)
+    "symlink target retained"
+    "must remain outside recovery"
+    (Fs_compat.load_file_unix target)
+
 let test_cleanup_rejects_recovery_escape () =
   with_temp_base @@ fun base_path ->
   let orphan = Filename.concat base_path ".atomic_data.tmp" in
@@ -314,7 +338,29 @@ let test_blocking_durable_primitives () =
   in
   (match Fs_compat.save_file_atomic_unix missing_parent_target "value" with
    | Error _ -> ()
-   | Ok () -> Alcotest.fail "write with missing parent unexpectedly succeeded")
+   | Ok () -> Alcotest.fail "write with missing parent unexpectedly succeeded");
+  (match Fs_compat.fsync_directory target with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "regular file accepted as directory fsync target")
+
+let test_durable_mkdir_rejects_non_directories () =
+  with_temp_base @@ fun base_path ->
+  let file = Filename.concat base_path "file" in
+  let target = Filename.concat base_path "target" in
+  let symlink = Filename.concat base_path "symlink" in
+  write_file ~path:file ~content:"not a directory";
+  Unix.mkdir target 0o755;
+  Unix.symlink target symlink;
+  (match Fs_compat.mkdir_p_durable_unix file with
+   | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> ()
+   | _ -> Alcotest.fail "regular file accepted as durable directory");
+  (match Fs_compat.mkdir_p_durable_unix (Filename.concat symlink "child") with
+   | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> ()
+   | _ -> Alcotest.fail "symlinked ancestor accepted as durable directory");
+  Alcotest.(check int)
+    "symlink target unchanged"
+    0
+    (Array.length (Sys.readdir target))
 
 let test_durable_append_falls_back_outside_eio () =
   with_temp_base @@ fun base_path ->
@@ -328,6 +374,77 @@ let test_durable_append_falls_back_outside_eio () =
          "fallback durable append"
          "row\n"
          (Fs_compat.load_file_unix path))
+
+let test_anchored_directory_primitives () =
+  with_temp_base @@ fun base_path ->
+  let module Dir = Fs_compat.Anchored_dir in
+  Dir.with_open_root base_path @@ fun root ->
+  Dir.with_ensure_dir
+    root
+    ~name:"managed"
+    ~perm:0o700
+    ~enforce_perm:true
+  @@ fun managed ->
+  (match Dir.save_file_atomic managed ~name:"state.json" ~perm:0o600 "one" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "anchored atomic write failed: %s" detail);
+  Alcotest.(check string) "anchored read" "one" (Dir.read_file managed "state.json");
+  (match Dir.stat managed "state.json" with
+   | Some { kind = Dir.Regular_file; _ } -> ()
+   | Some _ -> Alcotest.fail "anchored stat returned the wrong file kind"
+   | None -> Alcotest.fail "anchored stat lost a committed file");
+  Dir.rename
+    ~src_dir:managed
+    ~src:"state.json"
+    ~dst_dir:managed
+    ~dst:"renamed.json";
+  Alcotest.(check bool)
+    "source removed by rename"
+    false
+    (Option.is_some (Dir.stat managed "state.json"));
+  Alcotest.(check bool)
+    "renamed file removed"
+    true
+    (Dir.unlink_if_exists managed "renamed.json");
+  Alcotest.(check bool)
+    "missing unlink is explicit false"
+    false
+    (Dir.unlink_if_exists managed "renamed.json")
+
+let test_anchored_capability_survives_path_substitution () =
+  with_temp_base @@ fun base_path ->
+  let module Dir = Fs_compat.Anchored_dir in
+  let managed_path = Filename.concat base_path "managed" in
+  let detached_path = Filename.concat base_path "detached" in
+  let outside_path = Filename.concat base_path "outside" in
+  Unix.mkdir managed_path 0o700;
+  Unix.mkdir outside_path 0o700;
+  Dir.with_open_root base_path @@ fun root ->
+  Dir.with_open_dir root "managed" @@ fun managed ->
+  Unix.rename managed_path detached_path;
+  Unix.symlink outside_path managed_path;
+  (match Dir.save_file_atomic managed ~name:"proof.json" ~perm:0o600 "anchored" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "anchored write after substitution: %s" detail);
+  Alcotest.(check bool)
+    "replacement symlink target untouched"
+    false
+    (Sys.file_exists (Filename.concat outside_path "proof.json"));
+  Alcotest.(check string)
+    "open descriptor retained original directory"
+    "anchored"
+    (Fs_compat.load_file_unix (Filename.concat detached_path "proof.json"))
+
+let test_anchored_root_rejects_symlink () =
+  with_temp_base @@ fun base_path ->
+  let module Dir = Fs_compat.Anchored_dir in
+  let target = Filename.concat base_path "target" in
+  let alias = Filename.concat base_path "alias" in
+  Unix.mkdir target 0o700;
+  Unix.symlink target alias;
+  match Dir.with_open_root alias (fun _ -> ()) with
+  | exception Unix.Unix_error _ -> ()
+  | () -> Alcotest.fail "symlinked root was accepted as an anchored capability"
 
 let () =
   Alcotest.run "fs_atomic_orphan_sweep_10130"
@@ -353,6 +470,8 @@ let () =
             test_recovered_dir_skipped_on_rescan;
           Alcotest.test_case "symlinked recovery rejected" `Quick
             test_direct_recovery_rejects_symlinked_destination;
+          Alcotest.test_case "symlinked source rejected" `Quick
+            test_direct_recovery_rejects_symlinked_source;
           Alcotest.test_case "recovery traversal rejected" `Quick
             test_cleanup_rejects_recovery_escape;
           Alcotest.test_case "symlinked recovery root rejected" `Quick
@@ -363,7 +482,15 @@ let () =
       ( "durable-primitives",
         [ Alcotest.test_case "blocking durable filesystem boundaries" `Quick
             test_blocking_durable_primitives;
+          Alcotest.test_case "durable mkdir rejects non-directories" `Quick
+            test_durable_mkdir_rejects_non_directories;
           Alcotest.test_case "durable append outside Eio runtime" `Quick
             test_durable_append_falls_back_outside_eio;
+          Alcotest.test_case "descriptor anchored operations" `Quick
+            test_anchored_directory_primitives;
+          Alcotest.test_case "ancestor substitution stays confined" `Quick
+            test_anchored_capability_survives_path_substitution;
+          Alcotest.test_case "symlinked root rejected" `Quick
+            test_anchored_root_rejects_symlink;
         ] );
     ]

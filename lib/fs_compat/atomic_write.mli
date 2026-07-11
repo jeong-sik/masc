@@ -12,28 +12,29 @@
     owning process was SIGKILL'd or [Filename.temp_file] itself
     raised ENFILE/EMFILE before the with-handler could register.
 
-    The [save_file] and [mkdir_p_unix] primitives are injected so
-    this module stays free of [Fs_compat]'s Eio bridge — same
-    cycle-free placement pattern as [Mkdir_memo] and [Fd_cache]. *)
+    The implementation is blocking Unix I/O. Eio callers must offload the
+    complete transaction rather than mixing Eio path writes with Unix fsync
+    and rename operations. *)
 
-(** [save_file_atomic ~save_file path content] writes [content] to
-    a temp file in [path]'s directory, fsyncs the tmp, renames it
-    over [path], and best-effort fsyncs the parent directory.
+(** [save_file_atomic path content] atomically opens a temp file in [path]'s
+    directory, writes [content], verifies its file identity, fsyncs it, renames it
+    over [path], and fsyncs the parent directory. A failed or unsupported
+    durability operation is returned as [Error]; it is never treated as a
+    successful commit.
 
     Returns [Ok ()] on success or [Error msg] when the write or
     rename fails (the tmp is cleaned up). Re-raises
     [Eio.Cancel.Cancelled] after cleaning up the tmp — cancellation
     must not be swallowed (RFC-0143). *)
 val save_file_atomic
-  :  save_file:(string -> string -> unit)
-  -> string
+  :  string
   -> string
   -> (unit, string) Result.t
 
 val fsync_directory : string -> (unit, string) result
-(** Durably publish prior directory-entry changes. Unsupported-filesystem
-    [EINVAL]/[EOPNOTSUPP] is treated as success by the underlying portability
-    boundary; every other failure is returned explicitly. *)
+(** Durably publish prior directory-entry changes. [path] must resolve to a
+    directory. Unsupported filesystem operations and close failures are
+    returned explicitly. *)
 
 (** [true] iff [name] matches the [.atomic_*.tmp] shape produced
     by {!save_file_atomic}. Exposed so a periodic sweep can match

@@ -86,6 +86,7 @@ type config = Runtime_agent_context.config = {
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
+  tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option;
   compact_ratio : float option;
   context_window_tokens : int option;
   oas_auto_context_overflow_retry : bool;

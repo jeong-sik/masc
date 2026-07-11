@@ -81,6 +81,7 @@ type config =
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
+  ; tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option
   ; compact_ratio : float option
   ; context_window_tokens : int option
   ; oas_auto_context_overflow_retry : bool
@@ -183,6 +184,7 @@ let default_config
   ; checkpoint_sidecar = None
   ; cache_system_prompt = false
   ; yield_on_tool = false
+  ; tool_failure_judge = None
   ; compact_ratio = None
   ; context_window_tokens = None
   ; oas_auto_context_overflow_retry = true
@@ -314,6 +316,11 @@ let builder_without_approval
     if config.yield_on_tool
     then Agent_sdk.Builder.with_yield_on_tool true builder
     else builder
+  in
+  let builder =
+    match config.tool_failure_judge with
+    | Some judge -> Agent_sdk.Builder.with_tool_failure_judge judge builder
+    | None -> builder
   in
   let builder =
     if config.allowed_paths <> []

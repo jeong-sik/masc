@@ -102,6 +102,7 @@ type config =
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
+  tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option;
   compact_ratio : float option;
   context_window_tokens : int option;
   oas_auto_context_overflow_retry : bool;
@@ -1083,6 +1084,7 @@ let resume_from_checkpoint
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~options ~config:prepared_resume.agent_config
+           ?tool_failure_judge:config.tool_failure_judge
            ~auto_context_overflow_retry:config.oas_auto_context_overflow_retry
            ()))
 

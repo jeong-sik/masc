@@ -51,6 +51,7 @@ type try_provider_ctx =
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
+  ; tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option
   ; compact_ratio : float option
   ; context_window_tokens : int option
   ; oas_auto_context_overflow_retry : bool
@@ -491,6 +492,7 @@ let run_try_provider
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
+          ; tool_failure_judge = ctx.tool_failure_judge
           ; runtime_mcp_policy
           }
   in

@@ -642,6 +642,11 @@ let run_turn
         ~downstream:on_event
         ~turn_id:manifest_keeper_turn_id
     in
+    let tool_failure_judge =
+      Keeper_tool_failure_recovery_judge.create
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+    in
     let priority =
       Option.value priority ~default:Llm_provider.Request_priority.Proactive
     in
@@ -803,6 +808,7 @@ let run_turn
                     ~allowed_paths:oas_allowed_paths
                     ~cache_system_prompt:true
                     ~yield_on_tool
+                    ~tool_failure_judge
                     ~context_injector
                     ~context:shared_context
                     ~approval:

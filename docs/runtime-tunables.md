@@ -274,7 +274,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_SIDECAR_CONTROL_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 817 | Subprocess timeout (seconds) for sidecar control commands — [stop], [tail], and similar quick housekeeping operatio... |
 | `MASC_SIDECAR_RECONCILE_BACKOFF_SEC` | typed:float | unclassified | unclassified | 805 | Backoff window (seconds) between repeated same-generation [running + unavailable] start dispatches. Default: 30 (matc... |
 | `MASC_SIDECAR_SCHEMA_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 833 | Subprocess timeout (seconds) for sidecar Python schema generation. Wraps [Process_eio.run_argv_with_status] at [serve... |
-| `MASC_SLOT_YIELD_ENABLED` | feature_flag | n/a | n/a | 406 | Release LLM slot during tool execution so other agents can use it. Default: false. Set MASC_SLOT_YIELD_ENABLED=true t... |
 | `MASC_SMART_HB_BASE_INTERVAL_SEC` | typed:float | unclassified | unclassified | 565 | Base heartbeat interval (seconds), clamped [5, 300]. Default: 30. |
 | `MASC_SMART_HB_IDLE_MULTIPLIER` | typed:float | unclassified | unclassified | 570 | Idle multiplier for interval, clamped [1, 10]. Default: 3. |
 | `MASC_SMART_HB_IDLE_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 575 | Idle threshold (seconds) before multiplier kicks in, clamped [60, 3600]. Default: 300. |

@@ -44,8 +44,6 @@ let runtime_entries =
       "Escalate malformed env parses to Config_error";
     entry ~default:"production" Env_config_core.governance_level_env_key
       "Governance enforcement level";
-    entry ~default:"(none)" "MASC_SLOT_YIELD_ENABLED"
-      "Release LLM slot during tool execution (feature flag)";
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
       "Enable telemetry collection";
     entry ~default:"30" "MASC_TELEMETRY_RETENTION_DAYS"

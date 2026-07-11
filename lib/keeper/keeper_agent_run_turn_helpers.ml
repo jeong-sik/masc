@@ -312,12 +312,16 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
       keeper_name
       ~event_kind
   in
-  let yield_on_tool = Env_config.Slot.yield_enabled () in
+  (* Keeper tool execution and typed recovery judgment are separate provider
+     lease phases. This is a Keeper lifecycle invariant, not an operator
+     tuning knob: OAS releases before tools/judgment and reacquires only for
+     the next main-model turn. *)
+  let yield_on_tool = true in
   (* SSOT-DRIFT-REMEDIATION: Streaming⇄Awaiting_tool_result FSM transitions
      are now emitted from the turn-scoped OAS Event_bus observation in
      [Keeper_unified_turn_event_bus], so they appear unconditionally even
-     when [yield_on_tool=false]. The yield/resume hooks below only handle
-     the optional slot-yield behaviour and its registry progress events. *)
+     independently of these lease callbacks. The callbacks below record the
+     mandatory Keeper provider-lease transition. *)
   let on_yield =
     if yield_on_tool then
       Some

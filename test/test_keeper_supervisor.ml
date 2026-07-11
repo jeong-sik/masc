@@ -2722,17 +2722,22 @@ let test_launch_fork_rejection_does_not_announce_running () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.with_restart_launch_noop_for_test (fun () ->
-        match
-          Masc.Keeper_supervisor_launch.launch_supervised_fiber
-            ~proactive_warmup_sec:0 ctx meta reg
-        with
-        | Ok () -> fail "expected lane fork rejection to propagate as Error"
-        | Error _ -> ());
+      (match
+         Masc.Keeper_supervisor_launch.launch_supervised_fiber
+           ~proactive_warmup_sec:0 ctx meta reg
+       with
+       | Ok () -> fail "expected lane fork rejection to propagate as Error"
+       | Error _ -> ());
       check bool
         "fork-rejected launch resolves done through the crash path"
         true
-        (Option.is_some (Eio.Promise.peek reg.done_p)))
+        (Option.is_some (Eio.Promise.peek reg.done_p));
+      check bool
+        "fork-rejected launch transitions the registry SSOT to Crashed"
+        true
+        (match Reg.get_phase ~base_path:config.base_path name with
+         | Some KSM.Crashed -> true
+         | Some _ | None -> false))
 
 let test_sweep_waits_for_lane_join_before_unregister () =
   Eio_main.run @@ fun env ->

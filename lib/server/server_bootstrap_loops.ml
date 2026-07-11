@@ -1329,7 +1329,10 @@ let start_keeper_loops
                    { outcome_ref }
              | Some (Delivered { outcome_ref }), Error (kind, detail) ->
                  Keeper_chat_consumer.Failed
-                   { kind; detail; outcome_ref = Some outcome_ref }
+                   { kind
+                   ; detail
+                   ; outcome_ref = Some (Ids.Turn_ref.to_string outcome_ref)
+                   }
              | Some (Failed { kind = turn_kind; detail = turn_detail }),
                Error (delivery_kind, delivery_detail) ->
                  Keeper_chat_consumer.Failed

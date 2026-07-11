@@ -168,7 +168,7 @@ type queued_turn_failure_kind =
   | Stream_projection_failed
 
 type queued_turn_outcome =
-  | Delivered of { outcome_ref : string }
+  | Delivered of { outcome_ref : Ids.Turn_ref.t }
   | Failed of
       { kind : queued_turn_failure_kind
       ; detail : string

@@ -43,6 +43,15 @@ type completion = {
   outcome_ref : string option;
 }
 
+(** Write-side delivered evidence.  Unlike legacy persisted [completion]
+    reads, a new successful finalization cannot omit the turn join key or pass
+    an arbitrary string.  The queue also round-trips the typed value through
+    the canonical [Ids.Turn_ref] codec before persistence. *)
+type delivered_completion = {
+  completed_at : float;
+  outcome_ref : Ids.Turn_ref.t;
+}
+
 type failure_kind =
   | Turn_failed
   | Timed_out
@@ -79,7 +88,7 @@ type lease = {
 }
 
 type finalization =
-  | Mark_delivered of completion
+  | Mark_delivered of delivered_completion
   | Mark_failed of failure
 
 type snapshot_load_error_kind =

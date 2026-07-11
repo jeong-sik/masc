@@ -1124,7 +1124,7 @@ and queued_turn_failure_kind =
   | Stream_projection_failed
 
 and queued_turn_outcome =
-  | Delivered of { outcome_ref : string }
+  | Delivered of { outcome_ref : Ids.Turn_ref.t }
   | Failed of
       { kind : queued_turn_failure_kind
       ; detail : string
@@ -1167,7 +1167,7 @@ let queued_turn_failure_kind_to_string = function
 
 let queued_delivery_outcome_of_turn_ref = function
   | Some turn_ref ->
-      Delivered { outcome_ref = Ids.Turn_ref.to_string turn_ref }
+      Delivered { outcome_ref = turn_ref }
   | None ->
       Failed
         { kind = Missing_turn_ref

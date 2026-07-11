@@ -55,6 +55,11 @@ type completion = {
   outcome_ref : string option;
 }
 
+type delivered_completion = {
+  completed_at : float;
+  outcome_ref : Ids.Turn_ref.t;
+}
+
 type failure_kind =
   | Turn_failed
   | Timed_out
@@ -89,7 +94,7 @@ type lease = {
 }
 
 type finalization =
-  | Mark_delivered of completion
+  | Mark_delivered of delivered_completion
   | Mark_failed of failure
 
 type snapshot_load_error_kind =
@@ -1056,11 +1061,24 @@ let canonical_optional_ref = function
     else if not (String.is_valid_utf_8 value) then Error "terminal outcome_ref contains malformed UTF-8"
     else Ok (Some value)
 
+let canonical_turn_ref turn_ref =
+  let wire = Ids.Turn_ref.to_string turn_ref in
+  match Ids.Turn_ref.of_string wire with
+  | Some parsed
+    when Ids.Turn_ref.equal parsed turn_ref
+         && String.equal (Ids.Turn_ref.to_string parsed) wire ->
+    Ok wire
+  | Some _ | None -> Error "terminal outcome_ref must be a canonical turn_ref"
+
 let canonical_terminal_state = function
   | Mark_delivered completion when Float.is_finite completion.completed_at ->
     Result.map
-      (fun outcome_ref -> Stored_delivered { completion with outcome_ref })
-      (canonical_optional_ref completion.outcome_ref)
+      (fun outcome_ref ->
+         Stored_delivered
+           { completed_at = completion.completed_at
+           ; outcome_ref = Some outcome_ref
+           })
+      (canonical_turn_ref completion.outcome_ref)
   | Mark_delivered _ -> Error "terminal completed_at must be finite"
   | Mark_failed failure when not (Float.is_finite failure.completed_at) ->
     Error "terminal completed_at must be finite"

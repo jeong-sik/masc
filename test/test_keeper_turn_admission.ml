@@ -21,6 +21,9 @@ let check name cond =
 
 let base_path = "/tmp/masc_test_turn_admission"
 let keeper_name = "admission-keeper"
+let turn_ref trace_id absolute_turn =
+  Ids.Turn_ref.make ~trace_id ~absolute_turn
+
 let reset () =
   Keeper_turn_admission.For_testing.reset ();
   Keeper_chat_queue.For_testing.reset ();
@@ -119,7 +122,7 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
      Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
        ~outcome:
          (Keeper_chat_queue.Mark_delivered
-            { completed_at = Time_compat.now (); outcome_ref = Some "turn#1" })
+            { completed_at = Time_compat.now (); outcome_ref = turn_ref "turn" 1 })
    with
    | `Finalized _ -> ()
    | `Unknown_lease | `Error _ -> failwith "expected the lease to finalize");
@@ -526,7 +529,7 @@ let test_autonomous_yields_to_queued_connector_message () =
         Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
           ~outcome:
             (Keeper_chat_queue.Mark_delivered
-               { completed_at = 2.0; outcome_ref = None })
+               { completed_at = 2.0; outcome_ref = turn_ref "autonomous" 1 })
       with
       | `Finalized _ -> ()
       | `Unknown_lease | `Error _ ->

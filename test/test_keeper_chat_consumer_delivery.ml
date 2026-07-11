@@ -21,6 +21,8 @@ let check_failure name detail =
   Printf.printf "  ✗ %s: %s\n%!" name detail
 
 let keeper_name = "consumer-receipt-keeper"
+let turn_ref trace_id absolute_turn =
+  Ids.Turn_ref.make ~trace_id ~absolute_turn
 
 let discord_msg ~content ~channel_id ~user_id ~timestamp =
   { Keeper_chat_queue.content
@@ -163,7 +165,7 @@ let test_delivery_finalizes_terminal_receipt () =
       let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message =
         captured := Some (dispatched_keeper, queued_message);
         Keeper_chat_consumer.Delivered
-          { outcome_ref = "trace-delivered#1" }
+          { outcome_ref = turn_ref "trace-delivered" 1 }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -316,7 +318,7 @@ let test_dispatch_is_concurrent_per_keeper () =
           Eio.Promise.resolve resolve_first_started ();
           Eio.Promise.await release_first;
           Keeper_chat_consumer.Delivered
-            { outcome_ref = "trace-" ^ dispatched_keeper ^ "#2" }
+            { outcome_ref = turn_ref ("trace-" ^ dispatched_keeper) 2 }
         | Some first when String.equal first dispatched_keeper ->
           check "one keeper is not dispatched twice concurrently" false;
           Keeper_chat_consumer.Failed
@@ -328,7 +330,7 @@ let test_dispatch_is_concurrent_per_keeper () =
           second_keeper := Some dispatched_keeper;
           Eio.Promise.resolve resolve_second_started ();
           Keeper_chat_consumer.Delivered
-            { outcome_ref = "trace-" ^ dispatched_keeper ^ "#2" }
+            { outcome_ref = turn_ref ("trace-" ^ dispatched_keeper) 2 }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -383,7 +385,7 @@ let test_finalization_persistence_retry_does_not_redeliver () =
         incr calls;
         Keeper_chat_queue.For_testing.fail_next_persist ();
         Keeper_chat_consumer.Delivered
-          { outcome_ref = "trace-finalized-after-retry#3" }
+          { outcome_ref = turn_ref "trace-finalized-after-retry" 3 }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -403,12 +405,12 @@ let test_finalization_persistence_retry_does_not_redeliver () =
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
-let test_invalid_delivered_turn_ref_fails_closed () =
+let test_invalid_typed_delivered_turn_ref_fails_closed () =
   Printf.printf
-    "Test: Delivered with an invalid turn_ref becomes a terminal failure\n%!";
+    "Test: non-canonical typed Delivered ref becomes a terminal failure\n%!";
   with_env (fun ~base ~clock ->
     match
-      enqueue_checked ~label:"invalid turn_ref enqueue" ~keeper_name
+      enqueue_checked ~label:"invalid typed turn ref enqueue" ~keeper_name
         (discord_msg ~content:"invalid delivered ref"
            ~channel_id:"channel-invalid-ref" ~user_id:"user-invalid-ref"
            ~timestamp:6.5)
@@ -416,7 +418,7 @@ let test_invalid_delivered_turn_ref_fails_closed () =
     | None -> ()
     | Some accepted ->
       let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
-        Keeper_chat_consumer.Delivered { outcome_ref = "trace#0042" }
+        Keeper_chat_consumer.Delivered { outcome_ref = turn_ref "" 42 }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -425,15 +427,15 @@ let test_invalid_delivered_turn_ref_fails_closed () =
             ~receipt_id:accepted.receipt_id ~accept:is_failed
         with
         | Some { state = Keeper_chat_queue.Failed failure; _ } ->
-          check "invalid Delivered ref is an internal failure"
+          check "invalid typed Delivered ref is an internal failure"
             (failure.kind = Keeper_chat_queue.Internal_error);
-          check "invalid Delivered ref is not persisted as a join key"
+          check "invalid typed Delivered ref is not persisted as a join key"
             (failure.outcome_ref = None);
-          check "invalid Delivered ref has diagnostic detail"
+          check "invalid typed Delivered ref has diagnostic detail"
             (String.trim failure.detail <> "")
         | Some { state = Pending | Inflight _ | Delivered _; _ } | None ->
-          check "invalid Delivered ref never reaches Delivered" false);
-      check_terminal_snapshot ~label:"invalid delivered ref" ~keeper_name
+          check "invalid typed Delivered ref never reaches Delivered" false);
+      check_terminal_snapshot ~label:"invalid typed delivered ref" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
 let test_invalid_delivery_diagnostic_does_not_block_lane () =
@@ -462,7 +464,9 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
             ; detail = "HTTP response body: \255"
             ; outcome_ref = Some " delivery:\255 "
             })
-        else Keeper_chat_consumer.Delivered { outcome_ref = "trace-next#4" }
+        else
+          Keeper_chat_consumer.Delivered
+            { outcome_ref = turn_ref "trace-next" 4 }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -521,7 +525,7 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
       let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
         incr calls;
         Keeper_chat_consumer.Delivered
-          { outcome_ref = "trace-shutdown-rollback#1" }
+          { outcome_ref = turn_ref "trace-shutdown-rollback" 1 }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -588,7 +592,7 @@ let test_typed_admission_race_nacks_then_retries () =
           Eio.Promise.resolve resolve_second_started ();
           Eio.Promise.await release_second;
           Keeper_chat_consumer.Delivered
-            { outcome_ref = "trace-typed-deferral#2" })
+            { outcome_ref = turn_ref "trace-typed-deferral" 2 })
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -624,7 +628,7 @@ let () =
   test_structured_cancellation_nacks_and_preserves_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
-  test_invalid_delivered_turn_ref_fails_closed ();
+  test_invalid_typed_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   test_shutdown_fence_keeps_receipt_pending_until_rollback ();
   test_typed_admission_race_nacks_then_retries ();

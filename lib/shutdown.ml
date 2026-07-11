@@ -28,24 +28,78 @@ let default_config = {
   force_timeout_s = 10.0;
 }
 
+type config_field =
+  | Notify_delay
+  | Drain_timeout
+  | Cleanup_timeout
+  | Force_timeout
+
+let config_field_env_name = function
+  | Notify_delay -> "MASC_SHUTDOWN_NOTIFY_DELAY"
+  | Drain_timeout -> "MASC_SHUTDOWN_DRAIN_TIMEOUT"
+  | Cleanup_timeout -> "MASC_SHUTDOWN_CLEANUP_TIMEOUT"
+  | Force_timeout -> "MASC_SHUTDOWN_FORCE_TIMEOUT"
+
+type config_error =
+  | Invalid_config_number of { field : config_field; raw_value : string }
+  | Non_finite_config_duration of { field : config_field; value : float }
+  | Negative_config_duration of { field : config_field; value : float }
+  | Non_positive_config_duration of { field : config_field; value : float }
+
+let config_error_to_string = function
+  | Invalid_config_number { field; raw_value } ->
+      Printf.sprintf "%s must be a number (received %S)"
+        (config_field_env_name field) raw_value
+  | Non_finite_config_duration { field; value } ->
+      Printf.sprintf "%s must be finite (received %g)"
+        (config_field_env_name field) value
+  | Negative_config_duration { field; value } ->
+      Printf.sprintf "%s must be non-negative (received %g)"
+        (config_field_env_name field) value
+  | Non_positive_config_duration { field; value } ->
+      Printf.sprintf "%s must be greater than zero (received %g)"
+        (config_field_env_name field) value
+
 let config_from_env () =
-  let get_float name default =
-    match Sys.getenv_opt name with
-    | Some s -> Option.value ~default (float_of_string_opt s)
-    | None -> default
+  let get_duration field ~default ~positive =
+    match Sys.getenv_opt (config_field_env_name field) with
+    | None -> Ok default
+    | Some raw_value ->
+        (match float_of_string_opt raw_value with
+         | None -> Error (Invalid_config_number { field; raw_value })
+         | Some value when not (Float.is_finite value) ->
+             Error (Non_finite_config_duration { field; value })
+         | Some value when positive && value <= 0.0 ->
+             Error (Non_positive_config_duration { field; value })
+         | Some value when value < 0.0 ->
+             Error (Negative_config_duration { field; value })
+         | Some value -> Ok value)
   in
-  {
-    notify_delay_s = get_float "MASC_SHUTDOWN_NOTIFY_DELAY" 0.2;
-    drain_timeout_s = get_float "MASC_SHUTDOWN_DRAIN_TIMEOUT" 5.0;
-    cleanup_timeout_s = get_float "MASC_SHUTDOWN_CLEANUP_TIMEOUT" 3.0;
-    force_timeout_s = get_float "MASC_SHUTDOWN_FORCE_TIMEOUT" 10.0;
-  }
+  let ( let* ) = Result.bind in
+  let* notify_delay_s =
+    get_duration Notify_delay ~default:default_config.notify_delay_s
+      ~positive:false
+  in
+  let* drain_timeout_s =
+    get_duration Drain_timeout ~default:default_config.drain_timeout_s
+      ~positive:false
+  in
+  let* cleanup_timeout_s =
+    get_duration Cleanup_timeout ~default:default_config.cleanup_timeout_s
+      ~positive:false
+  in
+  let* force_timeout_s =
+    get_duration Force_timeout ~default:default_config.force_timeout_s
+      ~positive:true
+  in
+  Ok { notify_delay_s; drain_timeout_s; cleanup_timeout_s; force_timeout_s }
 
 (** {1 Process deadline supervision} *)
 
 type deadline_error =
   | Non_finite_deadline_timeout of float
   | Non_positive_deadline_timeout of float
+  | Watchdog_thread_start_failed of string
 
 let deadline_error_to_string = function
   | Non_finite_deadline_timeout value ->
@@ -54,6 +108,8 @@ let deadline_error_to_string = function
       Printf.sprintf
         "deadline timeout must be greater than zero (received %g)"
         value
+  | Watchdog_thread_start_failed reason ->
+      Printf.sprintf "deadline watchdog thread failed to start: %s" reason
 
 type watchdog_state =
   | Armed
@@ -71,6 +127,14 @@ type disarm_result =
   | Already_fired
 
 let process_deadline_exit_code = 124
+let process_deadline_start_failure_exit_code = 125
+
+let default_deadline_thread_create f = Thread.create f ()
+let deadline_thread_create = Atomic.make default_deadline_thread_create
+
+let set_deadline_thread_create_for_testing f = Atomic.set deadline_thread_create f
+let reset_deadline_thread_create_for_testing () =
+  Atomic.set deadline_thread_create default_deadline_thread_create
 
 let start_process_deadline_watchdog ~timeout_s =
   if not (Float.is_finite timeout_s) then
@@ -79,15 +143,26 @@ let start_process_deadline_watchdog ~timeout_s =
     Error (Non_positive_deadline_timeout timeout_s)
   else
     let state = Atomic.make Armed in
-    let thread =
-      Thread.create
-        (fun () ->
-          Thread.delay timeout_s;
-          if Atomic.compare_and_set state Armed Fired then
-            Unix._exit process_deadline_exit_code)
-        ()
-    in
-    Ok { state; thread }
+    (match
+       try
+         Ok
+           ((Atomic.get deadline_thread_create) (fun () ->
+                Thread.delay timeout_s;
+                if Atomic.compare_and_set state Armed Fired then
+                  Unix._exit process_deadline_exit_code))
+       with exn -> Error (Watchdog_thread_start_failed (Printexc.to_string exn))
+     with
+     | Ok thread -> Ok { state; thread }
+     | Error _ as error -> error)
+
+let start_process_deadline_watchdog_or_exit ~timeout_s ~on_error =
+  match start_process_deadline_watchdog ~timeout_s with
+  | Ok watchdog -> watchdog
+  | Error error ->
+      Fun.protect
+        ~finally:(fun () -> Unix._exit process_deadline_start_failure_exit_code)
+        (fun () -> on_error error);
+      assert false
 
 let rec disarm_deadline_watchdog watchdog =
   if Atomic.compare_and_set watchdog.state Armed Disarmed_state then
@@ -132,13 +207,22 @@ type state = {
   config : config;
 }
 
-let create ?(config = config_from_env ()) () = {
-  phase = Running;
-  started_at = 0.0;
-  reason = "";
-  entered = Atomic.make false;
-  config;
-}
+let create ?config () =
+  let config =
+    match config with
+    | Some config -> config
+    | None ->
+        (match config_from_env () with
+         | Ok config -> config
+         | Error error -> invalid_arg (config_error_to_string error))
+  in
+  {
+    phase = Running;
+    started_at = 0.0;
+    reason = "";
+    entered = Atomic.make false;
+    config;
+  }
 
 (** {1 Hook Registry} *)
 

@@ -50,6 +50,11 @@ type rollback_shutdown_result =
   | Shutdown_not_reserved
   | Shutdown_reserved_by_other of Keeper_shutdown_types.Operation_id.t
 
+type restore_shutdown_result =
+  | Shutdown_restored
+  | Shutdown_already_restored
+  | Shutdown_restore_conflict of Keeper_shutdown_types.Operation_id.t
+
 type 'a registration_commit_result =
   | Registration_committed of 'a
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
@@ -191,6 +196,16 @@ val rollback_shutdown :
   keeper_name:string ->
   operation_id:Keeper_shutdown_types.Operation_id.t ->
   rollback_shutdown_result
+
+(** Restore the admission owner from a durable non-terminal shutdown record
+    before boot recovery or same-name registration starts. The operation id is
+    compared as a typed identity; a different in-memory owner is never
+    overwritten. *)
+val restore_shutdown :
+  base_path:string ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  restore_shutdown_result
 
 (** Run the non-yielding registry [commit] only while no shutdown operation
     owns the Keeper admission fence. Shutdown reservation and same-name lane

@@ -336,11 +336,49 @@ let start_keeper_loops
   let shutdown_inventory_p, shutdown_inventory_r = Eio.Promise.create () in
   let config = Mcp_server.workspace_config state in
   fork_subsystem "keeper_shutdown_recovery" (fun () ->
-    let inventory = Keeper_shutdown_store.list_all ~config in
+    let operation_requires_fence operation =
+      match operation.Keeper_shutdown_types.phase with
+      | Keeper_shutdown_types.Finalized _ -> false
+      | Keeper_shutdown_types.Prepared
+      | Keeper_shutdown_types.Joined_idle
+      | Keeper_shutdown_types.Finalizing_tasks _
+      | Keeper_shutdown_types.Cleanup_ready _
+      | Keeper_shutdown_types.Reconciliation_required _
+      | Keeper_shutdown_types.Blocked _ -> true
+    in
+    let inventory =
+      match Keeper_shutdown_store.list_all ~config with
+      | Error error -> Error (Keeper_shutdown_store.error_to_string error)
+      | Ok operations ->
+        List.fold_left
+          (fun restored operation ->
+             match restored with
+             | Error _ as error -> error
+             | Ok () when not (operation_requires_fence operation) -> Ok ()
+             | Ok () ->
+               (match
+                  Keeper_turn_admission.restore_shutdown
+                    ~base_path:config.base_path
+                    ~keeper_name:operation.keeper_name
+                    ~operation_id:operation.operation_id
+                with
+                | Keeper_turn_admission.Shutdown_restored
+                | Keeper_turn_admission.Shutdown_already_restored -> Ok ()
+                | Keeper_turn_admission.Shutdown_restore_conflict existing ->
+                  Error
+                    (Printf.sprintf
+                       "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
+                       operation.keeper_name
+                       (Keeper_shutdown_types.Operation_id.to_string
+                          operation.operation_id)
+                       (Keeper_shutdown_types.Operation_id.to_string existing))))
+          (Ok ())
+          operations
+        |> Result.map (fun () -> operations)
+    in
     Eio.Promise.resolve shutdown_inventory_r inventory;
     match inventory with
-    | Error error ->
-      let detail = Keeper_shutdown_store.error_to_string error in
+    | Error detail ->
       Log.Keeper.error "shutdown recovery inventory failed: %s" detail;
       failwith detail
     | Ok operations ->
@@ -888,7 +926,7 @@ let start_keeper_loops
       let shutdown_inventory = Eio.Promise.await shutdown_inventory_p in
       let shutdown_blocked_names_result =
         match shutdown_inventory with
-        | Error error -> Error (Keeper_shutdown_store.error_to_string error)
+        | Error detail -> Error detail
         | Ok operations ->
           Ok
             (operations

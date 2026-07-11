@@ -39,7 +39,10 @@ vi.mock('../common/feedback-state', () => ({
 }))
 
 vi.mock('../../api/board', () => ({
-  fetchBoardReactions: vi.fn().mockResolvedValue([]),
+  fetchBoardReactionState: vi.fn().mockResolvedValue({
+    summaries: [],
+    supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
+  }),
   votePost: vi.fn().mockResolvedValue(undefined),
   voteComment: vi.fn().mockResolvedValue(undefined),
   requestBoardContextInference: vi.fn().mockResolvedValue({

@@ -60,6 +60,11 @@ vi.mock('../../api/actions', () => ({
 
 vi.mock('../../api/board', () => ({
   requestBoardContextInference: vi.fn(),
+  fetchBoardReactionState: vi.fn().mockResolvedValue({
+    summaries: [],
+    supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
+  }),
+  toggleReaction: vi.fn(),
 }))
 
 vi.mock('../../operator-store', async (importOriginal) => {
@@ -113,6 +118,7 @@ function makePost(overrides: Partial<BoardPost> & { id: string; title: string; a
     visibility: 'internal',
     expires_at: null,
     hearth_count: 0,
+    supported_reaction_emojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
     ...overrides,
   } as BoardPost
 }

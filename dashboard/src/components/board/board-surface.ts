@@ -484,6 +484,7 @@ function PostCard({ post }: { post: BoardPost }) {
             targetId=${post.id}
             compact
             initialSummaries=${post.reactions ?? []}
+            supportedEmojis=${post.supported_reaction_emojis}
           />
         </div>
         <span class="karma" aria-label=${voteScoreAria} title=${voteScoreLabel}>karma <b>${voteScoreLabel}</b></span>

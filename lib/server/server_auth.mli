@@ -65,6 +65,12 @@ val bearer_token_from_header : string -> string option
 val auth_token_from_request : Httpun.Request.t -> string option
 (** Token from [Authorization: Bearer …] on the request. *)
 
+val request_carries_auth_credential : Httpun.Request.t -> bool
+(** Whether the request presents either supported credential header, including
+    an empty or malformed value. This presence check lets optional-auth routes
+    distinguish a genuinely anonymous request from a credential that must fail
+    closed during parsing or validation. *)
+
 val observer_sse_query_token_from_request : Httpun.Request.t -> string option
 (** Observer/presence/cursor SSE allows the token via query string for browser
     EventSource. *)
@@ -314,8 +320,17 @@ val authorize_token_bound_permission_request :
   base_path:string ->
   permission:Masc_domain.permission ->
   Httpun.Request.t -> (string, Masc_domain.masc_error) result
-(** Like [authorize_permission_request] but returns the token id used
-    for auditing the call. *)
+(** Like [authorize_permission_request] but returns the credential's canonical
+    agent name for actor-bound operations. *)
+
+val authorize_optional_token_bound_permission_request :
+  base_path:string ->
+  permission:Masc_domain.permission ->
+  Httpun.Request.t -> (string option, Masc_domain.masc_error) result
+(** Return [Ok None] only when the request carries no supported credential
+    header. If a header is present, validate its credential and permission and
+    return its canonical agent name. Malformed, empty, invalid, or
+    underprivileged credentials are errors rather than anonymous fallbacks. *)
 
 val is_dashboard_bootstrap_path : string -> bool
 (** [true] when the path is part of the dashboard bootstrap surface

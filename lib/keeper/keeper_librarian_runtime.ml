@@ -665,7 +665,7 @@ let extract_and_append_with_provider_classified
        the truth anchor recall's recency ranking reads. The judgment (window
        join + metric) lives here at the write boundary; the fold itself stays
        a pure function of the decision. *)
-    Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
+    Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun bundle ->
       match
         try
           let window = Keeper_memory_os_io.fact_recall_window in
@@ -684,10 +684,17 @@ let extract_and_append_with_provider_classified
             Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
           in
           let (_ : Keeper_memory_os_io.fact_merge_stats) =
-            File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-              Keeper_memory_os_io.merge_and_cap_facts
+            Keeper_memory_os_io.with_facts_lock_in_bundle
+              ?clock
+              bundle
+              ~on_timeout:(fun timeout ->
+                raise
+                  (Failure
+                     (Keeper_memory_os_io.lock_timeout_to_string timeout)))
+              (fun lock ->
+              Keeper_memory_os_io.merge_and_cap_facts_in_lock
+                lock
                 ~now
-                ~keeper_id
                 ~merge
                 ~incoming:episode.Keeper_memory_os_types.claims
                 ~keep:window
@@ -703,21 +710,21 @@ let extract_and_append_with_provider_classified
           Error message
       with
       | Ok () ->
-        Keeper_memory_os_io.append_episode ~keeper_id episode;
-        Keeper_memory_os_io.append_event ~keeper_id episode;
+        Keeper_memory_os_io.append_episode_in_bundle bundle episode;
+        Keeper_memory_os_io.append_event_in_bundle bundle episode;
         (* RFC-0272 (defect D): bound the append-only episode log under the same
            bundle lock that serialized the writes above, so a re-extraction cannot
            grow events.jsonl / episodes/ without limit. Hysteresis-gated: the trim
            is a no-op until the high-water, so this is off the per-turn hot path. *)
         ignore
-          (Keeper_memory_os_io.cap_events
-             ~keeper_id
+          (Keeper_memory_os_io.cap_events_in_bundle
+             bundle
              ~keep:Keeper_memory_os_io.event_recall_window
              ~trigger:Keeper_memory_os_io.event_store_max
             : int);
         ignore
-          (Keeper_memory_os_io.cap_episode_files
-             ~keeper_id
+          (Keeper_memory_os_io.cap_episode_files_in_bundle
+             bundle
              ~keep:Keeper_memory_os_io.episode_file_window
              ~trigger:Keeper_memory_os_io.episode_file_store_max
             : int);

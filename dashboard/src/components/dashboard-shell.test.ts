@@ -1106,7 +1106,7 @@ describe('DashboardHealthStrip v2 chrome', () => {
   })
 
   it('renders with the v2-health-strip marker class', () => {
-    render(h(DashboardHealthStrip, {}), container)
+    render(h(DashboardHealthStrip, { hidden: false }), container)
 
     const strip = container.querySelector('[data-testid="dashboard-health-strip"]')
     expect(strip).not.toBeNull()

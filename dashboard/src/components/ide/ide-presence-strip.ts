@@ -301,7 +301,7 @@ function PresenceChip({ entry }: PresenceChipProps) {
 
   const canNavigate = contextAnchor !== null
   const navigate = (): void => {
-    if (contextAnchor) focusIdeContextAnchor(contextAnchor)
+    if (contextAnchor) focusIdeContextAnchor(contextAnchor, 'operator')
   }
   const onKeyDown = canNavigate
     ? (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate() } }

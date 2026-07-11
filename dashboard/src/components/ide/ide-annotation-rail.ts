@@ -71,7 +71,7 @@ function AnnotationRailCard({ annotation }: { readonly annotation: IdeAnnotation
       source_id: `annotation:${annotation.id}`,
       keeper_id: annotation.keeper_id,
       route_links: routeLinks,
-    })
+    }, 'operator')
   }
 
   return html`

@@ -44,7 +44,12 @@ import {
 } from './ide-shell'
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
-import { activeIdeFile, ideContextFocus } from './ide-state'
+import {
+  activeIdeFile,
+  focusIdeFile,
+  ideContextFocus,
+  synchronizeIdeWorkspaceIdentity,
+} from './ide-state'
 import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusSnapshot } from './ide-lsp-client'
@@ -141,7 +146,7 @@ function dashboardFetchMockWithResponse(
 ): (input: RequestInfo | URL) => Promise<Response> {
   return (input: RequestInfo | URL): Promise<Response> => {
     const url = String(input)
-    if (pattern.test(url)) return Promise.resolve(response)
+    if (pattern.test(url)) return Promise.resolve(response.clone())
     return dashboardFetchMock(input)
   }
 }
@@ -152,6 +157,13 @@ describe('IdeShell', () => {
   beforeEach(() => {
     container = document.createElement('div')
     clearLocalStorage()
+    synchronizeIdeWorkspaceIdentity({ kind: 'project' })
+    focusIdeFile({
+      path: 'package.json',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'available',
+    })
     vi.stubGlobal('fetch', vi.fn(dashboardFetchMock))
   })
 
@@ -168,7 +180,12 @@ describe('IdeShell', () => {
     vi.unstubAllGlobals()
     window.location.hash = ''
     route.value = { tab: 'overview', params: {}, postId: null }
-    activeIdeFile.value = 'package.json'
+    focusIdeFile({
+      path: 'package.json',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'available',
+    })
     ideContextFocus.value = null
     cursorOverlaySignal.value = { cursors: new Map(), heatmap: new Map(), collisions: [], active_file: null }
     lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
@@ -685,7 +702,12 @@ describe('IdeShell', () => {
       params: { section: 'ide-shell', view: 'source' },
       postId: null,
     }
-    activeIdeFile.value = 'lib/runtime.ml'
+    focusIdeFile({
+      path: 'lib/runtime.ml',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'available',
+    })
     cursorOverlaySignal.value = {
       cursors: new Map([[
         'sangsu',
@@ -785,7 +807,7 @@ describe('IdeShell', () => {
     expect(container.querySelector('.ide-toolbar-spacer')).toBeNull()
   })
 
-  it('persists layer toggles back to the route', () => {
+  it('persists layer toggles back to the route', async () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'split-diff', layers: 'notes' },
@@ -793,7 +815,9 @@ describe('IdeShell', () => {
     }
 
     render(h(IdeShell, {}), container)
-    expect(container.querySelector('[aria-label="Split diff preview"]')).not.toBeNull()
+    await waitFor(() => {
+      expect(container.querySelector('[aria-label="Split diff preview"]')).not.toBeNull()
+    })
     fireEvent.click(buttonByText(container, 'Trace'))
 
     expect(route.value.params.view).toBe('split-diff')
@@ -803,7 +827,7 @@ describe('IdeShell', () => {
     expect(route.value.params.layers).toBe('keeper-trace')
   })
 
-  it('turns focus=review into a unified review workspace with review layers', () => {
+  it('turns focus=review into a unified review workspace with review layers', async () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'unified', focus: 'review' },
@@ -813,7 +837,9 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
-    expect(container.querySelector('[aria-label="Unified diff preview"]')).not.toBeNull()
+    await waitFor(() => {
+      expect(container.querySelector('[aria-label="Unified diff preview"]')).not.toBeNull()
+    })
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
     expect(container.querySelector('[data-testid="ide-toolbar-layers"]')?.textContent)
@@ -966,7 +992,9 @@ describe('IdeShell', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(route.value.params.find).toBe('open')
-    expect(container.querySelector('[data-testid="ide-find-panel"]')).not.toBeNull()
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-find-panel"]')).not.toBeNull()
+    })
   })
 
   it('starts on the reference activity rail and keeps work context available without a fourth tab', () => {
@@ -1188,7 +1216,7 @@ describe('IdeShell', () => {
     expect(container.querySelector('.ide-plane-tree')).not.toBeNull()
   })
 
-  it('does not mount the polling rail on mobile and keeps annotation creation in the editor', () => {
+  it('does not mount the polling rail on mobile and keeps annotation creation in the editor', async () => {
     const originalWidth = window.innerWidth
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
@@ -1210,8 +1238,10 @@ describe('IdeShell', () => {
       expect(vi.mocked(fetch).mock.calls.some(([input]) =>
         String(input).includes('/api/v1/activity/events'),
       )).toBe(false)
-      expect(container.querySelector('.ide-v2-responsive-annotation-composer [data-testid="ide-annotation-composer-closed"]'))
-        .not.toBeNull()
+      await waitFor(() => {
+        expect(container.querySelector('.ide-v2-responsive-annotation-composer [data-testid="ide-annotation-composer-closed"]'))
+          .not.toBeNull()
+      })
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
     }
@@ -1275,7 +1305,7 @@ describe('IdeShell', () => {
     expect(getLocalStorageItem(IDE_TREE_WIDTH_STORAGE_KEY)).toBe(String(IDE_TREE_WIDTH_MAX))
   })
 
-  it('hydrates the trace layer button from the ?layers=keeper-trace URL param', () => {
+  it('hydrates the trace layer button from the ?layers=keeper-trace URL param', async () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source', layers: 'keeper-trace' },
@@ -1285,7 +1315,9 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
-    expect(container.textContent).toContain('Active overlays')
+    await waitFor(() => {
+      expect(container.textContent).toContain('Active overlays')
+    })
     expect(container.textContent).toContain('Trace')
   })
 

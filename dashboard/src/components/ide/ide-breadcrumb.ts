@@ -77,7 +77,7 @@ export function IdeBreadcrumb() {
         sourceId: `breadcrumb:${keeper.keeperId}:${keeper.line}`,
         keeperId: keeper.keeperId,
       }),
-    })
+    }, 'operator')
   }
 
   return html`

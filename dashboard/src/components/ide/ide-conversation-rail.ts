@@ -403,7 +403,7 @@ function PostCard(
             label: bodyText || post.title || 'board thread',
             source_id: `thread-${post.id}`,
             keeper_id: postAuthorId(post) || undefined,
-          })
+          }, 'operator')
         }}
         style=${{
           '--ide-conversation-bg': focused ? 'var(--color-bg-muted)' : 'var(--color-bg-elevated)',

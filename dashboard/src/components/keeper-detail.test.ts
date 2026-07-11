@@ -366,8 +366,10 @@ describe('KeeperDetailPage', () => {
     expect(screen.queryByText('FSM Hub (6축 상태 머신)')).toBeNull()
     expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
 
-    // "상세" flips to the full tabbed detail (KeeperDetailBody is reused).
-    fireEvent.click(screen.getByRole('button', { name: '상세' }))
+    // Secondary inspectors live in the standalone-style overflow. Opening the
+    // menu and choosing "상세" flips to the reused full tabbed detail body.
+    fireEvent.click(screen.getByRole('button', { name: '대화 도구' }))
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: '상세' }))
     const statusTab = await screen.findByRole('tab', { name: '상태' })
     fireEvent.click(statusTab)
     expect(statusTab.getAttribute('aria-selected')).toBe('true')

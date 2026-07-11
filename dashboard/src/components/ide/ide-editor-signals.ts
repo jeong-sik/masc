@@ -180,7 +180,7 @@ export function focusTraceLineContext(
       keeperId: event.keeperName,
       telemetry: Boolean(event.logId || event.sessionId || event.operationId || event.workerRunId),
     }),
-  })
+  }, 'operator')
 }
 
 export function EditorCurrentFileSignals({

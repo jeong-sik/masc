@@ -1089,7 +1089,7 @@ const ActivityRow = memo(function ActivityRow({
               source_id: item.id,
               keeper_id: item.keeper_id,
               route_links: routeLinks,
-            })}
+            }, 'operator')}
           >
             ↗ ${shortContextPath(eventFocusFile, eventFocusLine)}
           </button>

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
+  fetchScheduleExecutionHistory,
   resolveScheduleApproval,
   type DashboardScheduleDecision,
   type DashboardScheduledAutomationActor,
@@ -2048,6 +2049,7 @@ export function SchDetail({
               reactionEvidence=${request.keeper_reaction_evidence ?? null}
             />
             <${SchExecutionHistory}
+              scheduleId=${request.schedule_id}
               history=${request.execution_history ?? null}
             />
           </div>
@@ -2064,12 +2066,55 @@ export function SchDetail({
  *  repeated failures/successes had no dashboard trail). Row [0] duplicates
  *  the SchExecution block above, so the list starts at the second-newest. */
 function SchExecutionHistory({
+  scheduleId,
   history,
 }: {
+  scheduleId: string
   history: DashboardScheduledAutomationRequest['execution_history'] | null
 }) {
-  const rows = history?.rows.slice(1) ?? []
-  if (rows.length === 0 && !history?.truncated) return null
+  const initialRows = history?.rows ?? []
+  const initialCursor = history?.truncated && initialRows.length > 0
+    ? initialRows[initialRows.length - 1]!.execution_id
+    : null
+  const [executionRows, setExecutionRows] = useState(initialRows)
+  const [totalCount, setTotalCount] = useState(history?.total_count ?? initialRows.length)
+  const [nextCursor, setNextCursor] = useState<string | null>(initialCursor)
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const rows = history?.rows ?? []
+    setExecutionRows(rows)
+    setTotalCount(history?.total_count ?? rows.length)
+    setNextCursor(
+      history?.truncated && rows.length > 0
+        ? rows[rows.length - 1]!.execution_id
+        : null,
+    )
+    setLoadError(null)
+  }, [history, scheduleId])
+
+  async function loadOlderExecutions() {
+    if (loading || nextCursor === null) return
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const page = await fetchScheduleExecutionHistory(scheduleId, nextCursor)
+      setExecutionRows(current => {
+        const knownIds = new Set(current.map(row => row.execution_id))
+        return [...current, ...page.rows.filter(row => !knownIds.has(row.execution_id))]
+      })
+      setTotalCount(page.total_count)
+      setNextCursor(page.next_cursor)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : '실행 이력 조회 실패')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const rows = executionRows.slice(1)
+  if (rows.length === 0 && nextCursor === null && loadError === null) return null
   return html`
     <div class="sch-kvs" data-schedule-execution-history>
       ${rows.map(row => html`
@@ -2080,8 +2125,14 @@ function SchExecutionHistory({
           </span>
         </div>
       `)}
-      ${history?.truncated
-        ? html`<div class="sch-kv"><span class="k"></span><span class="v mono" data-execution-history-truncated>전체 ${history.total_count.toLocaleString()}건 중 최근 ${history.limit.toLocaleString()}건을 표시합니다</span></div>`
+      ${totalCount > 0
+        ? html`<div class="sch-kv"><span class="k">전체</span><span class="v mono">${totalCount.toLocaleString()}건</span></div>`
+        : null}
+      ${loadError
+        ? html`<div class="sch-kv"><span class="k">조회 오류</span><span class="v" role="alert">${loadError}</span></div>`
+        : null}
+      ${nextCursor !== null
+        ? html`<div class="sch-kv"><span class="k"></span><span class="v"><button type="button" class="sch-klink" data-execution-history-more disabled=${loading} onClick=${() => { void loadOlderExecutions() }}>${loading ? '조회 중…' : '이전 기록 더 보기'}</button></span></div>`
         : null}
     </div>
   `

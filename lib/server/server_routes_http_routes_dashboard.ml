@@ -1201,6 +1201,55 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd (operator_error_json (Printf.sprintf "invalid json: %s" msg))
          )
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/schedule/executions" (fun request reqd ->
+       with_public_read
+         (fun state req reqd ->
+           let schedule_id =
+             Server_utils.query_param req "schedule_id" |> String.trim
+           in
+           if String.equal schedule_id ""
+           then
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (operator_error_json "schedule_id is required")
+           else (
+             let cursor =
+               match Server_utils.query_param req "cursor" |> String.trim with
+               | "" -> None
+               | cursor -> Some cursor
+             in
+             let limit =
+               Server_utils.int_query_param req "limit" ~default:50
+               |> clamp ~min_v:1 ~max_v:100
+             in
+             match
+               Server_dashboard_http_runtime_info.schedule_execution_history_page_json
+                 ~config:(Mcp_server.workspace_config state)
+                 ~schedule_id
+                 ~cursor
+                 ~limit
+             with
+             | Ok json -> respond_json_value_with_cors request reqd json
+             | Error
+                 (Server_dashboard_http_runtime_info.Schedule_execution_history_schedule_not_found
+                    _ as error) ->
+               respond_json_value_with_cors ~status:`Not_found request reqd
+                 (operator_error_json
+                    (Server_dashboard_http_runtime_info.schedule_execution_history_page_error_to_string
+                       error))
+             | Error
+                 (Server_dashboard_http_runtime_info.Schedule_execution_history_store_read_error
+                    _ as error) ->
+               respond_json_value_with_cors ~status:`Service_unavailable request reqd
+                 (operator_error_json
+                    (Server_dashboard_http_runtime_info.schedule_execution_history_page_error_to_string
+                       error))
+             | Error error ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd
+                 (operator_error_json
+                    (Server_dashboard_http_runtime_info.schedule_execution_history_page_error_to_string
+                       error)))
+         )
+         request reqd)
   |> Http.Router.post "/api/v1/dashboard/schedule/resolve" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state operator_name _req reqd ->

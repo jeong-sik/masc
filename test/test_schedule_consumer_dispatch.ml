@@ -886,7 +886,59 @@ let test_dashboard_projects_bounded_execution_history () =
   | last ->
     check string "last_execution matches executions[0]"
       (last |> member "execution_id" |> to_string)
-      (List.hd projected)
+      (List.hd projected);
+  let cursor = List.nth projected 9 in
+  let first_page =
+    match
+      Server_dashboard_http_runtime_info.schedule_execution_history_page_json
+        ~config ~schedule_id:request.schedule_id ~cursor:(Some cursor) ~limit:1
+    with
+    | Ok page -> page
+    | Error error ->
+      fail
+        (Server_dashboard_http_runtime_info.schedule_execution_history_page_error_to_string
+           error)
+  in
+  check int "history page preserves durable total" 12
+    (first_page |> member "total_count" |> to_int);
+  let first_page_rows = first_page |> member "rows" |> to_list in
+  check int "history page obeys requested limit" 1 (List.length first_page_rows);
+  check string "history page starts strictly after cursor"
+    (List.nth stored 10)
+    (List.hd first_page_rows |> member "execution_id" |> to_string);
+  let next_cursor = first_page |> member "next_cursor" |> to_string in
+  let final_page =
+    match
+      Server_dashboard_http_runtime_info.schedule_execution_history_page_json
+        ~config ~schedule_id:request.schedule_id ~cursor:(Some next_cursor) ~limit:1
+    with
+    | Ok page -> page
+    | Error error ->
+      fail
+        (Server_dashboard_http_runtime_info.schedule_execution_history_page_error_to_string
+           error)
+  in
+  check string "final history page returns the oldest execution"
+    (List.nth stored 11)
+    (final_page |> member "rows" |> to_list |> List.hd
+     |> member "execution_id" |> to_string);
+  check bool "final history page closes the cursor"
+    true
+    (final_page |> member "next_cursor" = `Null);
+  match
+    Server_dashboard_http_runtime_info.schedule_execution_history_page_json
+      ~config ~schedule_id:request.schedule_id ~cursor:(Some "missing-cursor")
+      ~limit:1
+  with
+  | Error
+      (Server_dashboard_http_runtime_info.Schedule_execution_history_cursor_not_found
+         "missing-cursor") -> ()
+  | Error error ->
+    fail
+      ("unexpected cursor error: "
+       ^ Server_dashboard_http_runtime_info.schedule_execution_history_page_error_to_string
+           error)
+  | Ok _ -> fail "missing execution cursor must not restart from newest"
 ;;
 
 let test_dashboard_schedule_resolve_uses_authenticated_operator () =

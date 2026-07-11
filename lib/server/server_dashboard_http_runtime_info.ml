@@ -3078,6 +3078,82 @@ let schedule_execution_history_dashboard_json history =
     ]
 ;;
 
+type schedule_execution_history_page_error =
+  | Schedule_execution_history_invalid_limit of int
+  | Schedule_execution_history_schedule_not_found of string
+  | Schedule_execution_history_cursor_not_found of string
+  | Schedule_execution_history_store_read_error of Schedule_store.read_error
+
+let schedule_execution_history_page_error_to_string = function
+  | Schedule_execution_history_invalid_limit limit ->
+    Printf.sprintf "execution history limit must be positive, got %d" limit
+  | Schedule_execution_history_schedule_not_found schedule_id ->
+    Printf.sprintf "schedule not found: %s" schedule_id
+  | Schedule_execution_history_cursor_not_found cursor ->
+    Printf.sprintf "execution history cursor not found: %s" cursor
+  | Schedule_execution_history_store_read_error error ->
+    Schedule_store.read_error_to_string error
+;;
+
+let schedule_execution_history_page_json ~config ~schedule_id ~cursor ~limit =
+  if limit <= 0
+  then Error (Schedule_execution_history_invalid_limit limit)
+  else
+    match Schedule_store.read_state_result config with
+    | Error error -> Error (Schedule_execution_history_store_read_error error)
+    | Ok state ->
+      if
+        not
+          (List.exists
+             (fun (request : Schedule_domain.schedule_request) ->
+                String.equal request.schedule_id schedule_id)
+             state.schedules)
+      then Error (Schedule_execution_history_schedule_not_found schedule_id)
+      else (
+        let executions =
+          Schedule_store.executions_for_schedule state ~schedule_id
+        in
+        let remaining =
+          match cursor with
+          | None -> Ok executions
+          | Some cursor ->
+            let rec after_cursor = function
+              | [] -> Error (Schedule_execution_history_cursor_not_found cursor)
+              | (execution : Schedule_domain.execution_record) :: rest ->
+                if String.equal execution.execution_id cursor
+                then Ok rest
+                else after_cursor rest
+            in
+            after_cursor executions
+        in
+        match remaining with
+        | Error _ as error -> error
+        | Ok remaining ->
+          let rows = take limit remaining in
+          let has_more = List.length remaining > List.length rows in
+          let next_cursor =
+            if has_more
+            then
+              match List.rev rows with
+              | [] -> None
+              | (execution : Schedule_domain.execution_record) :: _ ->
+                Some execution.execution_id
+            else None
+          in
+          Ok
+            (`Assoc
+              [ "schema", `String "masc.dashboard.schedule_execution_history.v1"
+              ; "schedule_id", `String schedule_id
+              ; "rows", `List (List.map execution_record_dashboard_json rows)
+              ; "total_count", `Int (List.length executions)
+              ; "page_count", `Int (List.length rows)
+              ; ( "next_cursor"
+                , match next_cursor with
+                  | None -> `Null
+                  | Some next_cursor -> `String next_cursor )
+              ]))
+;;
+
 let schedule_request_dashboard_json
   ~now
   ~config

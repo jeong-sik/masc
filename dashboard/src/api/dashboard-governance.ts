@@ -29,6 +29,7 @@ import type {
   HitlApprovalModeStatus,
 } from '../types'
 import type { AbortableRequestOptions } from './core'
+import type { DashboardScheduledAutomationExecution } from './dashboard-tools-prompts'
 
 export interface FetchDashboardGovernanceOptions extends AbortableRequestOptions {
   force?: boolean
@@ -265,6 +266,24 @@ export function resolveScheduleApproval(
 export interface DashboardSchedulePruneResponse {
   ok: boolean
   pruned_count: number
+}
+
+export interface DashboardScheduleExecutionHistoryPage {
+  schema: 'masc.dashboard.schedule_execution_history.v1'
+  schedule_id: string
+  rows: DashboardScheduledAutomationExecution[]
+  total_count: number
+  page_count: number
+  next_cursor: string | null
+}
+
+export function fetchScheduleExecutionHistory(
+  scheduleId: string,
+  cursor?: string | null,
+): Promise<DashboardScheduleExecutionHistoryPage> {
+  const params = new URLSearchParams({ schedule_id: scheduleId })
+  if (cursor) params.set('cursor', cursor)
+  return get(`/api/v1/dashboard/schedule/executions?${params.toString()}`)
 }
 
 export function pruneSchedules(): Promise<DashboardSchedulePruneResponse> {

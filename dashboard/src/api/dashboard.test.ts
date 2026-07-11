@@ -49,6 +49,7 @@ import {
   fetchTlcResults,
   fetchToolQuality,
   resolveScheduleApproval,
+  fetchScheduleExecutionHistory,
 } from './dashboard'
 import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
 import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
@@ -183,6 +184,28 @@ describe('resolveScheduleApproval', () => {
       schedule_id: 'sched-1',
       decision: 'approve',
     })
+  })
+})
+
+describe('fetchScheduleExecutionHistory', () => {
+  it('requests the next immutable execution page by schedule and cursor', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        schema: 'masc.dashboard.schedule_execution_history.v1',
+        schedule_id: 'sched / one',
+        rows: [],
+        total_count: 12,
+        page_count: 0,
+        next_cursor: null,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchScheduleExecutionHistory('sched / one', 'exec / ten')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/dashboard/schedule/executions?schedule_id=sched+%2F+one&cursor=exec+%2F+ten',
+    )
   })
 })
 

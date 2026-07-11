@@ -155,6 +155,26 @@ val scheduled_automation_dashboard_json : Workspace.config -> Yojson.Safe.t
     automation. This summarizes the schedule store as a small FSM envelope
     plus recent request rows; it does not refresh due state or run work. *)
 
+type schedule_execution_history_page_error =
+  | Schedule_execution_history_invalid_limit of int
+  | Schedule_execution_history_schedule_not_found of string
+  | Schedule_execution_history_cursor_not_found of string
+  | Schedule_execution_history_store_read_error of Schedule_store.read_error
+
+val schedule_execution_history_page_error_to_string :
+  schedule_execution_history_page_error -> string
+
+val schedule_execution_history_page_json :
+  config:Workspace.config ->
+  schedule_id:string ->
+  cursor:string option ->
+  limit:int ->
+  (Yojson.Safe.t, schedule_execution_history_page_error) result
+(** Returns one immutable newest-first page from the durable schedule execution
+    ledger. [cursor] is the last execution id already held by the caller; the
+    next page begins strictly after it. Missing schedules, stale cursors, and
+    corrupt ledgers are explicit errors rather than empty history. *)
+
 (** {1 Runtime-probe test seams} *)
 
 val set_dashboard_runtime_probe_runner_for_tests :

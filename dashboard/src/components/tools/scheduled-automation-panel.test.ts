@@ -10,11 +10,13 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   resolveScheduleApproval: vi.fn(),
+  fetchScheduleExecutionHistory: vi.fn(),
   showToast: vi.fn(),
 }))
 
 vi.mock('../../api', () => ({
   resolveScheduleApproval: mocks.resolveScheduleApproval,
+  fetchScheduleExecutionHistory: mocks.fetchScheduleExecutionHistory,
 }))
 
 vi.mock('../common/toast', () => ({
@@ -334,6 +336,7 @@ describe('ScheduledAutomationPanel approval actions', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     mocks.resolveScheduleApproval.mockReset()
+    mocks.fetchScheduleExecutionHistory.mockReset()
     mocks.showToast.mockReset()
   })
 
@@ -573,7 +576,7 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).toContain('페이로드')
   })
 
-  it('renders server-owned execution history without duplicating the latest row', async () => {
+  it('pages durable execution history without duplicating the latest row', async () => {
     const latest = {
       execution_id: 'exec-latest',
       schedule_id: 'sched-history',
@@ -593,12 +596,26 @@ describe('ScheduledAutomationPanel', () => {
         last_execution: latest,
         execution_history: {
           rows: [latest, previous],
-          total_count: 12,
-          limit: 10,
+          total_count: 3,
+          limit: 2,
           truncated: true,
         },
       }),
     ])
+    mocks.fetchScheduleExecutionHistory.mockResolvedValueOnce({
+      schema: 'masc.dashboard.schedule_execution_history.v1',
+      schedule_id: 'sched-history',
+      rows: [{
+        execution_id: 'exec-oldest',
+        schedule_id: 'sched-history',
+        started_at_iso: '2026-06-21T00:10:00Z',
+        status: 'failed',
+        error: 'older failure',
+      }],
+      total_count: 3,
+      page_count: 1,
+      next_cursor: null,
+    })
 
     render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
     const scheduledFilter = container.querySelector(
@@ -616,8 +633,18 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-execution-history-row="exec-latest"]')).toBeNull()
     expect(container.querySelector('[data-execution-history-row="exec-previous"]')?.textContent)
       .toContain('provider unavailable')
-    expect(container.querySelector('[data-execution-history-truncated]')?.textContent)
-      .toContain('전체 12건 중 최근 10건')
+    const more = container.querySelector('[data-execution-history-more]') as HTMLButtonElement
+    expect(more).not.toBeNull()
+    more.click()
+    await flush()
+
+    expect(mocks.fetchScheduleExecutionHistory).toHaveBeenCalledWith(
+      'sched-history',
+      'exec-previous',
+    )
+    expect(container.querySelector('[data-execution-history-row="exec-oldest"]')?.textContent)
+      .toContain('older failure')
+    expect(container.querySelector('[data-execution-history-more]')).toBeNull()
   })
 
   it('renders keeper wake dispatch receipts as queue proof in diagnostics and v2', async () => {

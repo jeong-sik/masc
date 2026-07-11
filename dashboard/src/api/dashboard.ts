@@ -126,6 +126,7 @@ export {
 export type {
   DashboardScheduleDecision,
   DashboardScheduleResolveResponse,
+  DashboardScheduleExecutionHistoryPage,
   SetApprovalModeResponse,
 } from './dashboard-governance'
 export {
@@ -134,6 +135,7 @@ export {
   deleteGovernanceApprovalRule,
   setApprovalMode,
   resolveScheduleApproval,
+  fetchScheduleExecutionHistory,
   pruneSchedules,
   fetchGovernanceCaseStatus,
   submitGovernancePetition,

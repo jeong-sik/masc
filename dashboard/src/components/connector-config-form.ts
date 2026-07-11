@@ -350,7 +350,7 @@ function FieldWidget({ id, field, value, revealed }: {
   switch (field.type) {
     case 'boolean':
       return html`
-        <label class="flex items-center gap-2 text-2xs text-[var(--color-fg-primary)]">
+        <label class="v2-mobile-operator-target flex items-center gap-2 text-2xs text-[var(--color-fg-primary)]">
           <${Checkbox}
             checked=${value === 'true'}
             ariaLabel=${field.name}
@@ -447,7 +447,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                           href=${hint.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          class="ml-1 underline hover:text-[var(--color-accent-fg)]"
+                          class="v2-mobile-operator-target inline-flex items-center ml-1 underline hover:text-[var(--color-accent-fg)]"
                         >열기 ↗</a>
                       `
                     : null}
@@ -540,7 +540,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         </div>
         <div class="flex items-center gap-2">
           <label
-            class="flex cursor-pointer items-center gap-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
+            class="v2-mobile-operator-target flex cursor-pointer items-center gap-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
             title="저장 직후 자동으로 sidecar 재시작 (stop → 800ms → start)"
           >
             <${Checkbox}
@@ -605,7 +605,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                           href=${hint.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          class="ml-1 underline hover:text-[var(--color-accent-fg)]"
+                          class="v2-mobile-operator-target inline-flex items-center ml-1 underline hover:text-[var(--color-accent-fg)]"
                         >열기 ↗</a>
                       `
                     : null}

@@ -26,7 +26,7 @@ let check_invariant label (t : T.t) =
 let constructor_cases : (string * T.t) list =
   [ "success", T.success ()
   ; "of_code/explicit", T.of_code "post_commit_ambiguous"
-  ; "of_code/legacy_persisted/completed", T.of_code "completed"
+  ; "of_code/runtime_stop_not_final/completed", T.of_code "completed"
   ; ( "of_code/sdk_error/contract_violation"
     , T.of_code "completion_contract_violation:completion_contract" )
   ; "of_code/sdk_error/api_error_timeout", T.of_code "api_error_timeout"
@@ -73,6 +73,18 @@ let test_of_code_default_source_is_wire_code () =
   Alcotest.(check string) "default source" "wire_code" t.source
 ;;
 
+let test_runtime_completed_is_not_final_success () =
+  let terminal = T.of_code "completed" in
+  Alcotest.(check bool)
+    "runtime completed disposition is unknown"
+    false
+    (D.is_success terminal.disposition);
+  Alcotest.(check string)
+    "unknown runtime wire is preserved"
+    "completed"
+    (T.code terminal)
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_terminal_disposition_field"
@@ -95,6 +107,10 @@ let () =
             "of_code default source is wire_code"
             `Quick
             test_of_code_default_source_is_wire_code
+        ; Alcotest.test_case
+            "runtime completed is not final success"
+            `Quick
+            test_runtime_completed_is_not_final_success
         ] )
     ]
 ;;

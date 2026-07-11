@@ -109,12 +109,14 @@ val record_execution_receipt_reaction :
   current_task_id:string option ->
   goal_ids:string list ->
   outcome:string ->
+  reaction_kind:reaction_kind ->
   terminal_reason_code:string ->
   receipt_json:Yojson.Safe.t ->
   unit ->
   unit
 (** Append a reaction row that links a turn execution receipt back into the
-    keeper reaction ledger. *)
+    keeper reaction ledger. [reaction_kind] is a typed decision from the
+    receipt owner; this persistence boundary does not reclassify wire text. *)
 
 val read_recent_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t list

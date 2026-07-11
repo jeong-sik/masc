@@ -213,6 +213,13 @@ type t =
   }
 
 val stop_reason_to_string : Runtime_agent.stop_reason -> string
+
+(** Receipt terminal-reason projection for the runtime-stop axis. Unlike
+    {!stop_reason_to_string}, normal completion serialises as canonical
+    [Keeper_turn_disposition.Success]. Completion-contract truth remains a
+    separate typed receipt field and feeds the final operator disposition. *)
+val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> string
+
 val sandbox_kind_of_meta : Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
 val to_json : t -> Yojson.Safe.t
 
@@ -292,6 +299,13 @@ val is_auto_recoverable_turn_budget_terminal : string -> bool
 (** Derived display pair (disposition, reason) computed from receipt fields.
     Exposed for test access; the runtime path consumes it via [append]. *)
 val operator_disposition : t -> operator_disposition_kind * operator_disposition_reason
+
+(** Typed ledger projection owned by the receipt boundary. Successful/passive
+    terminal receipts are execution evidence; failed, cancelled, fallback, or
+    unknown terminal receipts retain terminal-reason evidence. *)
+val reaction_kind_of_operator_disposition
+  :  operator_disposition_kind
+  -> Keeper_reaction_ledger.reaction_kind
 
 (** [needs_operator_broadcast disposition] returns true when the disposition
     indicates a silent dead-end that operators must be notified about. *)

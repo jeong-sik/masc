@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import type {
   DashboardKeeperWaitingInventory,
   DashboardKeeperWaitingKeeper,
@@ -47,6 +48,7 @@ export function sourceTone(source: string | null | undefined): StatusChipTone {
       return 'warn'
     case 'fusion_running':
     case 'background_task':
+    case 'turn_admission_shutdown':
       return 'info'
     default:
       return 'neutral'
@@ -88,6 +90,56 @@ function SourceCounts({ counts }: { counts: Record<string, number> | null | unde
   `
 }
 
+function asDetailRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function WaitingRowReceiptDetail({ row }: { row: DashboardKeeperWaitingRow }) {
+  const detail = asDetailRecord(row.detail)
+  const lifecycle = asDetailRecord(detail?.lifecycle)
+  const receiptId = typeof detail?.receipt_id === 'string' ? detail.receipt_id : null
+  if (!receiptId) return null
+  const queueIndex = typeof detail?.queue_index === 'number' ? detail.queue_index : null
+  const state = typeof lifecycle?.state === 'string' ? lifecycle.state : null
+  const leaseId = typeof lifecycle?.lease_id === 'string' ? lifecycle.lease_id : null
+  const startedAt = typeof lifecycle?.started_at_iso === 'string'
+    ? lifecycle.started_at_iso
+    : null
+  return html`
+    <div
+      class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]"
+      data-keeper-chat-receipt=${receiptId}
+    >
+      <span class="min-w-0 break-all font-mono">receipt ${receiptId}</span>
+      ${queueIndex === null ? null : html`<span class="font-mono">queue index ${queueIndex}</span>`}
+      ${state ? html`<span class="font-mono">state ${enumLabel(state)}</span>` : null}
+      ${leaseId ? html`<span class="min-w-0 break-all font-mono">lease ${leaseId}</span>` : null}
+      ${startedAt ? html`<span>started ${timeLabel(startedAt)}</span>` : null}
+    </div>
+  `
+}
+
+function WaitingRowShutdownDetail({ row }: { row: DashboardKeeperWaitingRow }) {
+  if (row.source !== 'turn_admission_shutdown') return null
+  const detail = asDetailRecord(row.detail)
+  const operationId = typeof detail?.shutdown_operation_id === 'string'
+    ? detail.shutdown_operation_id.trim()
+    : ''
+  if (!operationId) return null
+  const admissionFenced = detail?.admission_fenced === true
+  return html`
+    <div
+      class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]"
+      data-keeper-shutdown-operation-id=${operationId}
+    >
+      <span class="min-w-0 break-all font-mono">shutdown operation ${operationId}</span>
+      ${admissionFenced ? html`<span>admission fenced</span>` : null}
+    </div>
+  `
+}
+
 function WaitingRow({ row }: { row: DashboardKeeperWaitingRow }) {
   const wakeProducer = evidenceLabel(row.wake_producer, 'wake producer missing')
   const nextAction = evidenceLabel(row.next_action, 'next action missing')
@@ -103,12 +155,16 @@ function WaitingRow({ row }: { row: DashboardKeeperWaitingRow }) {
         <span class="font-mono">producer ${wakeProducer}</span>
         <span class="font-mono">${nextAction}</span>
       </div>
+      <${WaitingRowReceiptDetail} row=${row} />
+      <${WaitingRowShutdownDetail} row=${row} />
     </div>
   `
 }
 
 function KeeperRow({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
-  const rows = (keeper.waiting_on ?? []).slice(0, 4)
+  const [expanded, setExpanded] = useState(false)
+  const allRows = keeper.waiting_on ?? []
+  const rows = expanded ? allRows : allRows.slice(0, 4)
   const truncatedSources = Object.entries(keeper.truncated_sources ?? {})
     .filter(([, truncated]) => truncated)
     .map(([source]) => enumLabel(source))
@@ -131,8 +187,13 @@ function KeeperRow({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
         : null}
       <div class="mt-2">
         ${rows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)}
-        ${keeper.waiting_count > rows.length
-          ? html`<div class="pt-1 text-2xs text-[var(--color-fg-muted)]">+${keeper.waiting_count - rows.length} more</div>`
+        ${allRows.length > rows.length
+          ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(true)} data-expand-waiting-rows>+${allRows.length - rows.length} more · 전체 보기</button>`
+          : expanded && allRows.length > 4
+            ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(false)} data-collapse-waiting-rows>접기</button>`
+          : null}
+        ${keeper.waiting_count > allRows.length
+          ? html`<div class="pt-1 text-2xs text-[var(--color-status-warn)]">서버 projection에서 ${keeper.waiting_count - allRows.length}행이 추가로 생략되었습니다.</div>`
           : null}
       </div>
     </div>
@@ -204,7 +265,9 @@ function laneSummary(keeper: DashboardKeeperWaitingKeeper): string {
 }
 
 function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
-  const rows = (keeper.waiting_on ?? []).slice(0, 6)
+  const [expanded, setExpanded] = useState(false)
+  const allRows = keeper.waiting_on ?? []
+  const rows = expanded ? allRows : allRows.slice(0, 6)
   const truncatedSources = Object.entries(keeper.truncated_sources ?? {})
     .filter(([, truncated]) => truncated)
     .map(([source]) => enumLabel(source))
@@ -247,8 +310,13 @@ function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) 
         ${rows.length > 0
           ? rows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)
           : html`<div class="border-t border-[var(--color-border-subtle)] pt-2 text-xs text-[var(--color-fg-muted)]">no keeper-specific waiting rows</div>`}
-        ${keeper.waiting_count > rows.length
-          ? html`<div class="pt-1 text-2xs text-[var(--color-fg-muted)]">+${keeper.waiting_count - rows.length} more</div>`
+        ${allRows.length > rows.length
+          ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(true)} data-expand-lane-rows>+${allRows.length - rows.length} more · 전체 보기</button>`
+          : expanded && allRows.length > 6
+            ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(false)} data-collapse-lane-rows>접기</button>`
+          : null}
+        ${keeper.waiting_count > allRows.length
+          ? html`<div class="pt-1 text-2xs text-[var(--color-status-warn)]">서버 projection에서 ${keeper.waiting_count - allRows.length}행이 추가로 생략되었습니다.</div>`
           : null}
       </div>
     </article>

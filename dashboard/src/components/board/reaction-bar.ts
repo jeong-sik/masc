@@ -91,7 +91,7 @@ export function ReactionBar({
   }
 
   return html`
-    <div class="flex items-center gap-1 flex-wrap" role="group" aria-label="리액션">
+    <div class="board-reaction-bar flex items-center gap-1 flex-wrap" role="group" aria-label="리액션">
       ${(supportedEmojiCatalog ?? []).map(emoji => {
         const summary = summaryByEmoji.get(emoji)
         const count = summary?.count ?? 0

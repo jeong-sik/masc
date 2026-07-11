@@ -5,4 +5,5 @@
 (tests
  (names test_fusion test_fusion_harness test_fusion_run_registry
    test_fusion_config_json)
+ (deps ../../config/runtime.toml)
  (libraries alcotest otoml yojson masc.fusion_core))

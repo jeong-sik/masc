@@ -361,7 +361,7 @@ function ContractSection({ task }: { task: Task }) {
             <div class="text-xs font-medium text-accent-fg">Verifier Keeper 검증 중</div>
             <a
               href=${`#workspace?section=verification&task=${encodeURIComponent(task.id)}`}
-              class="rounded-[var(--r-1)] border border-[var(--accent-50)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg hover:bg-[var(--accent-20)]"
+              class="v2-mobile-operator-target inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-50)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg hover:bg-[var(--accent-20)]"
               title="검증 패널에서 이 태스크를 직접 승인/반려"
             >검증에 개입 →</a>
           </div>

@@ -17,8 +17,10 @@ const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
 // above `let` declarations, so the shared state must itself be created inside
 // `vi.hoisted` to avoid the temporal dead zone. Tests inject a
 // `keeper_waiting_inventory` by setting `mockedToolsData.value` before render.
-const { mockedToolsData } = vi.hoisted(() => ({
+const { mockedToolsData, mockedToolsError, subscribeToolsAutoRefresh } = vi.hoisted(() => ({
   mockedToolsData: { value: null as unknown },
+  mockedToolsError: { value: null as string | null },
+  subscribeToolsAutoRefresh: vi.fn(() => vi.fn()),
 }))
 
 vi.mock('../keeper-actions', () => ({
@@ -27,6 +29,7 @@ vi.mock('../keeper-actions', () => ({
   hydrateKeeperChatHistory: vi.fn(async () => undefined),
   loadFullKeeperHistory: vi.fn(async () => null),
   probeKeeperRuntime: vi.fn(),
+  reconcileKeeperChatReceipts: vi.fn(async () => undefined),
   recoverKeeperRuntime: vi.fn(),
   resumePendingKeeperChatRequests: vi.fn(async () => undefined),
   sendKeeperThreadMessage: vi.fn(async () => null),
@@ -95,7 +98,9 @@ vi.mock('../store', async (importOriginal) => {
 vi.mock('../components/tools/tool-state', () => ({
   toolsData: mockedToolsData,
   toolsLoading: { value: false },
-  toolsError: { value: null },
+  toolsError: mockedToolsError,
+  KEEPER_WAITING_INVENTORY_REFRESH_MS: 15_000,
+  subscribeToolsAutoRefresh,
   loadTools: vi.fn(),
 }))
 
@@ -200,6 +205,8 @@ describe('KeeperConversationPanel', () => {
     keeperStreamStartedAt.value = {}
     shellAuthSummary.value = null
     mockedToolsData.value = null
+    mockedToolsError.value = null
+    subscribeToolsAutoRefresh.mockClear()
     _resetChatStoreForTests()
     vi.mocked(sendKeeperThreadMessage).mockReset()
     vi.mocked(sendKeeperThreadMessage).mockResolvedValue(undefined)
@@ -867,7 +874,7 @@ describe('KeeperConversationPanel', () => {
     expect(container.textContent).toContain('Snapshot says the keeper heartbeat is stale.')
   })
 
-  it('shows a busy chip when the keeper waiting inventory reports busy', async () => {
+  it('shows an explicit running-turn state when the keeper waiting inventory reports busy', async () => {
     mockedToolsData.value = {
       keeper_waiting_inventory: {
         keepers: [
@@ -880,7 +887,141 @@ describe('KeeperConversationPanel', () => {
       container,
     )
     await waitFor(() => {
-      expect(container.textContent).toContain('busy')
+      expect(container.textContent).toContain('Keeper 턴 실행 중')
+      expect(container.textContent).toContain('다른 턴 실행 중')
+    })
+  })
+
+  it('separates durable server pending/inflight counts from browser-local drafts', async () => {
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [
+          {
+            keeper_name: 'sangsu',
+            state: 'busy',
+            waiting_on: [],
+            waiting_count: 3,
+            sources: {
+              chat_queue_pending: 2,
+              chat_queue_inflight: 1,
+            },
+            next_action: 'keeper_chat_consumer_drain',
+          },
+        ],
+      },
+    }
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
+      expect(status?.getAttribute('data-server-chat-queue-pending')).toBe('2')
+      expect(status?.getAttribute('data-server-chat-queue-inflight')).toBe('1')
+      expect(status?.textContent).toContain('서버 대기 2')
+      expect(status?.textContent).toContain('처리 중 1')
+      expect(container.textContent).not.toContain('브라우저 초안 · 서버 미접수')
+    })
+  })
+
+  it('surfaces a server queue snapshot read failure instead of showing an empty queue', async () => {
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [
+          {
+            keeper_name: 'sangsu',
+            state: 'waiting',
+            waiting_on: [],
+            waiting_count: 1,
+            sources: { read_error: 1 },
+            next_action: 'repair_keeper_chat_queue_snapshot',
+          },
+        ],
+      },
+    }
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
+      expect(status?.getAttribute('data-server-chat-queue-read-errors')).toBe('1')
+      expect(status?.textContent).toContain('대기열 조회 실패 1')
+      expect(status?.textContent).toContain('repair_keeper_chat_queue_snapshot')
+    })
+  })
+
+  it('surfaces a failed tools refresh even when stale queue counts remain cached', async () => {
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [
+          {
+            keeper_name: 'sangsu',
+            state: 'waiting',
+            waiting_on: [],
+            waiting_count: 1,
+            sources: { chat_queue_pending: 1 },
+          },
+        ],
+      },
+    }
+    mockedToolsError.value = 'HTTP 502 Bad Gateway'
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
+      expect(status?.getAttribute('data-server-chat-queue-projection')).toBe('read-failed')
+      expect(status?.textContent).toContain('서버 대기열 갱신 실패')
+      expect(status?.textContent).toContain('표시 수치는 이전 snapshot일 수 있습니다')
+    })
+  })
+
+  it('shows each durable receipt lifecycle in messenger mode with receipt identity', async () => {
+    const receiptStates = ['pending', 'inflight', 'delivered', 'failed'] as const
+    keeperThreads.value = {
+      sangsu: receiptStates.map((queueState, index) => ({
+        id: `receipt-${queueState}`,
+        role: 'assistant' as const,
+        source: 'direct_assistant' as const,
+        label: 'sangsu',
+        text: `receipt ${queueState}`,
+        timestamp: null,
+        delivery: queueState === 'failed' ? 'error' as const : queueState === 'delivered' ? 'delivered' as const : 'queued' as const,
+        streamState: null,
+        details: {
+          queueReceiptId: `chatq_00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+          queueShutdownOperationId: queueState === 'pending' ? 'shutdown-op-7' : null,
+          queueRevision: index + 1,
+          queueState,
+        },
+      })),
+    }
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [{ keeper_name: 'sangsu', state: 'waiting', waiting_on: [], waiting_count: 0 }],
+      },
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-chat-queue-state-badge="pending"]')?.textContent).toContain('서버 대기')
+      expect(container.querySelector('[data-chat-queue-state-badge="inflight"]')?.textContent).toContain('Keeper 처리 중')
+      expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.textContent).toContain('처리 완료')
+      expect(container.querySelector('[data-chat-queue-state-badge="failed"]')?.textContent).toContain('처리 실패')
+      expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.getAttribute('title')).toContain('chatq_')
+      const shutdownBadge = container.querySelector('[data-chat-queue-state-badge][data-chat-queue-shutdown-operation-id="shutdown-op-7"]')
+      expect(shutdownBadge?.textContent).toContain('종료 후 처리')
+      expect(shutdownBadge?.getAttribute('title')).toContain('shutdown operation shutdown-op-7')
     })
   })
 
@@ -897,7 +1038,7 @@ describe('KeeperConversationPanel', () => {
       container,
     )
     await waitFor(() => {
-      expect(container.textContent).toContain('busy')
+      expect(container.textContent).toContain('Keeper 턴 실행 중')
     })
 
     const interruptButton = Array.from(container.querySelectorAll('button'))

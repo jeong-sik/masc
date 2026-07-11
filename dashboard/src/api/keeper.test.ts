@@ -19,11 +19,14 @@ import {
   bulkKeeperDirective,
   clearKeeper,
   deleteKeeperHistorySnapshots,
+  fetchKeeperChatHistory,
+  fetchKeeperChatReceipt,
   fetchKeeperCheckpoints,
   fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
   pauseKeeper,
   parseKeeperRuntimeTrace,
+  parseKeeperChatReceipt,
   queuedKeeperMessageError,
   queuedKeeperMessageToReply,
   resumeKeeper,
@@ -51,8 +54,10 @@ import {
   parseKeeperRuntimeTrace as parseKeeperRuntimeTraceFromRuntimeTrace,
 } from './keeper-runtime-trace'
 import { resetDevTokenBootstrap } from './dev-token'
+import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.clearAllMocks()
   vi.unstubAllGlobals()
   try {
@@ -85,6 +90,125 @@ describe('keeper API module split compatibility', () => {
     expect(fetchKeeperCheckpoints).toBe(fetchKeeperCheckpointsFromLifecycle)
     expect(deleteKeeperHistorySnapshots).toBe(deleteKeeperHistorySnapshotsFromLifecycle)
     expect(bulkKeeperDirective).toBe(bulkKeeperDirectiveFromLifecycle)
+  })
+})
+
+describe('Keeper chat durable receipt API', () => {
+  it('parses the closed terminal failure state', () => {
+    expect(parseKeeperChatReceipt({
+      schema: 'keeper_chat_queue.receipt.v1',
+      keeper_name: 'echo',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 7,
+      state: {
+        kind: 'failed',
+        failure_kind: 'delivery_failed',
+        detail: 'Slack API rejected the message',
+        completed_at: 42,
+        outcome_ref: null,
+      },
+    })).toEqual({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 7,
+      state: {
+        kind: 'failed',
+        failureKind: 'delivery_failed',
+        detail: 'Slack API rejected the message',
+        completedAt: 42,
+        outcomeRef: null,
+      },
+    })
+  })
+
+  it('rejects an unknown receipt lifecycle instead of guessing', () => {
+    expect(() => parseKeeperChatReceipt({
+      schema: 'keeper_chat_queue.receipt.v1',
+      keeper_name: 'echo',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 1,
+      state: { kind: 'lost_somewhere' },
+    })).toThrow('unknown state')
+  })
+
+  it('rejects a non-canonical receipt identity', () => {
+    expect(() => parseKeeperChatReceipt({
+      schema: 'keeper_chat_queue.receipt.v1',
+      keeper_name: 'echo',
+      receipt_id: 'receipt-echo-1',
+      revision: 1,
+      state: { kind: 'pending' },
+    })).toThrow('missing identity')
+  })
+
+  it('rejects malformed nullable outcome refs instead of coercing schema drift', () => {
+    expect(() => parseKeeperChatReceipt({
+      schema: 'keeper_chat_queue.receipt.v1',
+      keeper_name: 'echo',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 2,
+      state: { kind: 'delivered', completed_at: 42, outcome_ref: 7 },
+    })).toThrow('outcome_ref must be a string or null')
+  })
+
+  it('rejects whitespace-only failure detail', () => {
+    expect(() => parseKeeperChatReceipt({
+      schema: 'keeper_chat_queue.receipt.v1',
+      keeper_name: 'echo',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 2,
+      state: {
+        kind: 'failed',
+        failure_kind: 'delivery_failed',
+        detail: '   ',
+        completed_at: 42,
+        outcome_ref: null,
+      },
+    })).toThrow('invalid failure metadata')
+  })
+
+  it('fetches the exact encoded Keeper receipt route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        schema: 'keeper_chat_queue.receipt.v1',
+        keeper_name: 'keeper sangsu',
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+        revision: 2,
+        state: { kind: 'pending' },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchKeeperChatReceipt(
+      'keeper sangsu',
+      'chatq_00000000-0000-4000-8000-000000000001',
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/keepers/keeper%20sangsu/chat/receipts/chatq_00000000-0000-4000-8000-000000000001',
+      expect.objectContaining({ headers: expect.any(Object) }),
+    )
+  })
+
+  it('bounds chat history response-body consumption after headers arrive', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: vi.fn(() => new Promise<never>(() => undefined)),
+    } satisfies Partial<Response>)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const historyPromise = fetchKeeperChatHistory('echo')
+    const rejection = expect(historyPromise).rejects.toMatchObject({ timeout: true })
+    await vi.advanceTimersByTimeAsync(DEFAULT_GET_TIMEOUT_MS)
+    await rejection
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }))
   })
 })
 

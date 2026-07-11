@@ -19,6 +19,7 @@ describe('RichComposer', () => {
     render(h(RichComposer, { value: '', onValueChange: vi.fn() }), container)
     expect(container.textContent).toContain('Write')
     expect(container.textContent).toContain('Preview')
+    expect(container.querySelectorAll('button.rich-composer-tab')).toHaveLength(2)
   })
 
   it('defaults to write mode showing textarea', () => {

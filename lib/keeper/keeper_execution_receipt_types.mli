@@ -114,6 +114,13 @@ type t = {
   pre_dispatch_compaction_after_tokens : int option;
 }
 val stop_reason_to_string : Runtime_agent.stop_reason -> string
+
+(** Project the runtime-stop axis into the receipt terminal-reason field.
+    Runtime [Completed] stays ["completed"] in {!stop_reason_to_string}, while
+    the receipt field emits canonical [Keeper_turn_disposition.Success]. This
+    does not classify the independent completion-contract axis; the typed
+    operator disposition is the final receipt verdict. *)
+val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> string
 val enrich_contract_violation_reason : t -> string
 val sandbox_kind_of_meta :
   Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile

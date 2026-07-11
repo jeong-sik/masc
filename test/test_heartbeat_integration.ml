@@ -825,6 +825,8 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "shutdown store accepted a different lane identity");
       let worker_failure = Failure "worker exploded after durable join" in
+      let failure_timestamp = "2026-07-11T11:00:01Z" in
+      let failure_clock_sampled = Atomic.make false in
       let holder_locked_p, holder_locked_r = Eio.Promise.create () in
       let release_holder_p, release_holder_r = Eio.Promise.create () in
       let holder_done_p, holder_done_r = Eio.Promise.create () in
@@ -845,10 +847,18 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
            Eio.Fiber.fork ~sw:worker_sw (fun () ->
              Eio.Promise.resolve worker_started_r ();
              Shutdown_runtime.For_testing.persist_unhandled_failure
+               ~now:(fun () ->
+                 Atomic.set failure_clock_sampled true;
+                 failure_timestamp)
                ~config
                operation
                worker_failure);
            Eio.Promise.await worker_started_p;
+           Eio.Fiber.yield ();
+           check bool
+             "failure clock is not sampled while the write lock is held"
+             false
+             (Atomic.get failure_clock_sampled);
            Eio.Switch.fail worker_sw Cancel_worker;
            Eio.Promise.resolve release_holder_r ())
        with
@@ -863,8 +873,16 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         "unhandled worker failure advances the latest durable revision"
         (joined.revision + 1)
         blocked.revision;
+      check bool
+        "failure clock is sampled after the write lock is acquired"
+        true
+        (Atomic.get failure_clock_sampled);
+      check string
+        "blocked evidence owns its post-lock timestamp"
+        failure_timestamp
+        blocked.updated_at;
       (match blocked.phase with
-       | Shutdown_types.Blocked { stage = Shutdown_types.Record_update; detail } ->
+       | Shutdown_types.Blocked { stage = Shutdown_types.Unhandled_worker; detail } ->
          check string
            "unhandled worker failure detail"
            (Printexc.to_string worker_failure)
@@ -878,6 +896,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Shutdown_types.Blocked _ ->
          fail "unhandled worker failure did not persist typed blocked evidence");
       Shutdown_runtime.For_testing.persist_unhandled_failure
+        ~now:Masc_domain.now_iso
         ~config
         operation
         (Failure "later worker failure");

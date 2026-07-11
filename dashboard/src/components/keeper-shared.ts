@@ -22,6 +22,7 @@ import {
   interruptKeeperTurn,
   isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
+  reconcileKeeperChatReceipts,
   recoverKeeperRuntime,
   resumePendingKeeperChatRequests,
   sendKeeperThreadMessage,
@@ -73,14 +74,19 @@ import {
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
-import { loadTools, toolsData, toolsLoading } from './tools/tool-state'
+import {
+  KEEPER_WAITING_INVENTORY_REFRESH_MS,
+  subscribeToolsAutoRefresh,
+  toolsData,
+  toolsError,
+} from './tools/tool-state'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 
 // Mirrors `LANE_REFRESH_MS` in keeper-workspace/keeper-lane-strip.ts. That
 // const is module-local there, so we keep the same 15 s cadence here rather
 // than exporting it cross-file for a single consumer.
-const BUSY_REFRESH_MS = 15_000
+const BUSY_REFRESH_MS = KEEPER_WAITING_INVENTORY_REFRESH_MS
 
 
 function GhostButton({
@@ -513,9 +519,82 @@ function BusyToolbar({
       data-keeper-name=${keeperName}
     >
       <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 font-medium text-[var(--color-status-warn)]">
-        busy
+        Keeper 턴 실행 중
       </span>
       <${GhostButton} onClick=${onInterrupt}>현재 턴 중단<//>
+    </div>
+  `
+}
+
+function ServerQueueStatus({
+  busy,
+  pendingCount,
+  inflightCount,
+  readErrorCount,
+  projectionError,
+  projectionReady,
+  projectionPresent,
+  nextAction,
+}: {
+  busy: boolean
+  pendingCount: number
+  inflightCount: number
+  readErrorCount: number
+  projectionError?: string | null
+  projectionReady: boolean
+  projectionPresent: boolean
+  nextAction?: string | null
+}) {
+  const projectionUnavailable = Boolean(projectionError) || !projectionReady || !projectionPresent
+  if (
+    !projectionUnavailable
+    && !busy
+    && pendingCount === 0
+    && inflightCount === 0
+    && readErrorCount === 0
+  ) return null
+  return html`
+    <div
+      class="mb-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2.5 text-xs text-[var(--color-fg-secondary)] v2-monitoring-panel"
+      data-server-chat-queue
+      data-server-chat-queue-pending=${pendingCount}
+      data-server-chat-queue-inflight=${inflightCount}
+      data-server-chat-queue-read-errors=${readErrorCount}
+      data-server-chat-queue-projection=${projectionError
+        ? 'read-failed'
+        : !projectionReady
+          ? 'loading'
+          : !projectionPresent
+            ? 'missing'
+            : 'ready'}
+    >
+      <div class="flex flex-wrap items-center gap-2 v2-monitoring-row">
+        <span class="font-semibold text-[var(--color-fg-primary)]">Keeper 서버 대기열</span>
+        ${inflightCount > 0
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--info-20)] bg-[var(--info-10)] px-2 py-0.5" data-server-chat-queue-state="inflight">처리 중 ${inflightCount}</span>`
+          : null}
+        ${pendingCount > 0
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5" data-server-chat-queue-state="pending">서버 대기 ${pendingCount}</span>`
+          : null}
+        ${readErrorCount > 0
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]" data-server-chat-queue-state="read-error">대기열 조회 실패 ${readErrorCount}</span>`
+          : null}
+        ${projectionError
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]">서버 대기열 갱신 실패</span>`
+          : !projectionReady
+            ? html`<span class="rounded-[var(--r-0)] border border-[var(--info-20)] bg-[var(--info-10)] px-2 py-0.5">서버 대기열 불러오는 중</span>`
+            : !projectionPresent
+              ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]">Keeper 대기열 투영 없음</span>`
+              : null}
+        ${busy && inflightCount === 0
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5">다른 턴 실행 중</span>`
+          : null}
+      </div>
+      <div class="mt-1.5 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+        이 값은 브라우저 초안이 아니라 서버의 durable receipt 투영입니다.
+        ${projectionError ? html` 최근 갱신 오류: <code>${projectionError}</code>. 표시 수치는 이전 snapshot일 수 있습니다.` : null}
+        ${nextAction ? html` 다음 서버 동작: <code>${nextAction}</code>` : null}
+      </div>
     </div>
   `
 }
@@ -556,11 +635,16 @@ export function KeeperConversationPanel({
   // is hidden, refresh immediately on focus/return, and return the cleanup so
   // the busy chip / interrupt button cannot freeze on a stale snapshot.
   useEffect(() => {
-    if (!toolsData.value && !toolsLoading.value) void loadTools()
-    return setupVisibleAutoRefresh(() => {
-      void loadTools()
+    const unsubscribeToolsRefresh = subscribeToolsAutoRefresh()
+    void reconcileKeeperChatReceipts(keeperName)
+    const stopReceiptRefresh = setupVisibleAutoRefresh(() => {
+      void reconcileKeeperChatReceipts(keeperName)
     }, BUSY_REFRESH_MS)
-  }, [])
+    return () => {
+      stopReceiptRefresh()
+      unsubscribeToolsRefresh()
+    }
+  }, [keeperName])
 
   const inventoryEntry = useMemo(() => {
     const inv = toolsData.value?.keeper_waiting_inventory
@@ -601,7 +685,16 @@ export function KeeperConversationPanel({
   )
   const hiddenCount = rawThread.length - thread.length
   const sending = keeperSending.value[keeperName] ?? false
-  const isKeeperBusy = Boolean(inventoryEntry?.state === 'busy' && !sending)
+  const serverBusy = inventoryEntry?.state === 'busy'
+  const isKeeperBusy = Boolean(serverBusy && !sending)
+  const serverPendingCount = Math.max(0, inventoryEntry?.sources?.chat_queue_pending ?? 0)
+  const serverInflightCount = Math.max(0, inventoryEntry?.sources?.chat_queue_inflight ?? 0)
+  const serverQueueReadErrorCount = Math.max(0, inventoryEntry?.sources?.read_error ?? 0)
+  const toolsProjectionError = toolsError.value
+  const toolsProjectionReady = toolsData.value !== null
+  const toolsProjectionPresent = Boolean(
+    toolsData.value?.keeper_waiting_inventory && inventoryEntry,
+  )
   const visibleThread = useMemo(
     () =>
       sending && !thread.some(isActiveAssistantEntry)
@@ -829,6 +922,19 @@ export function KeeperConversationPanel({
     />
   `
 
+  const serverQueueStatus = html`
+    <${ServerQueueStatus}
+      busy=${serverBusy}
+      pendingCount=${serverPendingCount}
+      inflightCount=${serverInflightCount}
+      readErrorCount=${serverQueueReadErrorCount}
+      projectionError=${toolsProjectionError}
+      projectionReady=${toolsProjectionReady}
+      projectionPresent=${toolsProjectionPresent}
+      nextAction=${inventoryEntry?.next_action}
+    />
+  `
+
   if (layout === 'workspace') {
     // 3-pane workspace: identity + lifecycle live in the ChatHeader above
     // this panel, so the workspace layout drops the panel's own header and
@@ -919,11 +1025,12 @@ export function KeeperConversationPanel({
 
         <div class="kw-composer-wrap v2-monitoring-panel">
           <div class="kw-composer-inner v2-monitoring-panel">
+            ${serverQueueStatus}
             ${queueCount > 0
               ? html`
                   <div class="mb-3 flex flex-col gap-2" data-chat-queue-list>
                     <div class="flex items-center justify-between gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
-                      <span>${queueCount}개 메시지 대기 중</span>
+                      <span>${queueCount}개 브라우저 초안 · 서버 미접수</span>
                       <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
                     </div>
                     ${queuedMessages.map(msg => html`
@@ -1046,10 +1153,11 @@ export function KeeperConversationPanel({
           : null}
 
         <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none v2-monitoring-panel">
-          ${queueCount > 0
+        ${serverQueueStatus}
+        ${queueCount > 0
             ? html`
                 <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
-                  <span>${queueCount}개 메시지 대기 중</span>
+                  <span>${queueCount}개 브라우저 초안 · 서버 미접수</span>
                   <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
                 </div>
               `
@@ -1159,10 +1267,11 @@ export function KeeperConversationPanel({
           : null}
 
         <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 v2-monitoring-panel">
-          ${queueCount > 0
+        ${serverQueueStatus}
+        ${queueCount > 0
             ? html`
                 <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
-                  <span>${queueCount}개 메시지 대기 중</span>
+                  <span>${queueCount}개 브라우저 초안 · 서버 미접수</span>
                   <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
                 </div>
               `

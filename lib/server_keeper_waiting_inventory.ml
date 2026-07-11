@@ -2,12 +2,14 @@ type waiting_source =
   | Event_queue_pending
   | Event_queue_inflight
   | Chat_queue_pending
+  | Chat_queue_inflight
   | Hitl_pending
   | External_attention
   | Fusion_running
   | Background_task
   | Schedule_waiting
   | Turn_admission_waiting
+  | Turn_admission_shutdown
   | Operator_pending_confirm
   | Read_error
 
@@ -54,12 +56,14 @@ let source_to_string = function
   | Event_queue_pending -> "event_queue_pending"
   | Event_queue_inflight -> "event_queue_inflight"
   | Chat_queue_pending -> "chat_queue_pending"
+  | Chat_queue_inflight -> "chat_queue_inflight"
   | Hitl_pending -> "hitl_pending"
   | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
   | Background_task -> "background_task"
   | Schedule_waiting -> "schedule_waiting"
   | Turn_admission_waiting -> "turn_admission_waiting"
+  | Turn_admission_shutdown -> "turn_admission_shutdown"
   | Operator_pending_confirm -> "operator_pending_confirm"
   | Read_error -> "read_error"
 ;;
@@ -68,12 +72,14 @@ let all_waiting_sources =
   [ Event_queue_pending
   ; Event_queue_inflight
   ; Chat_queue_pending
+  ; Chat_queue_inflight
   ; Hitl_pending
   ; External_attention
   ; Fusion_running
   ; Background_task
   ; Schedule_waiting
   ; Turn_admission_waiting
+  ; Turn_admission_shutdown
   ; Operator_pending_confirm
   ; Read_error
   ]
@@ -247,52 +253,155 @@ let chat_queue_source_json = function
       ; "channel_id", `String channel_id
       ; "user_id", `String user_id
       ]
-  | Keeper_chat_queue.Slack { channel; user_id } ->
+  | Keeper_chat_queue.Slack { channel_id; user_id; team_id; thread_ts; _ } ->
     `Assoc
       [ "kind", `String "slack"
-      ; "channel", `String channel
+      ; "channel_id", `String channel_id
       ; "user_id", `String user_id
+      ; "team_id", Json_util.string_opt_to_json team_id
+      ; "thread_ts", Json_util.string_opt_to_json thread_ts
       ]
 ;;
 
-let chat_queue_rows keeper_name =
-  Keeper_chat_queue.snapshot ~keeper_name
-  |> List.mapi (fun queue_index (msg : Keeper_chat_queue.queued_message) ->
-    let source_label = chat_queue_source_label msg.source in
-    { keeper_name = Some keeper_name
-    ; source = Chat_queue_pending
+let chat_queue_active_row ~source ~next_action ~lifecycle_fields keeper_name queue_index
+    (receipt : Keeper_chat_queue.active_receipt) =
+  let msg = receipt.message in
+  let source_label = chat_queue_source_label msg.source in
+  { keeper_name = Some keeper_name
+    ; source
     ; waiting_on = source_label
     ; wake_producer = Keeper_chat_queue_store
     ; since = Some msg.timestamp
     ; due_at = None
-    ; next_action = "keeper_chat_consumer_drain"
+    ; next_action
     ; detail =
         `Assoc
           [ "queue_index", `Int queue_index
+          ; ( "receipt_id"
+            , `String
+                (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
           ; "message_source", chat_queue_source_json msg.source
           ; "content_length", `Int (String.length msg.content)
           ; "user_block_count", `Int (List.length msg.user_blocks)
           ; "attachment_count", `Int (List.length msg.attachments)
+          ; "lifecycle", `Assoc lifecycle_fields
           ]
-    })
+    }
+;;
+
+let chat_queue_invariant_error_row keeper_name queue_index
+    (receipt : Keeper_chat_queue.active_receipt) expected_state =
+  read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot_invariant"
+    ~next_action:"repair_keeper_chat_queue_snapshot"
+    (`Assoc
+      [ "expected_state", `String expected_state
+      ; ( "receipt_id"
+        , `String
+            (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
+      ; "queue_index", `Int queue_index
+      ])
+;;
+
+let chat_queue_load_error_row keeper_name
+    (error : Keeper_chat_queue.snapshot_load_error) =
+  let kind =
+    match error.kind with
+    | Keeper_chat_queue.Invalid_path -> "invalid_path"
+    | Keeper_chat_queue.Read_failed -> "read_failed"
+    | Keeper_chat_queue.Parse_failed -> "parse_failed"
+    | Keeper_chat_queue.Migration_failed -> "migration_failed"
+    | Keeper_chat_queue.Recovery_failed -> "recovery_failed"
+  in
+  read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot"
+    ~next_action:"repair_keeper_chat_queue_snapshot"
+    (`Assoc
+      [ "kind", `String kind
+      ; "path", Json_util.string_opt_to_json error.path
+      ; "message", `String error.message
+      ])
+;;
+
+let chat_queue_rows keeper_name =
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  let pending =
+    snapshot.pending
+    |> List.mapi (fun queue_index
+                       (receipt : Keeper_chat_queue.active_receipt) ->
+           match receipt.Keeper_chat_queue.state with
+           | Keeper_chat_queue.Pending ->
+               chat_queue_active_row ~source:Chat_queue_pending
+                 ~next_action:"keeper_chat_consumer_drain"
+                 ~lifecycle_fields:[ "state", `String "pending" ] keeper_name
+                 queue_index receipt
+           | Keeper_chat_queue.Inflight _ | Keeper_chat_queue.Delivered _
+           | Keeper_chat_queue.Failed _ ->
+               chat_queue_invariant_error_row keeper_name queue_index receipt
+                 "pending")
+  in
+  let inflight =
+    snapshot.inflight
+    |> List.mapi (fun queue_index
+                       (receipt : Keeper_chat_queue.active_receipt) ->
+           match receipt.Keeper_chat_queue.state with
+           | Keeper_chat_queue.Inflight { lease_id; started_at } ->
+               chat_queue_active_row ~source:Chat_queue_inflight
+                 ~next_action:"keeper_chat_turn_terminal_receipt"
+                 ~lifecycle_fields:
+                   [ "state", `String "inflight"
+                   ; "lease_id", `String lease_id
+                   ; "started_at", `Float started_at
+                   ; "started_at_iso", unix_iso_json (Some started_at)
+                   ]
+                 keeper_name queue_index receipt
+           | Keeper_chat_queue.Pending | Keeper_chat_queue.Delivered _
+           | Keeper_chat_queue.Failed _ ->
+               chat_queue_invariant_error_row keeper_name queue_index receipt
+                 "inflight")
+  in
+  pending @ inflight
+  @ List.map (chat_queue_load_error_row keeper_name) snapshot.load_errors
 ;;
 
 let turn_admission_rows ~base_path keeper_name =
   let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
-  if snapshot.snapshot_waiting <= 0
-  then []
-  else
-    let in_flight_detail =
-      match snapshot.snapshot_in_flight with
-      | None -> `Null
-      | Some (info : Keeper_turn_admission.in_flight_info) ->
-        `Assoc
-          [ "lane", `String (Keeper_turn_admission.lane_to_string info.lane)
-          ; "started_at", `Float info.started_at
-          ; "started_at_iso", unix_iso_json (Some info.started_at)
-          ]
-    in
-    [ { keeper_name = Some keeper_name
+  let in_flight_detail =
+    match snapshot.snapshot_in_flight with
+    | None -> `Null
+    | Some (info : Keeper_turn_admission.in_flight_info) ->
+      `Assoc
+        [ "lane", `String (Keeper_turn_admission.lane_to_string info.lane)
+        ; "started_at", `Float info.started_at
+        ; "started_at_iso", unix_iso_json (Some info.started_at)
+        ]
+  in
+  let shutdown_rows =
+    match snapshot.snapshot_shutdown_operation_id with
+    | None -> []
+    | Some operation_id ->
+      [ { keeper_name = Some keeper_name
+        ; source = Turn_admission_shutdown
+        ; waiting_on = "shutdown"
+        ; wake_producer = Keeper_turn_admission
+        ; since = None
+        ; due_at = None
+        ; next_action = "keeper_shutdown_finalize"
+        ; detail =
+            `Assoc
+              [ ( "shutdown_operation_id"
+                , `String
+                    (Keeper_shutdown_types.Operation_id.to_string operation_id) )
+              ; "admission_fenced", `Bool true
+              ; "chat_waiting_count", `Int snapshot.snapshot_waiting
+              ; "in_flight", in_flight_detail
+              ]
+        }
+      ]
+  in
+  let waiting_rows =
+    if snapshot.snapshot_waiting <= 0
+    then []
+    else
+      [ { keeper_name = Some keeper_name
       ; source = Turn_admission_waiting
       ; waiting_on = "chat"
       ; wake_producer = Keeper_turn_admission
@@ -310,7 +419,9 @@ let turn_admission_rows ~base_path keeper_name =
             ; "in_flight", in_flight_detail
             ]
       }
-    ]
+      ]
+  in
+  shutdown_rows @ waiting_rows
 ;;
 
 let hitl_rows keeper_name pending =
@@ -559,7 +670,13 @@ let keeper_names_or_error_rows config =
 ;;
 
 let row_state rows =
-  if List.exists (fun row -> row.source = Fusion_running || row.source = Background_task) rows
+  if
+    List.exists
+      (fun row ->
+         row.source = Fusion_running
+         || row.source = Background_task
+         || row.source = Turn_admission_shutdown)
+      rows
   then Deferred
   else if rows <> []
   then Waiting
@@ -800,7 +917,7 @@ let dashboard_json config =
   in
   record_metrics ~now ~per_keeper ~global_rows;
   `Assoc
-    [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v1"
+    [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v2"
     ; "source", `String "server_keeper_waiting_inventory"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "supported_states", `List (List.map (fun value -> `String value) [ "idle"; "busy"; "waiting"; "deferred" ])

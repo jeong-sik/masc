@@ -176,7 +176,7 @@ export function AddRepoDialog() {
           </div>
 
           <div class="flex items-center gap-3">
-            <label class="flex items-center gap-2 cursor-pointer">
+            <label class="v2-mobile-operator-target flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked=${formAutoSync.value}

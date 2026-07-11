@@ -830,6 +830,44 @@ describe('ChatTranscript', () => {
     expect(cursor).toBeNull()
   })
 
+  it('shows the shutdown fence that caused a durable queued receipt', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'queued-after-shutdown',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '메시지가 다음 active lane에 접수되었습니다.',
+            delivery: 'queued',
+            details: {
+              queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000007',
+              queueShutdownOperationId: 'shutdown-op-7',
+              queueState: 'pending',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="queued-after-shutdown"]')
+    expect(bubble?.getAttribute('data-chat-queue-shutdown-operation-id')).toBe('shutdown-op-7')
+    const badge = container.querySelector('[data-chat-queue-state-badge="pending"]')
+    expect(badge?.textContent).toContain('종료 후 처리')
+    expect(badge?.getAttribute('data-chat-queue-shutdown-operation-id')).toBe('shutdown-op-7')
+
+    const detailButton = [...container.querySelectorAll('button')]
+      .find(button => button.textContent?.trim() === '상세 보기')
+    expect(detailButton).toBeDefined()
+    fireEvent.click(detailButton!)
+    expect(container.textContent).toContain('종료 작업 ID')
+    expect(container.textContent).toContain('shutdown-op-7')
+  })
+
   it('uses a parent-bounded flexible transcript in primary mode', () => {
     render(
       html`<${ChatTranscript}

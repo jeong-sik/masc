@@ -298,6 +298,16 @@
 
 /* narrow — collapse the row to identity · state · action; ctx/tool move out of the way */
 @media (max-width: 720px) {
+  .fleet-fsm-matrix button,
+  .fleet-fsm-matrix input,
+  .fleet-fsm-matrix select,
+  .fsm-hub-surface button,
+  .fsm-hub-surface input,
+  .fsm-hub-surface select {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
+
   .fl-shell {
     --fl-cols: minmax(0, 1fr);
     --fl-gap: var(--space-2);
@@ -319,5 +329,6 @@
   .fl-row .fl-state, .fl-row .fl-actcell { margin-left: var(--fl-mobile-row-indent); }
   .fl-row .fl-actcell { justify-content: flex-start; flex-wrap: wrap; }
   .fl-row, .fl-group { padding-left: 16px; padding-right: 16px; }
+  .fl-create { min-height: var(--mobile-touch-target-min); }
   .fl-foot { gap: 14px; overflow-x: auto; }
 }

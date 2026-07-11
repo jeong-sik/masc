@@ -39,6 +39,7 @@ export function RouteLink({
 }: RouteLinkProps) {
   const href = hashForRoute(tab, params)
   const classNameWithFocus = [
+    'v2-mobile-operator-target',
     className,
     ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' }),
   ].filter(Boolean).join(' ')

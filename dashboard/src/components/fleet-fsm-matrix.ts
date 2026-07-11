@@ -977,7 +977,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   return html`
     <section
       data-testid="fleet-fsm-matrix"
-      class="v2-monitoring-panel contain-content rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]"
+      class="fleet-fsm-matrix v2-monitoring-panel contain-content rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]"
       aria-label="Fleet FSM 통합 상태"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--color-border-default)] p-3">

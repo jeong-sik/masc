@@ -267,6 +267,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
     ~current_task_id:(Some "task-275")
     ~goal_ids:[ "goal-world-reactivity-p0-20260517" ]
     ~outcome:"receipt_failed"
+    ~reaction_kind:Keeper_reaction_ledger.Terminal_reason
     ~terminal_reason_code:"completion_contract_violation"
     ~receipt_json
     ();
@@ -294,7 +295,7 @@ let test_summary_observes_passive_only_without_attention () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
   let keeper_name = "contract-attention-keeper" in
-  let record ?(terminal_reason_code = "completed") ?current_task_id
+  let record ?(terminal_reason_code = "success") ?current_task_id
         ~trace_id ~completion_contract_result () =
     let receipt_json =
       `Assoc
@@ -315,6 +316,7 @@ let test_summary_observes_passive_only_without_attention () =
       ~current_task_id
       ~goal_ids:[]
       ~outcome:"receipt_done"
+      ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
       ~terminal_reason_code
       ~receipt_json
       ()
@@ -391,7 +393,7 @@ let test_summary_degrades_unknown_completion_contract_result () =
         [ "schema", `String "keeper.execution_receipt.v1"
         ; "trace_id", `String trace_id
         ; "outcome", `String "receipt_done"
-        ; "terminal_reason_code", `String "completed"
+        ; "terminal_reason_code", `String "success"
         ; "operator_disposition", `String "continue"
         ; "operator_disposition_reason", `String "none"
         ; "completion_contract_result", `String completion_contract_result
@@ -405,7 +407,8 @@ let test_summary_degrades_unknown_completion_contract_result () =
       ~current_task_id:None
       ~goal_ids:[]
       ~outcome:"receipt_done"
-      ~terminal_reason_code:"completed"
+      ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
+      ~terminal_reason_code:"success"
       ~receipt_json
       ()
   in
@@ -517,7 +520,7 @@ let test_summary_observes_passive_only_without_work_scope_attention () =
       [ "schema", `String "keeper.execution_receipt.v1"
       ; "trace_id", `String "trace-passive-no-work"
       ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "completed"
+      ; "terminal_reason_code", `String "success"
       ; "operator_disposition", `String "pass"
       ; "operator_disposition_reason", `String "healthy"
       ; "completion_contract_result", `String "passive_only"
@@ -531,7 +534,8 @@ let test_summary_observes_passive_only_without_work_scope_attention () =
     ~current_task_id:None
     ~goal_ids:[]
     ~outcome:"receipt_done"
-    ~terminal_reason_code:"completed"
+    ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
+    ~terminal_reason_code:"success"
     ~receipt_json
     ();
   let summary =
@@ -756,7 +760,7 @@ let test_no_progress_recovery_unrelated_reaction_does_not_clear_pending () =
       [ "schema", `String "keeper.execution_receipt.v1"
       ; "trace_id", `String "trace-later-reaction"
       ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "completed"
+      ; "terminal_reason_code", `String "success"
       ; "operator_disposition", `String "pass"
       ; "operator_disposition_reason", `String "healthy"
       ; "completion_contract_result", `String "satisfied_execution"
@@ -770,7 +774,8 @@ let test_no_progress_recovery_unrelated_reaction_does_not_clear_pending () =
     ~current_task_id:None
     ~goal_ids:[]
     ~outcome:"receipt_done"
-    ~terminal_reason_code:"completed"
+    ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
+    ~terminal_reason_code:"success"
     ~receipt_json
     ();
   let unrelated_reaction_summary =
@@ -845,7 +850,7 @@ let test_summary_links_passive_only_observation_to_pending_recovery () =
       [ "schema", `String "keeper.execution_receipt.v1"
       ; "trace_id", `String "trace-passive"
       ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "completed"
+      ; "terminal_reason_code", `String "success"
       ; "operator_disposition", `String "pause_human"
       ; "operator_disposition_reason", `String "completion_contract_unsatisfied"
       ; "completion_contract_result", `String "passive_only"
@@ -859,7 +864,8 @@ let test_summary_links_passive_only_observation_to_pending_recovery () =
     ~current_task_id:(Some "task-passive")
     ~goal_ids:[]
     ~outcome:"receipt_done"
-    ~terminal_reason_code:"completed"
+    ~reaction_kind:Keeper_reaction_ledger.Terminal_reason
+    ~terminal_reason_code:"success"
     ~receipt_json
     ();
   Keeper_reaction_ledger.record_event_queue_stimulus

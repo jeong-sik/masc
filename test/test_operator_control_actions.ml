@@ -138,3 +138,29 @@ let test_operator_action_rejects_legacy_action_aliases () =
    a retired dashboard surface; the producers (split_review_items,
    *_review_item) were also removed. Review decisions still reach the UI
    via [recent_reviews]. *)
+
+let () =
+  Alcotest.run
+    "operator_control_actions"
+    [ ( "actions"
+      , [ Alcotest.test_case
+            "task inject executes immediately"
+            `Quick
+            test_task_inject_executes_immediately
+        ; Alcotest.test_case
+            "digest defaults to root target"
+            `Quick
+            test_digest_defaults_to_root_target
+        ; Alcotest.test_case
+            "legacy action aliases are rejected"
+            `Quick
+            test_operator_action_rejects_legacy_action_aliases
+        ] )
+    ; ( "confirmation"
+      , [ Alcotest.test_case
+            "expired token is rejected"
+            `Quick
+            Test_operator_control_confirm.test_confirm_rejects_expired_token
+        ] )
+    ]
+;;

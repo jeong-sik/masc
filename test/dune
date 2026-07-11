@@ -96,6 +96,7 @@
   test_fd_accountant
   test_fd_accountant_state
   test_host_fd_pressure_poller
+  test_operator_control_actions
   test_operator_control_snapshot_state
   test_operator_control_snapshot
   test_operator_control_judgment
@@ -201,6 +202,8 @@
   test_dashboard_harness_health
   test_keeper_timing
   test_keeper_token_count
+  test_keeper_behavior_trace
+  test_keeper_noop_backoff
   test_keeper_chat_store
   test_keeper_chat_blocks
   test_keeper_chat_media_store
@@ -344,6 +347,7 @@
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
+  test_start_masc_mcp_script
   test_tool_prefilter
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
@@ -454,6 +458,8 @@
   test_fd_accountant
   test_fd_accountant_state
   test_host_fd_pressure_poller
+  test_operator_control_actions
+  test_operator_control_confirm
   test_operator_control_snapshot_state
   test_operator_control_snapshot
   test_operator_control_judgment
@@ -560,6 +566,8 @@
   test_dashboard_harness_health
   test_keeper_timing
   test_keeper_token_count
+  test_keeper_behavior_trace
+  test_keeper_noop_backoff
   test_keeper_chat_store
   test_keeper_chat_blocks
   test_keeper_chat_media_store
@@ -706,6 +714,7 @@
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
+  test_start_masc_mcp_script
   test_tool_prefilter
   test_keeper_state_machine
   test_keeper_state_machine_mermaid

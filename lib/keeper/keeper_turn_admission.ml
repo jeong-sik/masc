@@ -556,6 +556,9 @@ module For_testing = struct
   let with_unpublished_turn_lock ~base_path ~keeper_name f =
     let slot = slot_for ~base_path ~keeper_name in
     Eio.Mutex.lock slot.turn_mu;
+    (* fun-protect-finally-ok: Eio.Mutex.unlock is non-suspending; this helper
+       acquired the raw test-only lock immediately above and the finalizer
+       releases exactly that lock on normal return, exception, or cancellation. *)
     Fun.protect ~finally:(fun () -> Eio.Mutex.unlock slot.turn_mu) f
   ;;
 

@@ -895,6 +895,7 @@ function normalizeHistoryEntry(
     timestamp,
     turnRef,
     delivery,
+    error: delivery === 'error' ? rawText : null,
     streamState: null,
     streamContract,
     details: null,

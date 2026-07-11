@@ -158,8 +158,8 @@ describe('ChatTranscript', () => {
             role: 'assistant',
             source: 'direct_assistant',
             label: 'sangsu',
-            text,
-            rawText: text,
+            text: '응답을 만들지 못했습니다',
+            rawText: '응답을 만들지 못했습니다',
             delivery: 'error',
             error: text,
           }),
@@ -177,7 +177,7 @@ describe('ChatTranscript', () => {
     // The raw internal error no longer replaces the reply: the card leads
     // with the reassurance that the pending message survives the failure.
     expect(card?.querySelector('[data-chat-failure-reassurance]')?.textContent)
-      .toContain('다음 턴')
+      .toContain('다음 턴을 시작하면')
     // Diagnostic detail is collapsed by default…
     expect(container.querySelector('[data-chat-failure-detail]')).toBeNull()
     expect(card?.textContent).not.toContain('no_usable_progress')

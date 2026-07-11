@@ -602,6 +602,7 @@ describe('thread history merge & persistence', () => {
       { role: 'assistant', content: 'Keeper request failed: timeout', ts: 1_780_000_000, kind: 'transport_failure' },
     ])
     expect(entries[1]?.delivery).toBe('error')
+    expect(entries[1]?.error).toBe('Keeper request failed: timeout')
     // A normal reply on the same role stays 'history'.
     const ok = chatHistoryEntriesFromRest('echo', [
       { role: 'assistant', content: 'done', ts: 1_780_000_000 },

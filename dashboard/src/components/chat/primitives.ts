@@ -2064,7 +2064,7 @@ function renderStructuredFailureText(text: string): Array<string | VNode> {
  * what the backend guarantees: a Transport_failure row is watermark-neutral
  * (keeper_chat_store), so the user message it failed to answer stays pending
  * for the keeper's next turn. */
-function ChatFailureCard({ text }: { text: string }) {
+function ChatFailureCard({ diagnostic }: { diagnostic: string }) {
   const [detailOpen, setDetailOpen] = useState(false)
   return html`
     <div
@@ -2083,7 +2083,7 @@ function ChatFailureCard({ text }: { text: string }) {
         </span>
       </div>
       <p class="m-0 text-sm leading-airy text-[var(--color-fg-secondary)]" data-chat-failure-reassurance>
-        보낸 메시지는 사라지지 않았습니다 — 대기 상태로 남아 keeper의 다음 턴에서 다시 처리됩니다.
+        보낸 메시지는 사라지지 않았습니다 — 대기 상태로 유지되며, keeper가 다음 턴을 시작하면 다시 처리 대상이 됩니다.
       </p>
       <div class="flex items-center gap-2">
         <button
@@ -2091,7 +2091,7 @@ function ChatFailureCard({ text }: { text: string }) {
           class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
           aria-expanded=${detailOpen}
           data-chat-failure-detail-toggle
-          onClick=${() => { setDetailOpen(!detailOpen) }}
+          onClick=${() => { setDetailOpen(open => !open) }}
         >
           ${detailOpen ? '상세 접기' : '오류 상세 보기'}
         </button>
@@ -2099,14 +2099,14 @@ function ChatFailureCard({ text }: { text: string }) {
           type="button"
           class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
           data-chat-failure-copy
-          onClick=${() => { void copyWithToast(text, '오류 내용을 복사했습니다') }}
+          onClick=${() => { void copyWithToast(diagnostic, '오류 내용을 복사했습니다') }}
         >
           오류 복사
         </button>
       </div>
       ${detailOpen
         ? html`
-            <pre class="chat-error-text" data-chat-failure-detail>${renderStructuredFailureText(text)}</pre>
+            <pre class="chat-error-text" data-chat-failure-detail>${renderStructuredFailureText(diagnostic)}</pre>
           `
         : null}
     </div>
@@ -2590,7 +2590,9 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
         ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
         : html`
             ${isFailureMessage
-              ? html`<${ChatFailureCard} text=${messageText} />`
+              ? html`<${ChatFailureCard}
+                  diagnostic=${entry.error?.trim() ? entry.error : messageText}
+                />`
               : hasEffectiveBlocks
               ? html`<${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />`
               : html`

@@ -153,6 +153,41 @@ val remove_meta_if_identity :
   generation:int ->
   (unit, identity_remove_error) result
 
+type exact_identity_error =
+  | Exact_identity_missing
+  | Exact_identity_changed
+  | Exact_meta_version_changed of
+      { expected : int
+      ; actual : int
+      }
+  | Exact_identity_read_failed of string
+  | Exact_identity_unlink_failed of string
+
+val exact_identity_error_to_string : exact_identity_error -> string
+
+(** Re-read [name] under its per-path lock and return it only while both its
+    trace/generation identity and [meta_version] still match the durable
+    lifecycle intent. *)
+val read_meta_if_exact_identity :
+  Workspace.config ->
+  name:string ->
+  trace_id:Keeper_id.Trace_id.t ->
+  generation:int ->
+  meta_version:int ->
+  (Keeper_meta_contract.keeper_meta, exact_identity_error) result
+
+(** Atomically unlink [name] only while both its trace/generation identity and
+    [meta_version] still match. A caller that observes a version conflict must
+    preserve the newer metadata and surface the lifecycle operation as
+    blocked. *)
+val remove_meta_if_exact_identity :
+  Workspace.config ->
+  name:string ->
+  trace_id:Keeper_id.Trace_id.t ->
+  generation:int ->
+  meta_version:int ->
+  (unit, exact_identity_error) result
+
 (** [true] iff [msg] matches [version_conflict_re]. *)
 val is_version_conflict_error : string -> bool
 

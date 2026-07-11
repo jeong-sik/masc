@@ -1,8 +1,9 @@
-(** Non-blocking lifecycle orchestration for durable Keeper shutdown. *)
+(** Non-blocking orchestration for durable Keeper lifecycle cleanup. *)
 
 type submit_error =
   | Prepare_error of Keeper_shutdown_prepare_join.error
   | Existing_operation_load_error of Keeper_shutdown_store.error
+  | Existing_operation_lane_mismatch of Keeper_shutdown_types.t
   | Worker_start_error of worker_start_error
 
 and worker_start_error =
@@ -32,6 +33,15 @@ val restore_inventory_admission :
 val submit :
   config:Workspace.config ->
   entry:Keeper_registry.registry_entry ->
+  request:Keeper_shutdown_prepare_join.request ->
+  (Keeper_shutdown_types.t, submit_error) result
+
+(** Fence same-name registration and submit a meta-only operation for a Keeper
+    with no registered lane. The durable record is committed before the
+    process-owned finalizer fiber starts. *)
+val submit_dormant :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   request:Keeper_shutdown_prepare_join.request ->
   (Keeper_shutdown_types.t, submit_error) result
 

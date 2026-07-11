@@ -552,3 +552,79 @@ let remove_meta_if_identity config ~name ~trace_id ~generation =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Remove_identity_unlink_failed (Printexc.to_string exn)))
 ;;
+
+type exact_identity_error =
+  | Exact_identity_missing
+  | Exact_identity_changed
+  | Exact_meta_version_changed of
+      { expected : int
+      ; actual : int
+      }
+  | Exact_identity_read_failed of string
+  | Exact_identity_unlink_failed of string
+
+let exact_identity_error_to_string = function
+  | Exact_identity_missing -> "Keeper metadata is absent"
+  | Exact_identity_changed -> "Keeper metadata identity changed"
+  | Exact_meta_version_changed { expected; actual } ->
+    Printf.sprintf
+      "Keeper metadata version changed: expected %d, actual %d"
+      expected
+      actual
+  | Exact_identity_read_failed detail
+  | Exact_identity_unlink_failed detail -> detail
+;;
+
+let validate_exact_identity ~trace_id ~generation ~meta_version latest =
+  if
+    not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
+    || not (Int.equal latest.runtime.generation generation)
+  then Error Exact_identity_changed
+  else if not (Int.equal latest.meta_version meta_version)
+  then
+    Error
+      (Exact_meta_version_changed
+         { expected = meta_version; actual = latest.meta_version })
+  else Ok latest
+;;
+
+let read_meta_if_exact_identity
+    config
+    ~name
+    ~trace_id
+    ~generation
+    ~meta_version
+  =
+  let path = keeper_meta_path config name in
+  File_lock_eio.with_mutex path (fun () ->
+    match read_meta_file_path path with
+    | Error detail -> Error (Exact_identity_read_failed detail)
+    | Ok None -> Error Exact_identity_missing
+    | Ok (Some latest) ->
+      validate_exact_identity ~trace_id ~generation ~meta_version latest)
+;;
+
+let remove_meta_if_exact_identity
+    config
+    ~name
+    ~trace_id
+    ~generation
+    ~meta_version
+  =
+  let path = keeper_meta_path config name in
+  File_lock_eio.with_mutex path (fun () ->
+    match read_meta_file_path path with
+    | Error detail -> Error (Exact_identity_read_failed detail)
+    | Ok None -> Error Exact_identity_missing
+    | Ok (Some latest) ->
+      (match validate_exact_identity ~trace_id ~generation ~meta_version latest with
+       | Error _ as error -> error
+       | Ok _ ->
+         try
+           Unix.unlink path;
+           Ok ()
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           Error (Exact_identity_unlink_failed (Printexc.to_string exn))))
+;;

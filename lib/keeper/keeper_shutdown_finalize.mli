@@ -1,6 +1,7 @@
 (** Durable task settlement and Keeper identity cleanup after an exact lane
-    has joined. Every externally visible side effect is either recorded in the
-    operation or returned as a typed failure. *)
+    has joined, or after a dormant metadata owner has been fenced. Every
+    externally visible side effect is either recorded in the operation or
+    returned as a typed failure. *)
 
 type error =
   | Store_error of Keeper_shutdown_store.error

@@ -920,8 +920,16 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                     ~keeper_name:meta.name)
        -> restore_reconcile_continue_gate ctx meta
      | Ok (Some _)
-     | Ok None
-     | Error _ -> ());
+     | Ok None -> ()
+     | Error detail ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string ReconcileFailures)
+         ~labels:[ "keeper", name; "phase", "paused_reconcile_meta_read" ]
+         ();
+       Log.Keeper.error
+         "%s: paused reconcile metadata read failed: %s"
+         name
+         detail);
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 3: prune stale paused keeper meta files from disk. Keep
      reconcile-recovery pauses until the operator explicitly resolves them. *)
@@ -939,66 +947,13 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                   (Keeper_approval_queue.has_blocking_pending_for_keeper
                      ~keeper_name:meta.name)
         ->
-        let path = Keeper_types_profile.keeper_meta_path ctx.config name in
-        (try
-           Sys.remove path;
-           (* Record why the pruned meta was latched before the on-disk record
-              is gone. [meta] was read above (pre-[Sys.remove]), so the reason
-              survives in the event even though the file no longer does. *)
-           let latched_reason_detail =
-             match meta.latched_reason with
-             | Some reason ->
-               Printf.sprintf
-                 " latched_reason=%s"
-                 (Keeper_latched_reason.to_wire reason)
-             | None -> ""
-           in
-           publish_lifecycle
-             ~event:
-               (Keeper_lifecycle_events.Custom_event
-                  { verb = Keeper_lifecycle_events.Paused_pruned; phase = None })
-             name
-             (Printf.sprintf
-                "last_updated=%s%s"
-                meta.updated_at
-                latched_reason_detail)
-             ();
-           (* The durable record is gone; a surviving registry entry would be
-              a ghost — still a board-wake candidate (Paused is accepted by
-              [board_signal_entry_is_wakeup_candidate]), and any later
-              [write_meta] through it resurrects the pruned file at
-              meta_version=1. [keeper_down]'s remove_meta branch pairs
-              [Sys.remove] with [unregister]; mirror that here (RFC-0334 W3
-              census #23837, freshness caveat 1). *)
-           Keeper_registry.unregister ~base_path name;
-           (* K4c — keeper fully forgotten: reclaim its accumulator slot,
-              matching the unregister sites above. *)
-           Keeper_tool_emission_hook.drop_keeper_accumulator name;
-           Log.Keeper.info "%s: stale paused meta pruned" name
-         with
-         | Eio.Cancel.Cancelled _ ->
-           (* supervisor finally cleanup cancelled: cleanup arms must not
-              re-raise cancellation, because [Fun.protect] wraps exceptions
-              raised from cleanup as [Fun.Finally_raised] and can re-arm the
-              2026-05-05 cycle9 incident. *)
-           Log.Keeper.debug
-             "%s: supervisor finally cleanup cancelled during paused meta prune"
-             name
-         | exn ->
-           Log.Keeper.warn
-             "%s: paused meta prune failed: %s"
-             name
-             (Printexc.to_string exn);
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string SupervisorCleanupFailures)
-                ~labels:
-               [ "keeper", name
-               ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Paused_meta_prune))
-               ]
-             ())
+        Keeper_supervisor_cleanup_paused.submit ctx meta
       | Ok (Some _)
-      | Ok None
-      | Error _ -> ());
+      | Ok None -> ()
+      | Error detail ->
+        Keeper_supervisor_cleanup_paused.report_meta_read_failure
+          ~keeper_name:name
+          detail);
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
      auto-paused and whose explicit pause timer has elapsed.  Clearing
@@ -1083,8 +1038,16 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          | None, Some _
          | None, None -> ())
       | Ok (Some _)
-      | Ok None
-      | Error _ -> ());
+      | Ok None -> ()
+      | Error detail ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string ReconcileFailures)
+          ~labels:[ "keeper", name; "phase", "auto_resume_meta_read" ]
+          ();
+        Log.Keeper.error
+          "%s: auto-resume metadata read failed: %s"
+          name
+          detail);
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ~load_or_materialize_keeper_meta ctx

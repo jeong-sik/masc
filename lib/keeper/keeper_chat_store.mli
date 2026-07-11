@@ -249,12 +249,15 @@ val append_turn :
 
 (** [append_assistant_message_result] is {!append_assistant_message} that
     returns [Error msg] on a write failure instead of swallowing it (the failure
-    is still counted + warn-logged). For callers whose own contract requires
-    surfacing a chat-append failure — e.g. {!Fusion_sink.emit}. *)
+    is still counted + warn-logged). [kind] defaults to [Utterance]; terminal
+    transport paths pass [Transport_failure] so an assistant-only failure does
+    not advance the conversation watermark. For callers whose own contract
+    requires surfacing a chat-append failure — e.g. {!Fusion_sink.emit}. *)
 val append_assistant_message_result :
   base_dir:string ->
   keeper_name:string ->
   content:string ->
+  ?kind:Row_kind.t ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->
@@ -273,6 +276,7 @@ val append_assistant_message :
   base_dir:string ->
   keeper_name:string ->
   content:string ->
+  ?kind:Row_kind.t ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->

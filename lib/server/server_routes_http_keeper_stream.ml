@@ -1023,14 +1023,52 @@ let body_with_rewritten_payload ~fallback payload_json_opt =
   | Some (`Assoc _ as payload_json) -> Yojson.Safe.to_string payload_json
   | Some _ | None -> fallback
 
-let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
+type turn_failure_kind =
+  | Turn_failed
+  | Dispatch_failed
+  | Turn_timed_out
+  | Turn_cancelled
+  | No_visible_reply
+  | Continuation_checkpoint_without_reply
+  | Transcript_persist_failed
+  | Stream_projection_failed
+
+type turn_failure =
+  { kind : turn_failure_kind
+  ; detail : string
+  }
+
+type queued_turn_outcome =
+  | Delivered of { outcome_ref : string option }
+  | Failed of turn_failure
+
+let turn_failure_kind_to_string = function
+  | Turn_failed -> "turn_failed"
+  | Dispatch_failed -> "dispatch_failed"
+  | Turn_timed_out -> "turn_timed_out"
+  | Turn_cancelled -> "turn_cancelled"
+  | No_visible_reply -> "no_visible_reply"
+  | Continuation_checkpoint_without_reply ->
+      "continuation_checkpoint_without_reply"
+  | Transcript_persist_failed -> "transcript_persist_failed"
+  | Stream_projection_failed -> "stream_projection_failed"
+
+let transcript_persist_failure detail =
+  { kind = Transcript_persist_failed
+  ; detail =
+      Printf.sprintf "failed to persist terminal transcript: %s" detail
+  }
+
+let keeper_request_terminal_payload ~request_id ~keeper_name ~status
     ?(message = "") () =
+  let status_label = Gate_protocol.message_request_status_to_string status in
   let fields =
     [
       ("request_id", `String request_id);
       ("keeper_name", `String keeper_name);
-      ("status", `String status);
-      ("ok", `Bool ok);
+      ("status", `String status_label);
+      ( "ok"
+      , `Bool (Gate_protocol.message_request_status_is_success status) );
     ]
   in
   let fields =
@@ -1039,42 +1077,77 @@ let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
   in
   `Assoc fields
 
+let terminal_failure_stream_lifecycle =
+  [ Keeper_chat_store.Run_started
+  ; Keeper_chat_store.Text_message_start
+  ; Keeper_chat_store.Text_message_end
+  ; Keeper_chat_store.Run_error
+  ]
+
+let persist_terminal_failure ~base_path ~user_line_recorded_upstream ~payload
+    ~kind ~detail =
+  let chat_surface = chat_surface_of_request payload in
+  let chat_source = Surface_ref.lane_label chat_surface in
+  let chat_speaker = chat_speaker_of_request payload in
+  let content = persisted_error_reply detail in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ChatTransportFailures)
+    ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
+    ();
+  let persisted =
+    if user_line_recorded_upstream then
+      Keeper_chat_store.append_assistant_message_result
+        ~base_dir:base_path
+        ~keeper_name:payload.name
+        ~content
+        ~kind:Keeper_chat_store.Row_kind.Transport_failure
+        ~surface:chat_surface
+        ~stream_lifecycle:terminal_failure_stream_lifecycle
+        ()
+    else
+      Keeper_chat_store.append_turn_result
+        ~base_dir:base_path
+        ~keeper_name:payload.name
+        ~user_content:payload.message
+        ~user_attachments:payload.attachments
+        ~surface:chat_surface
+        ~speaker:chat_speaker
+        ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+        ~assistant_content:content
+        ~stream_lifecycle:terminal_failure_stream_lifecycle
+        ()
+  in
+  match persisted with
+  | Ok () ->
+      Keeper_chat_broadcast.chat_appended ~keeper_name:payload.name
+        ~source:chat_source ~content ();
+      { kind; detail }
+  | Error detail -> transcript_persist_failure detail
+
+let terminal_of_worker_abort = function
+  | Keeper_msg_async.Timeout { timeout_sec } ->
+      ( Gate_protocol.Failed
+      , Turn_timed_out
+      , Printf.sprintf
+          "keeper_msg request exceeded timeout_sec=%.3f before completion"
+          timeout_sec )
+  | Keeper_msg_async.Worker_cancelled { cancelled_by; reason } ->
+      let cancelled_by =
+        Keeper_msg_async.worker_cancel_source_to_string cancelled_by
+      in
+      ( Gate_protocol.Cancelled
+      , Turn_cancelled
+      , Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by )
+
 type keeper_stream_worker_event =
   | Stream_event of Agent_sdk.Types.sse_event
   | Stream_client_disconnected
   | Stream_dashboard_queued of dashboard_deferred_chat
   | Stream_terminal of
-      { ok : bool
-      ; status : string
+      { status : Gate_protocol.message_request_status
       ; body : string
       ; queued_outcome : queued_turn_outcome option
       }
-
-and queued_turn_failure_kind =
-  | Turn_failed
-  | Turn_timed_out
-  | Turn_cancelled
-  | No_visible_reply
-  | Continuation_checkpoint_without_reply
-  | Transcript_persist_failed
-  | Stream_projection_failed
-
-and queued_turn_outcome =
-  | Delivered of { outcome_ref : string option }
-  | Failed of
-      { kind : queued_turn_failure_kind
-      ; detail : string
-      }
-
-let queued_turn_failure_kind_to_string = function
-  | Turn_failed -> "turn_failed"
-  | Turn_timed_out -> "turn_timed_out"
-  | Turn_cancelled -> "turn_cancelled"
-  | No_visible_reply -> "no_visible_reply"
-  | Continuation_checkpoint_without_reply ->
-      "continuation_checkpoint_without_reply"
-  | Transcript_persist_failed -> "transcript_persist_failed"
-  | Stream_projection_failed -> "stream_projection_failed"
 
 type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 
@@ -1114,13 +1187,6 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     ; Keeper_chat_store.Text_message_start
     ; Keeper_chat_store.Text_message_end
     ; Keeper_chat_store.Run_finished
-    ]
-  in
-  let errored_stream_lifecycle =
-    [ Keeper_chat_store.Run_started
-    ; Keeper_chat_store.Text_message_start
-    ; Keeper_chat_store.Text_message_end
-    ; Keeper_chat_store.Run_error
     ]
   in
   let args = args_of_request payload in
@@ -1210,57 +1276,13 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~speaker:chat_speaker
         ()
   in
-  let persist_failure_reply err =
-    (* The failure marker is typed, not an utterance: it renders for the
-       operator but does not advance the lane watermark, so the user
-       message it failed to answer stays pending for the keeper's next
-       turn — and the keeper never reads the error as its own words. *)
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatTransportFailures)
-      ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
-      ();
-    (* RFC-connector-deferred-reply-via-chat-queue §3.4: the failure must be
-       DURABLE on both paths — a post-ACK deferred turn that fails must not
-       vanish on restart/replay (counter + live broadcast alone is silent
-       failure under this feature's "queued, will answer" contract).
-       - Dashboard route ([recorded_upstream = false]): the turn owns the user
-         line, so record the paired [Transport_failure] row (user message stays
-         pending for the next turn; keeper never reads the error as its words).
-       - Connector route ([recorded_upstream = true]): the gate inbound boundary
-         already persisted the user line (assistant-less). The paired
-         [append_turn] would double-record that user line, so persist an
-         assistant-only durable failure marker instead — the failure survives a
-         restart and stays joined to the already-pending user line. *)
-    let persisted =
-      if connector_user_line_recorded_upstream then
-       Keeper_chat_store.append_assistant_message_result
-         ~base_dir:base_path
-         ~keeper_name:payload.name
-         ~content:(persisted_error_reply err)
-         ~surface:chat_surface
-         ~stream_lifecycle:errored_stream_lifecycle
-         ()
-      else
-       Keeper_chat_store.append_turn_result
-         ~base_dir:base_path
-         ~keeper_name:payload.name
-         ~user_content:payload.message
-         ~user_attachments:payload.attachments
-         ~surface:chat_surface
-         ~speaker:chat_speaker
-         ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
-         ~assistant_content:(persisted_error_reply err)
-         ~stream_lifecycle:errored_stream_lifecycle
-         ()
-    in
-    (match persisted with
-     | Ok () ->
-         Keeper_chat_broadcast.chat_appended
-           ~keeper_name:payload.name ~source:chat_source
-           ~content:(persisted_error_reply err)
-           ()
-     | Error _ -> ());
-    persisted
+  let persist_failure_reply ~kind detail =
+    persist_terminal_failure ~base_path
+      ~user_line_recorded_upstream:connector_user_line_recorded_upstream
+      ~payload ~kind ~detail
+  in
+  let queued_outcome_of_failure failure =
+    if queued_turn then Some (Failed failure) else None
   in
   let timeout_sec = Option.map float_of_int payload.timeout_sec in
   let dashboard_direct_stream =
@@ -1276,35 +1298,13 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
      sites (never inside the cancelled [f]) so this turn still gets exactly
      one terminal event via the same serialized [push_worker_event]. *)
   let on_worker_aborted (reason : Keeper_msg_async.worker_abort_reason) =
-    let status, body, failure_kind =
-      match reason with
-      | Keeper_msg_async.Timeout { timeout_sec } ->
-          ( "timeout"
-          , Printf.sprintf
-              "keeper_msg request exceeded timeout_sec=%.3f before completion"
-              timeout_sec
-          , Turn_timed_out )
-      | Keeper_msg_async.Worker_cancelled { cancelled_by; reason } ->
-          let cancelled_by =
-            Keeper_msg_async.worker_cancel_source_to_string cancelled_by
-          in
-          ( "cancelled"
-          , Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
-          , Turn_cancelled )
-    in
+    let status, failure_kind, body = terminal_of_worker_abort reason in
+    let failure = persist_failure_reply ~kind:failure_kind body in
     let queued_outcome =
-      if not queued_turn then None
-      else
-        match persist_failure_reply body with
-        | Ok () -> Some (Failed { kind = failure_kind; detail = body })
-        | Error persist_error ->
-            Some
-              (Failed
-                 { kind = Transcript_persist_failed
-                 ; detail = persist_error
-                 })
+      queued_outcome_of_failure failure
     in
-    push_worker_event (Stream_terminal { ok = false; status; body; queued_outcome })
+    push_worker_event
+      (Stream_terminal { status; body = failure.detail; queued_outcome })
   in
   let request_id =
     Keeper_msg_async.submit ?timeout_sec ~clock ~sw ~on_worker_aborted
@@ -1412,24 +1412,14 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  visible_reply
              with
              | Some err ->
+                 let failure = persist_failure_reply ~kind:Turn_failed err in
                  let queued_outcome =
-                   if not queued_turn then None
-                   else
-                     match persist_failure_reply err with
-                     | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
-                     | Error persist_error ->
-                         Some
-                           (Failed
-                              { kind = Transcript_persist_failed
-                              ; detail = persist_error
-                              })
+                   queued_outcome_of_failure failure
                  in
-                 if not queued_turn then ignore (persist_failure_reply err : (unit, string) result);
                  push_worker_event
                    (Stream_terminal
-                      { ok = false
-                      ; status = "error"
-                      ; body = err
+                      { status = Gate_protocol.Failed
+                      ; body = failure.detail
                       ; queued_outcome
                       });
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
@@ -1464,49 +1454,25 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                    | Ok () ->
                        Keeper_chat_broadcast.chat_appended
                          ~keeper_name:payload.name ~source:chat_source ?content ();
-                       if queued_turn
-                       then
-                         Some
-                           (Delivered
-                              { outcome_ref =
-                                  Option.map Ids.Turn_ref.to_string turn_ref
-                              })
-                       else None
+                       `Delivered (Option.map Ids.Turn_ref.to_string turn_ref)
                    | Error persist_error ->
-                       if queued_turn
-                       then
-                         Some
-                           (Failed
-                              { kind = Transcript_persist_failed
-                              ; detail = persist_error
-                              })
-                       else None
+                       `Failed (transcript_persist_failure persist_error)
                  in
                  let turn_outcome =
                    Keeper_turn_outcome.of_reply_payload payload_json_opt
                  in
-                 let queued_outcome =
+                 let turn_completion =
                    match turn_outcome, String_util.trim_to_option visible_reply with
                    | Keeper_turn_outcome.Continuation_checkpoint, _ when queued_turn ->
                        let detail =
                          "queued turn ended with a continuation checkpoint and no delivered reply"
                        in
-                       (match persist_failure_reply detail with
-                        | Ok () ->
-                            Some
-                              (Failed
-                                 { kind = Continuation_checkpoint_without_reply
-                                 ; detail
-                                 })
-                        | Error persist_error ->
-                            Some
-                              (Failed
-                                 { kind = Transcript_persist_failed
-                                 ; detail = persist_error
-                                 }))
+                       `Failed
+                         (persist_failure_reply
+                            ~kind:Continuation_checkpoint_without_reply detail)
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
                        persist_user_message_only ();
-                       None
+                       `Direct_deferred
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
                        if has_visible_blocks
@@ -1518,75 +1484,71 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                          let detail =
                            "no visible reply was produced for this queued message"
                          in
-                         (match persist_failure_reply detail with
-                          | Ok () -> Some (Failed { kind = No_visible_reply; detail })
-                          | Error persist_error ->
-                              Some
-                                (Failed
-                                   { kind = Transcript_persist_failed
-                                   ; detail = persist_error
-                                   }))
+                         `Failed
+                           (persist_failure_reply ~kind:No_visible_reply detail)
                        else (
                          persist_user_message_only ();
-                         None)
+                         `Direct_deferred)
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
                        |> delivered_after_persist ~content:visible_reply
                  in
-                 (match queued_outcome with
-                  | Some (Failed { detail; _ }) ->
+                 (match turn_completion with
+                  | `Failed ({ detail; _ } as failure) ->
+                      let queued_outcome =
+                        queued_outcome_of_failure failure
+                      in
                       push_worker_event
                         (Stream_terminal
-                           { ok = false
-                           ; status = "error"
+                           { status = Gate_protocol.Failed
                            ; body = detail
                            ; queued_outcome
                            });
                       Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
-                  | Some (Delivered _) | None ->
+                  | `Delivered outcome_ref ->
+                      let queued_outcome =
+                        if queued_turn
+                        then Some (Delivered { outcome_ref })
+                        else None
+                      in
                       push_worker_event
                         (Stream_terminal
-                           { ok = true
-                           ; status = "done"
+                           { status = Gate_protocol.Done
                            ; body
                            ; queued_outcome
                            });
+                      Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
+                  | `Direct_deferred ->
+                      push_worker_event
+                        (Stream_terminal
+                           { status = Gate_protocol.Done
+                           ; body
+                           ; queued_outcome = None
+                           });
                       Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body))
         | Ok (`Ran (false, err)) ->
-            let persisted = persist_failure_reply err in
+            let failure = persist_failure_reply ~kind:Dispatch_failed err in
             let queued_outcome =
-              if not queued_turn then None
-              else
-                match persisted with
-                | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
-                | Error persist_error ->
-                    Some
-                      (Failed
-                         { kind = Transcript_persist_failed
-                         ; detail = persist_error
-                         })
+              queued_outcome_of_failure failure
             in
             push_worker_event
               (Stream_terminal
-                 { ok = false; status = "error"; body = err; queued_outcome });
+                 { status = Gate_protocol.Failed
+                 ; body = failure.detail
+                 ; queued_outcome
+                 });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
         | Error err ->
-            let persisted = persist_failure_reply err in
+            let failure = persist_failure_reply ~kind:Dispatch_failed err in
             let queued_outcome =
-              if not queued_turn then None
-              else
-                match persisted with
-                | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
-                | Error persist_error ->
-                    Some
-                      (Failed
-                         { kind = Transcript_persist_failed
-                         ; detail = persist_error
-                         })
+              queued_outcome_of_failure failure
             in
             push_worker_event
               (Stream_terminal
-                 { ok = false; status = "error"; body = err; queued_outcome });
+                 { status = Gate_protocol.Failed
+                 ; body = failure.detail
+                 ; queued_outcome
+                 });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
       ()
   in
@@ -1638,20 +1600,22 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  ];
              }
        });
-  let publish_terminal ~status ~ok ?(message = "") () =
+  let publish_terminal ~status ?(message = "") () =
     let message = redact_text message in
+    let status_label = Gate_protocol.message_request_status_to_string status in
+    let ok = Gate_protocol.message_request_status_is_success status in
     let payload_json =
       keeper_request_terminal_payload ~request_id ~keeper_name:payload.name
-        ~status ~ok ~message ()
+        ~status ~message ()
     in
-    if ok || String.equal status "cancelled" then
+    if ok || Gate_protocol.(status = Cancelled) then
       Log.Keeper.info
         "keeper_stream: request terminal keeper=%s request_id=%s status=%s"
-        payload.name request_id status
+        payload.name request_id status_label
     else
       Log.Keeper.warn
         "keeper_stream: request terminal keeper=%s request_id=%s status=%s message=%s"
-        payload.name request_id status message;
+        payload.name request_id status_label message;
       Keeper_chat_events.publish events
         (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
   in
@@ -1672,7 +1636,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         let message =
           dashboard_deferred_ack_text ~keeper_name:payload.name queued
         in
-        publish_terminal ~status:"queued" ~ok:true ~message ();
+        publish_terminal ~status:Gate_protocol.Queued ~message ();
         Keeper_chat_events.publish events (Text_delta message);
         Keeper_chat_events.publish events
           (Custom
@@ -1683,23 +1647,31 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         Keeper_chat_events.publish events (Run_finished { run_id });
         None
     | Stream_terminal
-        { ok = false
-        ; status = "cancelled"
+        { status = Gate_protocol.Cancelled
         ; body = message
         ; queued_outcome
         } ->
         let message = redact_text message in
-        publish_terminal ~status:"cancelled" ~ok:false ~message ();
+        publish_terminal ~status:Gate_protocol.Cancelled ~message ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         queued_outcome
-    | Stream_terminal { ok = false; status; body = err; queued_outcome } ->
+    | Stream_terminal
+        { status = Gate_protocol.Failed; body = err; queued_outcome } ->
         let err = redact_text err in
-        publish_terminal ~status ~ok:false ~message:err ();
+        publish_terminal ~status:Gate_protocol.Failed ~message:err ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Event_error { message = err });
         queued_outcome
-    | Stream_terminal { ok = true; body; queued_outcome; _ } -> (
+    | Stream_terminal
+        { status = Gate_protocol.Lost; body = err; queued_outcome } ->
+        let err = redact_text err in
+        publish_terminal ~status:Gate_protocol.Lost ~message:err ();
+        Keeper_chat_events.publish events Text_message_end;
+        Keeper_chat_events.publish events (Event_error { message = err });
+        queued_outcome
+    | Stream_terminal
+        { status = Gate_protocol.Done; body; queued_outcome } -> (
         try
           let payload_json_opt, visible_reply = extract_visible_reply body in
           let visible_reply =
@@ -1748,7 +1720,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                        [ ("request_id", `String request_id);
                          ("message", `String visible_reply) ]
                  });
-          publish_terminal ~status:"done" ~ok:true ();
+          publish_terminal ~status:Gate_protocol.Done ();
           Keeper_chat_events.publish events Text_message_end;
           Keeper_chat_events.publish events (Run_finished { run_id });
           queued_outcome
@@ -1756,13 +1728,38 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
             let message = redact_text (Printexc.to_string exn) in
-            publish_terminal ~status:"error" ~ok:false ~message ();
+            let failure =
+              persist_terminal_failure ~base_path
+                ~user_line_recorded_upstream:true ~payload
+                ~kind:Stream_projection_failed ~detail:message
+            in
+            let queued_outcome = queued_outcome_of_failure failure in
+            let message = failure.detail in
+            publish_terminal ~status:Gate_protocol.Failed ~message ();
             Keeper_chat_events.publish events Text_message_end;
             Keeper_chat_events.publish events
               (Event_error { message });
-            if queued_turn
-            then Some (Failed { kind = Stream_projection_failed; detail = message })
-            else None)
+            queued_outcome)
+    | Stream_terminal
+        { status =
+            ( Gate_protocol.Accepted
+            | Gate_protocol.Queued
+            | Gate_protocol.Running )
+        ; body = _
+        ; queued_outcome = _
+        } ->
+        let message =
+          "keeper stream terminal event carried a non-terminal Gate status"
+        in
+        let failure =
+          persist_failure_reply ~kind:Stream_projection_failed message
+        in
+        let queued_outcome = queued_outcome_of_failure failure in
+        let message = failure.detail in
+        publish_terminal ~status:Gate_protocol.Failed ~message ();
+        Keeper_chat_events.publish events Text_message_end;
+        Keeper_chat_events.publish events (Event_error { message });
+        queued_outcome
   in
   match consume_worker_events empty_keeper_stream_bridge_state with
   | outcome ->
@@ -2163,6 +2160,8 @@ module For_testing = struct
   let turn_instructions_for_request = turn_instructions_for_request
   let args_of_request = args_of_request
   let modalities_for_request = modalities_for_request
+  let persist_terminal_failure = persist_terminal_failure
+  let terminal_of_worker_abort = terminal_of_worker_abort
   let defer_dashboard_payload_if_busy ~base_path ~clock payload =
     match defer_dashboard_payload_if_busy ~base_path ~clock payload with
     | `Not_busy -> `Not_busy

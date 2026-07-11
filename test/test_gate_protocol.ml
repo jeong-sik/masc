@@ -283,6 +283,24 @@ let test_message_request_status_of_string () =
   check_status_parse "cancelled" "cancelled" (Some Gate_protocol.Cancelled);
   check_status_parse "unknown fails closed" "finished" None
 
+let test_message_request_status_success_projection () =
+  List.iter
+    (fun status ->
+      check bool
+        (Gate_protocol.message_request_status_to_string status)
+        true (Gate_protocol.message_request_status_is_success status))
+    [ Gate_protocol.Accepted
+    ; Gate_protocol.Queued
+    ; Gate_protocol.Running
+    ; Gate_protocol.Done
+    ];
+  List.iter
+    (fun status ->
+      check bool
+        (Gate_protocol.message_request_status_to_string status)
+        false (Gate_protocol.message_request_status_is_success status))
+    [ Gate_protocol.Failed; Gate_protocol.Lost; Gate_protocol.Cancelled ]
+
 let () =
   Alcotest.run "Gate_protocol"
     [
@@ -320,5 +338,7 @@ let () =
           test_case "gate error strings" `Quick test_gate_error_strings;
           test_case "message request status parse" `Quick
             test_message_request_status_of_string;
+          test_case "message request status success projection" `Quick
+            test_message_request_status_success_projection;
         ] );
     ]

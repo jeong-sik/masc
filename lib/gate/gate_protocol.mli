@@ -65,6 +65,11 @@ type message_request = {
 }
 
 val message_request_status_to_string : message_request_status -> string
+val message_request_status_is_success : message_request_status -> bool
+(** Canonical success projection for request envelopes and terminal events.
+    Accepted/queued/running/done are non-failure states; failed/lost/cancelled
+    are failures. Callers must not carry a second independently-derived [ok]
+    bit. *)
 (** Parse the canonical status labels emitted by [keeper_msg_async].
     Unknown labels return [None] so callers fail closed instead of silently
     treating protocol drift as acceptance. *)

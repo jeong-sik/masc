@@ -50,6 +50,10 @@ let message_request_status_to_string = function
   | Lost -> "lost"
   | Cancelled -> "cancelled"
 
+let message_request_status_is_success = function
+  | Accepted | Queued | Running | Done -> true
+  | Failed | Lost | Cancelled -> false
+
 let message_request_status_of_string = function
   | "accepted" -> Some Accepted
   | "queued" -> Some Queued

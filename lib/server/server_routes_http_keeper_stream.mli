@@ -157,23 +157,31 @@ val handle_keeper_chat_stream :
 
 (** {1 Turn execution (shared between HTTP handler and queue consumer)} *)
 
-type queued_turn_failure_kind =
+type turn_failure_kind =
   | Turn_failed
+  | Dispatch_failed
   | Turn_timed_out
   | Turn_cancelled
   | No_visible_reply
   | Continuation_checkpoint_without_reply
   | Transcript_persist_failed
   | Stream_projection_failed
+(** Typed cause shared by direct and queued turn failure persistence. The queue
+    receipt projection maps this type to {!Keeper_chat_queue.failure_kind}; it
+    does not own the transcript failure contract. *)
+
+type turn_failure =
+  { kind : turn_failure_kind
+  ; detail : string
+  }
 
 type queued_turn_outcome =
   | Delivered of { outcome_ref : string option }
-  | Failed of
-      { kind : queued_turn_failure_kind
-      ; detail : string
-      }
+  | Failed of turn_failure
+(** Queue-receipt outcome only. Direct turns return [None] after publishing
+    their typed terminal event; they still persist the same transcript failure. *)
 
-val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
+val turn_failure_kind_to_string : turn_failure_kind -> string
 
 val process_single_turn :
   connector_user_line_recorded_upstream:bool ->
@@ -202,22 +210,29 @@ val process_single_turn :
     cancel the accepted request. [auth_token] is [None] for queue-consumer
     turns where no HTTP request is available.
 
-    [connector_user_line_recorded_upstream] (default [false]) tells the turn
+    [connector_user_line_recorded_upstream] tells the turn
     that the inbound user line was already persisted by the gate inbound
     boundary ([Gate_keeper_backend.dispatch_core], RFC-0226 sole-recorder).
     When [true] the turn records the assistant reply only and never re-writes
     the user line — set by the queue consumer for connector ([Discord]/[Slack])
     sources whose busy message was enqueued after the gate already recorded it
     (RFC-connector-deferred-reply-via-chat-queue §3.4). [false] keeps the dashboard-route behaviour of recording
-    both sides.
+    both sides. For a direct request, {!Keeper_msg_async.submit} durably records
+    acceptance before returning its request id; the chat store then appends the
+    user row and terminal assistant row together in one payload. A timeout or
+    cancellation therefore cannot leave the chat transcript with an unpaired,
+    falsely successful assistant row.
 
-    [queued_turn] (default [false], set [true] only by
-    [Server_bootstrap_loops]'s queue-consumer [handle_turn] wiring) changes
-    ONLY the [No_visible_reply]/empty-[Visible_reply] outcome: the
+    [queued_turn] (set [true] only by [Server_bootstrap_loops]'s
+    queue-consumer [handle_turn] wiring) changes the queue-receipt return value
+    and the [No_visible_reply]/empty-[Visible_reply] outcome: the
     interactive HTTP stream keeps recording the user line only
     ([persist_user_message_only]), matching its existing "the keeper will
     answer on the next turn" semantics; a queued turn instead persists a
-    typed failure row via [persist_failure_reply]. A queued message was
+    typed failure row. Timeout, cancellation, dispatch, transcript, and stream
+    projection failures use that same persistence path for direct and queued
+    turns; only the receipt outcome remains conditional on [queued_turn]. A
+    queued message was
     already leased from [Keeper_chat_queue] — there is no "next turn" for
     it to ride along with, so silence here is terminal, not merely
     deferred. *)
@@ -246,6 +261,16 @@ module For_testing : sig
   val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
   val modalities_for_request : keeper_chat_stream_request -> string list
   val keeper_chat_stream_headers : string -> Httpun.Headers.t
+  val persist_terminal_failure :
+    base_path:string ->
+    user_line_recorded_upstream:bool ->
+    payload:keeper_chat_stream_request ->
+    kind:turn_failure_kind ->
+    detail:string ->
+    turn_failure
+  val terminal_of_worker_abort :
+    Keeper_msg_async.worker_abort_reason ->
+    Gate_protocol.message_request_status * turn_failure_kind * string
   val defer_dashboard_payload_if_busy :
     base_path:string ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

@@ -3,6 +3,7 @@ module B = Masc.Keeper_chat_blocks
 module MS = Masc.Keeper_world_observation_message_scope
 module P = Masc.Otel_metric_store
 module KT = Masc.Keeper_turn
+module Keeper_stream = Server_routes_http_keeper_stream
 
 let rec remove_tree path =
   if Sys.file_exists path then
@@ -865,6 +866,99 @@ let test_failure_turn_kind_roundtrip () =
             (contains_substring raw {|"kind":"transport_failure"|})
       | messages ->
           Alcotest.failf "expected 2 rows, got %d" (List.length messages))
+
+let terminal_failure_payload keeper_name : Keeper_stream.keeper_chat_stream_request =
+  { name = keeper_name
+  ; message = "inspect the source"
+  ; user_blocks = []
+  ; timeout_sec = Some 300
+  ; turn_instructions = None
+  ; surface_context = None
+  ; channel = ""
+  ; channel_user_id = ""
+  ; channel_user_name = ""
+  ; channel_workspace_id = ""
+  ; attachments = []
+  }
+
+let check_transport_failure_rows ~base_dir ~keeper_name ~expected_count =
+  let messages = K.load ~base_dir ~keeper_name in
+  Alcotest.(check int) "row count" expected_count (List.length messages);
+  match List.rev messages with
+  | assistant :: _ ->
+      Alcotest.(check bool) "terminal row is a transport failure" true
+        (K.Row_kind.equal assistant.kind K.Row_kind.Transport_failure)
+  | [] -> Alcotest.fail "terminal failure did not persist a chat row"
+
+let test_direct_terminal_failure_persists_atomic_user_pair () =
+  let base_dir = temp_base_path "keeper-chat-direct-terminal-failure" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-direct-terminal-failure" in
+      let payload = terminal_failure_payload keeper_name in
+      let failure =
+        Keeper_stream.For_testing.persist_terminal_failure ~base_path:base_dir
+          ~user_line_recorded_upstream:false ~payload
+          ~kind:Keeper_stream.Turn_timed_out
+          ~detail:"keeper request timed out"
+      in
+      (match failure.kind with
+       | Keeper_stream.Turn_timed_out -> ()
+       | kind ->
+           Alcotest.failf "unexpected terminal failure kind: %s"
+             (Keeper_stream.turn_failure_kind_to_string kind));
+      check_transport_failure_rows ~base_dir ~keeper_name ~expected_count:2;
+      match K.load ~base_dir ~keeper_name with
+      | user :: _ ->
+          Alcotest.(check string) "direct user row survives timeout"
+            payload.message user.content
+      | [] -> Alcotest.fail "direct user row was not persisted")
+
+let test_upstream_terminal_failure_is_typed_without_duplicate_user () =
+  let base_dir = temp_base_path "keeper-chat-upstream-terminal-failure" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-upstream-terminal-failure" in
+      let payload = terminal_failure_payload keeper_name in
+      K.append_user_message ~base_dir ~keeper_name ~content:payload.message ();
+      ignore
+        (Keeper_stream.For_testing.persist_terminal_failure ~base_path:base_dir
+           ~user_line_recorded_upstream:true ~payload
+           ~kind:Keeper_stream.Turn_cancelled
+           ~detail:"keeper request was cancelled"
+          : Keeper_stream.turn_failure);
+      check_transport_failure_rows ~base_dir ~keeper_name ~expected_count:2)
+
+let test_worker_timeout_uses_gate_failed_status () =
+  let status, kind, _detail =
+    Keeper_stream.For_testing.terminal_of_worker_abort
+      (Masc.Keeper_msg_async.Timeout { timeout_sec = 300.0 })
+  in
+  Alcotest.(check string) "timeout wire status comes from Gate protocol"
+    "error" (Gate_protocol.message_request_status_to_string status);
+  match kind with
+  | Keeper_stream.Turn_timed_out -> ()
+  | kind ->
+      Alcotest.failf "unexpected timeout failure kind: %s"
+        (Keeper_stream.turn_failure_kind_to_string kind)
+
+let test_worker_cancel_uses_gate_cancelled_status () =
+  let status, kind, _detail =
+    Keeper_stream.For_testing.terminal_of_worker_abort
+      (Masc.Keeper_msg_async.Worker_cancelled
+         { cancelled_by = Masc.Keeper_msg_async.Operator_request
+         ; reason = "operator interrupted the turn"
+         })
+  in
+  Alcotest.(check string) "cancel wire status comes from Gate protocol"
+    "cancelled" (Gate_protocol.message_request_status_to_string status);
+  match kind with
+  | Keeper_stream.Turn_cancelled -> ()
+  | kind ->
+      Alcotest.failf "unexpected cancel failure kind: %s"
+        (Keeper_stream.turn_failure_kind_to_string kind)
 
 let test_kind_absent_reads_utterance () =
   (* Every row written before the [kind] field existed is an utterance;
@@ -1899,6 +1993,16 @@ let () =
         [
           Alcotest.test_case "failure turn kind roundtrip" `Quick
             test_failure_turn_kind_roundtrip;
+          Alcotest.test_case
+            "direct terminal failure persists atomic user pair" `Quick
+            test_direct_terminal_failure_persists_atomic_user_pair;
+          Alcotest.test_case
+            "upstream terminal failure is typed without duplicate user" `Quick
+            test_upstream_terminal_failure_is_typed_without_duplicate_user;
+          Alcotest.test_case "worker timeout uses gate failed status" `Quick
+            test_worker_timeout_uses_gate_failed_status;
+          Alcotest.test_case "worker cancel uses gate cancelled status" `Quick
+            test_worker_cancel_uses_gate_cancelled_status;
           Alcotest.test_case "absent kind reads utterance" `Quick
             test_kind_absent_reads_utterance;
           Alcotest.test_case "unknown kind reported, reads utterance" `Quick

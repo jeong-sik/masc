@@ -1231,14 +1231,15 @@ let start_keeper_loops
                    ; detail =
                        Printf.sprintf
                          "turn failed (%s): %s; terminal connector delivery also failed: %s"
-                         (queued_turn_failure_kind_to_string turn_kind)
+                         (turn_failure_kind_to_string turn_kind)
                          turn_detail delivery_detail
                    ; outcome_ref = None
                    }
              | Some (Failed { kind; detail }), Ok () ->
                  let kind =
                    match kind with
-                   | Turn_failed -> Keeper_chat_queue.Turn_failed
+                   | Turn_failed | Dispatch_failed ->
+                       Keeper_chat_queue.Turn_failed
                    | Turn_timed_out -> Keeper_chat_queue.Timed_out
                    | Turn_cancelled -> Keeper_chat_queue.Cancelled
                    | No_visible_reply

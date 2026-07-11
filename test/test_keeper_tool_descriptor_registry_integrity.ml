@@ -286,6 +286,22 @@ let schema_required_fields schema =
   | other -> Alcotest.failf "input_schema is not an object: %s" (Yojson.Safe.to_string other)
 ;;
 
+let schema_property_names schema =
+  match schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc properties) -> List.map fst properties
+     | Some other ->
+       Alcotest.failf
+         "input_schema properties is not an object: %s"
+         (Yojson.Safe.to_string other)
+     | None -> [])
+  | other ->
+    Alcotest.failf
+      "input_schema is not an object: %s"
+      (Yojson.Safe.to_string other)
+;;
+
 let schema_forbids_additional_properties schema =
   match schema with
   | `Assoc fields ->
@@ -622,31 +638,82 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
 ;;
 
 let test_masc_board_registry_has_descriptor_projection () =
+  let wire_names =
+    List.map Tool_name.Board_name.to_string Tool_name.Board_name.all
+  in
+  Alcotest.(check int)
+    "generated Board wire names are unique"
+    (List.length wire_names)
+    (List.length (List.sort_uniq String.compare wire_names));
+  let keeper_model_names =
+    Tool_name.Board_name.all
+    |> List.filter_map (fun board_name ->
+      match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+      | Keeper_tool_name.Keeper_wrapper keeper_tool ->
+        Some (Keeper_tool_name.to_string keeper_tool)
+      | Keeper_tool_name.Direct_masc ->
+        Some (Tool_name.Board_name.to_string board_name)
+      | Keeper_tool_name.External_only -> None)
+  in
+  Alcotest.(check int)
+    "Board Keeper projections are injective"
+    (List.length keeper_model_names)
+    (List.length (List.sort_uniq String.compare keeper_model_names));
   List.iter
-    (fun (schema : Masc_domain.tool_schema) ->
+    (fun board_name ->
+       let schema = Board_tool_registry.schema_for_board_name board_name in
+       Alcotest.(check string)
+         (schema.name ^ " typed registry name")
+         (Tool_name.Board_name.to_string board_name)
+         schema.name;
+       Alcotest.(check bool)
+         (schema.name ^ " typed round-trip")
+         true
+         (Tool_name.Board_name.of_string schema.name = Some board_name);
+       (match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+        | Keeper_tool_name.Keeper_wrapper keeper_tool ->
+          let keeper_name = Keeper_tool_name.to_string keeper_tool in
+          Alcotest.(check bool)
+            (keeper_name ^ " reverse projection is exact")
+            true
+            (Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool
+             = Some board_name);
+          Alcotest.(check int)
+            (keeper_name ^ " has exactly one descriptor")
+            1
+            (List.length (Descriptor.descriptors_for_internal keeper_name))
+        | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only -> ());
        match Descriptor.descriptors_for_internal schema.name with
        | [ descriptor ] ->
-         let suffix =
-           String.sub
-             schema.name
-             (String.length "masc_board_")
-             (String.length schema.name - String.length "masc_board_")
-         in
          Alcotest.(check string)
            (schema.name ^ " descriptor id")
-           ("masc.board." ^ suffix)
+           ("masc.board." ^ Tool_name.Board_name.operation_name board_name)
            descriptor.Descriptor.id;
          Alcotest.(check string)
            (schema.name ^ " runtime handler")
            "tool_masc_board_dispatch"
            (Descriptor.runtime_handler_to_string descriptor.runtime_handler);
+         let descriptor_properties = schema_property_names descriptor.input_schema in
+         Board_tool_registry.identity_fields_for_board_name board_name
+         |> List.iter (fun identity_field ->
+           Alcotest.(check bool)
+             (schema.name ^ " hides runtime-owned " ^ identity_field)
+             false
+             (List.mem identity_field descriptor_properties));
+         let expected_visibility =
+           match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+           | Keeper_tool_name.Direct_masc ->
+             (Tool_catalog.metadata schema.name).visibility
+           | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
+             Tool_catalog.Hidden
+         in
          Alcotest.(check bool)
-           (schema.name ^ " schema projected")
+           (schema.name ^ " descriptor visibility follows typed projection")
            true
-           (descriptor.input_schema = schema.input_schema)
+           (descriptor.policy.visibility = expected_visibility)
        | [] -> Alcotest.failf "missing descriptor for %s" schema.name
        | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" schema.name)
-    Board_tool_registry.tools
+    Tool_name.Board_name.all
 
 let test_library_search_descriptor_has_recoverable_query_schema () =
   let descriptor = required_internal_descriptor "keeper_library_search" in

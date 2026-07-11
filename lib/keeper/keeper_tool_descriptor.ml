@@ -832,11 +832,11 @@ let find_board_schema_opt name =
   match Keeper_tool_name.masc_board_name_of_keeper_name name with
   | None -> None
   | Some board_name ->
-    Board_tool_registry.schema_for_board_name board_name
-    |> Option.map (fun (s : Masc_domain.tool_schema) ->
-         remove_schema_fields
-           (Board_tool_registry.identity_fields_for_board_name board_name)
-           s.input_schema)
+    let schema = Board_tool_registry.schema_for_board_name board_name in
+    Some
+      (remove_schema_fields
+         (Board_tool_registry.identity_fields_for_board_name board_name)
+         schema.input_schema)
 
 let find_masc_schema_opt name =
   match Tools.find_tool name with
@@ -1135,14 +1135,9 @@ let board_descriptor name description ~readonly =
     ()
 ;;
 
-let masc_board_descriptor (schema : Masc_domain.tool_schema) =
-  let name = schema.name in
-  let suffix =
-    String.sub
-      name
-      (String.length "masc_board_")
-      (String.length name - String.length "masc_board_")
-  in
+let masc_board_descriptor board_name =
+  let schema = Board_tool_registry.schema_for_board_name board_name in
+  let name = Tool_name.Board_name.to_string board_name in
   let metadata = Tool_catalog.metadata name in
   let readonly =
     match metadata.readonly with
@@ -1150,25 +1145,36 @@ let masc_board_descriptor (schema : Masc_domain.tool_schema) =
     | None -> List.mem name Board_tool_dispatch.tool_spec_read_only
   in
   let policy =
+    let visibility =
+      match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+      | Keeper_tool_name.Direct_masc -> metadata.visibility
+      | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
+        Tool_catalog.Hidden
+    in
     policy
-      ~visibility:metadata.visibility
+      ~visibility
       ~readonly
       ?effect_domain:metadata.effect_domain
       ~approval:No_approval
       ~retryable:readonly
       ()
   in
+  let input_schema =
+    remove_schema_fields
+      (Board_tool_registry.identity_fields_for_board_name board_name)
+      schema.input_schema
+  in
   in_process_descriptor
-    ~id:("masc.board." ^ suffix)
+    ~id:("masc.board." ^ Tool_name.Board_name.operation_name board_name)
     ~name
     ~description:schema.description
-    ~input_schema:schema.input_schema
+    ~input_schema
     ~policy
     ~handler:Tool_masc_board_dispatch
 ;;
 
 let masc_board_descriptors =
-  List.map masc_board_descriptor Board_tool_registry.tools
+  List.map masc_board_descriptor Tool_name.Board_name.all
 ;;
 
 let voice_descriptor name description ~readonly =

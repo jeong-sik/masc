@@ -64,15 +64,14 @@ let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
         true))
     schemas
 
-let masc_board_tools_with_keeper_wrappers =
-  [
-    "masc_board_comment";
-    "masc_board_curation_submit";
-    "masc_board_cleanup";
-    "masc_board_post";
-    "masc_board_vote";
-    "masc_board_delete";
-  ]
+let is_keeper_model_board_route name =
+  match Tool_name.Board_name.of_string name with
+  | None -> true
+  | Some board_name ->
+    (match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+     | Keeper_tool_name.Direct_masc -> true
+     | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only -> false)
+;;
 
 (* ── Schema injection filter ──────────────────────────────────── *)
 
@@ -173,17 +172,11 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
            true
        | None -> false)
   in
-  (* masc_board_* tools that have keeper_board_* wrappers with auto-injected
-     author/voter fields. Exposing both leads to the LLM calling the raw
-     masc_* variant without the required author, causing "author is required". *)
-  let has_keeper_board_wrapper name =
-    List.mem name masc_board_tools_with_keeper_wrappers
-  in
   List.filter (fun (s : Masc_domain.tool_schema) ->
       String.starts_with ~prefix:"masc_" s.name
       && not (is_keeper_mcp_context_required s.name)
       && supported_in_keeper s.name
-      && not (has_keeper_board_wrapper s.name))
+      && is_keeper_model_board_route s.name)
       schemas
 
 let keeper_supported_masc_tool_names_from_schemas schemas =
@@ -207,6 +200,7 @@ let descriptor_candidate_tool_names () =
   |> List.concat_map (fun descriptor ->
     Keeper_tool_descriptor.public_names_of_descriptor descriptor
     @ Keeper_tool_descriptor.internal_names descriptor)
+  |> List.filter is_keeper_model_board_route
   |> dedupe_tool_names
 
 let keeper_base_candidate_tool_names () =
@@ -218,6 +212,7 @@ let keeper_base_candidate_tool_names () =
     @ descriptor_candidate_tool_names ()
     @ keeper_internal_candidate_tool_names
     @ injected_masc_tool_names () )
+  |> List.filter is_keeper_model_board_route
   |> List.filter (fun name -> not (is_keeper_maintenance_only_tool name))
 
 module StringSet = Set_util.StringSet
@@ -286,7 +281,9 @@ let filter_by_universe ~(lookup : tool_access_lookup) (name : string) : bool =
     registered candidates and not denied.
     All tools must exist in candidate_set — rejects hallucinated tool names. *)
 let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
-  if Keeper_tool_registry.is_core_always_tool name then
+  if not (is_keeper_model_board_route name) then
+    false
+  else if Keeper_tool_registry.is_core_always_tool name then
     (* Core tools bypass candidate_set — only deny_set blocks them *)
     not (StringSet.mem name lookup.deny_set)
   else if not (StringSet.mem name lookup.candidate_set) then
@@ -350,6 +347,7 @@ let failing_minimum_tool_names () : string list =
     |> List.map (fun (t : Masc_domain.tool_schema) -> t.Masc_domain.name)
   in
   shard_floor @ essential_masc_minimum_names
+  |> List.filter is_keeper_model_board_route
   |> List.sort_uniq String.compare
 
 let keeper_allowed_tool_names ?(write_done = false)
@@ -383,6 +381,7 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
   in
   let from_core =
     Keeper_tool_registry.core_always_tools
+    |> List.filter is_keeper_model_board_route
     |> List.filter (fun name -> not (StringSet.mem name lookup.deny_set))
   in
   dedupe_tool_names (from_candidates @ from_core)
@@ -396,6 +395,7 @@ let descriptor_model_tool_schemas () =
   Keeper_tool_descriptor.all_descriptors ()
   |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
     Keeper_tool_descriptor.internal_names descriptor
+    |> List.filter is_keeper_model_board_route
     |> List.map (fun name ->
       { Masc_domain.name
       ; description = descriptor.description

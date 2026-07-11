@@ -501,6 +501,84 @@ let test_tool_not_allowed_reason_label_is_bounded () =
       check bool "reason label is bounded vocabulary"
         true (List.mem reason valid))
 
+let test_raw_board_wrapper_routes_are_not_keeper_candidates () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_raw_board_wrapper"
+    (fun ~config ~meta ~ctx_work ->
+      List.iter
+        (fun board_name ->
+          match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+          | Keeper_tool_name.Keeper_wrapper _ ->
+            let name = Tool_name.Board_name.to_string board_name in
+            let result =
+              KET.execute_keeper_tool_call_with_outcome
+                ~config
+                ~meta
+                ~ctx_work
+                ~exec_cache:None
+                ~name
+                ~input:(`Assoc [])
+                ()
+            in
+            check string (name ^ " outcome") "failure" (outcome_label result.outcome);
+            let json = Yojson.Safe.from_string result.raw_output in
+            check string
+              (name ^ " candidate rejection")
+              "not_in_candidate_set"
+              Yojson.Safe.Util.(member "reason" json |> to_string)
+          | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only -> ())
+        Tool_name.Board_name.all)
+;;
+
+let test_raw_board_runtime_is_fail_closed () =
+  let meta = make_meta ~name:"keeper-board-runtime-guard" () in
+  let check_rejection board_name expected_kind expected_class =
+    let name = Tool_name.Board_name.to_string board_name in
+    let raw =
+      Masc.Keeper_tool_in_process_runtime.handle_masc_board
+        ~meta
+        ~name
+        ~args:(`Assoc [])
+    in
+    let json = Yojson.Safe.from_string raw in
+    check string
+      (name ^ " rejection kind")
+      expected_kind
+      Yojson.Safe.Util.(member "error_kind" json |> to_string);
+    check string
+      (name ^ " failure class")
+      expected_class
+      Yojson.Safe.Util.(member "failure_class" json |> to_string);
+    check string
+      (name ^ " payload classification")
+      "structured_error"
+      (payload_kind (KET.classify_tool_result_payload raw))
+  in
+  check_rejection
+    Tool_name.Board_name.Board_post
+    "keeper_wrapper_required"
+    "policy_rejection";
+  check_rejection
+    Tool_name.Board_name.Board_cleanup
+    "external_only_board_route"
+    "policy_rejection";
+  let raw =
+    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+      ~meta
+      ~name:"masc_board_not_registered"
+      ~args:(`Assoc [])
+  in
+  let json = Yojson.Safe.from_string raw in
+  check string
+    "unknown Board route is explicit"
+    "unknown_board_route"
+    Yojson.Safe.Util.(member "error_kind" json |> to_string);
+  check string
+    "unknown Board route is a runtime invariant failure"
+    "runtime_failure"
+    Yojson.Safe.Util.(member "failure_class" json |> to_string)
+;;
+
 let test_keeper_tools_list_json_uses_typed_groups () =
   let meta =
     make_meta
@@ -1722,6 +1800,10 @@ let () =
         test_tool_not_allowed_denied_by_policy_counter;
       test_case "reason label is bounded vocabulary" `Quick
         test_tool_not_allowed_reason_label_is_bounded;
+      test_case "raw Board wrapper routes are not Keeper candidates" `Quick
+        test_raw_board_wrapper_routes_are_not_keeper_candidates;
+      test_case "raw Board runtime routes fail closed" `Quick
+        test_raw_board_runtime_is_fail_closed;
     ]);
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick

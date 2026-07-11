@@ -23,27 +23,33 @@ end
 
 module Board_name : sig
   type t =
-    | Board_cleanup
+    | Board_post
+    | Board_post_update
+    | Board_list
+    | Board_post_get
     | Board_comment
+    | Board_vote
+    | Board_stats
+    | Board_search
     | Board_comment_vote
+    | Board_reaction
+    | Board_profile
+    | Board_hearths
     | Board_curation_read
     | Board_curation_submit
     | Board_delete
-    | Board_post_get
-    | Board_hearths
-    | Board_list
-    | Board_post
-    | Board_post_update
-    | Board_profile
-    | Board_reaction
-    | Board_search
-    | Board_stats
+    | Board_cleanup
     | Board_sub_board_create
-    | Board_sub_board_delete
-    | Board_sub_board_get
     | Board_sub_board_list
+    | Board_sub_board_get
     | Board_sub_board_update
-    | Board_vote
+    | Board_sub_board_delete
+
+  val all : t list
+  (** Exhaustive Board operation vocabulary in stable advertised order. *)
+
+  val operation_name : t -> string
+  (** Stable operation token without the [masc_board_] transport prefix. *)
 
   val to_string : t -> string
   val of_string : string -> t option

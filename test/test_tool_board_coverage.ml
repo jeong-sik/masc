@@ -848,7 +848,73 @@ let test_keeper_board_post_preserves_meta_reason () =
   Alcotest.(check string) "existing meta preserved" "probe-1"
     Yojson.Safe.Util.(json |> member "meta" |> member "trace" |> to_string);
   Alcotest.(check string) "author forced from keeper meta" "judge-keeper"
-    Yojson.Safe.Util.(json |> member "author" |> to_string)
+    Yojson.Safe.Util.(json |> member "author" |> to_string);
+  Alcotest.(check string) "keeper provenance remains automation" "automation"
+    Yojson.Safe.Util.(json |> member "post_kind" |> to_string)
+
+let test_keeper_board_sub_board_owner_is_runtime_bound () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let keeper_meta = make_keeper_meta ~name:"sub-board-keeper" () in
+  let slug = "typed-owner-boundary" in
+  let created =
+    Keeper_tool_board_runtime.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_sub_board_create"
+      ~args:
+        (make_args
+           [ "slug", `String slug
+           ; "name", `String "Typed owner boundary"
+           ; "description", `String "owner comes from keeper identity"
+           ; "owner", `String "spoofed-owner"
+           ])
+  in
+  Alcotest.(check bool) "sub-board create succeeds" false
+    (contains_substring created "error");
+  let fetched =
+    Keeper_tool_board_runtime.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_sub_board_get"
+      ~args:(make_args [ "sub_board_id", `String slug ])
+  in
+  Alcotest.(check bool) "owner is keeper identity" true
+    (contains_substring fetched "Owner: sub-board-keeper");
+  Alcotest.(check bool) "spoofed owner is absent" false
+    (contains_substring fetched "spoofed-owner")
+
+let test_direct_board_reaction_binds_keeper_identity () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "reaction identity target"
+         ; "author", `String "post-author"
+         ])
+  in
+  Alcotest.(check bool) "target post created" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
+  in
+  let keeper_meta = make_keeper_meta ~name:"reaction-keeper" () in
+  let reacted =
+    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+      ~meta:keeper_meta
+      ~name:"masc_board_reaction"
+      ~args:
+        (make_args
+           [ "target_type", `String "post"
+           ; "target_id", `String post_id
+           ; "user_id", `String "spoofed-user"
+           ; "emoji", `String "👍"
+           ])
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check string) "reaction identity is runtime-owned" "reaction-keeper"
+    Yojson.Safe.Util.(reacted |> member "user_id" |> to_string)
 
 let test_keeper_board_post_rejects_quantitative_line_claim_without_evidence () =
   with_eio @@ fun env ->
@@ -2649,6 +2715,10 @@ let () =
             test_post_create_sources_footer_and_meta;
           Alcotest.test_case "keeper board post preserves meta reason" `Quick
             test_keeper_board_post_preserves_meta_reason;
+          Alcotest.test_case "keeper sub-board owner is runtime-bound" `Quick
+            test_keeper_board_sub_board_owner_is_runtime_bound;
+          Alcotest.test_case "direct Board reaction binds keeper identity" `Quick
+            test_direct_board_reaction_binds_keeper_identity;
           Alcotest.test_case
             "keeper board post rejects quantitative line claim without evidence"
             `Quick

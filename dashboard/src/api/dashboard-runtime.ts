@@ -673,6 +673,9 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     supports_extended_thinking: asBoolean(raw.supports_extended_thinking),
     supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     accepted_reasoning_efforts: decodeNullableStringArray(raw.accepted_reasoning_efforts),
+    // Keep the server-projected wire opaque. The OCaml/OAS capability enum is
+    // the SSOT; duplicating its variants here would drift on the next catalog
+    // release and turn a received value into a false "missing" state.
     thinking_control_format: asNullableString(raw.thinking_control_format),
     preserve_thinking_control_format: asNullableString(raw.preserve_thinking_control_format),
     reasoning_output_format: asNullableString(raw.reasoning_output_format),

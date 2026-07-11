@@ -2848,6 +2848,40 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.librarian')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
+
+  it('preserves thinking-control wires without duplicating the server enum', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        providers: [
+          {
+            provider: 'ollama.deepseek',
+            runtime_id: 'ollama.deepseek',
+            models: ['deepseek'],
+            effective_capabilities: {
+              thinking_control_format: 'ollama-think',
+            },
+          },
+          {
+            provider: 'future.model',
+            runtime_id: 'future.model',
+            models: ['model'],
+            effective_capabilities: {
+              thinking_control_format: 'future-undocumented-wire',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeProviders()
+
+    expect(result.providers[0]?.effective_capabilities?.thinking_control_format).toBe('ollama-think')
+    expect(result.providers[1]?.effective_capabilities?.thinking_control_format).toBe('future-undocumented-wire')
+  })
 })
 
 describe('fetchRuntimeModelMetrics', () => {

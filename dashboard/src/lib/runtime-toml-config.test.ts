@@ -427,13 +427,17 @@ thinking-control-format = "reasoning-effort"
     const env = parseRuntimeTomlEnvironment(sourceWithCaps)
 
     const structuredModel = env.models.find(m => m.id === 'structured')
+    // thinking-control-format is present in the fixture (mirroring a real
+    // runtime.toml) but intentionally NOT projected into RuntimeTomlModel:
+    // OAS request-building never reads this key (masc #21521), so the parser
+    // does not resurface it as a client-editable field.
     expect(structuredModel).toMatchObject({
       jsonSupport: true,
       toolChoice: true,
       structuredOutput: false,
       multimodal: true,
-      thinkingControlFormat: 'reasoning-effort',
     })
+    expect(structuredModel).not.toHaveProperty('thinkingControlFormat')
   })
 
   it('treats absent capability keys as unknown (null), never a fabricated false', () => {
@@ -445,7 +449,6 @@ thinking-control-format = "reasoning-effort"
       toolChoice: null,
       structuredOutput: null,
       multimodal: null,
-      thinkingControlFormat: null,
     })
   })
 

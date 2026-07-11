@@ -45,7 +45,7 @@
 <body>
 <main>
   <h1>MASC issue root-cause improvement program</h1>
-  <p class="sub">Living report · initial capture 2026-07-11 02:57:15 KST · latest update 2026-07-11 13:38 KST · branch <code>codex/issue-root-cause-20260711</code> · source <code>origin/main@b1f5712856268bcd8797f99d8cacbfc4cac75fee</code> · live runtime <code>cfc19f4375</code></p>
+  <p class="sub">Living report · initial capture 2026-07-11 02:57:15 KST · latest update 2026-07-11 13:40 KST · branch <code>codex/issue-root-cause-20260711</code> · base <code>origin/main@b1f5712856</code> · candidate <code>7f8c7c4524</code> · live runtime <code>cfc19f4375</code></p>
 
   <div class="summary">
     <div class="stat"><strong>285</strong><span>open GitHub issues in the latest live snapshot</span></div>
@@ -153,7 +153,8 @@
     <tr><td>Current source</td><td><span class="status work">IN PROGRESS</span> rebased source main <code>b1f5712856</code>; first axis #24032</td><td>upstream 10 commits와 changed-path 교집합 0; source/runtime truth는 계속 분리</td></tr>
     <tr><td>Runtime</td><td><span class="status work">DEGRADED, RECHECKED</span> 7 fibers, 12 pending, 1 inflight, 5 paused</td><td>현재 실행 binary는 <code>cfc19f4375</code>라 #24032 source 변경 효과를 주장하지 않는다.</td></tr>
     <tr><td>Research HTML</td><td><span class="status ok">COMPLETE</span> 680개 inventory, 20개 primary reference</td><td>HTML의 과거 PR/퍼센트는 사실로 쓰지 않고 current source만 권위로 사용</td></tr>
-    <tr><td>Implementation</td><td><span class="status work">ADVERSARIAL REPAIR COMPLETE</span> #24032 typed capability/projection SSOT</td><td>독립 <code>Tool_capability_id</code>, exhaustive Board projection, sole Keeper exposure, capability-wide deny, raw bypass fail-close, typed route-miss telemetry</td></tr>
+    <tr><td>Implementation</td><td><span class="status work">DRAFT PR</span> <a href="https://github.com/jeong-sik/masc/pull/24079">#24079</a> · head <code>7f8c7c4524</code></td><td>독립 <code>Tool_capability_id</code>, exhaustive Board projection, sole Keeper exposure, capability-wide deny, raw bypass fail-close, typed route-miss telemetry</td></tr>
+    <tr><td>CI</td><td><span class="status pending">RUNNING</span> initial 7 checks pending</td><td>PR Sync, Fundamental lint, axis/coverage checks, changed-file ocamlformat, TLA annotation drift. Full Dune/type/link/test 결과가 최종 권위다.</td></tr>
   </table>
 
   <h2>#24032 구현 체크포인트</h2>
@@ -184,6 +185,7 @@
     <tr><td>2026-07-11 13:22 KST</td><td>source를 <code>b1f5712856</code>에 conflict 없이 rebase. #24049 lifecycle admission 이슈와 재측정 runtime을 반영하고, #24032 적대적 감사 blocker 및 structured logging 교차 문제를 교정.</td></tr>
     <tr><td>2026-07-11 13:25 KST</td><td>#24033–#24069 구간의 open issue 15개를 기존 8개 root axis에 delta 분류. 새 독립 axis 없음; compound issue 4개 분할 필요.</td></tr>
     <tr><td>2026-07-11 13:38 KST</td><td>최종 적대적 source/type/API 재감사에서 P0/P1 잔여 없음. OCaml parse/format, Dashboard typecheck, diff whitespace 검증을 재통과하고 보고서를 다시 열었다.</td></tr>
+    <tr><td>2026-07-11 13:40 KST</td><td>Draft PR <a href="https://github.com/jeong-sik/masc/pull/24079">#24079</a> 생성. candidate <code>7f8c7c4524</code>는 mergeable이며 초기 CI 7개가 실행 중.</td></tr>
   </table>
 
   <footer>

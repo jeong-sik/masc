@@ -301,21 +301,66 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
 // race the in-flight stream entries.
 const hydratedChatKeepers = new Set<string>()
 const keeperReceiptReconciliationGeneration = new Map<string, number>()
-const pendingTerminalTranscriptConvergence = new Map<string, Set<string>>()
+const pendingTerminalTranscriptConvergence = new Map<string, Map<string, string | null>>()
+const terminalTranscriptConvergenceFlights = new Map<string, Promise<string[]>>()
 
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
   keeperReceiptReconciliationGeneration.clear()
   pendingTerminalTranscriptConvergence.clear()
+  terminalTranscriptConvergenceFlights.clear()
 }
 
-async function fetchAndMergeKeeperChatHistory(keeperName: string): Promise<number> {
+async function fetchAndMergeKeeperChatHistory(keeperName: string): Promise<Set<string>> {
   const history = await fetchKeeperChatHistory(keeperName)
   if (history.length > 0) {
     mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
   }
-  return history.filter(message => message.role === 'assistant').length
+  return new Set(history.flatMap(message => (
+    message.role === 'assistant' && message.turn_ref?.trim()
+      ? [message.turn_ref.trim()]
+      : []
+  )))
+}
+
+async function convergeTerminalTranscript(keeperName: string): Promise<string[]> {
+  const existing = terminalTranscriptConvergenceFlights.get(keeperName)
+  if (existing) return existing
+  const flight = (async (): Promise<string[]> => {
+    const targets = new Map(pendingTerminalTranscriptConvergence.get(keeperName) ?? [])
+    if (targets.size === 0) return []
+    try {
+      const assistantTurnRefs = await fetchAndMergeKeeperChatHistory(keeperName)
+      const current = pendingTerminalTranscriptConvergence.get(keeperName)
+      const failures: string[] = []
+      for (const [receiptId, outcomeRef] of targets) {
+        if (outcomeRef && assistantTurnRefs.has(outcomeRef)) {
+          current?.delete(receiptId)
+        } else if (!outcomeRef) {
+          failures.push(`transcript convergence for ${receiptId} has no outcome_ref`)
+        } else {
+          failures.push(
+            `transcript convergence for ${receiptId} did not find turn_ref ${outcomeRef}`,
+          )
+        }
+      }
+      if (current?.size === 0) pendingTerminalTranscriptConvergence.delete(keeperName)
+      return failures
+    } catch (err) {
+      return [
+        `transcript convergence for ${[...targets.keys()].join(', ')}: ${err instanceof Error ? err.message : 'history lookup failed'}`,
+      ]
+    }
+  })()
+  terminalTranscriptConvergenceFlights.set(keeperName, flight)
+  try {
+    return await flight
+  } finally {
+    if (terminalTranscriptConvergenceFlights.get(keeperName) === flight) {
+      terminalTranscriptConvergenceFlights.delete(keeperName)
+    }
+  }
 }
 
 /** Merge the server-persisted chat transcript
@@ -818,10 +863,10 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
           break
         case 'delivered':
           if (currentState !== 'delivered' && currentState !== 'failed') {
-            const receiptIds = pendingTerminalTranscriptConvergence.get(keeperName)
-              ?? new Set<string>()
-            receiptIds.add(receiptId)
-            pendingTerminalTranscriptConvergence.set(keeperName, receiptIds)
+            const receiptTargets = pendingTerminalTranscriptConvergence.get(keeperName)
+              ?? new Map<string, string | null>()
+            receiptTargets.set(receiptId, receipt.state.outcomeRef)
+            pendingTerminalTranscriptConvergence.set(keeperName, receiptTargets)
           }
           finalizeAssistantEntry(keeperName, entry.id, {
             delivery: 'delivered',
@@ -832,6 +877,16 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
           })
           break
         case 'failed':
+          if (
+            receipt.state.outcomeRef
+            && currentState !== 'delivered'
+            && currentState !== 'failed'
+          ) {
+            const receiptTargets = pendingTerminalTranscriptConvergence.get(keeperName)
+              ?? new Map<string, string | null>()
+            receiptTargets.set(receiptId, receipt.state.outcomeRef)
+            pendingTerminalTranscriptConvergence.set(keeperName, receiptTargets)
+          }
           finalizeAssistantEntry(keeperName, entry.id, {
             delivery: 'error',
             streamState: null,
@@ -847,32 +902,18 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
       )
     }
   }))
-  const receiptIdsAwaitingTranscript = pendingTerminalTranscriptConvergence.get(keeperName)
+  const receiptsAwaitingTranscript = pendingTerminalTranscriptConvergence.get(keeperName)
   if (
-    receiptIdsAwaitingTranscript
-    && receiptIdsAwaitingTranscript.size > 0
+    receiptsAwaitingTranscript
+    && receiptsAwaitingTranscript.size > 0
     && keeperReceiptReconciliationGeneration.get(keeperName) === generation
   ) {
     // Receipt settlement and transcript persistence are separate projections.
-    // Keep this work pending until a bounded, authoritative history fetch sees
-    // an assistant row. A failed/empty fetch is retried by the next visible
-    // receipt poll even though the local ACK row is already terminal.
-    try {
-      const assistantCount = await fetchAndMergeKeeperChatHistory(keeperName)
-      if (assistantCount > 0) {
-        if (keeperReceiptReconciliationGeneration.get(keeperName) === generation) {
-          pendingTerminalTranscriptConvergence.delete(keeperName)
-        }
-      } else {
-        failures.push(
-          `transcript convergence for ${[...receiptIdsAwaitingTranscript].join(', ')} returned no assistant rows`,
-        )
-      }
-    } catch (err) {
-      failures.push(
-        `transcript convergence for ${[...receiptIdsAwaitingTranscript].join(', ')}: ${err instanceof Error ? err.message : 'history lookup failed'}`,
-      )
-    }
+    // The receipt outcome_ref is the exact turn_ref persisted on the assistant
+    // row. Keep retrying until that identity appears; old non-empty history can
+    // never satisfy a newer receipt. One in-flight fetch per Keeper prevents a
+    // stalled response body from multiplying on each visible poll.
+    failures.push(...await convergeTerminalTranscript(keeperName))
   }
   const stillQueued = (keeperThreads.value[keeperName] ?? []).some(entry => (
     entry.role === 'assistant'

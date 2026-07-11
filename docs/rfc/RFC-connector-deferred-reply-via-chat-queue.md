@@ -1,274 +1,288 @@
 ---
 rfc: "connector-deferred-reply-via-chat-queue"
-title: "Connector deferred reply: busy-path messages must drain through the chat queue, not a poll-only async store"
-status: Draft
+title: "Durable Keeper chat receipts and connector delivery settlement"
+status: Active
 created: 2026-06-30
-updated: 2026-06-30
+updated: 2026-07-11
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0203", "0217", "0223", "0225", "0226", "0232"]
-implementation_prs: []
+related: ["0203", "0217", "0223", "0225", "0226", "0232", "masc#23925"]
+implementation_prs: [24139]
 ---
 
-# RFC: Connector deferred reply via the chat queue
+# RFC: Durable Keeper chat receipts and connector delivery settlement
 
 ## 1. Problem
 
-A keeper in autonomous / `Busy` state receives a connector (Discord) message,
-emits a "busy, I'll answer later" ACK, finishes its in-flight work — and never
-answers the queued connector message. The deferred reply is generated but never
-delivered back to the channel.
+A busy Keeper can accept a Dashboard, Discord, or Slack message after returning
+the acknowledgement “your message is queued”. Acceptance used to mean only that
+an in-memory or partially persisted payload existed. It did not prove that:
 
-### 1.1 Observed mechanism (verified, file:line)
+- the individual message had a durable identity;
+- a restart would replay the same message;
+- an active lease remained observable as work in progress;
+- the turn persisted a reply or failure marker;
+- the originating connector delivered the terminal response; or
+- the Dashboard invalidated and reread the authoritative queue projection.
 
-The non-busy and busy gate paths diverge in `gate_keeper_backend.ml`:
+The old public destructive dequeue and a second consumer watchdog made the gap
+worse. A payload could disappear before its terminal outcome was known, and a
+watchdog could settle a lease while the underlying turn continued.
 
-- **Inbound recording (both paths):** `dispatch_core` records the connector user
-  line at the gate boundary — `Keeper_chat_store.append_user_message`
-  (`lib/gate_keeper_backend.ml:299`), per RFC-0226 ("the gate inbound boundary is
-  the sole recorder of connector user lines").
-- **Busy branch:** when `Keeper_turn_admission.in_flight = Some info`
-  (`lib/gate_keeper_backend.ml:359`), it returns `` `Async_ack `` and calls
-  `Keeper_tool_surface.dispatch ~name:"masc_keeper_msg" ~args`
-  (`lib/gate_keeper_backend.ml:367-370`). It builds a busy ACK reply
-  (`busy_ack_reply_text`, `:133`) with `message_request = Some request` and the
-  original Discord fiber sends the ACK and **returns**.
-- `masc_keeper_msg` resolves to `Keeper_msg_async.submit`
-  (`lib/keeper/keeper_tool_surface_ops.ml:103`), which forks a background daemon
-  fiber. That fiber runs `Turn.handle_keeper_msg`
-  (`lib/keeper/keeper_turn.ml:1320`) → `Keeper_turn_admission.run_serialized`,
-  which **waits fiber-cooperatively** for the in-flight turn to release, then runs
-  a genuine keeper turn (`keeper_turn_admission.mli:56`). So the deferred turn
-  **does** execute — the drain is not the break.
-- **The break is outbound routing.** The busy turn's success callback,
-  `append_direct_chat_pair_if_reply` (`lib/keeper/keeper_tool_surface_ops.ml:583`),
-  writes the assistant reply only to `Keeper_chat_store` + `Keeper_chat_broadcast`
-  (dashboard SSE; `keeper_chat_broadcast.mli` — "the dashboard uses it to re-merge
-  the server transcript live"). It has **no connector outbound**.
-  `keeper_msg_async.ml` contains zero references to discord / send_message /
-  adapter_loop / chat_queue.
+## 2. Required invariant
 
-### 1.2 The only Discord-outbound path is never fed
+Every accepted message has one stable `Receipt_id` and follows this closed
+lifecycle:
 
-The single code path that forks a Discord delivery adapter
-(`Keeper_chat_discord.adapter_loop`, `lib/server/server_bootstrap_loops.ml:1050`)
-is `Keeper_chat_consumer`'s `handle_turn`, which drains a **different** store:
-`Keeper_chat_queue`. But `Keeper_chat_queue.enqueue`
-(`lib/keeper/keeper_chat_queue.ml:275`) has **zero production callers** —
-repo-wide it is invoked only by tests (`test/test_keeper_chat_coalescing.ml`,
-`test/test_keeper_effective_meta_overlay.ml`). The drain + outbound half of the
-pipeline is wired (`Keeper_chat_consumer.start`,
-`server_bootstrap_loops.ml:989`); the producer half is not.
-
-Result: busy connector messages flow into `Keeper_msg_async` (poll-only, no
-outbound), while the outbound-capable `Keeper_chat_queue` is never populated. Two
-disjoint async subsystems.
-
-### 1.3 This completes RFC-0225 §3.1, which was only half-implemented
-
-RFC-0225 §3.1 specifies: "The `fork_daemon`-per-request pattern in
-`keeper_msg_async.ml` is replaced by a per-keeper serial consumer fiber draining
-the queued chat requests through the same admission point." Rollout Phase 1:
-"Admission primitive + chat lane serial consumer (3.1)."
-
-What shipped: the admission primitive (`run_serialized` / `in_flight`),
-`Keeper_chat_consumer`, `Keeper_chat_queue` (typed source + outbound adapter).
-What did **not** ship: routing the busy connector path off `Keeper_msg_async`
-(fork-per-request, poll-only) onto `Keeper_chat_queue`. This RFC finishes that
-migration for the connector lane.
-
-### 1.4 History (not a regression)
-
-The user-described behaviour — busy ACK now, automatic answer later — was never
-built in any version. The Python sidecar's only deferred mechanism was an
-**operator-triggered** emoji-reaction re-submission (`_drain_pending`), dropped on
-the in-process gateway migration (the `Reaction_add` "drain pending messages …
-dropped" comment, `lib/server/server_discord_in_process_gateway.ml:544`). This is
-a missing feature, not a regression.
-
-## 2. Non-goals
-
-- **External-attention wake gate (separate axis).** `Keeper_external_attention`
-  records connector urgency (`Mention | Direct_message | Ambient`) but is consumed
-  only by `operator_digest.ml:287` (digest/dashboard); the reactive-wake gate keys
-  on `Keeper_approval_queue.has_pending_for_keeper`, a different queue. Making the
-  connector backlog drive a wake belongs to the RFC-0020 data-channel frame and is
-  out of scope here. The user's scenario is a message that already entered the chat
-  lane (it was dispatched and got a busy ACK), so this RFC closes it without the
-  wake-gate change.
-- Not a turn-admission redesign; RFC-0225's `run_serialized` stays as-is.
-- Not removing `Keeper_msg_async` wholesale. Keeper→keeper messaging and operator
-  `masc_keeper_msg` retain their poll/`masc_keeper_msg_result` semantics. Only the
-  **gate connector** busy branch is rerouted.
-
-## 3. Design
-
-### 3.1 Route the busy connector branch into `Keeper_chat_queue`
-
-In `gate_keeper_backend.dispatch_core`, replace the busy-branch
-`Keeper_msg_async.submit` call with `Keeper_chat_queue.enqueue` carrying a typed
-`message_source`. The already-wired `Keeper_chat_consumer` then drains it once the
-slot frees (coalescing same-source batches via `dequeue_batch` / `merge_batch`)
-and `handle_turn` forks `Keeper_chat_discord.adapter_loop ~channel_id` to deliver
-the reply to the channel. The non-busy branch keeps streaming the immediate reply
-unchanged.
-
-### 3.2 Typed source mapping — no string match (key boundary decision)
-
-`gate_keeper_backend` is connector-neutral by design (RFC-0226): `dispatch_core`
-sees only a string `lane = channel` (`"discord"`, …), `channel_workspace_id`
-(= Discord channel_id snowflake), and `channel_user_id`. But
-`Keeper_chat_queue.message_source` is a typed sum
-(`Dashboard | Discord {channel_id; user_id} | Slack {channel; user_id}`).
-
-Mapping `lane` → `message_source` by `match lane with "discord" -> …` is a
-string classifier — forbidden (CLAUDE.md "노 스트링 매치"; AI anti-pattern #2/#4).
-
-#### Layering constraint (discovered during implementation)
-
-The first instinct — thread a typed `Surface_ref.t` or `message_source` through
-the `Channel_gate.dispatch_fn` type — does **not** type-check: `channel_gate` lives
-in the `masc_gate` library, which `masc` (where `Surface_ref` / `message_source` /
-`gate_keeper_backend` live) **depends on**. Putting a `masc`-level type on a
-`masc_gate` function signature is a dependency cycle (`masc_gate → masc`).
-
-**Resolution — `connector_kind` injected at dispatch construction (not per
-message):** the connector type (Discord vs Slack vs sidecar) is a property of the
-*connector*, not of each message; the per-message varying data (channel_id,
-user_id) already arrives as `channel_workspace_id` / `channel_user_id`. So:
-
-- Define a leaf variant in `masc` (next to the routing site):
-  `type connector_kind = Discord | Slack | Generic`.
-- Add `?connector_kind` to `Gate_keeper_backend.dispatch` /
-  `dispatch_with_text_snapshot` (functions in `masc`, **not** the `masc_gate`
-  `dispatch_fn` type). The Discord gateway bakes `~connector_kind:Discord` in at
-  partial-application time, when it constructs its `dispatch`; the remaining
-  signature still matches `streaming_dispatch_fn`, so `masc_gate` is untouched and
-  no cycle is introduced. Default `Generic` preserves today's behaviour for every
-  caller that does not opt in (HTTP gate-route sidecars, tests).
-- `dispatch_core`'s busy branch maps `connector_kind` + channel_id + user_id →
-  `message_source` via an **exhaustive** match (a new `connector_kind` variant
-  fails to compile until handled). No string match; the typed discrimination
-  happens where the type is known (the connector), threaded as a typed value.
-
-The pure decision is `route_busy_connector` (§4.0), exhaustive over
-`connector_kind`.
-
-### 3.3 message_source coverage gap (honest constraint)
-
-`message_source` is a closed 3-variant sum. HTTP gate-route sidecars
-(imessage-bot, cli-connector) also POST to `/api/v1/gate/message` and converge on
-`dispatch_core` (RFC-0226 §3.3 amendment) with a generic `channel` label that is
-neither `discord` nor `slack` nor `dashboard`. Two admissible resolutions, to be
-decided in review:
-
-- **(a) Scope deferred-queue delivery to connectors with an in-process outbound
-  adapter** (Discord, Slack). Sidecars that POST-and-await keep their current
-  synchronous/poll semantics; the typed map returns `None` for them and the busy
-  branch falls back to today's `Keeper_msg_async` path. Smallest blast radius.
-- **(b) Widen `message_source`** with a generic `Gate {label; channel_id;
-  user_id}` variant and a matching outbound delivery adapter. Larger, but unifies
-  every gate connector under the serial consumer (full RFC-0225 §3.1 intent).
-
-This RFC recommends **(a)** first (surgical, closes the reported Discord bug),
-with **(b)** as a follow-up once a generic gate outbound adapter exists.
-
-### 3.4 Recording ownership — source-keyed user-line write
-
-`Keeper_chat_consumer.handle_turn` invokes `process_single_turn`
-(`lib/server/server_routes_http_keeper_stream.ml:669`), which records the user
-line itself (`persist_user_message_only`, `:736`; `append_turn`, `:755`). That is
-correct for **dashboard** stream messages (no gate inbound recorder) but would
-**double-record** a connector user line, since the gate inbound already recorded
-it (`gate_keeper_backend.ml:299`, RFC-0226's sole-recorder invariant).
-
-**Resolution (typed, exhaustive):** the consumer-driven turn records the user line
-only when there is no upstream recorder, keyed on the typed `message_source`:
-
-```ocaml
-match queued_message.source with
-| Dashboard            -> record user line   (* no gate inbound recorder *)
-| Discord _ | Slack _  -> assistant-only     (* gate inbound owns the user line *)
+```text
+Pending -> Inflight -> Delivered
+                    \-> Failed
 ```
 
-This preserves RFC-0226's ownership split (gate inbound = connector user line;
-reply path = assistant) under the unified consumer, with no dedup and no
-string-keyed branch. A new source variant forces a compile-time decision.
+`Delivered` means the complete delivery boundary succeeded:
 
-## 4. Verification
+1. the Keeper turn produced a visible terminal result;
+2. the transcript write committed; and
+3. for Discord or Slack, the connector's primary terminal send committed.
 
-### 4.0 The fix must introduce a testable routing seam (harness-first)
+`Failed` is also terminal and carries a typed failure kind plus detail. It is
+not silently converted into success. Structured process cancellation is the one
+non-terminal exit: it nacks the lease back to `Pending` with the same receipt ID.
 
-Today the busy branch hard-calls `Keeper_tool_surface.dispatch ~name:"masc_keeper_msg"`
-inline (`lib/gate_keeper_backend.ml:367-370`), and `test/test_gate_keeper_backend.ml`
-exercises only `Gate_keeper_backend`'s pure helpers — there is **no harness that
-drives `dispatch_core`'s busy branch end-to-end**, and no injection point for the
-routing decision. A deterministic "red now, green after" reproduction therefore
-cannot be written against the current code without standing up a full runtime
-(proc_mgr / net / a live keeper turn).
+Messages from the same source may be coalesced into one Keeper turn, but the
+lease retains every constituent receipt and finalizes them atomically.
 
-The fix extracts the busy-connector routing decision into a pure, injectable
-function whose effect is observable — e.g.
+## 3. Durable queue contract
 
-```ocaml
-type connector_kind = Discord | Slack | Generic
+### 3.1 Snapshot schema
 
-(* pure, exhaustive over connector_kind: decide where a busy connector
-   message goes, building the typed message_source from per-message ids *)
-val route_busy_connector
-  :  connector_kind
-  -> channel_id:string
-  -> user_id:string
-  -> [ `Enqueue_chat_queue of Keeper_chat_queue.message_source
-     | `Async_poll (* §3.3 fallback: Generic has no in-process outbound adapter *) ]
+The on-disk SSOT is the BasePath-owned file:
+
+```text
+<base>/.masc/keepers/<keeper>/chat-queue.json
 ```
 
-The enqueue side effect (`Keeper_chat_queue.length` / `dequeue`) is the
-deterministic seam the test asserts against. This is the harness-first part of the
-fix, not an afterthought: the routing decision becomes a total function over the
-typed source, and the test pins it.
+Schema `keeper_chat_queue.v2` contains:
 
-### 4.1 Tests
+- a monotonic `revision`;
+- every receipt ID;
+- `Pending` and `Inflight` message payloads;
+- lease ID and start time for `Inflight`; and
+- terminal completion/failure metadata without message bodies or attachments.
 
-- **Routing decision (pure, deterministic):** `route_busy_connector
-  ~source:(Some (Discord {channel_id; user_id}))` → `` `Enqueue_chat_queue (Discord …) ``;
-  a source with no chat-queue projection (§3.3) → `` `Async_poll ``. Exhaustive over
-  `message_source`.
-- **Reproduction test (failing-first), `test/test_keeper_busy_connector_deferred.ml`:**
-  hold the turn slot busy (the proven `Keeper_turn_admission.For_testing.reset` +
-  forked `run_serialized` blocking on a `release` promise pattern from
-  `test_keeper_turn_admission.ml`), dispatch a Discord-source gate message, and
-  assert `Keeper_chat_queue.length ~keeper_name ≥ 1` with `source = Discord
-  {channel_id; _}`. Pre-fix the busy branch routes into `Keeper_msg_async`, so
-  `length = 0` — **red**. Post-fix — **green**.
-- **Ownership regression guard:** assert the gate inbound records the user line
-  exactly once and the consumer-driven turn records it zero additional times for a
-  `Discord` source (no double-record).
-- **Drain/coalesce:** reuse the existing `test_keeper_chat_coalescing.ml` harness
-  to assert same-source coalescing of multiple busy-arrival connector messages into
-  one follow-up turn.
-- **TLA+ bug model (CLAUDE.md pattern), optional:** `BugAction` = busy connector
-  message routed to a store with no outbound; `Invariant` = every accepted
-  connector message eventually has an outbound delivery attempt. Clean spec passes;
-  buggy spec violates.
+The revision domain is capped at JavaScript's exact JSON integer boundary
+(`2^53 - 1`) because the same value crosses the Dashboard JSON/SSE boundary.
+The next mutation fails explicitly with `Revision_exhausted`; it never wraps a
+signed `int64` into a corrupt negative snapshot.
 
-## 5. Rollout
+Every mutation is written atomically before the API reports success. A failed
+write rolls the in-memory mutation and revision back. Corrupt or unreadable
+snapshots remain untouched, make that Keeper queue unavailable, and surface an
+explicit load error. They are never interpreted as an empty queue.
 
-1. Typed `connector_source` threaded through gate dispatch + busy-branch enqueue
-   into `Keeper_chat_queue` (§3.1–3.3 option (a)).
-2. Source-keyed user-line ownership in the consumer turn (§3.4).
-3. Failing reproduction test flips to green; coalescing + ownership guards added.
-4. Follow-up (separate RFC/PR): generic gate outbound adapter (§3.3 option (b))
-   and the external-attention wake gate (§2, RFC-0020 frame).
+### 3.2 Version-1 migration
 
-## 6. Workaround self-check (CLAUDE.md gate)
+Production snapshots existed as `keeper_chat_queue.v1` before this contract.
+Startup therefore performs one explicit migration transaction:
 
-- Telemetry-as-fix: no — this routes the message to a store that delivers, it does
-  not merely count the drop.
-- String/substring classifier: no — §3.2 explicitly replaces a would-be string
-  match with a typed `Surface_ref → message_source` exhaustive mapping.
-- N-of-M: no — the migration is the producer half of RFC-0225 §3.1, completed for
-  the connector lane in one place; §3.3 names the remaining coverage decision
-  rather than silently patching one site.
-- Cap/cooldown/dedup/repair: none introduced.
+1. strictly decode the v1 shape;
+2. mint one receipt for each legacy inflight/pending payload;
+3. replay legacy inflight payloads ahead of pending payloads; and
+4. atomically replace the file with strict v2.
+
+After that transaction there is no v1 runtime fallback or dual-write path. A
+malformed v1/v2 file is a load error, not a compatibility success.
+
+### 3.3 Restart recovery
+
+An `Inflight` snapshot means the previous process did not durably settle the
+lease. Startup atomically moves those receipts back to `Pending`, preserving
+their IDs and FIFO order, and increments the revision. Delivery is therefore
+at-least-once; connector and transcript effects must remain idempotent where
+their downstream contracts permit it.
+
+Reconfiguring BasePath first clears the in-memory registry and then loads the
+new workspace. Receipts from one BasePath must never appear in another.
+
+### 3.4 Mutation surface
+
+The public queue API is intentionally narrow:
+
+- `enqueue` returns the durable receipt, revision, pending count, and inflight
+  count only after commit;
+- `lease_batch` changes a same-source pending run to `Inflight` atomically;
+- `finalize` commits `Delivered` or `Failed` for the exact lease;
+- `nack` returns the exact lease to `Pending`; and
+- `snapshot` / `lookup_receipt` are read-only diagnostics; exact lookup returns
+  the receipt and revision from one locked observation.
+
+There is no public unleased `dequeue`, `clear`, `remove_matching`, or untyped
+`ack` path.
+
+## 4. Turn and connector settlement
+
+### 4.1 One timeout owner
+
+The Keeper turn runtime owns timeout and cancellation. The queue consumer does
+not race it with a second wall-clock watchdog. The turn returns a typed terminal
+outcome, and the consumer persists that exact decision before allowing another
+queued turn for the Keeper.
+
+If finalization persistence fails, the consumer retains the decision in memory
+and retries the same finalization. It does not rerun the Keeper turn and does
+not release the Keeper dispatch gate until settlement succeeds.
+
+### 4.2 Connector join
+
+For Discord and Slack, the consumer starts the outbound adapter before the turn
+and joins its terminal callback after the turn finishes. The callback reports
+exactly one result for the primary final reply or error reply.
+
+- preview edits and rich side messages do not settle the receipt;
+- an interim stream-protocol diagnostic cannot mask a later final-send failure;
+- a missing connector credential becomes `Connector_unavailable`;
+- a terminal HTTP/API failure becomes `Delivery_failed`; and
+- empty terminal connector output is a failure, not implicit success.
+
+When both the turn and connector delivery fail, the durable receipt records the
+connector delivery failure and retains the typed turn failure in its detail.
+The transcript already contains the turn-side failure marker.
+
+Dashboard-originated queued turns have no external adapter. Their event stream
+is still drained so backpressure cannot stall the turn, and transcript commit is
+their delivery boundary.
+
+### 4.3 Recording ownership
+
+The source variant fixes transcript ownership without string classification:
+
+```ocaml
+match source with
+| Dashboard -> turn records user and assistant rows
+| Discord _ | Slack _ -> gate records the user row; turn records assistant only
+```
+
+This preserves the single connector-inbound recorder defined by RFC-0226.
+
+## 5. Admission and lane isolation
+
+The autonomous lane yields while the Keeper has either pending or inflight chat
+receipts. Leasing must not create a race window in which an autonomous turn can
+overtake the queued chat turn.
+
+Direct Dashboard and connector turns use non-blocking admission. Route-level
+queue observations are only fast paths: after acquiring the Keeper turn slot,
+the admission boundary rereads parked waiters and active durable receipts before
+running the turn. A receipt committed or leased before that post-lock read wins
+FIFO priority; queue read errors fail closed and route the message through the
+durable enqueue/error path.
+
+Queue state and finalization state are per Keeper. Different Keepers may drain
+concurrently. A corrupt snapshot, connector failure, or stuck finalization for
+one Keeper must not block another Keeper lane.
+
+## 6. Dashboard and acknowledgement wiring
+
+### 6.1 Busy acknowledgement
+
+A successful busy acknowledgement includes:
+
+- `receipt_id`;
+- committed `queue_revision`;
+- pending and inflight counts; and
+- a typed queued status source.
+
+If durable enqueue fails, the route returns an explicit error and must not claim
+the message is queued.
+
+The Dashboard handles `KEEPER_CHAT_QUEUED` as a server acceptance receipt. It
+keeps the chat row in `queued` state after the short acknowledgement stream ends
+and preserves the receipt ID, revision, and queue position in message details.
+Browser-local unsent drafts are labelled separately as “server not accepted”.
+
+The exact lifecycle and its atomic snapshot revision are queryable at
+`GET /api/v1/keepers/<name>/chat/receipts/<receipt_id>`. Queue-change SSE remains
+an invalidation rather than lifecycle truth: the Dashboard rereads this endpoint
+for every visible busy-ACK receipt and moves that chat row to
+`pending`, `inflight`, `delivered`, or `failed`. A receipt-query failure is
+operator-visible and never guessed as success. Revision comparison prevents an
+older concurrent GET from regressing a newer terminal row. Receipt observation,
+reconnect hydration, and a visible-panel safety poll provide catch-up when the
+queue invalidation arrives before the stream acknowledgement or is missed during
+a disconnect.
+
+A delivered receipt's `outcome_ref` is the exact `turn_ref` persisted on its
+assistant transcript row. Terminal transcript convergence is complete only when
+the bounded history read contains that identity; an older non-empty history
+window is not success. The history and receipt deadlines cover response-body
+parsing as well as response headers, and the Dashboard permits only one terminal
+convergence read per Keeper at a time. Failed, empty, stale, or timed-out reads
+remain pending for the next visible-panel poll.
+
+`Delivered.outcome_ref` is non-optional at the queued-turn boundary. If a
+successful-looking provider reply omits or malforms `turn_ref`, the transcript
+row is retained for diagnosis but the receipt terminates as typed
+`Missing_turn_ref`/`Internal_error`; the server never fabricates a join key or
+emits `Delivered` without one. If a legacy or corrupt snapshot still projects a
+`Delivered` receipt without a nonblank key, the Dashboard surfaces a correlation
+invariant error and stops terminal-convergence retries for that receipt.
+The queue consumer repeats this invariant at its final typed boundary:
+`Delivered` carries a required canonical `turn_ref` string, and an invalid value
+is finalized as `Internal_error`, never as `Delivered` with a missing key. A
+`Failed` outcome may omit correlation, but a supplied value must be the same
+canonical key; invalid values are omitted with explicit failure detail rather
+than sanitized into a different identity.
+
+### 6.2 Authoritative queue projection
+
+`Server_keeper_waiting_inventory` exposes separate
+`chat_queue_pending` and `chat_queue_inflight` rows. Each row includes receipt
+ID, source, timestamp, and lifecycle detail. Snapshot load failures appear as
+explicit `read_error` rows.
+
+Every committed mutation invokes one post-commit transition observer outside
+queue locks. The server emits `keeper_chat_queue_changed` with Keeper name and
+revision. This event is an invalidation signal: the Dashboard debounces it and
+rereads the authoritative waiting inventory instead of reconstructing state
+from deltas.
+
+The chat composer renders server pending/inflight/read-error counts independently
+from browser-local drafts and from the Keeper's active turn state. The waiting
+inventory renders each active receipt ID, lifecycle, lease ID, and inflight start
+time so a reloaded Dashboard still has a correlation path.
+
+## 7. Verification
+
+Focused regression coverage must prove:
+
+- `Pending -> Inflight -> Delivered|Failed` and exact receipt lookup;
+- coalescing preserves all receipt identities;
+- nack and restart preserve receipt IDs;
+- enqueue, lease, finalize, and nack persistence failures roll back;
+- v1 migration happens once and malformed snapshots fail closed;
+- BasePath reconfiguration does not leak the registry;
+- cancellation nacks, while unexpected exceptions become terminal failures;
+- failed finalization persistence retries without redelivering the turn;
+- different Keeper queues dispatch concurrently;
+- a receipt committed after a stale outer peek still blocks direct admission,
+  both while Pending and Inflight;
+- connector ACK receipt matches the durable snapshot;
+- Discord/Slack terminal callback failures remain visible;
+- Dashboard busy ACK rows remain `queued` after `RUN_FINISHED`;
+- pending/inflight/read-error rows reach the Dashboard projection; and
+- missing or malformed queued-turn `turn_ref` never reaches `Delivered`; and
+- queue-change SSE triggers an authoritative refresh.
+
+Full Dune remains CI authority. Local validation uses focused repo wrapper
+targets plus the relevant Dashboard typecheck and Vitest suites.
+
+## 8. Non-goals
+
+- Generic sidecar connectors without an in-process outbound adapter retain the
+  async-poll path.
+- This RFC does not redesign the general Keeper event queue.
+- Connector-specific rich formatting is a separate transport contract; this
+  RFC only requires its terminal delivery result to settle truthfully.
+- Terminal receipt retention/archival policy may move to a separate append-only
+  ledger, but active receipts must never be pruned or hidden by that work.

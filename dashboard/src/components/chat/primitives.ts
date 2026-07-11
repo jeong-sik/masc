@@ -446,6 +446,39 @@ function showDeliveryBadge(entry: KeeperConversationEntry, variant: ChatTranscri
   return entry.delivery !== 'history' && entry.delivery !== 'delivered'
 }
 
+function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
+  const receiptId = entry.details?.queueReceiptId?.trim()
+  const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
+  const queueState = entry.details?.queueState
+  if (!receiptId || !queueState) return null
+  const label = (() => {
+    switch (queueState) {
+      case 'pending': return '서버 대기'
+      case 'inflight': return 'Keeper 처리 중'
+      case 'delivered': return '처리 완료'
+      case 'failed': return '처리 실패'
+      default: return '상태 확인 필요'
+    }
+  })()
+  const shutdownLabel = shutdownOperationId ? ' · 종료 후 처리' : ''
+  const title = [
+    `receipt ${receiptId}`,
+    label,
+    shutdownOperationId ? `shutdown operation ${shutdownOperationId}` : null,
+  ].filter((value): value is string => value !== null).join(' · ')
+  return html`
+    <span
+      class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
+      title=${title}
+      data-chat-queue-state-badge=${queueState}
+      data-chat-queue-receipt=${receiptId}
+      data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
+    >
+      ${label}${shutdownLabel}
+    </span>
+  `
+}
+
 function avatarLabel(entry: KeeperConversationEntry): string {
   if (entry.role === 'user') return '사용자'
   if (entry.label.trim()) return entry.label.trim()
@@ -580,6 +613,13 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     typeof details.usage?.totalTokens === 'number' ? { label: '토큰', value: `${details.usage.totalTokens}` } : null,
     formatCurrency(details.costUsd) ? { label: '비용', value: formatCurrency(details.costUsd)! } : null,
     details.traceId ? { label: '트레이스', value: details.traceId } : null,
+    details.queueReceiptId ? { label: '큐 receipt', value: details.queueReceiptId } : null,
+    details.queueShutdownOperationId ? { label: '종료 작업 ID', value: details.queueShutdownOperationId } : null,
+    details.queueState ? { label: '큐 상태', value: details.queueState } : null,
+    details.queueFailureKind ? { label: '큐 실패', value: details.queueFailureKind } : null,
+    typeof details.queueRevision === 'number' ? { label: '큐 revision', value: `${details.queueRevision}` } : null,
+    typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,
+    typeof details.queueInflightCount === 'number' ? { label: '접수 시 inflight', value: `${details.queueInflightCount}` } : null,
     typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
@@ -2458,6 +2498,12 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-speaker-name=${entry.speakerName ?? undefined}
       data-chat-speaker-authority=${entry.speakerAuthority ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
+      data-chat-queue-receipt-id=${entry.details?.queueReceiptId ?? undefined}
+      data-chat-queue-shutdown-operation-id=${entry.details?.queueShutdownOperationId ?? undefined}
+      data-chat-queue-state=${entry.details?.queueState ?? undefined}
+      data-chat-queue-revision=${entry.details?.queueRevision ?? undefined}
+      data-chat-queue-pending-count=${entry.details?.queuePendingCount ?? undefined}
+      data-chat-queue-inflight-count=${entry.details?.queueInflightCount ?? undefined}
       data-chat-attachment-count=${attachments.length}
       data-chat-server-attach-block-count=${attachBlocks.length}
       data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}
@@ -2495,6 +2541,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
+                    <${QueueReceiptBadge} entry=${entry} />
                     <${StreamContractBadge} badge=${streamContractBadge} compact=${true} />
                     <${ChatMetaChip} info=${surfaceInfo} compact=${true} />
                     <${ChatMetaChip} info=${speakerInfo} compact=${true} />
@@ -2518,6 +2565,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
+                    <${QueueReceiptBadge} entry=${entry} />
                     ${timestamp
                       ? html`
                           <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">

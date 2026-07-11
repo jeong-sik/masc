@@ -15,7 +15,13 @@ import type {
   DashboardKeeperWaitingKeeper,
   DashboardKeeperWaitingRow,
 } from '../../api'
-import { loadTools, toolsData, toolsError, toolsLoading } from '../tools/tool-state'
+import {
+  KEEPER_WAITING_INVENTORY_REFRESH_MS,
+  subscribeToolsAutoRefresh,
+  toolsData,
+  toolsError,
+  toolsLoading,
+} from '../tools/tool-state'
 import { StatusChip } from '../common/status-chip'
 import {
   enumLabel,
@@ -23,7 +29,7 @@ import {
   stateTone,
 } from '../tools/keeper-waiting-inventory-panel'
 import { formatDateTimeKo } from '../../lib/format-time'
-import { setupVisibleAutoRefresh, formatAutoRefreshLabel } from '../../lib/auto-refresh'
+import { formatAutoRefreshLabel } from '../../lib/auto-refresh'
 import { CountBadge } from '../v2/primitives-v2'
 
 const LANE_ROW_LIMIT = 3
@@ -35,7 +41,7 @@ const LANE_ROW_LIMIT = 3
 // 30s shared panel default because this is the live "what is this keeper
 // waiting on right now" surface; setupVisibleAutoRefresh still pauses when the
 // tab is hidden and refreshes immediately on focus/return.
-const LANE_REFRESH_MS = 15_000
+const LANE_REFRESH_MS = KEEPER_WAITING_INVENTORY_REFRESH_MS
 
 function inventoryEntry(
   inventory: DashboardKeeperWaitingInventory | null | undefined,
@@ -150,10 +156,7 @@ export function KeeperLaneStrip({
  *  inventory in place without flashing a loading gap. */
 export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
   useEffect(() => {
-    if (!toolsData.value && !toolsLoading.value) void loadTools()
-    return setupVisibleAutoRefresh(() => {
-      void loadTools()
-    }, LANE_REFRESH_MS)
+    return subscribeToolsAutoRefresh()
   }, [])
   return html`
     <${KeeperLaneStrip}

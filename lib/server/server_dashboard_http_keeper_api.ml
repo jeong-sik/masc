@@ -1112,6 +1112,61 @@ let user_model_dashboard_json ~keeper_id =
       ]
 ;;
 
+let keeper_chat_receipt_state_json = function
+  | Keeper_chat_queue.Pending ->
+    `Assoc [ "kind", `String "pending" ]
+  | Keeper_chat_queue.Inflight { lease_id; started_at } ->
+    `Assoc
+      [ "kind", `String "inflight"
+      ; "lease_id", `String lease_id
+      ; "started_at", `Float started_at
+      ]
+  | Keeper_chat_queue.Delivered completion ->
+    `Assoc
+      [ "kind", `String "delivered"
+      ; "completed_at", `Float completion.completed_at
+      ; "outcome_ref", json_string_opt completion.outcome_ref
+      ]
+  | Keeper_chat_queue.Failed failure ->
+    `Assoc
+      [ "kind", `String "failed"
+      ; ( "failure_kind"
+        , `String (Keeper_chat_queue.failure_kind_to_string failure.kind) )
+      ; ( "detail"
+        , `String (Observability_redact.redact_text failure.detail) )
+      ; "completed_at", `Float failure.completed_at
+      ; "outcome_ref", json_string_opt failure.outcome_ref
+      ]
+;;
+
+let keeper_chat_receipt_json ~keeper_name ~revision
+    (receipt : Keeper_chat_queue.receipt_view) =
+  `Assoc
+    [ "schema", `String "keeper_chat_queue.receipt.v1"
+    ; "keeper_name", `String keeper_name
+    ; ( "receipt_id"
+      , `String
+          (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
+    ; "revision", `Intlit (Int64.to_string revision)
+    ; "state", keeper_chat_receipt_state_json receipt.state
+    ]
+;;
+
+let keeper_chat_receipt_route req_path =
+  if not (String.starts_with ~prefix:keeper_api_prefix req_path)
+  then None
+  else
+    let rest =
+      String.sub req_path (String.length keeper_api_prefix)
+        (String.length req_path - String.length keeper_api_prefix)
+    in
+    match String.split_on_char '/' rest with
+    | [ keeper_name; "chat"; "receipts"; receipt_id ]
+      when keeper_name <> "" && receipt_id <> "" ->
+      Some (keeper_name, receipt_id)
+    | _ -> None
+;;
+
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in
@@ -1126,6 +1181,30 @@ let handle_keeper_get_subroutes state req request reqd =
     let slen = String.length suffix in
     String.trim (String.sub req_path plen (tlen - plen - slen))
   in
+  match keeper_chat_receipt_route req_path with
+  | Some (name, raw_receipt_id) ->
+    if not (Keeper_config.validate_name name)
+    then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json (Printf.sprintf "invalid keeper name: %s" name))
+    else
+      (match Keeper_chat_queue.Receipt_id.of_string raw_receipt_id with
+       | Error message ->
+         Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+           (error_json message)
+       | Ok receipt_id ->
+         (match Keeper_chat_queue.lookup_receipt ~keeper_name:name ~receipt_id with
+          | Error error ->
+            Server_auth.respond_json_value_with_cors ~status:`Service_unavailable
+              request reqd
+              (error_json (Keeper_chat_queue.mutation_error_to_string error))
+          | Ok { receipt = None; _ } ->
+            Server_auth.respond_json_value_with_cors ~status:`Not_found request reqd
+              (error_json "keeper chat receipt not found")
+          | Ok { revision; receipt = Some receipt } ->
+            Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+              (keeper_chat_receipt_json ~keeper_name:name ~revision receipt)))
+  | None ->
   if ends_with "/digest" then (
     (* Keeper catch-up digest (since-last-seen). Inherits the enclosing
        prefix_get "/api/v1/keepers/" + with_public_read gating, same as the

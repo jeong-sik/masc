@@ -15,6 +15,7 @@ open Alcotest
 
 module TO = Masc.Keeper_turn_outcome
 module Ops = Masc.Keeper_tool_surface_ops
+module Stream = Server_routes_http_keeper_stream
 
 let outcome : TO.t testable =
   testable
@@ -199,6 +200,43 @@ let test_turn_ref_payload_decode () =
   check (option turn_ref_t) "non-string field -> None" None
     (TO.turn_ref_of_reply_payload (payload [ (TO.turn_ref_wire_key, `Int 5) ]))
 
+let test_queued_delivery_requires_exact_turn_ref () =
+  let check_failed label payload_json =
+    match
+      payload_json
+      |> TO.turn_ref_of_reply_payload
+      |> Stream.For_testing.queued_delivery_outcome_of_turn_ref
+    with
+    | Stream.Failed { kind = Stream.Missing_turn_ref; detail } ->
+        check bool (label ^ " has diagnostic detail") true
+          (String.trim detail <> "")
+    | Stream.Failed _ | Stream.Delivered _ | Stream.Deferred _ ->
+        fail (label ^ " must fail with Missing_turn_ref")
+  in
+  check_failed "missing turn_ref"
+    (payload [ ("reply", `String "hi") ]);
+  check_failed "malformed turn_ref"
+    (payload
+       [ ("reply", `String "hi")
+       ; (TO.turn_ref_wire_key, `String "not-a-turn-ref")
+       ]);
+  let valid =
+    payload
+      [ ("reply", `String "hi")
+      ; (TO.turn_ref_wire_key, `String "trace-queued#42")
+      ]
+  in
+  match
+    valid
+    |> TO.turn_ref_of_reply_payload
+    |> Stream.For_testing.queued_delivery_outcome_of_turn_ref
+  with
+  | Stream.Delivered { outcome_ref } ->
+      check string "valid turn_ref is preserved exactly"
+        "trace-queued#42" outcome_ref
+  | Stream.Failed _ | Stream.Deferred _ ->
+    fail "valid turn_ref must produce Delivered"
+
 let body fields = Yojson.Safe.to_string (`Assoc fields)
 
 let test_direct_reply_visible_text () =
@@ -252,6 +290,8 @@ let () =
           test_case "prefix is dead" `Quick test_prefix_is_dead;
           test_case "turn_ref decode (parse, don't repair)" `Quick
             test_turn_ref_payload_decode;
+          test_case "queued delivery requires exact turn_ref" `Quick
+            test_queued_delivery_requires_exact_turn_ref;
         ] );
       ( "direct_reply",
         [

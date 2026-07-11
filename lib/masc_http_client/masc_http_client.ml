@@ -34,6 +34,8 @@ type response = {
   body : string;
 }
 
+let default_request_timeout_sec = 10.0
+
 (** Apply an optional Eio wall-clock timeout around a request. When both
     [clock] and [timeout_sec] are supplied, a sleep fiber races the request
     fiber; whichever finishes first wins and the loser is cancelled. On
@@ -137,6 +139,11 @@ let get_sync ?clock ?timeout_sec ~url ~headers () =
   match get_response_sync ?clock ?timeout_sec ~url ~headers () with
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error
+
+module For_testing = struct
+  let with_request_timeout ~clock ~timeout_sec f =
+    with_optional_timeout ~clock ~timeout_sec f
+end
 
 (* ── Observability ────────────────────────────────────────────────── *)
 

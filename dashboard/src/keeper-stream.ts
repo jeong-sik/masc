@@ -34,6 +34,7 @@ import { isRecord, asNumber, asString } from './components/common/normalize'
 import { toolEntryIdFromCallId } from './tool-call-output-store'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
+import { isKeeperChatReceiptId } from './lib/keeper-chat-receipt'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
@@ -647,6 +648,57 @@ export function applyKeeperStreamEvent(
           'queued',
           keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', { eventName: 'KEEPER_QUEUE_REQUEST' }),
         )
+        return null
+      }
+      if (event.name === 'KEEPER_CHAT_QUEUED') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        const queued = isRecord(event.value) ? event.value : null
+        const receiptId = asString(queued?.receipt_id, '').trim()
+        const revision = asNumber(queued?.queue_revision)
+        const pendingCount = asNumber(queued?.pending_count)
+        const inflightCount = asNumber(queued?.inflight_count)
+        const shutdownOperationId = (() => {
+          const raw = queued?.shutdown_operation_id
+          if (raw === null) return null
+          if (typeof raw !== 'string') return undefined
+          const normalized = raw.trim()
+          return normalized.length > 0 ? normalized : undefined
+        })()
+        if (
+          !isKeeperChatReceiptId(receiptId)
+          || typeof revision !== 'number'
+          || !Number.isSafeInteger(revision)
+          || revision < 0
+          || typeof pendingCount !== 'number'
+          || !Number.isSafeInteger(pendingCount)
+          || pendingCount < 1
+          || typeof inflightCount !== 'number'
+          || !Number.isSafeInteger(inflightCount)
+          || inflightCount < 0
+        ) {
+          return 'Keeper queue acceptance is missing its durable receipt metadata.'
+        }
+        if (shutdownOperationId === undefined) {
+          return 'Keeper queue acceptance has invalid shutdown operation metadata.'
+        }
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          delivery: 'queued',
+          streamState: null,
+          details: {
+            ...(entry.details ?? {}),
+            queueReceiptId: receiptId,
+            queueShutdownOperationId: shutdownOperationId,
+            queueRevision: revision,
+            queuePendingCount: pendingCount,
+            queueInflightCount: inflightCount,
+            queueState: 'pending',
+          },
+          streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {
+            eventName: 'KEEPER_CHAT_QUEUED',
+            reason: `durable receipt ${receiptId}`,
+          }),
+        }))
         return null
       }
       if (event.name === 'KEEPER_CONTINUATION_CHECKPOINT') {

@@ -178,7 +178,26 @@ let rejected_snapshot slot =
     slot.rejected_chat_count <- slot.rejected_chat_count + 1;
     { waiting = slot.waiting
     ; in_flight = slot.info
-    ; shutdown_operation_id = None
+    ; shutdown_operation_id = slot.shutdown_operation_id
+    })
+;;
+
+let rejection_snapshot slot =
+  Stdlib.Mutex.protect slot.state_mu (fun () ->
+    { waiting = slot.waiting
+    ; in_flight = slot.info
+    ; shutdown_operation_id = slot.shutdown_operation_id
+    })
+;;
+
+(* Preserve the operation that actually rejected admission even if lifecycle
+   rollback clears the live fence before the caller renders the result. The
+   waiting/in-flight fields are still sampled together under [state_mu]. *)
+let shutdown_rejection_snapshot slot operation_id =
+  Stdlib.Mutex.protect slot.state_mu (fun () ->
+    { waiting = slot.waiting
+    ; in_flight = slot.info
+    ; shutdown_operation_id = Some operation_id
     })
 ;;
 
@@ -196,17 +215,28 @@ let run_if_free ~base_path ~keeper_name f =
      lock-only, non-suspending peek and is the SSOT signal that closes the
      gap: the autonomous lane cooperates on the same backlog the consumer
      drains, so the consumer's [in_flight = None] window opens
-     deterministically instead of racing the next autonomous cycle. *)
+     deterministically instead of racing the next autonomous cycle. A leased
+     receipt remains active until its terminal decision commits, so the
+     autonomous lane must also yield during the short lease-to-admission and
+     admission-to-finalization windows. *)
   match peek_shutdown slot with
   | Some operation_id -> `Busy (Shutdown_requested operation_id)
   | None when waiting_count slot > 0 -> `Busy (Turn_busy (peek_info slot))
-  | None when Keeper_chat_queue.length ~keeper_name > 0 ->
+  | None when not (Keeper_chat_queue.persistence_configured ()) ->
     `Busy (Turn_busy (peek_info slot))
-  | None when Eio.Mutex.try_lock slot.turn_mu ->
-    (match run_locked slot ~lane:Autonomous f with
-     | `Ran value -> `Ran value
-     | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id))
-  | None -> `Busy (Turn_busy (peek_info slot))
+  | None ->
+    let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+    if
+      snapshot.load_errors <> []
+      || snapshot.pending <> []
+      || snapshot.inflight <> []
+    then `Busy (Turn_busy (peek_info slot))
+    else if Eio.Mutex.try_lock slot.turn_mu
+    then
+      match run_locked slot ~lane:Autonomous f with
+      | `Ran value -> `Ran value
+      | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id)
+    else `Busy (Turn_busy (peek_info slot))
 ;;
 
 let run_serialized ~base_path ~keeper_name f =
@@ -226,11 +256,7 @@ let run_serialized ~base_path ~keeper_name f =
   in
   match waiter_id with
   | `Shutdown_requested operation_id ->
-    `Rejected
-      { waiting = waiting_count slot
-      ; in_flight = peek_info slot
-      ; shutdown_operation_id = Some operation_id
-      }
+    `Rejected (shutdown_rejection_snapshot slot operation_id)
   | `Rejected -> `Rejected (rejected_snapshot slot)
   | `Waiting waiter_id ->
     (* [Fun.protect] rather than [Switch.on_release]: there is no ambient
@@ -250,37 +276,41 @@ let run_serialized ~base_path ~keeper_name f =
     (match run_locked slot ~lane:Chat f with
      | `Ran value -> `Ran value
      | `Shutdown_requested operation_id ->
-       `Rejected
-         { waiting = waiting_count slot
-         ; in_flight = peek_info slot
-         ; shutdown_operation_id = Some operation_id
-         })
-;;
-
-let rejection_snapshot slot =
-  let waiting = waiting_count slot in
-  { waiting; in_flight = peek_info slot; shutdown_operation_id = None }
+       `Rejected (shutdown_rejection_snapshot slot operation_id))
 ;;
 
 let run_chat_if_free ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   match peek_shutdown slot with
   | Some operation_id ->
-    `Busy
-      { waiting = waiting_count slot
-      ; in_flight = peek_info slot
-      ; shutdown_operation_id = Some operation_id
-      }
+    `Busy (shutdown_rejection_snapshot slot operation_id)
   | None when waiting_count slot > 0 -> `Busy (rejection_snapshot slot)
   | None when Eio.Mutex.try_lock slot.turn_mu ->
-    (match run_locked slot ~lane:Chat f with
-     | `Ran value -> `Ran value
-     | `Shutdown_requested operation_id ->
-       `Busy
-         { waiting = waiting_count slot
-         ; in_flight = peek_info slot
-         ; shutdown_operation_id = Some operation_id
-         })
+    let active_receipts =
+      try Keeper_chat_queue.has_active_receipts ~keeper_name with
+      | exn ->
+        Eio.Mutex.unlock slot.turn_mu;
+        raise exn
+    in
+    (* The outer route's queue peek is only a fast path. Recheck after the
+       turn slot is acquired so a receipt committed or leased between that
+       peek and admission cannot be overtaken. The queue entry lock makes a
+       commit already in progress finish before this read returns; a commit
+       that starts after the read is ordered after this admitted turn. The
+       waiter recheck closes the equivalent increment-before-lock window for
+       [run_serialized]. Queue read errors fail closed and are surfaced by the
+       caller's durable-enqueue path. *)
+    if waiting_count slot > 0
+       || match active_receipts with Ok active -> active | Error _ -> true
+    then (
+      let rejection = rejection_snapshot slot in
+      Eio.Mutex.unlock slot.turn_mu;
+      `Busy rejection)
+    else
+      (match run_locked slot ~lane:Chat f with
+       | `Ran value -> `Ran value
+       | `Shutdown_requested operation_id ->
+         `Busy (shutdown_rejection_snapshot slot operation_id))
   | None -> `Busy (rejection_snapshot slot)
 ;;
 
@@ -520,6 +550,15 @@ let fleet_health_json ~base_path ~keeper_names =
 
 module For_testing = struct
   let reset () = Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.reset slots)
+
+  let with_unpublished_turn_lock ~base_path ~keeper_name f =
+    let slot = slot_for ~base_path ~keeper_name in
+    Eio.Mutex.lock slot.turn_mu;
+    (* fun-protect-finally-ok: Eio.Mutex.unlock is non-suspending; this helper
+       acquired the raw test-only lock immediately above and the finalizer
+       releases exactly that lock on normal return, exception, or cancellation. *)
+    Fun.protect ~finally:(fun () -> Eio.Mutex.unlock slot.turn_mu) f
+  ;;
 
   let peek ~base_path ~keeper_name =
     let key = Keeper_registry_types.registry_key ~base_path keeper_name in

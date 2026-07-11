@@ -780,10 +780,7 @@ let mark_dead_exact (expected : registry_entry) ~at =
     | Some entry ->
       let replacement =
         if entry.phase = Dead
-        then
-          { entry with
-            dead_since_ts = Some (Option.value ~default:at entry.dead_since_ts)
-          }
+        then entry
         else
           let conditions =
             { Keeper_state_machine.default_conditions with

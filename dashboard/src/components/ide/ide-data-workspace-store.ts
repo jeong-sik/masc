@@ -34,6 +34,7 @@ import {
 } from './file-tree-store'
 import {
   fetchIdeAnnotations,
+  ideScopeFromKeeperLane,
   type IdeAnnotation,
 } from '../../api/ide'
 import { registerIdeWorkspaceRefresh } from '../../sse-store'
@@ -101,8 +102,14 @@ export interface WorkspaceFetchIssueContext {
 
 type WorkspaceFetchIssueScope = Pick<WorkspaceFetchIssueContext, 'filePath' | 'keeper' | 'repoId'>
 
-function firstFilePath(nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>): string | null {
-  const firstFile = nodes.find(node => !node.hasChildren)
+export function selectInitialIdeFilePath(
+  nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>,
+): string | null {
+  // Finder metadata is a real workspace entry but never a useful first editor
+  // target. Prefer the first editable file while retaining a fallback for the
+  // unusual workspace that contains only metadata files.
+  const firstFile = nodes.find(node => !node.hasChildren && !node.path.endsWith('/.DS_Store') && node.path !== '.DS_Store')
+    ?? nodes.find(node => !node.hasChildren)
   return firstFile?.path ?? null
 }
 
@@ -373,6 +380,17 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
+    // IDE observation routes require one explicit scope. Repository scope is
+    // authoritative when configured; otherwise a selected keeper can read its
+    // own orphan observation lane without fabricating a repository identity.
+    const ideOpts = repoId
+      ? { keeper: keeperParam, repoId, signal }
+      : {
+          keeper: keeperParam,
+          repoId,
+          scope: ideScopeFromKeeperLane(keeperParam),
+          signal,
+        }
     workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
       filePath,
       keeper: keeperParam ?? null,
@@ -410,7 +428,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
       const hasCurrentFile =
         filePath !== null && nodes.some(node => node.path === filePath && !node.hasChildren)
-      const nextFile = hasCurrentFile ? null : firstFilePath(nodes)
+      const nextFile = hasCurrentFile ? null : selectInitialIdeFilePath(nodes)
       if (nextFile && nextFile !== activeIdeFile.value) {
         activeIdeFile.value = nextFile
       }
@@ -449,6 +467,35 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
           return
         }
         clearIssue('file', { filePath, keeper: keeperParam ?? null, repoId })
+
+        // The document load invalidates metadata for a different file. Start
+        // the region read only after that load has committed; doing both in
+        // parallel let a slower file response mark a valid region response as
+        // stale before it could populate the ownership projection.
+        documentStore.loadRegions(filePath, ideOpts).then(() => {
+          if (signal.aborted || documentStore.document().file_path !== filePath) return
+          for (const region of documentStore.regions()) {
+            ownershipStore.ingest({
+              file_path: region.file_path,
+              line_start: region.line_start,
+              line_end: region.line_end,
+              keeper_id: region.keeper_id,
+              timestamp_ms: region.timestamp_ms,
+              // Regions prove that a keeper operated on this code range, but the
+              // wire contract deliberately does not infer a more specific edit
+              // operation such as create/refactor/revert.
+              kind: 'observed',
+            })
+          }
+          clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
+        }).catch(error => {
+          recordIssue('regions', error, {
+            filePath,
+            keeper: keeperParam ?? null,
+            repoId,
+            fallbackMessage: 'IDE regions fetch failed',
+          })
+        })
       } else {
         recordIssue('file', new Error('workspace file response was not available'), {
           filePath,
@@ -463,19 +510,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
         keeper: keeperParam ?? null,
         repoId,
         fallbackMessage: 'workspace file fetch failed',
-      })
-    })
-
-    // Load regions
-    documentStore.loadRegions(filePath, opts).then(() => {
-      if (signal.aborted) return
-      clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
-    }).catch(error => {
-      recordIssue('regions', error, {
-        filePath,
-        keeper: keeperParam ?? null,
-        repoId,
-        fallbackMessage: 'IDE regions fetch failed',
       })
     })
 
@@ -528,7 +562,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     }
 
     // Load annotations
-    fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, opts).then(annotations => {
+    fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, ideOpts).then(annotations => {
       if (signal.aborted) return
       clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
       annotationsSignal.value = annotations

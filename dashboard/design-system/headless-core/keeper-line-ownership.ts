@@ -9,7 +9,7 @@
 
 import { kSlot, type AgentColorSlot } from './agent-presence'
 
-export type KeeperEditKind = 'edit' | 'create' | 'refactor' | 'revert'
+export type KeeperEditKind = 'edit' | 'create' | 'refactor' | 'revert' | 'observed'
 
 export interface KeeperEdit {
   readonly file_path: string

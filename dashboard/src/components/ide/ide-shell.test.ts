@@ -107,6 +107,8 @@ const dashboardFetchHandlers: ReadonlyArray<[
   [/\/api\/v1\/git\/diff/, () => jsonResponse({ unified: [] })],
   [/\/api\/v1\/ide\/regions/, () => jsonResponse({ ok: true, data: [] })],
   [/\/api\/v1\/ide\/annotations/, () => jsonResponse({ ok: true, data: [] })],
+  [/\/api\/v1\/activity\/events/, () => jsonResponse({ events: [] })],
+  [/\/api\/v1\/ide\/events/, () => jsonResponse({ ok: true, data: { events: [] } })],
   [/\/state-diagram/, () => jsonResponse({
     keeper: 'sangsu',
     current_phase: 'observe',
@@ -152,8 +154,12 @@ describe('IdeShell', () => {
     vi.stubGlobal('fetch', vi.fn(dashboardFetchMock))
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     render(null, container)
+    // Preact schedules effect disposal after the render call.  Let the
+    // activity rail clear its optional poll timer while the fetch mock is
+    // still installed, before restoring the real global fetch below.
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
     // IdeShell now shares an app-lifetime workspace-store singleton; dispose it
     // between tests (after unmount) so each test starts from a fresh store
     // instead of inheriting the previous test's tree/repo/diff state.
@@ -192,7 +198,7 @@ describe('IdeShell', () => {
     expect(buttonByText(container, 'Time').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Tools').getAttribute('aria-pressed')).toBe('false')
-    expect(container.textContent).toContain('PERSISTENCE MAP')
+    expect(container.textContent).toContain('EVENT TIMELINE')
     expect(container.textContent).toContain('Active overlays')
     expect(container.textContent).toContain('Time')
     expect(container.textContent).toContain('Approve')
@@ -908,7 +914,7 @@ describe('IdeShell', () => {
     expect(btn.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('keeps default right rail context diagnostics bounded above the primary conversation rail', () => {
+  it('uses the reference IDE activity rail and persistent terminal by default', () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -918,21 +924,21 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     const rail = container.querySelector('[data-testid="ide-right-rail"]')
-    const contextStack = container.querySelector('[data-testid="ide-right-context-stack"]')
-    const primaryRail = container.querySelector('[data-testid="ide-primary-conversation-rail"]')
     expect(rail).not.toBeNull()
-    expect(contextStack).not.toBeNull()
-    expect(primaryRail).not.toBeNull()
     expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
-    expect(buttonByText(container, 'Work Context').getAttribute('aria-selected')).toBe('true')
-    expect(buttonByText(container, 'Run Activity').getAttribute('title'))
+    expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
+    expect(buttonByText(container, '활동').getAttribute('title'))
       .toBe('Workspace and keeper activity linked to the active file and repository')
-    expect(buttonByText(container, 'Keeper Cursors').getAttribute('title'))
+    expect(buttonByText(container, '어노테이션').getAttribute('title'))
+      .toBe('File-addressable comments, decisions, questions, and bookmarks')
+    expect(buttonByText(container, '커서').getAttribute('title'))
       .toBe('Live keeper file focus and cursor stream status')
     expect(container.querySelector('[data-testid="ide-dashboard-connection"]')?.getAttribute('title'))
       .toContain('Dashboard event transport')
-    expect(container.querySelector('.ide-plane-activity')).toBeNull()
+    expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
     expect(container.querySelector('[data-testid="ide-cursor-rail"]')).toBeNull()
+    expect(container.querySelector('[data-testid="execute-output-drawer"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="ide-interject-fab"]')).not.toBeNull()
   })
 
   it('switches the IDE right rail tabs and renders cursor stream focus', async () => {
@@ -983,15 +989,18 @@ describe('IdeShell', () => {
       },
     }
 
-    fireEvent.click(buttonByText(container, 'Run Activity'))
-    expect(buttonByText(container, 'Run Activity').getAttribute('aria-selected')).toBe('true')
+    expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
     expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
-    expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
+    expect(container.querySelector('[data-testid="ide-annotation-rail"]')).toBeNull()
 
-    fireEvent.click(buttonByText(container, 'Keeper Cursors'))
-    expect(buttonByText(container, 'Keeper Cursors').getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(buttonByText(container, '어노테이션'))
+    expect(buttonByText(container, '어노테이션').getAttribute('aria-selected')).toBe('true')
     expect(container.querySelector('.ide-plane-activity')).toBeNull()
-    expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
+    expect(container.querySelector('[data-testid="ide-annotation-rail"]')).not.toBeNull()
+
+    fireEvent.click(buttonByText(container, '커서'))
+    expect(buttonByText(container, '커서').getAttribute('aria-selected')).toBe('true')
+    expect(container.querySelector('[data-testid="ide-annotation-rail"]')).toBeNull()
     const cursorRail = container.querySelector('[data-testid="ide-cursor-rail"]')
     expect(cursorRail).not.toBeNull()
     expect(cursorRail?.textContent).toContain('KEEPER CURSORS')

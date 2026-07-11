@@ -1,15 +1,47 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+const workspaceApiMocks = vi.hoisted(() => ({
+  fetchWorkspaceTree: vi.fn(),
+  fetchWorkspaceChildren: vi.fn(),
+  fetchWorkspaceFile: vi.fn(),
+  fetchGitBlame: vi.fn(),
+  fetchGitDiff: vi.fn(),
+}))
+const ideApiMocks = vi.hoisted(() => ({
+  fetchIdeAnnotations: vi.fn(),
+  fetchIdeRegions: vi.fn(),
+  ideScopeFromKeeperLane: vi.fn((keeperId: string | undefined) =>
+    keeperId ? { kind: 'keeper_lane' as const, keeperId } : null),
+}))
+
+vi.mock('../../api/repositories', () => ({
+  discoverRepositories: vi.fn().mockResolvedValue([]),
+  fetchRepositoriesList: vi.fn().mockResolvedValue([]),
+}))
+
+vi.mock('../../api/workspace', () => workspaceApiMocks)
+vi.mock('../../api/ide', () => ideApiMocks)
+vi.mock('../../sse-store', () => ({
+  registerIdeWorkspaceRefresh: vi.fn(() => () => {}),
+}))
+
 import {
   clearWorkspaceFetchIssue,
+  createIdeDataWorkspaceStore,
   replaceWorkspaceFetchIssue,
   retainCurrentWorkspaceFetchIssues,
   sameWorkspaceTreeIdentity,
+  selectInitialIdeFilePath,
   selectPreferredIdeRepositoryId,
   workspaceFetchIssueFromError,
   workspaceTreeIdentity,
 } from './ide-data-workspace-store'
 import { isDiffEditorView, viewFromRoute } from './ide-view-route'
 import type { Repository } from '../../api/repositories'
+import { activeIdeFile } from './ide-state'
+import { activeKeeperName } from '../../keeper-state'
+import { selectedTask } from '../goals/task-detail-selection'
+import { route } from '../../router'
 
 function repo(
   id: string,
@@ -28,6 +60,18 @@ function repo(
     created_at: null,
     updated_at: null,
   }
+}
+
+function seedWorkspaceApiMocks(): void {
+  workspaceApiMocks.fetchWorkspaceTree.mockResolvedValue({
+    nodes: [],
+    source: { kind: 'project' },
+    basePath: null,
+  })
+  workspaceApiMocks.fetchWorkspaceChildren.mockResolvedValue([])
+  workspaceApiMocks.fetchGitBlame.mockResolvedValue([])
+  workspaceApiMocks.fetchGitDiff.mockResolvedValue([])
+  ideApiMocks.fetchIdeAnnotations.mockResolvedValue([])
 }
 
 describe('selectPreferredIdeRepositoryId', () => {
@@ -162,6 +206,79 @@ describe('selectPreferredIdeRepositoryId', () => {
 })
 
 describe('workspace fetch diagnostics', () => {
+  it('does not choose Finder metadata as the default editor file', () => {
+    expect(selectInitialIdeFilePath([
+      { path: '.DS_Store', hasChildren: false },
+      { path: 'lib/scheduler/round.ml', hasChildren: false },
+    ])).toBe('lib/scheduler/round.ml')
+  })
+
+  it('loads regions after the active file commits and projects them to source ownership', async () => {
+    const previousFile = activeIdeFile.value
+    const previousKeeper = activeKeeperName.value
+    const previousTask = selectedTask.value
+    const previousRoute = route.value
+    let resolveFile: (value: { ok: boolean; content: string; language: string }) => void = () => {
+      throw new Error('workspace file request was not started')
+    }
+
+    vi.clearAllMocks()
+    seedWorkspaceApiMocks()
+    workspaceApiMocks.fetchWorkspaceFile.mockImplementationOnce(() => new Promise(resolve => {
+      resolveFile = resolve
+    }))
+    ideApiMocks.fetchIdeRegions.mockResolvedValueOnce([{
+      file_path: 'lib/scheduler/round.ml',
+      line_start: 2,
+      line_end: 3,
+      keeper_id: 'sangsu',
+      source_type: 'tool_call',
+      source_tool_name: 'edit_file',
+      source_turn: 7,
+      source_note: null,
+      timestamp_ms: 1_700_000_000_000,
+    }])
+    activeIdeFile.value = 'lib/scheduler/round.ml'
+    activeKeeperName.value = 'sangsu'
+    selectedTask.value = null
+    route.value = { tab: 'code', params: { view: 'source' }, postId: null }
+    const store = createIdeDataWorkspaceStore()
+
+    try {
+      await vi.waitFor(() => {
+        expect(workspaceApiMocks.fetchWorkspaceFile).toHaveBeenCalledOnce()
+      })
+      expect(ideApiMocks.fetchIdeRegions).not.toHaveBeenCalled()
+
+      resolveFile({ ok: true, content: 'let a = 1\nlet b = 2\n', language: 'ocaml' })
+
+      await vi.waitFor(() => {
+        expect(ideApiMocks.fetchIdeRegions).toHaveBeenCalledWith(
+          'lib/scheduler/round.ml',
+          expect.objectContaining({
+            repoId: null,
+            scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
+          }),
+        )
+      })
+      await vi.waitFor(() => {
+        expect(store.ownershipStore.ownership().get(2)).toMatchObject({
+          keeper_id: 'sangsu',
+          last_edit_kind: 'observed',
+        })
+      })
+      expect(store.ownershipStore.ownership().get(3)).toMatchObject({
+        keeper_id: 'sangsu',
+      })
+    } finally {
+      store.dispose()
+      activeIdeFile.value = previousFile
+      activeKeeperName.value = previousKeeper
+      selectedTask.value = previousTask
+      route.value = previousRoute
+    }
+  })
+
   it('materializes failed fetches without stringly fallback coercion', () => {
     const issue = workspaceFetchIssueFromError('diff', new Error('network down'), {
       filePath: 'lib/runtime.ml',

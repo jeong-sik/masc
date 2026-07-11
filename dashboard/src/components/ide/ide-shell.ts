@@ -13,9 +13,8 @@ import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
 import { IdeAnnotationComposer } from './ide-annotation-composer'
-import { IdeConversationRail } from './ide-conversation-rail'
 import { IdeActivityPanel } from './ide-activity-panel'
-import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
+import { IdeAnnotationRail } from './ide-annotation-rail'
 import { IdeInterject } from './ide-interject'
 import { ExecuteOutputDrawer } from './execute-output-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
@@ -29,8 +28,6 @@ import { IdeBreadcrumb } from './ide-breadcrumb'
 import { IdeReviewFocusStrip } from './ide-review-focus-strip'
 import { pinKeeper } from './multi-keeper-pin-store'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
-import { IdePersistencePanel } from './ide-persistence-panel'
-import { IdeMemoryPanel } from './ide-memory-panel'
 import { routeLinksForContext } from './ide-context-lens'
 import {
   connectKeeperCursorStream,
@@ -63,7 +60,7 @@ import { viewFromRoute } from './ide-view-route'
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
-type IdeRightRailTab = 'context' | 'activity' | 'cursors'
+type IdeRightRailTab = 'activity' | 'annotations' | 'cursors'
 type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok' | 'warn'
 type IdeConnectionTone = 'ok' | 'warn'
 
@@ -114,18 +111,18 @@ const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
 }
 const IDE_RIGHT_RAIL_TABS: ReadonlyArray<IdeRightRailTabDescriptor> = [
   {
-    id: 'context',
-    label: 'Work Context',
-    title: 'Keeper work, persistence, memory, and chat scoped to the active IDE context',
-  },
-  {
     id: 'activity',
-    label: 'Run Activity',
+    label: '활동',
     title: 'Workspace and keeper activity linked to the active file and repository',
   },
   {
+    id: 'annotations',
+    label: '어노테이션',
+    title: 'File-addressable comments, decisions, questions, and bookmarks',
+  },
+  {
     id: 'cursors',
-    label: 'Keeper Cursors',
+    label: '커서',
     title: 'Live keeper file focus and cursor stream status',
   },
 ]
@@ -1035,10 +1032,13 @@ export function IdeShell() {
   const terminalOpen =
     route.value.params.terminal === 'open'
     || Boolean(route.value.params.keeper?.trim())
+  // The reference IDE keeps the drawer in the shell at all times. A route can
+  // still opt out explicitly, while only `terminal=open` starts live output.
+  const terminalVisible = route.value.params.terminal !== 'hidden'
   const findOpen = route.value.params.find === 'open'
   const terminalKeeper = keeperFromRoute()
   const railsCollapsed = route.value.params.rails === 'hidden'
-  const [rightRailTab, setRightRailTab] = useState<IdeRightRailTab>('context')
+  const [rightRailTab, setRightRailTab] = useState<IdeRightRailTab>('activity')
   const [treeWidth, setTreeWidth] = useState<number>(readStoredIdeTreeWidth)
   const statusbar = deriveIdeStatusbarModel({
     activeView,
@@ -1194,7 +1194,7 @@ export function IdeShell() {
       class="ide-plane-shell ide-v2-surface v2-ide-surface ss-surface bg-surface-page"
       role="region"
       aria-label="Code IDE shell"
-      data-terminal-open=${terminalOpen ? 'true' : 'false'}
+      data-terminal-open=${terminalVisible ? 'true' : 'false'}
       data-rails-collapsed=${railsCollapsed ? 'true' : 'false'}
       data-tree-width=${String(treeWidth)}
     >
@@ -1331,22 +1331,6 @@ export function IdeShell() {
                 `)}
               </div>
               <div class="ide-v2-rail-scroll">
-                ${rightRailTab === 'context' ? html`
-                  <div
-                    class="ide-plane-context-stack"
-                    data-testid="ide-right-context-stack"
-                  >
-                    <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
-                    <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                    <${IdeMemoryPanel} keeperName=${terminalKeeper} repoId=${activeRepositoryId} />
-                  </div>
-                  <div
-                    class="ide-plane-primary-rail"
-                    data-testid="ide-primary-conversation-rail"
-                  >
-                    <${IdeConversationRail} />
-                  </div>
-                ` : null}
                 ${rightRailTab === 'activity' ? html`
                   <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}
@@ -1359,15 +1343,20 @@ export function IdeShell() {
                     />
                   </div>
                 ` : null}
+                ${rightRailTab === 'annotations' ? html`
+                  <div class="ide-plane-annotations" style=${{ minHeight: 0 }}>
+                    <${IdeAnnotationRail} annotations=${annotations} />
+                  </div>
+                ` : null}
                 ${rightRailTab === 'cursors' ? html`<${IdeCursorRailPanel} />` : null}
               </div>
             </div>
           `}
       </div>
-      ${terminalOpen
-        ? html`<${ExecuteOutputDrawer} keeperName=${terminalKeeper} />`
+      ${terminalVisible
+        ? html`<${ExecuteOutputDrawer} keeperName=${terminalKeeper} streamEnabled=${terminalOpen} />`
         : null}
-      <${IdeInterject} keeperName=${terminalKeeper} />
+      <${IdeInterject} keeperName=${terminalKeeper} compact=${terminalVisible} />
     </section>
   `
 }

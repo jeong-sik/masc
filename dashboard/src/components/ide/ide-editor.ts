@@ -101,6 +101,7 @@ export function IdeEditor({
   onAnnotationDelete,
 }: IdeEditorProps) {
   useStoreSubscription(documentStore.subscribe)
+  useStoreSubscription(documentStore.subscribeRegions)
   useStoreSubscription(ownershipStore.subscribe)
   useSignalValue(cursorOverlaySignal)
   useSignalValue(globalPresenceSnapshot)
@@ -131,6 +132,8 @@ export function IdeEditor({
   }
   const documentFilePath: string = document.file_path
   const lines = documentStore.lines()
+  const regions = documentStore.regions()
+  const regionsState = documentStore.regionsState()
   const ownership = ownershipStore.ownership()
   const keepers = ownershipStore.knownKeepers()
   const overlay = cursorOverlaySignal.value
@@ -149,6 +152,20 @@ export function IdeEditor({
     traceEvents: replayTraceEvents,
   })
   const gridTemplateRows = editorGridRows(activeLayerKinds.length > 0, findOpen)
+  const observationSummary = regionsState === 'loading'
+    ? 'metadata loading…'
+    : regionsState === 'error'
+      ? 'metadata unavailable'
+      : regionsState === 'idle'
+        ? 'metadata pending'
+        : `${regions.length} observed · ${ownership.size} owned · ${keepers.length} keepers`
+  const observationTitle = regionsState === 'loading'
+    ? 'Loading keeper-authored code-region metadata'
+    : regionsState === 'error'
+      ? 'Keeper code-region metadata could not be loaded; see the workspace diagnostics'
+      : regionsState === 'idle'
+        ? 'Keeper code-region metadata has not been requested for this file yet'
+        : `${regions.length} observed region(s), ${ownership.size} owned line(s), ${keepers.length} keeper(s)`
 
   return html`
     <div
@@ -185,8 +202,12 @@ export function IdeEditor({
         }}>${document.file_path}</span>
         <span style=${{ color: 'var(--color-fg-disabled)', flexShrink: 0 }}>${document.language}</span>
         <span style=${{ color: 'var(--color-accent-fg)', flexShrink: 0 }}>${VIEW_LABEL[activeView]}</span>
-        <span style=${{ marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          ${lines.length} lines · ownership · ${keepers.length} keepers · ${activeLayerKinds.length} layers
+        <span
+          style=${{ marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}
+          data-testid="ide-observation-summary"
+          title=${observationTitle}
+        >
+          ${lines.length} lines · ${observationSummary} · ${activeLayerKinds.length} layers
         </span>
         <${EditorCurrentFileSignals} signals=${currentFileSignals} />
         ${currentFileFocus ? html`
@@ -266,6 +287,7 @@ export function IdeEditor({
               documentStore=${documentStore}
               ownershipStore=${ownershipStore}
               showBlame=${activeView === 'blame'}
+              showOwnership=${ownership.size > 0}
               keepers=${keepers}
               onKeeperLineSelect=${onKeeperLineSelect}
               contextFocus=${currentFileFocus}
@@ -286,6 +308,7 @@ function CodeMirrorEditor({
   documentStore,
   ownershipStore,
   showBlame,
+  showOwnership,
   keepers,
   onKeeperLineSelect,
   annotations = [],
@@ -297,6 +320,7 @@ function CodeMirrorEditor({
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
   readonly showBlame: boolean
+  readonly showOwnership: boolean
   readonly keepers: ReadonlyArray<string>
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
   readonly annotations?: ReadonlyArray<IdeAnnotation>
@@ -348,7 +372,7 @@ function CodeMirrorEditor({
       const lang = await languageExt(mountFilePath)
       if (destroyed) return
 
-      const blameExts = showBlame ? blameExtensions() : []
+      const blameExts = showOwnership ? blameExtensions() : []
       const state = EditorState.create({
         doc: documentStore.document().content,
         extensions: [
@@ -404,7 +428,7 @@ function CodeMirrorEditor({
       })
 
       editorRef.current = view
-      if (showBlame && ownership.size > 0) {
+      if (showOwnership && ownership.size > 0) {
         pushOwnership(view, ownership)
       }
       if (traceActive && traceLines.length > 0) {
@@ -421,7 +445,7 @@ function CodeMirrorEditor({
       editorRef.current = null
       setReady(false)
     }
-  }, [document.file_path, documentStore, ownershipStore, onKeeperLineSelect, showBlame, traceActive])
+  }, [document.file_path, documentStore, ownershipStore, onKeeperLineSelect, showOwnership, traceActive])
 
   // Push document updates. The first file response can arrive before
   // the CM6 instance is ready or before this component subscribes, so
@@ -440,9 +464,9 @@ function CodeMirrorEditor({
   // Push ownership updates
   useEffect(() => {
     const view = editorRef.current
-    if (!view || !ready || !showBlame) return
+    if (!view || !ready || !showOwnership) return
     pushOwnership(view, ownership)
-  }, [ownership, ready, showBlame])
+  }, [ownership, ready, showOwnership])
 
   useEffect(() => {
     const view = editorRef.current
@@ -498,7 +522,10 @@ function CodeMirrorEditor({
   useSignalValue(keeperTraceState)
 
   return html`
-    <div class="ide-codemirror-shell v2-ide-panel" data-view=${showBlame ? 'blame' : 'source'}>
+    <div
+      class="ide-codemirror-shell v2-ide-panel"
+      data-view=${showBlame ? 'blame' : showOwnership ? 'source-ownership' : 'source'}
+    >
       ${showBlame ? BlameTimeline(ownership, keepers) : null}
       <div ref=${containerRef} class="ide-codemirror-host" />
       ${selectedAnn && editorRef.current ? AnnotationPopover({

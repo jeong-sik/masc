@@ -12,6 +12,7 @@
 /* ── Surface shell ─────────────────────────────────────────────────────────── */
 
 .ide-v2-surface {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -378,6 +379,16 @@
   overflow: hidden;
 }
 
+/* The legacy IDE used this node as a two-row CSS grid (conversation over
+   activity).  The reference surface has one continuous activity rail, so make
+   the v2 modifier authoritative even when the legacy stylesheet is emitted
+   later by the CSS bundler. */
+.ide-v2-surface .ide-v2-rail.ide-plane-conversation {
+  display: flex;
+  flex-direction: column;
+  grid-template-rows: none;
+}
+
 .ide-v2-rail-tabs {
   flex: none;
   display: flex;
@@ -385,6 +396,16 @@
   gap: 2px;
   padding: 10px 10px 0;
   border-bottom: 1px solid var(--border-soft);
+}
+
+.ide-v2-surface .ide-v2-rail-tabs.ide-rail-tabs {
+  display: flex;
+  flex: none;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  height: auto;
+  min-height: 0;
 }
 
 .ide-v2-rail-tab {
@@ -413,6 +434,11 @@
   color: var(--volt-strong);
 }
 
+.ide-v2-surface .ide-v2-rail-tabs.ide-rail-tabs > .ide-v2-rail-tab {
+  flex: 1 1 0;
+  height: auto;
+}
+
 .ide-v2-rail-scroll {
   flex: 1;
   overflow-y: auto;
@@ -422,10 +448,15 @@
   min-height: 0;
 }
 
+.ide-v2-surface .ide-v2-rail-scroll {
+  min-height: 0;
+}
+
 /* Map existing context-stack / conversation / activity panels into the rail. */
 .ide-v2-rail .ide-plane-context-stack,
 .ide-v2-rail .ide-plane-primary-rail,
 .ide-v2-rail .ide-plane-activity,
+.ide-v2-rail .ide-plane-annotations,
 .ide-v2-rail .ide-plane-cursors {
   border: 0;
   background: transparent;
@@ -447,6 +478,143 @@
   padding: 12px 12px;
   flex: 1;
   min-height: 0;
+}
+
+.ide-v2-rail .ide-plane-annotations {
+  padding: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ide-v2-rail .ide-activity-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+}
+
+/* The reference rail presents recent activity as independently scannable
+   cards, not a single uninterrupted text log. */
+.ide-v2-rail .ide-activity-row {
+  grid-template-columns: 42px 7px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.22);
+}
+
+.ide-v2-rail .ide-activity-row:hover {
+  border-color: var(--border-main);
+  background: color-mix(in srgb, var(--bg-card) 86%, var(--volt-wash));
+}
+
+.ide-annotation-rail {
+  min-height: 100%;
+}
+
+.ide-annotation-rail-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ide-annotation-rail-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--volt);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 7.25rem;
+}
+
+.ide-annotation-rail-card-main {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ide-annotation-rail-card-main:hover .ide-annotation-rail-content,
+.ide-annotation-rail-card-main:focus-visible .ide-annotation-rail-content {
+  color: var(--volt-strong);
+}
+
+.ide-annotation-rail-card-main:focus-visible {
+  outline: 1px solid var(--volt);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.ide-annotation-rail-kind,
+.ide-annotation-rail-line,
+.ide-annotation-rail-context {
+  padding: 2px 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ide-annotation-rail-kind {
+  color: var(--volt-strong);
+  background: var(--volt-wash);
+}
+
+.ide-annotation-rail-kind.is-decision { color: var(--color-status-ok); }
+.ide-annotation-rail-kind.is-question { color: var(--color-status-warn); }
+.ide-annotation-rail-kind.is-bookmark { color: var(--text-dim); }
+
+.ide-annotation-rail-line,
+.ide-annotation-rail-context {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.ide-annotation-rail-content {
+  min-width: 0;
+  color: var(--text-mid);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.ide-annotation-rail-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.ide-annotation-rail-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-annotation-rail-context {
+  margin-left: auto;
+  flex: none;
 }
 
 .ide-v2-rail .ide-plane-cursors {
@@ -570,6 +738,69 @@
   display: flex;
   flex-direction: column;
   max-height: 200px;
+}
+
+/* The live drawer retains the existing stream contract, while this v2 shell
+   gives it the compact, always-present execution-output geometry of the
+   reference IDE. */
+.ide-v2-surface > .execute-output-drawer {
+  flex: none;
+  max-height: 208px;
+  border-top: 1px solid var(--border-main);
+  background: var(--bg-well);
+}
+
+.ide-v2-surface > .execute-output-drawer .execute-output-drawer-header {
+  min-height: 30px;
+  padding: 5px 14px;
+  border-bottom-color: var(--border-soft);
+  background: var(--bg-sunken);
+}
+
+.ide-v2-surface > .execute-output-drawer [data-terminal] {
+  height: 168px !important;
+  background: var(--bg-well) !important;
+}
+
+.ide-interject-fab {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  z-index: calc(var(--z-base) + 2);
+  min-width: 82px;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid color-mix(in srgb, var(--volt) 58%, var(--border-main));
+  border-radius: 999px;
+  background: var(--volt);
+  box-shadow: 0 8px 26px color-mix(in srgb, var(--volt) 24%, transparent);
+  color: var(--bg-deep);
+  font-family: var(--font-ui);
+  font-size: var(--fs-11);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.ide-interject-fab:hover,
+.ide-interject-fab:focus-visible {
+  background: var(--volt-strong);
+  transform: translateY(-1px);
+}
+
+.ide-interject-fab:focus-visible {
+  outline: 2px solid var(--text-bright);
+  outline-offset: 2px;
+}
+
+.ide-v2-surface > .ide-interject-expanded {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  z-index: calc(var(--z-base) + 3);
+  width: min(34rem, calc(100% - 36px));
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 44px rgb(0 0 0 / 0.42);
 }
 
 .ide-v2-drawer.closed {

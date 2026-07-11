@@ -265,6 +265,9 @@ let transition_task_outcome_r
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
+              | Masc_domain.OperatorBlocked _, _ ->
+                " Remediation: task is operator-blocked. Unblocking requires operator \
+                 intervention (RFC-0323 OperatorBlocked transition)."
               | _ -> ""
             in
             Error

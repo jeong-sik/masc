@@ -81,7 +81,8 @@ let owned_active_tasks_snapshot_for_names ~(config : Workspace.config)
           | Masc_domain.AwaitingVerification _
           | Masc_domain.Todo
           | Masc_domain.Done _
-          | Masc_domain.Cancelled _ -> None)
+          | Masc_domain.Cancelled _
+          | Masc_domain.OperatorBlocked _ -> None)
       in
       Ok { tasks; backlog_tasks = backlog.tasks; backlog_version = backlog.version }
   with
@@ -145,7 +146,8 @@ let active_status_rank = function
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Todo
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> 2
+  | Masc_domain.Cancelled _
+  | Masc_domain.OperatorBlocked _ -> 2
 
 let current_task_rank (meta : Keeper_meta_contract.keeper_meta) task_id =
   match meta.current_task_id with

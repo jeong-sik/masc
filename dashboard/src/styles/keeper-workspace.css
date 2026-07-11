@@ -473,8 +473,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   line-height: 1.4;
 }
 @media (max-width: 860px) {
-  .kw-kp-more { opacity: 1; }
-  .kw-kp-row .kw-kp-right { padding-right: 30px; }
+  /* The standalone touch roster is identity-first and opens commands from the
+   * selected keeper header. Hiding the duplicate row menu gives status/model
+   * text the full narrow-screen width without removing the command surface. */
+  .kw-kp-more { display: none; }
   .kw-kp-row:hover .kw-kp-right,
   .kw-kp-row:focus-within .kw-kp-right {
     opacity: 1;

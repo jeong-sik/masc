@@ -466,6 +466,14 @@ let login_no_expiry =
     [Switch.run] wait forever. *)
 exception Graceful_shutdown
 
+type shutdown_signal =
+  | Sigterm
+  | Sigint
+
+let shutdown_signal_name = function
+  | Sigterm -> "SIGTERM"
+  | Sigint -> "SIGINT"
+
 let acquire_pid_lock port =
   match Server_startup_takeover.acquire_pid_lock port with
   | Server_startup_takeover.Acquired -> ()
@@ -568,13 +576,14 @@ let run_cmd host port cli_base_path =
      then enqueue the signal name for the Eio watcher fiber to consume.
      [Atomic.set]/[Atomic.get] are lock-free and signal-safe. *)
   let pending_shutdown_signal = Atomic.make None in
-  let request_shutdown signal_name =
+  let shutdown_watchdog : Masc.Shutdown.watchdog option Atomic.t = Atomic.make None in
+  let request_shutdown signal =
     Masc.Shutdown.mark_shutting_down ();
     if Option.is_none (Atomic.get pending_shutdown_signal) then
-      Atomic.set pending_shutdown_signal (Some signal_name)
+      Atomic.set pending_shutdown_signal (Some signal)
   in
-  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> request_shutdown "SIGTERM"));
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> request_shutdown "SIGINT"));
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> request_shutdown Sigterm));
+  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> request_shutdown Sigint));
 
   let max_bind_retries = 5 in
   let rec try_start attempt =
@@ -586,20 +595,25 @@ let run_cmd host port cli_base_path =
         | None ->
             Eio.Time.sleep clock 0.05;
             await_shutdown_signal ()
-        | Some signal_name ->
+        | Some signal ->
             let shutdown_cfg = Masc.Shutdown.config_from_env () in
             let force_timeout = shutdown_cfg.force_timeout_s in
             let t_shutdown_start = Unix.gettimeofday () in
-            Log.Server.info
-              "[MASC] Received %s, shutting down gracefully (timeout=%.0fs)..."
-              signal_name force_timeout;
-            Eio.Fiber.fork_daemon ~sw (fun () ->
-                Eio.Time.sleep clock force_timeout;
-                let elapsed = Unix.gettimeofday () -. t_shutdown_start in
-                Log.Server.error
-                  "[MASC] Graceful shutdown timed out after %.1fs (limit=%.0fs), forcing exit."
-                  elapsed force_timeout;
-                exit 1);
+            let signal_name = shutdown_signal_name signal in
+            (match
+               Masc.Shutdown.start_process_deadline_watchdog
+                 ~timeout_s:force_timeout
+             with
+             | Ok watchdog ->
+                 Atomic.set shutdown_watchdog (Some watchdog);
+                 Log.Server.info
+                   "[MASC] Received %s, shutting down gracefully (timeout=%.0fs, hard_exit=%d)..."
+                   signal_name force_timeout Masc.Shutdown.process_deadline_exit_code
+             | Error error ->
+                 Log.Server.error
+                   "[MASC] Invalid graceful shutdown deadline: %s"
+                   (Masc.Shutdown.deadline_error_to_string error);
+                 exit 1);
             (* Phase 1: Notify SSE clients *)
             let t_phase = Unix.gettimeofday () in
             let shutdown_data =
@@ -723,6 +737,13 @@ let run_cmd host port cli_base_path =
         exit 1)
   in
   try_start 0;
+  (match Atomic.get shutdown_watchdog with
+   | None -> ()
+   | Some watchdog ->
+       (match Masc.Shutdown.disarm_deadline_watchdog watchdog with
+        | Masc.Shutdown.Disarmed | Masc.Shutdown.Already_disarmed -> ()
+        | Masc.Shutdown.Already_fired ->
+            Masc.Shutdown.await_deadline_watchdog watchdog));
   Log.Server.info "MASC MCP: Shutdown complete."
 
 let run_cmd_exit host port base_path =

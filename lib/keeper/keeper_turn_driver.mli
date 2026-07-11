@@ -171,6 +171,21 @@ type attempt_inference_policy =
   }
 
 module For_testing : sig
+  type provider_attempt_outcomes
+
+  val project_provider_attempt_result :
+    replay_prefix_projection:Keeper_replay_prefix.projection ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result ->
+    provider_attempt_outcomes
+
+  val provider_result :
+    provider_attempt_outcomes ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+  val turn_result :
+    provider_attempt_outcomes ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
   val checkpoint_after_attempt :
     ?agent_ref:Agent_sdk.Agent.t option ref ->
     Agent_sdk.Agent.t option ->

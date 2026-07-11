@@ -70,6 +70,40 @@ let media_degrade_manifest_decision ~(runtime_id : string)
         ("media_dropped_counts", `String summary);
       ])
 
+type provider_run_result =
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+type provider_attempt_outcomes =
+  { provider_result : provider_run_result
+  ; turn_result : provider_run_result
+  }
+
+let project_provider_attempt_result ~replay_prefix_projection provider_result =
+  let turn_result =
+    match provider_result with
+    | Error _ as error -> error
+    | Ok run_result ->
+      (match run_result.Runtime_agent.checkpoint with
+       | None -> Ok run_result
+       | Some checkpoint ->
+         (match
+            Keeper_replay_prefix.restore_checkpoint
+              replay_prefix_projection
+              checkpoint
+          with
+          | Ok checkpoint ->
+            Ok
+              { run_result with
+                Runtime_agent.checkpoint = Some checkpoint
+              }
+          | Error error ->
+            Error
+              (Agent_sdk.Error.Internal
+                 (Keeper_replay_prefix.restore_error_to_string error))))
+  in
+  { provider_result; turn_result }
+;;
+
 type context_window_rebudget =
   { requested_context_window : int option
   ; final_runtime_context_window : int
@@ -750,27 +784,10 @@ let run_named
             Keeper_turn_driver_try_provider.run_try_provider
               try_provider_ctx ?resume_checkpoint ?per_provider_timeout_s candidate
           in
-          let result =
-            match provider_result with
-            | Error _ as error -> error
-            | Ok run_result ->
-              (match run_result.Runtime_agent.checkpoint with
-               | None -> Ok run_result
-               | Some checkpoint ->
-                 (match
-                    Keeper_replay_prefix.restore_checkpoint
-                      replay_prefix_projection
-                      checkpoint
-                  with
-                  | Ok checkpoint ->
-                    Ok
-                      { run_result with
-                        Runtime_agent.checkpoint = Some checkpoint
-                      }
-                  | Error error ->
-                    Error
-                       (Agent_sdk.Error.Internal
-                          (Keeper_replay_prefix.restore_error_to_string error))))
+          let outcomes =
+            project_provider_attempt_result
+              ~replay_prefix_projection
+              provider_result
           in
           let latency_ms =
             let ns =
@@ -783,7 +800,7 @@ let run_named
              checkpoint projection.  A fail-closed replay-prefix error must
              fail the turn without falsely degrading a provider that returned
              successfully. *)
-          (match provider_result with
+          (match outcomes.provider_result with
            | Ok _ ->
              record_candidate_health_success
                ~keeper_name
@@ -795,11 +812,16 @@ let run_named
                 record_candidate_health_rejected ~keeper_name candidate ~reason
               | Some _ | None ->
                 record_candidate_health_error ~keeper_name candidate err));
-          result, checkpoint_after))
+          outcomes.turn_result, checkpoint_after))
     attempt_runtimes
 
 
 module For_testing = struct
+  type nonrec provider_attempt_outcomes = provider_attempt_outcomes
+
+  let project_provider_attempt_result = project_provider_attempt_result
+  let provider_result outcomes = outcomes.provider_result
+  let turn_result outcomes = outcomes.turn_result
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let record_candidate_health_error = record_candidate_health_error

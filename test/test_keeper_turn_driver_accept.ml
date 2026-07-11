@@ -194,6 +194,46 @@ let test_accept_keeps_result () =
     Alcotest.failf "accepted response should pass through: %s"
       (Agent_sdk.Error.to_string err)
 
+let test_replay_projection_failure_preserves_provider_success () =
+  let open Agent_sdk.Types in
+  let canonical_prefix =
+    [ message
+        ~role:User
+        [ Text "canonical history"
+        ; image_block ~media_type:"image/png" ~data:"canonical-image" ()
+        ]
+    ]
+  in
+  let dispatch_prefix = [ message ~role:User [ Text "canonical history" ] ] in
+  let drifted_checkpoint =
+    checkpoint_with_messages [ message ~role:User [ Text "unrelated history" ] ]
+  in
+  let outcomes =
+    Masc.Keeper_turn_driver.For_testing.project_provider_attempt_result
+      ~replay_prefix_projection:
+        (Masc.Keeper_replay_prefix.media_degraded
+           ~canonical_prefix
+           ~dispatch_prefix)
+      (Ok (run_result ~checkpoint:drifted_checkpoint ()))
+  in
+  (match Masc.Keeper_turn_driver.For_testing.provider_result outcomes with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf
+       "provider success source was overwritten: %s"
+       (Agent_sdk.Error.to_string error));
+  match Masc.Keeper_turn_driver.For_testing.turn_result outcomes with
+  | Error (Agent_sdk.Error.Internal detail) ->
+    Alcotest.(check bool)
+      "local replay-prefix drift fails the turn explicitly"
+      true
+      (String.trim detail <> "")
+  | Error error ->
+    Alcotest.failf
+      "expected typed Internal replay-prefix failure, got %s"
+      (Agent_sdk.Error.to_string error)
+  | Ok _ -> Alcotest.fail "replay-prefix drift did not fail closed"
+
 let test_rejects_as_typed_accept_error () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -2376,6 +2416,10 @@ let () =
       , [
           Alcotest.test_case "accepted response passes through" `Quick
             test_accept_keeps_result;
+          Alcotest.test_case
+            "replay projection failure preserves provider success"
+            `Quick
+            test_replay_projection_failure_preserves_provider_success;
           Alcotest.test_case
             "strict tool_choice is relaxed to auto"
             `Quick

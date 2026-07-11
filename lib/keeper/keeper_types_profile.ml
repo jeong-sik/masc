@@ -340,7 +340,7 @@ let keeper_toml_unknown_keys_of_path path =
                 }))
 
 let keeper_toml_config_error_of_path path =
-  match load_keeper_toml path with
+  match inspect_keeper_toml path with
   | Ok _ -> None
   | Error error ->
     Some

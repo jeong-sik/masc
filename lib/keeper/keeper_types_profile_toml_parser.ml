@@ -310,11 +310,10 @@ let warn_unknown_keeper_toml_keys_once ~path unknown =
   in
   loop ()
 
-let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
-  match detect_unknown_keeper_toml_keys doc with
+let warn_unknown_keeper_toml_key_names ~path unknown =
+  match normalize_unknown_keeper_toml_keys unknown with
   | [] -> ()
   | unknown ->
-    let unknown = normalize_unknown_keeper_toml_keys unknown in
     if warn_unknown_keeper_toml_keys_once ~path unknown then begin
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_config_unknown_keys_ignored
@@ -326,6 +325,11 @@ let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
         path
         (String.concat ", " unknown)
     end
+
+let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
+  warn_unknown_keeper_toml_key_names
+    ~path
+    (detect_unknown_keeper_toml_keys doc)
 
 let merge_string_list ~base overlay =
   match overlay with [] -> base | xs -> xs

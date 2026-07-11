@@ -142,6 +142,15 @@ let resolve_exit_once t outcome cleanup =
   else false
 ;;
 
+let resolve_exit_without_cleanup t outcome =
+  if claim_finalization t
+  then (
+    Atomic.set t.state Exited;
+    Eio.Promise.resolve t.exited_r { outcome; cleanup_error = None };
+    true)
+  else false
+;;
+
 let rec request_cancel t =
   let current = Atomic.get t.state in
   match current with
@@ -230,7 +239,7 @@ let reject_before_start t ~reason =
   match claim_start t with
   | Error _ as error -> error
   | Ok () ->
-    if resolve_exit_once t (Failed reason) (fun _ -> Ok ())
+    if resolve_exit_without_cleanup t (Failed reason)
     then Ok ()
     else Error Already_exited
 ;;

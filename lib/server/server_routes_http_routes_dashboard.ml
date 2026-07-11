@@ -1204,18 +1204,18 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/schedule/executions" (fun request reqd ->
        with_public_read
          (fun state req reqd ->
-           let schedule_id =
-             Server_utils.query_param req "schedule_id" |> String.trim
-           in
-           if String.equal schedule_id ""
-           then
+           match
+             Server_utils.query_param req "schedule_id" |> Option.map String.trim
+           with
+           | None | Some "" ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (operator_error_json "schedule_id is required")
-           else (
+           | Some schedule_id ->
              let cursor =
-               match Server_utils.query_param req "cursor" |> String.trim with
-               | "" -> None
-               | cursor -> Some cursor
+               Server_utils.query_param req "cursor"
+               |> Option.map String.trim
+               |> Option.bind (fun cursor ->
+                 if String.equal cursor "" then None else Some cursor)
              in
              let limit =
                Server_utils.int_query_param req "limit" ~default:50
@@ -1247,7 +1247,7 @@ let add_routes ~sw ~clock router =
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (operator_error_json
                     (Server_dashboard_http_runtime_info.schedule_execution_history_page_error_to_string
-                       error)))
+                       error))
          )
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/schedule/resolve" (fun request reqd ->

@@ -178,7 +178,26 @@ let rejected_snapshot slot =
     slot.rejected_chat_count <- slot.rejected_chat_count + 1;
     { waiting = slot.waiting
     ; in_flight = slot.info
-    ; shutdown_operation_id = None
+    ; shutdown_operation_id = slot.shutdown_operation_id
+    })
+;;
+
+let rejection_snapshot slot =
+  Stdlib.Mutex.protect slot.state_mu (fun () ->
+    { waiting = slot.waiting
+    ; in_flight = slot.info
+    ; shutdown_operation_id = slot.shutdown_operation_id
+    })
+;;
+
+(* Preserve the operation that actually rejected admission even if lifecycle
+   rollback clears the live fence before the caller renders the result. The
+   waiting/in-flight fields are still sampled together under [state_mu]. *)
+let shutdown_rejection_snapshot slot operation_id =
+  Stdlib.Mutex.protect slot.state_mu (fun () ->
+    { waiting = slot.waiting
+    ; in_flight = slot.info
+    ; shutdown_operation_id = Some operation_id
     })
 ;;
 
@@ -237,11 +256,7 @@ let run_serialized ~base_path ~keeper_name f =
   in
   match waiter_id with
   | `Shutdown_requested operation_id ->
-    `Rejected
-      { waiting = waiting_count slot
-      ; in_flight = peek_info slot
-      ; shutdown_operation_id = Some operation_id
-      }
+    `Rejected (shutdown_rejection_snapshot slot operation_id)
   | `Rejected -> `Rejected (rejected_snapshot slot)
   | `Waiting waiter_id ->
     (* [Fun.protect] rather than [Switch.on_release]: there is no ambient
@@ -261,27 +276,14 @@ let run_serialized ~base_path ~keeper_name f =
     (match run_locked slot ~lane:Chat f with
      | `Ran value -> `Ran value
      | `Shutdown_requested operation_id ->
-       `Rejected
-         { waiting = waiting_count slot
-         ; in_flight = peek_info slot
-         ; shutdown_operation_id = Some operation_id
-         })
-;;
-
-let rejection_snapshot slot =
-  let waiting = waiting_count slot in
-  { waiting; in_flight = peek_info slot; shutdown_operation_id = None }
+       `Rejected (shutdown_rejection_snapshot slot operation_id))
 ;;
 
 let run_chat_if_free ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   match peek_shutdown slot with
   | Some operation_id ->
-    `Busy
-      { waiting = waiting_count slot
-      ; in_flight = peek_info slot
-      ; shutdown_operation_id = Some operation_id
-      }
+    `Busy (shutdown_rejection_snapshot slot operation_id)
   | None when waiting_count slot > 0 -> `Busy (rejection_snapshot slot)
   | None when Eio.Mutex.try_lock slot.turn_mu ->
     let active_receipts =
@@ -308,11 +310,7 @@ let run_chat_if_free ~base_path ~keeper_name f =
       (match run_locked slot ~lane:Chat f with
        | `Ran value -> `Ran value
        | `Shutdown_requested operation_id ->
-         `Busy
-           { waiting = waiting_count slot
-           ; in_flight = peek_info slot
-           ; shutdown_operation_id = Some operation_id
-           })
+         `Busy (shutdown_rejection_snapshot slot operation_id))
   | None -> `Busy (rejection_snapshot slot)
 ;;
 

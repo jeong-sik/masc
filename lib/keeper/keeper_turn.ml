@@ -1323,6 +1323,7 @@ let handle_keeper_msg
       ?on_event
       ?event_bus
       ?continuation_channel
+      ?on_admission_rejected
       ctx
       args
   : tool_result
@@ -1359,19 +1360,21 @@ let handle_keeper_msg
     with
     | `Ran result -> result
     | `Rejected
-        { Keeper_turn_admission.shutdown_operation_id = Some operation_id
-        ; _
-        } ->
+        ({ Keeper_turn_admission.shutdown_operation_id = Some operation_id
+         ; _
+         } as rejection) ->
+        Option.iter (fun notify -> notify rejection) on_admission_rejected;
         tool_result_error
           (Printf.sprintf
              "keeper %s is stopping under operation %s"
              name
              (Keeper_shutdown_types.Operation_id.to_string operation_id))
     | `Rejected
-        { Keeper_turn_admission.waiting
-        ; in_flight
-        ; shutdown_operation_id = None
-        } ->
+        ({ Keeper_turn_admission.waiting
+         ; in_flight
+         ; shutdown_operation_id = None
+         } as rejection) ->
+        Option.iter (fun notify -> notify rejection) on_admission_rejected;
         let in_flight_text =
           match in_flight with
           | None -> ""

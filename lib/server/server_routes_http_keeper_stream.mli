@@ -173,6 +173,7 @@ type queued_turn_outcome =
       { kind : queued_turn_failure_kind
       ; detail : string
       }
+  | Deferred of { rejection : Keeper_turn_admission.rejection }
 
 val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
 
@@ -252,6 +253,14 @@ module For_testing : sig
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     keeper_chat_stream_request ->
     [ `Not_busy | `Queued of int | `Queue_error of string ]
+  val defer_dashboard_payload_if_busy_evidence :
+    base_path:string ->
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    keeper_chat_stream_request ->
+    [ `Not_busy
+    | `Queued of Yojson.Safe.t * string
+    | `Queue_error of string
+    ]
   val extract_visible_reply : string -> Yojson.Safe.t option * string
   val direct_reply_terminal_error :
     ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option

@@ -23,6 +23,8 @@ let check name cond =
     incr failures;
     Printf.printf "  \xe2\x9c\x97 %s\n%!" name)
 
+let contains ~affix text = Astring.String.is_infix ~affix text
+
 let keeper_name = "busy-connector-keeper"
 
 (* Hold the keeper's admission slot busy in a forked fiber (the proven pattern
@@ -368,12 +370,129 @@ let test_busy_slack_preserves_thread_context () =
           (thread_ts = Some "171.001")
       | _ -> check "one typed Slack receipt is pending" false)
 
+let test_shutdown_fenced_connector_ack
+    ~label ~connector_kind ~channel ~channel_user_id ~channel_user_name
+    ~channel_workspace_id ~metadata ~content ~source_matches =
+  Printf.printf
+    "Test: shutdown-fenced %s ACK carries typed operation cause\n%!"
+    label;
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-shutdown-conn-%s-%d-%d"
+         (String.lowercase_ascii label)
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock = Eio.Stdenv.clock env in
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:(Some keeper_name));
+      Keeper_turn_admission.For_testing.reset ();
+      configure_queue ~base;
+      let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+      let operation_id_text =
+        Keeper_shutdown_types.Operation_id.to_string operation_id
+      in
+      (match
+         Keeper_turn_admission.begin_shutdown
+           ~base_path:base ~keeper_name ~operation_id
+       with
+       | Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Keeper_turn_admission.Shutdown_already_reserved _ ->
+         check (label ^ " shutdown fence is newly reserved") false);
+      Eio.Switch.run (fun sw ->
+        Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
+        let reply =
+          Gate_keeper_backend.dispatch
+            ~connector_kind ~sw ~clock ~proc_mgr:None ~net:None ~config
+            ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
+            ~keeper_name
+            ~idempotency_key:("shutdown-fenced-" ^ String.lowercase_ascii label)
+            ~metadata ~content
+        in
+        (match reply with
+         | Gate_protocol.Reply
+             { message_request = Some request; content = ack_text; _ } ->
+           check (label ^ " shutdown-fenced input is durably queued")
+             (request.status = Gate_protocol.Queued);
+           check (label ^ " ACK metadata carries shutdown operation id")
+             (List.assoc_opt "shutdown_operation_id" request.metadata
+              = Some operation_id_text);
+           check (label ^ " ACK names the stopping operation")
+             (contains
+                ~affix:
+                  (Printf.sprintf "is stopping under shutdown operation %s"
+                     operation_id_text)
+                ack_text);
+           check (label ^ " ACK promises the next active lane")
+             (contains
+                ~affix:"durably queued and will wait for the next active lane"
+                ack_text);
+           check (label ^ " ACK does not claim the current turn will finish")
+             (not (contains ~affix:"current turn finishes" ack_text))
+         | Gate_protocol.Reply { message_request = None; _ }
+         | Gate_protocol.Keeper_error_result _
+         | Gate_protocol.Unavailable_result ->
+           check (label ^ " shutdown-fenced input returns a queued ACK") false);
+        (match (Keeper_chat_queue.snapshot ~keeper_name).pending with
+         | [ { Keeper_chat_queue.message = { source; _ }; _ } ] ->
+           check (label ^ " shutdown-fenced receipt retains connector source")
+             (source_matches source)
+         | _ ->
+           check (label ^ " shutdown-fenced receipt is pending exactly once") false));
+      match
+        Keeper_turn_admission.rollback_shutdown
+          ~base_path:base ~keeper_name ~operation_id
+      with
+      | Keeper_turn_admission.Shutdown_rolled_back -> ()
+      | Keeper_turn_admission.Shutdown_not_reserved
+      | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+        check (label ^ " shutdown fence rolls back") false)
+
+let test_shutdown_fenced_discord_ack () =
+  test_shutdown_fenced_connector_ack
+    ~label:"Discord" ~connector_kind:Gate_keeper_backend.Discord
+    ~channel:"discord" ~channel_user_id:"discord-user"
+    ~channel_user_name:"Discord User" ~channel_workspace_id:"discord-channel"
+    ~metadata:[] ~content:"keep this until restart"
+    ~source_matches:(function
+      | Keeper_chat_queue.Discord { channel_id; user_id } ->
+        channel_id = "discord-channel" && user_id = "discord-user"
+      | Keeper_chat_queue.Dashboard | Keeper_chat_queue.Slack _ -> false)
+
+let test_shutdown_fenced_slack_ack () =
+  test_shutdown_fenced_connector_ack
+    ~label:"Slack" ~connector_kind:Gate_keeper_backend.Slack
+    ~channel:"slack" ~channel_user_id:"U-SHUTDOWN"
+    ~channel_user_name:"Slack User" ~channel_workspace_id:"C-SHUTDOWN"
+    ~metadata:
+      [ "slack.message_ts", "171.999"
+      ; "slack.team_id", "T-SHUTDOWN"
+      ]
+    ~content:"keep this until restart"
+    ~source_matches:(function
+      | Keeper_chat_queue.Slack
+          { channel_id; user_id; team_id; thread_ts; _ } ->
+        channel_id = "C-SHUTDOWN"
+        && user_id = "U-SHUTDOWN"
+        && team_id = Some "T-SHUTDOWN"
+        && thread_ts = Some "171.999"
+      | Keeper_chat_queue.Dashboard | Keeper_chat_queue.Discord _ -> false)
+
 let () =
   test_busy_discord_enqueues ();
   test_unpublished_busy_slot_queues_without_resolved_meta ();
   test_busy_discord_persist_failure_is_explicit ();
   test_pending_receipt_prevents_direct_overtake ();
   test_busy_slack_preserves_thread_context ();
+  test_shutdown_fenced_discord_ack ();
+  test_shutdown_fenced_slack_ack ();
   if !failures > 0 then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;
     exit 1)

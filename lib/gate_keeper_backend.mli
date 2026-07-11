@@ -61,8 +61,12 @@ val dispatch :
     the serial consumer's outbound adapter
     (RFC-connector-deferred-reply-via-chat-queue). The enqueue is acknowledged
     only after its durable snapshot commits; the reply's [message_request]
-    carries the queue receipt id and revision. Persistence failure returns an
-    explicit [Keeper_error_result], never a queued ACK. [Generic] (the default)
+    carries the queue receipt id and revision. When admission is fenced by a
+    typed Keeper shutdown operation, the same envelope carries
+    [shutdown_operation_id] and the ACK says the receipt waits for the next
+    active lane rather than promising completion of a current turn.
+    Persistence failure returns an explicit [Keeper_error_result], never a
+    queued ACK. [Generic] (the default)
     returns an accepted async request envelope ([Keeper_msg_async]) instead of
     blocking the connector request behind that turn. The [channel] and
     [channel_user_id] are used to construct the agent name

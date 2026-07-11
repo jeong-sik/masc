@@ -572,6 +572,15 @@ let test_shutdown_reservation_fences_and_rolls_back () =
    | `Rejected { shutdown_operation_id = None; _ } | `Ran () ->
      check "chat lane cannot cross shutdown fence" false);
   (match
+     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> ())
+   with
+   | `Busy { shutdown_operation_id = Some reserved; _ } ->
+     check
+       "if-free chat preserves the typed shutdown owner"
+       (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
+   | `Busy { shutdown_operation_id = None; _ } | `Ran () ->
+     check "if-free chat cannot lose the shutdown owner" false);
+  (match
      Keeper_turn_admission.rollback_shutdown
        ~base_path
        ~keeper_name

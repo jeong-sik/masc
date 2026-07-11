@@ -820,12 +820,12 @@ let handle_keeper_msg_stream
       ?on_text_delta
       ?on_event
       ?continuation_channel
+      ?on_admission_rejected
       ctx
       args
   : tool_result
   =
-  match
-    let* name = resolve_keeper_name ctx args in
+  let run name =
     let resolved_args = with_keeper_name args name in
     (* Stream turns are synchronous today, but still pin the bus visible at the
        public surface boundary so later refactors cannot reintroduce a nested
@@ -837,13 +837,25 @@ let handle_keeper_msg_stream
         ?on_event
         ?event_bus
         ?continuation_channel
+        ?on_admission_rejected
         ctx
         resolved_args
     in
-    Ok (complete_keeper_msg_stream_result ~name result)
-  with
-  | Ok result -> result
-  | Error err -> tool_result_error err
+    complete_keeper_msg_stream_result ~name result
+  in
+  match resolve_keeper_name ctx args with
+  | Ok name -> run name
+  | Error err ->
+      let raw_name = String.trim (get_string args "name" "") in
+      if not (Keeper_config.validate_name raw_name)
+      then tool_result_error err
+      else
+        (* Preserve typed admission truth after lifecycle teardown removes the
+           metadata row: a shutdown-fenced queued receipt must return to
+           Pending, not become a terminal lookup failure. An open lane still
+           runs the admitted body and surfaces its authoritative metadata
+           error. *)
+        run raw_name
 
 let handle_keeper_msg_stream_if_free
       ?on_text_delta

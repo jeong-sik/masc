@@ -210,7 +210,7 @@ let test_queued_delivery_requires_exact_turn_ref () =
     | Stream.Failed { kind = Stream.Missing_turn_ref; detail } ->
         check bool (label ^ " has diagnostic detail") true
           (String.trim detail <> "")
-    | Stream.Failed _ | Stream.Delivered _ ->
+    | Stream.Failed _ | Stream.Delivered _ | Stream.Deferred _ ->
         fail (label ^ " must fail with Missing_turn_ref")
   in
   check_failed "missing turn_ref"
@@ -234,7 +234,8 @@ let test_queued_delivery_requires_exact_turn_ref () =
   | Stream.Delivered { outcome_ref } ->
       check string "valid turn_ref is preserved exactly"
         "trace-queued#42" outcome_ref
-  | Stream.Failed _ -> fail "valid turn_ref must produce Delivered"
+  | Stream.Failed _ | Stream.Deferred _ ->
+    fail "valid turn_ref must produce Delivered"
 
 let body fields = Yojson.Safe.to_string (`Assoc fields)
 

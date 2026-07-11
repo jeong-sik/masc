@@ -200,25 +200,43 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
    the correlation handle instead of a [Keeper_msg_async] poll request id. The
    reply is delivered later by the serial consumer through the connector's
    outbound adapter. *)
-let busy_ack_reply_text_queued ~in_flight ~keeper_name ~receipt_id =
+let busy_ack_reply_text_queued
+    ~(admission_rejection : Keeper_turn_admission.rejection)
+    ~keeper_name ~receipt_id =
   let in_flight_text =
-    match in_flight with
+    match admission_rejection.in_flight with
     | None -> ""
     | Some { Keeper_turn_admission.lane; started_at = _ } ->
         Printf.sprintf
           " Current turn: %s."
           (Keeper_turn_admission.lane_to_string lane)
   in
-  Printf.sprintf
-    "%s is busy; your message is queued and will be answered once the current \
-     turn finishes (receipt_id=%s).%s"
-    keeper_name receipt_id
-    in_flight_text
+  match admission_rejection.shutdown_operation_id with
+  | Some operation_id ->
+      Printf.sprintf
+        "%s is stopping under shutdown operation %s; your message is durably \
+         queued and will wait for the next active lane (receipt_id=%s).%s"
+        keeper_name
+        (Keeper_shutdown_types.Operation_id.to_string operation_id)
+        receipt_id in_flight_text
+  | None ->
+      Printf.sprintf
+        "%s is busy; your message is queued and will be answered once the current \
+         turn finishes (receipt_id=%s).%s"
+        keeper_name receipt_id in_flight_text
 
-let chat_queue_message_request ~channel ~channel_user_id ~keeper_name ~metadata
+let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
+    ~(admission_rejection : Keeper_turn_admission.rejection) ~metadata
     (receipt : Keeper_chat_queue.enqueue_receipt) =
   let receipt_id =
     Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id
+  in
+  let shutdown_metadata =
+    match admission_rejection.shutdown_operation_id with
+    | None -> []
+    | Some operation_id ->
+        [ ( "shutdown_operation_id"
+          , Keeper_shutdown_types.Operation_id.to_string operation_id ) ]
   in
   { Gate_protocol.request_id = receipt_id
   ; destination_type = "keeper"
@@ -235,6 +253,7 @@ let chat_queue_message_request ~channel ~channel_user_id ~keeper_name ~metadata
       ; "pending_count", string_of_int receipt.pending_count
       ; "inflight_count", string_of_int receipt.inflight_count
       ]
+      @ shutdown_metadata
       @ metadata
   }
 
@@ -590,7 +609,8 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
     | Some thread_ts -> Some thread_ts
     | None -> metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
   in
-  let defer_to_existing_work in_flight =
+  let defer_to_existing_work
+      (admission_rejection : Keeper_turn_admission.rejection) =
     match
       route_busy_connector connector_kind
         ~channel_id:channel_workspace_id ~user_id:channel_user_id
@@ -611,7 +631,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
            ; source
            }
        with
-       | Ok receipt -> `Queued_to_chat_lane (in_flight, receipt)
+       | Ok receipt -> `Queued_to_chat_lane (admission_rejection, receipt)
        | Error error ->
          Log.Server.error
            "channel gate durable chat enqueue failed (keeper=%s, lane=%s): %s"
@@ -620,7 +640,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
          `Chat_queue_error error)
     | `Async_poll ->
       `Async_ack
-        ( in_flight
+        ( admission_rejection.in_flight
         , Keeper_tool_surface.dispatch keeper_ctx
             ~name:"masc_keeper_msg" ~args )
   in
@@ -632,8 +652,8 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
         ~name:"masc_keeper_msg" ~args
     with
     | `Ran result -> `Streaming result
-    | `Busy { Keeper_turn_admission.in_flight; _ } ->
-      defer_to_existing_work in_flight
+    | `Busy admission_rejection ->
+      defer_to_existing_work admission_rejection
   in
   match dispatch_result with
   | `Async_ack (in_flight, Some result) when Tool_result.is_success result ->
@@ -689,7 +709,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
           }
       in
       Gate_protocol.Reply { content = reply; structured; stats; message_request }
-  | `Queued_to_chat_lane (in_flight, receipt) ->
+  | `Queued_to_chat_lane (admission_rejection, receipt) ->
       (* RFC-connector-deferred-reply-via-chat-queue: the message was enqueued onto [Keeper_chat_queue]; the
          connector gets a busy ACK now and the deferred reply later via the
          serial consumer's outbound adapter. The existing [message_request]
@@ -702,11 +722,11 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
       in
       let message_request =
         chat_queue_message_request ~channel ~channel_user_id ~keeper_name
-          ~metadata receipt
+          ~admission_rejection ~metadata receipt
       in
       let reply =
         redact_text
-          (busy_ack_reply_text_queued ~in_flight ~keeper_name
+          (busy_ack_reply_text_queued ~admission_rejection ~keeper_name
              ~receipt_id:message_request.request_id)
       in
       let stats =

@@ -79,6 +79,7 @@ let keeper_turn_admission_health_json () =
       ; "chat_waiting_full_keeper_count", `Int 0
       ; "chat_rejected_total_count", `Int 0
       ; "in_flight_keeper_count", `Int 0
+      ; "shutdown_keeper_count", `Int 0
       ; "keepers", `List []
       ]
   | Some state ->

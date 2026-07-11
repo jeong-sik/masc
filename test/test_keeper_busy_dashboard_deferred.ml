@@ -287,6 +287,85 @@ let test_stream_headers_close_per_turn_response () =
     (Httpun.Headers.get headers "connection" = Some "close")
 ;;
 
+let test_shutdown_fenced_dashboard_ack_preserves_cause () =
+  Printf.printf
+    "Test: shutdown-fenced dashboard ACK preserves operation cause\n%!";
+  with_env
+  @@ fun ~base ~clock ->
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  let operation_id_text =
+    Keeper_shutdown_types.Operation_id.to_string operation_id
+  in
+  ignore
+    (Keeper_turn_admission.begin_shutdown ~base_path:base ~keeper_name
+       ~operation_id
+      : Keeper_turn_admission.begin_shutdown_result);
+  (match
+     Server_routes_http_keeper_stream.For_testing
+     .defer_dashboard_payload_if_busy_evidence
+       ~base_path:base ~clock
+       (payload ~content:"keep this through shutdown" ())
+   with
+   | `Queued (json, ack) ->
+     let open Yojson.Safe.Util in
+     check "dashboard queued event carries shutdown operation id"
+       (String.equal operation_id_text
+          (json |> member "shutdown_operation_id" |> to_string));
+     check "dashboard ACK names the shutdown operation"
+       (Astring.String.is_infix
+          ~affix:("stopping under operation " ^ operation_id_text)
+          ack);
+     check "dashboard ACK promises the next active lane"
+       (Astring.String.is_infix ~affix:"for the next active lane" ack)
+   | `Not_busy | `Queue_error _ ->
+     check "shutdown-fenced dashboard message is durably queued" false);
+  check "shutdown-fenced dashboard receipt stays Pending"
+    (List.length (Keeper_chat_queue.snapshot ~keeper_name).pending = 1)
+;;
+
+let test_stream_surface_preserves_typed_shutdown_rejection () =
+  Printf.printf
+    "Test: streaming tool surface preserves typed shutdown rejection\n%!";
+  with_env
+  @@ fun ~base ~clock ->
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  ignore
+    (Keeper_turn_admission.begin_shutdown ~base_path:base ~keeper_name
+       ~operation_id
+      : Keeper_turn_admission.begin_shutdown_result);
+  Eio.Switch.run
+  @@ fun sw ->
+  let config = Workspace.default_config base in
+  let ctx : _ Keeper_types_profile.context =
+    { config
+    ; agent_name = "dashboard-shutdown-test"
+    ; sw
+    ; clock
+    ; proc_mgr = None
+    ; net = None
+    }
+  in
+  let observed = ref None in
+  let result =
+    Keeper_tool_surface_ops.handle_keeper_msg_stream
+      ~on_admission_rejected:(fun rejection -> observed := Some rejection)
+      ctx
+      (`Assoc
+         [ ("name", `String keeper_name)
+         ; ("message", `String "must remain pending")
+         ])
+  in
+  check "shutdown-fenced stream dispatch does not report success"
+    (not (Tool_result.is_success result));
+  match !observed with
+  | Some { Keeper_turn_admission.shutdown_operation_id = Some observed_id; _ } ->
+    check
+      "stream surface callback preserves the shutdown operation id"
+      (Keeper_shutdown_types.Operation_id.equal observed_id operation_id)
+  | Some { shutdown_operation_id = None; _ } | None ->
+    check "stream surface emits a typed shutdown rejection" false
+;;
+
 let () =
   test_busy_dashboard_enqueues ();
   test_free_dashboard_not_enqueued ();
@@ -294,6 +373,8 @@ let () =
   test_concurrent_busy_dashboard_enqueues_are_per_keeper ();
   test_busy_dashboard_persist_failure_is_explicit ();
   test_stream_headers_close_per_turn_response ();
+  test_shutdown_fenced_dashboard_ack_preserves_cause ();
+  test_stream_surface_preserves_typed_shutdown_rejection ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

@@ -5,6 +5,7 @@ module Keeper_chat_store = Masc.Keeper_chat_store
 module Keeper_external_attention = Masc.Keeper_external_attention
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_registry = Masc.Keeper_registry
+module Keeper_shutdown_types = Masc.Keeper_shutdown_types
 module Keeper_turn_admission = Masc.Keeper_turn_admission
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Otel_metric_store = Masc.Otel_metric_store
@@ -397,6 +398,89 @@ let test_turn_admission_waiting_row_is_visible () =
       Eio.Promise.resolve set_release_autonomous ())
 ;;
 
+let test_turn_admission_shutdown_row_is_deferred () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "admission-shutdown-keeper" in
+  ensure_keeper config keeper_name;
+  Keeper_turn_admission.For_testing.reset ();
+  Fun.protect
+    ~finally:(fun () -> Keeper_turn_admission.For_testing.reset ())
+    (fun () ->
+      let base_path = config.Workspace_utils_backend_setup.base_path in
+      let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+      (match
+         Keeper_turn_admission.begin_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+       with
+       | Keeper_turn_admission.Shutdown_reserved reservation ->
+         check bool "shutdown reservation is idle" true
+           (Option.is_none reservation.in_flight)
+       | Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "fresh keeper unexpectedly had a shutdown reservation");
+      let json = Server_keeper_waiting_inventory.dashboard_json config in
+      check_metric_float "turn admission shutdown metric"
+        Otel_metric_store.metric_keeper_waiting_count
+        ~labels:[ "scope", "keeper"; "source", "turn_admission_shutdown" ]
+        1.0;
+      check_metric_float "deferred keeper metric"
+        Otel_metric_store.metric_keeper_waiting_keeper_count
+        ~labels:[ "state", "deferred" ]
+        1.0;
+      check int "shutdown keeper is counted" 1
+        (json_int_member "waiting_keeper_count" json);
+      check int "shutdown contributes one row" 1 (json_int_member "row_count" json);
+      (match find_keeper json keeper_name with
+       | None -> fail "shutdown keeper row missing"
+       | Some keeper ->
+         check string "shutdown keeper is deferred" "deferred"
+           (json_string_member "state" keeper);
+         check int "shutdown source count" 1
+           U.(keeper |> member "sources" |> member "turn_admission_shutdown" |> to_int);
+         (match U.(keeper |> member "waiting_on" |> to_list) with
+          | [ row ] ->
+            check string "shutdown row source" "turn_admission_shutdown"
+              (json_string_member "source" row);
+            check string "shutdown row waiting_on" "shutdown"
+              (json_string_member "waiting_on" row);
+            check string "shutdown row wake producer" "keeper_turn_admission"
+              (json_string_member "wake_producer" row);
+            check string "shutdown row next action" "keeper_shutdown_finalize"
+              (json_string_member "next_action" row);
+            check string "shutdown operation is correlated"
+              (Keeper_shutdown_types.Operation_id.to_string operation_id)
+              U.(
+                row |> member "detail" |> member "shutdown_operation_id"
+                |> to_string);
+            check bool "admission fence is explicit" true
+              U.(row |> member "detail" |> member "admission_fenced" |> to_bool);
+            check int "shutdown has no waiting chat" 0
+              U.(row |> member "detail" |> member "chat_waiting_count" |> to_int);
+            check bool "shutdown has no in-flight turn" true
+              U.(row |> member "detail" |> member "in_flight" = `Null)
+          | rows -> failf "expected one shutdown row, got %d" (List.length rows)));
+      (match
+         Keeper_turn_admission.rollback_shutdown
+           ~base_path
+           ~keeper_name
+           ~operation_id
+       with
+       | Keeper_turn_admission.Shutdown_rolled_back -> ()
+       | Keeper_turn_admission.Shutdown_not_reserved
+       | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+         fail "owned shutdown reservation did not roll back");
+      let reopened = Server_keeper_waiting_inventory.dashboard_json config in
+      match find_keeper reopened keeper_name with
+      | None -> fail "reopened keeper row missing"
+      | Some keeper ->
+        check string "rollback returns keeper to idle" "idle"
+          (json_string_member "state" keeper);
+        check int "rollback removes shutdown row" 0
+          (json_int_member "waiting_count" keeper))
+;;
+
 let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
   with_workspace
   @@ fun config ->
@@ -772,6 +856,8 @@ let () =
             test_chat_queue_pending_rows_are_visible
         ; test_case "turn admission waiting row is visible" `Quick
             test_turn_admission_waiting_row_is_visible
+        ; test_case "turn admission shutdown row is deferred" `Quick
+            test_turn_admission_shutdown_row_is_deferred
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
         ; test_case "live turn keeper is busy without waiting rows" `Quick

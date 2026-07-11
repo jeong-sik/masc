@@ -13,6 +13,7 @@ type turn_outcome =
       ; detail : string
       ; outcome_ref : string option
       }
+  | Deferred of { rejection : Keeper_turn_admission.rejection }
 
 type lease_finalization =
   | Finalize of Keeper_chat_queue.finalization
@@ -195,44 +196,61 @@ let canonical_failure_detail detail =
   then "queued turn failed without diagnostic detail"
   else detail
 
-let finalization_of_turn_outcome ~clock = function
-  | Delivered { outcome_ref } ->
-      (match canonical_turn_ref_string outcome_ref with
-       | Some outcome_ref ->
-         Keeper_chat_queue.Mark_delivered
-           { completed_at = Eio.Time.now clock
-           ; outcome_ref = Some outcome_ref
-           }
-       | None ->
-         Keeper_chat_queue.Mark_failed
-           { completed_at = Eio.Time.now clock
-           ; kind = Keeper_chat_queue.Internal_error
-           ; detail =
-               "queued turn claimed delivery with an invalid turn_ref"
-           ; outcome_ref = None
-           })
-  | Failed { kind; detail; outcome_ref } ->
-      let outcome_ref, invalid_outcome_ref =
-        canonical_optional_outcome_ref outcome_ref
-      in
-      let detail = canonical_failure_detail detail in
-      let detail =
-        if invalid_outcome_ref
-        then detail ^ "; invalid turn_ref omitted from terminal correlation"
-        else detail
-      in
-      Keeper_chat_queue.Mark_failed
-        { completed_at = Eio.Time.now clock
-        ; kind
-        ; detail
-        ; outcome_ref
-        }
+let finalization_of_delivered ~clock ~outcome_ref =
+  match canonical_turn_ref_string outcome_ref with
+  | Some outcome_ref ->
+    Keeper_chat_queue.Mark_delivered
+      { completed_at = Eio.Time.now clock; outcome_ref = Some outcome_ref }
+  | None ->
+    Keeper_chat_queue.Mark_failed
+      { completed_at = Eio.Time.now clock
+      ; kind = Keeper_chat_queue.Internal_error
+      ; detail = "queued turn claimed delivery with an invalid turn_ref"
+      ; outcome_ref = None
+      }
+
+let finalization_of_failed ~clock ~kind ~detail ~outcome_ref =
+  let outcome_ref, invalid_outcome_ref =
+    canonical_optional_outcome_ref outcome_ref
+  in
+  let detail = canonical_failure_detail detail in
+  let detail =
+    if invalid_outcome_ref
+    then detail ^ "; invalid turn_ref omitted from terminal correlation"
+    else detail
+  in
+  Keeper_chat_queue.Mark_failed
+    { completed_at = Eio.Time.now clock; kind; detail; outcome_ref }
+
+let log_deferred_turn ~keeper_name
+    ({ Keeper_turn_admission.waiting
+     ; in_flight
+     ; shutdown_operation_id
+     } : Keeper_turn_admission.rejection) =
+  match shutdown_operation_id with
+  | Some operation_id ->
+      Log.Keeper.info
+        "keeper_chat_consumer: admission fenced for keeper=%s by shutdown=%s; \
+         returning the leased receipt to Pending"
+        keeper_name
+        (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | None ->
+      Log.Keeper.info
+        "keeper_chat_consumer: admission deferred for keeper=%s waiting=%d \
+         in_flight=%b; returning the leased receipt to Pending"
+        keeper_name waiting (Option.is_some in_flight)
 
 let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id ~queued =
   match handle_turn ~sw ~keeper_name ~queued_message:queued with
-  | outcome ->
+  | Deferred { rejection } ->
+      log_deferred_turn ~keeper_name rejection;
+      nack_or_warn state ~keeper_name ~lease_id
+  | Delivered { outcome_ref } ->
       finalize_or_warn state ~keeper_name ~lease_id
-        (finalization_of_turn_outcome ~clock outcome)
+        (finalization_of_delivered ~clock ~outcome_ref)
+  | Failed { kind; detail; outcome_ref } ->
+      finalize_or_warn state ~keeper_name ~lease_id
+        (finalization_of_failed ~clock ~kind ~detail ~outcome_ref)
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
       let detail = Printexc.to_string exn in
@@ -286,9 +304,15 @@ let start ~sw ~clock ~base_path ~handle_turn =
            match retry_pending_finalization dispatch_state ~keeper_name with
            | true -> ()
            | false -> (
-             match Keeper_turn_admission.in_flight ~base_path ~keeper_name with
-             | Some _ -> ()
-             | None -> (
+             let admission =
+               Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+             in
+             match
+               admission.snapshot_in_flight,
+               admission.snapshot_shutdown_operation_id
+             with
+             | Some _, _ | _, Some _ -> ()
+             | None, None -> (
                if mark_dispatching dispatch_state keeper_name
                then (
                  let leased =
@@ -342,23 +366,37 @@ let start ~sw ~clock ~base_path ~handle_turn =
                           nack_or_warn dispatch_state ~keeper_name ~lease_id;
                           clear_dispatching dispatch_state keeper_name
                       | Some queued ->
-                          (try
-                             dispatch_queued_turn dispatch_state ~sw ~clock
-                               ~handle_turn ~keeper_name ~lease_id ~queued
+                          let admission =
+                            Keeper_turn_admission.snapshot_for ~base_path
+                              ~keeper_name
+                          in
+                          (match
+                             admission.snapshot_in_flight,
+                             admission.snapshot_shutdown_operation_id
                            with
-                           | Eio.Cancel.Cancelled _ as e ->
-                               Eio.Cancel.protect (fun () ->
-                                   nack_or_warn dispatch_state ~keeper_name ~lease_id);
-                               clear_dispatching dispatch_state keeper_name;
-                               raise e
-                           | exn ->
+                           | Some _, _ | _, Some _ ->
                                nack_or_warn dispatch_state ~keeper_name ~lease_id;
-                               clear_dispatching dispatch_state keeper_name;
-                               Log.Keeper.warn
-                                 "keeper_chat_consumer: dispatch fork failed for \
-                                  keeper=%s: %s"
-                                 keeper_name
-                                 (Printexc.to_string exn))))
+                               clear_dispatching dispatch_state keeper_name
+                           | None, None ->
+                               (try
+                                  dispatch_queued_turn dispatch_state ~sw ~clock
+                                    ~handle_turn ~keeper_name ~lease_id ~queued
+                                with
+                                | Eio.Cancel.Cancelled _ as e ->
+                                    Eio.Cancel.protect (fun () ->
+                                        nack_or_warn dispatch_state ~keeper_name
+                                          ~lease_id);
+                                    clear_dispatching dispatch_state keeper_name;
+                                    raise e
+                                | exn ->
+                                    nack_or_warn dispatch_state ~keeper_name
+                                      ~lease_id;
+                                    clear_dispatching dispatch_state keeper_name;
+                                    Log.Keeper.warn
+                                      "keeper_chat_consumer: dispatch fork failed for \
+                                       keeper=%s: %s"
+                                      keeper_name
+                                      (Printexc.to_string exn)))))
                else
                  Log.Keeper.warn
                    "keeper_chat_consumer: duplicate dispatch suppressed for \

@@ -700,6 +700,7 @@ let dispatch_stream
       ?on_text_delta
       ?on_event
       ?continuation_channel
+      ?on_admission_rejected
       ctx
       ~name
       ~args
@@ -716,6 +717,7 @@ let dispatch_stream
               ?on_text_delta
               ?on_event
               ?continuation_channel
+              ?on_admission_rejected
               ctx
               args))
   | _ -> None

@@ -1322,6 +1322,8 @@ let start_keeper_loops
              in
              let delivery_outcome = Eio.Promise.await delivery in
              match turn_outcome, delivery_outcome with
+             | Some (Deferred { rejection }), _ ->
+                 Keeper_chat_consumer.Deferred { rejection }
              | Some (Delivered { outcome_ref }), Ok () ->
                  Keeper_chat_consumer.Delivered
                    { outcome_ref }

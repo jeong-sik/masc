@@ -193,8 +193,10 @@ type dashboard_deferred_chat =
   }
 
 let dashboard_busy_queue_state ~base_path ~keeper_name =
-  let in_flight = Keeper_turn_admission.in_flight ~base_path ~keeper_name in
-  let chat_waiting = Keeper_turn_admission.chat_waiting ~base_path ~keeper_name in
+  let admission = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+  let in_flight = admission.snapshot_in_flight in
+  let chat_waiting = admission.snapshot_waiting > 0 in
+  let shutdown_operation_id = admission.snapshot_shutdown_operation_id in
   let queue_waiting =
     if not (Keeper_chat_queue.persistence_configured ())
     then true
@@ -204,12 +206,9 @@ let dashboard_busy_queue_state ~base_path ~keeper_name =
       || snapshot.pending <> []
       || snapshot.inflight <> []
   in
-  match in_flight, chat_waiting, queue_waiting with
-  | None, false, false -> None
-  | None, false, true -> Some (None, false)
-  | None, true, _ -> Some (None, true)
-  | Some info, false, _ -> Some (Some info, false)
-  | Some info, true, _ -> Some (Some info, true)
+  match in_flight, chat_waiting, queue_waiting, shutdown_operation_id with
+  | None, false, false, None -> None
+  | _ -> Some (in_flight, chat_waiting, shutdown_operation_id)
 
 let dashboard_deferred_ack_text ~keeper_name deferred =
   match deferred.shutdown_operation_id with
@@ -316,14 +315,14 @@ let dashboard_deferred_chat_of_rejection ~clock payload
 let defer_dashboard_payload_if_busy ~base_path ~clock payload =
   match dashboard_busy_queue_state ~base_path ~keeper_name:payload.name with
   | None -> `Not_busy
-  | Some (in_flight, chat_waiting) ->
+  | Some (in_flight, chat_waiting, shutdown_operation_id) ->
       (match
          enqueue_dashboard_payload
            ~clock
            payload
            ~in_flight
            ~chat_waiting
-           ~shutdown_operation_id:None
+           ~shutdown_operation_id
        with
        | Ok queued -> `Queued queued
        | Error message -> `Queue_error message)
@@ -793,6 +792,7 @@ let execute_keeper_stream_tool_streaming
       ~on_text_delta
   =
   let start_time = Eio.Time.now clock in
+  let admission_rejection = ref None in
   let success, body, failure_class =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
@@ -806,7 +806,10 @@ let execute_keeper_stream_tool_streaming
         }
       in
       match
-        Keeper_tool_surface.dispatch_stream ~on_text_delta ?on_event keeper_ctx
+        Keeper_tool_surface.dispatch_stream ~on_text_delta ?on_event
+          ~on_admission_rejected:(fun rejection ->
+            admission_rejection := Some rejection)
+          keeper_ctx
           ~continuation_channel
           ~name:"masc_keeper_msg"
           ~args:arguments
@@ -832,47 +835,53 @@ let execute_keeper_stream_tool_streaming
         Log.Mcp.error "tools/call crashed (stream): %s" err;
         false, Printf.sprintf "Internal error: %s" err, Tool_result.Runtime_failure
   in
-  let end_time = Eio.Time.now clock in
-  let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
-  let error_detail =
-    if success then None
-    else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
-  in
-  Audit_log.log_tool_call (Mcp_server.workspace_config state) ~agent_id:agent_name
-    ~tool_name:"masc_keeper_msg" ~success ~error_msg:error_detail ();
-  if not success then
-    Log.Keeper.emit Log.Error
-      ~details:
-        (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
-           ~agent_name ~duration_ms ~streaming:true ~error_body:body
-           ~failure_class)
-      "keeper tool call failed: masc_keeper_msg";
-  let telemetry_enabled = Env_config_core.telemetry_enabled () in
-  if telemetry_enabled then (
-    match state.Mcp_server.fs with
-    | Some fs ->
-        (try
-           let telemetry_error_kind =
-             if success then None
-             else Some (Telemetry_eio.error_kind_of_string "tool_failure")
-           in
-           let telemetry_failure_class =
-             if success then None else Some failure_class
-           in
-           Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
-             ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
-             ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
-             ?failure_class:telemetry_failure_class
-             ?error_kind:telemetry_error_kind ?error_message:error_detail ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Misc.error "telemetry tracking failed: %s"
-             (Printexc.to_string exn))
-    | None -> ());
-  Tool_registry.record_call_if_known ~source:Agent_internal
-    ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
-  (success, body)
+  match !admission_rejection with
+  | Some rejection -> `Deferred rejection
+  | None ->
+      let end_time = Eio.Time.now clock in
+      let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
+      let error_detail =
+        if success then None
+        else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
+      in
+      Audit_log.log_tool_call (Mcp_server.workspace_config state)
+        ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success
+        ~error_msg:error_detail ();
+      if not success then
+        Log.Keeper.emit Log.Error
+          ~details:
+            (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
+               ~agent_name ~duration_ms ~streaming:true ~error_body:body
+               ~failure_class)
+          "keeper tool call failed: masc_keeper_msg";
+      let telemetry_enabled = Env_config_core.telemetry_enabled () in
+      if telemetry_enabled then (
+        match state.Mcp_server.fs with
+        | Some fs ->
+            (try
+               let telemetry_error_kind =
+                 if success then None
+                 else Some (Telemetry_eio.error_kind_of_string "tool_failure")
+               in
+               let telemetry_failure_class =
+                 if success then None else Some failure_class
+               in
+               Telemetry_eio.track_tool_called ~fs
+                 (Mcp_server.workspace_config state)
+                 ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
+                 ~duration_ms
+                 ~source:(Tool_registry.string_of_source Agent_internal)
+                 ?failure_class:telemetry_failure_class
+                 ?error_kind:telemetry_error_kind ?error_message:error_detail ()
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Misc.error "telemetry tracking failed: %s"
+                 (Printexc.to_string exn))
+        | None -> ());
+      Tool_registry.record_call_if_known ~source:Agent_internal
+        ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
+      `Ran (success, body)
 
 let execute_keeper_stream_tool_streaming_if_free
       ~sw
@@ -1096,6 +1105,7 @@ type keeper_stream_worker_event =
   | Stream_event of Agent_sdk.Types.sse_event
   | Stream_client_disconnected
   | Stream_dashboard_queued of dashboard_deferred_chat
+  | Stream_queued_turn_deferred of Keeper_turn_admission.rejection
   | Stream_terminal of
       { ok : bool
       ; status : string
@@ -1119,6 +1129,30 @@ and queued_turn_outcome =
       { kind : queued_turn_failure_kind
       ; detail : string
       }
+  | Deferred of { rejection : Keeper_turn_admission.rejection }
+
+let admission_rejection_to_json
+    ({ Keeper_turn_admission.waiting
+     ; in_flight
+     ; shutdown_operation_id
+     } : Keeper_turn_admission.rejection) =
+  let in_flight_fields =
+    match in_flight with
+    | None -> []
+    | Some { Keeper_turn_admission.lane; started_at } ->
+        [ ("in_flight_lane", `String (Keeper_turn_admission.lane_to_string lane))
+        ; ("in_flight_started_at", `Float started_at)
+        ]
+  in
+  `Assoc
+    ([ ("waiting", `Int waiting)
+     ; ( "shutdown_operation_id"
+       , match shutdown_operation_id with
+         | None -> `Null
+         | Some operation_id ->
+           `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
+     ]
+     @ in_flight_fields)
 
 let queued_turn_failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
@@ -1209,7 +1243,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
   in
   let push_worker_event event =
     match event with
-    | Stream_dashboard_queued _ | Stream_terminal _ ->
+    | Stream_dashboard_queued _
+    | Stream_queued_turn_deferred _
+    | Stream_terminal _ ->
         Eio.Mutex.use_rw ~protect:true terminal_delivery_mu (fun () ->
           if not (Atomic.get terminal_pushed) then begin
             Eio.Stream.add worker_events event;
@@ -1397,13 +1433,13 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                        Ok (`Queued queued)
                    | Error message -> Error message)
             else
-              Ok
-                (`Ran
-	                   (execute_keeper_stream_tool_streaming ~sw ~clock
-	                      ?auth_token
-	                      state ~agent_name ~arguments:args ~on_event
-                         ~continuation_channel
-	                      ~on_text_delta:(fun _ -> ())))
+              (match
+                 execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token
+                   state ~agent_name ~arguments:args ~on_event
+                   ~continuation_channel ~on_text_delta:(fun _ -> ())
+               with
+               | `Ran result -> Ok (`Ran result)
+               | `Deferred rejection -> Ok (`Deferred rejection))
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
@@ -1424,6 +1460,16 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  | exn2 -> Error (Printexc.to_string exn2))
         in
         match dispatch_result with
+        | Ok (`Deferred rejection) ->
+            push_worker_event (Stream_queued_turn_deferred rejection);
+            Tool_result.ok
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              (Yojson.Safe.to_string
+                 (`Assoc
+                    [ ("status", `String "deferred")
+                    ; ("admission", admission_rejection_to_json rejection)
+                    ]))
         | Ok (`Queued queued) ->
             Tool_result.ok
               ~tool_name:"masc_keeper_msg"
@@ -1603,8 +1649,19 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                            ; status = "error"
                            ; body = detail
                            ; queued_outcome
-                           });
+                      });
                       Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
+                  | Some (Deferred { rejection }) ->
+                      push_worker_event (Stream_queued_turn_deferred rejection);
+                      Tool_result.ok
+                        ~tool_name:"masc_keeper_msg"
+                        ~start_time
+                        (Yojson.Safe.to_string
+                           (`Assoc
+                              [ ("status", `String "deferred")
+                              ; ( "admission"
+                                , admission_rejection_to_json rejection )
+                              ]))
                   | Some (Delivered _) | None ->
                       push_worker_event
                         (Stream_terminal
@@ -1730,6 +1787,29 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
+    | Stream_queued_turn_deferred rejection ->
+        let message =
+          match rejection.Keeper_turn_admission.shutdown_operation_id with
+          | Some operation_id ->
+              Printf.sprintf
+                "queued receipt remains Pending while shutdown operation %s \
+                 fences keeper admission"
+                (Keeper_shutdown_types.Operation_id.to_string operation_id)
+          | None ->
+              Printf.sprintf
+                "queued receipt remains Pending because keeper admission is \
+                 deferred with %d waiting chat requests"
+                rejection.waiting
+        in
+        publish_terminal ~status:"deferred" ~ok:true ~message ();
+        Keeper_chat_events.publish events
+          (Custom
+             { name = "KEEPER_QUEUED_TURN_DEFERRED"
+             ; value = admission_rejection_to_json rejection
+             });
+        Keeper_chat_events.publish events Text_message_end;
+        Keeper_chat_events.publish events (Run_finished { run_id });
+        Some (Deferred { rejection })
     | Stream_dashboard_queued queued ->
         let message =
           dashboard_deferred_ack_text ~keeper_name:payload.name queued
@@ -2226,6 +2306,15 @@ module For_testing = struct
   let turn_instructions_for_request = turn_instructions_for_request
   let args_of_request = args_of_request
   let modalities_for_request = modalities_for_request
+  let defer_dashboard_payload_if_busy_evidence ~base_path ~clock payload =
+    match defer_dashboard_payload_if_busy ~base_path ~clock payload with
+    | `Not_busy -> `Not_busy
+    | `Queued queued ->
+        `Queued
+          ( dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
+          , dashboard_deferred_ack_text ~keeper_name:payload.name queued )
+    | `Queue_error message -> `Queue_error message
+
   let defer_dashboard_payload_if_busy ~base_path ~clock payload =
     match defer_dashboard_payload_if_busy ~base_path ~clock payload with
     | `Not_busy -> `Not_busy

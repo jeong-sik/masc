@@ -115,6 +115,10 @@ let is_inflight = function
   | Keeper_chat_queue.Inflight _ -> true
   | Pending | Delivered _ | Failed _ -> false
 
+let is_pending = function
+  | Keeper_chat_queue.Pending -> true
+  | Inflight _ | Delivered _ | Failed _ -> false
+
 let receipt_id_in_active receipt_id receipts =
   List.exists
     (fun (receipt : Keeper_chat_queue.active_receipt) ->
@@ -496,6 +500,124 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
       check_terminal_snapshot ~label:"invalid diagnostic" ~keeper_name
         ~receipt_id:first.receipt_id)
 
+let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
+  Printf.printf
+    "Test: shutdown fence keeps the accepted receipt Pending until rollback\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"shutdown fence enqueue" ~keeper_name
+        (discord_msg ~content:"wait through shutdown"
+           ~channel_id:"channel-shutdown" ~user_id:"user-shutdown"
+           ~timestamp:9.0)
+    with
+    | None -> ()
+    | Some accepted ->
+      let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+      ignore
+        (Keeper_turn_admission.begin_shutdown ~base_path:base ~keeper_name
+           ~operation_id
+          : Keeper_turn_admission.begin_shutdown_result);
+      let calls = ref 0 in
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+        incr calls;
+        Keeper_chat_consumer.Delivered
+          { outcome_ref = "trace-shutdown-rollback#1" }
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        Eio.Time.sleep clock 1.2;
+        check "consumer does not lease through the shutdown fence" (!calls = 0);
+        check "fenced receipt remains Pending"
+          (match
+             Keeper_chat_queue.lookup_receipt ~keeper_name
+               ~receipt_id:accepted.receipt_id
+           with
+           | Ok { receipt = Some { state = Pending; _ }; _ } -> true
+           | Ok { receipt = Some { state = Inflight _ | Delivered _ | Failed _; _ } | None; _ }
+           | Error _ -> false);
+        (match
+           Keeper_turn_admission.rollback_shutdown ~base_path:base ~keeper_name
+             ~operation_id
+         with
+         | Keeper_turn_admission.Shutdown_rolled_back -> ()
+         | Keeper_turn_admission.Shutdown_not_reserved
+         | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+           check "test shutdown owner rolls back" false);
+        check "same receipt delivers after the lane reopens"
+          (match
+             await_receipt ~clock ~seconds:5.0 ~keeper_name
+               ~receipt_id:accepted.receipt_id ~accept:is_delivered
+           with
+           | Some _ -> true
+           | None -> false));
+      check "shutdown rollback dispatches the accepted receipt exactly once"
+        (!calls = 1);
+      check_terminal_snapshot ~label:"shutdown rollback" ~keeper_name
+        ~receipt_id:accepted.receipt_id)
+
+let test_typed_admission_race_nacks_then_retries () =
+  Printf.printf
+    "Test: typed admission race nacks the lease and retries without Failed\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"typed deferral enqueue" ~keeper_name
+        (discord_msg ~content:"retry typed deferral"
+           ~channel_id:"channel-deferral" ~user_id:"user-deferral"
+           ~timestamp:10.0)
+    with
+    | None -> ()
+    | Some accepted ->
+      let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+      let calls = ref 0 in
+      let first_deferred, resolve_first_deferred = Eio.Promise.create () in
+      let second_started, resolve_second_started = Eio.Promise.create () in
+      let release_second, resolve_release_second = Eio.Promise.create () in
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+        incr calls;
+        if !calls = 1
+        then (
+          Eio.Promise.resolve resolve_first_deferred ();
+          Keeper_chat_consumer.Deferred
+            { rejection =
+                { Keeper_turn_admission.waiting = 0
+                ; in_flight = None
+                ; shutdown_operation_id = Some operation_id
+                }
+            })
+        else (
+          Eio.Promise.resolve resolve_second_started ();
+          Eio.Promise.await release_second;
+          Keeper_chat_consumer.Delivered
+            { outcome_ref = "trace-typed-deferral#2" })
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        check "first leased attempt returns typed Deferred"
+          (await_promise ~clock ~seconds:5.0 first_deferred);
+        check "typed Deferred returns the same receipt to Pending"
+          (match
+             await_receipt ~clock ~seconds:2.0 ~keeper_name
+               ~receipt_id:accepted.receipt_id ~accept:is_pending
+           with
+           | Some _ -> true
+           | None -> false);
+        let after_defer = Keeper_chat_queue.snapshot ~keeper_name in
+        check "typed Deferred never creates a terminal Failed receipt"
+          (not (receipt_id_in_terminal accepted.receipt_id after_defer.terminal));
+        check "consumer retries the same receipt after deferral"
+          (await_promise ~clock ~seconds:5.0 second_started);
+        Eio.Promise.resolve resolve_release_second ();
+        check "retried receipt reaches Delivered"
+          (match
+             await_receipt ~clock ~seconds:5.0 ~keeper_name
+               ~receipt_id:accepted.receipt_id ~accept:is_delivered
+           with
+           | Some _ -> true
+           | None -> false));
+      check "typed deferral causes one retry and no duplicate turn" (!calls = 2);
+      check_terminal_snapshot ~label:"typed deferral retry" ~keeper_name
+        ~receipt_id:accepted.receipt_id)
+
 let () =
   test_delivery_finalizes_terminal_receipt ();
   test_explicit_failure_finalizes_failed_receipt ();
@@ -504,6 +626,8 @@ let () =
   test_finalization_persistence_retry_does_not_redeliver ();
   test_invalid_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
+  test_shutdown_fence_keeps_receipt_pending_until_rollback ();
+  test_typed_admission_race_nacks_then_retries ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

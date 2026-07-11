@@ -335,6 +335,102 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       Alcotest.(check bool) "nested context payload omitted" true
         (Yojson.Safe.Util.member "context" keeper = `Null))
 
+let test_keeper_up_clears_dead_tombstone_resume_state () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "dead-tombstone-operator-resume" in
+  Eio.Switch.on_release sw (fun () ->
+    Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+    Keeper_registry.clear ();
+    Keeper_runtime.reset_test_state base_dir;
+    cleanup_dir base_dir);
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:(Some "operator"));
+  ignore
+    (Workspace.bind_session config ~agent_name:"operator" ~capabilities:[] ());
+  let keeper_ctx : _ Keeper_tool_surface.context =
+    {
+      config;
+      agent_name = "operator";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+      net = None;
+    }
+  in
+  let read_meta label =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.failf "expected %s keeper meta" label
+    | Error err -> Alcotest.fail err
+  in
+  let seeded =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
+            ("trace_id", `String "trace-dead-tombstone-operator-resume");
+            ("goal", `String "Resume a tombstoned keeper");
+            ("runtime_id", `String "runtime.primary");
+          ])
+    with
+    | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
+    | Ok meta ->
+      {
+        meta with
+        paused = true;
+        latched_reason = Some Keeper_latched_reason.Dead_tombstone;
+        auto_resume_after_sec = Some 60.0;
+        runtime =
+          {
+            meta.runtime with
+            last_blocker =
+              Some
+                (Keeper_meta_contract.blocker_info_of_class
+                   ~detail:"stale timeout before operator resume"
+                   Keeper_meta_contract.Turn_timeout);
+          };
+      }
+  in
+  (match Keeper_meta_store.write_meta config seeded with
+  | Ok () -> ()
+  | Error err -> Alcotest.fail err);
+  let persisted_seed = read_meta "seeded tombstone" in
+  Alcotest.(check bool) "seed is paused" true persisted_seed.paused;
+  Alcotest.(check bool) "seed has terminal latch" true
+    (Option.is_some persisted_seed.latched_reason);
+  Alcotest.(check bool) "seed has auto-resume delay" true
+    (Option.is_some persisted_seed.auto_resume_after_sec);
+  Alcotest.(check bool) "seed has runtime blocker" true
+    (Option.is_some persisted_seed.runtime.last_blocker);
+  let ok, _ =
+    dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+      ~args:
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("goal", `String "Resume tombstoned keeper");
+            ("proactive_enabled", `Bool false);
+            ("autoboot_enabled", `Bool false);
+          ])
+  in
+  Alcotest.(check bool) "keeper_up resumes tombstoned keeper" true ok;
+  ignore
+    (Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:base_dir keeper_name);
+  let resumed = read_meta "resumed" in
+  Alcotest.(check bool) "operator resume clears paused" false resumed.paused;
+  Alcotest.(check bool) "operator resume clears terminal latch" true
+    (Option.is_none resumed.latched_reason);
+  Alcotest.(check bool) "operator resume clears auto-resume delay" true
+    (Option.is_none resumed.auto_resume_after_sec);
+  Alcotest.(check bool) "operator resume clears runtime blocker" true
+    (Option.is_none resumed.runtime.last_blocker)
+
 let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1196,3 +1292,17 @@ let test_operator_digest_severity_rank_supports_critical () =
 
 (* test_snapshot_and_digest_expose_role_runtime_census removed:
    depended on team session start/update which is no longer available. *)
+
+let () =
+  Alcotest.run
+    "operator_control_snapshot"
+    [
+      ( "keeper_up resume"
+      , [
+          Alcotest.test_case
+            "operator resume clears persisted dead-tombstone state"
+            `Quick
+            test_keeper_up_clears_dead_tombstone_resume_state;
+        ] );
+    ]
+;;

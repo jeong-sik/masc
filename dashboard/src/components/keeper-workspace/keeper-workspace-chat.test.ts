@@ -56,8 +56,8 @@ async function loadChat() {
     KeeperLifecycleButtons: () => html`<span data-testid="kw-lifecycle-buttons">Lifecycle</span>`,
   }))
   vi.doMock('../keeper-shared', () => ({
-    KeeperConversationPanel: ({ onInspectTurn }: { onInspectTurn?: (entry: unknown) => void }) => html`
-      <div data-testid="kw-conversation-panel">
+    KeeperConversationPanel: ({ onInspectTurn, workspaceToolbarOpen }: { onInspectTurn?: (entry: unknown) => void; workspaceToolbarOpen?: boolean }) => html`
+      <div data-testid="kw-conversation-panel" data-toolbar-open=${workspaceToolbarOpen ? 'true' : 'false'}>
         Conversation
         ${onInspectTurn
           ? html`
@@ -116,13 +116,13 @@ async function loadChat() {
   vi.doMock('../keeper-detail-state', () => ({
     keeperMobilePane: signal<'roster' | 'chat'>('chat'),
   }))
-  // Preserve the real router but capture navigate() so the pending-approval cue's
-  // "결재 큐 →" link can be asserted.
+  // Preserve the real router but capture navigate() so the compact approval
+  // badge link can be asserted.
   vi.doMock('../../router', async (importOriginal) => ({
     ...(await importOriginal<typeof import('../../router')>()),
     navigate: vi.fn(),
   }))
-  // The cue reads governanceData.approval_queue; inject a controllable signal in
+  // The badge reads governanceData.approval_queue; inject a controllable signal in
   // place of the real computed so a test can populate the queue directly.
   vi.doMock('../governance-signals', async (importOriginal) => ({
     ...(await importOriginal<typeof import('../governance-signals')>()),
@@ -159,10 +159,10 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../governance-signals')
   })
 
-  it('shows a pending-approval cue linking to the approvals queue when the keeper awaits a decision', async () => {
+  it('links the compact pending-approval header badge to the approvals queue', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
     const { navigate } = await import('../../router')
-    // The cue derives from the governance approval_queue (HITL SSOT), not
+    // The badge derives from the governance approval_queue (HITL SSOT), not
     // keeper.trust.approval_state (#23678).
     mockGovernanceData.value = governanceResponse([approvalItem('appr-1', 'sangsu', 'fs_write')])
 
@@ -170,32 +170,25 @@ describe('KeeperWorkspaceChat', () => {
       render(html`<${KeeperWorkspaceChat} keeper=${mockKeeper} />`, container)
     })
 
-    const cue = container.querySelector('[data-testid="keeper-pending-approval-cue"]')
-    expect(cue).not.toBeNull()
-    expect(cue?.textContent).toContain('승인 대기')
-    expect(cue?.textContent).toContain('fs_write')
-
-    // Chat remains read-only: the approvals surface is the single act-point
-    // that includes risk and input evidence before approve/reject.
-    const actions = Array.from(cue?.querySelectorAll('button') ?? [])
-    expect(actions).toHaveLength(1)
-    expect(cue?.textContent).not.toContain('거부')
-    const queueLink = actions[0]
-    expect(queueLink?.textContent).toContain('결재 큐')
+    const queueLink = container.querySelector('[data-testid="keeper-pending-approval-link"]') as HTMLButtonElement
+    expect(queueLink).not.toBeNull()
+    expect(queueLink.textContent).toContain('1')
+    expect(queueLink.getAttribute('aria-label')).toContain('결재 대기 1건')
+    expect(container.querySelector('[data-testid="keeper-pending-approval-cue"]')).toBeNull()
     await act(async () => {
-      queueLink?.click()
+      queueLink.click()
     })
     expect(navigate).toHaveBeenCalledWith('approvals')
   })
 
-  it('hides the pending-approval cue when the keeper has no pending decision', async () => {
+  it('hides the pending-approval badge when the keeper has no pending decision', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
 
     await act(async () => {
       render(html`<${KeeperWorkspaceChat} keeper=${mockKeeper} />`, container)
     })
 
-    expect(container.querySelector('[data-testid="keeper-pending-approval-cue"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-pending-approval-link"]')).toBeNull()
   })
 
   it('renders the chat header and conversation panel', async () => {
@@ -212,9 +205,21 @@ describe('KeeperWorkspaceChat', () => {
     expect(container.querySelector('[data-testid="kw-sigil"]')?.textContent).toBe('sangsu')
     expect(container.querySelector('[data-testid="kw-conversation-panel"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="kw-chat-command-icons"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="kw-chat-command-config"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="kw-chat-command-search"]')).toBeNull()
+    expect(container.querySelector('[data-testid="kw-conversation-panel"]')?.getAttribute('data-toolbar-open')).toBe('false')
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="kw-chat-command-menu-toggle"]') as HTMLButtonElement).click()
+    })
     expect(container.querySelector('[data-testid="kw-chat-command-turn"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="kw-chat-command-artifacts"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="kw-chat-command-config"]')).not.toBeNull()
+    const search = container.querySelector('[data-testid="kw-chat-command-search"]') as HTMLButtonElement
+    expect(search).not.toBeNull()
+    await act(async () => {
+      search.click()
+    })
+    expect(container.querySelector('[data-testid="kw-conversation-panel"]')?.getAttribute('data-toolbar-open')).toBe('true')
   })
 
   it('keeps utility commands usable while a lifecycle command is pending', async () => {
@@ -234,9 +239,9 @@ describe('KeeperWorkspaceChat', () => {
     })
 
     const pause = container.querySelector('[data-testid="kw-chat-command-pause"]') as HTMLButtonElement
-    const turn = container.querySelector('[data-testid="kw-chat-command-turn"]') as HTMLButtonElement
+    const menuToggle = container.querySelector('[data-testid="kw-chat-command-menu-toggle"]') as HTMLButtonElement
     expect(pause).not.toBeNull()
-    expect(turn).not.toBeNull()
+    expect(menuToggle).not.toBeNull()
 
     await act(async () => {
       pause.click()
@@ -245,6 +250,11 @@ describe('KeeperWorkspaceChat', () => {
 
     expect(runKeeperAction).toHaveBeenCalledWith('sangsu', 'pause')
     expect(pause.disabled).toBe(true)
+    await act(async () => {
+      menuToggle.click()
+    })
+    const turn = container.querySelector('[data-testid="kw-chat-command-turn"]') as HTMLButtonElement
+    expect(turn).not.toBeNull()
     expect(turn.disabled).toBe(false)
 
     await act(async () => {

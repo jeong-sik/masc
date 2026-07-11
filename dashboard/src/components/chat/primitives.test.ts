@@ -3441,6 +3441,42 @@ describe('ChatComposer v2 prototype surface', () => {
     expect(cls).not.toMatch(/\bbg-\[/)
   })
 
+  it('uses the single-row prototype composer and can omit the redundant workspace footer', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        layout="primary"
+        showFooter="activity"
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    expect((container.querySelector('.composer-textarea') as HTMLTextAreaElement).rows).toBe(1)
+    expect(container.querySelector('.composer-foot')).toBeNull()
+  })
+
+  it('restores the compact footer when queue evidence exists in activity mode', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        queueCount=${2}
+        layout="primary"
+        showFooter="activity"
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-chat-queue-count]')?.textContent).toContain('대기 2')
+  })
+
   it('keeps send and attach controls operational', () => {
     const onSend = vi.fn()
     render(

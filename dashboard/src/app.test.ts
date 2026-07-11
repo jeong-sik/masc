@@ -6,6 +6,7 @@ import {
   App,
   shouldBootstrapCommandPaletteShortcut,
   shouldShowCopilotFab,
+  shouldShowDashboardHealthStrip,
   shouldSuppressFloatingChrome,
   shouldUseCompactDashboardChrome,
 } from './app'
@@ -83,13 +84,15 @@ describe('App v2 header chrome', () => {
     expect(app?.hasAttribute('data-theme')).toBe(false)
   })
 
-  it('renders v2 shell header and health strip scopes', () => {
+  it('keeps primary v2 surfaces on the single 50px top chrome', () => {
     renderApp()
-    // The shell header is now TopBarV2's `.v2-top` (the old `header.v2-shell-header`
-    // element was replaced by the keeper-v2 prototype top bar). The health strip is
-    // re-mounted under the top bar, so its testid + scope class still hold.
     expect(container.querySelector('.v2-top')).not.toBeNull()
-    expect(container.querySelector('[data-testid="dashboard-health-strip"].v2-health-strip')).not.toBeNull()
+    const health = container.querySelector('[data-testid="dashboard-health-strip"].v2-health-strip') as HTMLElement
+    expect(health).not.toBeNull()
+    expect(health.style.display).toBe('none')
+    expect(shouldShowDashboardHealthStrip('overview')).toBe(false)
+    expect(shouldShowDashboardHealthStrip('keepers')).toBe(false)
+    expect(shouldShowDashboardHealthStrip('cockpit')).toBe(true)
   })
 
   it('renders v2 header structural classes', () => {
@@ -222,10 +225,12 @@ describe('App v2 header chrome', () => {
     expect(main?.style.overflowY).toBe('auto')
   })
 
-  it('renders health chips with the shared chip class', () => {
+  it('renders health chips with the shared chip class on non-primary diagnostics', () => {
+    route.value = { tab: 'cockpit', params: {}, postId: null }
     renderApp()
     const chip = container.querySelector('.dashboard-health-chip')
     expect(chip).not.toBeNull()
+    expect((container.querySelector('[data-testid="dashboard-health-strip"]') as HTMLElement).style.display).not.toBe('none')
   })
 
   it('sets data-mobile based on the viewport width', () => {

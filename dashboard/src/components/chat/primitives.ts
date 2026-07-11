@@ -3742,6 +3742,7 @@ export function ChatComposer({
   layout = 'default',
   draftPersistKey,
   keeperLabel,
+  showFooter = true,
 }: {
   draft?: string
   placeholder: string
@@ -3766,6 +3767,10 @@ export function ChatComposer({
    *  intentionally separate from [draftPersistKey], which may be an opaque
    *  storage key. */
   keeperLabel?: string
+  /** `activity` keeps queue/stall evidence but removes the idle instruction
+   * row, allowing the dense keeper-v2 workspace to match its single-row
+   * composer. Other chat layouts retain the footer by default. */
+  showFooter?: boolean | 'activity'
   /** When set (and uncontrolled), the composer persists its unsent draft
    *  per key across remounts via keeper-chat-store, so switching keepers
    *  keeps each keeper's own half-typed message without leaking it to
@@ -4167,6 +4172,7 @@ export function ChatComposer({
                 <textarea
                   ref=${textareaRef}
                   class="composer-textarea"
+                  rows=${layout === 'primary' ? 1 : 2}
                   placeholder=${drag ? CHAT_COMPOSER_DROP_PLACEHOLDER : placeholder}
                   aria-label="메시지 입력"
                   value=${draft}
@@ -4236,17 +4242,21 @@ export function ChatComposer({
                 </div>
               `}
         </div>
-        <div class="composer-foot">
-          <span class="hint">
-            <kbd>⌘</kbd> <kbd>↵</kbd> 전송 · 끌어다 놓아 첨부
-            ${isStalled
-              ? html`<span class="ml-2 text-[var(--color-status-warn)]" data-chat-stall-hint>마지막 수신 ${sinceLastEvent}초 전 — 스트림 지연</span>`
-              : null}
-          </span>
-          ${queueCount > 0
-            ? html`<span class="queue-badge" data-chat-queue-count>대기 ${queueCount}</span>`
-            : null}
-        </div>
+        ${showFooter === true || (showFooter === 'activity' && (isStalled || queueCount > 0))
+          ? html`
+              <div class="composer-foot">
+                <span class="hint">
+                  <kbd>⌘</kbd> <kbd>↵</kbd> 전송 · 끌어다 놓아 첨부
+                  ${isStalled
+                    ? html`<span class="ml-2 text-[var(--color-status-warn)]" data-chat-stall-hint>마지막 수신 ${sinceLastEvent}초 전 — 스트림 지연</span>`
+                    : null}
+                </span>
+                ${queueCount > 0
+                  ? html`<span class="queue-badge" data-chat-queue-count>대기 ${queueCount}</span>`
+                  : null}
+              </div>
+            `
+          : null}
       </div>
     </div>
   `

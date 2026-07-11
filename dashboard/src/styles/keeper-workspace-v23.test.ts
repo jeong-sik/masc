@@ -32,7 +32,7 @@ describe('keeper-workspace v2.3 fleet surface CSS', () => {
     expect(gloss['white-space']).toBe('nowrap')
 
     const rightRail = declarationsForSelector(css, '.kw-kp-right')
-    expect(rightRail['padding-right']).toBe('34px')
+    expect(rightRail['padding-right']).toBeUndefined()
     expect(rightRail['align-items']).toBe('flex-end')
   })
 

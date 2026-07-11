@@ -528,12 +528,14 @@ export function KeeperConversationPanel({
   layout = 'default',
   composerCommands = [],
   onInspectTurn,
+  workspaceToolbarOpen = true,
 }: {
   keeperName: string
   placeholder: string
   layout?: 'default' | 'primary' | 'workspace'
   composerCommands?: ChatComposerCommand[]
   onInspectTurn?: (entry: KeeperConversationEntry) => void
+  workspaceToolbarOpen?: boolean
 }) {
   // Global view prefs (Tweaks panel owns the switches). Reading .value here
   // subscribes this component, so a Tweaks flip re-renders every mounted panel.
@@ -838,34 +840,38 @@ export function KeeperConversationPanel({
         class="flex min-h-0 flex-1 flex-col v2-monitoring-surface"
         data-keeper-chat-layout="workspace"
       >
-        <div class="kw-chat-toolbar v2-monitoring-toolbar">
-          <${TextInput}
-            class="max-w-50"
-            name="keeper_chat_search"
-            ariaLabel="대화 내용 검색"
-            autoComplete="off"
-            placeholder="대화 검색..."
-            value=${searchQuery}
-            onInput=${(e: Event) => { setSearchQuery((e.target as HTMLInputElement).value) }}
-          />
-          ${hasQuery
-            ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)] v2-monitoring-row" data-chat-search-count>
-                ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
-              </span>`
-            : null}
-          <span class="spacer"></span>
-          ${!historyExpanded
-            ? html`
-                <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
-                  ${hydrating
-                    ? '불러오는 중...'
-                    : rawThread.length === 0
-                      ? '이력 불러오기'
-                      : `전체 이력 (${thread.length})`}
-                <//>
-              `
-            : null}
-        </div>
+        ${workspaceToolbarOpen
+          ? html`
+              <div class="kw-chat-toolbar v2-monitoring-toolbar">
+                <${TextInput}
+                  class="max-w-50"
+                  name="keeper_chat_search"
+                  ariaLabel="대화 내용 검색"
+                  autoComplete="off"
+                  placeholder="대화 검색..."
+                  value=${searchQuery}
+                  onInput=${(e: Event) => { setSearchQuery((e.target as HTMLInputElement).value) }}
+                />
+                ${hasQuery
+                  ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)] v2-monitoring-row" data-chat-search-count>
+                      ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
+                    </span>`
+                  : null}
+                <span class="spacer"></span>
+                ${!historyExpanded
+                  ? html`
+                      <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
+                        ${hydrating
+                          ? '불러오는 중...'
+                          : rawThread.length === 0
+                            ? '이력 불러오기'
+                            : `전체 이력 (${thread.length})`}
+                      <//>
+                    `
+                  : null}
+              </div>
+            `
+          : null}
 
         ${chatAccess.message
           ? html`
@@ -947,6 +953,7 @@ export function KeeperConversationPanel({
               onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
               onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
               layout="primary"
+              showFooter="activity"
             />
             ${renderError()}
           </div>

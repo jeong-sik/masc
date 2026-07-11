@@ -351,7 +351,7 @@ function selectTraceEvent(event: KeeperTraceEvent): void {
     source_id: context.sourceId ?? `trace:${event.id}`,
     keeper_id: context.keeperId,
     route_links: routeLinksForContext(context),
-  })
+  }, 'operator')
 }
 
 function traceRouteLinks(events: ReadonlyArray<KeeperTraceEvent>): ReadonlyArray<IdeContextRouteLink> {

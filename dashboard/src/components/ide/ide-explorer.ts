@@ -3,7 +3,12 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Search } from 'lucide-preact'
 import { activeKeeperName } from '../../keeper-state'
 import { type FileTreeStore, type FileTreeNode, type FileTreeDiffSummary } from './file-tree-store'
-import { activeIdeFile, ideContextFocus, type IdeContextFocus } from './ide-state'
+import {
+  activeIdeFile,
+  focusIdeFile,
+  ideContextFocus,
+  type IdeContextFocus,
+} from './ide-state'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
 import { showToast } from '../common/toast'
@@ -23,6 +28,7 @@ interface IdeExplorerProps {
   readonly subscribeWorkspaceSource?: (listener: () => void) => () => void
   readonly repositories?: () => ReadonlyArray<Repository>
   readonly activeRepositoryId?: () => string | null
+  readonly subscribeActiveRepositoryId?: (listener: () => void) => () => void
   readonly onRepositoryChange?: (repoId: string | null) => void
   readonly onRepositoryScan?: () => Promise<ReadonlyArray<Repository>>
   readonly subscribeRepositories?: (listener: () => void) => () => void
@@ -85,6 +91,7 @@ export function IdeExplorer({
   subscribeWorkspaceSource,
   repositories,
   activeRepositoryId,
+  subscribeActiveRepositoryId,
   onRepositoryChange,
   onRepositoryScan,
   subscribeRepositories,
@@ -110,9 +117,14 @@ export function IdeExplorer({
     if (!subscribeRepositories || !repositories) return
     return subscribeRepositories(() => {
       setRepoList(repositories())
-      setSelectedRepoId(activeRepositoryId ? activeRepositoryId() : null)
     })
-  }, [activeRepositoryId, repositories, subscribeRepositories])
+  }, [repositories, subscribeRepositories])
+  useEffect(() => {
+    if (!subscribeActiveRepositoryId || !activeRepositoryId) return
+    return subscribeActiveRepositoryId(() => {
+      setSelectedRepoId(activeRepositoryId())
+    })
+  }, [activeRepositoryId, subscribeActiveRepositoryId])
 
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -359,7 +371,13 @@ export function IdeExplorer({
               // store.toggle -> expand -> loadChildren fetches this directory's
               // children on first open (no-op if already present/in flight).
               if (node.hasChildren) store.toggle(node.path)
-              else activeIdeFile.value = node.path
+              else {
+                focusIdeFile({
+                  path: node.path,
+                  origin: 'operator',
+                  availability: 'available',
+                })
+              }
             },
             contextFocus?.file_path === node.path ? contextFocus : null,
             keepersByFile.get(node.path),

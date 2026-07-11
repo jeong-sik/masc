@@ -17,11 +17,12 @@ function stubFetch(
   response: unknown,
   ok = true,
   headers: Record<string, string> = {},
+  status = ok ? 200 : 500,
 ): void {
   mockFetch.mockResolvedValue({
     ok,
-    status: ok ? 200 : 500,
-    statusText: ok ? 'OK' : 'Internal Server Error',
+    status,
+    statusText: ok ? 'OK' : status === 404 ? 'Not Found' : 'Internal Server Error',
     headers: new Headers(headers),
     json: () => Promise.resolve(response),
     text: () => Promise.resolve(JSON.stringify(response)),
@@ -86,8 +87,7 @@ describe('workspace API', () => {
     stubFetch({ ok: true, content: 'let x = 1\n', language: 'ocaml' })
 
     const result = await fetchWorkspaceFile('lib/main.ml')
-    expect(result?.ok).toBe(true)
-    expect(result?.content).toBe('let x = 1\n')
+    expect(result).toEqual({ ok: true, content: 'let x = 1\n', language: 'ocaml' })
 
     expect(mockFetch.mock.calls[0]![0]).toContain('/api/v1/workspace/file?path=')
     expect(mockFetch.mock.calls[0]![0]).toContain('lib%2Fmain.ml')
@@ -98,6 +98,18 @@ describe('workspace API', () => {
 
     await fetchWorkspaceFile('lib/main.ml', { repoId: 'oas' })
     expect(mockFetch.mock.calls[0]![0]).toContain('repo_id=oas')
+  })
+
+  it('fetchWorkspaceFile projects the route HTTP 404 as typed not-found', async () => {
+    stubFetch({ ok: false, error: 'File not found' }, false, {}, 404)
+
+    await expect(fetchWorkspaceFile('missing.ml')).resolves.toEqual({ ok: false })
+  })
+
+  it('fetchWorkspaceFile preserves non-404 API failures', async () => {
+    stubFetch({ ok: false, error: 'Failed to read file' }, false, {}, 500)
+
+    await expect(fetchWorkspaceFile('broken.ml')).rejects.toMatchObject({ status: 500 })
   })
 
   it('fetchGitBlame returns blame blocks', async () => {

@@ -10,7 +10,7 @@ import {
   replayRailItems,
 } from './ide-conversation-rail'
 import { routeHashParams } from './ide-test-helpers'
-import { activeIdeFile, ideContextFocus } from './ide-state'
+import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
@@ -49,7 +49,12 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
-  activeIdeFile.value = 'package.json'
+  focusIdeFile({
+    path: 'package.json',
+    origin: 'operator',
+    workspace_identity: { kind: 'project' },
+    availability: 'available',
+  })
   ideContextFocus.value = null
   setIdeReplayUntilMs(null)
   cursorOverlaySignal.value = {
@@ -171,7 +176,12 @@ describe('IdeConversationRail', () => {
     }]
 
     expect(postsToAnchoredThreads(posts)).toEqual([])
-    activeIdeFile.value = 'lib/runtime.ml'
+    focusIdeFile({
+      path: 'lib/runtime.ml',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'available',
+    })
     expect(postsToAnchoredThreads(posts)).toEqual([])
   })
 

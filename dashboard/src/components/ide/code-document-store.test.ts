@@ -4,6 +4,7 @@ vi.mock('../../api/ide', () => ({
   fetchIdeRegions: vi.fn().mockResolvedValue([]),
 }))
 import { fetchIdeRegions } from '../../api/ide'
+import type { IdeCodeRegion } from '../../api/ide'
 import { createCodeDocumentStore } from './code-document-store'
 
 const fetchIdeRegionsMock = vi.mocked(fetchIdeRegions)
@@ -126,6 +127,38 @@ describe('createCodeDocumentStore', () => {
     expect(store.regions()).toHaveLength(1)
 
     store.load({ file_path: 'b.ts', language: 'typescript', content: 'export {}' })
+    expect(store.regions()).toEqual([])
+    expect(store.regionsState()).toBe('idle')
+  })
+
+  it('invalidates the document and prevents an older region request from repopulating it', async () => {
+    let resolveRegions: (regions: ReadonlyArray<IdeCodeRegion>) => void = () => {
+      throw new Error('region request resolver was not initialized')
+    }
+    fetchIdeRegionsMock.mockImplementationOnce(() => new Promise<ReadonlyArray<IdeCodeRegion>>(resolve => {
+      resolveRegions = resolve
+    }))
+    const store = createCodeDocumentStore({
+      file_path: 'repo-a.ml',
+      language: 'ocaml',
+      content: 'let workspace = "repo-a"\n',
+    })
+
+    const regions = store.loadRegions('repo-a.ml')
+    expect(store.regionsState()).toBe('loading')
+
+    store.invalidate()
+    expect(store.document()).toMatchObject({
+      file_path: null,
+      language: 'text',
+      content: '',
+      lines: [],
+    })
+    expect(store.regions()).toEqual([])
+    expect(store.regionsState()).toBe('idle')
+
+    resolveRegions([])
+    await regions
     expect(store.regions()).toEqual([])
     expect(store.regionsState()).toBe('idle')
   })

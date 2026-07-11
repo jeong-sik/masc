@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
-import { fireEvent } from '@testing-library/preact'
+import { signal } from '@preact/signals'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import { explorerScopeLabel, IdeExplorer } from './ide-explorer'
 import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
 import type { Repository } from '../../api/repositories'
-import { activeIdeFile, ideContextFocus } from './ide-state'
+import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
 
 const SAMPLE: ReadonlyArray<FileTreeNode> = [
   { path: 'runtime', label: 'runtime', depth: 0, parent: null, hasChildren: true, diff: null, keeperId: null, hueIndex: null },
@@ -59,7 +60,12 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
   afterEach(() => {
     render(null, container)
     window.location.hash = ''
-    activeIdeFile.value = 'package.json'
+    focusIdeFile({
+      path: 'package.json',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'available',
+    })
     ideContextFocus.value = null
   })
 
@@ -169,6 +175,28 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     expect(container.querySelector('[data-testid="ide-explorer-source"]')?.textContent).toBe('masc')
     expect(container.querySelector('[data-testid="ide-explorer-source"]')?.getAttribute('title'))
       .toBe('Workspace source: masc')
+  })
+
+  it('tracks an active repository change published after the repository list', async () => {
+    const store = createFileTreeStore()
+    const repositories = signal<ReadonlyArray<Repository>>([])
+    const activeRepositoryId = signal<string | null>(null)
+
+    render(h(IdeExplorer, {
+      fileTreeStore: store,
+      repositories: () => repositories.value,
+      activeRepositoryId: () => activeRepositoryId.value,
+      subscribeRepositories: listener => repositories.subscribe(listener),
+      subscribeActiveRepositoryId: listener => activeRepositoryId.subscribe(listener),
+    }), container)
+
+    repositories.value = [repo('repo-a', 'repo A'), repo('repo-b', 'repo B')]
+    activeRepositoryId.value = 'repo-b'
+
+    await waitFor(() => {
+      expect(container.querySelector<HTMLSelectElement>('[aria-label="IDE repository"]')?.value)
+        .toBe('repo-b')
+    })
   })
 
   it('labels loaded visible files distinctly from filtered results', () => {

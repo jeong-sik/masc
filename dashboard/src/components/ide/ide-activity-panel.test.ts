@@ -3,7 +3,7 @@ import { h } from 'preact'
 import { render as preactRender } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { deriveIdeRunProgressSummary, IdeActivityPanel } from './ide-activity-panel'
-import { activeIdeFile, ideContextFocus } from './ide-state'
+import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { goals, tasks } from '../../store'
@@ -36,7 +36,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
   ideContextFocus.value = null
   lspDiagnosticSnapshot.value = new Map()
-  activeIdeFile.value = 'package.json'
+  focusIdeFile({
+    path: 'package.json',
+    origin: 'operator',
+    workspace_identity: { kind: 'project' },
+    availability: 'available',
+  })
   goals.value = []
   tasks.value = []
   window.location.hash = ''

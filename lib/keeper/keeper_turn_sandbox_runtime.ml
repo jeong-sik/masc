@@ -871,23 +871,29 @@ let ensure_started ?(validate_running = false) (t : t) ~timeout_sec =
   | Not_started -> start_container t ~timeout_sec
 ;;
 
-let rewrite_command_argv (t : t) command_argv =
-  List.map
-    (fun arg ->
-      let rewritten =
-        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-          ~host_root:t.host_root
-          ~container_root:t.container_root
-          arg
-      in
-      if String.equal t.raw_host_root t.host_root
-      then rewritten
-      else
-        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-          ~host_root:t.raw_host_root
-          ~container_root:t.container_root
-          rewritten)
-    command_argv
+let rewrite_host_value (t : t) value =
+  let rewritten =
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:t.host_root
+      ~container_root:t.container_root
+      value
+  in
+  if String.equal t.raw_host_root t.host_root
+  then rewritten
+  else
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:t.raw_host_root
+      ~container_root:t.container_root
+      rewritten
+;;
+
+let rewrite_command_argv t command_argv = List.map (rewrite_host_value t) command_argv
+
+let rewrite_env_bindings t env =
+  env
+  |> Array.to_list
+  |> List.map (fun (binding : Masc_exec.Sandbox_target.env_binding) ->
+    { binding with value = rewrite_host_value t binding.value })
 ;;
 
 let run_exec_with_status_split_once
@@ -898,60 +904,61 @@ let run_exec_with_status_split_once
       ?(env = [||])
       (t : t)
       ~timeout_sec
-      ~(cwd : string)
-      ~(command_argv : string list)
+  ~(cwd : string)
+  ~(command_argv : string list)
   =
-  match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
-  | Error _ as err -> err
-  | Ok container_name ->
-    let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-    let command_argv = rewrite_command_argv t command_argv in
-    (* Keeper env entries get the same host-root rewriting as argv:
-       values may carry playground paths that only resolve inside the
-       container. Reserved-key collisions are rejected upstream in
-       [Keeper_sandbox_shell_ir_target] before this point. *)
-    let keeper_env_args =
-      Keeper_sandbox_runtime.docker_keeper_env_args
-        (rewrite_command_argv t (Array.to_list env))
-    in
-    let argv =
-      Keeper_sandbox_runtime.docker_command_argv ()
-      @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
-      @ Keeper_sandbox_runtime.docker_sandbox_env_args
-          ~base_path:t.config.base_path
-          ~container_root:t.container_root
-      @ keeper_env_args
-      @ (match stdin_content with
-         | Some _ -> [ "-i" ]
-         | None -> [])
-      @ (container_name :: command_argv)
-    in
-    let has_output_callback =
-      Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
-    in
-    let st, stdout, stderr =
-      match stdin_content, has_output_callback with
-      | Some content, false ->
-        run_argv_with_stdin_and_status_split_retry_eintr
-          ~timeout_sec
-          ~stdin_content:content
-          argv
-      | None, false -> run_argv_with_status_split_retry_eintr ~timeout_sec argv
-      | Some content, true ->
-        run_argv_with_stdin_and_status_split_retry_eintr
-          ~timeout_sec
-          ?on_stdout_chunk
-          ?on_stderr_chunk
-          ~stdin_content:content
-          argv
-      | None, true ->
-        run_argv_with_status_split_retry_eintr
-          ~timeout_sec
-          ?on_stdout_chunk
-          ?on_stderr_chunk
-          argv
-    in
-    Ok (st, stdout, stderr)
+  match Keeper_sandbox_runtime.docker_keeper_env_args (rewrite_env_bindings t env) with
+  | Error error ->
+    Error (Keeper_sandbox_runtime.docker_keeper_env_error_to_string error)
+  | Ok keeper_env_args ->
+    (match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
+     | Error _ as err -> err
+     | Ok container_name ->
+       let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
+       let command_argv = rewrite_command_argv t command_argv in
+       let argv =
+         Keeper_sandbox_runtime.docker_command_argv ()
+         @ [ "exec"
+           ; "--user"
+           ; Printf.sprintf "%d:%d" t.uid t.gid
+           ; "-w"
+           ; container_cwd
+           ]
+         @ Keeper_sandbox_runtime.docker_sandbox_env_args
+             ~base_path:t.config.base_path
+             ~container_root:t.container_root
+         @ keeper_env_args
+         @ (match stdin_content with
+            | Some _ -> [ "-i" ]
+            | None -> [])
+         @ (container_name :: command_argv)
+       in
+       let has_output_callback =
+         Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
+       in
+       let st, stdout, stderr =
+         match stdin_content, has_output_callback with
+         | Some content, false ->
+           run_argv_with_stdin_and_status_split_retry_eintr
+             ~timeout_sec
+             ~stdin_content:content
+             argv
+         | None, false -> run_argv_with_status_split_retry_eintr ~timeout_sec argv
+         | Some content, true ->
+           run_argv_with_stdin_and_status_split_retry_eintr
+             ~timeout_sec
+             ?on_stdout_chunk
+             ?on_stderr_chunk
+             ~stdin_content:content
+             argv
+         | None, true ->
+           run_argv_with_status_split_retry_eintr
+             ~timeout_sec
+             ?on_stdout_chunk
+             ?on_stderr_chunk
+             argv
+       in
+       Ok (st, stdout, stderr))
 ;;
 
 let run_exec_with_status_split
@@ -1026,18 +1033,28 @@ let run_exec_with_status
 type exec_pipeline_stage = {
   command_argv : string list;
   cwd : string option;
-  env : string list;
+  env : Masc_exec.Sandbox_target.env_binding array;
 }
 
-let docker_exec_pipeline_argv (t : t) ~container_name ~container_cwd ~env command_argv =
+let docker_exec_pipeline_argv
+      (t : t)
+      ~container_name
+      ~container_cwd
+      ~keeper_env_args
+      command_argv
+  =
   Keeper_sandbox_runtime.docker_command_argv ()
-  @ [ "exec"; "-i"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
+  @ [ "exec"
+    ; "-i"
+    ; "--user"
+    ; Printf.sprintf "%d:%d" t.uid t.gid
+    ; "-w"
+    ; container_cwd
+    ]
   @ Keeper_sandbox_runtime.docker_sandbox_env_args
       ~base_path:t.config.base_path
       ~container_root:t.container_root
-  (* Same host-root rewriting as argv; reserved-key collisions are
-     rejected upstream in [Keeper_sandbox_shell_ir_target]. *)
-  @ Keeper_sandbox_runtime.docker_keeper_env_args (rewrite_command_argv t env)
+  @ keeper_env_args
   @ (container_name :: rewrite_command_argv t command_argv)
 ;;
 
@@ -1047,32 +1064,60 @@ let run_exec_pipeline_with_status_once
       ?on_stderr_chunk
       (t : t)
       ~timeout_sec
-      ~(cwd : string)
-      ~(stages : exec_pipeline_stage list)
+  ~(cwd : string)
+  ~(stages : exec_pipeline_stage list)
   =
-  match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
-  | Error _ as err -> err
-  | Ok container_name ->
-    let process_stages =
-      List.map
-        (fun { command_argv; cwd = stage_cwd; env } ->
-          let cwd = Option.value stage_cwd ~default:cwd in
-          let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-          let argv =
-            docker_exec_pipeline_argv t ~container_name ~container_cwd ~env command_argv
-          in
-          { Process_eio.argv
-          ; env = Some (Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
-          ; cwd = Some (Config_dir_resolver.current_working_dir ())
-          })
-        stages
+  let rec validate_envs acc = function
+    | [] -> Ok (List.rev acc)
+    | ({ env; _ } as stage) :: rest ->
+      (match
+         Keeper_sandbox_runtime.docker_keeper_env_args
+           (rewrite_env_bindings t env)
+       with
+       | Error error ->
+         Error (Keeper_sandbox_runtime.docker_keeper_env_error_to_string error)
+       | Ok keeper_env_args ->
+         validate_envs ((stage, keeper_env_args) :: acc) rest)
+  in
+  match validate_envs [] stages with
+  | Error _ as error -> error
+  | Ok stages ->
+    (match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
+     | Error _ as err -> err
+     | Ok container_name ->
+    let rec build_process_stages acc = function
+      | [] -> Ok (List.rev acc)
+      | ({ command_argv; cwd = stage_cwd; env = _ }, keeper_env_args) :: rest ->
+        let cwd = Option.value stage_cwd ~default:cwd in
+        let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
+        let argv =
+          docker_exec_pipeline_argv
+            t
+            ~container_name
+            ~container_cwd
+            ~keeper_env_args
+            command_argv
+        in
+           let stage =
+             { Process_eio.argv
+             ; env =
+                 Some
+                   (Env_keeper_scrub.filter_environment_c_messages
+                      (Unix.environment ()))
+             ; cwd = Some (Config_dir_resolver.current_working_dir ())
+             }
+           in
+           build_process_stages (stage :: acc) rest
     in
-    Ok
-      (run_argv_pipeline_with_status_split_retry_eintr
-         ~timeout_sec
-         ?on_stdout_chunk
-         ?on_stderr_chunk
-         process_stages)
+    (match build_process_stages [] stages with
+     | Error _ as error -> error
+     | Ok process_stages ->
+       Ok
+         (run_argv_pipeline_with_status_split_retry_eintr
+            ~timeout_sec
+            ?on_stdout_chunk
+            ?on_stderr_chunk
+            process_stages)))
 ;;
 
 let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ~timeout_sec t ~cwd ~stages =

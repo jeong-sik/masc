@@ -53,6 +53,7 @@ type validation_error =
   | Pipeline_empty
   | Pipeline_too_short
   | Env_key_invalid of string
+  | Env_key_duplicate of string
 
 let json_type_name (json : Yojson.Safe.t) =
   match json with
@@ -396,18 +397,22 @@ let check_cwd = function
 let check_env env =
   let key_ok k =
     String.length k > 0
+    && (match k.[0] with
+        | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
+        | _ -> false)
     && String.for_all
          (function
            | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
            | _ -> false)
          k
   in
-  let rec loop = function
+  let rec loop seen = function
     | [] -> Ok ()
     | (k, _) :: _ when not (key_ok k) -> Error (Env_key_invalid k)
-    | _ :: rest -> loop rest
+    | (k, _) :: _ when List.mem k seen -> Error (Env_key_duplicate k)
+    | (k, _) :: rest -> loop (k :: seen) rest
   in
-  loop env
+  loop [] env
 ;;
 
 let check_exec ~executable ~argv ~cwd ~env =
@@ -618,7 +623,9 @@ let pp_validation_error ppf = function
   | Pipeline_too_short ->
     Format.pp_print_string ppf "pipeline requires at least two stages"
   | Env_key_invalid k ->
-    Format.fprintf ppf "env key %S is not [A-Za-z0-9_]+" k
+    Format.fprintf ppf "env key %S is not [A-Za-z_][A-Za-z0-9_]*" k
+  | Env_key_duplicate k ->
+    Format.fprintf ppf "env key %S is duplicated" k
 ;;
 
 let validation_error_alternatives : validation_error -> string list = function

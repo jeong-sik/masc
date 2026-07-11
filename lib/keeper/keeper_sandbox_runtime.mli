@@ -269,10 +269,19 @@ val docker_sandbox_env_args
     override a sandbox invariant. *)
 val docker_sandbox_reserved_env_keys : string list
 
-(** Keeper-supplied env entries ("K=V", already resolved by the Shell IR
-    dispatch) as [docker exec] argv flags. Callers must reject entries whose
-    key is in [docker_sandbox_reserved_env_keys] first. *)
-val docker_keeper_env_args : string list -> string list
+type docker_keeper_env_error =
+  | Invalid_key of string
+  | Duplicate_key of string
+  | Reserved_key of string
+
+val docker_keeper_env_error_to_string : docker_keeper_env_error -> string
+
+(** Validate structured keeper bindings at the final Docker argv boundary and
+    render them as [--env K=V] pairs. Reserved, duplicate, and invalid keys are
+    typed errors; Docker's bare-key host import form is unrepresentable. *)
+val docker_keeper_env_args
+  :  Masc_exec.Sandbox_target.env_binding list
+  -> (string list, docker_keeper_env_error) result
 
 (** Docker [-v ...] argv fragment that supplies passwd/group entries for
     the numeric host uid/gid used inside the keeper container. *)

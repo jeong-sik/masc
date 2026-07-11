@@ -915,6 +915,50 @@ let test_env_key_invalid () =
     (typed_ok input)
 ;;
 
+let test_env_key_cannot_start_with_digit () =
+  let input =
+    Execute_input.Exec
+      { executable = "ls"
+      ; argv = []
+      ; cwd = None
+      ; env = [ "1TOKEN", "value" ]
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
+      }
+  in
+  match Execute_input.validate input with
+  | Error (Execute_input.Env_key_invalid "1TOKEN") -> ()
+  | Error error ->
+    Alcotest.failf
+      "expected Env_key_invalid, got %a"
+      Execute_input.pp_validation_error
+      error
+  | Ok () -> Alcotest.fail "digit-prefixed env key unexpectedly accepted"
+;;
+
+let test_env_key_duplicate () =
+  let input =
+    Execute_input.Exec
+      { executable = "ls"
+      ; argv = []
+      ; cwd = None
+      ; env = [ "TOKEN", "first"; "TOKEN", "second" ]
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
+      }
+  in
+  match Execute_input.validate input with
+  | Error (Execute_input.Env_key_duplicate "TOKEN") -> ()
+  | Error error ->
+    Alcotest.failf
+      "expected Env_key_duplicate, got %a"
+      Execute_input.pp_validation_error
+      error
+  | Ok () -> Alcotest.fail "duplicate env key unexpectedly accepted"
+;;
+
 (* RFC-0198 Phase A: redirection-shape argv tokens.  Validation must
    reject these with the typed [Argv_contains_shell_redirection] error
    so the caller (LLM) receives a typed alternative instead of the
@@ -1366,6 +1410,11 @@ let suite =
           test_gh_multiline_body_lowers_to_literal_argv
       ; Alcotest.test_case "cwd_not_absolute" `Quick test_cwd_not_absolute
       ; Alcotest.test_case "env_key_invalid" `Quick test_env_key_invalid
+      ; Alcotest.test_case
+          "env_key_cannot_start_with_digit"
+          `Quick
+          test_env_key_cannot_start_with_digit
+      ; Alcotest.test_case "env_key_duplicate" `Quick test_env_key_duplicate
       ; Alcotest.test_case
           "rfc_0198_shell_redirection_token_rejected"
           `Quick

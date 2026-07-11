@@ -121,6 +121,7 @@ type validation_error =
   | Pipeline_empty
   | Pipeline_too_short
   | Env_key_invalid of string
+  | Env_key_duplicate of string
 
 val of_json : Yojson.Safe.t -> (execute_input, string) result
 (** Parse the typed Execute JSON boundary.  Accepts either

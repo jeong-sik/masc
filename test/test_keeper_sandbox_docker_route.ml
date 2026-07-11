@@ -647,14 +647,18 @@ let tool_execute_typed_pipeline_args ~cwd =
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
-let tool_execute_typed_exec_args ?(argv = []) ~cwd executable =
+let tool_execute_typed_exec_args ?(argv = []) ?(env = []) ~cwd executable =
   `Assoc
-    [
-      ("executable", `String executable);
-      ("argv", json_string_list argv);
-      ("cwd", `String cwd);
-      ("timeout_sec", `Float 5.0);
-    ]
+    ([ ("executable", `String executable)
+     ; ("argv", json_string_list argv)
+     ; ("cwd", `String cwd)
+     ; ("timeout_sec", `Float 5.0)
+     ]
+     @
+     match env with
+     | [] -> []
+     | bindings ->
+       [ "env", `Assoc (List.map (fun (key, value) -> key, `String value) bindings) ])
 
 let tool_execute_typed_pipeline_args_of ~cwd stages =
   `Assoc
@@ -2008,6 +2012,97 @@ let test_execute_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
+let test_execute_typed_env_reaches_docker_exec () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (tool_execute_typed_exec_args
+           ~cwd:playground
+           ~env:
+             [ "EXEC_TOKEN", "value=with=equals"
+             ; "EXEC_PATH", Filename.concat playground "repos"
+             ]
+           "echo"
+           ~argv:[ "hello" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "typed env execution succeeds" (Some true)
+    (parse_bool_field raw "ok");
+  let log = read_file log_path in
+  Alcotest.(check bool) "structured env reaches docker exec" true
+    (contains_substring log "--env EXEC_TOKEN=value=with=equals");
+  Alcotest.(check bool) "env value uses container path" true
+    (contains_substring
+       log
+       ("--env EXEC_PATH=" ^ Filename.concat container_root "repos"))
+
+let test_execute_reserved_env_rejected_before_container_execution () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (tool_execute_typed_exec_args
+           ~cwd:playground
+           ~env:[ "HOME", "/evil" ]
+           "echo")
+      ()
+  in
+  Alcotest.(check (option bool)) "reserved env execution rejected" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "typed reserved-key error surfaced" true
+    (response_mentions raw "error" "sandbox exec boundary owns it");
+  let log = if Sys.file_exists log_path then read_file log_path else "" in
+  Alcotest.(check bool) "container was not started or executed" false
+    (docker_log_has_container_execution log)
+
+let test_execute_duplicate_env_rejected_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (tool_execute_typed_exec_args
+           ~cwd:playground
+           ~env:[ "TOKEN", "first"; "TOKEN", "second" ]
+           "echo")
+      ()
+  in
+  Alcotest.(check (option bool)) "duplicate env execution rejected" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "duplicate key is explicit" true
+    (response_mentions raw "error" "env key \"TOKEN\" is duplicated");
+  Alcotest.(check bool) "docker was not invoked" false (Sys.file_exists log_path)
+
 let test_turn_runtime_projects_keeper_secret_dir () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -2359,6 +2454,15 @@ let () =
           Alcotest.test_case
             "docker Execute executes through fake docker"
             `Quick test_execute_fake_docker_executes;
+          Alcotest.test_case
+            "docker Execute forwards structured env"
+            `Quick test_execute_typed_env_reaches_docker_exec;
+          Alcotest.test_case
+            "docker Execute rejects reserved env before container execution"
+            `Quick test_execute_reserved_env_rejected_before_container_execution;
+          Alcotest.test_case
+            "docker Execute rejects duplicate env before docker"
+            `Quick test_execute_duplicate_env_rejected_before_docker;
           Alcotest.test_case
             "docker Execute safe pipe redirect routes through docker"
             `Quick test_execute_allows_validator_safe_pipe_redirect_in_docker_route;

@@ -30,18 +30,23 @@
    [Exec_gate.run_argv_with_status_split], and [Docker] via the carried
    [runner]. *)
 
+type env_binding =
+  { key : string
+  ; value : string
+  }
+
 type runner =
   on_stdout_chunk:(string -> unit) option ->
   on_stderr_chunk:(string -> unit) option ->
   stdin_content:string option ->
   argv:string list ->
-  env:string array ->
+  env:env_binding array ->
   cwd:string option ->
   Unix.process_status * string * string
 
 type pipeline_stage = {
   argv : string list;
-  env : string array;
+  env : env_binding array;
   cwd : string option;
 }
 

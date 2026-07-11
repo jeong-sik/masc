@@ -10,6 +10,14 @@
     directly to [Exec_gate], avoiding a circular dependency between
     [Sandbox_target] and [Exec_gate]. *)
 
+(** A resolved environment binding. Keeping the key and value structured
+    prevents sandbox backends from reparsing ["K=V"] strings or accepting
+    Docker's bare-key host-environment import form. *)
+type env_binding =
+  { key : string
+  ; value : string
+  }
+
 (** A runner closure executes an argv with the given env / cwd and returns
     the raw process status plus stdout/stderr buffers. Exceptions are
     propagated; callers in [Exec_dispatch] catch and translate them into
@@ -19,13 +27,13 @@ type runner =
   on_stderr_chunk:(string -> unit) option ->
   stdin_content:string option ->
   argv:string list ->
-  env:string array ->
+  env:env_binding array ->
   cwd:string option ->
   Unix.process_status * string * string
 
 type pipeline_stage = {
   argv : string list;
-  env : string array;
+  env : env_binding array;
   cwd : string option;
 }
 

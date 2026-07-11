@@ -13,7 +13,7 @@ val effective_autoboot_enabled :
 val pause_elapsed_sec :
   float ->
   Keeper_meta_contract.keeper_meta -> float option
-type pause_kind =
+type pause_kind = Keeper_activation_readiness.pause_kind =
   | Active
   | Reconcile_gated
   | Auto_recoverable

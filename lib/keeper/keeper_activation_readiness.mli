@@ -8,6 +8,21 @@ type autonomous_blocker =
   | Autoboot_disabled
   | Proactive_disabled
 
+(** Typed operator-facing projection of the persisted Keeper lifecycle and
+    supervisor recovery policy. Server/dashboard code consumes this value; it
+    must not reclassify pause/dead states independently. *)
+type pause_kind =
+  | Active
+  | Reconcile_gated
+  | Auto_recoverable
+  | Operator_paused
+  | Latched_paused
+  | Unclassified_paused
+  | Dead_tombstone
+
+val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
+val pause_kind_to_wire : pause_kind -> string
+
 type autonomous_activation =
   { ok : bool
   ; autoboot_enabled : bool

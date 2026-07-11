@@ -21,7 +21,6 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module Readiness = Masc.Keeper_activation_readiness
 module Admission = Masc.Keeper_lifecycle_admission
-module Fleet_scan = Masc.Server_routes_http_runtime_fleet_scan
 
 let contains haystack needle =
   let hl = String.length haystack
@@ -363,23 +362,23 @@ let test_health_projection_uses_typed_lifecycle () =
     { (ready_meta ()) with paused = true; latched_reason = None }
   in
   check bool "health classifies dead tombstone" true
-    (match Fleet_scan.pause_kind dead_meta with
-     | Fleet_scan.Dead_tombstone -> true
-     | Fleet_scan.Active
-     | Fleet_scan.Reconcile_gated
-     | Fleet_scan.Auto_recoverable
-     | Fleet_scan.Operator_paused
-     | Fleet_scan.Latched_paused
-     | Fleet_scan.Unclassified_paused -> false);
+    (match Readiness.pause_kind dead_meta with
+     | Readiness.Dead_tombstone -> true
+     | Readiness.Active
+     | Readiness.Reconcile_gated
+     | Readiness.Auto_recoverable
+     | Readiness.Operator_paused
+     | Readiness.Latched_paused
+     | Readiness.Unclassified_paused -> false);
   check bool "health does not mislabel missing reason as operator pause" true
-    (match Fleet_scan.pause_kind unclassified_meta with
-     | Fleet_scan.Unclassified_paused -> true
-     | Fleet_scan.Active
-     | Fleet_scan.Reconcile_gated
-     | Fleet_scan.Auto_recoverable
-     | Fleet_scan.Operator_paused
-     | Fleet_scan.Latched_paused
-     | Fleet_scan.Dead_tombstone -> false)
+    (match Readiness.pause_kind unclassified_meta with
+     | Readiness.Unclassified_paused -> true
+     | Readiness.Active
+     | Readiness.Reconcile_gated
+     | Readiness.Auto_recoverable
+     | Readiness.Operator_paused
+     | Readiness.Latched_paused
+     | Readiness.Dead_tombstone -> false)
 ;;
 
 let () = init_runtime_default_for_tests ()

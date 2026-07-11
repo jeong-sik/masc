@@ -35,7 +35,7 @@ let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))
   | Some _ | None -> None
 
-type pause_kind =
+type pause_kind = Keeper_activation_readiness.pause_kind =
   | Active
   | Reconcile_gated
   | Auto_recoverable
@@ -44,36 +44,8 @@ type pause_kind =
   | Unclassified_paused
   | Dead_tombstone
 
-let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
-  let lifecycle_state =
-    Keeper_lifecycle_admission.state
-      ~paused:meta.paused
-      ~latched_reason:meta.latched_reason
-  in
-  match lifecycle_state with
-  | Keeper_lifecycle_admission.Dead_tombstone -> Dead_tombstone
-  | Keeper_lifecycle_admission.Active -> Active
-  | Keeper_lifecycle_admission.Paused latch ->
-    if Keeper_supervisor_types.paused_meta_requires_reconcile_recovery meta then
-      Reconcile_gated
-    else
-      (match Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta with
-       | Some _ -> Auto_recoverable
-       | None ->
-         (match latch with
-          | Keeper_lifecycle_admission.Classified
-              (Keeper_latched_reason.Operator_paused _) -> Operator_paused
-          | Keeper_lifecycle_admission.Classified _ -> Latched_paused
-          | Keeper_lifecycle_admission.Unclassified -> Unclassified_paused))
-
-let pause_kind_to_wire = function
-  | Active -> "active"
-  | Reconcile_gated -> "reconcile_gated"
-  | Auto_recoverable -> "auto_recoverable"
-  | Operator_paused -> "operator_paused"
-  | Latched_paused -> "latched_paused"
-  | Unclassified_paused -> "unclassified_paused"
-  | Dead_tombstone -> "dead_tombstone"
+let pause_kind = Keeper_activation_readiness.pause_kind
+let pause_kind_to_wire = Keeper_activation_readiness.pause_kind_to_wire
 
 let pause_auto_resume_source (meta : Keeper_meta_contract.keeper_meta) =
   match meta.auto_resume_after_sec with

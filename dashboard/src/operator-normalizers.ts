@@ -80,13 +80,32 @@ function normalizeOperatorJudgeRuntime(raw: unknown): OperatorJudgeRuntime | nul
 
 function normalizeAdmissionQueue(raw: unknown): AdmissionQueueSnapshot | null {
   if (!isRecord(raw)) return null
+  const throttleOwner = asString(raw.throttle_owner)
+  const maxConcurrent = asNumber(raw.max_concurrent)
+  const active = asNumber(raw.active)
+  const available = asNumber(raw.available)
+  const queueDepth = asNumber(raw.queue_depth)
+  if (
+    throttleOwner === undefined
+    || maxConcurrent === undefined
+    || active === undefined
+    || available === undefined
+    || queueDepth === undefined
+    || !Number.isSafeInteger(maxConcurrent)
+    || maxConcurrent < 1
+    || !Number.isSafeInteger(active)
+    || active < 0
+    || !Number.isSafeInteger(available)
+    || available < 0
+    || !Number.isSafeInteger(queueDepth)
+    || queueDepth < 0
+  ) return null
   return {
-    mode: asString(raw.mode) ?? 'unknown',
-    throttle_owner: asString(raw.throttle_owner) ?? 'unknown',
-    max_concurrent: asNumber(raw.max_concurrent) ?? 0,
-    active: asNumber(raw.active) ?? 0,
-    available: asNumber(raw.available) ?? 0,
-    queue_depth: asNumber(raw.queue_depth) ?? 0,
+    throttle_owner: throttleOwner,
+    max_concurrent: maxConcurrent,
+    active,
+    available,
+    queue_depth: queueDepth,
   }
 }
 

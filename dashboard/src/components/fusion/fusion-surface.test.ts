@@ -1114,6 +1114,28 @@ describe('FusionSurface', () => {
     expect(ids).toEqual(['fus-new', 'fus-old'])
   })
 
+  it('keeps one newest-first axis instead of heuristically pinning running rows', () => {
+    fusionBoardPosts.value = [
+      minimalFusionPost('fus-new-complete', '2026-06-19T05:00:00Z', '2026-06-19T05:01:00Z'),
+    ]
+    fusionRuns.value = [
+      {
+        runId: 'fus-old-running',
+        keeper: 'sangsu',
+        preset: 'balanced',
+        startedAt: Date.parse('2026-06-19T01:00:00Z') / 1000,
+        status: 'running',
+      },
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const ids = Array.from(container.querySelectorAll('.fus-run-id')).map(
+      element => element.textContent,
+    )
+    expect(ids).toEqual(['fus-new-complete', 'fus-old-running'])
+  })
+
   it('pages the master list and reveals more rows on demand (#34)', async () => {
     const posts = []
     for (let i = 0; i < 33; i += 1) {

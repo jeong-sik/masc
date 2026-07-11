@@ -513,7 +513,6 @@ export interface KeeperRecoverResult {
 }
 
 export interface AdmissionQueueSnapshot {
-  mode: string
   throttle_owner: string
   max_concurrent: number
   active: number

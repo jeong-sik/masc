@@ -1288,7 +1288,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         <section class="fl-capacity" aria-label="Runtime admission capacity" data-testid="fleet-admission-capacity">
           <div class="fl-capacity-lead">
             <span class="ov-eyebrow">Admission</span>
-            <strong>${admission.mode}</strong>
+            <strong>관측값</strong>
           </div>
           <div class="fl-capacity-cell">
             <span>활성 / 상한</span>

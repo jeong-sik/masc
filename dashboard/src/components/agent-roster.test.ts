@@ -851,7 +851,6 @@ describe('AgentRoster live-only cards', () => {
   it('renders admission capacity only from the live operator projection', async () => {
     operatorSnapshot.value = {
       admission_queue: {
-        mode: 'bounded',
         throttle_owner: 'oas_runtime',
         max_concurrent: 6,
         active: 4,
@@ -865,7 +864,6 @@ describe('AgentRoster live-only cards', () => {
     })
 
     const capacity = container.querySelector('[data-testid="fleet-admission-capacity"]')
-    expect(capacity?.textContent).toContain('bounded')
     expect(capacity?.textContent).toContain('4 / 6')
     expect(capacity?.textContent).toContain('oas_runtime')
   })

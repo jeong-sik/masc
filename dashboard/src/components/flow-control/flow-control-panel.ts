@@ -35,10 +35,6 @@ export function FlowControlPanel() {
   const isInitializing = state === 'initializing'
   const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const admission = operatorSnapshot.value?.admission_queue ?? null
-  const admissionMode = admission?.mode ?? 'unknown'
-  const admissionOwner = admission?.throttle_owner === 'oas_runtime'
-    ? 'OAS runtime'
-    : admission?.throttle_owner ?? 'unknown'
   return html`
     <div class="v2-command-surface flex flex-col gap-4">
       <${SurfaceCard} variant="compact" class="v2-command-panel mb-4">
@@ -47,9 +43,8 @@ export function FlowControlPanel() {
         <${CountBadge} tone=${stateTone(state)}>${stateLabel(state)}<//>
       </div>
       ${admission ? html`
-        <div class="mb-3 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="flow-admission-mode">
-          <${CountBadge} tone=${admissionMode === 'passthrough' ? 'default' : 'warn'}>${admissionMode}<//>
-          <span>Throttle: ${admissionOwner}</span>
+        <div class="mb-3 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="flow-admission-observation">
+          <span>Throttle owner: ${admission.throttle_owner}</span>
           <span>${admission.active}/${admission.max_concurrent} observed inflight</span>
         </div>
       ` : null}

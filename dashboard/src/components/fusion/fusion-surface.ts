@@ -406,15 +406,15 @@ function registryToRunStatus(status: FusionRunStatusLabel): FusionRunStatus {
 // surface matches the prototype's 2-pane master/detail instead of stacking a
 // separate registry panel above it.
 type MergedRun =
-  | { kind: 'board'; runId: string; sortTime: number; running: boolean; view: FusionRunView }
-  | { kind: 'registry'; runId: string; sortTime: number; running: boolean; record: FusionRunRecord }
+  | { kind: 'board'; runId: string; sortTime: number; view: FusionRunView }
+  | { kind: 'registry'; runId: string; sortTime: number; record: FusionRunRecord }
 
 // Master-list page size: rows rendered initially and added per "더 보기" click.
 const FUSION_LIST_PAGE_SIZE = 30
 
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
-// (it carries the detail), so the registry duplicate is dropped. Running rows pin
-// to the top (the live work), then recency on a SINGLE stable axis per row kind:
+// (it carries the detail), so the registry duplicate is dropped. Ordering uses
+// one visible policy — newest first — on a SINGLE stable axis per row kind:
 // board post creation (createdAt ISO — the post lands when the deliberation
 // completes) and registry start (startedAt unix seconds), both normalized to ms.
 // The two kinds approximate different moments of a run's life, but each is
@@ -431,7 +431,6 @@ function buildMergedRuns(
       kind: 'board',
       runId: view.runId,
       sortTime: timeValue(view.createdAt),
-      running: view.status === 'running',
       view,
     })),
     ...registryRuns
@@ -440,13 +439,15 @@ function buildMergedRuns(
         kind: 'registry',
         runId: record.runId,
         sortTime: record.startedAt * 1000,
-        running: record.status === 'running',
         record,
       })),
   ]
   return merged.sort((a, b) => {
-    if (a.running !== b.running) return a.running ? -1 : 1
-    return b.sortTime - a.sortTime
+    const timeOrder = b.sortTime - a.sortTime
+    if (timeOrder !== 0) return timeOrder
+    if (a.runId < b.runId) return -1
+    if (a.runId > b.runId) return 1
+    return 0
   })
 }
 

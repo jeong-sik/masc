@@ -450,7 +450,6 @@ describe('normalizeOperatorSnapshot', () => {
   it('normalizes admission queue ownership metadata', () => {
     const result = normalizeOperatorSnapshot({
       admission_queue: {
-        mode: 'passthrough',
         throttle_owner: 'oas_runtime',
         max_concurrent: 3,
         active: 1,
@@ -459,13 +458,23 @@ describe('normalizeOperatorSnapshot', () => {
       },
     })
     expect(result.admission_queue).toEqual({
-      mode: 'passthrough',
       throttle_owner: 'oas_runtime',
       max_concurrent: 3,
       active: 1,
       available: 2,
       queue_depth: 0,
     })
+  })
+
+  it('rejects incomplete admission queue snapshots instead of fabricating zero capacity', () => {
+    const result = normalizeOperatorSnapshot({
+      admission_queue: {
+        throttle_owner: 'oas_runtime',
+        max_concurrent: 3,
+      },
+    })
+
+    expect(result.admission_queue).toBeNull()
   })
 
   it('extracts persistent_agents using same keeper normalizer', () => {

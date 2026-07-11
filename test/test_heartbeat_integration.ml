@@ -1230,6 +1230,11 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       (match Shutdown_finalize.run ~config ~entry:None finalized with
        | Ok _ -> ()
        | Error error -> fail (Shutdown_finalize.error_to_string error));
+      (* Same #24135 root as the rollback test: [run_if_free] fail-closes to
+         [Busy] without chat-queue persistence. Configure it so the check
+         reflects only the (released) shutdown fence. *)
+      ignore
+        (Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path);
       (match
          Masc.Keeper_turn_admission.run_if_free
            ~base_path:config.base_path

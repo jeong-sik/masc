@@ -2789,3 +2789,5 @@
  (deps
   (source_tree ../lib)
   (source_tree ../bin)))
+
+(include stanzas/test_durable_mutation_state_machine.inc)

@@ -3,7 +3,10 @@
 (library
  (name fs_compat)
  (public_name masc.fs_compat)
- (modules fs_compat mkdir_memo fd_cache atomic_write)
+ (modules fs_compat mkdir_memo fd_cache atomic_write durable_mutation)
+ (foreign_stubs
+  (language c)
+  (names durable_mutation_stubs))
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))

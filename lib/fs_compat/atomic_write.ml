@@ -1,73 +1,5 @@
 (* See [atomic_write.mli] for the contract. *)
 
-(* Durable atomic write: tmp → fsync(tmp) → rename → fsync(parent dir).
-   Without the fsync pair, a crash between the rename and the kernel's
-   dirty-page flush can leave the target truncated or zero-length —
-   observed on backlog.json after an abrupt shutdown (2026-04-18). *)
-let fsync_path path =
-  let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
-  Stdlib.Fun.protect
-    ~finally:(fun () ->
-      try Unix.close fd with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Stdlib.Printf.eprintf
-          "[fs_compat] fsync_path close failed: %s\n%!"
-          (Printexc.to_string exn))
-    (fun () ->
-      try Unix.fsync fd with
-      | Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->
-        (* Some filesystems (tmpfs on some kernels) reject fsync. The data
-           is still durable to the extent the underlying FS offers. *)
-        ())
-;;
-
-(* #10205 finding 2: keep the atomic-tmp filename shape in one place
-   so the writer ([save_file_atomic]) and the orphan-sweep matcher
-   ([is_atomic_orphan_name]) cannot drift independently. A
-   prefix/suffix change on one side without the other would cause
-   the sweep to either miss live orphans or scoop unrelated tmp
-   files. *)
-let atomic_tmp_prefix = ".atomic_"
-let atomic_tmp_suffix = ".tmp"
-
-let save_file_atomic
-  ~(save_file : string -> string -> unit)
-  (path : string)
-  (content : string)
-  : (unit, string) Result.t
-  =
-  let dir = Stdlib.Filename.dirname path in
-  let tmp =
-    Stdlib.Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
-  in
-  try
-    save_file tmp content;
-    fsync_path tmp;
-    Stdlib.Sys.rename tmp path;
-    (try fsync_path dir with
-     | Unix.Unix_error _ -> ());
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e ->
-    (try Stdlib.Sys.remove tmp with
-     | Sys_error _ -> ());
-    raise e
-  | exn ->
-    (try Stdlib.Sys.remove tmp with
-     | Sys_error _ -> ());
-    Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
-;;
-
-let is_atomic_orphan_name name =
-  let n = String.length name in
-  let p = String.length atomic_tmp_prefix in
-  let s = String.length atomic_tmp_suffix in
-  n >= p + s
-  && String.starts_with name ~prefix:atomic_tmp_prefix
-  && String.ends_with ~suffix:atomic_tmp_suffix name
-;;
-
 let cleanup_atomic_orphans
   ~(mkdir_p_unix : string -> unit)
   ~(base_path : string)
@@ -112,7 +44,7 @@ let cleanup_atomic_orphans
   in
   let scan_dir dir entries =
     Array.iter
-      (fun name -> if is_atomic_orphan_name name then handle_file dir name)
+      (fun name -> if Durable_mutation.is_temporary_name name then handle_file dir name)
       entries
   in
   let read_dir_entries dir =

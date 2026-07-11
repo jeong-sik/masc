@@ -13,6 +13,8 @@
     @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
+module Durable_mutation = Durable_mutation
+
 (** Global fs — WORM Atomic (write-once at startup, read from any domain).
     Using Atomic.t is required for OCaml 5 multi-domain safety:
     Executor_pool workers run on a separate domain and read this value. *)
@@ -238,10 +240,52 @@ let save_file (path : string) (content : string) : unit =
 ;;
 
 let save_file_atomic path content =
-  Atomic_write.save_file_atomic ~save_file path content
+  test_exec_home_guard ~op:"save_file_atomic" path;
+  let parent = Filename.dirname path in
+  match Durable_mutation.Segment.of_string (Filename.basename path) with
+  | Error _ -> Error (Printf.sprintf "save_file_atomic %s: invalid final segment" path)
+  | Ok name ->
+    let report =
+      Durable_mutation.atomic_replace_blocking
+        ~parent
+        ~name
+        ~perm:0o600
+        content
+    in
+    let diagnostic_suffix =
+      match report.diagnostics with
+      | [] -> ""
+      | diagnostics ->
+        "; diagnostics: "
+        ^ String.concat
+            "; "
+            (List.map Durable_mutation.diagnostic_to_string diagnostics)
+    in
+    (match report.progress, report.diagnostics with
+     | Durable_mutation.Durable (), [] -> Ok ()
+     | Durable_mutation.Durable (), _ ->
+       Error
+         (Printf.sprintf
+            "save_file_atomic %s: durable%s"
+            path
+            diagnostic_suffix)
+     | Durable_mutation.Not_committed { cause; _ }, _ ->
+       Error
+         (Printf.sprintf
+            "save_file_atomic %s: not committed: %s%s"
+            path
+            (Printexc.to_string cause)
+            diagnostic_suffix)
+     | Durable_mutation.Committed_not_durable { cause; _ }, _ ->
+       Error
+         (Printf.sprintf
+            "save_file_atomic %s: committed but not durable: %s%s"
+            path
+            (Printexc.to_string cause)
+            diagnostic_suffix))
 ;;
 
-let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
+let is_atomic_orphan_name = Durable_mutation.is_temporary_name
 
 let cleanup_atomic_orphans ~base_path ?recovered_subdir () =
   Atomic_write.cleanup_atomic_orphans ~mkdir_p_unix ~base_path ?recovered_subdir ()

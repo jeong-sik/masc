@@ -9,32 +9,12 @@
 
     Crash recovery is provided by [cleanup_atomic_orphans], a
     boot-time sweep for [.atomic_*.tmp] files left behind when the
-    owning process was SIGKILL'd or [Filename.temp_file] itself
-    raised ENFILE/EMFILE before the with-handler could register.
+    owning process was SIGKILL'd after the descriptor-owned writer
+    created its exclusive temporary entry.
 
-    The [save_file] and [mkdir_p_unix] primitives are injected so
-    this module stays free of [Fs_compat]'s Eio bridge — same
-    cycle-free placement pattern as [Mkdir_memo] and [Fd_cache]. *)
-
-(** [save_file_atomic ~save_file path content] writes [content] to
-    a temp file in [path]'s directory, fsyncs the tmp, renames it
-    over [path], and best-effort fsyncs the parent directory.
-
-    Returns [Ok ()] on success or [Error msg] when the write or
-    rename fails (the tmp is cleaned up). Re-raises
-    [Eio.Cancel.Cancelled] after cleaning up the tmp — cancellation
-    must not be swallowed (RFC-0143). *)
-val save_file_atomic
-  :  save_file:(string -> string -> unit)
-  -> string
-  -> string
-  -> (unit, string) Result.t
-
-(** [true] iff [name] matches the [.atomic_*.tmp] shape produced
-    by {!save_file_atomic}. Exposed so a periodic sweep can match
-    the same filename pattern without re-deriving the prefix and
-    suffix — #10205 finding 2. *)
-val is_atomic_orphan_name : string -> bool
+    The writer SSOT is {!Durable_mutation}; this module owns only the
+    legacy boot-time recovery traversal until #24083 replaces it with
+    schema-owned roots. *)
 
 (** #10130: boot-time sweep for [.atomic_*.tmp] orphans.
 

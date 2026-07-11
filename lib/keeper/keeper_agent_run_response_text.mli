@@ -19,6 +19,16 @@ val completion_contract_suppresses_visible_response :
   Keeper_execution_receipt.completion_contract_result ->
   bool
 
+(** [InputRequired] carries a question that must remain visible even when the
+    otherwise-passive completion contract came from an internal/autonomous
+    history source. Other stop reasons use
+    {!completion_contract_suppresses_visible_response}. *)
+val completion_contract_suppresses_visible_response_for_stop_reason :
+  history_assistant_source:string ->
+  stop_reason:Runtime_agent.stop_reason ->
+  Keeper_execution_receipt.completion_contract_result ->
+  bool
+
 val finalize :
   completion_contract_result:Keeper_execution_receipt.completion_contract_result ->
   stop_reason:Runtime_agent.stop_reason ->

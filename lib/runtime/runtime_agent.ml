@@ -66,6 +66,10 @@ type stop_reason =
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | InputRequired of {
+      turns_used : int;
+      request : Agent_sdk.Error.input_required;
+    }
   | ToolFailureRecoveryDeferred of {
       turns_used : int;
       reason : string;
@@ -158,6 +162,8 @@ let worker_lifecycle_classification_of_result = function
   | Error
       (Agent_sdk.Error.Agent (Agent_sdk.Error.ToolFailureRecoveryDeferred _)) ->
     { event = "completed"; status = "tool_failure_recovery_deferred"; error = None }
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _)) ->
+    { event = "completed"; status = "input_required"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
     { event = "failed"; status = "agent_execution_timeout"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
@@ -1011,6 +1017,8 @@ let dashboard_status_of_stop_reason = function
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
   | Yielded_to_durable_stimulus _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
+  | InputRequired _ ->
+      Dashboard_oas_bridge.Cancelled { reason = "input_required" }
   | ToolFailureRecoveryDeferred _ ->
       Dashboard_oas_bridge.Cancelled { reason = "tool_failure_recovery_deferred" }
 
@@ -1322,6 +1330,38 @@ let run_blocks
           run_validation;
           runtime_observation = Some runtime_observation;
           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
+        }
+    | Error
+        (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired request)) ->
+      close_after_success ();
+      let stop_reason = InputRequired { turns_used = turns; request } in
+      let partial_response =
+        partial_response_of_stop ~session_id ~text:request.question
+      in
+      record_dashboard_oas_response
+        ~config
+        ~total_duration_ms:run_total_duration_ms
+        ~status:(dashboard_status_of_stop_reason stop_reason)
+        partial_response;
+      Log.Misc.info
+        "oas_worker %s: typed input required request_id=%s turns=%d"
+        config.name
+        request.request_id
+        turns;
+      let runtime_observation =
+        runtime_observation_for_completed_config
+          ~total_duration_ms:run_total_duration_ms
+          config
+      in
+      Ok
+        { response = partial_response
+        ; checkpoint
+        ; session_id
+        ; turns
+        ; trace_ref
+        ; run_validation
+        ; runtime_observation = Some runtime_observation
+        ; stop_reason
         }
     | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
       match config.exit_condition_result with

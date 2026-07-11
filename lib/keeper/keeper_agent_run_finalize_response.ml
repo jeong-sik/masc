@@ -217,6 +217,7 @@ let checkpoint_for_replay_persistence
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   match stop_reason with
+  | Runtime_agent.InputRequired _
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     (* OAS attached the durable recovery receipt to the current ToolResult.
        Blank-response canonicalization and completion-contract pruning both
@@ -231,18 +232,15 @@ let checkpoint_for_replay_persistence
        Ok
          ( { checkpoint with
              Agent_sdk.Checkpoint.session_id
-           ; messages =
-               Keeper_context_core.repair_broken_tool_call_pairs
-                 checkpoint.messages
            }
          , None )
      | Ok [] ->
        Error
-         "refusing to save recovery-deferred checkpoint without a current-turn \
+         "refusing to save recovery-control checkpoint without a current-turn \
           replay suffix"
      | Error _ ->
        Error
-         "refusing to save recovery-deferred checkpoint: messages do not match \
+         "refusing to save recovery-control checkpoint: messages do not match \
           pre-turn history prefix")
   | ( Runtime_agent.Completed
     | Runtime_agent.TurnBudgetExhausted _
@@ -335,8 +333,10 @@ let finalize
   in
   let completion_contract_result = acc.receipt_completion_contract_result in
   let contract_suppresses_visible_response =
-    Keeper_agent_run_response_text.completion_contract_suppresses_visible_response
+    Keeper_agent_run_response_text
+    .completion_contract_suppresses_visible_response_for_stop_reason
       ~history_assistant_source
+      ~stop_reason:result.stop_reason
       completion_contract_result
   in
   let control_checkpoint =

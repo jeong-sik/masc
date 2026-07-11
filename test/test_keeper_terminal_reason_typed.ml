@@ -424,6 +424,22 @@ let () =
      = Masc.Keeper_reaction_ledger.Terminal_reason)
 ;;
 
+let () =
+  let input_required_receipt =
+    { base_receipt with
+      outcome = `Ok
+    ; terminal_reason_code =
+        Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
+    ; completion_contract_result = R.Contract_passive_only
+    ; runtime_outcome = R.Runtime_completed
+    }
+  in
+  let got = R.operator_disposition input_required_receipt in
+  let want = R.Disp_pass, R.Reason_input_required in
+  check "input-required receipt stays non-paging and explicitly classified"
+    (got = want)
+;;
+
 (* Field matrix axes. Kept small but covering the dimensions the
    classifier branches on. *)
 let codes = roundtrip_corpus

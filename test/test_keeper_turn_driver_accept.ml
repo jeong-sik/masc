@@ -64,6 +64,15 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     stop_reason = Runtime_agent.Completed;
   }
 
+let input_required_request () : Agent_sdk.Error.input_required =
+  { request_id = "input-request-1"
+  ; participant_name = Some "operator"
+  ; question = "Which repository should I inspect?"
+  ; schema = Some (`Assoc [ "type", `String "string" ])
+  ; timeout_s = None
+  ; created_at = 1_000.0
+  }
+
 let accept_no_progress_retry_kind_string err =
   let kind =
     match Masc.Keeper_turn_driver.classify_masc_internal_error err with
@@ -193,6 +202,45 @@ let test_accept_keeps_result () =
   | Error err ->
     Alcotest.failf "accepted response should pass through: %s"
       (Agent_sdk.Error.to_string err)
+
+let test_typed_recovery_control_stops_bypass_response_accept () =
+  let accept_calls = ref 0 in
+  let reject (_ : Agent_sdk.Types.api_response) =
+    incr accept_calls;
+    false
+  in
+  let request = input_required_request () in
+  let input_required =
+    { (run_result ()) with
+      stop_reason = Runtime_agent.InputRequired { turns_used = 2; request }
+    }
+  in
+  let deferred =
+    { (run_result ()) with
+      stop_reason =
+        Runtime_agent.ToolFailureRecoveryDeferred
+          { turns_used = 2; reason = "wait"; tool_names = [ "Execute" ] }
+    }
+  in
+  List.iter
+    (fun (label, result) ->
+       match
+         Masc.Keeper_turn_driver.For_testing.apply_accept
+           ~runtime_id:"runtime.reasoning-model"
+           ~accept:reject
+           result
+       with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.failf
+           "%s control stop rotated through response acceptance: %s"
+           label
+           (Agent_sdk.Error.to_string error))
+    [ "input_required", input_required; "defer", deferred ];
+  Alcotest.(check int)
+    "typed control stops never invoke the deliverable accept predicate"
+    0
+    !accept_calls
 
 let test_replay_projection_failure_preserves_provider_success () =
   let open Agent_sdk.Types in
@@ -2446,6 +2494,10 @@ let () =
       , [
           Alcotest.test_case "accepted response passes through" `Quick
             test_accept_keeps_result;
+          Alcotest.test_case
+            "typed recovery control stops bypass response acceptance"
+            `Quick
+            test_typed_recovery_control_stops_bypass_response_accept;
           Alcotest.test_case
             "replay projection failure preserves provider success"
             `Quick

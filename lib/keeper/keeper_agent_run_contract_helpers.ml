@@ -29,7 +29,9 @@ let visible_response_text_present ~stop_reason ~response_text_present =
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     false
-  | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ ->
+  | Runtime_agent.Completed
+  | Runtime_agent.MutationBoundaryReached _
+  | Runtime_agent.InputRequired _ ->
     response_text_present
 ;;
 
@@ -44,6 +46,7 @@ let budget_exhausted_contract_status ~stop_reason status =
       | Runtime_agent.MutationBoundaryReached _
       | Runtime_agent.Yielded_to_chat_waiting _
       | Runtime_agent.Yielded_to_durable_stimulus _
+      | Runtime_agent.InputRequired _
       | Runtime_agent.ToolFailureRecoveryDeferred _ )
     , _ )
   | Runtime_agent.TurnBudgetExhausted _, _ ->
@@ -56,11 +59,12 @@ let observed_completion_contract_status
   : Keeper_execution_receipt.completion_contract_result
   =
   match stop_reason with
+  | Runtime_agent.InputRequired _
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     (* The typed recovery judge deliberately ended this run. It is a control
-       checkpoint, not a completion claim and not an empty model reply. Keep
-       the completion-contract axis inert so failure escalation cannot turn a
-       valid Defer decision into a Keeper pause. *)
+       terminal, not a completion claim. Keep the completion-contract axis
+       inert so failure escalation cannot turn a valid Ask_user/Defer decision
+       into a Keeper pause. *)
     Keeper_execution_receipt.Contract_passive_only
   | ( Runtime_agent.Completed
     | Runtime_agent.TurnBudgetExhausted _

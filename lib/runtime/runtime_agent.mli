@@ -35,6 +35,10 @@ type stop_reason = Runtime_agent_context.stop_reason =
     }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | InputRequired of {
+      turns_used : int;
+      request : Agent_sdk.Error.input_required;
+    }
   | ToolFailureRecoveryDeferred of {
       turns_used : int;
       reason : string;
@@ -52,11 +56,14 @@ type stop_reason = Runtime_agent_context.stop_reason =
     the keeper's turn slot to a parked dashboard/connector chat request.
     [Yielded_to_durable_stimulus] fires after at least one provider turn when
     another durable event is waiting behind the event currently leased by the
-    cycle. [ToolFailureRecoveryDeferred] means the typed OAS recovery judge
+    cycle. [InputRequired] means OAS returned a typed elicitation request whose
+    question and checkpoint must be surfaced without provider fallback.
+    [ToolFailureRecoveryDeferred] means the typed OAS recovery judge
     returned control to the host without another main-provider call; its
-    [reason] is observation-only and must never drive scheduling. All three are
-    continuation checkpoints, not completed deliverables, and the keeper
-    resumes through a later host-owned activity boundary. *)
+    [reason] is observation-only and must never drive scheduling. These typed
+    non-completion stops persist checkpoints rather than claiming a completed
+    deliverable: [InputRequired] resumes from later host input, while the yield
+    and defer variants resume through later host-owned activity boundaries. *)
 
 (** {1 Config} *)
 

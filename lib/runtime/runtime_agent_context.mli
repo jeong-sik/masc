@@ -25,6 +25,10 @@ type stop_reason =
     }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | InputRequired of {
+      turns_used : int;
+      request : Agent_sdk.Error.input_required;
+    }
   | ToolFailureRecoveryDeferred of {
       turns_used : int;
       reason : string;

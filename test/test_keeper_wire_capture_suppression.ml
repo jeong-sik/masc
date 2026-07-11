@@ -20,6 +20,15 @@ module Receipt = Masc.Keeper_execution_receipt
 module Keeper_metrics = Keeper_metrics
 module Metrics = Masc.Otel_metric_store
 
+let input_required_request () : Agent_sdk.Error.input_required =
+  { request_id = "wire-input-1"
+  ; participant_name = Some "operator"
+  ; question = "Which repository should I inspect?"
+  ; schema = None
+  ; timeout_s = None
+  ; created_at = 1_000.0
+  }
+
 (* ── wire_capture_response_suppression_reasons / labels / metrics ───── *)
 
 let test_wire_capture_suppression_reasons_emit_all_cause_metrics () =
@@ -174,6 +183,33 @@ let test_internal_passive_only_is_suppressed () =
     (passive_suppresses_for_source "internal_assistant")
 ;;
 
+let test_input_required_question_is_not_suppressed_for_internal_source () =
+  let request = input_required_request () in
+  let stop_reason = Runtime_agent.InputRequired { turns_used = 2; request } in
+  let suppressed =
+    Response_text.completion_contract_suppresses_visible_response_for_stop_reason
+      ~history_assistant_source:"internal_assistant"
+      ~stop_reason
+      Receipt.Contract_passive_only
+  in
+  Alcotest.(check bool)
+    "typed input question overrides passive internal suppression"
+    false
+    suppressed;
+  let finalized =
+    Response_text.finalize
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~stop_reason
+      ~raw_response_text:request.question
+      ~suppress_response_text:suppressed
+      ()
+  in
+  Alcotest.(check string)
+    "typed input question remains visible"
+    request.question
+    finalized.response_text
+;;
+
 (* ── Keeper_agent_run_response_text.finalize: passive-only + auto-suppress ── *)
 
 let test_direct_passive_only_finalizer_preserves_raw_response_text () =
@@ -293,6 +329,10 @@ let () =
             "internal-channel passive-only is suppressed"
             `Quick
             test_internal_passive_only_is_suppressed
+        ; Alcotest.test_case
+            "InputRequired remains visible on internal source"
+            `Quick
+            test_input_required_question_is_not_suppressed_for_internal_source
         ] )
     ; ( "keeper_agent_run_response_text.finalize"
       , [ Alcotest.test_case

@@ -297,6 +297,8 @@ let append_decision_record
                       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
                   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
                       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
+                  | Runtime_agent.InputRequired { turns_used; _ } ->
+                      Printf.sprintf "input_required(%d)" turns_used
                   | Runtime_agent.ToolFailureRecoveryDeferred { turns_used; _ } ->
                       Printf.sprintf "tool_failure_recovery_deferred(%d)" turns_used
                 in

@@ -39,6 +39,15 @@ let test_unknown_label_is_none () =
     [ ""; "completed"; "checkpoint"; "Visible_reply"; "VISIBLE_REPLY" ]
 
 let test_of_stop_reason () =
+  let request : Agent_sdk.Error.input_required =
+    { request_id = "outcome-input-1"
+    ; participant_name = None
+    ; question = "Which repository?"
+    ; schema = None
+    ; timeout_s = None
+    ; created_at = 1_000.0
+    }
+  in
   check outcome "completed -> visible" TO.Visible_reply
     (TO.of_stop_reason Runtime_agent.Completed);
   check outcome "budget exhausted -> checkpoint" TO.Continuation_checkpoint
@@ -57,7 +66,10 @@ let test_of_stop_reason () =
   check outcome "typed recovery defer -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.ToolFailureRecoveryDeferred
-          { turns_used = 2; reason = "wait"; tool_names = [ "Execute" ] }))
+          { turns_used = 2; reason = "wait"; tool_names = [ "Execute" ] }));
+  check outcome "typed input required -> visible" TO.Visible_reply
+    (TO.of_stop_reason
+       (Runtime_agent.InputRequired { turns_used = 2; request }))
 
 let test_of_result_surface () =
   check outcome "completed with text -> visible" TO.Visible_reply

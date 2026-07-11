@@ -37,7 +37,16 @@ let checkpoint ?(working_context = Some (`Assoc [])) messages =
     ; context = Agent_sdk.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context
-    }
+  }
+
+let input_required_request () : Agent_sdk.Error.input_required =
+  { request_id = "recovery-input-1"
+  ; participant_name = Some "operator"
+  ; question = "Which repository should I inspect?"
+  ; schema = Some (`Assoc [ "type", `String "string" ])
+  ; timeout_s = None
+  ; created_at = 1_000.0
+  }
 ;;
 
 let expect_ok = function
@@ -326,6 +335,63 @@ let test_recovery_defer_preserves_typed_receipt_suffix () =
     (prune_reason_to_string reason)
 ;;
 
+let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
+  let open Agent_sdk.Types in
+  let history =
+    [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
+  in
+  let receipt_metadata =
+    [ ( "oas.tool_failure_recovery.v1"
+      , `Assoc
+          [ "version", `Int 1
+          ; "decision", `String "ask_user"
+          ; "question", `String "Which repository should I inspect?"
+          ] )
+    ]
+  in
+  let current_turn =
+    [ message User [ Text "inspect the source" ]
+    ; message Assistant
+        [ ToolUse
+            { id = "tool-ask-1"
+            ; name = "Execute"
+            ; input = `Assoc [ "cmd", `String "gh pr list" ]
+            }
+        ]
+    ; { (message Tool
+           [ ToolResult
+               { tool_use_id = "tool-ask-1"
+               ; content = "working directory is required"
+               ; is_error = true
+               ; json = None
+               ; content_blocks = None
+               }
+           ]) with
+        metadata = receipt_metadata
+      }
+    ]
+  in
+  let request = input_required_request () in
+  let patched, reason =
+    Finalize.checkpoint_for_replay_persistence
+      ~history_messages:history
+      ~pre_turn_working_context:None
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~session_id:"new-session"
+      ~response_text:request.question
+      ~stop_reason:(Runtime_agent.InputRequired { turns_used = 2; request })
+      (checkpoint (history @ current_turn))
+    |> expect_ok
+  in
+  Alcotest.(check string) "session unified" "new-session" patched.session_id;
+  Alcotest.(check bool)
+    "Ask_user replay suffix is structurally unchanged"
+    true
+    (patched.messages = history @ current_turn);
+  Alcotest.(check (option string)) "no prune reason" None
+    (prune_reason_to_string reason)
+;;
+
 let test_media_degraded_projection_persists_canonical_checkpoint () =
   let open Agent_sdk.Types in
   let canonical_history =
@@ -417,6 +483,10 @@ let () =
             "recovery defer preserves typed receipt suffix"
             `Quick
             test_recovery_defer_preserves_typed_receipt_suffix
+        ; Alcotest.test_case
+            "recovery Ask_user preserves exact typed receipt suffix"
+            `Quick
+            test_recovery_ask_user_preserves_exact_typed_receipt_suffix
         ; Alcotest.test_case
             "media-degraded projection persists canonical checkpoint"
             `Quick

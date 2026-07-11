@@ -27,6 +27,14 @@ type stop_reason =
     (* The current autonomous cycle completed at least one OAS provider turn,
        then released its lane because another durable stimulus was queued
        behind the stimulus already leased by this cycle. *)
+  | InputRequired of
+      { turns_used : int
+      ; request : Agent_sdk.Error.input_required
+      }
+    (* OAS ended the current run with a typed elicitation request. The host
+       must surface [request.question] and persist the checkpoint before
+       returning control; this is neither a provider failure nor a completed
+       model deliverable. *)
   | ToolFailureRecoveryDeferred of
       { turns_used : int
       ; reason : string

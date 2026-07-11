@@ -724,14 +724,10 @@ supports_seed = true
 input_per_million = 0.0
 output_per_million = 0.0
 
-# RunPod Models
-# WORKAROUND: current pinned OAS emits provider_label "openai_compat" for
-# RunPod proxy URLs because it does not recognize *.proxy.runpod.net base URLs.
-# The root fix is jeong-sik/oas#2374, which restores the dedicated
-# "runpod_mtp" label. Keep both provider-qualified rows during the OAS pin
-# transition so Runtime.init_default_strict resolves the model before and after
-# that OAS bump. Removal target: after #2374 is pinned here and proven stable,
-# drop the openai_compat row and keep runpod_mtp as canonical.
+# RunPod Qwen3.6 deployment contract. `runpod_mtp` is the MASC runtime-id
+# namespace; the generic OpenAI-compatible transport resolves through
+# `openai_compat`. Keep every explicit lookup form used by Runtime without
+# inferring capabilities from the rental host.
 
 [[models]]
 id_prefix = "runpod_mtp/qwen36-35b-a3b-mtp"
@@ -744,6 +740,8 @@ supports_extended_thinking = true
 supports_reasoning_budget = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -759,6 +757,8 @@ supports_extended_thinking = true
 supports_reasoning_budget = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -774,6 +774,8 @@ supports_extended_thinking = true
 supports_reasoning_budget = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -789,6 +791,8 @@ supports_extended_thinking = true
 supports_reasoning_budget = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true

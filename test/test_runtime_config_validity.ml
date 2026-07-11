@@ -353,7 +353,11 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
       check (option string) (model_id ^ " base") (Some "openai_chat")
         entry.base_label;
       check (option int) (model_id ^ " context") (Some 131072)
-        entry.max_context_tokens
+        entry.max_context_tokens;
+      check (option string) (model_id ^ " reasoning stream")
+        (Some "delta:reasoning_content") entry.reasoning_streaming_format;
+      check (option string) (model_id ^ " reasoning replay")
+        (Some "drop_without_tool_preserve_with_tool") entry.reasoning_replay
   in
   let expect_runpod_caps
         name
@@ -365,7 +369,15 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
       caps.supports_extended_thinking;
     check bool (name ^ " chat-template thinking") true
       (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_kwargs))
+         caps.thinking_control_format = Chat_template_kwargs));
+    check bool (name ^ " reasoning_content stream") true
+      (Llm_provider.Capabilities.(
+         caps.reasoning_streaming_format
+         = Delta_reasoning_field "reasoning_content"));
+    check bool (name ^ " tool-call reasoning replay") true
+      (Llm_provider.Capabilities.(
+         caps.reasoning_replay_override
+         = Force_drop_without_tool_preserve_with_tool))
   in
   List.iter expect_lookup provider_model_ids;
   expect_lookup runpod_model_id;

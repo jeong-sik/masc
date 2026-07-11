@@ -1,5 +1,9 @@
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 module Driver = Masc.Keeper_turn_driver
+module Helpers = Masc.Keeper_turn_driver_helpers
+
+let legacy_fail_open_health_filtered_candidates =
+  (Helpers.fail_open_health_filtered_candidates [@alert "-deprecated"])
 
 let contains ~needle haystack =
   let needle_len = String.length needle in
@@ -916,6 +920,28 @@ let test_attempt_loop_preserves_last_sdk_error () =
        | _ -> false)
      |> List.map decision_runtime_id)
 
+let test_legacy_fail_open_helper_compatibility () =
+  let candidates, failed_open =
+    legacy_fail_open_health_filtered_candidates
+      ~tool_filtered_candidates:[ "primary"; "fallback" ]
+      ~health_filtered_candidates:[]
+  in
+  Alcotest.(check (list string))
+    "empty health result preserves tool-filtered candidates"
+    [ "primary"; "fallback" ]
+    candidates;
+  Alcotest.(check bool) "fallback is explicit" true failed_open;
+  let candidates, failed_open =
+    legacy_fail_open_health_filtered_candidates
+      ~tool_filtered_candidates:[ "primary"; "fallback" ]
+      ~health_filtered_candidates:[ "fallback" ]
+  in
+  Alcotest.(check (list string))
+    "non-empty health result remains authoritative"
+    [ "fallback" ]
+    candidates;
+  Alcotest.(check bool) "no fallback occurred" false failed_open
+
 let () =
   Alcotest.run
     "keeper_turn_driver_failover"
@@ -990,5 +1016,9 @@ let () =
             "attempt loop preserves last SDK error"
             `Quick
             test_attempt_loop_preserves_last_sdk_error;
+          Alcotest.test_case
+            "legacy fail-open helper remains source-compatible"
+            `Quick
+            test_legacy_fail_open_helper_compatibility;
         ] );
     ]

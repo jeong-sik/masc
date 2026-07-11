@@ -112,6 +112,11 @@ val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 (** Active descriptor/registry model tool schemas for BM25 indexing. *)
 val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
+(** Internal handler schema for a descriptor-backed model projection. This is
+    intentionally separate from the model-visible schema inventory. *)
+val descriptor_handler_input_schema :
+  Keeper_tool_descriptor.t -> Yojson.Safe.t
+
 (** Filter schemas by a set of allowed names.  O(1) per schema. *)
 val filter_schemas_by_names :
   string list -> Masc_domain.tool_schema list -> Masc_domain.tool_schema list

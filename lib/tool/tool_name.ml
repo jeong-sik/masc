@@ -85,29 +85,56 @@ module Board_name = struct
     | Board_sub_board_update
     | Board_vote
 
-  let to_string = function
-    | Board_cleanup -> "masc_board_cleanup"
-    | Board_comment -> "masc_board_comment"
-    | Board_comment_vote -> "masc_board_comment_vote"
-    | Board_curation_read -> "masc_board_curation_read"
-    | Board_curation_submit -> "masc_board_curation_submit"
-    | Board_delete -> "masc_board_delete"
-    | Board_post_get -> "masc_board_post_get"
-    | Board_hearths -> "masc_board_hearths"
-    | Board_list -> "masc_board_list"
-    | Board_post -> "masc_board_post"
-    | Board_post_update -> "masc_board_post_update"
-    | Board_profile -> "masc_board_profile"
-    | Board_reaction -> "masc_board_reaction"
-    | Board_search -> "masc_board_search"
-    | Board_stats -> "masc_board_stats"
-    | Board_sub_board_create -> "masc_board_sub_board_create"
-    | Board_sub_board_delete -> "masc_board_sub_board_delete"
-    | Board_sub_board_get -> "masc_board_sub_board_get"
-    | Board_sub_board_list -> "masc_board_sub_board_list"
-    | Board_sub_board_update -> "masc_board_sub_board_update"
-    | Board_vote -> "masc_board_vote"
+  let all =
+    [ Board_post
+    ; Board_post_update
+    ; Board_list
+    ; Board_post_get
+    ; Board_comment
+    ; Board_vote
+    ; Board_stats
+    ; Board_search
+    ; Board_comment_vote
+    ; Board_reaction
+    ; Board_profile
+    ; Board_hearths
+    ; Board_curation_read
+    ; Board_curation_submit
+    ; Board_delete
+    ; Board_cleanup
+    ; Board_sub_board_create
+    ; Board_sub_board_list
+    ; Board_sub_board_get
+    ; Board_sub_board_update
+    ; Board_sub_board_delete
+    ]
   ;;
+
+  let operation_name = function
+    | Board_cleanup -> "cleanup"
+    | Board_comment -> "comment"
+    | Board_comment_vote -> "comment_vote"
+    | Board_curation_read -> "curation_read"
+    | Board_curation_submit -> "curation_submit"
+    | Board_delete -> "delete"
+    | Board_post_get -> "post_get"
+    | Board_hearths -> "hearths"
+    | Board_list -> "list"
+    | Board_post -> "post"
+    | Board_post_update -> "post_update"
+    | Board_profile -> "profile"
+    | Board_reaction -> "reaction"
+    | Board_search -> "search"
+    | Board_stats -> "stats"
+    | Board_sub_board_create -> "sub_board_create"
+    | Board_sub_board_delete -> "sub_board_delete"
+    | Board_sub_board_get -> "sub_board_get"
+    | Board_sub_board_list -> "sub_board_list"
+    | Board_sub_board_update -> "sub_board_update"
+    | Board_vote -> "vote"
+  ;;
+
+  let to_string name = "masc_board_" ^ operation_name name
 
   let of_string = function
     | "masc_board_cleanup" -> Some Board_cleanup

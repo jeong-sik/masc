@@ -950,8 +950,7 @@ let tag_dispatch_fn
 
 let descriptor_active_names active_name_set descriptor =
   let descriptor_names =
-    Keeper_tool_descriptor.public_names_of_descriptor descriptor
-    @ Keeper_tool_descriptor.internal_names descriptor
+    Keeper_tool_descriptor.keeper_model_names descriptor
   in
   List.filter (fun name -> StringSet.mem name active_name_set) descriptor_names
 ;;
@@ -965,29 +964,60 @@ let descriptor_discovery_json active_name_set descriptor =
        ])
 ;;
 
+let descriptor_category (descriptor : Keeper_tool_descriptor.t) =
+  match descriptor.runtime_handler with
+  | Keeper_tool_descriptor.Tool_execute -> "execute"
+  | Keeper_tool_descriptor.Tool_search_files -> "search_files"
+  | Keeper_tool_descriptor.Tool_read_file
+  | Keeper_tool_descriptor.Tool_edit_file
+  | Keeper_tool_descriptor.Tool_write_file -> "fs"
+  | Keeper_tool_descriptor.Board_tool_dispatch
+  | Keeper_tool_descriptor.Tool_masc_board_dispatch -> "board"
+  | Keeper_tool_descriptor.Tool_voice_dispatch -> "voice"
+  | Keeper_tool_descriptor.Tool_task_dispatch
+  | Keeper_tool_descriptor.Tool_masc_task_dispatch
+  | Keeper_tool_descriptor.Tool_masc_plan_dispatch
+  | Keeper_tool_descriptor.Tool_masc_run_dispatch
+  | Keeper_tool_descriptor.Tool_masc_agent_dispatch
+  | Keeper_tool_descriptor.Tool_masc_workspace_dispatch -> "workspace"
+  | Keeper_tool_descriptor.Tool_surface_read
+  | Keeper_tool_descriptor.Tool_surface_post
+  | Keeper_tool_descriptor.Tool_person_note_set -> "surface"
+  | Keeper_tool_descriptor.Tool_memory_search
+  | Keeper_tool_descriptor.Tool_memory_write
+  | Keeper_tool_descriptor.Tool_library_search
+  | Keeper_tool_descriptor.Tool_library_read -> "memory"
+  | Keeper_tool_descriptor.Tool_time_now
+  | Keeper_tool_descriptor.Tool_tools_list
+  | Keeper_tool_descriptor.Tool_tool_search
+  | Keeper_tool_descriptor.Tool_context_status
+  | Keeper_tool_descriptor.Tool_ide_annotate
+  | Keeper_tool_descriptor.Tool_masc_misc_dispatch
+  | Keeper_tool_descriptor.Tool_masc_control_dispatch
+  | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+  | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+  | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+  | Keeper_tool_descriptor.Tool_masc_surface_audit
+  | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
+  | Keeper_tool_descriptor.Tool_masc_fusion_status
+  | Keeper_tool_descriptor.Tool_analyze_image -> "meta"
+;;
+
 let keeper_tools_list_json ~(meta : keeper_meta) =
-  let names = Keeper_tool_policy.keeper_allowed_tool_names meta in
+  let names =
+    Keeper_tool_policy.keeper_model_tool_schemas meta
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  in
   let active_name_set =
     List.fold_left
       (fun acc name -> StringSet.add name acc)
       StringSet.empty
       names
   in
-  let has_prefix prefix name = String.starts_with ~prefix name in
-  (* Display-only grouping for the keeper tools list. The typed [tool_group]
-     classifier was deleted in the surface-cut refactor; this prefix categorizer
-     (formerly the fallback for non-typed names) now categorizes all names. *)
-  let categorize n =
-    if has_prefix "keeper_board_" n || has_prefix "masc_board_" n then "board"
-    else if has_prefix "keeper_voice_" n then "voice"
-    else if has_prefix "keeper_task_" n || has_prefix "keeper_tasks_" n then "workspace"
-    else if has_prefix "keeper_surface_" n || has_prefix "keeper_person_note_" n then "surface"
-    else if String.equal n "tool_execute" then "execute"
-    else if String.equal n "tool_search_files" then "search_files"
-    else if has_prefix "tool_" n then "fs"
-    else if has_prefix "keeper_library_" n || has_prefix "keeper_memory_" n then "memory"
-    else if has_prefix "keeper_" n then "meta"
-    else "core"
+  let categorize name =
+    match Keeper_tool_descriptor_resolution.descriptor_for_tool_name name with
+    | Some descriptor -> descriptor_category descriptor
+    | None -> "registry"
   in
   let map =
     List.fold_left

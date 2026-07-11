@@ -3,6 +3,7 @@ open Alcotest
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KES = Masc.Keeper_tool_shared_runtime
 module KTD = Masc.Keeper_tool_descriptor
+module KTP = Masc.Keeper_tool_policy
 module Workspace = Masc.Workspace
 
 let tool_ok ?(tool_name = "") message =
@@ -482,6 +483,25 @@ let test_tool_not_allowed_denied_by_policy_counter () =
       (before +. 1.0)
       (counter_for_tool_not_allowed ~keeper ~tool ~reason))
 
+let test_board_capability_deny_expands_bidirectionally () =
+  let raw = Tool_name.Board_name.to_string Tool_name.Board_name.Board_post in
+  let wrapper = Keeper_tool_name.to_string Keeper_tool_name.Board_post in
+  List.iter
+    (fun denied_name ->
+      let lookup =
+        make_meta ~tool_denylist:[ denied_name ] ()
+        |> KTP.tool_access_lookup_of_meta
+      in
+      List.iter
+        (fun sibling_name ->
+          check bool
+            (denied_name ^ " denies capability sibling " ^ sibling_name)
+            true
+            (KTP.StringSet.mem sibling_name lookup.deny_set))
+        [ raw; wrapper ])
+    [ raw; wrapper ]
+;;
+
 let test_tool_not_allowed_reason_label_is_bounded () =
   (* Verify that the reason label written into the JSON payload is one
      of the three bounded vocabulary values, not a free-form string. *)
@@ -500,6 +520,91 @@ let test_tool_not_allowed_reason_label_is_bounded () =
       let valid = [ "not_in_candidate_set"; "denied_by_policy"; "not_executable" ] in
       check bool "reason label is bounded vocabulary"
         true (List.mem reason valid))
+
+let test_raw_board_wrapper_routes_are_not_keeper_candidates () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_raw_board_wrapper"
+    (fun ~config ~meta ~ctx_work ->
+      List.iter
+        (fun board_name ->
+          match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+          | Keeper_tool_name.Keeper_wrapper _ ->
+            let name = Tool_name.Board_name.to_string board_name in
+            let result =
+              KET.execute_keeper_tool_call_with_outcome
+                ~config
+                ~meta
+                ~ctx_work
+                ~exec_cache:None
+                ~name
+                ~input:(`Assoc [])
+                ()
+            in
+            check string (name ^ " outcome") "failure" (outcome_label result.outcome);
+            let json = Yojson.Safe.from_string result.raw_output in
+            check string
+              (name ^ " candidate rejection")
+              "not_in_candidate_set"
+              Yojson.Safe.Util.(member "reason" json |> to_string)
+          | Keeper_tool_name.Direct_masc | Keeper_tool_name.External_only -> ())
+        Tool_name.Board_name.all)
+;;
+
+let test_raw_board_wrapper_runtime_is_fail_closed () =
+  let meta = make_meta ~name:"keeper-board-runtime-guard" () in
+  let raw =
+    Masc.Keeper_tool_in_process_runtime.handle_masc_board
+      ~meta
+      ~name:(Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
+      ~args:(`Assoc [])
+  in
+  let json = Yojson.Safe.from_string raw in
+  check string
+    "typed board projection error"
+    "keeper_wrapper_required"
+    Yojson.Safe.Util.(member "error_kind" json |> to_string);
+  check string
+    "raw post identifies required wrapper"
+    "keeper_board_post"
+    Yojson.Safe.Util.(member "required_tool" json |> to_string);
+  check string
+    "raw post fails as policy rejection"
+    "policy_rejection"
+    Yojson.Safe.Util.(member "failure_class" json |> to_string)
+;;
+
+let test_descriptor_route_miss_is_typed_and_observed () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_route_miss"
+    (fun ~config ~meta ~ctx_work:_ ->
+      let metric = "masc_keeper_descriptor_route_miss_total" in
+      let labels = [ "route", "tool_masc_task_dispatch" ] in
+      let before = Masc.Otel_metric_store.metric_value_or_zero metric ~labels () in
+      let raw =
+        Masc.Keeper_tool_in_process_runtime.handle_masc_task
+          ~config
+          ~meta
+          ~name:"__missing_task_route"
+          ~args:(`Assoc [])
+      in
+      let json = Yojson.Safe.from_string raw in
+      check string
+        "route miss code"
+        "descriptor_route_miss"
+        Yojson.Safe.Util.(member "error" json |> to_string);
+      check string
+        "route miss class"
+        "runtime_failure"
+        Yojson.Safe.Util.(member "failure_class" json |> to_string);
+      check string
+        "route miss route"
+        "tool_masc_task_dispatch"
+        Yojson.Safe.Util.(member "route" json |> to_string);
+      check (float 0.0001)
+        "route miss counter +1"
+        (before +. 1.0)
+        (Masc.Otel_metric_store.metric_value_or_zero metric ~labels ()))
+;;
 
 let test_keeper_tools_list_json_uses_typed_groups () =
   let meta =
@@ -538,9 +643,11 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   check bool "tools_list remains a meta introspection tool" true
     (member "meta" "keeper_tools_list");
   check bool "Grep tool grouped" true
-    (member "search_files" "tool_search_files");
+    (member "search_files" "Grep");
+  check bool "legacy search backend is not model-visible" false
+    (json_contains_tool "tool_search_files" json);
   check bool "fs tool grouped" true
-    (member "fs" "tool_read_file");
+    (member "fs" "Read");
   check bool "memory tool grouped" true
     (member "memory" "keeper_memory_search");
   let descriptor_surface =
@@ -584,7 +691,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (string_member "public_name" execute);
   check string "Execute executor" "shell_ir"
     (string_member "executor" execute);
-  check bool "Execute active internal name listed" true
+  check bool "Execute internal route is not model-visible" false
     (list_member_contains "active_names" "tool_execute" execute);
   check bool "Execute active public name listed" true
     (list_member_contains "active_names" "Execute" execute);
@@ -641,8 +748,10 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (string_member "effect_domain" grep_policy);
   check bool "Grep policy group omitted" true
     (Yojson.Safe.Util.member "policy_group" grep_policy = `Null);
-  check bool "Grep active internal name listed" true
+  check bool "Grep internal route is not model-visible" false
     (list_member_contains "active_names" "tool_search_files" grep);
+  check bool "Grep preferred model name is active" true
+    (list_member_contains "active_names" "Grep" grep);
   let malformed_execute =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =
@@ -859,26 +968,26 @@ let test_public_local_aliases_dispatch_to_runtime_handlers () =
           (`Assoc
              [ "pattern", `String "gamma"; "path", `String visible_file_path ])
       in
-      let search_json = check_success_result "Search" search_result in
-      check string "Search translates to rg op" "rg"
-        (json_string_field ~default:"" "op" search_json);
-      check bool "Search returns real match" true
-        (contains_substring search_result.raw_output "public-alias.txt");
-      check bool "Search match includes content" true
-        (contains_substring search_result.raw_output "gamma");
+      check string "legacy Search is not active" "failure"
+        (outcome_label search_result.outcome);
+      check string "legacy Search misses candidate set" "not_in_candidate_set"
+        Yojson.Safe.Util.(
+          Yojson.Safe.from_string search_result.raw_output
+          |> member "reason"
+          |> to_string);
       let search_files_result =
         run
           "search_files"
           (`Assoc
              [ "pattern", `String "gamma"; "path", `String visible_file_path ])
       in
-      let search_files_json =
-        check_success_result "search_files" search_files_result
-      in
-      check string "search_files translates to rg op" "rg"
-        (json_string_field ~default:"" "op" search_files_json);
-      check bool "search_files returns real match" true
-        (contains_substring search_files_result.raw_output "public-alias.txt");
+      check string "legacy search_files is not active" "failure"
+        (outcome_label search_files_result.outcome);
+      check string "legacy search_files misses candidate set" "not_in_candidate_set"
+        Yojson.Safe.Util.(
+          Yojson.Safe.from_string search_files_result.raw_output
+          |> member "reason"
+          |> to_string);
       let execute_result =
         run
           "Execute"
@@ -1720,8 +1829,16 @@ let () =
         test_tool_not_allowed_increments_counter_for_unknown_tool;
       test_case "increments for denied_by_policy" `Quick
         test_tool_not_allowed_denied_by_policy_counter;
+      test_case "Board capability deny expands bidirectionally" `Quick
+        test_board_capability_deny_expands_bidirectionally;
       test_case "reason label is bounded vocabulary" `Quick
         test_tool_not_allowed_reason_label_is_bounded;
+      test_case "raw Board wrapper routes are not Keeper candidates" `Quick
+        test_raw_board_wrapper_routes_are_not_keeper_candidates;
+      test_case "raw Board wrapper runtime is fail-closed" `Quick
+        test_raw_board_wrapper_runtime_is_fail_closed;
+      test_case "descriptor route miss is typed and observed" `Quick
+        test_descriptor_route_miss_is_typed_and_observed;
     ]);
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick

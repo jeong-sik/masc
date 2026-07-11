@@ -321,7 +321,7 @@ let prepare_agent_setup
      keeper tool_access has explicitly excluded — the descriptor would dispatch to
      a registered-but-disallowed tool. See PR #14574 review. *)
   let descriptor_public_names =
-    Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names
+    Keeper_tool_descriptor_resolution.model_names_for_allowed_internal_names
       policy_allowed_tool_names
   in
   (* Now strip the descriptor internal names from the LLM-visible surface,
@@ -364,7 +364,7 @@ let prepare_agent_setup
     ()
   in
   let allowed_public_name_for_internal internal_name =
-    Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
+    Keeper_tool_descriptor_resolution.model_names_for_internal internal_name
     |> List.find_opt (fun public_name ->
       Keeper_tool_policy.StringSet.mem public_name universe_set
       && Keeper_tool_policy.StringSet.mem public_name policy_allowed_tool_set)

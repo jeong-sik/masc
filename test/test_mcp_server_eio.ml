@@ -888,7 +888,9 @@ let test_handle_request_initialize_managed_profile () =
             Alcotest.(check bool) "mentions managed profile" true
               (contains_substring instructions "managed-agent profile");
             Alcotest.(check bool) "mentions canonical task control" true
-              (contains_substring instructions "masc_transition")
+              (contains_substring instructions "masc_transition");
+            Alcotest.(check bool) "does not mention unavailable keeper claim" false
+              (contains_substring instructions "keeper_task_claim")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
@@ -922,6 +924,36 @@ let test_handle_request_tools_list_managed_profile () =
                         | _ -> None)
                    |> List.filter_map (function `String s -> Some s | _ -> None)
                  in
+                 let registry_names =
+                   Masc.Capability_registry.surface_tool_names_from
+                     Config.raw_all_tool_schemas
+                     Masc.Capability_registry.Managed_agent_mcp
+                 in
+                 Alcotest.(check (list string))
+                   "managed tools/list equals capability projection"
+                   (List.sort String.compare registry_names)
+                   (List.sort String.compare names);
+                 Alcotest.(check int)
+                   "managed tools/list names are unique"
+                   (List.length names)
+                   (List.length (List.sort_uniq String.compare names));
+                 List.iter
+                   (fun instruction_name ->
+                     Alcotest.(check bool)
+                       (instruction_name ^ " instruction name is exposed")
+                       true
+                       (List.mem instruction_name names))
+                   Masc.Mcp_server_eio_tool_profile.managed_agent_instruction_tool_names;
+                 List.iter
+                   (fun name ->
+                     Alcotest.(check bool)
+                       (name ^ " passes managed call gate")
+                       true
+                       (Masc.Mcp_server_eio_tool_profile.tool_allowed_in_profile
+                          state
+                          Mcp_eio.Managed_agent
+                          name))
+                   names;
                  Alcotest.(check bool) "has canonical managed status" true
                    (List.mem "masc_status" names);
                  Alcotest.(check bool) "has canonical managed tasks" true

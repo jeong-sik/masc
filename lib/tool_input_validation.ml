@@ -225,15 +225,20 @@ let is_execute_typed_argv_schema schema =
   && schema_has_property_name schema "pipeline"
 ;;
 
-let execute_public_tool_name = "Execute"
-
 let is_execute_tool_name name =
   let name = Tool_name_alias_axis.strip_mcp_masc_prefix name in
-  String.equal name execute_public_tool_name
-  ||
-  match Tool_name_alias_axis.internal_name_of_public execute_public_tool_name with
-  | Some internal_name -> String.equal name internal_name
-  | None -> false
+  match Tool_name_alias_axis.public_tool_of_name name with
+  | Some Tool_name_alias_axis.Execute -> true
+  | Some (Tool_name_alias_axis.Edit
+         | Tool_name_alias_axis.Web_fetch
+         | Tool_name_alias_axis.Read
+         | Tool_name_alias_axis.Grep
+         | Tool_name_alias_axis.Web_search
+         | Tool_name_alias_axis.Write) -> false
+  | None ->
+    String.equal
+      name
+      (Tool_name_alias_axis.internal_name Tool_name_alias_axis.Execute)
 ;;
 
 let normalize_execute_args_envelope ?schema ~name args =

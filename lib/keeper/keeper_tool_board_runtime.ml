@@ -125,6 +125,13 @@ let ensure_keeper_board_post_args ~author ~source args =
   | other -> other
 ;;
 
+let bind_board_identity ~keeper_name board_name args =
+  List.fold_left
+    (fun args field -> assoc_override_string field keeper_name args)
+    args
+    (Board_tool_registry.identity_fields_for_board_name board_name)
+;;
+
 let handle_keeper_board_tool
       ~(meta : keeper_meta)
       ~(name : string)
@@ -139,8 +146,8 @@ let handle_keeper_board_tool
   let dispatch_board (tool : Tool_name.Board_name.t) tool_args =
     dispatch (Tool_name.Board_name.to_string tool) tool_args
   in
-  match name with
-  | "keeper_board_post" ->
+  match Keeper_tool_name.of_string name with
+  | Some Keeper_tool_name.Board_post ->
     let author = meta.name in
     let keeper_source = name in
     let content =
@@ -163,7 +170,10 @@ let handle_keeper_board_tool
       ensure_keeper_board_post_args
         ~author
         ~source:keeper_source
-        (assoc_override_string "author" author args)
+        (bind_board_identity
+           ~keeper_name:author
+           Tool_name.Board_name.Board_post
+           args)
     in
     Log.Keeper.debug "board_args: %s" (Yojson.Safe.pretty_to_string board_args);
     let result =
@@ -178,8 +188,7 @@ let handle_keeper_board_tool
       ok
       (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
     tool_result_or_error result)
-  | "keeper_board_list" -> dispatch_board Tool_name.Board_name.Board_list args
-  | "keeper_board_post_get" ->
+  | Some Keeper_tool_name.Board_post_get ->
     (match string_arg "post_id" args with
      | Some pid when String.trim pid <> "" ->
        dispatch_board Tool_name.Board_name.Board_post_get args
@@ -191,37 +200,12 @@ let handle_keeper_board_tool
           You sent empty or missing post_id. Call keeper_board_list \
           or keeper_board_search first to discover available post IDs, \
           then retry with the post_id you want to read.")
-  | "keeper_board_comment" ->
-    dispatch_board
-      Tool_name.Board_name.Board_comment
-      (assoc_override_string "author" meta.name args)
-  | "keeper_board_vote" ->
-    dispatch_board
-      Tool_name.Board_name.Board_vote
-      (assoc_override_string "voter" meta.name args)
-  | "keeper_board_comment_vote" ->
-    dispatch_board
-      Tool_name.Board_name.Board_comment_vote
-      (assoc_override_string "voter" meta.name args)
-  | "keeper_board_stats" -> dispatch_board Tool_name.Board_name.Board_stats args
-  | "keeper_board_search" -> dispatch_board Tool_name.Board_name.Board_search args
-  | "keeper_board_curation_read" ->
-    dispatch_board Tool_name.Board_name.Board_curation_read args
-  | "keeper_board_curation_submit" ->
-    dispatch_board
-      Tool_name.Board_name.Board_curation_submit
-      (assoc_override_string "submitted_by" meta.name args)
-  | "keeper_board_sub_board_create" ->
-    dispatch_board
-      Tool_name.Board_name.Board_sub_board_create
-      (assoc_override_string "owner" meta.name args)
-  | "keeper_board_sub_board_list" ->
-    dispatch_board Tool_name.Board_name.Board_sub_board_list args
-  | "keeper_board_sub_board_get" ->
-    dispatch_board Tool_name.Board_name.Board_sub_board_get args
-  | "keeper_board_sub_board_update" ->
-    dispatch_board Tool_name.Board_name.Board_sub_board_update args
-  | "keeper_board_sub_board_delete" ->
-    dispatch_board Tool_name.Board_name.Board_sub_board_delete args
-  | _ -> error_json ~fields:[ "tool", `String name ] "unknown_board_tool"
+  | Some keeper_tool ->
+    (match Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool with
+     | Some board_name ->
+       dispatch_board
+         board_name
+         (bind_board_identity ~keeper_name:meta.name board_name args)
+     | None -> error_json ~fields:[ "tool", `String name ] "unknown_board_tool")
+  | None -> error_json ~fields:[ "tool", `String name ] "unknown_board_tool"
 ;;

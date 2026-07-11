@@ -5,24 +5,9 @@
     intentionally reuse the same tool name with a narrower schema
     (e.g. local worker projections).
 
-    Internal helpers ([StringSet] / [StringMap], [risk_rank],
-    [max_risk], [unique_preserve_order], [dedupe_schemas],
-    [dedupe_projections], [prefixed_tool_names],
-    [canonical_capability_id], [risk_class_to_string],
-    [audience_to_string], [projection_to_schema], [make_seed],
-    [public_projection_seeds_from], [local_worker_internal_seeds],
-    [keeper_projection_seeds], [surface_tool_schemas_from],
-    [surface_tool_names_from], [public_raw_tool_schemas_from],
-    [keeper_safe_tool_names], [keeper_all_tool_names],
-    [keeper_wrapped_server_tools],
-    [keeper_wrapped_internal_tools], [capability_to_json],
-    [oauth_login_stage], the surface-name lists
-    [spawned_agent_public_tool_names],
-    [local_worker_public_tool_names],
-    [local_worker_internal_schemas],
-    [privileged_public_tool_names]) are hidden — callers consume the
-    typed projections, the [from] entry points, and the snapshot /
-    schema accessors below. *)
+    Implementation helpers remain hidden; callers consume the typed
+    projections, result-returning constructors, and schema/snapshot accessors
+    below. *)
 
 (** {1 Risk / audience / surface} *)
 
@@ -40,6 +25,7 @@ type audience =
 
 type surface =
   | Public_mcp
+  | Managed_agent_mcp
   | Spawned_agent_mcp
   | Local_worker
   | Keeper_standard
@@ -61,7 +47,7 @@ type projection = {
 }
 
 type capability_def = {
-  capability_id : string;
+  capability_id : Tool_capability_id.t;
   risk_class : risk_class;
   audiences : audience list;
   supports_audit_evidence : bool;
@@ -70,13 +56,27 @@ type capability_def = {
 }
 
 type capability_seed = {
-  capability_id : string;
+  capability_id : Tool_capability_id.t;
   risk_class : risk_class;
   audiences : audience list;
   supports_audit_evidence : bool;
   supports_direct_user_discovery : bool;
   projection : projection;
 }
+
+type projection_error =
+  | Conflicting_surface_projection of
+      { surface : surface
+      ; tool_name : string
+      ; capability_ids : Tool_capability_id.t list
+      }
+  | Multiple_keeper_model_names of
+      { capability_id : Tool_capability_id.t
+      ; tool_names : string list
+      }
+
+val projection_error_kind : projection_error -> string
+val projection_error_to_json : projection_error -> Yojson.Safe.t
 
 (** {1 Seed / capability builders} *)
 
@@ -86,6 +86,17 @@ val all_projection_seeds_from :
     flat list keyed off [public_tool_source_schemas] (the canonical
     public schema list owned by [Tool_help_registry]). *)
 
+val validate_projection_seeds :
+  capability_seed list -> (unit, projection_error list) result
+(** Reject conflicting names within one surface and more than one active
+    Keeper model name for a semantic capability. *)
+
+val all_projection_seeds_from_result :
+  Masc_domain.tool_schema list ->
+  (capability_seed list, projection_error list) result
+(** Typed projection constructor. The non-result convenience function emits
+    bounded error telemetry and fails explicitly on this error. *)
+
 val all_capabilities_from :
   Masc_domain.tool_schema list -> capability_def list
 (** Group {!all_projection_seeds_from} by [capability_id] into a
@@ -93,11 +104,19 @@ val all_capabilities_from :
     is the max over the seeds; [audiences] / [projections] are
     union'd preserving order. *)
 
+val surface_tool_schemas_from :
+  Masc_domain.tool_schema list -> surface -> Masc_domain.tool_schema list
+(** Exact schema projection for one typed surface. *)
+
+val surface_tool_names_from :
+  Masc_domain.tool_schema list -> surface -> string list
+(** Names from {!surface_tool_schemas_from}, preserving projection order. *)
+
 (** {1 Public surface accessors} *)
 
 val public_tool_schemas_from :
   Masc_domain.tool_schema list -> Masc_domain.tool_schema list
-(** Canonicalised + deduped public-MCP schemas. *)
+(** Canonicalised + deduped front-door source schemas. *)
 
 val visible_public_tool_schemas_from :
   ?include_hidden:bool ->
@@ -134,14 +153,10 @@ val keeper_safe_tool_names : string list
     order. Exposed for the registry test that pins the
     safe / privileged partition. *)
 
-val keeper_backend_tool_name : string -> string
-(** Resolve a keeper-facing tool alias to its [masc_*] backend
-    name; identity for non-aliased tools. Pulls from
-    runtime-owned aliases are resolved behind the runtime boundary. *)
-
 (** {1 Snapshot} *)
 
 val surface_snapshot_json : Masc_domain.tool_schema list -> Yojson.Safe.t
-(** Per-surface tool counts and tool name lists, plus the
-    [keeper_wrapped_server_tools] hardcoded set. Used by the
-    dashboard's capability inventory pane. *)
+(** Per-surface tool counts and exact projected name lists. Used by the
+    dashboard's capability inventory pane. Invalid projections are logged,
+    counted, and raised explicitly rather than encoded into this stable map
+    shape. *)

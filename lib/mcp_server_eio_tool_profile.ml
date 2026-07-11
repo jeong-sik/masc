@@ -18,26 +18,18 @@ Use masc_operator_action for guided actions only. \
 When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
 Do not assume access to any other MASC tool from this endpoint."
 
+let managed_agent_instruction_tool_names =
+  Capability_registry.surface_tool_names_from
+    Config.raw_all_tool_schemas
+    Capability_registry.Managed_agent_mcp
+
 let managed_agent_instructions =
-  "MASC managed-agent profile exposes the internal agent control surface. \
-Prefer canonical task-control tools such as masc_status, masc_tasks, keeper_task_claim, masc_transition, and masc_plan_set_task. \
+  Printf.sprintf
+    "MASC managed-agent profile exposes the internal agent control surface. \
+The available tools are generated from the managed-agent capability projection: %s. \
+Use only names returned by tools/list. \
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
-
-let managed_agent_passthrough_tool_names =
-  Keeper_tool_surfaces.spawned_agent_public_tool_names
-
-(* O(1) membership view of [managed_agent_passthrough_tool_names].
-   Used by [tool_schemas_for_profile Managed_agent] to filter
-   ~150 visible schemas per request — replaces a per-schema
-   [List.mem] scan over ~20 passthrough names. *)
-let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
-  let tbl =
-    Hashtbl.create (List.length managed_agent_passthrough_tool_names)
-  in
-  List.iter
-    (fun name -> Hashtbl.replace tbl name ())
-    managed_agent_passthrough_tool_names;
-  tbl
+    (String.concat ", " managed_agent_instruction_tool_names)
 
 module StringSet = Set_util.StringSet
 module StringMap = Set_util.StringMap
@@ -91,14 +83,9 @@ let tool_schemas_for_profile ?(include_hidden = false)
         in
         full_profile_tools
     | Managed_agent ->
-        let passthrough =
-          Config.visible_tool_schemas ~include_hidden:true ()
-          |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-                 Hashtbl.mem managed_agent_passthrough_tool_set schema.name
-                 && Tool_catalog.is_visible ~include_hidden:true schema.name)
-        in
-        dedupe_tool_schemas_by_name
-          (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
+        Capability_registry.surface_tool_schemas_from
+          Config.raw_all_tool_schemas
+          Capability_registry.Managed_agent_mcp
     | Operator_remote -> Tool_operator.remote_schemas ()
   in
   schemas

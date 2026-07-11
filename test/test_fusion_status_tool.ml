@@ -6,9 +6,8 @@
       mislabels a run status (e.g.
       reports a denied/sink-failed run as "completed"), or returns the wrong
       shape for list vs single-run vs unknown-run_id; and
-   2. the tool is wired but NOT visible to the keeper LLM (Pass B requires
-      visibility=Default; read_only_in_process_policy defaults to Hidden, so a
-      missing override would silently hide the tool while compiling fine).
+   2. the tool is wired but NOT exposed to the keeper LLM through its explicit
+      descriptor-owned Pass-B projection.
 
    [fusion_status_json] is pure over a registry instance, so it is exercised on
    isolated [Fusion_run_registry.create ()] tables (no global-state coupling). *)
@@ -140,11 +139,9 @@ let test_empty_registry () =
   check int "empty runs list" 0 (List.length (runs_of json))
 ;;
 
-(* (2) keeper-LLM visibility: masc_fusion_status must be in the Pass-B set
-   (model_visible_descriptors filters visibility=Default). Hidden would compile
-   but silently strip it from the keeper's tool list. Also runs the unified
-   registry boot invariant (enforce_visible_tag_coverage) so a Default-visible
-   tool without a dispatch tag would fail loudly here. *)
+(* (2) keeper-LLM exposure: masc_fusion_status must be in the descriptor-owned
+   Pass-B projection. Also runs the unified registry boot invariant so an
+   exposed tool without a dispatch tag fails loudly here. *)
 let test_tool_is_keeper_visible () =
   Masc_test_deps.init_keeper_tool_registry ();
   let visible_names =
@@ -153,7 +150,7 @@ let test_tool_is_keeper_visible () =
   in
   check
     bool
-    "masc_fusion_status is keeper-LLM-visible (Pass B Default gate)"
+    "masc_fusion_status is keeper-LLM-visible (Pass B projection)"
     true
     (List.mem "masc_fusion_status" visible_names)
 ;;

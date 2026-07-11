@@ -521,7 +521,18 @@ let merge_expectation base extras =
   | Expect_success_or_guard fragments ->
       Expect_success_or_guard (fragments @ extras)
 
-let case_for_name name =
+let rec case_for_name name =
+  match Masc.Keeper_tool_alias.route name with
+  | Some route when not (String.equal route.internal_name name) ->
+    let internal_case = case_for_name route.internal_name in
+    { internal_case with
+      arguments =
+        (fun fixture schema ->
+          internal_case.arguments
+            fixture
+            { schema with Masc_domain.name = route.internal_name })
+    }
+  | Some _ | None ->
   if string_starts_with ~prefix:"masc_" name then
     let generic_case_opt =
       try Some (Generic.case_for_name name) with Failure _ -> None

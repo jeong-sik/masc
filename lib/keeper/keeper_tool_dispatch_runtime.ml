@@ -283,9 +283,21 @@ let tool_tutor_json ~kind ~requested_tool ~message ~alternatives =
     ]
 ;;
 
+let grep_model_name =
+  Tool_name_alias_axis.preferred_name Tool_name_alias_axis.Grep
+;;
+
+let execute_model_name =
+  Tool_name_alias_axis.preferred_name Tool_name_alias_axis.Execute
+;;
+
+let read_model_name =
+  Tool_name_alias_axis.preferred_name Tool_name_alias_axis.Read
+;;
+
 let grep_alternative =
   `Assoc
-    [ "tool", `String "Grep"
+    [ "tool", `String grep_model_name
     ; "when", `String "search file contents with a ripgrep regex"
     ; "required", `List [ `String "pattern" ]
     ; "optional", `List [ `String "path"; `String "glob"; `String "type" ]
@@ -294,7 +306,7 @@ let grep_alternative =
 
 let execute_find_alternative =
   `Assoc
-    [ "tool", `String "Execute"
+    [ "tool", `String execute_model_name
     ; "when", `String "list files or expand globs"
     ; ( "example"
       , `Assoc
@@ -306,7 +318,7 @@ let execute_find_alternative =
 
 let read_alternative =
   `Assoc
-    [ "tool", `String "Read"
+    [ "tool", `String read_model_name
     ; "when", `String "read one whole file or a byte-limited prefix"
     ; "required", `List [ `String "file_path" ]
     ; "optional", `List [ `String "cwd"; `String "limit" ]
@@ -340,8 +352,11 @@ let tool_tutor_for_unknown_name requested_tool =
          ~kind:"unknown_tool"
          ~requested_tool
          ~message:
-           "Glob is not an active MASC keeper tool. Use Grep only for content \
-            search; use Execute with find/ls for file listing."
+           (Printf.sprintf
+              "Glob is not an active MASC keeper tool. Use %s only for content \
+               search; use %s with find/ls for file listing."
+              grep_model_name
+              execute_model_name)
          ~alternatives:[ grep_alternative; execute_find_alternative ])
   | Some Search_files_alias ->
     Some
@@ -349,15 +364,20 @@ let tool_tutor_for_unknown_name requested_tool =
          ~kind:"tool_name_alias"
          ~requested_tool
          ~message:
-           "Use Grep or search_files with the public search-files schema: \
-            provide pattern, not query."
+           (Printf.sprintf
+              "Use %s with the active search-files schema: provide pattern, not query."
+              grep_model_name)
          ~alternatives:[ grep_alternative ])
   | Some Read_file_alias ->
     Some
       (tool_tutor_json
          ~kind:"tool_name_alias"
          ~requested_tool
-         ~message:"Use Read with file_path; Read has no start_line or offset."
+         ~message:
+           (Printf.sprintf
+              "Use %s with file_path; %s has no start_line or offset."
+              read_model_name
+              read_model_name)
          ~alternatives:[ read_alternative ])
   | None -> None
 ;;
@@ -382,8 +402,12 @@ let tool_tutor_for_validation ~tool_name ~input =
             ~kind:"invalid_arguments"
             ~requested_tool:tool_name
             ~message:
-              "Read does not support line offsets. Use file_path plus optional \
-               cwd/limit; use Grep or Execute for locating a smaller target first."
+              (Printf.sprintf
+                 "%s does not support line offsets. Use file_path plus optional \
+                  cwd/limit; use %s or %s for locating a smaller target first."
+                 read_model_name
+                 grep_model_name
+                 execute_model_name)
             ~alternatives:[ read_alternative; grep_alternative; execute_find_alternative ])
      | Keeper_tool_descriptor.Tool_search_files when args_has_any_field [ "query" ] input
        ->
@@ -392,8 +416,9 @@ let tool_tutor_for_validation ~tool_name ~input =
             ~kind:"invalid_arguments"
             ~requested_tool:tool_name
             ~message:
-              "Grep/search_files requires pattern. Rename query to pattern for \
-               content search."
+              (Printf.sprintf
+                 "%s requires pattern. Rename query to pattern for content search."
+                 grep_model_name)
             ~alternatives:[ grep_alternative ])
      (* Handlers below carry no tutor; listed explicitly so a new runtime_handler
         variant forces a compile-time choice instead of a string catch-all. *)

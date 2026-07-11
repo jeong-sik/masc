@@ -279,28 +279,96 @@ let handle_board ~(meta : keeper_meta) ~name ~args =
   Keeper_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args
 ;;
 
+type board_projection_error =
+  | Unknown_board_route of string
+  | Keeper_wrapper_required of
+      { board_name : Tool_name.Board_name.t
+      ; keeper_tool : Keeper_tool_name.t
+      }
+  | External_only_board_route of Tool_name.Board_name.t
+
+let board_projection_error_kind = function
+  | Unknown_board_route _ -> "unknown_board_route"
+  | Keeper_wrapper_required _ -> "keeper_wrapper_required"
+  | External_only_board_route _ -> "external_only_board_route"
+;;
+
+let board_projection_error_class = function
+  | Unknown_board_route _ -> Tool_result.Runtime_failure
+  | Keeper_wrapper_required _ | External_only_board_route _ ->
+    Tool_result.Policy_rejection
+;;
+
+let board_projection_error_data error =
+  let fields =
+    match error with
+    | Unknown_board_route name -> [ "tool", `String name ]
+    | Keeper_wrapper_required { board_name; keeper_tool } ->
+      [ "capability_id"
+      , `String
+          (Tool_capability_id.to_string
+             (Tool_capability_id.board_operation board_name))
+      ; "required_tool", `String (Keeper_tool_name.to_string keeper_tool)
+      ]
+    | External_only_board_route board_name ->
+      [ "capability_id"
+      , `String
+          (Tool_capability_id.to_string
+             (Tool_capability_id.board_operation board_name))
+      ]
+  in
+  `Assoc (("error_kind", `String (board_projection_error_kind error)) :: fields)
+;;
+
+let reject_board_projection ~(meta : keeper_meta) ~name error =
+  let class_ = board_projection_error_class error in
+  let data =
+    match board_projection_error_data error with
+    | `Assoc fields ->
+      `Assoc
+        (("tool", `String name)
+         :: ( "failure_class"
+            , `String (Tool_result.tool_failure_class_to_string class_) )
+         :: fields)
+    | data -> data
+  in
+  Log.Keeper.emit
+    Log.Error
+    ~keeper_name:meta.name
+    ~category:Log.Tool
+    ~details:data
+    "board projection rejected";
+  Tool_result.make_err
+    ~tool_name:name
+    ~class_
+    ~start_time:(Time_compat.now ())
+    ~data
+    (Yojson.Safe.to_string data)
+  |> Keeper_tool_shared_runtime.tool_result_or_error
+;;
+
 let handle_masc_board ~(meta : keeper_meta) ~name ~args =
-  let args =
-    match Tool_name.Board_name.of_string name with
-    | None -> args
-    | Some board_name ->
+  match Tool_name.Board_name.of_string name with
+  | None -> reject_board_projection ~meta ~name (Unknown_board_route name)
+  | Some board_name ->
+    (match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+     | Keeper_tool_name.Keeper_wrapper keeper_tool ->
+       reject_board_projection
+         ~meta
+         ~name
+         (Keeper_wrapper_required { board_name; keeper_tool })
+     | Keeper_tool_name.External_only ->
+       reject_board_projection ~meta ~name (External_only_board_route board_name)
+     | Keeper_tool_name.Direct_masc ->
+      let args =
       List.fold_left
         (fun args field ->
            Keeper_tool_shared_runtime.assoc_override_string field meta.name args)
         args
         (Board_tool_registry.identity_fields_for_board_name board_name)
-  in
-  let result =
-    Board_tool_dispatch.handle_tool name args
-  in
-  if Tool_result.is_success result
-  then Tool_result.message result
-  else
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error", `String (Tool_result.message result)
-         ; "tool", `String name
-         ])
+      in
+      Board_tool_dispatch.handle_tool name args
+      |> Keeper_tool_shared_runtime.tool_result_or_error)
 ;;
 
 (* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
@@ -308,51 +376,71 @@ let handle_masc_board ~(meta : keeper_meta) ~name ~args =
    convention. [None] means the dispatcher does not recognise the name
    (the descriptor → dispatcher mapping is misconfigured if this fires
    for a tool reachable via [descriptors_for_internal]). *)
-let dispatch_option_to_string ~name = function
+let dispatch_option_to_string ~runtime_handler ~name = function
   | Some (result : Tool_result.result) ->
-    if Tool_result.is_success result
-    then Tool_result.message result
-    else
-      let fields =
-        match Tool_result.failure_class result with
-        | None -> [ "error", `String (Tool_result.message result) ]
-        | Some cls ->
-          [ "error", `String (Tool_result.message result)
-          ; "failure_class", `String (Tool_result.tool_failure_class_to_string cls)
-          ]
-      in
-      Yojson.Safe.to_string (`Assoc fields)
+    Keeper_tool_shared_runtime.tool_result_or_error result
   | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: cluster dispatcher did not recognise %S"
-                name)
-         ])
+    let route_name =
+      Keeper_tool_descriptor.runtime_handler_to_string runtime_handler
+    in
+    let data =
+      `Assoc
+        [ "ok", `Bool false
+        ; "error", `String "descriptor_route_miss"
+        ; "tool", `String name
+        ; "route", `String route_name
+        ]
+    in
+    Log.Keeper.emit
+      Log.Error
+      ~category:Log.Tool
+      ~details:data
+      "descriptor route miss";
+    Otel_metric_store.inc_counter
+      "masc_keeper_descriptor_route_miss_total"
+      ~labels:[ "route", route_name ]
+      ();
+    Tool_result.make_err
+      ~tool_name:name
+      ~class_:Tool_result.Runtime_failure
+      ~start_time:(Time_compat.now ())
+      ~data
+      (Yojson.Safe.to_string data)
+    |> Keeper_tool_shared_runtime.tool_result_or_error
 ;;
 
 let handle_masc_task ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Task.Tool.context =
     { config; agent_name = meta.name; sw = None }
   in
-  Task.Tool.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Task.Tool.dispatch ctx ~name ~args
+  |> dispatch_option_to_string
+       ~runtime_handler:Keeper_tool_descriptor.Tool_masc_task_dispatch
+       ~name
 ;;
 
 let handle_masc_plan ~(config : Workspace.config) ~name ~args =
   let ctx : Tool_plan.context = { config } in
-  Tool_plan.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_plan.dispatch ctx ~name ~args
+  |> dispatch_option_to_string
+       ~runtime_handler:Keeper_tool_descriptor.Tool_masc_plan_dispatch
+       ~name
 ;;
 
 let handle_masc_run ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_run.context = { config; agent_name = Some meta.name } in
-  Tool_run.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_run.dispatch ctx ~name ~args
+  |> dispatch_option_to_string
+       ~runtime_handler:Keeper_tool_descriptor.Tool_masc_run_dispatch
+       ~name
 ;;
 
 let handle_masc_agent ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent.context = { config; agent_name = meta.name } in
-  Tool_agent.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_agent.dispatch ctx ~name ~args
+  |> dispatch_option_to_string
+       ~runtime_handler:Keeper_tool_descriptor.Tool_masc_agent_dispatch
+       ~name
 ;;
 
 (* RFC-0182 §3.1 — masc_workspace_ cluster. Tool_workspace lies LATE in module
@@ -369,7 +457,10 @@ let handle_masc_workspace ~(config : Workspace.config) ~(meta : keeper_meta) ~na
   let dispatched =
     !Workspace_dispatch_ref.dispatch ~config ~agent_name:meta.name ~name ~args
   in
-  dispatch_option_to_string ~name dispatched
+  dispatch_option_to_string
+    ~runtime_handler:Keeper_tool_descriptor.Tool_masc_workspace_dispatch
+    ~name
+    dispatched
 ;;
 
 (* RFC-0182 §3.1 — masc_misc cluster. Active after Turn_mode_codec
@@ -378,12 +469,18 @@ let handle_masc_workspace ~(config : Workspace.config) ~(meta : keeper_meta) ~na
    Keeper_tool_in_process_runtime. *)
 let handle_masc_misc ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_misc.context = { config; agent_name = meta.name } in
-  Tool_misc.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_misc.dispatch ctx ~name ~args
+  |> dispatch_option_to_string
+       ~runtime_handler:Keeper_tool_descriptor.Tool_masc_misc_dispatch
+       ~name
 ;;
 
 let handle_masc_control ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_control.context = { config; agent_name = meta.name } in
-  Tool_control.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_control.dispatch ctx ~name ~args
+  |> dispatch_option_to_string
+       ~runtime_handler:Keeper_tool_descriptor.Tool_masc_control_dispatch
+       ~name
 ;;
 
 let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
@@ -393,12 +490,17 @@ let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta
       Keeper_chat_timeline_source.lines_for_self
         ~base_dir:config.base_path ~caller_keeper_name:meta.name ~agent_name)
     ctx ~name ~args
-  |> dispatch_option_to_string ~name
+  |> dispatch_option_to_string
+       ~runtime_handler:Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+       ~name
 ;;
 
 let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_schedule.context = { config; agent_name = meta.name } in
-  Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_schedule.dispatch ctx ~name ~args
+  |> dispatch_option_to_string
+       ~runtime_handler:Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+       ~name
 ;;
 
 (* RFC-0252 — masc_fusion out-of-band panel+judge deliberation.  The
@@ -557,5 +659,8 @@ let handle_masc_keeper
       ~args
       ()
   in
-  dispatch_option_to_string ~name result
+  dispatch_option_to_string
+    ~runtime_handler:Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+    ~name
+    result
 ;;

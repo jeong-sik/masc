@@ -32,7 +32,7 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
 let descriptor_owned_internal_tool_schemas : Masc_domain.tool_schema list =
   Keeper_tool_descriptor.public_descriptors
   |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
-    if String.starts_with ~prefix:"masc_" descriptor.internal_name
+    if Keeper_tool_descriptor.is_masc_internal_route descriptor
     then
       Some
         { Masc_domain.name = descriptor.internal_name

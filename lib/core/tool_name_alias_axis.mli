@@ -9,7 +9,21 @@ type public_alias =
   ; internal_name : string
   }
 
+type public_tool =
+  | Execute
+  | Edit
+  | Web_fetch
+  | Read
+  | Grep
+  | Web_search
+  | Write
+
 val public_aliases : public_alias list
+val all : public_tool list
+val preferred_name : public_tool -> string
+val internal_name : public_tool -> string
+val compatibility_names : public_tool -> string list
+val public_tool_of_name : string -> public_tool option
 val public_names : unit -> string list
 val internal_name_of_public : string -> string option
 val public_name_for_internal : string -> string option

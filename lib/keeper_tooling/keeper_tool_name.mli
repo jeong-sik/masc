@@ -67,6 +67,17 @@ val masc_board_name_of_keeper_tool : t -> Tool_name.Board_name.t option
     [masc_board_*] board tool vocabulary. Non-board keeper names return
     [None]. *)
 
+type board_projection =
+  | Keeper_wrapper of t
+  | Direct_masc
+  | External_only
+
+val board_projection_of_masc_board_name : Tool_name.Board_name.t -> board_projection
+(** Exhaustive Board capability projection into the Keeper plane. This is the
+    policy SSOT: wrapper-backed operations use the Keeper route, explicitly
+    approved raw operations retain their [masc_board_*] route, and
+    operator-only operations remain outside the Keeper model surface. *)
+
 val masc_board_name_of_keeper_name : string -> Tool_name.Board_name.t option
 (** Parse a [keeper_board_*] string and return the corresponding typed
     public board tool name. *)

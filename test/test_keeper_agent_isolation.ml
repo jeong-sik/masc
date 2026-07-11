@@ -54,9 +54,7 @@ let has_keeper_prefix name =
     inject_masc_schemas, which runs after module init. *)
 let descriptor_tool_names () : string list =
   Keeper_tool_descriptor.all_descriptors ()
-  |> List.concat_map (fun descriptor ->
-       Keeper_tool_descriptor.public_names_of_descriptor descriptor
-       @ Keeper_tool_descriptor.internal_names descriptor)
+  |> List.concat_map Keeper_tool_descriptor.keeper_candidate_names
   |> List.sort_uniq String.compare
 
 let shard_tool_names () : string list =

@@ -381,6 +381,55 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
       check bool "masc_fusion Tool.t is materialized" true
         (List.mem "masc_fusion" names))
 
+let test_keeper_oas_bundle_matches_typed_model_projection () =
+  let marker = Filename.temp_file "keeper-model-projection-" ".tmp" in
+  Sys.remove marker;
+  Unix.mkdir marker 0o700;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists marker then Cases.cleanup_dir marker)
+    (fun () ->
+      let expected_names =
+        Cases.all_keeper_tool_schemas ()
+        |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+      in
+      let config = Masc.Workspace.default_config marker in
+      let meta = Cases.make_meta ~name:"keeper-model-projection" () in
+      let ctx_snapshot =
+        Masc.Keeper_context_runtime.create
+          ~eio:false
+          ~system_prompt:"keeper model projection regression"
+          ~max_tokens:4000
+      in
+      let actual_names =
+        Masc.Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot ()
+        |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+      in
+      check int
+        "OAS Tool.t names are unique"
+        (List.length actual_names)
+        (List.length (List.sort_uniq String.compare actual_names));
+      check (list string)
+        "OAS Tool.t names equal model schema projection"
+        (List.sort String.compare expected_names)
+        (List.sort String.compare actual_names);
+      List.iter
+        (fun board_name ->
+          let raw_name = Tool_name.Board_name.to_string board_name in
+          match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+          | Keeper_tool_name.Keeper_wrapper keeper_tool ->
+            let keeper_name = Keeper_tool_name.to_string keeper_tool in
+            check bool (raw_name ^ " raw route absent") false
+              (List.mem raw_name actual_names);
+            check bool (keeper_name ^ " wrapper present") true
+              (List.mem keeper_name actual_names)
+          | Keeper_tool_name.Direct_masc ->
+            check bool (raw_name ^ " direct route present") true
+              (List.mem raw_name actual_names)
+          | Keeper_tool_name.External_only ->
+            check bool (raw_name ^ " external-only route absent") false
+              (List.mem raw_name actual_names))
+        Tool_name.Board_name.all)
+
 let selected_schemas () =
   let requested = requested_tool_names () in
   match requested with
@@ -424,6 +473,8 @@ let () =
             test_masc_fusion_schema_declares_web_tools;
           test_case "keeper OAS bundle materializes masc_fusion tool" `Quick
             test_keeper_oas_bundle_materializes_masc_fusion_tool;
+          test_case "keeper OAS bundle matches typed model projection" `Quick
+            test_keeper_oas_bundle_matches_typed_model_projection;
         ] );
       ("matrix", matrix_cases);
     ]

@@ -201,7 +201,8 @@ let canonical_tool_name_observed name =
 ;;
 
 let public_aliases_for_internal_name internal_name =
-  Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
+  Keeper_tool_descriptor_resolution.public_model_names_for_internal_backend
+    internal_name
 ;;
 
 let public_alias_guidance_for_internal_call

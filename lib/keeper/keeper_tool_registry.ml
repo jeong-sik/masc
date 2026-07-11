@@ -337,7 +337,7 @@ let effective_core_tools () =
         Set_util.StringSet.mem
           d.Keeper_tool_descriptor.internal_name
           universe_set)
-    |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   in
   base_core_tools @ descriptor_publics
 ;;

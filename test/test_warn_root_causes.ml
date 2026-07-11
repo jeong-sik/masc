@@ -61,7 +61,7 @@ let build_policy_allowed_tool_set (meta : Keeper_meta_contract.keeper_meta) =
   let allowed_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let internal_set = Keeper_tool_policy.tool_name_set allowed_names in
   let public_of_internal name =
-    match Keeper_tool_descriptor_resolution.public_names_for_internal name with
+    match Keeper_tool_descriptor_resolution.model_names_for_internal name with
     | [] -> [ name ]
     | public_names -> public_names
   in
@@ -88,7 +88,7 @@ let filter_core_by_tool_access (meta : Keeper_meta_contract.keeper_meta) =
 let write_tools = [ "Edit" ]
 
 let shell_bridge_tools = [ "Execute" ]
-let read_alias_tools = [ "Grep"; "Search"; "Read" ]
+let read_alias_tools = [ "Grep"; "Read" ]
 
 let write_enabled_tool_access =
   [ "tool_edit_file"; "tool_execute" ]
@@ -156,7 +156,8 @@ let test_core_tools_hidden_by_denylist () =
   List.iter (fun t ->
     if List.mem t filtered then
       fail (Printf.sprintf "%s should be excluded by denylist" t)
-  ) [ "Edit"; "Grep"; "Search" ]
+  ) [ "Edit"; "Grep" ];
+  check bool "legacy Search alias is never active" false (List.mem "Search" filtered)
 
 let test_web_alias_bundle_visible_without_injected_masc_schema () =
   ignore (init_registry ());

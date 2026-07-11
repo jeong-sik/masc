@@ -55,9 +55,15 @@ let translate_search_files_public_args args =
 ;;
 
 let translate_public_alias_args ~public args =
-  match public with
-  | "Grep" | "Search" -> translate_search_files_public_args args
-  | _ -> args
+  match Tool_name_alias_axis.public_tool_of_name public with
+  | Some Tool_name_alias_axis.Grep -> translate_search_files_public_args args
+  | Some (Tool_name_alias_axis.Execute
+         | Tool_name_alias_axis.Edit
+         | Tool_name_alias_axis.Web_fetch
+         | Tool_name_alias_axis.Read
+         | Tool_name_alias_axis.Web_search
+         | Tool_name_alias_axis.Write)
+  | None -> args
 ;;
 
 let normalize_call ~tool_name ~arguments =

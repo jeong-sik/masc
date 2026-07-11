@@ -27,6 +27,20 @@ type approval =
   | Policy_selected
   | Human_required
 
+(** Semantic capability identity owned by the tool core. Nominal routes never
+    merge by string similarity; closed Board operation identities intentionally
+    join the external route and Keeper wrapper. *)
+type capability_id = Tool_capability_id.t
+
+(** Exactly one model projection policy per descriptor. Public descriptors
+    expose their preferred public name, ordinary internal descriptors expose
+    their internal name, and dispatch-only descriptors remain routable outside
+    the Keeper model surface. *)
+type keeper_model_projection =
+  | Preferred_public_name
+  | Internal_name
+  | Dispatch_only
+
 type readonly_of_input = Yojson.Safe.t -> bool option
 
 type runtime_handler =
@@ -67,8 +81,7 @@ type runtime_handler =
   | Tool_analyze_image
 
 type policy =
-  { visibility : Tool_catalog.visibility
-  ; readonly_of_input : readonly_of_input
+  { readonly_of_input : readonly_of_input
   ; readonly_hint : bool option
   ; effect_domain : Tool_catalog.effect_domain option
   ; approval : approval
@@ -81,6 +94,8 @@ type policy =
 
 type t =
   { id : string
+  ; capability_id : capability_id
+  ; keeper_model_projection : keeper_model_projection
   ; public_name : string
   ; public_aliases : string list
   ; internal_name : string
@@ -111,6 +126,10 @@ val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
 val approval_to_string : approval -> string
 val runtime_handler_to_string : runtime_handler -> string
+val capability_id_to_string : capability_id -> string
+val equal_capability_id : capability_id -> capability_id -> bool
+val compare_capability_id : capability_id -> capability_id -> int
+val keeper_model_projection_to_string : keeper_model_projection -> string
 
 (** [public_descriptors] is the LLM-native public surface (RFC-0064 hard-cut).
     Each descriptor has one preferred [public_name] and may expose secondary
@@ -128,13 +147,30 @@ val internal_descriptors : t list
     descriptor-backed tool, regardless of LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
 
-(** [model_visible_descriptors ()] is [public_descriptors] plus internal
-    descriptors whose policy visibility is [Default]. Hidden internal
-    descriptors remain executable only through non-model dispatcher paths. *)
+(** [model_visible_descriptors ()] is the descriptor set with a non-empty
+    Keeper model projection. The projection is the sole Keeper-plane exposure
+    authority; external catalog visibility remains owned by [Tool_catalog]. *)
 val model_visible_descriptors : unit -> t list
 
+(** Preferred model-facing name for this descriptor. The list is empty for a
+    dispatch-only route and otherwise contains exactly one name. *)
+val keeper_model_names : t -> string list
+
+(** Keeper candidate/execution names owned by the descriptor. Public aliases
+    are deliberately excluded: the preferred public name and the internal
+    route are sufficient. Dispatch-only descriptors return an empty list. *)
+val keeper_candidate_names : t -> string list
+
+(** Whether the descriptor's internal route belongs to the MASC front-door
+    family. This typed handler classification replaces name-prefix tests. *)
+val is_masc_internal_route : t -> bool
+
 val public_names_of_descriptor : t -> string list
+(** Legacy-routable public names, including compatibility aliases. Do not use
+    this list to construct a model schema; use [keeper_model_names]. *)
+
 val public_names : unit -> string list
+(** Active preferred model names for [public_descriptors]. *)
 val internal_names : t -> string list
 val find_public : string -> t option
 val public_name_for_internal : string -> string option

@@ -177,40 +177,51 @@ let board_tool_curation_submit : Masc_domain.tool_schema =
   }
 ;;
 
-(** {1 Aggregate list advertised to MCP clients}
+(** {1 Typed schema projection} *)
+let schema_for_board_name = function
+  | Tool_name.Board_name.Board_post -> Board_tool_schemas.tool_post_create
+  | Tool_name.Board_name.Board_post_update -> Board_tool_schemas.tool_post_edit
+  | Tool_name.Board_name.Board_list -> Board_tool_schemas.tool_post_list
+  | Tool_name.Board_name.Board_post_get -> Board_tool_schemas.tool_post_get
+  | Tool_name.Board_name.Board_comment -> Board_tool_schemas.tool_comment_add
+  | Tool_name.Board_name.Board_vote -> Board_tool_schemas.tool_vote
+  | Tool_name.Board_name.Board_stats -> Board_tool_schemas.tool_stats
+  | Tool_name.Board_name.Board_search -> Board_tool_schemas.tool_search
+  | Tool_name.Board_name.Board_comment_vote -> Board_tool_schemas.tool_comment_vote
+  | Tool_name.Board_name.Board_reaction -> Board_tool_schemas.tool_reaction
+  | Tool_name.Board_name.Board_profile -> Board_tool_schemas.tool_profile
+  | Tool_name.Board_name.Board_hearths -> Board_tool_schemas.tool_hearth_list
+  | Tool_name.Board_name.Board_curation_read -> board_tool_curation_read
+  | Tool_name.Board_name.Board_curation_submit -> board_tool_curation_submit
+  | Tool_name.Board_name.Board_delete -> tool_delete
+  | Tool_name.Board_name.Board_cleanup -> board_tool_cleanup
+  | Tool_name.Board_name.Board_sub_board_create ->
+    Board_tool_schemas.tool_sub_board_create
+  | Tool_name.Board_name.Board_sub_board_list ->
+    Board_tool_schemas.tool_sub_board_list
+  | Tool_name.Board_name.Board_sub_board_get ->
+    Board_tool_schemas.tool_sub_board_get
+  | Tool_name.Board_name.Board_sub_board_update ->
+    Board_tool_schemas.tool_sub_board_update
+  | Tool_name.Board_name.Board_sub_board_delete ->
+    Board_tool_schemas.tool_sub_board_delete
+;;
 
-    Order preserved from pre-split board_tool.ml. *)
+(** Aggregate list advertised to MCP clients, generated from the typed Board
+    vocabulary in its stable declaration order. *)
 let tools =
-  [ Board_tool_schemas.tool_post_create
-  ; Board_tool_schemas.tool_post_edit
-  ; Board_tool_schemas.tool_post_list
-  ; Board_tool_schemas.tool_post_get
-  ; Board_tool_schemas.tool_comment_add
-  ; Board_tool_schemas.tool_vote
-  ; Board_tool_schemas.tool_stats
-  ; Board_tool_schemas.tool_search
-  ; Board_tool_schemas.tool_comment_vote
-  ; Board_tool_schemas.tool_reaction
-  ; Board_tool_schemas.tool_profile
-  ; Board_tool_schemas.tool_hearth_list
-  ; board_tool_curation_read
-  ; board_tool_curation_submit
-  ; tool_delete
-  ; board_tool_cleanup
-  ; Board_tool_schemas.tool_sub_board_create
-  ; Board_tool_schemas.tool_sub_board_list
-  ; Board_tool_schemas.tool_sub_board_get
-  ; Board_tool_schemas.tool_sub_board_update
-  ; Board_tool_schemas.tool_sub_board_delete
-  ]
-;;
-
-let schema_for_board_name board_name =
-  let name = Tool_name.Board_name.to_string board_name in
-  List.find_opt
-    (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
-    tools
-;;
+  Tool_name.Board_name.all
+  |> List.map (fun board_name ->
+    let schema = schema_for_board_name board_name in
+    let expected_name = Tool_name.Board_name.to_string board_name in
+    if not (String.equal expected_name schema.name)
+    then
+      invalid_arg
+        (Printf.sprintf
+           "board schema projection mismatch: expected=%s actual=%s"
+           expected_name
+           schema.name);
+    schema)
 
 let identity_fields_for_board_name = function
   | Tool_name.Board_name.Board_post

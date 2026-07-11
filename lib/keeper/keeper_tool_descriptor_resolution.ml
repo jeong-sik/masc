@@ -22,14 +22,47 @@ let canonical_internal_name_for_tool_name tool_name =
   | None -> Keeper_tool_alias.canonical_internal_name tool_name
 ;;
 
+let capability_sibling_names_for_tool_name tool_name =
+  match descriptor_for_tool_name tool_name with
+  | None -> []
+  | Some source ->
+    Keeper_tool_descriptor.all_descriptors ()
+    |> List.filter (fun descriptor ->
+      Keeper_tool_descriptor.equal_capability_id
+        source.Keeper_tool_descriptor.capability_id
+        descriptor.Keeper_tool_descriptor.capability_id)
+    |> List.concat_map (fun descriptor ->
+      Keeper_tool_descriptor.public_names_of_descriptor descriptor
+      @ Keeper_tool_descriptor.internal_names descriptor
+      @ Keeper_tool_descriptor.keeper_model_names descriptor)
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+;;
+
 let public_names_for_internal internal_name =
   Keeper_tool_descriptor.public_descriptors_for_internal internal_name
   |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
+let model_names_for_internal internal_name =
+  Keeper_tool_descriptor.descriptors_for_internal internal_name
+  |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+;;
+
+let public_model_names_for_internal_backend internal_name =
+  Keeper_tool_descriptor.descriptors_for_internal internal_name
+  |> List.filter (fun descriptor ->
+    match descriptor.Keeper_tool_descriptor.keeper_model_projection with
+    | Keeper_tool_descriptor.Preferred_public_name -> true
+    | Keeper_tool_descriptor.Internal_name
+    | Keeper_tool_descriptor.Dispatch_only -> false)
+  |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+;;
+
 let public_name_for_internal internal_name =
-  match public_names_for_internal internal_name with
+  match model_names_for_internal internal_name with
   | first :: _ -> Some first
   | [] -> None
 ;;
@@ -41,6 +74,16 @@ let public_names_for_allowed_internal_names internal_names =
   |> List.filter (fun (descriptor : Keeper_tool_descriptor.t) ->
     Hashtbl.mem allowed descriptor.internal_name)
   |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+;;
+
+let model_names_for_allowed_internal_names internal_names =
+  let allowed = Hashtbl.create (List.length internal_names) in
+  List.iter (fun internal_name -> Hashtbl.replace allowed internal_name ()) internal_names;
+  Keeper_tool_descriptor.all_descriptors ()
+  |> List.filter (fun (descriptor : Keeper_tool_descriptor.t) ->
+    Hashtbl.mem allowed descriptor.internal_name)
+  |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 

@@ -64,16 +64,6 @@ let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
         true))
     schemas
 
-let masc_board_tools_with_keeper_wrappers =
-  [
-    "masc_board_comment";
-    "masc_board_curation_submit";
-    "masc_board_cleanup";
-    "masc_board_post";
-    "masc_board_vote";
-    "masc_board_delete";
-  ]
-
 (* ── Schema injection filter ──────────────────────────────────── *)
 
 let keeper_safe_inline_tools () =
@@ -117,6 +107,20 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
     | _ :: _ -> true
     | [] -> false
   in
+  let is_masc_descriptor_route name =
+    Keeper_tool_descriptor.descriptors_for_internal name
+    |> List.exists Keeper_tool_descriptor.is_masc_internal_route
+  in
+  let is_keeper_projected_descriptor name =
+    Keeper_tool_descriptor.descriptors_for_internal name
+    |> List.exists (fun descriptor ->
+      List.mem name (Keeper_tool_descriptor.keeper_candidate_names descriptor))
+  in
+  let is_keeper_schema_source name =
+    Tool_catalog.is_public_mcp name
+    || is_keeper_management_tool name
+    || is_masc_descriptor_route name
+  in
   let supported_in_keeper name =
     if is_keeper_safe_inline_tool name then
       true
@@ -134,7 +138,7 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
          dropping the schema from keeper_universe_model_tools. OAS then sees a
          ghost tool: keeper_tools_list says it exists, but Agent.run has no
          Tool.t for it. *)
-      true
+      is_keeper_projected_descriptor name
     else if Tool_dispatch.is_registered name then
       true
     else if not (Tool_dispatch.is_tag_registry_initialized ()) then
@@ -173,17 +177,10 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
            true
        | None -> false)
   in
-  (* masc_board_* tools that have keeper_board_* wrappers with auto-injected
-     author/voter fields. Exposing both leads to the LLM calling the raw
-     masc_* variant without the required author, causing "author is required". *)
-  let has_keeper_board_wrapper name =
-    List.mem name masc_board_tools_with_keeper_wrappers
-  in
   List.filter (fun (s : Masc_domain.tool_schema) ->
-      String.starts_with ~prefix:"masc_" s.name
+      is_keeper_schema_source s.name
       && not (is_keeper_mcp_context_required s.name)
-      && supported_in_keeper s.name
-      && not (has_keeper_board_wrapper s.name))
+      && supported_in_keeper s.name)
       schemas
 
 let keeper_supported_masc_tool_names_from_schemas schemas =
@@ -204,9 +201,7 @@ let tool_schema_names schemas =
 
 let descriptor_candidate_tool_names () =
   Keeper_tool_descriptor.all_descriptors ()
-  |> List.concat_map (fun descriptor ->
-    Keeper_tool_descriptor.public_names_of_descriptor descriptor
-    @ Keeper_tool_descriptor.internal_names descriptor)
+  |> List.concat_map Keeper_tool_descriptor.keeper_candidate_names
   |> dedupe_tool_names
 
 let keeper_base_candidate_tool_names () =
@@ -243,6 +238,7 @@ let expand_descriptor_aliases name =
   in
   [ name; stripped; canonical ]
   @ Keeper_tool_descriptor_resolution.public_names_for_internal canonical
+  @ Keeper_tool_descriptor_resolution.capability_sibling_names_for_tool_name stripped
   |> dedupe_tool_names
 
 let expanded_tool_name_set names =
@@ -395,13 +391,38 @@ let keeper_tool_search_scope = keeper_universe_tool_names
 let descriptor_model_tool_schemas () =
   Keeper_tool_descriptor.all_descriptors ()
   |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
-    Keeper_tool_descriptor.internal_names descriptor
+    Keeper_tool_descriptor.keeper_model_names descriptor
     |> List.map (fun name ->
       { Masc_domain.name
       ; description = descriptor.description
       ; input_schema = descriptor.input_schema
       }))
   |> dedupe_tool_schemas
+
+let descriptor_owned_route_names () =
+  Keeper_tool_descriptor.all_descriptors ()
+  |> List.concat_map (fun descriptor ->
+    Keeper_tool_descriptor.internal_names descriptor
+    @ Keeper_tool_descriptor.keeper_model_names descriptor)
+  |> dedupe_tool_names
+;;
+
+let descriptor_handler_input_schema (descriptor : Keeper_tool_descriptor.t) =
+  match Tool_capability_id.board_operation_opt descriptor.capability_id with
+  | Some _ -> descriptor.input_schema
+  | None ->
+    let sources =
+      Tool_shard.all_keeper_tool_schemas @ masc_schemas_snapshot ()
+    in
+    (match
+       List.find_opt
+         (fun (schema : Masc_domain.tool_schema) ->
+           String.equal schema.name descriptor.internal_name)
+         sources
+     with
+     | Some schema -> schema.input_schema
+     | None -> descriptor.input_schema)
+;;
 
 (** Shared schema assembly: computes the full tool schema list once.
     [masc_schemas_fn] selects policy-filtered or universe-filtered MASC schemas
@@ -411,11 +432,16 @@ let descriptor_model_tool_schemas () =
     candidate names without a matching Agent.run [Tool.t]. *)
 let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schema list)
     (meta : keeper_meta) : Masc_domain.tool_schema list =
-  descriptor_model_tool_schemas ()
-  @ keeper_model_tools
-  @ keeper_voice_tool_schemas
-  @ [ keeper_tool_search_schema ]
-  @ (masc_schemas_fn meta)
+  let descriptor_owned = tool_name_set (descriptor_owned_route_names ()) in
+  let non_descriptor_schemas =
+    keeper_model_tools
+    @ keeper_voice_tool_schemas
+    @ [ keeper_tool_search_schema ]
+    @ masc_schemas_fn meta
+    |> List.filter (fun (schema : Masc_domain.tool_schema) ->
+      not (StringSet.mem schema.name descriptor_owned))
+  in
+  descriptor_model_tool_schemas () @ non_descriptor_schemas
 
 (** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup
     instead of List.mem (O(n) per schema). *)

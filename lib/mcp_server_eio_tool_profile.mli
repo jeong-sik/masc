@@ -6,8 +6,7 @@
     advertised on a given endpoint:
 
     - [Full]: developer / internal MCP surface (full catalog).
-    - [Managed_agent]: spawned agent surface (SDK contract +
-      passthrough subset).
+    - [Managed_agent]: exact managed-agent capability projection.
     - [Operator_remote]: control-plane surface (4 operator tools).
 
     Pagination contract: callers consume {!parse_cursor_only_params}
@@ -16,8 +15,7 @@
     opaque base64 strings produced by {!page_items_with_cursor}.
 
     Internal: [StringSet] / [StringMap], [dedupe_tool_schemas_by_name],
-    [managed_agent_passthrough_tool_names] (consumed by
-    {!tool_schemas_for_profile} only), [label_words_from_identifier]
+    [label_words_from_identifier]
     + the [custom_tool_titles] / [custom_title_table] data tables
     (consumed by {!tool_title_of_name}), [tool_icons_for_name]
     (consumed by {!tool_json_for_profile}), the parsing helpers
@@ -51,11 +49,13 @@ val default_instructions : unit -> string
     [config/prompts/tool_contract.task_lifecycle_workflow.md]. *)
 
 val managed_agent_instructions : string
-(** [Managed_agent] profile instructions.  Names the canonical
-    task-control tools ([masc_status], [masc_tasks],
-    [keeper_task_claim], [masc_transition], [masc_plan_set_task])
-    and warns that the public /mcp surface and managed-agent
-    surface diverge in inventory. *)
+(** [Managed_agent] profile instructions. Names the tools generated from the
+    managed-agent capability projection and warns that the public /mcp surface
+    and managed-agent surface diverge in inventory. *)
+
+val managed_agent_instruction_tool_names : string list
+(** Exact structured names from the managed-agent capability projection,
+    interpolated into {!managed_agent_instructions}. *)
 
 val operator_remote_instructions : string
 (** [Operator_remote] profile instructions.  Names the 4 operator
@@ -79,8 +79,8 @@ val tool_schemas_for_profile :
       deduped by name.  [include_agent_internal] is a retained no-op:
       the Agent_internal surface was empty and was deleted in the
       surface-cut refactor, so it adds no schema.
-    - [Managed_agent]: SDK tool contract +
-      [managed_agent_passthrough_tool_names] subset.
+    - [Managed_agent]: exact [Capability_registry.Managed_agent_mcp]
+      projection.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].
 
     All defaults are [false].  [_state] is reserved for future

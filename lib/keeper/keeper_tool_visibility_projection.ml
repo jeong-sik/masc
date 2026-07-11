@@ -30,7 +30,7 @@ let allowed_set allowed_tool_names =
 ;;
 
 let public_aliases_for_internal_name internal_name =
-  Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
+  Keeper_tool_descriptor_resolution.model_names_for_internal internal_name
 ;;
 
 let public_alias_for_internal internal_name =

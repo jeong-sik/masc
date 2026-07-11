@@ -12,7 +12,7 @@ let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_resul
      their backing tool was not permitted for the turn, which would invite
      the model to attempt unregistered tool calls. *)
   let aliases_with_allowed_route =
-    Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names allowed
+    Keeper_tool_descriptor_resolution.model_names_for_allowed_internal_names allowed
   in
   let allowed = allowed @ aliases_with_allowed_route in
   let allowed_set =

@@ -49,47 +49,7 @@ let routing_table : (string, route) Hashtbl.t =
 (** [is_known_public name] is [true] when [name] has a routing entry. *)
 let is_known_public name = Hashtbl.mem routing_table name
 
-let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
-  match d.runtime_handler with
-  | Tool_masc_board_dispatch
-  | Tool_masc_task_dispatch
-  | Tool_masc_plan_dispatch
-  | Tool_masc_run_dispatch
-  | Tool_masc_agent_dispatch
-  | Tool_masc_workspace_dispatch
-  | Tool_masc_misc_dispatch
-  | Tool_masc_control_dispatch
-  | Tool_masc_agent_timeline_dispatch
-  | Tool_masc_schedule_dispatch
-  | Tool_masc_keeper_dispatch
-  | Tool_masc_surface_audit -> true
-  | Tool_execute
-  | Tool_search_files
-  | Tool_read_file
-  | Tool_edit_file
-  | Tool_write_file
-  | Tool_time_now
-  | Tool_tools_list
-  | Tool_tool_search
-  | Tool_context_status
-  | Tool_memory_search
-  | Tool_memory_write
-  | Tool_library_search
-  | Tool_library_read
-  | Tool_surface_read
-  | Tool_surface_post
-  | Tool_person_note_set
-  | Tool_ide_annotate
-  | Tool_voice_dispatch
-  | Tool_task_dispatch
-  | Board_tool_dispatch
-  (* masc_fusion / masc_fusion_status are keeper-native in-process tools (own
-     orchestrator / registry read), not masc-MCP coordination proxies — routed
-     via descriptors, not this alias path. *)
-  | Tool_masc_fusion_dispatch
-  | Tool_masc_fusion_status
-  | Tool_analyze_image -> false
-;;
+let is_masc_mcp_descriptor = Keeper_tool_descriptor.is_masc_internal_route
 
 let add_internal_names t (d : Keeper_tool_descriptor.t) =
   List.iter

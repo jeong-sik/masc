@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASC issue root-cause improvement program — 2026-07-11</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink:#17202a; --muted:#5f6b76; --line:#d8dee4; --bg:#f6f8fa;
+      --card:#fff; --accent:#075ca8; --p0:#8b1e1e; --p1:#a33a00;
+      --p2:#735c00; --ok:#12633c; --work:#6b4aa5;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--bg); font:15px/1.58 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:1220px; margin:0 auto; padding:32px 22px 64px; }
+    h1 { margin:0 0 8px; font-size:30px; line-height:1.2; }
+    h2 { margin:34px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--line); font-size:21px; }
+    h3 { margin:0 0 8px; font-size:17px; }
+    p { margin:8px 0; }
+    a { color:var(--accent); }
+    code, pre { font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    code { padding:1px 4px; border-radius:3px; background:#eef1f4; }
+    .sub, .meta { color:var(--muted); }
+    .summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; margin:22px 0; }
+    .stat, .axis, .note { border:1px solid var(--line); border-radius:8px; background:var(--card); padding:15px; }
+    .stat strong { display:block; font-size:25px; }
+    .stat span { color:var(--muted); }
+    .axis { margin:14px 0; border-left:5px solid var(--work); }
+    .axis.p0 { border-left-color:var(--p0); }
+    .axis.p1 { border-left-color:var(--p1); }
+    .axis.p2 { border-left-color:var(--p2); }
+    .axis ul, .note ul { margin:7px 0 0 21px; padding:0; }
+    table { width:100%; border-collapse:collapse; background:var(--card); }
+    th, td { padding:9px 10px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:#edf1f4; }
+    .status { display:inline-block; padding:2px 7px; border-radius:999px; color:#fff; font-size:12px; font-weight:700; }
+    .status.work { background:var(--work); }
+    .status.ok { background:var(--ok); }
+    .status.pending { background:var(--muted); }
+    .small { font-size:13px; }
+    footer { margin-top:36px; color:var(--muted); font-size:13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>MASC issue root-cause improvement program</h1>
+  <p class="sub">Living report · initial capture 2026-07-11 02:57:15 KST · latest update 2026-07-11 13:38 KST · branch <code>codex/issue-root-cause-20260711</code> · source <code>origin/main@b1f5712856268bcd8797f99d8cacbfc4cac75fee</code> · live runtime <code>cfc19f4375</code></p>
+
+  <div class="summary">
+    <div class="stat"><strong>285</strong><span>open GitHub issues in the latest live snapshot</span></div>
+    <div class="stat"><strong>8</strong><span>root-invariant programs after full issue inventory</span></div>
+    <div class="stat"><strong>680</strong><span>recursive research HTML inventory; 20 primary references</span></div>
+    <div class="stat"><strong>0</strong><span>local Dune builds; CI is build authority</span></div>
+  </div>
+
+  <h2>현재 판정</h2>
+  <p>285개 이슈를 그대로 순서대로 고치면 같은 원인의 변형을 계속 양산한다. 최초 271개 전체 인벤토리와 이후 추가된 issue delta, 연구·런타임 교차 결과를 함께 추적한다. 문제의 중심은 기능 부족보다 <strong>typed identity, durable authority, transactional commit, immutable runtime snapshot, lane continuation, auth provenance, domain FSM, execution-truth projection</strong>의 경계 불일치다.</p>
+  <p>OAS는 MASC를 모르는 범용 SDK 경계를 유지한다. provider/model terminal outcome이나 public Agent lifecycle 계약이 원인이면 OAS를 먼저 고치되, MASC 전용 타입·이름·policy를 OAS로 내리지 않는다.</p>
+
+  <h2>전체 이슈 인벤토리</h2>
+  <table>
+    <tr><th>항목</th><th>현재 값</th><th>판정</th></tr>
+    <tr><td>Open issues</td><td>285개, 범위 <code>#15257–#24069</code></td><td>2026-07-11 13:22 KST live <code>gh issue list</code>. Open PR은 별도 8개이며 issue delta를 같은 8개 root axis에 재분류 중이다.</td></tr>
+    <tr><td>Triage debt</td><td><code>triage-required</code> 182개; <code>area:*</code> 없음 177개</td><td>기존 label만으로는 근본 군집을 표현하지 못한다.</td></tr>
+    <tr><td>Largest areas</td><td>keeper 29, coordination 19, config 13, CI 9, transport 9</td><td>surface area와 root cause를 분리해야 한다.</td></tr>
+    <tr><td>Duplicate candidates</td><td>#22133/#22140, #21827/#21962/#23202, #21150/#23502, #23504/#23768, #23278/#23283, #23390/#23434</td><td>current source와 merged fix를 확인한 뒤 umbrella/duplicate를 정리한다.</td></tr>
+    <tr><td>Obsolete candidates</td><td>#23551, #23787, #23818, #23527, #23553, #23586, #23278, #23283, #20856</td><td>일괄 close 금지. issue-specific 회귀와 current CI를 각각 확인해야 한다.</td></tr>
+  </table>
+
+  <h2>신규 issue delta — #24033 이후</h2>
+  <p><code>#24033–#24069</code> 번호 구간에서 현재 open issue는 15개다. 재분류 결과 새로운 독립 root axis는 없으며, 기존 8개 축의 교차 또는 leaf defect다.</p>
+  <table>
+    <tr><th>축</th><th>신규 이슈</th><th>핵심 판정</th></tr>
+    <tr><td>B/H</td><td>#24034, #24035, #24036</td><td>compaction plan/report 손실, prompt·latency projection 거짓, typed log category/details 부재. #24032 신규 오류 로그는 structured <code>emit</code>으로 교정.</td></tr>
+    <tr><td>G/E/B</td><td>#24037, #24049, #24054, #24059, #24062</td><td>lifecycle admission과 HITL dependency wait를 분리해야 한다. #24049 gate를 먼저 고정하고 #24037이 계승하며, pending approval을 terminal blocker로 재도입하지 않는다.</td></tr>
+    <tr><td>D/C/E</td><td>#24056, #24057, #24067</td><td>typed outcome·provider-owned token semantics 대신 rollback, 문자열 budget 분류, 임의 clamp/time budget을 권위로 쓰는 문제. #24067은 OAS #2517 선행이지만 OAS는 MASC를 모른다.</td></tr>
+    <tr><td>F/H/A</td><td>#24053, #24063</td><td>observation 원문 token scanner와 다른 PR diff/title 사용. typed content authority와 head-SHA-bound publish evidence가 필요하다.</td></tr>
+    <tr><td>D/G/H</td><td>#24068</td><td>voice provider identity/tuning/fallback 및 UI write path가 분리되지 않은 compound issue.</td></tr>
+    <tr><td>H leaf</td><td>#24069</td><td>IDE backend truth와 CSS/layout/empty-state projection 불일치. backend 재구현이 아니라 UI leaf 분리 대상.</td></tr>
+  </table>
+  <p class="small">분할 우선 후보: #24035, #24059, #24068, #24069. 특히 #24059의 context-history 파괴와 Paused/Dead producer는 동일 PR로 묶지 않는다.</p>
+
+  <h2>라이브 런타임 — 13:22 KST</h2>
+  <table>
+    <tr><th>항목</th><th>관찰값</th><th>판정</th></tr>
+    <tr><td>Build / paths</td><td><code>0.20.1@cfc19f4375</code>, BasePath <code>/Users/dancer/me</code>, runtime root <code>/Users/dancer/me/.masc</code></td><td>path/bootstrap drift는 현재 원인이 아니다.</td></tr>
+    <tr><td>Health</td><td><code>status=ok</code>, <code>overall_status=degraded</code></td><td>pending stimulus와 stale durable queue가 operator action을 요구한다.</td></tr>
+    <tr><td>Fleet</td><td>active fibers 7; durable paused 5: garnet, issue_king, rondo, sangsu, verifier</td><td>다섯 Keeper 모두 autoboot가 켜진 채 durable pause 상태다. registry의 persisted <code>paused=true</code> 집계는 garnet 1개뿐이라 projection 간 의미도 갈린다.</td></tr>
+    <tr><td>Durable queue</td><td>pending 12, inflight 1, oldest 약 101,064초; verifier pending 6</td><td>queue 자체는 <code>status=ok</code>지만 ledger는 13개 전부 stale로 판정하며 supervisor recovery request는 0이다.</td></tr>
+    <tr><td>Turn / schedule</td><td>in-flight Keeper 6, waiting chat 0; scheduler 2,715/2,715 success, failure/crash 0</td><td>스케줄러 tick 성공과 Keeper event 처리 진전은 별개다. green tick을 durable consumption 성공으로 해석하면 안 된다.</td></tr>
+    <tr><td>Manifest scan</td><td>process-window WARN 11,298 중 10,202건이 retired sidecar event 재스캔</td><td>typed schema evolution 부재와 per-row/per-scan 경고 증폭이다.</td></tr>
+    <tr><td>Memory lane</td><td>process-window post-turn unit drop 86건; Jul 8/9/10 일별 3/54/547</td><td>임의 <code>pending&gt;=2</code> cap이 실제 기억 작업을 손실한다. 기존 Draft #23971은 durable admission 전까지 HOLD다.</td></tr>
+    <tr><td>Governance</td><td>judge unavailable 시 <code>approving by default</code> 4건</td><td>availability failure가 승인으로 변환되는 fail-open 경계다.</td></tr>
+    <tr><td>Thinking continuation</td><td>mutation 후 132,052 thinking chars, text/tool 0, <code>repetition_truncation</code>, 972초 실패</td><td>whole-turn replay 금지. OAS typed outcome + MASC post-mutation continuation이 필요하다.</td></tr>
+  </table>
+  <p><strong>P0 lifecycle finding:</strong> dashboard manual-turn 실패 postlude, <code>start_keepalive</code>, supervisor restart, registry wake, heartbeat pre-intake가 기존 <code>Keeper_activation_readiness</code>를 우회한다. 그 결과 paused/dead-tombstone Keeper가 autonomously 부활하고, lifecycle admission 전에 durable queue를 lease해 같은 event를 재큐잉한다. 별도 이슈 <a href="https://github.com/jeong-sik/masc/issues/24049">#24049</a>로 기록했고 typed launch/admission SSOT 축에 배치했다.</p>
+
+  <h2>직교 구현 축 v1</h2>
+
+  <section class="axis p0">
+    <h3>A · Semantic capability identity and generated projections</h3>
+    <div class="meta">대표: <a href="https://github.com/jeong-sik/masc/issues/24032">#24032</a>, <a href="https://github.com/jeong-sik/masc/issues/23940">#23940</a>, <a href="https://github.com/jeong-sik/masc/issues/23522">#23522</a></div>
+    <p>transport name, model-visible name, internal handler, actor identity를 문자열 prefix/alias로 결합한 문제군이다. closed capability ID와 descriptor-owned projection을 SSOT로 두고 외부 MCP·Keeper schema·dispatch를 생성하는 축이다.</p>
+  </section>
+
+  <section class="axis p1">
+    <h3>G · Domain FSM and verification truth</h3>
+    <div class="meta">Goal/Task: #21074, #21078, #22629, #23307, #23886 · Board: #23503, #23504, #23768, #23784, #23889 · Scheduler: #23995, #24026–#24028</div>
+    <p>각 도메인은 약하게 결합된 typed transition과 durable receipt를 소유하고, 공통 queue/wake substrate 위에 올라간다. LLM 판단은 권한·상태 전이를 대체하지 않는다.</p>
+  </section>
+
+  <section class="axis p1">
+    <h3>H · Projection and verification must reflect execution truth</h3>
+    <div class="meta">대표: #23309, #23310, #23463–#23466, #23507, #23932, #23936, #23960</div>
+    <p>Dashboard/IDE/CI가 추론된 상태, 실행되지 않은 테스트, 가짜 필드를 성공 증거로 표시하는 문제군이다. projection은 revision/source/error를 포함한 canonical execution snapshot만 소비한다.</p>
+  </section>
+
+  <section class="axis p0">
+    <h3>B · Durable authority and monotonic recovery evidence</h3>
+    <div class="meta">대표: <a href="https://github.com/jeong-sik/masc/issues/24049">#24049</a>, <a href="https://github.com/jeong-sik/masc/issues/24028">#24028</a>, <a href="https://github.com/jeong-sik/masc/issues/24027">#24027</a>, <a href="https://github.com/jeong-sik/masc/issues/24030">#24030</a>, <a href="https://github.com/jeong-sik/masc/issues/23988">#23988</a></div>
+    <p>decode 가능한 persisted state를 곧바로 실행 권한이나 최신 상태로 간주하는 문제군이다. generation/hash/revocation evidence, semantic reload validation, tombstone/epoch 정책을 projection과 분리해야 한다.</p>
+  </section>
+
+  <section class="axis p1">
+    <h3>C · Transaction boundary: I/O outside state locks, persist-before-commit</h3>
+    <div class="meta">대표: <a href="https://github.com/jeong-sik/masc/issues/24025">#24025</a>, <a href="https://github.com/jeong-sik/masc/issues/24029">#24029</a>, <a href="https://github.com/jeong-sik/masc/issues/23939">#23939</a></div>
+    <p>mutable state mutex 안에서 filesystem/network 작업 또는 실패 가능한 callback을 수행해 poison·head-of-line blocking·부분 commit을 만드는 문제군이다. immutable candidate → durable commit → 짧은 in-memory swap 순서를 공통 계약으로 만든다.</p>
+  </section>
+
+  <section class="axis p1">
+    <h3>D · Immutable runtime selection and typed provider outcomes</h3>
+    <div class="meta">대표: <a href="https://github.com/jeong-sik/masc/issues/24022">#24022</a>, <a href="https://github.com/jeong-sik/masc/issues/24023">#24023</a>, <a href="https://github.com/jeong-sik/masc/issues/23985">#23985</a>, <a href="https://github.com/jeong-sik/masc/issues/23984">#23984</a></div>
+    <p>선택된 runtime policy를 이후 ID 재해석으로 찢거나 provider 오류 문자열로 정책을 분류하는 문제군이다. OAS가 wire outcome을 typed catalog로 보존하고, MASC는 한 turn의 immutable resolved runtime snapshot만 소비해야 한다.</p>
+  </section>
+
+  <section class="axis p1">
+    <h3>E · Per-Keeper continuation, backpressure, and failure isolation</h3>
+    <div class="meta">대표: <a href="https://github.com/jeong-sik/masc/issues/23939">#23939</a>, <a href="https://github.com/jeong-sik/masc/issues/23532">#23532</a>, <a href="https://github.com/jeong-sik/masc/issues/23507">#23507</a></div>
+    <p>장기 thinking/tool/HITL/poison message가 한 Keeper lane의 finalization과 reactive work를 굶기는 문제군이다. 임의 timeout/cap 대신 typed phase receipt, durable continuation, explicit backpressure와 lane-local recovery를 사용한다.</p>
+  </section>
+
+  <section class="axis p0">
+    <h3>F · Authentication, subject kind, and provenance</h3>
+    <div class="meta">대표: <a href="https://github.com/jeong-sik/masc/issues/24031">#24031</a>, <a href="https://github.com/jeong-sik/masc/issues/24026">#24026</a></div>
+    <p>Admin role, human subject, dashboard owner, loopback origin을 문자열이나 편의 default로 합성하는 문제군이다. typed subject/origin/permission을 credential에서 끝까지 보존하고 unknown 또는 indeterminate persistence는 fail-closed한다.</p>
+  </section>
+
+  <h2>증거 수집 상태</h2>
+  <table>
+    <tr><th>Evidence lane</th><th>현재 상태</th><th>통과 조건</th></tr>
+    <tr><td>GitHub issues</td><td><span class="status ok">COMPLETE</span> 271개 전체 inventory + root/dependency/duplicate 후보</td><td>close/update 전에는 issue별 current proof를 재확인</td></tr>
+    <tr><td>Current source</td><td><span class="status work">IN PROGRESS</span> rebased source main <code>b1f5712856</code>; first axis #24032</td><td>upstream 10 commits와 changed-path 교집합 0; source/runtime truth는 계속 분리</td></tr>
+    <tr><td>Runtime</td><td><span class="status work">DEGRADED, RECHECKED</span> 7 fibers, 12 pending, 1 inflight, 5 paused</td><td>현재 실행 binary는 <code>cfc19f4375</code>라 #24032 source 변경 효과를 주장하지 않는다.</td></tr>
+    <tr><td>Research HTML</td><td><span class="status ok">COMPLETE</span> 680개 inventory, 20개 primary reference</td><td>HTML의 과거 PR/퍼센트는 사실로 쓰지 않고 current source만 권위로 사용</td></tr>
+    <tr><td>Implementation</td><td><span class="status work">ADVERSARIAL REPAIR COMPLETE</span> #24032 typed capability/projection SSOT</td><td>독립 <code>Tool_capability_id</code>, exhaustive Board projection, sole Keeper exposure, capability-wide deny, raw bypass fail-close, typed route-miss telemetry</td></tr>
+  </table>
+
+  <h2>#24032 구현 체크포인트</h2>
+  <ul>
+    <li><code>Tool_capability_id</code>를 Keeper 밖의 독립 core 타입으로 두고, nominal route는 임의 alias로 합치지 않으며 Board만 closed <code>Board_name</code> operation으로 external/wrapper를 의도적으로 결합한다.</li>
+    <li><code>keeper_model_projection</code>이 Keeper model exposure의 유일한 권위다. 기존 <code>policy.visibility</code>는 Pass A를 실제로 막지 못한 죽은 이중 SSOT라 제거했고 내부 descriptor 생성은 projection 명시를 강제한다.</li>
+    <li>External MCP, Managed-agent MCP, Keeper schema를 registry projection에서 생성하고, semantic capability당 Keeper active name이 둘 이상이면 typed error·bounded metric·명시적 실패로 중단한다.</li>
+    <li>Board raw route는 <code>Keeper_wrapper | Direct_masc | External_only</code> 전수 판정으로 모델·candidate·runtime 세 경계에서 닫는다. denylist도 capability sibling 전체로 확장한다.</li>
+    <li>적대적 감사에서 발견된 stale Managed 안내, malformed dashboard snapshot shape, inactive <code>search_files</code> tutor, Board write 관측 누락, 중복 route taxonomy를 모두 교정했다. 신규 오류 로그도 <code>category + details</code> structured emit으로 보내 #24036을 악화시키지 않는다.</li>
+    <li>검증: 모든 변경 OCaml 파싱, <code>ocamlformat --check</code>, Dashboard <code>tsc --noEmit</code>, <code>git diff --check</code> 통과. Local Dune 실행 0회; full build/test는 Draft PR CI가 권위다.</li>
+  </ul>
+
+  <h2>실행 순서</h2>
+  <ol>
+    <li>전체 이슈를 symptoms가 아닌 invariant owner로 분류하고, 이미 merged/obsolete한 항목을 현재 source로 제거한다.</li>
+    <li>라이브 로그에서 빈도뿐 아니라 exact turn/receipt/queue ordering으로 재현되는 축을 우선한다.</li>
+    <li>기존 RFC와 open PR 반경을 확인해 중복 carrier를 만들지 않는다.</li>
+    <li>첫 implementation은 <a href="https://github.com/jeong-sik/masc/issues/24032">#24032</a>: descriptor-owned typed capability/projection SSOT로 Board wrapper bypass와 prefix/manual alias drift를 함께 제거한다.</li>
+    <li>Draft PR을 열고 CI가 도는 동안 다음 축의 source proof와 report를 계속 갱신한다.</li>
+  </ol>
+
+  <h2>변경 기록</h2>
+  <table>
+    <tr><th>시각</th><th>업데이트</th></tr>
+    <tr><td>2026-07-11 02:57 KST</td><td>live GitHub issue count, current main SHA, 잠정 6개 invariant 축, 병렬 evidence lane을 최초 기록.</td></tr>
+    <tr><td>2026-07-11 03:05 KST</td><td>271개 issue inventory를 8개 root-invariant program으로 분류하고 duplicate/obsolete 후보를 기록.</td></tr>
+    <tr><td>2026-07-11 03:23 KST</td><td>680개 HTML 연구 inventory와 live runtime health/log/queue 감사를 반영. #24032를 첫 implementation axis로 확정.</td></tr>
+    <tr><td>2026-07-11 13:22 KST</td><td>source를 <code>b1f5712856</code>에 conflict 없이 rebase. #24049 lifecycle admission 이슈와 재측정 runtime을 반영하고, #24032 적대적 감사 blocker 및 structured logging 교차 문제를 교정.</td></tr>
+    <tr><td>2026-07-11 13:25 KST</td><td>#24033–#24069 구간의 open issue 15개를 기존 8개 root axis에 delta 분류. 새 독립 axis 없음; compound issue 4개 분할 필요.</td></tr>
+    <tr><td>2026-07-11 13:38 KST</td><td>최종 적대적 source/type/API 재감사에서 P0/P1 잔여 없음. OCaml parse/format, Dashboard typecheck, diff whitespace 검증을 재통과하고 보고서를 다시 열었다.</td></tr>
+  </table>
+
+  <footer>
+    [근거] <code>gh issue list --repo jeong-sik/masc --state open --limit 1000</code>, <code>gh pr list --repo jeong-sik/masc --state open</code>, <code>git fetch origin main</code>, <code>curl -fsS 'http://127.0.0.1:8935/health?full=1'</code>, latest <code>system_log_2026-07-10.jsonl</code>, <code>/Users/dancer/Downloads/*.html</code> read-only inventory; live 확인 구간 2026-07-11 13:22–13:25 KST, 최종 source 검증 13:38 KST; 신뢰도 High. 이 보고서는 조사와 구현이 진행되는 동안 같은 경로에서 갱신된다.
+  </footer>
+</main>
+</body>
+</html>

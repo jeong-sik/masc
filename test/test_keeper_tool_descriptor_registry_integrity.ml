@@ -124,6 +124,48 @@ let test_internal_name_uniqueness () =
       (String.concat ", "
          (List.map (fun (n, c) -> Printf.sprintf "%S×%d" n c) dups))
 
+let test_board_capability_projection_contract () =
+  let required name =
+    match Descriptor.descriptors_for_internal name with
+    | descriptor :: _ -> descriptor
+    | [] -> Alcotest.failf "missing internal descriptor: %s" name
+  in
+  List.iter
+    (fun board_name ->
+      let raw_name = Tool_name.Board_name.to_string board_name in
+      let raw_descriptor = required raw_name in
+      let raw_model_names = Descriptor.keeper_model_names raw_descriptor in
+      match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+      | Keeper_tool_name.Keeper_wrapper keeper_tool ->
+        let keeper_name = Keeper_tool_name.to_string keeper_tool in
+        let wrapper_descriptor = required keeper_name in
+        Alcotest.(check bool)
+          (raw_name ^ " shares typed capability with wrapper")
+          true
+          (Descriptor.equal_capability_id
+             raw_descriptor.capability_id
+             wrapper_descriptor.capability_id);
+        Alcotest.(check (list string))
+          (raw_name ^ " raw model projection is closed")
+          []
+          raw_model_names;
+        Alcotest.(check (list string))
+          (keeper_name ^ " is sole wrapper projection")
+          [ keeper_name ]
+          (Descriptor.keeper_model_names wrapper_descriptor)
+      | Keeper_tool_name.Direct_masc ->
+        Alcotest.(check (list string))
+          (raw_name ^ " is the direct Keeper projection")
+          [ raw_name ]
+          raw_model_names
+      | Keeper_tool_name.External_only ->
+        Alcotest.(check (list string))
+          (raw_name ^ " is external-only")
+          []
+          raw_model_names)
+    Tool_name.Board_name.all
+;;
+
 let is_blank s = String.trim s = ""
 
 let string_contains ~sub text =
@@ -284,6 +326,20 @@ let schema_required_fields schema =
        Alcotest.failf "required is not a list: %s" (Yojson.Safe.to_string other)
      | None -> [])
   | other -> Alcotest.failf "input_schema is not an object: %s" (Yojson.Safe.to_string other)
+;;
+
+let schema_property_names schema =
+  match schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc properties) -> List.map fst properties
+     | Some other ->
+       Alcotest.failf
+         "input_schema properties is not an object: %s"
+         (Yojson.Safe.to_string other)
+     | None -> [])
+  | other ->
+    Alcotest.failf "input_schema is not an object: %s" (Yojson.Safe.to_string other)
 ;;
 
 let schema_forbids_additional_properties schema =
@@ -623,30 +679,34 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
 
 let test_masc_board_registry_has_descriptor_projection () =
   List.iter
-    (fun (schema : Masc_domain.tool_schema) ->
+    (fun board_name ->
+       let schema = Board_tool_registry.schema_for_board_name board_name in
        match Descriptor.descriptors_for_internal schema.name with
        | [ descriptor ] ->
-         let suffix =
-           String.sub
-             schema.name
-             (String.length "masc_board_")
-             (String.length schema.name - String.length "masc_board_")
-         in
          Alcotest.(check string)
            (schema.name ^ " descriptor id")
-           ("masc.board." ^ suffix)
+           ("masc.board." ^ Tool_name.Board_name.operation_name board_name)
            descriptor.Descriptor.id;
          Alcotest.(check string)
            (schema.name ^ " runtime handler")
            "tool_masc_board_dispatch"
            (Descriptor.runtime_handler_to_string descriptor.runtime_handler);
          Alcotest.(check bool)
-           (schema.name ^ " schema projected")
+           (schema.name ^ " typed capability")
            true
-           (descriptor.input_schema = schema.input_schema)
+           (Descriptor.equal_capability_id
+              descriptor.capability_id
+              (Masc.Tool_capability_id.board_operation board_name));
+         let descriptor_properties = schema_property_names descriptor.input_schema in
+         Board_tool_registry.identity_fields_for_board_name board_name
+         |> List.iter (fun identity_field ->
+           Alcotest.(check bool)
+             (schema.name ^ " hides runtime-owned " ^ identity_field)
+             false
+             (List.mem identity_field descriptor_properties))
        | [] -> Alcotest.failf "missing descriptor for %s" schema.name
        | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" schema.name)
-    Board_tool_registry.tools
+    Tool_name.Board_name.all
 
 let test_library_search_descriptor_has_recoverable_query_schema () =
   let descriptor = required_internal_descriptor "keeper_library_search" in
@@ -821,6 +881,10 @@ let test_public_name_projection_uses_descriptor_resolution () =
     "tool_search_files public projections"
     [ "Grep"; "Search"; "search_files" ]
     (Resolution.public_names_for_internal "tool_search_files");
+  Alcotest.(check (list string))
+    "tool_search_files active model projection"
+    [ "Grep" ]
+    (Resolution.model_names_for_internal "tool_search_files");
   Alcotest.(check (option string))
     "tool_search_files preferred public projection"
     (Some "Grep")
@@ -830,10 +894,15 @@ let test_public_name_projection_uses_descriptor_resolution () =
     (Some "Write")
     (Resolution.public_name_for_internal "tool_write_file");
   Alcotest.(check (list string))
-    "allowed internal routes project to public names"
+    "allowed internal routes retain legacy routable aliases"
     [ "Execute"; "Grep"; "Search"; "search_files" ]
     (Resolution.public_names_for_allowed_internal_names
        [ "tool_execute"; "tool_search_files" ])
+  ; Alcotest.(check (list string))
+      "allowed internal routes project only active model names"
+      [ "Execute"; "Grep" ]
+      (Resolution.model_names_for_allowed_internal_names
+         [ "tool_execute"; "tool_search_files" ])
 ;;
 
 let test_run_tools_setup_has_no_direct_public_mcp_catalog_read () =
@@ -1115,7 +1184,7 @@ let test_effective_core_tools_without_universe_keeps_only_native_executor_public
     let effective = Registry.effective_core_tools () in
     List.iter
       (fun (d : Descriptor.t) ->
-         let public_names = Descriptor.public_names_of_descriptor d in
+         let public_names = Descriptor.keeper_model_names d in
          match d.Descriptor.executor with
          | Descriptor.Shell_ir | Descriptor.Filesystem ->
            List.iter
@@ -1166,6 +1235,10 @@ let () =
       , [ test_case "registry not empty" `Quick test_registry_not_empty
         ; test_case "public_name is unique" `Quick test_public_name_uniqueness
         ; test_case "internal_name is unique" `Quick test_internal_name_uniqueness
+        ; test_case
+            "Board capability projection is exhaustive"
+            `Quick
+            test_board_capability_projection_contract
         ] )
     ; ( "format"
       , [ test_case "no blank name fields" `Quick test_no_blank_names

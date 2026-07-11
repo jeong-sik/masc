@@ -45,6 +45,12 @@ module Board_name : sig
     | Board_sub_board_update
     | Board_vote
 
+  val all : t list
+  (** Exhaustive board tool vocabulary in stable declaration order. *)
+
+  val operation_name : t -> string
+  (** Stable board operation token without the MCP transport prefix. *)
+
   val to_string : t -> string
   val of_string : string -> t option
   val is_resource_write : t -> bool

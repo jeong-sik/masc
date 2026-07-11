@@ -52,26 +52,25 @@ let make_tool_bundle
      execute_keeper_tool_call uses can_execute for the execution gate. *)
   let universe_names = Keeper_tool_dispatch_runtime.keeper_universe_tool_names meta in
   let tool_defs = Keeper_tool_dispatch_runtime.keeper_universe_model_tools meta in
-  (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): aliased internal
-     names backing public aliases must NOT appear on
-     the LLM-visible surface alongside their public alias.  Mirrors the
-     pattern already established in [keeper_run_tools.ml] PRs #14574/#14596. *)
+  (* Descriptor projection owns the sole active model name for each semantic
+     capability. Its internal route is materialized only by Pass B, so Pass A
+     cannot reintroduce a second model-visible name. Dispatch-only descriptors
+     are absent from [model_visible_descriptors]. *)
   let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
-  let aliased_internal_names =
+  let descriptor_pass_b_owned_names =
     model_visible_descriptors
-    |> List.map Keeper_tool_descriptor.internal_names
-    |> List.concat
+    |> List.concat_map (fun descriptor ->
+      Keeper_tool_descriptor.keeper_model_names descriptor
+      @ Keeper_tool_descriptor.internal_names descriptor)
   in
   let failure_counts = create_failure_counts () in
-  (* Pass A: internal tools that have no public alias.  Aliased internals
-     are registered only via Pass B under their public name so the LLM
-     surface holds at most one entry per logical tool. *)
+  (* Pass A: schemas without a descriptor-owned model projection. *)
   let internal_tools =
     List.filter_map
       (fun (td : Masc_domain.tool_schema) ->
          if
            List.mem td.name universe_names
-           && not (List.mem td.name aliased_internal_names)
+           && not (List.mem td.name descriptor_pass_b_owned_names)
          then (
            let h =
              Keeper_tools_oas_handler.make_keeper_tool_handler
@@ -102,10 +101,9 @@ let make_tool_bundle
          else None)
       tool_defs
   in
-  (* Pass B: register LLM-native capability names (Execute/Read/etc)
-     via descriptor projection. The handler dispatches with
+  (* Pass B: register the descriptor-owned model projection. The handler dispatches with
      [~name:descriptor.internal_name] so all telemetry SSOT remains internal;
-     only the Tool.schema.name (LLM-visible) is the public name.
+     only the Tool.schema.name is model-visible.
      [descriptor.translate] reshapes the LLM's payload before dispatch;
      [descriptor.input_schema] provides the LLM-facing schema. *)
   let alias_tools =
@@ -119,16 +117,10 @@ let make_tool_bundle
               (notably WebSearch/WebFetch) can be present in the descriptor
               universe before the injected masc_* schema snapshot is populated. *)
            let handler_input_schema =
-             match
-               List.find_opt
-                 (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
-                 tool_defs
-             with
-             | Some internal_def -> internal_def.input_schema
-             | None -> descriptor.input_schema
+             Keeper_tool_policy.descriptor_handler_input_schema descriptor
            in
-           Keeper_tool_descriptor.public_names_of_descriptor descriptor
-           |> List.map (fun public_name ->
+           Keeper_tool_descriptor.keeper_model_names descriptor
+           |> List.map (fun model_name ->
              let h =
                Keeper_tools_oas_handler.make_keeper_tool_handler
                  ~name:internal
@@ -144,7 +136,7 @@ let make_tool_bundle
                  ~pre_validate_input:(fun input ->
                    match
                      Keeper_tool_descriptor_resolution.validate_public_input_for_tool_call
-                       ~tool_name:public_name
+                       ~tool_name:model_name
                        ~input
                    with
                  | Some result -> result
@@ -160,7 +152,7 @@ let make_tool_bundle
              let oas_descriptor = Tool_bridge.oas_descriptor_of_masc_tool internal in
              Tool_bridge.oas_tool_of_masc
                ?descriptor:oas_descriptor
-               ~name:public_name
+               ~name:model_name
                ~description:descriptor.description
                ~input_schema:descriptor.input_schema
                (fun input -> h input))))

@@ -108,6 +108,10 @@
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.42);
 }
 
+.ide-toolbar-advanced:not([open]) .ide-toolbar-advanced-popover {
+  display: none;
+}
+
 .ide-toolbar-advanced-views,
 .ide-toolbar-advanced-layers {
   display: flex;
@@ -1242,4 +1246,13 @@
 .ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree-toggle,
 .ide-plane-shell[data-mobile-viewport="true"] .ide-v2-rail-toggle {
   display: none;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .v2-ide-action,
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-action,
+.ide-plane-shell[data-mobile-viewport="true"] .execute-output-drawer-toggle,
+.ide-plane-shell[data-mobile-viewport="true"] .ide-interject-fab,
+.ide-plane-shell[data-mobile-viewport="true"] summary.chip {
+  min-width: 40px;
+  min-height: 40px;
 }

@@ -180,6 +180,10 @@
   box-shadow: 0 18px 40px rgb(0 0 0 / 0.42);
 }
 
+.v2-logs-advanced-menu:not([open]) .v2-logs-advanced {
+  display: none;
+}
+
 .v2-logs-actions {
   display: flex;
   align-items: center;
@@ -706,6 +710,19 @@
     -webkit-line-clamp: 2;
     line-height: 1.35;
     white-space: normal;
+  }
+
+  .v2-logs-filter-chip,
+  .v2-logs-attention,
+  .logs-refresh-btn,
+  .logs-auto-label,
+  .v2-logs-advanced-menu > summary,
+  .v2-logs-diagnostics > summary {
+    min-height: 40px;
+  }
+
+  .v2-logs-refresh {
+    width: 40px;
   }
 
   .v2-logs-inline-links,

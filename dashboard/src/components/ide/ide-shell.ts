@@ -1232,6 +1232,7 @@ export function IdeShell() {
       data-tree-collapsed=${treeCollapsed ? 'true' : 'false'}
       data-tree-width=${String(treeWidth)}
     >
+      <h1 class="sr-only">MASC IDE</h1>
       <div class="ide-v2-top">
         <button
           type="button"

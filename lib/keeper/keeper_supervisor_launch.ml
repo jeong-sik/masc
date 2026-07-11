@@ -44,9 +44,8 @@ let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
 let publish_phase_lifecycle = Keeper_supervisor_publish_lifecycle.publish_phase_lifecycle
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
-let global_switch : Eio.Switch.t option Atomic.t = Atomic.make None
-let set_global_switch sw = Atomic.set global_switch (Some sw)
-let get_global_switch () = Atomic.get global_switch
+let set_global_switch = Keeper_process_switch.set
+let get_global_switch = Keeper_process_switch.get
 
 let set_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.set
 let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enabled
@@ -109,7 +108,7 @@ let launch_supervised_fiber_body
           meta.name;
       (* determinism-contract: allow — ctx.sw fallback is the same deterministic
          default used before the ref -> Atomic conversion. *)
-      let sw = Option.value (Atomic.get global_switch) ~default:ctx.sw in
+      let sw = Option.value (Keeper_process_switch.get ()) ~default:ctx.sw in
       match
         Keeper_lane.fork
           ~sw

@@ -208,7 +208,7 @@ type worker_start_result =
   | Worker_start_rejected of worker_start_error
 
 let start_worker ~config ~entry operation =
-  match Keeper_supervisor.get_global_switch () with
+  match Keeper_process_switch.get () with
   | None -> Worker_start_rejected Worker_supervisor_unavailable
   | Some sw ->
     Eio.Cancel.protect (fun () ->

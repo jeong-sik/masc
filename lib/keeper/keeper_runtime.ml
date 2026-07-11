@@ -959,7 +959,7 @@ let start_supervisor_sweep ctx =
     in
     with_sweeps_rw (fun () ->
       Hashtbl.replace supervisor_sweeps base_path p);
-    let sw = Option.value (Keeper_supervisor.get_global_switch ()) ~default:ctx.sw in
+    let sw = Option.value (Keeper_process_switch.get ()) ~default:ctx.sw in
     Pulse.run ~sw p;
     (* #10125: counter increments once per actual Pulse start.
        After a server restart, if this stays at 0 the supervisor

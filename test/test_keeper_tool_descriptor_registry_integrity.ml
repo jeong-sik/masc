@@ -940,7 +940,11 @@ let test_masc_board_registry_has_descriptor_projection () =
              (List.mem identity_field descriptor_properties));
          let expected_visibility =
            match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-           | Keeper_tool_name.Direct_masc -> Tool_catalog.Default
+           | Keeper_tool_name.Direct_masc ->
+             let operation_policy = Board_tool_registry.operation_policy board_name in
+             Tool_catalog.effective_registered_visibility
+               ~name:schema.name
+               ~declared:operation_policy.visibility
            | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
              Tool_catalog.Hidden
          in
@@ -969,10 +973,9 @@ let test_masc_board_registry_has_descriptor_projection () =
            true
            (descriptor.policy.effect_domain = expected_effect_domain);
          let expected_model_projection =
-           match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-           | Keeper_tool_name.Direct_masc -> Descriptor.Internal_name
-           | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
-             Descriptor.Dispatch_only
+           match expected_visibility with
+           | Tool_catalog.Default -> Descriptor.Internal_name
+           | Tool_catalog.Hidden -> Descriptor.Dispatch_only
          in
          Alcotest.(check bool)
            (schema.name ^ " descriptor model projection follows typed projection")

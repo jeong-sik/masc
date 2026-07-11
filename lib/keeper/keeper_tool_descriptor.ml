@@ -1328,15 +1328,24 @@ let board_descriptor name description ~readonly =
 let masc_board_descriptor board_name =
   let schema = Board_tool_registry.schema_for_board_name board_name in
   let name = Tool_name.Board_name.to_string board_name in
-  let readonly = not (Tool_name.Board_name.is_resource_write board_name) in
+  let operation_policy = Board_tool_registry.operation_policy board_name in
+  let readonly = operation_policy.readonly in
   let effect_domain =
     if readonly then Tool_catalog.Read_only else Tool_catalog.Masc_workspace
   in
-  let visibility, keeper_model_projection =
+  let visibility =
     match Keeper_tool_name.board_projection_of_masc_board_name board_name with
-    | Keeper_tool_name.Direct_masc -> Tool_catalog.Default, Internal_name
+    | Keeper_tool_name.Direct_masc ->
+      Tool_catalog.effective_registered_visibility
+        ~name
+        ~declared:operation_policy.visibility
     | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
-      Tool_catalog.Hidden, Dispatch_only
+      Tool_catalog.Hidden
+  in
+  let keeper_model_projection =
+    match visibility with
+    | Tool_catalog.Default -> Internal_name
+    | Tool_catalog.Hidden -> Dispatch_only
   in
   let policy =
     policy

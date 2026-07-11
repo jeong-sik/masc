@@ -113,31 +113,26 @@ let handle_tool name args : Tool_result.result =
 let tool_spec_read_only =
   Tool_name.Board_name.all
   |> List.filter (fun board_name ->
-    not (Tool_name.Board_name.is_resource_write board_name))
+    (Board_tool_registry.operation_policy board_name).readonly)
   |> List.map Tool_name.Board_name.to_string
 ;;
 
-let destructive_board_tool_names =
-  let open Tool_name.Board_name in
-  [ to_string Board_delete; to_string Board_cleanup ]
-;;
-
-let is_destructive_board_tool name = List.mem name destructive_board_tool_names
-
 let register () =
   let handler ~name ~args = Some (handle_tool name args) in
-  let make_spec (s : Masc_domain.tool_schema) =
-    let ro = List.mem s.name tool_spec_read_only in
+  let make_spec board_name =
+    let s = Board_tool_registry.schema_for_board_name board_name in
+    let policy = Board_tool_registry.operation_policy board_name in
     Tool_spec.create
       ~name:s.name
       ~description:s.description
       ~module_tag:Tool_dispatch.Mod_inline
       ~input_schema:s.input_schema
       ~handler_binding:(Shared handler)
-      ~is_read_only:ro
-      ~is_idempotent:ro
-      ~is_destructive:(is_destructive_board_tool s.name)
+      ~is_read_only:policy.readonly
+      ~is_idempotent:policy.idempotent
+      ~is_destructive:policy.destructive
+      ~visibility:policy.visibility
       ()
   in
-  Tool_spec.register_all (List.map make_spec Board_tool_registry.tools)
+  Tool_spec.register_all (List.map make_spec Tool_name.Board_name.all)
 ;;

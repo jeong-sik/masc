@@ -111,9 +111,9 @@ let register (spec : t) =
     Tool_catalog_surfaces.is_system_internal_hidden spec.name
   in
   let effective_visibility =
-    if is_system_internal && spec.visibility = Tool_catalog.Default
-    then Tool_catalog.Hidden
-    else spec.visibility
+    Tool_catalog.effective_registered_visibility
+      ~name:spec.name
+      ~declared:spec.visibility
   in
   let effective_allow_direct =
     spec.allow_direct_call_when_hidden || is_system_internal

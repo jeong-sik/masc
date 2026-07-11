@@ -3,6 +3,12 @@
     Split from {!Server_dashboard_http_keeper_api}; included back there so
     existing local call sites keep using the same names. *)
 
+type manifest_scan_diagnostic =
+  | Retired_event_row of Keeper_runtime_manifest.retired_event_kind
+  | Unsupported_event_row of string
+  | Invalid_manifest_row of string
+  | Invalid_json_row of string
+
 type runtime_manifest_scan =
   { path : string
   ; limit : int
@@ -36,6 +42,13 @@ type runtime_manifest_scan =
   ; mutable scanned_lines : int
   ; scan_line_limit : int
   ; scan_scope : string
+  ; retired_event_counts : (Keeper_runtime_manifest.retired_event_kind, int) Hashtbl.t
+  ; unsupported_event_counts : (string, int) Hashtbl.t
+  ; mutable unsupported_event_count : int
+  ; mutable unsupported_event_unattributed_count : int
+  ; mutable invalid_manifest_row_count : int
+  ; mutable invalid_json_row_count : int
+  ; diagnostic_samples : manifest_scan_diagnostic Queue.t
   }
 
 val make_runtime_manifest_scan :
@@ -47,6 +60,7 @@ val make_runtime_manifest_scan :
 
 val push_bounded : 'a Queue.t -> int -> 'a -> unit
 val queue_to_list : 'a Queue.t -> 'a list
+val runtime_manifest_scan_diagnostics_json : runtime_manifest_scan -> Yojson.Safe.t
 val increment_event_count : runtime_manifest_scan -> Keeper_runtime_manifest.event_kind -> unit
 
 val runtime_manifest_scan_event_count :

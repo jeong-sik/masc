@@ -144,7 +144,7 @@ function presenceHeader(snap: KeeperPresenceSnapshot) {
   `
 }
 
-export function IdePresenceStrip() {
+export function IdePresenceStrip({ compact = false }: { readonly compact?: boolean } = {}) {
   const presenceStore = useMemo(() => createKeeperPresenceStore(LOADING_SNAPSHOT), [])
 
   useEffect(() => {
@@ -169,6 +169,46 @@ export function IdePresenceStrip() {
 
   const current = presenceStore.snapshot()
   const entries = presenceStore.entries()
+
+  if (compact) {
+    const compactStateLabel = current.kind === 'live'
+      ? `Presence live: ${current.runtime_id}`
+      : current.kind === 'disconnected'
+        ? `Presence disconnected: ${current.reason}`
+        : 'Presence loading'
+    return html`
+      <div
+        class="ide-presence-strip ide-v2-presence-compact v2-ide-panel"
+        role="status"
+        aria-label="Live workspace keeper presence"
+        data-state=${current.kind}
+      >
+        <span class="lbl">Presence</span>
+        <span
+          class="ide-v2-presence-state"
+          data-state=${current.kind}
+          aria-label=${compactStateLabel}
+          title=${compactStateLabel}
+        >${current.kind === 'live' ? '●' : '○'}</span>
+        <ul>
+          ${entries.map(entry => html`
+            <li
+              key=${entry.keeper_id}
+              title=${`${entry.keeper_id} · ${entry.role} · ${entry.workspace_label}`}
+              aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}`}
+            >
+              <${KeeperBadge}
+                id=${entry.keeper_id}
+                variant="sigil"
+                size="sm"
+                beat=${entry.status === 'active'}
+              />
+            </li>
+          `)}
+        </ul>
+      </div>
+    `
+  }
 
   return html`
     <div

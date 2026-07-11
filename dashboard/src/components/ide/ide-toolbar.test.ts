@@ -167,6 +167,44 @@ describe('IdeToolbar', () => {
     expect(railsButton?.classList.contains('v2-ide-action')).toBe(true)
   })
 
+  it('exposes the reference search tab in compact chrome', () => {
+    container = document.createElement('div')
+    const onFindOpen = vi.fn()
+    const onFindClose = vi.fn()
+
+    render(h(IdeToolbar, {
+      activeView: 'source',
+      activeLayers: new Set<string>(),
+      onViewChange: vi.fn(),
+      onLayersChange: vi.fn(),
+      compact: true,
+      findOpen: false,
+      onFindOpen,
+      onFindClose,
+    }), container)
+
+    const search = container.querySelector<HTMLButtonElement>('[data-view="find"]')
+    expect(container.querySelector('[data-compact="true"]')).not.toBeNull()
+    expect(search?.textContent).toBe('검색')
+    expect(search?.getAttribute('aria-selected')).toBe('false')
+    fireEvent.click(search!)
+    expect(onFindOpen).toHaveBeenCalledOnce()
+
+    render(h(IdeToolbar, {
+      activeView: 'source',
+      activeLayers: new Set<string>(),
+      onViewChange: vi.fn(),
+      onLayersChange: vi.fn(),
+      compact: true,
+      findOpen: true,
+      onFindOpen,
+      onFindClose,
+    }), container)
+    expect(container.querySelectorAll('[role="tab"][aria-selected="true"]')).toHaveLength(1)
+    expect(container.querySelector('[data-view="find"]')?.getAttribute('aria-selected')).toBe('true')
+    expect(container.querySelector('[aria-label="Advanced IDE controls"]')).not.toBeNull()
+  })
+
   it('groups focused context links by operational surface', () => {
     const groups = deriveToolbarContextRouteGroups({
       file_path: 'lib/runtime.ml',

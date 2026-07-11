@@ -166,6 +166,7 @@ export interface IdeActivityPanelProps {
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
   readonly pollMs?: number
+  readonly compact?: boolean
   readonly children?: unknown
 }
 
@@ -483,6 +484,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
     pollMs = 0,
+    compact = false,
   } = props
   const activeFile = rawActiveFile ?? ''
   const store = useMemo(() => {
@@ -495,6 +497,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const bridgeScoped = hasActivityBridgeScope(repoId, keeperLane)
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null)
   const loadedScopeKeyRef = useRef<string | null>(null)
+  const [compactInsightsOpen, setCompactInsightsOpen] = useState(false)
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
   const refreshMs = normalizedPollMs(pollMs)
 
@@ -570,37 +573,73 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
 
   return html`
     <div
-      class="ide-rail-panel ide-activity-panel"
+      class=${`ide-rail-panel ide-activity-panel ${compact ? 'is-compact' : ''}`}
       role="region"
       aria-label="EVENT TIMELINE"
     >
-      <div
-        class="ide-rail-head"
-      >
-        <span>EVENT TIMELINE</span>
-        <span class="ide-activity-head-meta">
-          <span>${events.length} events · ${keepers.length} keepers</span>
-          <span
-            class="ide-activity-refresh-status"
-            data-state=${refreshState.tone}
-            role="status"
-            aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
-            title=${activityRefreshTitle(refreshState, refreshMs)}
-          >
-            ${activityRefreshLabel(refreshState, refreshMs)}
+      ${compact ? null : html`
+        <div
+          class="ide-rail-head"
+        >
+          <span>EVENT TIMELINE</span>
+          <span class="ide-activity-head-meta">
+            <span>${events.length} events · ${keepers.length} keepers</span>
+            <span
+              class="ide-activity-refresh-status"
+              data-state=${refreshState.tone}
+              role="status"
+              aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
+              title=${activityRefreshTitle(refreshState, refreshMs)}
+            >
+              ${activityRefreshLabel(refreshState, refreshMs)}
+            </span>
           </span>
-        </span>
-      </div>
-      <${RunProgressStrip} summary=${progress} />
-      <${IdeContextLens}
-        filePath=${activeFile}
-        annotations=${annotations}
-        diffRows=${diffRows}
-        events=${events}
-        threads=${threads}
-        diagnostics=${diagnostics}
-        overlay=${overlay}
-      />
+        </div>
+        <${RunProgressStrip} summary=${progress} />
+        <${IdeContextLens}
+          filePath=${activeFile}
+          annotations=${annotations}
+          diffRows=${diffRows}
+          events=${events}
+          threads=${threads}
+          diagnostics=${diagnostics}
+          overlay=${overlay}
+        />
+      `}
+      ${compact ? html`
+        <div
+          class="ide-activity-compact-status"
+          data-state=${refreshState.tone}
+          role="status"
+          aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
+          title=${activityRefreshTitle(refreshState, refreshMs)}
+        >
+          <span>${events.length} events · ${keepers.length} keepers</span>
+          <span>${activityRefreshLabel(refreshState, refreshMs)}</span>
+        </div>
+        <div class="ide-activity-compact-insights">
+          <button
+            type="button"
+            aria-expanded=${compactInsightsOpen ? 'true' : 'false'}
+            onClick=${() => setCompactInsightsOpen(current => !current)}
+          >
+            Observation context
+            <span>${progress.linkedEvents}/${progress.totalEvents} linked</span>
+          </button>
+          ${compactInsightsOpen ? html`
+            <${RunProgressStrip} summary=${progress} />
+            <${IdeContextLens}
+              filePath=${activeFile}
+              annotations=${annotations}
+              diffRows=${diffRows}
+              events=${events}
+              threads=${threads}
+              diagnostics=${diagnostics}
+              overlay=${overlay}
+            />
+          ` : null}
+        </div>
+      ` : null}
       <ol
         class="ide-rail-list ide-activity-list"
       >

@@ -1,8 +1,12 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { useState } from 'preact/hooks'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { IdeAnnotationComposer } from './ide-annotation-composer'
+import {
+  IdeAnnotationComposer,
+  type IdeAnnotationComposerDraft,
+} from './ide-annotation-composer'
 import { ideEditorSelection } from './ide-editor-selection'
 
 vi.mock('../../api/ide', async importOriginal => {
@@ -48,6 +52,25 @@ function composer({
       subscribeActiveRepositoryId=${() => () => {}}
       refresh=${refresh}
     />
+  `
+}
+
+function SharedComposerPair() {
+  const [draft, setDraft] = useState<IdeAnnotationComposerDraft | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const props = {
+    documentStore: documentStoreFixture('lib/foo.ml'),
+    activeRepositoryId: () => 'masc',
+    subscribeActiveRepositoryId: () => () => {},
+    refresh: () => {},
+    draft,
+    onDraftChange: setDraft,
+    submitting,
+    onSubmittingChange: setSubmitting,
+  }
+  return html`
+    <div data-slot="rail"><${IdeAnnotationComposer} ...${props} /></div>
+    <div data-slot="mobile"><${IdeAnnotationComposer} ...${props} /></div>
   `
 }
 
@@ -122,6 +145,41 @@ describe('IdeAnnotationComposer', () => {
     const submit = el.querySelector<HTMLButtonElement>('[data-testid="ide-annotation-submit"]')
     expect(submit?.disabled).toBe(true)
     expect(el.textContent ?? '').toContain('내용을 입력하세요')
+  })
+
+  it('shares one controlled draft between desktop and responsive placements', async () => {
+    const el = mount(html`<${SharedComposerPair} />`)
+    const rail = el.querySelector<HTMLElement>('[data-slot="rail"]')!
+    await open(rail)
+
+    const railContent = rail.querySelector<HTMLTextAreaElement>('[data-testid="ide-annotation-content"]')!
+    railContent.value = '리사이즈 후에도 유지'
+    railContent.dispatchEvent(new Event('input', { bubbles: true }))
+    await tick()
+
+    const mobileContent = el.querySelector<HTMLTextAreaElement>(
+      '[data-slot="mobile"] [data-testid="ide-annotation-content"]',
+    )
+    expect(mobileContent?.value).toBe('리사이즈 후에도 유지')
+  })
+
+  it('shares submission state so a resize cannot issue a duplicate annotation', async () => {
+    createIdeAnnotationMock.mockReturnValue(new Promise(() => {}))
+    const el = mount(html`<${SharedComposerPair} />`)
+    const rail = el.querySelector<HTMLElement>('[data-slot="rail"]')!
+    await open(rail)
+
+    const content = rail.querySelector<HTMLTextAreaElement>('[data-testid="ide-annotation-content"]')!
+    content.value = '중복 저장 방지'
+    content.dispatchEvent(new Event('input', { bubbles: true }))
+    await tick()
+    rail.querySelector<HTMLButtonElement>('[data-testid="ide-annotation-submit"]')?.click()
+    await tick()
+
+    expect(createIdeAnnotationMock).toHaveBeenCalledOnce()
+    expect(el.querySelector<HTMLButtonElement>(
+      '[data-slot="mobile"] [data-testid="ide-annotation-submit"]',
+    )?.disabled).toBe(true)
   })
 
   it.each(['1.9', '1e3', '12abc', '-3', ''])(

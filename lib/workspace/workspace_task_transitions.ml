@@ -87,7 +87,9 @@ let transition_task_outcome_r
           | Masc_domain.Claim
           | Masc_domain.Start
           | Masc_domain.Cancel
-          | Masc_domain.Release -> Ok ()
+          | Masc_domain.Release
+          | Masc_domain.Block_for_operator
+          | Masc_domain.Unblock -> Ok ()
           | Masc_domain.Done_action
           | Masc_domain.Submit_for_verification ->
             (* #23719 evidence gate, scoped to the RFC-0323 Phase A predicate

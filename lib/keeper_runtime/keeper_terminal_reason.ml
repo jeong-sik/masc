@@ -42,6 +42,12 @@ let terminal_prefix_turn_budget_exhausted = "turn_budget_exhausted"
 let wire_api_error_timeout = "api_error_timeout"
 let wire_api_error_network = "api_error_network"
 
+(* Exact producer/consumer wire SSOT for typed model availability failures.
+   These are deliberately separate from the transient set above: [NotFound]
+   rotates immediately, but is not a same-runtime transient retry. *)
+let wire_api_error_not_found = "api_error_not_found"
+let wire_provider_error_not_found = "provider_error_not_found"
+
 let is_auto_recoverable_turn_budget_terminal terminal_reason =
   String.starts_with ~prefix:terminal_prefix_max_turns_exceeded terminal_reason
   || String.starts_with ~prefix:terminal_prefix_execution_timeout terminal_reason
@@ -51,6 +57,7 @@ let is_auto_recoverable_turn_budget_terminal terminal_reason =
 type t =
   | Runtime_exhausted of string
   | Capacity_backpressure of string
+  | Model_unavailable of string
   | Config_or_auth of string
   | Provider_runtime_failure of string
   | Completion_contract_violation of string
@@ -81,6 +88,10 @@ let of_wire wire =
   then Runtime_exhausted wire
   else if String.equal lowered Keeper_internal_error.capacity_backpressure_kind
   then Capacity_backpressure wire
+  else if
+    String.equal lowered wire_api_error_not_found
+    || String.equal lowered wire_provider_error_not_found
+  then Model_unavailable wire
   else if contains_config_or_auth lowered
   then Config_or_auth wire
   else if
@@ -110,6 +121,7 @@ let of_wire wire =
 let to_wire = function
   | Runtime_exhausted wire -> wire
   | Capacity_backpressure wire -> wire
+  | Model_unavailable wire -> wire
   | Config_or_auth wire -> wire
   | Provider_runtime_failure wire -> wire
   | Completion_contract_violation wire -> wire
@@ -146,6 +158,7 @@ let is_transient_provider_runtime_failure = function
     || String.starts_with ~prefix:"provider_error_network:timeout:" lowered
   | Runtime_exhausted _
   | Capacity_backpressure _
+  | Model_unavailable _
   | Config_or_auth _
   | Completion_contract_violation _
   | Turn_livelock _

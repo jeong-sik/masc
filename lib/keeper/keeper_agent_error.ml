@@ -160,7 +160,7 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   | Agent_sdk.Retry.AuthError _ -> "api_error_auth"
   | Agent_sdk.Retry.PaymentRequired _ -> "api_error_payment_required"
   | Agent_sdk.Retry.InvalidRequest _ -> "api_error_invalid_request"
-  | Agent_sdk.Retry.NotFound _ -> "api_error_not_found"
+  | Agent_sdk.Retry.NotFound _ -> Keeper_terminal_reason.wire_api_error_not_found
   | Agent_sdk.Retry.ContextOverflow _ -> "api_error_context_overflow"
   (* SSOT: the two transient wire codes are owned by [Keeper_terminal_reason]
      so the consumer-side disposition classifier
@@ -261,7 +261,8 @@ let provider_error_terminal_reason_code = function
   | Llm_provider.Error.Timeout { timeout_phase; _ } ->
     "provider_error_timeout" ^ provider_timeout_suffix timeout_phase
   | Llm_provider.Error.InvalidRequest _ -> "provider_error_invalid_request"
-  | Llm_provider.Error.NotFound _ -> "provider_error_not_found"
+  | Llm_provider.Error.NotFound _ ->
+    Keeper_terminal_reason.wire_provider_error_not_found
   | Llm_provider.Error.ProviderTerminal { reason; _ } ->
     Printf.sprintf "provider_error_terminal:%s" reason
 ;;

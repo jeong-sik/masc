@@ -121,6 +121,7 @@ type degraded_retry_reason =
   | Runtime_candidates_filtered
   | Runtime_exhausted
   | Capacity_backpressure
+  | Model_unavailable
   | Rate_limit
   | Server_error
   | Auth_error
@@ -165,6 +166,7 @@ val fallback_runtime_for_unavailable_profile :
     - [RateLimited] soft provider throttles → ["rate_limit"] (rotation filters
       candidates sharing the same credential pool)
     - [Overloaded] and Cloudflare 524 → ["capacity_backpressure"]
+    - [NotFound] → ["model_unavailable"]
     - [ServerError] with status >= 500 → ["server_error"]
     - [AuthError] → ["auth_error"]
 
@@ -224,8 +226,9 @@ val degraded_rotation_after_recoverable_error :
   degraded_retry option
 
 (** [true] when [reason] permits re-cycling the candidate pool after every
-    candidate has been attempted. [Capacity_backpressure] returns [false]
-    (see {!degraded_rotation_after_recoverable_error}). *)
+    candidate has been attempted. [Capacity_backpressure] and
+    [Model_unavailable] return [false] in shadow mode (see
+    {!degraded_rotation_after_recoverable_error}). *)
 val degraded_reason_allows_candidate_cycle :
   degraded_retry_reason -> bool
 

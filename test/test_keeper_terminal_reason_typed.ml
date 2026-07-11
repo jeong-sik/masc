@@ -73,6 +73,8 @@ let roundtrip_corpus =
   [ (* exact-match buckets *)
     "runtime_exhausted"
   ; Keeper_internal_error.capacity_backpressure_kind
+  ; Tr.wire_api_error_not_found
+  ; Tr.wire_provider_error_not_found
   ; "internal_error"
   ; "pre_dispatch_success"
   ; "provider_error"
@@ -224,6 +226,11 @@ let frozen_is_transient_provider_runtime_failure terminal_reason =
   || String.equal terminal_reason "api_error_network"
 ;;
 
+let frozen_is_model_unavailable terminal_reason =
+  String.equal terminal_reason Tr.wire_api_error_not_found
+  || String.equal terminal_reason Tr.wire_provider_error_not_found
+;;
+
 let frozen_operator_disposition (receipt : R.t)
   : R.operator_disposition_kind * R.operator_disposition_reason
   =
@@ -258,6 +265,8 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     String.equal terminal_reason Keeper_internal_error.capacity_backpressure_kind
   then R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure
+  else if frozen_is_model_unavailable terminal_reason
+  then R.Disp_fail_open_next_runtime, R.Reason_model_unavailable
   else if preflight_config_failure
   then R.Disp_pause_human, R.Reason_preflight_config_error
   else if
@@ -689,6 +698,70 @@ let () =
     (got = want);
   check
     "opaque internal lookalike still emits operator broadcast"
+    (R.needs_operator_broadcast (fst got))
+;;
+
+let () =
+  let cases =
+    [ ( "api"
+      , Agent_sdk.Error.Api
+          (Llm_provider.Retry.NotFound { message = "model is not deployed" })
+      , Tr.wire_api_error_not_found
+      , "api" )
+    ; ( "provider"
+      , Agent_sdk.Error.Provider
+          (Llm_provider.Error.NotFound
+             { provider = "runpod"; detail = "model is not deployed" })
+      , Tr.wire_provider_error_not_found
+      , "provider" )
+    ]
+  in
+  List.iter
+    (fun (label, err, expected_code, error_kind) ->
+       let code = Masc.Keeper_agent_error.terminal_reason_code_of_sdk_error err in
+       check
+         (label ^ " not-found producer uses canonical terminal code")
+         (String.equal code expected_code);
+       check
+         (label ^ " not-found decodes to model-unavailable variant")
+         (match Tr.of_wire code with
+          | Tr.Model_unavailable wire -> String.equal wire code
+          | _ -> false);
+       let receipt =
+         { base_receipt with
+           terminal_reason_code = code
+         ; error_kind = Some (R.error_kind_of_string error_kind)
+         ; outcome = `Error
+         ; runtime_outcome = R.Runtime_failed
+         }
+       in
+       let got = R.operator_disposition receipt in
+       let want = R.Disp_fail_open_next_runtime, R.Reason_model_unavailable in
+       check
+         (Printf.sprintf
+            "%s model-unavailable disposition want=%s got=%s"
+            label
+            (disp_pair_to_string want)
+            (disp_pair_to_string got))
+         (got = want);
+       check
+         (label ^ " model-unavailable does not emit operator broadcast")
+         (not (R.needs_operator_broadcast (fst got))))
+    cases;
+  let lookalike =
+    { base_receipt with
+      terminal_reason_code = Tr.wire_api_error_not_found ^ "_unexpected"
+    ; error_kind = Some (R.error_kind_of_string "api")
+    ; outcome = `Error
+    ; runtime_outcome = R.Runtime_failed
+    }
+  in
+  let got = R.operator_disposition lookalike in
+  check
+    "not-found lookalike remains a pageable provider failure"
+    (got = (R.Disp_pause_human, R.Reason_provider_runtime_error));
+  check
+    "not-found lookalike emits operator broadcast"
     (R.needs_operator_broadcast (fst got))
 ;;
 

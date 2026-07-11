@@ -351,6 +351,7 @@ type degraded_retry_reason =
   | Runtime_candidates_filtered
   | Runtime_exhausted
   | Capacity_backpressure
+  | Model_unavailable
   | Rate_limit
   | Server_error
   | Auth_error
@@ -367,6 +368,9 @@ let degraded_retry_reason_to_string = function
   | Runtime_candidates_filtered -> "runtime_candidates_filtered"
   | Runtime_exhausted -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
+  | Model_unavailable ->
+    Keeper_runtime_failure_route.rotate_class_label
+      Keeper_runtime_failure_route.Model_unavailable
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
@@ -560,6 +564,8 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Rate_limit
          | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _) ->
              Some Capacity_backpressure
+         | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _) ->
+             Some Model_unavailable
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
            when is_gateway_backpressure_status status ->
              Some Capacity_backpressure
@@ -573,6 +579,8 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Rate_limit
          | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
              Some Capacity_backpressure
+         | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) ->
+             Some Model_unavailable
          | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
          | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
@@ -590,7 +598,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              (Llm_provider.Error.ServerError _
              | Llm_provider.Error.InvalidConfig _
              | Llm_provider.Error.InvalidRequest _
-             | Llm_provider.Error.NotFound _
              | Llm_provider.Error.NetworkError _
              | Llm_provider.Error.Timeout _
              | Llm_provider.Error.ParseError _
@@ -602,7 +609,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) -> None
@@ -665,6 +671,7 @@ let default_degraded_rotation_candidates
     dedupe_keep_order (default_candidates @ tool_capable)
   | Some
       ( Capacity_backpressure
+      | Model_unavailable
       | Provider_timeout
       | Server_error
       | Auth_error
@@ -773,6 +780,7 @@ let degraded_reason_allows_candidate_cycle = function
      Cap rotation here; the keeper pauses after candidates are exhausted and
      retries on a later turn once the provider actually recovers. *)
   | Capacity_backpressure
+  | Model_unavailable
   | Read_only_no_progress
   | Empty_no_progress
   | Thinking_only_no_progress -> false
@@ -830,6 +838,7 @@ let degraded_rotation_after_recoverable_error
         | Runtime_candidates_filtered
         | Runtime_exhausted
         | Capacity_backpressure
+        | Model_unavailable
         | Server_error
         | Auth_error -> candidates
       in

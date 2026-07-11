@@ -266,6 +266,11 @@ type operator_disposition_reason =
       Paired with [Disp_fail_open_next_runtime]: the keeper keeps moving and
       no operator broadcast is emitted, while the receipt does not falsely
       claim [Reason_runtime_fallback]. *)
+  | Reason_model_unavailable
+  (** The selected runtime returned a typed API/provider [NotFound]. Paired
+      with [Disp_fail_open_next_runtime]: another configured runtime may serve
+      the request, and the pre-rotation receipt must not page a human or claim
+      that fallback already completed. *)
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure

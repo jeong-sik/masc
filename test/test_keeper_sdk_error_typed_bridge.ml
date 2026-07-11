@@ -791,6 +791,53 @@ let test_server_error_classifies_as_runtime_recoverable () =
   | None -> Alcotest.fail "expected server_error recoverable reason"
 ;;
 
+let model_unavailable_errors =
+  [ ( "api"
+    , SdkE.Api (Retry.NotFound { message = "model is not deployed" }) )
+  ; ( "provider"
+    , SdkE.Provider
+        (Llm_provider.Error.NotFound
+           { provider = "runpod"; detail = "model is not deployed" }) )
+  ]
+;;
+
+let test_model_unavailable_rotates_to_another_runtime () =
+  init_rate_limit_pool_runtime ();
+  List.iter
+    (fun (label, err) ->
+       (match EC.recoverable_runtime_failure_reason err with
+        | Some EC.Model_unavailable -> ()
+        | Some reason ->
+          Alcotest.failf
+            "%s expected model_unavailable, got %s"
+            label
+            (EC.degraded_retry_reason_to_string reason)
+        | None -> Alcotest.failf "%s expected model_unavailable recovery" label);
+       match
+         EC.degraded_rotation_after_recoverable_error
+           ~pacing_enforced:false
+           ~fallback_hint:"other.c"
+           ~base_runtime:"same.a"
+           ~effective_runtime:"same.a"
+           ~attempted_runtimes:[ "same.a" ]
+           err
+       with
+       | Some { EC.next_runtime = "other.c"; fallback_reason = EC.Model_unavailable } ->
+         ()
+       | Some { next_runtime; fallback_reason } ->
+         Alcotest.failf
+           "%s expected model_unavailable -> other.c, got %s -> %s"
+           label
+           (EC.degraded_retry_reason_to_string fallback_reason)
+           next_runtime
+       | None -> Alcotest.failf "%s expected model-unavailable rotation" label)
+    model_unavailable_errors;
+  Alcotest.(check bool)
+    "model_unavailable does not recycle an exhausted candidate set in shadow mode"
+    false
+    (EC.degraded_reason_allows_candidate_cycle EC.Model_unavailable)
+;;
+
 let test_server_error_records_immediate_provider_cooldown () =
   let candidate =
     Llm_provider.Provider_config.make
@@ -1251,6 +1298,10 @@ let () =
             "500 classifies as recoverable server_error"
             `Quick
             test_server_error_classifies_as_runtime_recoverable
+        ; Alcotest.test_case
+            "model unavailable rotates to another runtime"
+            `Quick
+            test_model_unavailable_rotates_to_another_runtime
         ; Alcotest.test_case
             "500 records immediate provider cooldown"
             `Quick

@@ -103,6 +103,7 @@ type operator_disposition_reason =
   | Reason_runtime_fallback
   | Reason_transient_runtime_retry
   | Reason_capacity_backpressure
+  | Reason_model_unavailable
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure
@@ -129,6 +130,9 @@ let operator_disposition_reason_to_string = function
   | Reason_runtime_fallback -> "runtime_fallback"
   | Reason_transient_runtime_retry -> "transient_runtime_retry"
   | Reason_capacity_backpressure -> Keeper_internal_error.capacity_backpressure_kind
+  | Reason_model_unavailable ->
+    Keeper_runtime_failure_route.rotate_class_label
+      Keeper_runtime_failure_route.Model_unavailable
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
@@ -265,6 +269,12 @@ let operator_disposition (receipt : t)
        [runtime_fallback_applied], so it must neither claim a completed
        fallback nor page a human. *)
     Disp_fail_open_next_runtime, Reason_capacity_backpressure
+  | Keeper_terminal_reason.Model_unavailable _ ->
+    (* [NotFound] identifies the selected runtime's model/endpoint, not a
+       fleet-wide terminal. The typed runtime route rotates immediately, but
+       this failed-attempt receipt is emitted before that rotation is visible
+       in the fallback fields. Preserve liveness without claiming completion. *)
+    Disp_fail_open_next_runtime, Reason_model_unavailable
   | _ when preflight_config_failure ->
     Disp_pause_human, Reason_preflight_config_error
   | _

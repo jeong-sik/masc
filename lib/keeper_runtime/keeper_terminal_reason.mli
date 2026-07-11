@@ -60,6 +60,12 @@ type t =
           {!Keeper_internal_error.capacity_backpressure_kind}.  This is a
           typed provider/infrastructure pacing condition, not an opaque
           internal failure.  Payload preserves the original bytes. *)
+  | Model_unavailable of string
+  (** Exact canonical API/provider model-unavailable wire codes
+          {!wire_api_error_not_found} and {!wire_provider_error_not_found}.
+          This is a runtime-selection condition: another configured runtime
+          may serve the request, so it must not be treated as an operator-
+          pageable provider failure. Payload preserves the original bytes. *)
   | Config_or_auth of string
   (** Wire string contains ["config"] or ["auth"] (case-insensitive).
           Ranked above the provider family so [api_error_auth],
@@ -138,6 +144,14 @@ val terminal_prefix_turn_budget_exhausted : string
     part of [is_auto_recoverable_turn_budget_terminal]: it is a completed
     runtime stop reason, so receipt classification must inspect completion
     contract evidence before deciding pass vs attention. *)
+
+(** {1 Model-unavailable wire codes (SSOT)} *)
+
+val wire_api_error_not_found : string
+val wire_provider_error_not_found : string
+(** Exact wire codes emitted for typed API/provider [NotFound] errors. The
+    encoder and receipt decoder share these constants so model availability
+    cannot drift into generic provider-runtime policy. *)
 
 (** {1 Transient provider-runtime wire codes (SSOT)}
 

@@ -4,7 +4,7 @@ import { fireEvent } from '@testing-library/preact'
 import { explorerScopeLabel, IdeExplorer } from './ide-explorer'
 import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
 import type { Repository } from '../../api/repositories'
-import { activeIdeFile, ideContextFocus } from './ide-state'
+import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
 
 const SAMPLE: ReadonlyArray<FileTreeNode> = [
   { path: 'runtime', label: 'runtime', depth: 0, parent: null, hasChildren: true, diff: null, keeperId: null, hueIndex: null },
@@ -59,7 +59,12 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
   afterEach(() => {
     render(null, container)
     window.location.hash = ''
-    activeIdeFile.value = 'package.json'
+    focusIdeFile({
+      path: 'package.json',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'available',
+    })
     ideContextFocus.value = null
   })
 

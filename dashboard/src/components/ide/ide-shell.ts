@@ -712,7 +712,7 @@ function focusCursor(cursor: KeeperCursor): void {
         cursor.tool_name ? `tool:${cursor.tool_name}` : null,
       ].filter((part): part is string => Boolean(part)).join(' '),
     }),
-  })
+  }, 'operator')
 }
 
 function IdeCursorRailPanel() {
@@ -1009,7 +1009,7 @@ export function IdeShell() {
         keeperId: routeKeeperFocus,
         telemetry,
       }),
-    })
+    }, 'route')
   }, [
     routeFileFocus,
     routeLineFocus,

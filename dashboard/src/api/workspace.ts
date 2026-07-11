@@ -34,11 +34,15 @@ export interface UnifiedDiffRow {
 
 // --- Workspace File ---
 
-export interface WorkspaceFileResponse {
-  readonly ok: boolean
-  readonly content: string
-  readonly language?: string
-}
+export type WorkspaceFileResponse =
+  | {
+      readonly ok: true
+      readonly content: string
+      readonly language?: string
+    }
+  | {
+      readonly ok: false
+    }
 
 // --- API helpers ---
 

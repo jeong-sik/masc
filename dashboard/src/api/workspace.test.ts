@@ -86,8 +86,7 @@ describe('workspace API', () => {
     stubFetch({ ok: true, content: 'let x = 1\n', language: 'ocaml' })
 
     const result = await fetchWorkspaceFile('lib/main.ml')
-    expect(result?.ok).toBe(true)
-    expect(result?.content).toBe('let x = 1\n')
+    expect(result).toEqual({ ok: true, content: 'let x = 1\n', language: 'ocaml' })
 
     expect(mockFetch.mock.calls[0]![0]).toContain('/api/v1/workspace/file?path=')
     expect(mockFetch.mock.calls[0]![0]).toContain('lib%2Fmain.ml')

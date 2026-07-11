@@ -514,7 +514,7 @@ function activateIdeContextAnchor(anchor: IdeContextAnchor): void {
     source_id: anchor.id,
     keeper_id: anchor.keeper_id,
     route_links: anchor.route_links,
-  })
+  }, 'operator')
 }
 
 export function openIdeContextRouteLink(link: IdeContextRouteLink): void {

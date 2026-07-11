@@ -3,7 +3,12 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Search } from 'lucide-preact'
 import { activeKeeperName } from '../../keeper-state'
 import { type FileTreeStore, type FileTreeNode, type FileTreeDiffSummary } from './file-tree-store'
-import { activeIdeFile, ideContextFocus, type IdeContextFocus } from './ide-state'
+import {
+  activeIdeFile,
+  focusIdeFile,
+  ideContextFocus,
+  type IdeContextFocus,
+} from './ide-state'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
 import { showToast } from '../common/toast'
@@ -359,7 +364,13 @@ export function IdeExplorer({
               // store.toggle -> expand -> loadChildren fetches this directory's
               // children on first open (no-op if already present/in flight).
               if (node.hasChildren) store.toggle(node.path)
-              else activeIdeFile.value = node.path
+              else {
+                focusIdeFile({
+                  path: node.path,
+                  origin: 'operator',
+                  availability: 'available',
+                })
+              }
             },
             contextFocus?.file_path === node.path ? contextFocus : null,
             keepersByFile.get(node.path),

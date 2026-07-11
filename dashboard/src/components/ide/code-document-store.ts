@@ -22,6 +22,7 @@ export type CodeDocumentRegionsState = 'idle' | 'loading' | 'ready' | 'error'
 
 export interface CodeDocumentStore {
   readonly load: (source: unknown) => boolean
+  readonly invalidate: () => void
   readonly document: () => CodeDocumentSnapshot
   readonly lines: () => ReadonlyArray<CodeDocumentLine>
   readonly line: (lineNumber: number) => CodeDocumentLine | null
@@ -66,6 +67,13 @@ export function createCodeDocumentStore(
     return true
   }
 
+  const invalidate = (): void => {
+    regionRequestId += 1
+    snapshot.value = EMPTY_DOCUMENT
+    regionsSignal.value = []
+    regionsStateSignal.value = 'idle'
+  }
+
   const loadRegions = async (
     filePath: string,
     opts?: { keeper?: string; repoId?: string | null; signal?: AbortSignal },
@@ -105,6 +113,7 @@ export function createCodeDocumentStore(
 
   return {
     load,
+    invalidate,
     document: () => snapshot.value,
     lines: () => snapshot.value.lines,
     line: lineNumber => snapshot.value.lines[lineNumber - 1] ?? null,

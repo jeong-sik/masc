@@ -102,7 +102,9 @@ let restore_inventory_admission ~config inventory =
 let worker_mu = Eio.Mutex.create ()
 let active_workers : (string, unit) Hashtbl.t = Hashtbl.create 17
 
-let worker_key operation = Operation_id.to_string operation.operation_id
+let worker_key (operation : Keeper_shutdown_types.t) =
+  Operation_id.to_string operation.operation_id
+;;
 
 let claim_worker operation =
   Eio.Mutex.use_rw ~protect:true worker_mu (fun () ->

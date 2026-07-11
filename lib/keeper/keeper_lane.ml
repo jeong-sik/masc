@@ -19,7 +19,7 @@ module Id = struct
   let prefix = "lane-"
   (* NDT-OK: UUID entropy is identity only; lifecycle decisions compare the
      typed value and never branch on its random contents. *)
-  let rng = Random.State.make_self_init ()
+  let rng = Random.State.make_self_init () (* NDT-OK: identity entropy only *)
   let rng_mutex = Eio.Mutex.create ()
 
   let generate () =

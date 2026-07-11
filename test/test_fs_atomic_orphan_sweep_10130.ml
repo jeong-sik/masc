@@ -375,41 +375,81 @@ let test_durable_append_falls_back_outside_eio () =
          "row\n"
          (Fs_compat.load_file_unix path))
 
+let anchored_segment raw =
+  match Fs_compat.Anchored_dir.Segment.of_string raw with
+  | Ok segment -> segment
+  | Error error ->
+    Alcotest.failf
+      "invalid anchored test segment %S: %s"
+      raw
+      (Fs_compat.Anchored_dir.Segment.error_to_string error)
+;;
+
+let require_anchored_mutation label = function
+  | Ok value -> value
+  | Error error ->
+    Alcotest.failf
+      "%s: %s"
+      label
+      (Fs_compat.Anchored_dir.mutation_error_to_string error)
+;;
+
 let test_anchored_directory_primitives () =
   with_temp_base @@ fun base_path ->
   let module Dir = Fs_compat.Anchored_dir in
   Dir.with_open_root base_path @@ fun root ->
   Dir.with_ensure_dir
     root
-    ~name:"managed"
+    ~name:(anchored_segment "managed")
     ~perm:0o700
     ~enforce_perm:true
   @@ fun managed ->
-  (match Dir.save_file_atomic managed ~name:"state.json" ~perm:0o600 "one" with
-   | Ok () -> ()
-   | Error detail -> Alcotest.failf "anchored atomic write failed: %s" detail);
-  Alcotest.(check string) "anchored read" "one" (Dir.read_file managed "state.json");
-  (match Dir.stat managed "state.json" with
+  require_anchored_mutation
+    "anchored atomic write"
+    (Dir.atomic_replace
+       managed
+       ~name:(anchored_segment "state.json")
+       ~perm:0o600
+       "one");
+  Alcotest.(check string)
+    "anchored read"
+    "one"
+    (Dir.read_file managed (anchored_segment "state.json"));
+  (match Dir.stat managed (anchored_segment "state.json") with
    | Some { kind = Dir.Regular_file; _ } -> ()
    | Some _ -> Alcotest.fail "anchored stat returned the wrong file kind"
    | None -> Alcotest.fail "anchored stat lost a committed file");
-  Dir.rename
-    ~src_dir:managed
-    ~src:"state.json"
-    ~dst_dir:managed
-    ~dst:"renamed.json";
+  require_anchored_mutation
+    "anchored rename"
+    (Dir.rename
+       ~src_dir:managed
+       ~src:(anchored_segment "state.json")
+       ~dst_dir:managed
+       ~dst:(anchored_segment "renamed.json"));
   Alcotest.(check bool)
     "source removed by rename"
     false
-    (Option.is_some (Dir.stat managed "state.json"));
+    (Option.is_some (Dir.stat managed (anchored_segment "state.json")));
   Alcotest.(check bool)
     "renamed file removed"
     true
-    (Dir.unlink_if_exists managed "renamed.json");
+    (match
+       require_anchored_mutation
+         "anchored unlink"
+         (Dir.unlink_if_exists managed (anchored_segment "renamed.json"))
+     with
+     | `Removed -> true
+     | `Missing -> false);
   Alcotest.(check bool)
     "missing unlink is explicit false"
     false
-    (Dir.unlink_if_exists managed "renamed.json")
+    (match
+       require_anchored_mutation
+         "anchored missing unlink"
+         (Dir.unlink_if_exists managed (anchored_segment "renamed.json"))
+     with
+     | `Removed -> true
+     | `Missing -> false)
 
 let test_anchored_capability_survives_path_substitution () =
   with_temp_base @@ fun base_path ->
@@ -420,12 +460,16 @@ let test_anchored_capability_survives_path_substitution () =
   Unix.mkdir managed_path 0o700;
   Unix.mkdir outside_path 0o700;
   Dir.with_open_root base_path @@ fun root ->
-  Dir.with_open_dir root "managed" @@ fun managed ->
+  Dir.with_open_dir root (anchored_segment "managed") @@ fun managed ->
   Unix.rename managed_path detached_path;
   Unix.symlink outside_path managed_path;
-  (match Dir.save_file_atomic managed ~name:"proof.json" ~perm:0o600 "anchored" with
-   | Ok () -> ()
-   | Error detail -> Alcotest.failf "anchored write after substitution: %s" detail);
+  require_anchored_mutation
+    "anchored write after substitution"
+    (Dir.atomic_replace
+       managed
+       ~name:(anchored_segment "proof.json")
+       ~perm:0o600
+       "anchored");
   Alcotest.(check bool)
     "replacement symlink target untouched"
     false
@@ -445,6 +489,15 @@ let test_anchored_root_rejects_symlink () =
   match Dir.with_open_root alias (fun _ -> ()) with
   | exception Unix.Unix_error _ -> ()
   | () -> Alcotest.fail "symlinked root was accepted as an anchored capability"
+
+let test_anchored_segments_reject_ambiguous_names () =
+  let module Segment = Fs_compat.Anchored_dir.Segment in
+  List.iter
+    (fun raw ->
+       match Segment.of_string raw with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.failf "ambiguous anchored segment accepted: %S" raw)
+    [ ""; "."; ".."; "a/b"; "nul\000suffix" ]
 
 let () =
   Alcotest.run "fs_atomic_orphan_sweep_10130"
@@ -492,5 +545,7 @@ let () =
             test_anchored_capability_survives_path_substitution;
           Alcotest.test_case "symlinked root rejected" `Quick
             test_anchored_root_rejects_symlink;
+          Alcotest.test_case "ambiguous segments rejected" `Quick
+            test_anchored_segments_reject_ambiguous_names;
         ] );
     ]

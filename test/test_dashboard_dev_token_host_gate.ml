@@ -50,6 +50,30 @@ let test_non_loopback_rejection_precedes_token_io () =
       | Ok _ -> fail "non-loopback authority must not reach token I/O")
 ;;
 
+let test_read_failure_does_not_mint_admin_credential () =
+  let base_path = Filename.temp_file "masc-dev-token-read-" ".workspace" in
+  Sys.remove base_path;
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+      let token_path = Dev_token.dashboard_dev_token_path base_path in
+      Fs_compat.mkdir_p (Filename.dirname token_path);
+      Fs_compat.save_file token_path "stale";
+      Dev_token.set_dashboard_dev_token_load_for_testing (fun _ ->
+        raise (Sys_error "injected read failure"));
+      Fun.protect
+        ~finally:Dev_token.reset_dashboard_dev_token_load_for_testing
+        (fun () ->
+          match Dev_token.ensure_dashboard_dev_token base_path with
+          | Error _ ->
+              check
+                bool
+                "read failure creates no credential store"
+                false
+                (Sys.file_exists (Common.agents_dir_from_base_path ~base_path))
+          | Ok _ -> fail "unreadable dev-token path must fail closed"))
+;;
+
 let () =
   run
     "dashboard-dev-token-host-gate"
@@ -59,6 +83,10 @@ let () =
             "non-loopback rejected before token I/O"
             `Quick
             test_non_loopback_rejection_precedes_token_io
+        ; test_case
+            "read failure does not mint admin credential"
+            `Quick
+            test_read_failure_does_not_mint_admin_credential
         ] )
     ]
 ;;

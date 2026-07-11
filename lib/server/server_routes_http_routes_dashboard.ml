@@ -515,11 +515,7 @@ let add_routes ~sw ~clock router =
                  (`Assoc [ ("token", `String raw) ]) reqd
              | Error err ->
                let status =
-                 match err with
-                 | Server_routes_http_dashboard_dev_token.Request_host_rejected _ ->
-                   `Forbidden
-                 | Server_routes_http_dashboard_dev_token.Token_operation_failed _ ->
-                   `Internal_server_error
+                 Server_routes_http_dashboard_dev_token.request_error_status err
                in
                let error_code =
                  Server_routes_http_dashboard_dev_token.request_error_code err

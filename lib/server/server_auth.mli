@@ -168,6 +168,7 @@ val host_port_scheme_of_origin :
 
 type request_host_rejection =
   | Missing_request_host
+  | Multiple_request_hosts
   | Malformed_request_host
   | Non_loopback_request_host of string
 
@@ -179,8 +180,9 @@ type admitted_request_host =
 val admit_loopback_request_host :
   Httpun.Request.t -> (admitted_request_host, request_host_rejection) result
 (** Parse the request [Host] authority and admit exact loopback hosts only.
-    Missing, malformed, and non-loopback authorities remain distinct typed
-    rejections. Credential-bearing endpoints must run this gate before I/O. *)
+    Missing, repeated, malformed, and non-loopback authorities remain distinct
+    typed rejections. Credential-bearing endpoints must run this gate before
+    I/O. *)
 
 val host_port_of_request : Httpun.Request.t -> (string * int option) option
 (** Host/port from the request's [Host] header. *)

@@ -1,6 +1,7 @@
 open Alcotest
 
 module Uid = Keeper_id.Uid
+module Keeper_name = Keeper_id.Keeper_name
 
 let test_generate_format () =
   let uid = Uid.generate () in
@@ -53,6 +54,20 @@ let test_equal () =
   check bool "different UIDs not equal" false (Uid.equal a b);
   check bool "same UID equal" true (Uid.equal a a)
 
+let test_keeper_name_portable_contract () =
+  List.iter
+    (fun input ->
+       match Keeper_name.of_string input with
+       | Ok parsed -> check string "portable name" input (Keeper_name.to_string parsed)
+       | Error error -> failf "portable keeper name %S rejected: %s" input error)
+    [ "keeper"; "dot.name"; "under_score"; "dash-name" ];
+  List.iter
+    (fun input ->
+       match Keeper_name.of_string input with
+       | Error _ -> ()
+       | Ok _ -> failf "unsafe keeper name %S accepted" input)
+    [ ""; "."; ".."; "slash/name"; "nul\000suffix" ]
+
 let () =
   run "Keeper ID"
     [
@@ -63,5 +78,11 @@ let () =
           test_case "of_string valid" `Quick test_of_string_valid;
           test_case "of_string invalid" `Quick test_of_string_invalid;
           test_case "equal" `Quick test_equal;
+        ] );
+      ( "Keeper name",
+        [ test_case
+            "portable path-segment contract"
+            `Quick
+            test_keeper_name_portable_contract
         ] );
     ]

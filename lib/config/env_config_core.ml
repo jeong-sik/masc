@@ -90,10 +90,10 @@ let get_float ~default name =
         default)
 
 (** Variants that floor at zero.  An operator who sets a negative
-    value (e.g. [MASC_KEEPER_ALERT_MAX_RETRIES=-5]) gets the default
+    value (e.g. [MASC_KEEPER_MEMORY_MAX_NOTES=-5]) gets the default
     rather than the literal — negative budgets/counts are
     nonsensical for the call sites these feed
-    ({!Env_config_keeper}, alert thresholds, retry caps).
+    ({!Env_config_keeper}, size budgets, retry caps).
 
     For the float variant, all non-finite values (NaN, +∞, -∞) are
     also rejected.  [+∞] sneaks past the [< 0.0] check because

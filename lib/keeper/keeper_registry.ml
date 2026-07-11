@@ -334,6 +334,20 @@ let record_crash ~base_path name ts msg =
   Error_tracking.record_crash ~base_path name ts msg ~update_entry:update_entry_unit
 ;;
 
+let set_failure_reason_exact entry reason =
+  update_entry_exact entry (fun current -> { current with last_failure_reason = reason })
+;;
+
+let set_last_error_exact entry err =
+  update_entry_exact entry (fun current -> { current with last_error = Some err })
+;;
+
+let record_crash_exact entry ts msg =
+  Log.Keeper.error "registry: recording exact-lane crash name=%s msg=%s" entry.name msg;
+  update_entry_exact entry (fun current ->
+    Error_tracking.record_crash_entry current ts msg)
+;;
+
 let set_grpc_close ~base_path name close_fn =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry -> Atomic.set entry.grpc_close close_fn
@@ -441,16 +455,22 @@ let fiber_health_of ~base_path name =
          Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
        in
        if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie
-     | Stopped | Offline -> Fiber_unknown
+     | Stopped ->
+       if lane_has_exited entry then Fiber_unknown else Fiber_alive
+     | Offline -> Fiber_unknown
      | Running | Paused | Failing | Overflowed | Compacting | HandingOff | Draining ->
        (match Eio.Promise.peek entry.done_p with
         | None -> Fiber_alive
-        | Some `Stopped -> Fiber_unknown
+        | Some `Stopped ->
+          if lane_has_exited entry then Fiber_unknown else Fiber_alive
         | Some (`Crashed _) ->
-          let max_restarts =
-            Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
-          in
-          if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie))
+          if not (lane_has_exited entry)
+          then Fiber_alive
+          else
+            let max_restarts =
+              Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
+            in
+            if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie))
 ;;
 
 let crash_log_of ~base_path name =
@@ -530,6 +550,16 @@ let cleanup_tracking ~base_path name =
          name
          (registry_entry_validation_error_to_string err))
   | None -> ()
+;;
+
+let cleanup_tracking_exact (entry : registry_entry) =
+  update_entry_exact entry (fun current ->
+    { current with
+      board_wakeups = StringMap.empty
+    ; tool_usage = StringMap.empty
+    ; board_cursor_ts = 0.0
+    ; board_cursor_post_id = None
+    })
 ;;
 
 let clear () =
@@ -668,12 +698,13 @@ let compaction_stage_after_event entry event =
   new_stage
 ;;
 
-(** Registry mutation is still non-yielding (StringMap lookup + put,
-    Atomic.set). Entry actions run only after [put_entry], so any
+(** Registry mutation is still non-yielding (StringMap lookup + CAS).
+    Entry actions run only after [install_entry_if_current], so any
     observability or follow-up state transitions happen after the registry
     state is consistent. *)
-let rec dispatch_event_with_audit
+let rec dispatch_event_with_audit_internal
           ~base_path
+          ?expected_lane
           ?(origin = Generic_dispatch)
           ?snapshot
           ?events_fired
@@ -689,6 +720,17 @@ let rec dispatch_event_with_audit
          { from_phase = Keeper_state_machine.Offline
          ; to_phase = Keeper_state_machine.Offline
          ; reason = Printf.sprintf "keeper %s not registered" name
+         })
+  | Some entry
+    when Option.exists
+           (fun lane_id ->
+              not (Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane)))
+           expected_lane ->
+    Error
+      (Keeper_state_machine.Invalid_transition
+         { from_phase = entry.phase
+         ; to_phase = entry.phase
+         ; reason = Printf.sprintf "keeper %s lane ownership changed" name
          })
   | Some entry ->
     let now = Time_compat.now () in
@@ -766,9 +808,8 @@ let rec dispatch_event_with_audit
        in
        let new_seq = entry.transition_seq + 1 in
        (match
-          put_entry
-            ~base_path
-            name
+          install_entry_if_current
+            ~observed:entry
             { entry with
               phase = tr.new_phase
             ; conditions = tr.updated_conditions
@@ -779,13 +820,37 @@ let rec dispatch_event_with_audit
             ; compaction_stage
             }
         with
-        | Error err ->
+        | Entry_install_invalid err ->
           reject_dispatch
             (registry_write_error
                ~from_phase:tr.prev_phase
                ~to_phase:tr.new_phase
                err)
-        | Ok () ->
+        | Entry_install_conflict ->
+          dispatch_event_with_audit_internal
+            ~base_path
+            ?expected_lane
+            ~origin
+            ?snapshot
+            ?events_fired
+            ?selected_event
+            name
+            event
+        | Entry_install_missing ->
+          reject_dispatch
+            (Keeper_state_machine.Invalid_transition
+               { from_phase = tr.prev_phase
+               ; to_phase = tr.prev_phase
+               ; reason = Printf.sprintf "keeper %s was unregistered during dispatch" name
+               })
+        | Entry_install_replaced ->
+          reject_dispatch
+            (Keeper_state_machine.Invalid_transition
+               { from_phase = tr.prev_phase
+               ; to_phase = tr.prev_phase
+               ; reason = Printf.sprintf "keeper %s lane ownership changed during dispatch" name
+               })
+        | Entry_installed ->
           record_transition_attribution tr;
           Log.Keeper.emit
             Log.Info
@@ -867,7 +932,13 @@ let rec dispatch_event_with_audit
             tr.entry_actions;
           List.iter
             (fun followup_event ->
-               match dispatch_event_with_audit ~base_path name followup_event with
+               match
+                 dispatch_event_with_audit_internal
+                   ~base_path
+                   ?expected_lane
+                   name
+                   followup_event
+               with
             | Ok _ -> ()
             | Error
                 (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason })
@@ -932,9 +1003,8 @@ let rec dispatch_event_with_audit
        (* No phase change — still update conditions *)
        let new_seq = entry.transition_seq + 1 in
        (match
-          put_entry
-            ~base_path
-            name
+          install_entry_if_current
+            ~observed:entry
             { entry with
               conditions = tr.updated_conditions
             ; transition_seq = new_seq
@@ -943,13 +1013,37 @@ let rec dispatch_event_with_audit
             ; compaction_stage
             }
         with
-        | Error err ->
+        | Entry_install_invalid err ->
           reject_dispatch
             (registry_write_error
                ~from_phase:tr.prev_phase
                ~to_phase:tr.new_phase
                err)
-        | Ok () ->
+        | Entry_install_conflict ->
+          dispatch_event_with_audit_internal
+            ~base_path
+            ?expected_lane
+            ~origin
+            ?snapshot
+            ?events_fired
+            ?selected_event
+            name
+            event
+        | Entry_install_missing ->
+          reject_dispatch
+            (Keeper_state_machine.Invalid_transition
+               { from_phase = tr.prev_phase
+               ; to_phase = tr.prev_phase
+               ; reason = Printf.sprintf "keeper %s was unregistered during dispatch" name
+               })
+        | Entry_install_replaced ->
+          reject_dispatch
+            (Keeper_state_machine.Invalid_transition
+               { from_phase = tr.prev_phase
+               ; to_phase = tr.prev_phase
+               ; reason = Printf.sprintf "keeper %s lane ownership changed during dispatch" name
+               })
+        | Entry_installed ->
           record_transition_attribution tr;
           if Keeper_trace_emit.enabled ()
           then
@@ -965,6 +1059,38 @@ let rec dispatch_event_with_audit
           broadcast_composite_changed ~name ~ts_unix:now;
           Ok tr)
      | Error e -> reject_dispatch e)
+;;
+
+let dispatch_event_with_audit
+      ~base_path
+      ?(origin = Generic_dispatch)
+      ?snapshot
+      ?events_fired
+      ?selected_event
+      name
+      event
+  =
+  dispatch_event_with_audit_internal
+    ~base_path
+    ~origin
+    ?snapshot
+    ?events_fired
+    ?selected_event
+    name
+    event
+;;
+
+let dispatch_event_exact
+      (entry : registry_entry)
+      ?(origin = Generic_dispatch)
+      event
+  =
+  dispatch_event_with_audit_internal
+    ~base_path:entry.base_path
+    ~expected_lane:(Keeper_lane.id entry.lane)
+    ~origin
+    entry.name
+    event
 ;;
 
 let dispatch_event ~base_path ?(origin = Generic_dispatch) name event =

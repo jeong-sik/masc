@@ -36,6 +36,19 @@ val register : base_path:string -> string -> keeper_meta -> registry_entry
     runtime actually launches the fiber. *)
 val register_offline : base_path:string -> string -> keeper_meta -> registry_entry
 
+type registration_error =
+  | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_invalid of registry_entry_validation_error
+
+(** Production registration gate: the final registry CAS is serialized with
+    Keeper shutdown reservation. Event-queue loading remains outside the
+    non-yielding fence critical section. *)
+val register_offline_if_admitted :
+  base_path:string ->
+  string ->
+  keeper_meta ->
+  (registry_entry, registration_error) result
+
 (** R-A-6.a — error variant for [register_restarting].
     [Budget_already_exhausted] is returned (not raised — the API is
     Result-based) when the caller attempts to revive a keeper whose
@@ -43,6 +56,7 @@ val register_offline : base_path:string -> string -> keeper_meta -> registry_ent
     violate TLA+ §S3 BudgetNeverRevives. *)
 type register_restarting_error =
   | Budget_already_exhausted of { name : string }
+  | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 (** Register a keeper that is about to relaunch after a crash.
     The entry starts in [Restarting] and must receive [Fiber_started] when the
@@ -65,6 +79,17 @@ val prepare_fiber_launch :
 
 (** Unregister a keeper (removes from registry). *)
 val unregister : base_path:string -> string -> unit
+
+type unregister_exact_result =
+  | Exact_unregistered
+  | Exact_entry_missing
+  | Exact_entry_replaced
+
+(** Remove [entry] only if its typed lane identity still owns the
+    [(base_path, name)] key. Immutable registry field updates may replace the
+    record value while preserving the same lane; a newer same-name lane has a
+    different identity and is retained. *)
+val unregister_exact : registry_entry -> unregister_exact_result
 
 (** Look up a keeper by name. *)
 val get : base_path:string -> string -> registry_entry option
@@ -109,6 +134,20 @@ val update_entry :
   string ->
   (registry_entry -> registry_entry) ->
   (unit, registry_entry_validation_error) result
+
+type exact_update_result =
+  | Exact_updated
+  | Exact_update_missing
+  | Exact_update_replaced
+  | Exact_update_invalid of registry_entry_validation_error
+
+(** Update only while the lane identity captured in [expected] still owns the
+    registry key. CAS conflicts within that lane retry against the latest
+    immutable entry; a same-name replacement is never mutated. *)
+val update_entry_exact :
+  registry_entry ->
+  (registry_entry -> registry_entry) ->
+  exact_update_result
 
 (** Update a registered entry and return [true] only when a validated write
     was installed.  Missing keepers, no-op closures, and validation failures
@@ -276,6 +315,19 @@ val clear_turn_switch : base_path:string -> string -> unit
 val interrupt_current_turn :
   base_path:string -> string -> [ `Cancelled of int | `No_turn_in_flight ]
 
+type exact_turn_interrupt_result =
+  | Exact_turn_cancelled of int
+  | Exact_no_turn_in_flight
+  | Exact_turn_cancel_failed of
+      { turn_id : int option
+      ; detail : string
+      }
+
+(** Cancel the turn switch retained by this exact registry entry. Unlike the
+    name-based compatibility API, failure is returned explicitly. *)
+val interrupt_current_turn_exact :
+  registry_entry -> exact_turn_interrupt_result
+
 (** Record the verdict reasons from a [keeper_cycle_decision] that
     chose to skip the next turn.  Stamps [last_skip_observation] with
     [(now, reasons)] so the stale watchdog can surface *why* a keeper
@@ -302,6 +354,15 @@ val get_turn_failures : base_path:string -> string -> int
 (** Record a crash entry in the crash log (keeps last 5). *)
 val record_crash : base_path:string -> string -> float -> string -> unit
 
+(** Failure mutations scoped to the exact lane captured by [entry]. *)
+val set_failure_reason_exact :
+  registry_entry -> failure_reason option -> exact_update_result
+
+val set_last_error_exact : registry_entry -> string -> exact_update_result
+
+val record_crash_exact :
+  registry_entry -> float -> string -> exact_update_result
+
 (** Set or clear the gRPC close callback. *)
 val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 
@@ -322,6 +383,10 @@ val is_registered : base_path:string -> string -> bool
 
 (** Mark a keeper as dead tombstone and record the transition timestamp. *)
 val mark_dead : base_path:string -> string -> at:float -> unit
+
+(** Mark only [entry]'s lane dead. The running-count transition is applied
+    once, after the exact-lane CAS succeeds. *)
+val mark_dead_exact : registry_entry -> at:float -> exact_update_result
 
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option
@@ -415,6 +480,9 @@ val clear_board_wakeups : base_path:string -> string -> unit
 (** Reset tracking state (agent count + board wakeups) for a keeper. *)
 val cleanup_tracking : base_path:string -> string -> unit
 
+(** Reset tracking only if [entry]'s lane still owns its registry key. *)
+val cleanup_tracking_exact : registry_entry -> exact_update_result
+
 (** Clear the registry. For testing only. *)
 val clear : unit -> unit
 
@@ -466,6 +534,15 @@ val dispatch_event :
   base_path:string ->
   ?origin:lifecycle_event_origin ->
   string -> Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+(** Dispatch only while [entry]'s lane still owns the registry key. The event
+    is recomputed after same-lane CAS conflicts and is rejected before mutating
+    a same-name replacement lane. *)
+val dispatch_event_exact :
+  registry_entry ->
+  ?origin:lifecycle_event_origin ->
+  Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 (** Like [dispatch_event], but preserves richer audit metadata when the event

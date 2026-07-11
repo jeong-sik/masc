@@ -65,12 +65,26 @@ let supervise_keepalive
         meta.name
         (Keeper_registry.spawn_slot_denial_reason_to_detail reason)
         ()
-    | Ok () -> (
+    | Ok () ->
     Startup_helpers.log_persona_drift_if_missing ~base_path:ctx.config.base_path meta;
     (* Register in Keeper_registry — single source of truth. *)
-    let reg =
-      Keeper_registry.register_offline ~base_path:ctx.config.base_path meta.name meta
-    in
+    (match
+       Keeper_registry.register_offline_if_admitted
+         ~base_path:ctx.config.base_path
+         meta.name
+         meta
+     with
+     | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
+       Log.Keeper.info
+         "supervisor launch skipped %s because shutdown operation %s owns admission"
+         meta.name
+         (Keeper_shutdown_types.Operation_id.to_string operation_id)
+     | Error (Keeper_registry.Registration_invalid validation_error) ->
+       Log.Keeper.error
+         "supervisor registry validation rejected %s: %s"
+         meta.name
+         (Keeper_registry.registry_entry_validation_error_to_string validation_error)
+     | Ok reg ->
     (* Workspace initialization *)
     (try
        if not (Workspace_utils.is_initialized ctx.config)

@@ -709,23 +709,65 @@ let resolve_registry_done
   | Keeper_registry.Done_already_resolved _ -> false
 ;;
 
+let log_exact_update_outcome
+      (entry : Keeper_registry.registry_entry)
+      ~site
+  = function
+  | Keeper_registry.Exact_updated -> true
+  | Keeper_registry.Exact_update_missing ->
+    Log.Keeper.warn
+      "%s: exact registry update skipped because lane is no longer registered site=%s"
+      entry.name
+      site;
+    false
+  | Keeper_registry.Exact_update_replaced ->
+    Log.Keeper.warn
+      "%s: exact registry update retained newer same-name lane site=%s"
+      entry.name
+      site;
+    false
+  | Keeper_registry.Exact_update_invalid validation_error ->
+    Log.Keeper.warn
+      "%s: exact registry update validation failed site=%s error=%s"
+      entry.name
+      site
+      (Keeper_registry.registry_entry_validation_error_to_string validation_error);
+    false
+;;
+
+let dispatch_event_exact_unit
+      (entry : Keeper_registry.registry_entry)
+      event
+  =
+  match Keeper_registry.dispatch_event_exact entry event with
+  | Ok _ -> true
+  | Error error ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string DispatchEventFailures)
+      ~labels:[ "keeper", entry.name; "site", "exact_lane_terminal" ]
+      ();
+    Log.Keeper.warn
+      "%s: exact-lane terminal dispatch failed event=%s error=%s"
+      entry.name
+      (Keeper_state_machine.event_to_string event)
+      (Keeper_state_machine.transition_error_to_string error);
+    false
+;;
+
 let record_keeper_stopped
       (entry : Keeper_registry.registry_entry)
-      ~base_path
+      ~base_path:_
       ~keeper_name
       ~detail
   : bool
   =
   if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
   then (
-    Keeper_registry.dispatch_event_unit
-      ~base_path
-      keeper_name
-      Keeper_state_machine.Stop_requested;
-    Keeper_registry.dispatch_event_unit
-      ~base_path
-      keeper_name
-      Keeper_state_machine.Drain_complete;
+    (match dispatch_event_exact_unit entry Keeper_state_machine.Stop_requested with
+     | false -> ()
+     | true ->
+       (match dispatch_event_exact_unit entry Keeper_state_machine.Drain_complete with
+        | true | false -> ()));
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Stopped
       ~keeper_name
@@ -737,7 +779,7 @@ let record_keeper_stopped
 
 let record_keeper_crashed
       (entry : Keeper_registry.registry_entry)
-      ~base_path
+      ~base_path:_
       ~keeper_name
       ~failure_reason
   : unit
@@ -746,13 +788,18 @@ let record_keeper_crashed
   if resolve_registry_done entry ~source:"keepalive_record_crashed" (`Crashed reason)
   then (
     let outcome = reason in
-    Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
-    Keeper_registry.dispatch_event_unit
-      ~base_path
-      keeper_name
-      (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None });
-    Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
-    Keeper_registry_error_recording.record ~base_path keeper_name reason;
+    ignore
+      (Keeper_registry.set_failure_reason_exact entry (Some failure_reason)
+       |> log_exact_update_outcome entry ~site:"record_keeper_crashed.failure_reason");
+    ignore
+      (dispatch_event_exact_unit
+         entry
+         (Keeper_state_machine.Fiber_terminated
+            { outcome; provider_id = None; http_status = None }));
+    ignore
+      (Keeper_registry.record_crash_exact entry (Time_compat.now ()) reason
+       |> log_exact_update_outcome entry ~site:"record_keeper_crashed.crash_log");
+    Keeper_registry_error_recording.record_exact entry reason;
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Crashed
       ~keeper_name
@@ -780,7 +827,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       Keeper_registry.get ~base_path:ctx.config.base_path m.name
     in
     let reclaimable_stale_entry (entry : Keeper_registry.registry_entry) =
-      let finished = Option.is_some (Eio.Promise.peek entry.done_p) in
+      let finished =
+        Option.is_some (Eio.Promise.peek entry.done_p)
+        && Keeper_registry.lane_has_exited entry
+      in
       match entry.phase with
       | Keeper_state_machine.Stopped -> finished
       | Keeper_state_machine.Failing
@@ -810,7 +860,13 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             "start_keepalive: reclaiming stale registered entry %s phase=%s"
             m.name
             (Keeper_state_machine.phase_to_string entry.phase));
-       Keeper_registry.unregister ~base_path:ctx.config.base_path m.name
+       (match Keeper_registry.unregister_exact entry with
+        | Keeper_registry.Exact_unregistered
+        | Keeper_registry.Exact_entry_missing -> ()
+        | Keeper_registry.Exact_entry_replaced ->
+          Log.Keeper.info
+            "start_keepalive: stale entry for %s was already replaced; keeping the newer lane"
+            m.name)
      | _ -> ());
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
     then
@@ -832,11 +888,25 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           ~keeper_name:m.name
           ~detail:(Keeper_registry.spawn_slot_denial_reason_to_detail reason)
           ()
-      | Ok () -> (
+      | Ok () ->
       (* Register in Keeper_registry first — single source of truth. *)
-      let reg =
-        Keeper_registry.register_offline ~base_path:ctx.config.base_path m.name m
-      in
+      (match
+         Keeper_registry.register_offline_if_admitted
+           ~base_path:ctx.config.base_path
+           m.name
+           m
+       with
+       | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
+         Log.Keeper.info
+           "start_keepalive: skipped %s because shutdown operation %s owns admission"
+           m.name
+           (Keeper_shutdown_types.Operation_id.to_string operation_id)
+       | Error (Keeper_registry.Registration_invalid validation_error) ->
+         Log.Keeper.error
+           "start_keepalive: registry validation rejected %s: %s"
+           m.name
+           (Keeper_registry.registry_entry_validation_error_to_string validation_error)
+       | Ok reg ->
       (* Restore persisted tool usage stats from previous session *)
       Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
       (* Launch gate FIRST: every launch side effect (gRPC heartbeat fiber,
@@ -876,22 +946,54 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             ~phase:Keeper_state_machine.Crashed
             ~keeper_name:m.name
             ~detail:reason
-            ()
+            ();
+        (match Keeper_lane.reject_before_start reg.lane ~reason:(Failure reason) with
+         | Ok () -> ()
+         | Error lane_error ->
+           Log.Keeper.error
+             "%s: rejected launch could not close lane join contract: %s"
+             m.name
+             (Keeper_lane.start_error_to_string lane_error))
       | Ok () ->
         let stop = reg.fiber_stop in
         let wakeup = reg.fiber_wakeup in
-        (* Start optional gRPC heartbeat fiber *)
-        let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
-        (match grpc_close with
-         | Some _ ->
-           Keeper_registry.set_grpc_close ~base_path:ctx.config.base_path m.name grpc_close
-         | None -> ());
         let live_meta = bootstrap_live_keeper_meta ~ctx m in
-        Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
+        let live_meta_installed =
+          Keeper_registry.update_entry_exact reg (fun current ->
+            { current with meta = live_meta })
+          |> log_exact_update_outcome reg ~site:"start_keepalive.live_meta"
+        in
+        if not live_meta_installed
+        then (
+          let failure_reason = Keeper_registry.Exception "lane_ownership_lost_before_fork" in
+          record_keeper_crashed
+            reg
+            ~base_path:ctx.config.base_path
+            ~keeper_name:live_meta.name
+            ~failure_reason;
+          match
+            Keeper_lane.reject_before_start
+              reg.lane
+              ~reason:(Failure "lane ownership lost before fork")
+          with
+          | Ok () -> ()
+          | Error error ->
+            Log.Keeper.warn
+              "%s: failed to close rejected stale lane: %s"
+              live_meta.name
+              (Keeper_lane.start_error_to_string error))
+        else (
         (* Telemetry feedback refresh loop removed in #6814:
          behavioral_stats no longer consumed by build_prompt. *)
-        publish_keeper_started ~live_meta;
-        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+        let current_failure_reason () =
+          match Keeper_registry.get ~base_path:ctx.config.base_path live_meta.name with
+          | Some current
+            when Keeper_lane.Id.equal
+                   (Keeper_lane.id current.lane)
+                   (Keeper_lane.id reg.lane) ->
+            current.last_failure_reason
+          | Some _ | None -> None
+        in
         let record_crash failure_reason =
           record_keeper_crashed
             reg
@@ -907,34 +1009,83 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                ~keeper_name:live_meta.name
                ~detail)
         in
-        let record_loop_exit () =
-          match Keeper_registry.get ~base_path:ctx.config.base_path live_meta.name with
+        let record_completed_lane () =
+          match current_failure_reason () with
           | Some
-              { Keeper_registry.last_failure_reason =
-                  Some
-                    (( Keeper_registry.Stale_turn_timeout _
-                     | Keeper_registry.Stale_termination_storm _
-                     | Keeper_registry.Stale_fleet_batch _
-                     | Keeper_registry.Provider_timeout_loop _ ) as reason)
-              ; _
-              } -> record_crash reason
-          | _ -> record_stopped "normal exit"
+              (( Keeper_registry.Stale_turn_timeout _
+               | Keeper_registry.Stale_termination_storm _
+               | Keeper_registry.Stale_fleet_batch _
+               | Keeper_registry.Provider_timeout_loop _ ) as reason) ->
+            record_crash reason
+          | Some _ | None ->
+            record_stopped (if Atomic.get stop then "manual stop" else "normal exit")
         in
-        (* Cancel-safe finally (#9747 iter 2): [cleanup_tracking] touches
-         registry state that can raise transiently during shutdown.
-         Stdlib [Fun.protect] would wrap that as [Fun.Finally_raised],
-         masking the body's Cancelled / Keeper_fiber_crash. Swallow
-         Cancelled (the outer one is in flight) and log non-cancel
-         exceptions instead of propagating them. Mirrors
-         keeper_agent_run.ml and keeper_unified_turn.ml:990. *)
-        let safe_cleanup_tracking () =
+        let terminalize_lane = function
+          | Keeper_lane.Completed -> record_completed_lane ()
+          | Keeper_lane.Shutdown_before_start ->
+            record_stopped "shutdown requested before lane start"
+          | Keeper_lane.Shutdown_requested -> record_stopped "shutdown requested"
+          | Keeper_lane.Cancelled_by_parent _ ->
+            if Atomic.get stop || Shutdown.is_shutting_down_global ()
+            then record_stopped "cancelled during shutdown"
+            else
+              record_crash
+                (Keeper_registry.Fiber_unresolved Keeper_registry.Cancelled_by_parent)
+          | Keeper_lane.Failed Keeper_registry.Keeper_fiber_crash ->
+            (match current_failure_reason () with
+             | Some reason -> record_crash reason
+             | None when Atomic.get stop -> record_stopped "manual stop"
+             | None -> record_crash (Keeper_registry.Exception "fiber_crash"))
+          | Keeper_lane.Failed exn ->
+            if Atomic.get stop
+            then record_stopped "manual stop"
+            else (
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string HeartbeatFailures)
+                ~labels:[ "keeper", live_meta.name; "phase", "lane_crash" ]
+                ();
+              Log.Keeper.emit
+                Log.Error
+                ~category:Log.Heartbeat
+                ~details:
+                  (`Assoc
+                    [ "keeper", `String live_meta.name
+                    ; "error", `String (Printexc.to_string exn)
+                    ])
+                (Printf.sprintf
+                   "keeper lane for %s crashed: %s"
+                   live_meta.name
+                   (Printexc.to_string exn));
+              record_crash (Keeper_registry.Exception (Printexc.to_string exn)))
+        in
+        (* Lane cleanup is declared outside [run] because [Keeper_lane.fork]
+           invokes it only after the run scope and all child fibers join. *)
+        let cleanup_tracking outcome =
+          let terminal_result =
+            try
+              terminalize_lane outcome;
+              Ok ()
+            with
+            | exn -> Error (Printexc.to_string exn)
+          in
+          let tracking_result =
           try
-            Keeper_registry.cleanup_tracking
-              ~base_path:ctx.config.base_path
-              live_meta.name
+            (match Keeper_registry.cleanup_tracking_exact reg with
+             | Keeper_registry.Exact_updated
+             | Keeper_registry.Exact_update_missing -> Ok ()
+             | Keeper_registry.Exact_update_replaced ->
+               Log.Keeper.info
+                 "%s: lane cleanup retained newer same-name registry entry"
+                 live_meta.name;
+               Ok ()
+             | Keeper_registry.Exact_update_invalid validation_error ->
+               Error
+                 (Keeper_registry.registry_entry_validation_error_to_string
+                    validation_error))
           with
-          | Eio.Cancel.Cancelled _ -> ()
+          | Eio.Cancel.Cancelled _ as exn -> Error (Printexc.to_string exn)
           | e ->
+            let detail = Printexc.to_string e in
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string CleanupTrackingFailures)
               ~labels:[ "keeper", live_meta.name; "site", "heartbeat_finally" ]
@@ -945,67 +1096,62 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
               ~details:
                 (`Assoc
                   [ "keeper", `String live_meta.name
-                  ; "error", `String (Printexc.to_string e)
+                  ; "error", `String detail
                   ])
               (Printf.sprintf
                  "%s: cleanup_tracking in heartbeat finally raised: %s"
                  live_meta.name
-                 (Printexc.to_string e))
+                 detail);
+            Error detail
+          in
+          match terminal_result, tracking_result with
+          | Ok (), Ok () -> Ok ()
+          | Error detail, Ok () | Ok (), Error detail -> Error detail
+          | Error terminal_detail, Error tracking_detail ->
+            Error
+              (Printf.sprintf
+                 "terminal cleanup failed: %s; tracking cleanup failed: %s"
+                 terminal_detail
+                 tracking_detail)
         in
-        Eio_guard.protect
-          (fun () ->
-             try
-               run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup;
-               record_loop_exit ()
-             with
-             | Keeper_registry.Keeper_fiber_crash ->
-               if Atomic.get stop
-               then record_stopped "manual stop"
-               else (
-                 let reason =
-                   match
-                     Keeper_registry.get ~base_path:ctx.config.base_path live_meta.name
-                   with
-                   | Some e ->
-                     Option.value
-                       ~default:(Keeper_registry.Exception "fiber_crash")
-                       e.last_failure_reason
-                   | None -> Keeper_registry.Exception "fiber_crash"
-                 in
-                 record_crash reason)
-             | Eio.Cancel.Cancelled _ ->
-               record_stopped "cancelled"
-             | exn ->
-               if Atomic.get stop
-               then record_stopped "manual stop"
-               else (
-                 Otel_metric_store.inc_counter
-                   Keeper_metrics.(to_string HeartbeatFailures)
-                   ~labels:[ "keeper", live_meta.name; "phase", "loop_crash" ]
-                   ();
-                 Log.Keeper.emit
-                   Log.Error
-                   ~category:Log.Heartbeat
-                   ~details:
-                     (`Assoc
-                       [ "keeper", `String live_meta.name
-                       ; "error", `String (Printexc.to_string exn)
-                       ])
-                   (Printf.sprintf
-                      "heartbeat loop for %s crashed: %s"
-                      live_meta.name
-                      (Printexc.to_string exn));
-                 record_crash (Keeper_registry.Exception (Printexc.to_string exn))))
-          ~finally:safe_cleanup_tracking))
+        publish_keeper_started ~live_meta;
+        (match
+           Keeper_lane.fork
+             ~sw:ctx.sw
+             reg.lane
+             ~run:(fun lane_sw ->
+        let ctx = { ctx with sw = lane_sw } in
+        (* The sidecar is part of this Keeper lane. It cannot outlive the
+           lane's structured-concurrency scope. *)
+        let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
+        (match grpc_close with
+         | Some _ ->
+           Atomic.set reg.grpc_close grpc_close
+         | None -> ());
+        run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
+             ~cleanup:cleanup_tracking
+         with
+         | Ok () -> ()
+         | Error error ->
+           let detail = Keeper_lane.start_error_to_string error in
+           record_keeper_crashed
+             reg
+             ~base_path:ctx.config.base_path
+             ~keeper_name:live_meta.name
+             ~failure_reason:(Keeper_registry.Exception detail)))
+        )
 ;;
 
-let stop_keepalive ?base_path name =
-  let entries =
-    Keeper_registry.all ?base_path ()
-    |> List.filter (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name)
-  in
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
+type joined_stop =
+  { lane_exit : Keeper_lane.exit
+  ; terminal : Keeper_registry.done_resolution
+  }
+
+type joined_stop_result =
+  | Keeper_not_registered
+  | Keeper_joined of joined_stop
+
+let request_entry_stop (entry : Keeper_registry.registry_entry) =
        (* tla-lint: allow-mutation: fiber signal — stop+wakeup pair triggers cooperative shutdown *)
        Atomic.set entry.fiber_stop true;
        Atomic.set entry.fiber_wakeup true;
@@ -1023,18 +1169,24 @@ let stop_keepalive ?base_path name =
                "masc_keeper_grpc_close_failures"
                ~labels:[ "keeper", entry.meta.name ]
                ())
-        | None -> ());
-       match entry.phase with
-       | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
-       | _ ->
-         if
-           record_keeper_stopped
-             entry
-             ~base_path:entry.base_path
-             ~keeper_name:entry.name
-             ~detail:"manual stop"
-         then Keeper_registry.cleanup_tracking ~base_path:entry.base_path entry.name)
-    entries
+        | None -> ())
+;;
+
+let stop_keepalive ?base_path name =
+  Keeper_registry.all ?base_path ()
+  |> List.filter (fun (entry : Keeper_registry.registry_entry) ->
+    String.equal entry.name name)
+  |> List.iter request_entry_stop
+;;
+
+let stop_keepalive_and_await ~base_path name =
+  match Keeper_registry.get ~base_path name with
+  | None -> Keeper_not_registered
+  | Some entry ->
+    request_entry_stop entry;
+    let lane_exit = Keeper_lane.await_exit entry.lane in
+    let terminal = Eio.Promise.await entry.done_p in
+    Keeper_joined { lane_exit; terminal }
 ;;
 
 (** Stop all running keepers. Used in test cleanup to prevent orphaned

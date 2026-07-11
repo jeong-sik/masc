@@ -10,6 +10,7 @@ module KR = Masc.Keeper_registry
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KLH = Masc.Keeper_lifecycle_hooks
 module KSM = Keeper_state_machine
+module Lane = Masc.Keeper_lane
 
 let base_path = "/tmp/test_keeper_registry_hardening"
 
@@ -63,6 +64,113 @@ let test_update_entry_rejects_corrupted_result () =
   match KR.get ~base_path "alice" with
   | None -> fail "original entry disappeared after rejected update"
   | Some e -> check string "original base_path preserved" original_base_path e.base_path
+;;
+
+let test_unregister_exact_preserves_replacement_lane () =
+  KR.clear ();
+  let old_entry = register "alice" in
+  let replacement = register "alice" in
+  (match KR.unregister_exact old_entry with
+   | KR.Exact_entry_replaced -> ()
+   | KR.Exact_unregistered -> fail "stale entry removed its replacement lane"
+   | KR.Exact_entry_missing -> fail "replacement lane unexpectedly missing");
+  (match KR.get ~base_path "alice" with
+   | Some current ->
+     check bool "replacement remains registered" true (current == replacement)
+   | None -> fail "replacement lane was removed");
+  match KR.unregister_exact replacement with
+  | KR.Exact_unregistered -> ()
+  | KR.Exact_entry_missing -> fail "replacement disappeared before exact removal"
+  | KR.Exact_entry_replaced -> fail "replacement identity changed unexpectedly"
+;;
+
+let test_unregister_exact_accepts_same_lane_record_update () =
+  KR.clear ();
+  let observed = register "alice" in
+  (match
+     KR.update_entry ~base_path "alice" (fun entry ->
+       { entry with last_error = Some "immutable record replacement" })
+   with
+   | Ok () -> ()
+   | Error error -> fail (KR.registry_entry_validation_error_to_string error));
+  match KR.unregister_exact observed with
+  | KR.Exact_unregistered -> ()
+  | KR.Exact_entry_missing -> fail "same lane disappeared before removal"
+  | KR.Exact_entry_replaced -> fail "same lane record update was treated as ABA"
+;;
+
+let test_update_entry_exact_preserves_replacement_lane () =
+  KR.clear ();
+  let old_entry = register "alice" in
+  let replacement = register "alice" in
+  (match
+     KR.update_entry_exact old_entry (fun entry ->
+       { entry with last_error = Some "stale lane mutation" })
+   with
+   | KR.Exact_update_replaced -> ()
+   | KR.Exact_updated -> fail "stale exact update mutated the replacement lane"
+   | KR.Exact_update_missing -> fail "replacement lane unexpectedly missing"
+   | KR.Exact_update_invalid error ->
+     fail (KR.registry_entry_validation_error_to_string error));
+  match KR.get ~base_path "alice" with
+  | Some current ->
+    check bool "replacement identity preserved" true (current == replacement);
+    check (option string) "replacement error field preserved" None current.last_error
+  | None -> fail "replacement lane disappeared"
+;;
+
+let test_dispatch_event_exact_preserves_replacement_lane () =
+  KR.clear ();
+  let old_meta = make_meta "alice" in
+  let old_entry = KR.register_offline ~base_path old_meta.name old_meta in
+  let replacement = KR.register_offline ~base_path old_meta.name old_meta in
+  (match KR.dispatch_event_exact old_entry KSM.Fiber_started with
+   | Error _ -> ()
+   | Ok _ -> fail "stale exact dispatch mutated the replacement lane");
+  match KR.get ~base_path "alice" with
+  | Some current ->
+    check bool "replacement identity preserved" true (current == replacement);
+    check
+      string
+      "replacement remains offline"
+      "offline"
+      (KSM.phase_to_string current.phase)
+  | None -> fail "replacement lane disappeared"
+;;
+
+let test_lane_fork_rejects_cancelling_switch () =
+  Eio_main.run @@ fun _env ->
+  let lane = Lane.create () in
+  let run_called = Atomic.make false in
+  let cleanup_calls = Atomic.make 0 in
+  let fork_result = Atomic.make None in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Eio.Switch.fail sw (Failure "synthetic parent cancellation");
+     Atomic.set
+       fork_result
+       (Some
+          (Lane.fork
+             ~sw
+             lane
+             ~run:(fun _ -> Atomic.set run_called true)
+             ~cleanup:(fun _ ->
+               Atomic.incr cleanup_calls;
+               Ok ())))
+   with
+   | Failure _ -> ()
+   | exn -> raise exn);
+  (match Atomic.get fork_result with
+   | Some (Error (Lane.Fork_failed _)) -> ()
+   | Some (Error error) -> fail (Lane.start_error_to_string error)
+   | Some (Ok ()) -> fail "fork reported success on an already-cancelling switch"
+   | None -> fail "fork result was not captured");
+  check bool "lane body was not run" false (Atomic.get run_called);
+  check int "cleanup ran exactly once" 1 (Atomic.get cleanup_calls);
+  match Lane.peek_exit lane with
+  | Some { outcome = Lane.Cancelled_by_parent _; _ } -> ()
+  | Some _ -> fail "lane exit did not preserve parent cancellation"
+  | None -> fail "lane exit promise remained unresolved"
 ;;
 
 let test_dispatch_write_failure_skips_phase_side_effects () =
@@ -218,12 +326,36 @@ let () =
             "rejects corrupted closure result and preserves original"
             `Quick
             test_update_entry_rejects_corrupted_result
+        ; test_case
+            "exact update preserves replacement lane"
+            `Quick
+            test_update_entry_exact_preserves_replacement_lane
+        ] )
+    ; ( "unregister_exact"
+      , [ test_case
+            "stale entry preserves replacement lane"
+            `Quick
+            test_unregister_exact_preserves_replacement_lane
+        ; test_case
+            "same lane immutable update remains removable"
+            `Quick
+            test_unregister_exact_accepts_same_lane_record_update
         ] )
     ; ( "dispatch_event"
       , [ test_case
             "skips phase side effects when validated write fails"
             `Quick
             test_dispatch_write_failure_skips_phase_side_effects
+        ; test_case
+            "exact dispatch preserves replacement lane"
+            `Quick
+            test_dispatch_event_exact_preserves_replacement_lane
+        ] )
+    ; ( "keeper_lane"
+      , [ test_case
+            "rejects fork on an already-cancelling switch"
+            `Quick
+            test_lane_fork_rejects_cancelling_switch
         ] )
     ; ( "get_with_health"
       , [ test_case "get filters corrupted entry" `Quick test_get_filters_corrupted_entry ] )

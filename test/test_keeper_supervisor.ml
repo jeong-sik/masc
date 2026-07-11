@@ -19,6 +19,7 @@ module KA = Masc.Keeper_keepalive
 module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
+module Lane = Masc.Keeper_lane
 
 let supervisor_agent_name = Sup.supervisor_agent_name
 
@@ -55,7 +56,12 @@ let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
 let resolve_done_for_test reg value =
-  ignore (Reg.resolve_done reg ~source:"test_fixture" value)
+  ignore (Reg.resolve_done reg ~source:"test_fixture" value);
+  match
+    Lane.reject_before_start reg.lane ~reason:(Failure "synthetic terminal fixture")
+  with
+  | Ok () -> ()
+  | Error error -> fail (Lane.start_error_to_string error)
 
 let restore_env name = function
   | Some value -> Unix.putenv name value
@@ -2591,7 +2597,53 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
               (Keeper_state_machine.phase_to_string phase))
        | None -> fail "registry entry disappeared after rejected launch");
       check bool "done promise resolved through the crash path"
-        true (Option.is_some (Eio.Promise.peek reg.done_p)))
+        true (Option.is_some (Eio.Promise.peek reg.done_p));
+      check bool "rejected launch closes lane join contract"
+        true (Reg.lane_has_exited reg))
+
+let test_sweep_waits_for_lane_join_before_unregister () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+      let name = "joined-before-unregister" in
+      let meta = make_meta name in
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      ignore (Reg.dispatch_event ~base_path:config.base_path name KSM.Stop_requested);
+      ignore (Reg.dispatch_event ~base_path:config.base_path name KSM.Drain_complete);
+      ignore (Reg.resolve_done reg ~source:"test_unjoined_terminal" `Stopped);
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        }
+      in
+      sweep_and_recover_no_materialize ~pacing_enforced:false ctx;
+      check bool
+        "terminal event alone does not unregister lane"
+        true
+        (Reg.is_registered ~base_path:config.base_path name);
+      (match
+         Lane.reject_before_start reg.lane ~reason:(Failure "synthetic joined lane")
+       with
+       | Ok () -> ()
+       | Error error -> fail (Lane.start_error_to_string error));
+      sweep_and_recover_no_materialize ~pacing_enforced:false ctx;
+      check bool
+        "joined terminal lane is unregistered"
+        false
+        (Reg.is_registered ~base_path:config.base_path name))
 
 let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
   Eio_main.run @@ fun env ->
@@ -2613,6 +2665,13 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
       Atomic.set reg.fiber_stop true;
+      (match
+         Lane.reject_before_start
+           reg.lane
+           ~reason:(Failure "synthetic unresolved lane exit")
+       with
+       | Ok () -> ()
+       | Error error -> fail (Lane.start_error_to_string error));
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -2720,6 +2779,13 @@ let test_stale_run_sweep_sets_watchdog_stop_signal () =
               true (stall_seconds > 1800.0)
           | _ -> fail "expected idle stale-turn failure reason")
        | None -> fail "registry entry missing after first stale sweep");
+      (match
+         Lane.reject_before_start
+           reg.lane
+           ~reason:(Failure "synthetic watchdog lane exit")
+       with
+       | Ok () -> ()
+       | Error error -> fail (Lane.start_error_to_string error));
       sweep_and_recover_no_materialize ctx;
       (match Reg.get ~base_path:config.base_path name with
        | Some updated ->
@@ -3863,6 +3929,8 @@ let () =
         test_stale_storm_pause_persist_failure_keeps_entry_registered;
       test_case "terminal-state launch reject does not announce Running" `Quick
         test_launch_rejected_terminal_state_does_not_announce_running;
+      test_case "sweep joins lane before unregister" `Quick
+        test_sweep_waits_for_lane_join_before_unregister;
       test_case "start_keepalive launch gate precedes side effects (source guard)" `Quick
         test_start_keepalive_gate_precedes_side_effects;
       test_case "unresolved watchdog-stopped budget loop is reaped" `Quick

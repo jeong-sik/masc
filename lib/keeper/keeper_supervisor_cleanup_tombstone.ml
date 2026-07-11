@@ -13,6 +13,23 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_execution
 
+let unregister_exact_dead_entry (entry : Keeper_registry.registry_entry) =
+  match Keeper_registry.unregister_exact entry with
+  | Keeper_registry.Exact_unregistered ->
+    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
+    true
+  | Keeper_registry.Exact_entry_missing -> false
+  | Keeper_registry.Exact_entry_replaced ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string SupervisorCleanupFailures)
+      ~labels:[ "keeper", entry.name; "site", "dead_tombstone_entry_replaced" ]
+      ();
+    Log.Keeper.warn
+      "%s: dead tombstone cleanup retained a newer same-name lane"
+      entry.name;
+    false
+;;
+
 let cleanup_dead_tombstone
       ~publish_lifecycle
       (ctx : _ context)
@@ -85,9 +102,9 @@ let cleanup_dead_tombstone
             err;
           false)
     in
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    if persisted_paused
+    if not (unregister_exact_dead_entry entry)
+    then ()
+    else if persisted_paused
     then (
       publish_lifecycle
         ~event:
@@ -116,39 +133,41 @@ let cleanup_dead_tombstone
           ]
         ())
   | Ok None ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-      entry.name
-      "meta missing"
-      ();
-    Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string SupervisorCleanupFailures)
-      ~labels:
-        [ "keeper", entry.name
-        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing))
-        ]
-      ()
+    if unregister_exact_dead_entry entry
+    then (
+      publish_lifecycle
+        ~event:
+          (Keeper_lifecycle_events.Custom_event
+             { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+        entry.name
+        "meta missing"
+        ();
+      Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string SupervisorCleanupFailures)
+        ~labels:
+          [ "keeper", entry.name
+          ; ( "site"
+            , Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing) )
+          ]
+        ())
   | Error err ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-      entry.name
-      (Printf.sprintf "meta read error: %s" err)
-      ();
-    Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)" entry.name err;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string SupervisorCleanupFailures)
-      ~labels:
-        [ "keeper", entry.name
-        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error))
-        ]
-      ()
+    if unregister_exact_dead_entry entry
+    then (
+      publish_lifecycle
+        ~event:
+          (Keeper_lifecycle_events.Custom_event
+             { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+        entry.name
+        (Printf.sprintf "meta read error: %s" err)
+        ();
+      Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)" entry.name err;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string SupervisorCleanupFailures)
+        ~labels:
+          [ "keeper", entry.name
+          ; ( "site"
+            , Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error) )
+          ]
+        ())
 ;;

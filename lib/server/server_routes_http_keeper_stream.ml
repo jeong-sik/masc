@@ -187,6 +187,7 @@ type dashboard_deferred_chat =
   ; chat_waiting : bool
   ; queue_length : int
   ; receipt_id : string
+  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
 let dashboard_busy_queue_state ~base_path ~keeper_name =
@@ -200,14 +201,26 @@ let dashboard_busy_queue_state ~base_path ~keeper_name =
   | Some info, false, _ -> Some (Some info, false)
   | Some info, true, _ -> Some (Some info, true)
 
-let dashboard_deferred_ack_text ~keeper_name =
-  Printf.sprintf
-    "%s is busy; your message is queued and will be answered after the current \
-     turn finishes."
-    keeper_name
+let dashboard_deferred_ack_text ~keeper_name deferred =
+  match deferred.shutdown_operation_id with
+  | Some operation_id ->
+    Printf.sprintf
+      "%s is stopping under operation %s; your message is queued for the next active lane."
+      keeper_name
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | None ->
+    Printf.sprintf
+      "%s is busy; your message is queued and will be answered after the current \
+       turn finishes."
+      keeper_name
 
 let dashboard_deferred_chat_to_json ~keeper_name
-    ({ in_flight; chat_waiting; queue_length; receipt_id } : dashboard_deferred_chat) =
+    ({ in_flight
+     ; chat_waiting
+     ; queue_length
+     ; receipt_id
+     ; shutdown_operation_id
+     } : dashboard_deferred_chat) =
   let in_flight_fields =
     match in_flight with
     | None -> []
@@ -225,10 +238,21 @@ let dashboard_deferred_chat_to_json ~keeper_name
      ; ("queue_length", `Int queue_length)
      ; ("chat_waiting", `Bool chat_waiting)
      ; ("receipt_id", `String receipt_id)
+     ; ( "shutdown_operation_id"
+       , match shutdown_operation_id with
+         | None -> `Null
+         | Some operation_id ->
+           `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
      ]
      @ in_flight_fields)
 
-let enqueue_dashboard_payload ~clock payload ~in_flight ~chat_waiting =
+let enqueue_dashboard_payload
+      ~clock
+      payload
+      ~in_flight
+      ~chat_waiting
+      ~shutdown_operation_id
+  =
   let receipt_id =
     Keeper_chat_queue.enqueue ~keeper_name:payload.name
       { Keeper_chat_queue.content = payload.message
@@ -240,17 +264,34 @@ let enqueue_dashboard_payload ~clock payload ~in_flight ~chat_waiting =
   in
   let queue_length = Keeper_chat_queue.length ~keeper_name:payload.name in
   Keeper_chat_broadcast.queue_changed ~keeper_name:payload.name ~depth:queue_length ();
-  { in_flight; chat_waiting; queue_length; receipt_id }
+  { in_flight; chat_waiting; queue_length; receipt_id; shutdown_operation_id }
 
 let dashboard_deferred_chat_of_rejection ~clock payload
-    ({ Keeper_turn_admission.waiting; in_flight } : Keeper_turn_admission.rejection) =
-  enqueue_dashboard_payload ~clock payload ~in_flight ~chat_waiting:(waiting > 0)
+     ({ Keeper_turn_admission.waiting
+     ; in_flight
+     ; shutdown_operation_id
+     } : Keeper_turn_admission.rejection) =
+  (* Dashboard messages remain durable while a shutdown fence is active;
+     the queue is the continuation boundary for a later resume/replacement
+     lane, rather than starting a turn behind the fence. *)
+  enqueue_dashboard_payload
+    ~clock
+    payload
+    ~in_flight
+    ~chat_waiting:(waiting > 0)
+    ~shutdown_operation_id
 
 let defer_dashboard_payload_if_busy ~base_path ~clock payload =
   match dashboard_busy_queue_state ~base_path ~keeper_name:payload.name with
   | None -> `Not_busy
   | Some (in_flight, chat_waiting) ->
-      `Queued (enqueue_dashboard_payload ~clock payload ~in_flight ~chat_waiting)
+      `Queued
+        (enqueue_dashboard_payload
+           ~clock
+           payload
+           ~in_flight
+           ~chat_waiting
+           ~shutdown_operation_id:None)
 
 let keeper_chat_request_prefixes =
   [
@@ -1496,7 +1537,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
     | Stream_dashboard_queued queued ->
-        let message = dashboard_deferred_ack_text ~keeper_name:payload.name in
+        let message =
+          dashboard_deferred_ack_text ~keeper_name:payload.name queued
+        in
         publish_terminal ~status:"queued" ~ok:true ~message ();
         Keeper_chat_events.publish events (Text_delta message);
         Keeper_chat_events.publish events
@@ -1990,7 +2033,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                       { message_id; role = Keeper_chat_events.Assistant });
                  Keeper_chat_events.publish events
                    (Text_delta
-                      (dashboard_deferred_ack_text ~keeper_name:payload.name));
+                      (dashboard_deferred_ack_text
+                         ~keeper_name:payload.name
+                         queued));
                  Keeper_chat_events.publish events
                    (Custom
                       { name = "KEEPER_CHAT_QUEUED";

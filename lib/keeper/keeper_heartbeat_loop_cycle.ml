@@ -162,7 +162,13 @@ let run_keeper_cycle
          ?hitl_resolution)
   with
   | `Ran updated -> updated
-  | `Busy in_flight ->
+  | `Busy (Keeper_turn_admission.Shutdown_requested operation_id) ->
+    Log.Keeper.info
+      "%s: autonomous turn admission closed by shutdown operation %s"
+      meta_after_triage.name
+      (Keeper_shutdown_types.Operation_id.to_string operation_id);
+    meta_after_triage
+  | `Busy (Keeper_turn_admission.Turn_busy in_flight) ->
     (* Another lane holds this keeper's turn slot (RFC-0225 §3.1): skip the
        cycle and return the pre-cycle meta unchanged. The next heartbeat
        retries naturally — same shape as the pre-existing skip decisions. *)

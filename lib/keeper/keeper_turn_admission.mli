@@ -23,11 +23,41 @@ type in_flight_info =
   ; started_at : float (** Unix epoch seconds when the turn was admitted *)
   }
 
+type autonomous_block =
+  | Turn_busy of in_flight_info option
+  | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
+
 type rejection =
   { waiting : int (** chat requests already waiting on this keeper's slot *)
   ; in_flight : in_flight_info option
     (** the turn holding the slot, if observable at rejection time *)
+  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
+    (** [Some id] when admission is fenced by a durable shutdown operation. *)
   }
+
+type shutdown_reservation =
+  { operation_id : Keeper_shutdown_types.Operation_id.t
+  ; in_flight : in_flight_info option
+  ; waiting : int
+  }
+
+type begin_shutdown_result =
+  | Shutdown_reserved of shutdown_reservation
+  | Shutdown_already_reserved of shutdown_reservation
+
+type rollback_shutdown_result =
+  | Shutdown_rolled_back
+  | Shutdown_not_reserved
+  | Shutdown_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
+type restore_shutdown_result =
+  | Shutdown_restored
+  | Shutdown_already_restored
+  | Shutdown_restore_conflict of Keeper_shutdown_types.Operation_id.t
+
+type 'a registration_commit_result =
+  | Registration_committed of 'a
+  | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 type slot_snapshot =
   { snapshot_keeper_name : string
@@ -38,6 +68,7 @@ type slot_snapshot =
   ; snapshot_waiting_cap : int
   ; snapshot_waiting_full : bool
   ; snapshot_rejected_chat_count : int
+  ; snapshot_shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
 type fleet_snapshot =
@@ -47,6 +78,7 @@ type fleet_snapshot =
   ; fleet_waiting_full_keeper_count : int
   ; fleet_rejected_chat_total : int
   ; fleet_in_flight_keeper_count : int
+  ; fleet_shutdown_keeper_count : int
   ; fleet_slots : slot_snapshot list
   }
 
@@ -64,13 +96,15 @@ val run_if_free
   :  base_path:string
   -> keeper_name:string
   -> (unit -> 'a)
-  -> [ `Ran of 'a | `Busy of in_flight_info option ]
+  -> [ `Ran of 'a | `Busy of autonomous_block ]
 (** Run [f] holding the keeper's turn slot, or return [`Busy] without
     blocking when another turn is in flight. The autonomous lane uses this:
     a busy slot skips the cycle and the next heartbeat retries naturally.
-    [`Busy None] means the slot is held but the holder has not yet published
-    its info (admission in progress on another fiber). Exceptions from [f]
-    (including [Eio.Cancel.Cancelled]) release the slot and re-raise.
+    [`Busy (Turn_busy None)] means the slot is held but the holder has not yet
+    published its info (admission in progress on another fiber).
+    [`Busy (Shutdown_requested id)] means a durable shutdown reservation owns
+    admission. Exceptions from [f] (including [Eio.Cancel.Cancelled]) release
+    the slot and re-raise.
 
     Also returns [`Busy] without attempting the lock when a chat request is
     already parked on this slot ([chat_waiting] is true), or when a busy
@@ -111,8 +145,9 @@ val run_serialized
 (** Run [f] holding the keeper's turn slot, waiting (fiber-cooperatively, in
     Eio.Mutex wakeup order) while another turn is in flight. The chat lane
     uses this: dashboard/connector messages queue rather than error. Returns
-    [`Rejected] only when [max_waiting_chat_requests] chat requests are
-    already waiting. Cancellation while waiting leaves the queue; exceptions
+    [`Rejected] when [max_waiting_chat_requests] chat requests are already
+    waiting or when [shutdown_operation_id] names the durable operation that
+    fenced admission. Cancellation while waiting leaves the queue; exceptions
     from [f] release the slot and re-raise.
 
     Caller contract: a synchronous self-targeted call from inside the same
@@ -130,7 +165,9 @@ val run_chat_if_free
     in-flight turn. Dashboard direct-stream callers use this to preserve live
     streaming for idle keepers while atomically routing busy keepers to the
     durable chat queue. Existing parked chat waiters have priority: when
-    [chat_waiting] is true this returns [`Busy] without attempting the lock. *)
+    [chat_waiting] is true this returns [`Busy] without attempting the lock.
+    [Busy.shutdown_operation_id] distinguishes lifecycle fencing from
+    ordinary turn contention. *)
 
 val in_flight
   :  base_path:string
@@ -142,6 +179,47 @@ val in_flight
     while a turn runs) tolerate the narrow window where a holder has
     locked the slot but not yet published its info — a turn forked on a
     stale [None] simply waits at the slot. *)
+
+(** Atomically close admission for [keeper_name] and snapshot the turn that
+    already owns the slot. New autonomous/chat turns receive the typed
+    [`Shutdown_requested] result after this succeeds. *)
+val begin_shutdown :
+  base_path:string ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  begin_shutdown_result
+
+(** Re-open admission only when [operation_id] still owns the reservation.
+    Used when durable prepare fails before cancellation begins. *)
+val rollback_shutdown :
+  base_path:string ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  rollback_shutdown_result
+
+(** Restore the admission owner from a durable non-terminal shutdown record
+    before boot recovery or same-name registration starts. The operation id is
+    compared as a typed identity; a different in-memory owner is never
+    overwritten. *)
+val restore_shutdown :
+  base_path:string ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  restore_shutdown_result
+
+(** Run the non-yielding registry [commit] only while no shutdown operation
+    owns the Keeper admission fence. Shutdown reservation and same-name lane
+    installation are therefore totally ordered. *)
+val commit_registration_if_open :
+  base_path:string ->
+  keeper_name:string ->
+  (unit -> 'a) ->
+  'a registration_commit_result
+
+(** Join the current turn holder after admission has been closed. This waits
+    without an invented timeout, then immediately releases the slot. Never
+    call from the same admitted turn. *)
+val await_idle_after_shutdown : base_path:string -> keeper_name:string -> unit
 
 val snapshot_for : base_path:string -> keeper_name:string -> slot_snapshot
 (** Raw, read-only admission state for one keeper. Unknown keepers return a

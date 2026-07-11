@@ -452,8 +452,31 @@ let () =
   Atomic.set
     Workspace_hooks.operator_pending_confirm_remove_fn
     Operator_pending_confirm.remove_pending_confirm;
+  Operator_pending_confirm.register_target_gate
+    (fun config target ->
+      match target.Operator_pending_confirm.target_type, target.target_id with
+      | Operator_action_constants.Keeper, Some keeper_name ->
+        let admission =
+          Keeper_turn_admission.snapshot_for
+            ~base_path:config.Workspace.base_path
+            ~keeper_name
+        in
+        (match admission.snapshot_shutdown_operation_id with
+         | None -> Ok ()
+         | Some operation_id ->
+           Error
+             (Printf.sprintf
+                "Keeper %s is shutting down under operation %s"
+                keeper_name
+                (Keeper_shutdown_types.Operation_id.to_string operation_id)))
+      | Operator_action_constants.Keeper, None ->
+        Error "Keeper pending-confirm target requires target_id"
+      | (Operator_action_constants.Workspace | Operator_action_constants.Goal), _ -> Ok ());
   Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
-    Operator_pending_confirm.remove_pending_confirms_by_target
+    (fun config ~target_type ~target_id ->
+      Operator_pending_confirm.remove_pending_confirms_by_typed_target
+        config
+        { Operator_pending_confirm.target_type = target_type; target_id })
 ;;
 
 let force_link = ()

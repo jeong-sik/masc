@@ -265,7 +265,8 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                | Masc_domain.Claimed { assignee; _ }
                | Masc_domain.InProgress { assignee; _ }
                | Masc_domain.AwaitingVerification { assignee; _ } -> assignee = agent_name
-               | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false
+               | Masc_domain.Done _ | Masc_domain.Cancelled _
+               | Masc_domain.OperatorBlocked _ -> false
              in
              if not can_cancel
              then

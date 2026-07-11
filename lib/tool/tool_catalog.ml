@@ -70,7 +70,7 @@ type metadata = {
   idempotent : bool option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
-  required_permission : Masc_domain.permission option;
+  required_permission : Masc_domain.permission;
 }
 
 (* ================================================================ *)
@@ -92,7 +92,7 @@ let default_metadata =
     idempotent = None;
     effect_domain = None;
     requires_actor_binding = None;
-    required_permission = None;
+    required_permission = Masc_domain.CanBroadcast;
   }
 
 (* Runtime-readable like MASC_FULL_SURFACE so tests and local admin flows can
@@ -120,7 +120,7 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     idempotent = None;
     effect_domain = None;
     requires_actor_binding = None;
-    required_permission = None;
+    required_permission = Masc_domain.CanBroadcast;
   }
 
 let with_semantic_flags ?readonly ?mcp_context_required
@@ -148,7 +148,7 @@ let with_semantic_flags ?readonly ?mcp_context_required
       | None -> meta.requires_actor_binding);
     required_permission =
       (match required_permission with
-      | Some value -> Some value
+      | Some value -> value
       | None -> meta.required_permission);
   }
 
@@ -573,12 +573,9 @@ let metadata_to_fields name =
     | Some value -> ("requiresActorBinding", `Bool value) :: with_mcp_context_required
     | None -> with_mcp_context_required
   in
-  (match meta.required_permission with
-   | Some permission ->
-       ( "requiredPermission",
-         `String (Masc_domain.permission_to_string permission) )
-       :: with_actor_binding
-   | None -> with_actor_binding)
+  ( "requiredPermission",
+    `String (Masc_domain.permission_to_string meta.required_permission) )
+  :: with_actor_binding
 
 let public_contract_fields name =
   let meta = metadata name in
@@ -606,12 +603,9 @@ let public_contract_fields name =
     | None -> with_actor_binding
   in
   let with_required_permission =
-    match meta.required_permission with
-    | Some permission ->
-        ( "requiredPermission",
-          `String (Masc_domain.permission_to_string permission) )
-        :: with_mcp_context_required
-    | None -> with_mcp_context_required
+    ( "requiredPermission",
+      `String (Masc_domain.permission_to_string meta.required_permission) )
+    :: with_mcp_context_required
   in
   match meta.canonical_name with
   | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_required_permission

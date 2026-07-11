@@ -130,10 +130,9 @@ let register (spec : t) =
   in
   let required_permission =
     match spec.required_permission with
-    | Some _ as value -> value
+    | Some value -> value
     | None ->
-        Option.bind existing (fun (meta : Tool_catalog.metadata) ->
-          meta.required_permission)
+        (Tool_catalog.metadata spec.name).required_permission
   in
   Tool_catalog.register_metadata spec.name
     { Tool_catalog.visibility = effective_visibility;

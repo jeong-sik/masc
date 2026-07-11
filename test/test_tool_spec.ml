@@ -190,7 +190,7 @@ let () =
             check bool "requires_actor_binding" true
               (meta.requires_actor_binding = Some true);
             check bool "required_permission" true
-              (meta.required_permission = Some Masc_domain.CanAdmin);
+              (meta.required_permission = Masc_domain.CanAdmin);
             check bool "hidden" true (meta.visibility = Tool_catalog.Hidden);
             check bool "reason" true (meta.reason = Some "test hidden"));
           test_case "register preserves catalog actor binding by default" `Quick (fun () ->
@@ -217,7 +217,7 @@ let () =
             let name = "__test_spec_preserve_permission" in
             let existing = Tool_catalog.metadata name in
             Tool_catalog.register_metadata name
-              { existing with required_permission = Some Masc_domain.CanAdmin };
+              { existing with required_permission = Masc_domain.CanAdmin };
             let spec =
               Tool_spec.create
                 ~name
@@ -230,7 +230,7 @@ let () =
             Tool_spec.register spec;
             let meta = Tool_catalog.metadata name in
             check bool "required_permission preserved" true
-              (meta.required_permission = Some Masc_domain.CanAdmin));
+              (meta.required_permission = Masc_domain.CanAdmin));
           test_case "empty name rejected" `Quick (fun () ->
             check_raises "invalid_arg"
               (Invalid_argument "Tool_spec.register: name must not be empty")

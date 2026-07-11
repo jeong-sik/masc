@@ -283,10 +283,7 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
   if is_known_or_internal_tool_name tool_name
   then
-    let permission =
-      (Tool_catalog.metadata tool_name).required_permission
-      |> Option.value ~default:CanBroadcast
-    in
+    let permission = (Tool_catalog.metadata tool_name).required_permission in
     if has_permission role permission
     then Ok ()
     else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
@@ -299,8 +296,8 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
 ;;
 
 (** Role-based tool authorization.
-    Resolves the caller role and enforces the catalog-owned permission when
-    present. Destructive metadata remains a risk/HITL signal and does not by
+    Resolves the caller role and enforces the catalog-owned permission.
+    Destructive metadata remains a risk/HITL signal and does not by
     itself turn every Keeper tool into an Admin-only operation. Invalid or
     expired tokens are rejected rather than silently downgraded. *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =

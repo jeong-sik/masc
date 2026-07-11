@@ -1127,9 +1127,9 @@ let test_authorize_tool_v2_destructive_risk_is_not_implicit_admin () =
     (Some true)
     metadata.destructive;
   check bool
-    "destructive risk does not imply an admin permission"
+    "destructive risk keeps the closed broadcast permission"
     true
-    (Option.is_none metadata.required_permission);
+    (metadata.required_permission = Masc_domain.CanBroadcast);
   match
     Auth.authorize_tool_for_role
       ~agent_name:"board-author"

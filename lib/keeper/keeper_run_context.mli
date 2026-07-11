@@ -36,23 +36,16 @@ val build_base_system_prompt :
 (** Build the keeper base system prompt from the same persisted meta/profile
     inputs used by {!prepare_run_context}. *)
 
-val resolve_max_tokens_for_runtime_with_profile :
+val resolve_turn_max_tokens :
      keeper_name:string
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
-  -> runtime_id:string
   -> ?max_tokens:int
   -> unit
   -> int option
-(** Resolve the keeper turn max-token request value for a concrete runtime id.
-
-    [Some caller_override] wins when [max_tokens] is an explicit argument
-    and passes through unchanged (the OAS provider serializer owns
-    validation/clamp against the catalog ceiling, oas#2517).
-    Otherwise, an explicit per-keeper profile/env override
-    ([MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS] via
-    {!Keeper_types_profile.unified_max_tokens_override_of_oas_env}) wins.
-    Absent both, the result is [None]: the caller must not synthesize a
-    request value — no [max_tokens] field goes on the request. *)
+(** Resolve output-token intent exactly once at turn start. An explicit caller
+    value wins; otherwise the validated keeper profile override is used.
+    Absent both, return [None]. Runtime candidates must receive this result
+    unchanged. *)
 
 val prepare_run_context :
      config:Workspace.config
@@ -69,4 +62,6 @@ val prepare_run_context :
   -> run_context
 (** Resolve [temperature] as the caller fallback; a temperature declared by the
     selected runtime model always wins. [profile_defaults] is the immutable
-    pre-dispatch snapshot and is never reloaded inside this function. *)
+    pre-dispatch snapshot. [max_tokens] is resolved once from the explicit
+    caller value or that snapshot and remains unchanged for every runtime
+    candidate in this turn. *)

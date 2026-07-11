@@ -439,16 +439,6 @@ let approved_action_matches_request
   && String.equal approved.input_hash (normalized_input_hash input)
 ;;
 
-type approval_resolution_delivery_hook =
-  base_path:string
-  -> keeper_name:string
-  -> approval_id:string
-  -> decision:Keeper_event_queue.hitl_resolution_decision
-  -> channel:Keeper_continuation_channel.t
-  -> (unit -> unit, string) result
-
-let approval_resolution_wake_hook : approval_resolution_delivery_hook option ref = ref None
-
 let first_cmd_token (cmd : string) =
   Keeper_tool_command_words.first_token_of_cmd cmd
 ;;
@@ -463,7 +453,6 @@ module For_testing = struct
   let first_cmd_token = first_cmd_token
 
   let get_pending_entry ~id = SMap.find_opt id (Atomic.get pending)
-  let clear_approval_resolution_wake_hook () = approval_resolution_wake_hook := None
 end
 
 let action_key_of_input ~tool_name ~(input : Yojson.Safe.t) =
@@ -881,22 +870,6 @@ let spawn_hitl_summary_worker_on_root_switch ~(entry : pending_approval) =
        record_summary_failure ~id:entry.id ~reason ~retryable:false)
 ;;
 
-(* Wake an independent-cycle Keeper after its approval resolves. A
-   [Nonblocking] approval does not own a suspended fiber or a lifecycle pause,
-   so the composition root registers a hook that enqueues a [Hitl_resolved]
-   stimulus — the same async-completion-wake mechanism [Fusion_completed]
-   (RFC-0266) and [Bg_completed] (RFC-0290) use — so the keeper re-evaluates
-   immediately instead of waiting for an unrelated stimulus, no-progress
-   recovery, or the 30-minute approval janitor. [Blocking] entries resume their
-   own resolver or lifecycle callback and do not call this hook.
-
-   Injected as a hook rather than a direct call to break a dependency cycle:
-   this module sits below [Keeper_keepalive_signal], which depends on
-   [Keeper_world_observation], which depends back on this module for
-   [has_blocking_pending_for_keeper]. Until [Server_bootstrap] installs the
-   delivery hook, nonblocking resolution fails explicitly and remains pending. *)
-let set_approval_resolution_wake_hook f = approval_resolution_wake_hook := Some f
-
 let record_resolution_delivery_failure ~keeper_name ~approval_id reason =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)
@@ -913,8 +886,28 @@ let record_resolution_delivery_failure ~keeper_name ~approval_id reason =
     reason
 ;;
 
-let signal_resolution_after_commit ~keeper_name ~approval_id signal =
-  try signal () with
+let signal_resolution_after_commit ~base_path ~keeper_name ~approval_id =
+  try
+    let outcome = Keeper_registry.wakeup_running ~base_path keeper_name in
+    let outcome_label, detail =
+      match outcome with
+      | Keeper_registry.Signaled -> "signaled", "running"
+      | Keeper_registry.Deferred_unregistered ->
+        "deferred_unregistered", "unregistered"
+      | Keeper_registry.Deferred_not_running phase ->
+        "deferred_not_running", Keeper_state_machine.phase_to_string phase
+    in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ApprovalResolutionSignal)
+      ~labels:[ "keeper", keeper_name; "outcome", outcome_label ]
+      ();
+    Log.Keeper.info
+      ~keeper_name
+      "hitl resolution committed approval=%s signal=%s phase=%s"
+      approval_id
+      outcome_label
+      detail
+  with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Otel_metric_store.inc_counter
@@ -931,24 +924,25 @@ let signal_resolution_after_commit ~keeper_name ~approval_id signal =
       (Printexc.to_string exn)
 ;;
 
-let wake_keeper_on_approval_resolution
+let commit_keeper_approval_resolution
     ~base_path ~keeper_name ~approval_id ~decision
     ~(channel : Keeper_continuation_channel.t) =
-  match !approval_resolution_wake_hook with
-  | None ->
-    let reason = "approval resolution delivery hook is not installed" in
+  match
+    try
+      Keeper_registry_event_queue.enqueue_hitl_resolution_durable_result
+        ~base_path
+        ~keeper_name
+        ~approval_id
+        ~decision
+        ~channel
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  with
+  | Ok () -> Ok ()
+  | Error reason ->
     record_resolution_delivery_failure ~keeper_name ~approval_id reason;
     Error reason
-  | Some deliver ->
-    (match
-       try deliver ~base_path ~keeper_name ~approval_id ~decision ~channel with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn -> Error (Printexc.to_string exn)
-     with
-     | Ok signal -> Ok signal
-     | Error reason ->
-       record_resolution_delivery_failure ~keeper_name ~approval_id reason;
-       Error reason)
 ;;
 
 let hitl_resolution_decision_of_approval_decision
@@ -964,12 +958,16 @@ let hitl_resolution_decision_of_approval_decision
   | Agent_sdk.Hooks.Edit _ -> Keeper_event_queue.Hitl_edited
 ;;
 
+type committed_resolution =
+  | Blocking_owned
+  | Nonblocking_durable
+
 let deliver_resolution ~base_path (entry : pending_approval) decision =
   match entry.lane_policy with
-  | Blocking -> Ok None
+  | Blocking -> Ok Blocking_owned
   | Nonblocking ->
     (match
-       wake_keeper_on_approval_resolution
+       commit_keeper_approval_resolution
          ~base_path
          ~keeper_name:entry.keeper_name
          ~approval_id:entry.id
@@ -977,7 +975,7 @@ let deliver_resolution ~base_path (entry : pending_approval) decision =
          ~channel:entry.continuation_channel
      with
      | Error _ as err -> err
-     | Ok signal -> Ok (Some signal))
+     | Ok () -> Ok Nonblocking_durable)
 ;;
 
 let resolve_entry
@@ -1476,7 +1474,7 @@ let resolve_with_policy
          | Some entry ->
            (match deliver_resolution ~base_path entry decision with
             | Error reason -> Error (Delivery_failed { approval_id = id; reason })
-            | Ok signal ->
+            | Ok committed ->
               (* Durable delivery is the commit point for nonblocking entries.
                  Keep the approval queryable while its callback applies the
                  approved domain mutation; intake defers this exact resolution
@@ -1497,11 +1495,13 @@ let resolve_with_policy
                 | Nonblocking -> atomic_update pending (fun map -> SMap.remove id map)
               in
               resolve_entry ~before_terminal_publish ~base_path entry decision;
-              Option.iter
-                (signal_resolution_after_commit
+              (match committed with
+               | Blocking_owned -> ()
+               | Nonblocking_durable ->
+                 signal_resolution_after_commit
+                   ~base_path
                    ~keeper_name:entry.keeper_name
-                   ~approval_id:id)
-                signal;
+                   ~approval_id:id);
               Ok { remembered_rule }))
 ;;
 

@@ -17,25 +17,6 @@ module Metrics = Masc.Otel_metric_store
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
-(* Mirror the server composition root so resolution success proves a durable
-   typed wake was committed; no test-only success hook is permitted. *)
-let () =
-  AQ.set_approval_resolution_wake_hook
-    (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
-      match
-        Masc.Keeper_registry_event_queue.enqueue_hitl_resolution_durable_result
-          ~base_path
-          ~keeper_name
-          ~approval_id
-          ~decision
-          ~channel
-      with
-      | Error _ as error -> error
-      | Ok () ->
-        Ok (fun () ->
-          Masc.Keeper_keepalive_signal.wakeup_keeper ~base_path keeper_name))
-;;
-
 let reason_testable =
   let pp ppf reason = Format.pp_print_string ppf (D.to_telemetry_key reason) in
   Alcotest.testable pp ( = )
@@ -439,6 +420,47 @@ let resolve_or_fail ~id decision =
     Alcotest.failf "approval resolve failed: %s" (AQ.resolve_error_to_string err)
 ;;
 
+let require_durable_resolution
+    ~base_path
+    ~(entry : AQ.pending_approval)
+    ~expected_decision
+  =
+  let matching =
+    Masc.Keeper_registry_event_queue.snapshot ~base_path entry.keeper_name
+    |> Keeper_event_queue.to_list
+    |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Hitl_resolved resolution
+        when String.equal resolution.approval_id entry.id ->
+        Some (stimulus, resolution)
+      | _ -> None)
+  in
+  match matching with
+  | [ stimulus, resolution ] ->
+    Alcotest.(check string)
+      "resolution post id is canonical"
+      (Keeper_event_queue.hitl_resolution_post_id resolution)
+      stimulus.post_id;
+    (match expected_decision, resolution.decision with
+     | `Approved, Keeper_event_queue.Hitl_approved action ->
+       Alcotest.(check bool)
+         "approved wake preserves exact request identity"
+         true
+         (AQ.approved_action_matches_request
+            action
+            ~keeper_name:entry.keeper_name
+            ~tool_name:entry.tool_name
+            ~input:entry.input)
+     | `Rejected, Keeper_event_queue.Hitl_rejected -> ()
+     | (`Approved | `Rejected), _ ->
+       Alcotest.fail "durable resolution decision changed")
+  | rows ->
+    Alcotest.failf
+      "expected one durable resolution for %s, got %d"
+      entry.id
+      (List.length rows)
+;;
+
 let test_gh_approval_resolution_does_not_install_retry_grant () =
   let base_path = temp_dir () in
   let approval_ids = ref [] in
@@ -459,17 +481,31 @@ let test_gh_approval_resolution_does_not_install_retry_grant () =
     (fun () ->
        let before = AQ.pending_count () in
        let first_id = remember (submit_test_gh_approval_pending ~base_path ()) in
+       let first_entry =
+         match AQ.get_pending_entry ~id:first_id with
+         | Some entry -> entry
+         | None -> Alcotest.fail "first pending approval is missing"
+       in
        Alcotest.(check int)
          "first request pending"
          (before + 1)
          (AQ.pending_count ());
        resolve_or_fail ~id:first_id Agent_sdk.Hooks.Approve;
+       require_durable_resolution
+         ~base_path
+         ~entry:first_entry
+         ~expected_decision:`Approved;
        forget first_id;
        Alcotest.(check int)
          "approval removed from pending queue"
          before
          (AQ.pending_count ());
        let second_id = remember (submit_test_gh_approval_pending ~base_path ()) in
+       let second_entry =
+         match AQ.get_pending_entry ~id:second_id with
+         | Some entry -> entry
+         | None -> Alcotest.fail "second pending approval is missing"
+       in
        Alcotest.(check bool)
          "retry creates a fresh pending approval"
          true
@@ -479,6 +515,10 @@ let test_gh_approval_resolution_does_not_install_retry_grant () =
          (before + 1)
          (AQ.pending_count ());
        resolve_or_fail ~id:second_id (Agent_sdk.Hooks.Reject "test cleanup");
+       require_durable_resolution
+         ~base_path
+         ~entry:second_entry
+         ~expected_decision:`Rejected;
        forget second_id;
        Alcotest.(check int) "cleanup restores pending count" before (AQ.pending_count ()))
 ;;

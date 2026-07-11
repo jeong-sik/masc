@@ -1,26 +1,6 @@
 module Claim = Masc.Keeper_repo_claim_hitl
 module AQ = Masc.Keeper_approval_queue
 
-(* Mirror the server composition root: a nonblocking decision is acknowledged
-   only after its typed [Hitl_resolved] stimulus is durable. The live wake is a
-   hint and safely finds no registered keeper in these repository fixtures. *)
-let () =
-  AQ.set_approval_resolution_wake_hook
-    (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
-      match
-        Masc.Keeper_registry_event_queue.enqueue_hitl_resolution_durable_result
-          ~base_path
-          ~keeper_name
-          ~approval_id
-          ~decision
-          ~channel
-      with
-      | Error _ as error -> error
-      | Ok () ->
-        Ok (fun () ->
-          Masc.Keeper_keepalive_signal.wakeup_keeper ~base_path keeper_name))
-;;
-
 open Repo_manager_types
 
 let contains_substring s needle =
@@ -246,6 +226,45 @@ let require_one_pending ~keeper_id =
       (List.length entries)
 ;;
 
+let require_approved_resolution
+    ~base_path
+    (entry : AQ.pending_approval)
+  =
+  let matching =
+    Masc.Keeper_registry_event_queue.snapshot ~base_path entry.keeper_name
+    |> Keeper_event_queue.to_list
+    |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Hitl_resolved resolution
+        when String.equal resolution.approval_id entry.id ->
+        Some (stimulus, resolution)
+      | _ -> None)
+  in
+  match matching with
+  | [ stimulus, resolution ] ->
+    Alcotest.(check string)
+      "resolution post id is canonical"
+      (Keeper_event_queue.hitl_resolution_post_id resolution)
+      stimulus.post_id;
+    (match resolution.decision with
+     | Keeper_event_queue.Hitl_approved action ->
+       Alcotest.(check bool)
+         "resolution preserves the exact approved request"
+         true
+         (AQ.approved_action_matches_request
+            action
+            ~keeper_name:entry.keeper_name
+            ~tool_name:entry.tool_name
+            ~input:entry.input)
+     | Keeper_event_queue.Hitl_rejected | Keeper_event_queue.Hitl_edited ->
+       Alcotest.fail "approved repository mutation emitted a non-approved resolution")
+  | rows ->
+    Alcotest.failf
+      "expected one durable resolution for %s, got %d"
+      entry.id
+      (List.length rows)
+;;
+
 let string_field key json =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
@@ -338,6 +357,7 @@ let test_unregistered_clone_requests_hitl_and_approval_registers_repo () =
     (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    require_approved_resolution ~base_path pending;
     match Repo_store.find ~base_path "not-registered" with
     | Error detail -> Alcotest.fail ("approved registration did not persist: " ^ detail)
     | Ok repo ->
@@ -374,6 +394,7 @@ let test_registration_approval_rechecks_clone_origin () =
     (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    require_approved_resolution ~base_path pending;
     match Repo_store.find ~base_path "not-registered" with
     | Error _ -> ()
     | Ok _ -> Alcotest.fail "stale approved registration must not persist")
@@ -418,6 +439,7 @@ let test_unregistered_clone_matching_existing_remote_requests_alias () =
     (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    require_approved_resolution ~base_path pending;
     match Repo_store.find ~base_path "masc" with
     | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
     | Ok repo ->
@@ -529,6 +551,7 @@ let test_nested_git_root_queues_manual_review_without_alias () =
     (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    require_approved_resolution ~base_path pending;
     match Repo_store.find ~base_path "masc" with
     | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
     | Ok repo ->
@@ -568,6 +591,7 @@ let test_alias_approval_rechecks_clone_origin () =
     (match AQ.resolve ~id:pending.id ~decision:Agent_sdk.Hooks.Approve with
      | Ok () -> ()
      | Error err -> Alcotest.fail (AQ.resolve_error_to_string err));
+    require_approved_resolution ~base_path pending;
     match Repo_store.find ~base_path "masc" with
     | Error detail -> Alcotest.fail ("existing repo disappeared: " ^ detail)
     | Ok repo ->

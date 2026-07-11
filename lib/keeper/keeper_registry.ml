@@ -406,6 +406,20 @@ let wakeup ~base_path name =
   | None -> ()
 ;;
 
+type wakeup_running_outcome =
+  | Signaled
+  | Deferred_unregistered
+  | Deferred_not_running of Keeper_state_machine.phase
+
+let wakeup_running ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> Deferred_unregistered
+  | Some entry when entry.phase = Keeper_state_machine.Running ->
+    Atomic.set entry.fiber_wakeup true;
+    Signaled
+  | Some entry -> Deferred_not_running entry.phase
+;;
+
 let wakeup_all ?base_path () =
   StringMap.iter
     (fun _k entry ->

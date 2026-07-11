@@ -70,6 +70,7 @@ type t =
   | WriteMetaFailures
   | MetaReadFailures
   | ApprovalQueueFailures
+  | ApprovalResolutionSignal
   | GuardsFailures
   | ProfileLoadFailures
   | CompactAuditFailures
@@ -331,6 +332,7 @@ let to_string = function
   | WriteMetaFailures -> "masc_keeper_write_meta_failures_total"
   | MetaReadFailures -> "masc_keeper_meta_read_failures_total"
   | ApprovalQueueFailures -> "masc_keeper_approval_queue_failures_total"
+  | ApprovalResolutionSignal -> "masc_keeper_approval_resolution_signal_total"
   | GuardsFailures -> "masc_keeper_guards_failures_total"
   | ProfileLoadFailures -> "masc_keeper_profile_load_failures_total"
   | CompactAuditFailures -> "masc_keeper_compact_audit_failures_total"

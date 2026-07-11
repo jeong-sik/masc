@@ -1212,10 +1212,11 @@ let add_routes ~sw ~clock router =
                (operator_error_json "schedule_id is required")
            | Some schedule_id ->
              let cursor =
-               Server_utils.query_param req "cursor"
-               |> Option.map String.trim
-               |> Option.bind (fun cursor ->
-                 if String.equal cursor "" then None else Some cursor)
+               match
+                 Server_utils.query_param req "cursor" |> Option.map String.trim
+               with
+               | Some cursor when not (String.equal cursor "") -> Some cursor
+               | None | Some _ -> None
              in
              let limit =
                Server_utils.int_query_param req "limit" ~default:50

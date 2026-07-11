@@ -79,6 +79,7 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
        [predecessor_task_id]. *)
     Held_terminal task.task_status
   | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
+  | Masc_domain.OperatorBlocked { blocked_by; _ } -> Held_by_other blocked_by
 ;;
 
 (* RFC-0262: a transition that overrides the assignee guard is permitted when
@@ -266,6 +267,8 @@ let decide
       | Masc_domain.Done _
       | Masc_domain.Cancelled _ ) ) ->
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
+  (* ── OperatorBlocked: reject all actions ────────────────────── *)
+  | _, Masc_domain.OperatorBlocked _ -> Error Invalid_transition
 ;;
 
 (* Enumerate the actions that [decide] would accept for the given status under

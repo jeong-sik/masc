@@ -181,7 +181,8 @@ let cleanup_zombies
                    ("ts", `String (now_iso ()));
                  ]))
         | Masc_domain.Claimed _ | Masc_domain.InProgress _
-        | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ()
+        | Todo | AwaitingVerification _ | Done _ | Cancelled _
+        | OperatorBlocked _ -> ()
       ) backlog.tasks;
 
       (* Phase 4: Delete files — skip agents with release failures *)

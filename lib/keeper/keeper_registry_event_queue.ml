@@ -125,6 +125,26 @@ let enqueue_durable_result ~base_path name stimulus =
     (fun queue -> enqueue_external_decision queue stimulus)
 ;;
 
+let enqueue_hitl_resolution_durable_result
+    ~base_path
+    ~keeper_name
+    ~approval_id
+    ~decision
+    ~channel
+  =
+  let resolution : Keeper_event_queue.hitl_resolution =
+    { approval_id; decision; channel }
+  in
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id = Keeper_event_queue.hitl_resolution_post_id resolution
+    ; urgency = Keeper_event_queue.Immediate
+    ; arrived_at = Time_compat.now ()
+    ; payload = Keeper_event_queue.Hitl_resolved resolution
+    }
+  in
+  enqueue_durable_result ~base_path keeper_name stimulus
+;;
+
 let requeue_front ~base_path name stimuli =
   match stimuli with
   | [] -> ()

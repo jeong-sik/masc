@@ -17,16 +17,20 @@ module SDH = Server_dashboard_http
 module KT = Keeper_types
 module Mcp_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
-
-let install_noop_resolution_delivery_hook () =
-  AQ.set_approval_resolution_wake_hook
-    (fun
-      ~base_path:_ ~keeper_name:_ ~approval_id:_ ~decision:_ ~channel:_ ->
-      Ok (fun () -> ()))
-
-let () = install_noop_resolution_delivery_hook ()
+module Registry_queue = Masc.Keeper_registry_event_queue
 
 let check = Alcotest.(check string)
+
+let durable_resolution_opt ~base_path ~keeper_name ~approval_id =
+  Registry_queue.snapshot ~base_path keeper_name
+  |> Keeper_event_queue.to_list
+  |> List.find_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+    match stimulus.payload with
+    | Keeper_event_queue.Hitl_resolved resolution
+      when String.equal resolution.approval_id approval_id ->
+      Some resolution
+    | _ -> None)
+;;
 
 let temp_dir () =
   let dir = Filename.temp_file "test_hitl_approval_" "" in
@@ -1436,15 +1440,13 @@ let test_approval_resolve_missing_decision_is_rejected () =
 
 let test_approval_delivery_failure_is_unavailable () =
   let workspace_base = temp_dir () in
-  AQ.For_testing.clear_approval_resolution_wake_hook ();
   Fun.protect
-    ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
-      cleanup_dir workspace_base)
+    ~finally:(fun () -> cleanup_dir workspace_base)
     (fun () ->
+       let keeper_name = "dashboard-delivery-failure-keeper" in
        let id =
          AQ.submit_pending
-           ~keeper_name:"dashboard-delivery-failure-keeper"
+           ~keeper_name
            ~tool_name:"masc_transition"
            ~input:(`Assoc [ "action", `String "claim" ])
            ~risk_level:AQ.Medium
@@ -1452,6 +1454,21 @@ let test_approval_delivery_failure_is_unavailable () =
            ~on_resolution:(fun _ -> ())
            ()
        in
+       let entry =
+         match AQ.get_pending_entry ~id with
+         | Some entry -> entry
+         | None -> Alcotest.fail "pending approval disappeared before conflict setup"
+       in
+       (match
+          Registry_queue.enqueue_hitl_resolution_durable_result
+            ~base_path:workspace_base
+            ~keeper_name
+            ~approval_id:id
+            ~decision:Keeper_event_queue.Hitl_rejected
+            ~channel:entry.continuation_channel
+        with
+        | Ok () -> ()
+        | Error reason -> Alcotest.fail ("conflict setup failed: " ^ reason));
        let args =
          `Assoc [ "id", `String id; "decision", `String "approve" ]
        in
@@ -1749,22 +1766,9 @@ let test_callback_nonblocking_high_returns_without_suspending () =
       ]
   in
   let base_path = temp_dir () in
-  let captured_resolution = ref None in
-  AQ.set_approval_resolution_wake_hook
-    (fun ~base_path:_ ~keeper_name:_ ~approval_id ~decision ~channel ->
-       Ok
-         (fun () ->
-            captured_resolution :=
-              Some
-                Keeper_event_queue.
-                  { approval_id
-                  ; decision
-                  ; channel
-                  }));
   AQ.For_testing.reset_audit_store ();
   Fun.protect
     ~finally:(fun () ->
-      install_noop_resolution_delivery_hook ();
       AQ.For_testing.reset_audit_store ();
       cleanup_dir base_path)
     (fun () ->
@@ -1810,7 +1814,7 @@ let test_callback_nonblocking_high_returns_without_suspending () =
         initial_pending
         (AQ.pending_count ());
       let grant =
-        match !captured_resolution with
+        match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
         | Some resolution ->
           (match GP.hitl_approval_grant_of_resolution resolution with
            | Some grant -> grant

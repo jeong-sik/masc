@@ -5,7 +5,6 @@ Parses dune S-expressions properly (handling multiline, nested forms, strings,
 and comments) to avoid the false-positive flood from regex-based approaches.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -37,7 +36,7 @@ def tokenize(content: str):
             i += 1  # skip closing quote
         else:
             start = i
-            while i < n and content[i] not in "() \t\n\r;\"":
+            while i < n and content[i] not in '() \t\n\r;"':
                 i += 1
             tokens.append(("atom", content[start:i]))
     return tokens
@@ -62,7 +61,11 @@ def extract_test_names(tokens):
             if i + 1 < n and isinstance(tokens[i + 1], tuple):
                 stanza = tokens[i + 1][1]
                 if stanza == "tests":
-                    # Scan inside this (tests ...) block for (names ...)
+                    # Scan inside this (tests ...) block for executable names
+                    # and explicitly registered support modules. A support
+                    # module need not be an executable entry point, but it is
+                    # still registered in Dune and must not be reported as an
+                    # unregistered source file.
                     j = i + 2
                     depth = 1
                     while j < n and depth > 0:
@@ -72,9 +75,9 @@ def extract_test_names(tokens):
                                 depth == 2
                                 and j + 1 < n
                                 and isinstance(tokens[j + 1], tuple)
-                                and tokens[j + 1][1] == "names"
+                                and tokens[j + 1][1] in ("names", "modules")
                             ):
-                                # collect atoms inside (names ...)
+                                # collect atoms inside (names ...)/(modules ...)
                                 k = j + 2
                                 names_depth = 1
                                 while k < n and names_depth > 0:
@@ -84,7 +87,10 @@ def extract_test_names(tokens):
                                         names_depth -= 1
                                         if names_depth == 0:
                                             break
-                                    elif isinstance(tokens[k], tuple) and tokens[k][0] == "atom":
+                                    elif (
+                                        isinstance(tokens[k], tuple)
+                                        and tokens[k][0] == "atom"
+                                    ):
                                         tests.add(tokens[k][1])
                                     k += 1
                                 j = k
@@ -99,9 +105,18 @@ def extract_test_names(tokens):
                     while j < n and depth > 0:
                         if tokens[j] == "(":
                             depth += 1
-                            if depth == 2 and j + 1 < n and isinstance(tokens[j + 1], tuple):
+                            if (
+                                depth == 2
+                                and j + 1 < n
+                                and isinstance(tokens[j + 1], tuple)
+                            ):
                                 field = tokens[j + 1][1]
-                                if field == "name" and j + 2 < n and isinstance(tokens[j + 2], tuple) and tokens[j + 2][0] == "atom":
+                                if (
+                                    field == "name"
+                                    and j + 2 < n
+                                    and isinstance(tokens[j + 2], tuple)
+                                    and tokens[j + 2][0] == "atom"
+                                ):
                                     tests.add(tokens[j + 2][1])
                                 elif field == "modules":
                                     # collect atoms inside (modules ...)
@@ -114,7 +129,10 @@ def extract_test_names(tokens):
                                             modules_depth -= 1
                                             if modules_depth == 0:
                                                 break
-                                        elif isinstance(tokens[k], tuple) and tokens[k][0] == "atom":
+                                        elif (
+                                            isinstance(tokens[k], tuple)
+                                            and tokens[k][0] == "atom"
+                                        ):
                                             tests.add(tokens[k][1])
                                         k += 1
                                     j = k

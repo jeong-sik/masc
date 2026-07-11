@@ -1340,7 +1340,7 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
     ~finally:(fun () -> Config_dir_resolver.reset ())
     (fun () ->
       let json =
-        Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+        Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
       in
       let open Yojson.Safe.Util in
       Alcotest.(check int)
@@ -1360,7 +1360,7 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
         "[keeper]\nautoboot_enabled = true\n";
       Config_dir_resolver.reset ();
       let json =
-        Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+        Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
       in
       Alcotest.(check int)
         "configured_keepers includes explicit autoboot base keeper"

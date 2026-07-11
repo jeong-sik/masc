@@ -61,6 +61,7 @@ type t =
   | WriteMetaFailures
   | MetaReadFailures
   | ApprovalQueueFailures
+  | ApprovalResolutionSignal
   | GuardsFailures
   | ProfileLoadFailures
   | CompactAuditFailures
@@ -255,7 +256,7 @@ val emit_runtime_selected :
 val emit_runtime_rotation :
   keeper_name:string -> from_runtime:string -> to_runtime:string -> reason:string -> unit
 
-(** Every constructor of [t] in declaration order.  Keep in sync when
-    adding constructors (the [to_string] exhaustive match in the .ml
-    forces an edit in the same file). *)
+(** Every constructor of [t], generated from the type declaration by
+    [ppx_enumerate].  Membership is compiler-maintained; list order is not a
+    public contract. *)
 val all : t list

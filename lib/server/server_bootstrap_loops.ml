@@ -550,45 +550,6 @@ let start_keeper_loops
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
       ~config:(Mcp_server.workspace_config state)
       signal);
-  (* Commit a resolved HITL decision to the keeper's durable lane, then signal
-     the live fiber as a hint. Registered here (composition root) rather than in
-     Keeper_approval_queue to break the Keeper_approval_queue ->
-     Keeper_keepalive_signal -> Keeper_world_observation ->
-     Keeper_approval_queue dependency cycle. *)
-  Keeper_approval_queue.set_approval_resolution_wake_hook
-    (fun ~base_path ~keeper_name ~approval_id ~decision ~channel ->
-       let resolution =
-         Keeper_event_queue.
-           {
-             approval_id;
-             decision;
-             channel;
-           }
-       in
-       let decision_label = Keeper_event_queue.hitl_resolution_decision_to_string decision in
-       let stimulus : Keeper_event_queue.stimulus =
-         { Keeper_event_queue.post_id = Keeper_event_queue.hitl_resolution_post_id resolution
-         ; urgency = Keeper_event_queue.Immediate
-         ; arrived_at = Time_compat.now ()
-         ; payload = Keeper_event_queue.Hitl_resolved resolution
-         }
-       in
-       match
-         Keeper_registry_event_queue.enqueue_durable_result
-           ~base_path
-           keeper_name
-           stimulus
-       with
-       | Error _ as err -> err
-       | Ok () ->
-         Ok
-           (fun () ->
-            Log.Keeper.info
-              "hitl resolution committed and signaling: keeper=%s approval=%s decision=%s"
-              keeper_name
-              approval_id
-              decision_label;
-            Keeper_keepalive_signal.wakeup_keeper ~base_path keeper_name));
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
     Sse.broadcast

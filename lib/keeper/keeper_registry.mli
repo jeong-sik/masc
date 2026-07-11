@@ -374,6 +374,17 @@ end
     the fiber. *)
 val wakeup : base_path:string -> string -> unit
 
+type wakeup_running_outcome =
+  | Signaled
+  | Deferred_unregistered
+  | Deferred_not_running of Keeper_state_machine.phase
+
+val wakeup_running : base_path:string -> string -> wakeup_running_outcome
+(** Signal a registered Keeper only while its fiber phase is [Running]. The
+    typed deferred outcomes let durable event producers distinguish an absent
+    or inactive live hint without treating the already-committed payload as a
+    delivery failure. *)
+
 (** Set fiber_wakeup for all running keepers. *)
 val wakeup_all : ?base_path:string -> unit -> unit
 

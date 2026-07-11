@@ -19,4 +19,6 @@
   keeper_oas_execution_error_phase
   keeper_operator_compact_result
   keeper_tool_outcome)
+ (preprocess
+  (pps ppx_enumerate))
  (libraries masc_core otel_metric_store time_compat unix yojson))

@@ -49,6 +49,8 @@ val read_pending_confirms : Workspace.config -> pending_confirm list
 val upsert_pending_confirm :
   Workspace.config -> pending_confirm -> (unit, string) result
 val remove_pending_confirm : Workspace.config -> string -> (unit, string) result
+(** Remove confirms for one target.  Store read/decode failures are returned;
+    they are never projected to an empty store. *)
 val remove_pending_confirms_by_target :
   Workspace.config -> target_type:string -> target_id:string option -> (int, string) result
 val normalize_pending_confirm_actor_filter : string option -> string option

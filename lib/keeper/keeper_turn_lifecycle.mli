@@ -4,9 +4,9 @@
 
 type tool_result = Keeper_types_profile.tool_result
 
-(** Handle the [masc_keeper_down] MCP tool call.  A retained shutdown persists
-    its operator-paused next-boot intent before stopping the live registry
-    entry; full removal may also remove meta and/or the session directory. *)
+(** Handle the [masc_keeper_down] MCP tool call.  Every shutdown persists an
+    operator-paused next-boot guard before stopping the live registry entry;
+    full removal deletes that guard only after the stop transition is issued. *)
 val handle_keeper_down :
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
@@ -14,6 +14,9 @@ val handle_keeper_down :
 val handle_keeper_down_config :
   config:Workspace.config -> Yojson.Safe.t -> tool_result
 
+(** Register the operator-owned pending-confirm cleanup boundary.  Until the
+    operator layer registers this callback, [masc_keeper_down] fails explicitly
+    without stopping a Keeper lane. *)
 val register_remove_pending_confirms_by_target :
   (Workspace.config ->
    target_type:string ->

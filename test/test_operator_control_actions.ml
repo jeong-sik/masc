@@ -164,6 +164,10 @@ let () =
             "expired token is rejected"
             `Quick
             Test_operator_control_confirm.test_confirm_rejects_expired_token
+        ; Alcotest.test_case
+            "target cleanup surfaces malformed store"
+            `Quick
+            Test_operator_control_confirm.test_target_cleanup_surfaces_malformed_store
         ] )
     ]
 ;;

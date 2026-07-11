@@ -92,6 +92,9 @@ val write_json_result : config -> string -> Yojson.Safe.t -> (unit, string) resu
 
 val write_text_local : string -> string -> (unit, string) result
 val write_text : config -> string -> string -> unit
+(** Delete a backend-routed path and any required local mirror.  Missing paths
+    are successful; every other backend or filesystem failure is returned. *)
+val delete_path_result : config -> string -> (unit, string) result
 val delete_path : config -> string -> unit
 val path_exists : config -> string -> bool
 val append_text : config -> string -> string -> unit

@@ -45,3 +45,32 @@ let test_confirm_rejects_expired_token () =
       | Ok _ -> Alcotest.fail "expected expired confirmation error"
       | Error err ->
           Alcotest.(check string) "expired error" "pending confirmation expired" err)
+
+let test_target_cleanup_surfaces_malformed_store () =
+  Eio_main.run
+  @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       let config = Workspace.default_config base_dir in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
+       let pending_dir = Filename.concat (Workspace.masc_dir config) "operator" in
+       Workspace_utils.mkdir_p pending_dir;
+       let path = Operator_pending_confirm.pending_confirms_path config in
+       let oc = open_out path in
+       Fun.protect
+         ~finally:(fun () -> close_out_noerr oc)
+         (fun () -> output_string oc "{malformed-json");
+       match
+         Operator_pending_confirm.remove_pending_confirms_by_target
+           config
+           ~target_type:"keeper"
+           ~target_id:(Some "keeper-a")
+       with
+       | Ok removed ->
+         Alcotest.failf
+           "malformed pending-confirm store was treated as %d removals"
+           removed
+       | Error _ -> ())

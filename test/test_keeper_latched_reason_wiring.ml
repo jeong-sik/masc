@@ -29,6 +29,7 @@ module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_supervisor_cleanup_tombstone = Masc.Keeper_supervisor_cleanup_tombstone
 module Keeper_supervisor_types = Masc.Keeper_supervisor_types
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Tool_result = Masc.Tool_result
 
 let base_json name =
   `Assoc
@@ -193,6 +194,7 @@ let test_keeper_down_retain_records_reason () =
   let base_path = Masc_test_deps.setup_test_workspace () in
   Fun.protect
     ~finally:(fun () ->
+      Keeper_turn_lifecycle.For_testing.reset_remove_pending_confirms_by_target ();
       Keeper_registry.clear ();
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
@@ -207,6 +209,8 @@ let test_keeper_down_retain_records_reason () =
         | Ok () -> ()
         | Error err -> failf "seed meta write: %s" err);
        ignore (Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
+         (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
        let args =
          `Assoc
            [ "name", `String keeper_name
@@ -284,6 +288,113 @@ let test_keeper_down_cleanup_failure_keeps_lane_registered () =
          check bool "cleanup failure does not persist a pause" false persisted.paused
        | Ok None -> fail "expected original keeper meta on disk"
        | Error err -> failf "read original meta: %s" err)
+
+let test_keeper_down_meta_failure_reports_partial_cleanup () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_turn_lifecycle.For_testing.reset_remove_pending_confirms_by_target ();
+      Keeper_registry.clear ();
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "downretain-meta-failure" in
+       let meta = make_meta keeper_name in
+       Keeper_registry.clear ();
+       (match Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error err -> failf "seed meta write: %s" err);
+       ignore (Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       let meta_path = Keeper_meta_store.keeper_meta_path config keeper_name in
+       Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
+         (fun _config ~target_type:_ ~target_id:_ ->
+            Unix.unlink meta_path;
+            Unix.mkdir meta_path 0o700;
+            Ok 2);
+       let result =
+         Keeper_turn_lifecycle.handle_keeper_down_config
+           ~config
+           (`Assoc
+             [ "name", `String keeper_name
+             ; "remove_meta", `Bool false
+             ; "remove_session", `Bool false
+             ])
+       in
+       check
+         bool
+         "meta persistence failure is explicit"
+         false
+         (Keeper_types_profile.tool_result_success result);
+       let data = Tool_result.data result in
+       let open Yojson.Safe.Util in
+       check
+         string
+         "failure stage is typed"
+         "paused_intent_persist"
+         (data |> member "failure_stage" |> to_string);
+       check
+         int
+         "committed pending-confirm cleanup is reported"
+         2
+         (data |> member "pending_confirms_removed" |> to_int);
+       check bool "lane was not stopped" false (data |> member "stopped" |> to_bool);
+       check
+         bool
+         "meta persistence failure leaves the live registry entry intact"
+         true
+         (Option.is_some
+            (Keeper_registry.get ~base_path:config.base_path keeper_name)))
+
+let test_keeper_down_remove_meta_deletes_after_stop () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_turn_lifecycle.For_testing.reset_remove_pending_confirms_by_target ();
+      Keeper_registry.clear ();
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "downremove-owner" in
+       let meta = make_meta keeper_name in
+       Keeper_registry.clear ();
+       (match Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error err -> failf "seed meta write: %s" err);
+       ignore (Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
+         (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+       let result =
+         Keeper_turn_lifecycle.handle_keeper_down_config
+           ~config
+           (`Assoc
+             [ "name", `String keeper_name
+             ; "remove_meta", `Bool true
+             ; "remove_session", `Bool false
+             ])
+       in
+       check
+         bool
+         "keeper_down remove_meta reports success"
+         true
+         (Keeper_types_profile.tool_result_success result);
+       check
+         bool
+         "removed Keeper is absent from the registry"
+         true
+         (Option.is_none
+            (Keeper_registry.get ~base_path:config.base_path keeper_name));
+       match Keeper_meta_store.read_meta config keeper_name with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "remove_meta left Keeper metadata on disk"
+       | Error err -> failf "read removed meta: %s" err)
 
 (* ── Site 1: dead-tombstone cleanup ─────────────────────────── *)
 
@@ -587,6 +698,12 @@ let () =
             test_keeper_down_retain_records_reason
         ; test_case "keeper_down cleanup failure keeps lane registered" `Quick
             test_keeper_down_cleanup_failure_keeps_lane_registered
+        ; test_case
+            "keeper_down meta failure reports partial cleanup"
+            `Quick
+            test_keeper_down_meta_failure_reports_partial_cleanup
+        ; test_case "keeper_down remove_meta deletes after stop" `Quick
+            test_keeper_down_remove_meta_deletes_after_stop
         ; test_case "dead-tombstone cleanup records Dead_tombstone reason" `Quick
             test_dead_tombstone_cleanup_records_reason
         ; test_case "dead-tombstone cleanup overwrites existing pause reason" `Quick

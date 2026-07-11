@@ -263,7 +263,14 @@ let test_turn_lifecycle_callback () =
   let n = Keeper_turn_lifecycle.For_testing.remove_pending_confirms_by_target ~config:(Obj.magic ()) ~target_type:"keeper" ~target_id:(Some "k") in
   check bool "remove pending confirms callback invoked" true !called;
   check (result int string) "remove pending confirms returned value" (Ok 7) n;
-  Keeper_turn_lifecycle.For_testing.reset_remove_pending_confirms_by_target ()
+  Keeper_turn_lifecycle.For_testing.reset_remove_pending_confirms_by_target ();
+  let after_reset =
+    Keeper_turn_lifecycle.For_testing.remove_pending_confirms_by_target
+      ~config:(Obj.magic ())
+      ~target_type:"keeper"
+      ~target_id:(Some "k")
+  in
+  check bool "missing callback fails explicitly" true (Result.is_error after_reset)
 ;;
 
 let () =

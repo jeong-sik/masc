@@ -367,17 +367,37 @@ let write_text config path content =
       |> Result.iter_error (fun msg ->
            Log.Misc.warn "write_text: local write failed for %s: %s" path msg)
 
-let delete_path config path =
+let delete_local_file_result path =
+  try
+    Unix.unlink path;
+    Ok ()
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "local delete failed for %s: %s"
+         path
+         (Printexc.to_string exn))
+
+let delete_path_result config path =
   match key_of_path config path with
   | Some key ->
-      backend_delete config ~key
-      |> Result.fold
-           ~ok:(fun _ ->
-             if should_dual_write_local config then try Sys.remove path with Sys_error _ -> ())
-           ~error:(fun e ->
-             Log.Misc.error "delete_path: backend_delete failed for %s: %s" key
-               (Backend_types.show_error e))
-  | None -> if Sys.file_exists path then Sys.remove path
+    (match backend_delete config ~key with
+     | Error error ->
+       Error
+         (Printf.sprintf
+            "backend delete failed for %s: %s"
+            key
+            (Backend_types.show_error error))
+     | Ok _deleted ->
+       if should_dual_write_local config then delete_local_file_result path else Ok ())
+  | None -> delete_local_file_result path
+
+let delete_path config path =
+  delete_path_result config path
+  |> Result.iter_error (fun message -> Log.Misc.error "delete_path: %s" message)
 
 let path_exists config path =
   match key_of_path config path with

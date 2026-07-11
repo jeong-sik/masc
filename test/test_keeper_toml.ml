@@ -1360,6 +1360,29 @@ let test_oas_env_rejects_invalid_unified_max_tokens () =
              (contains_substring detail "positive integer")))
     [ "\"not-an-int\""; "\"8192\""; "true"; "1.5"; "0"; "-1" ]
 
+let test_oas_env_max_tokens_validation_preserves_tool_access () =
+  let input = {|
+[keeper]
+persona_name = "analyst"
+tool_access = ["masc_status", "masc_tasks"]
+[keeper.oas_env]
+MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok defaults ->
+       check (option (list string))
+         "max_tokens validation preserves the successful tool_access payload"
+         (Some [ "masc_status"; "masc_tasks" ])
+         defaults.tool_access;
+       check (option int)
+         "valid unified max_tokens remains available after validation"
+         (Some 8192)
+         (KTP.unified_max_tokens_override_of_oas_env defaults.oas_env))
+
 let test_oas_env_drops_non_oas_prefix () =
   (* Guards against ambient env injection via keeper TOML: arbitrary keys
      outside the audited allowlist are silently dropped. *)
@@ -1752,6 +1775,8 @@ let () =
             test_oas_env_rejects_legacy_unified_max_tokens_alias;
           test_case "rejects invalid unified max tokens" `Quick
             test_oas_env_rejects_invalid_unified_max_tokens;
+          test_case "max tokens validation preserves tool_access" `Quick
+            test_oas_env_max_tokens_validation_preserves_tool_access;
           test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
             test_oas_env_drops_non_oas_prefix;
           test_case "empty when table absent" `Quick

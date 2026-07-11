@@ -404,8 +404,10 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       (Some true)
       thinking_policy.Driver.attempt_preserve_thinking;
     Alcotest.(check int)
+      (* reasoning-big-out declares max_output_tokens = 200000; the full
+         declared ceiling passes through with no MASC-side clamp. *)
       "thinking candidate sizes from catalog ceiling"
-      32768
+      200000
       thinking_policy.Driver.attempt_max_tokens;
     let non_thinking_policy =
       Driver.For_testing.attempt_inference_policy

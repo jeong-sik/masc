@@ -345,12 +345,12 @@ let parse_keeper_state
 	    | _ -> None
 	  in
 	  let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
-  (* [latched_reason] is a display-only annotation on the pause, not the
-     authoritative control bit ([paused] is). A malformed/unknown persisted
-     value degrades to [None] rather than failing the whole meta parse —
-     mirroring the lenient [last_blocker] read above. Losing the annotation
-     costs observability, never control. Degradation is logged and counted
-     so observability loss is visible. *)
+  (* [paused] is the authoritative pause bit. [latched_reason] refines the
+     lifecycle state, notably distinguishing a terminal [Dead_tombstone]. A
+     malformed/unknown value degrades to [None] without clearing [paused];
+     lifecycle admission therefore treats that combination as an unclassified
+     pause. Degradation is logged and counted so the lost classification is
+     visible rather than silently activating the keeper. *)
   let ps_latched_reason =
     match Json_util.assoc_member_opt "latched_reason" json with
     | None | Some `Null -> None

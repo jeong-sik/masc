@@ -13,8 +13,17 @@ val effective_autoboot_enabled :
 val pause_elapsed_sec :
   float ->
   Keeper_meta_contract.keeper_meta -> float option
-val pause_kind :
-  Keeper_meta_contract.keeper_meta -> string
+type pause_kind =
+  | Active
+  | Reconcile_gated
+  | Auto_recoverable
+  | Operator_paused
+  | Latched_paused
+  | Unclassified_paused
+  | Dead_tombstone
+
+val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
+val pause_kind_to_wire : pause_kind -> string
 val pause_auto_resume_source :
   Keeper_meta_contract.keeper_meta ->
   string option

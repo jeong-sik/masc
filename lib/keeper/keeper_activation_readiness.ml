@@ -1,9 +1,15 @@
+type autonomous_blocker =
+  | Lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Autoboot_disabled
+  | Proactive_disabled
+
 type autonomous_activation =
   { ok : bool
   ; autoboot_enabled : bool
   ; proactive_enabled : bool
   ; paused : bool
-  ; blocker : string option
+  ; lifecycle_state : Keeper_lifecycle_admission.state
+  ; blocker : autonomous_blocker option
   ; hint : string option
   }
 
@@ -18,26 +24,37 @@ type t =
    per-keeper flag), rather than re-deriving the enabled state from
    [meta.autoboot_enabled] / [meta.proactive.enabled] here. This is the same
    resolver [keeper_cycle_decision] uses, so the two sites cannot drift. *)
-let autonomous_blocker (meta : Keeper_meta_contract.keeper_meta) =
-  if meta.paused then Some "paused"
-  else if not (Keeper_lifecycle_gate_env.enabled Autonomous meta) then
-    Some "autoboot_disabled"
-  else if not (Keeper_lifecycle_gate_env.enabled Proactive meta) then
-    Some "proactive_disabled"
-  else None
+let autonomous_blocker (meta : Keeper_meta_contract.keeper_meta) lifecycle_state =
+  match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    Some (Lifecycle_denied denial)
+  | Keeper_lifecycle_admission.Autonomous_admitted ->
+    if not (Keeper_lifecycle_gate_env.enabled Autonomous meta) then
+      Some Autoboot_disabled
+    else if not (Keeper_lifecycle_gate_env.enabled Proactive meta) then
+      Some Proactive_disabled
+    else None
 ;;
 
-(* [blocker] strings ("autoboot_disabled" / "proactive_disabled") are shared
-   with [Keeper_lifecycle_gate_env.enabled]'s combined global-AND-meta
-   verdict, so the same string fires whether the *global* kill-switch or the
-   *per-keeper* meta flag caused the block. The hint must check the meta
-   flag directly to tell an operator which one to fix -- pointing them at
-   meta when it's already true would send them editing the wrong knob. *)
+let autonomous_blocker_to_wire = function
+  | Lifecycle_denied denial ->
+    Keeper_lifecycle_admission.autonomous_denial_to_wire denial
+  | Autoboot_disabled -> "autoboot_disabled"
+  | Proactive_disabled -> "proactive_disabled"
+;;
+
+(* The typed blocker is shared with the lifecycle and feature-gate verdicts.
+   The hint checks the meta flag directly to distinguish a global kill-switch
+   from a per-keeper flag without parsing the boundary string projection. *)
 let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
   | None -> None
-  | Some "paused" ->
+  | Some
+      (Lifecycle_denied (Keeper_lifecycle_admission.Autonomous_paused _)) ->
     Some "resume keeper before expecting autonomous keepalive or PR fan-out"
-  | Some "autoboot_disabled" ->
+  | Some
+      (Lifecycle_denied Keeper_lifecycle_admission.Autonomous_dead_tombstone) ->
+    Some "transition the dead keeper lifecycle before starting a new lane"
+  | Some Autoboot_disabled ->
     if meta.autoboot_enabled
     then
       Some
@@ -46,7 +63,7 @@ let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
          autonomous keepalive or PR fan-out"
     else
       Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
-  | Some "proactive_disabled" ->
+  | Some Proactive_disabled ->
     if meta.proactive.enabled
     then
       Some
@@ -55,15 +72,20 @@ let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
          scheduled autonomous work"
     else
       Some "set proactive_enabled=true before expecting scheduled autonomous work"
-  | Some reason -> Some ("activation blocked: " ^ reason)
 ;;
 
 let autonomous_activation (meta : Keeper_meta_contract.keeper_meta) =
-  let blocker = autonomous_blocker meta in
+  let lifecycle_state =
+    Keeper_lifecycle_admission.state
+      ~paused:meta.paused
+      ~latched_reason:meta.latched_reason
+  in
+  let blocker = autonomous_blocker meta lifecycle_state in
   { ok = Option.is_none blocker
   ; autoboot_enabled = meta.autoboot_enabled
   ; proactive_enabled = meta.proactive.enabled
   ; paused = meta.paused
+  ; lifecycle_state
   ; blocker
   ; hint = autonomous_hint meta blocker
   }
@@ -80,7 +102,7 @@ let ready_for_unclaimed_backlog meta = (of_meta meta).ready_for_unclaimed_backlo
 let autonomous_check_value (activation : autonomous_activation) =
   match activation.blocker with
   | None -> "ok"
-  | Some blocker -> blocker
+  | Some blocker -> autonomous_blocker_to_wire blocker
 ;;
 
 let autonomous_activation_to_yojson (activation : autonomous_activation) =
@@ -89,7 +111,12 @@ let autonomous_activation_to_yojson (activation : autonomous_activation) =
     ; "autoboot_enabled", `Bool activation.autoboot_enabled
     ; "proactive_enabled", `Bool activation.proactive_enabled
     ; "paused", `Bool activation.paused
-    ; "blocker", Json_util.string_opt_to_json activation.blocker
+    ; ( "lifecycle_state"
+      , `String
+          (Keeper_lifecycle_admission.state_to_wire activation.lifecycle_state) )
+    ; ( "blocker"
+      , Json_util.string_opt_to_json
+          (Option.map autonomous_blocker_to_wire activation.blocker) )
     ; "hint", Json_util.string_opt_to_json activation.hint
     ]
 ;;

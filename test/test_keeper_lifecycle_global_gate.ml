@@ -20,6 +20,8 @@
 open Alcotest
 module WO = Masc.Keeper_world_observation
 module Readiness = Masc.Keeper_activation_readiness
+module Admission = Masc.Keeper_lifecycle_admission
+module Fleet_scan = Masc.Server_routes_http_runtime_fleet_scan
 
 let contains haystack needle =
   let hl = String.length haystack
@@ -219,8 +221,11 @@ let test_global_autonomous_off_blocks_readiness () =
   let r = Readiness.of_meta meta in
   check bool "global autonomous off blocks activation" false
     r.autonomous_activation.ok;
-  check (option string) "blocker is autoboot_disabled" (Some "autoboot_disabled")
-    r.autonomous_activation.blocker;
+  check bool "blocker is typed autoboot_disabled" true
+    (match r.autonomous_activation.blocker with
+     | Some Readiness.Autoboot_disabled -> true
+     | Some (Readiness.Lifecycle_denied _ | Readiness.Proactive_disabled) | None ->
+       false);
   (* Review-flagged: the hint must not tell the operator to set
      autoboot_enabled=true when the per-keeper flag is already true and the
      *global* kill-switch is the actual cause -- that would send them
@@ -230,6 +235,152 @@ let test_global_autonomous_off_blocks_readiness () =
     (match r.autonomous_activation.hint with
      | Some hint -> contains hint "MASC_KEEPER_AUTONOMOUS_ENABLED"
      | None -> false)
+
+let operator_pause =
+  Keeper_latched_reason.Operator_paused
+    { operator_actor = Keeper_latched_reason.operator_actor_keeper_down }
+;;
+
+let lifecycle_state ~paused ~latched_reason =
+  Admission.state ~paused ~latched_reason
+;;
+
+let test_active_admission () =
+  let state = lifecycle_state ~paused:false ~latched_reason:None in
+  check bool "state is active" true
+    (match state with
+     | Admission.Active -> true
+     | Admission.Paused _ | Admission.Dead_tombstone -> false);
+  check bool "manual one-shot admitted" true
+    (match Admission.admit_manual_one_shot state with
+     | Admission.Manual_admitted_active -> true
+     | Admission.Manual_admitted_paused_recovery _
+     | Admission.Manual_denied_dead_tombstone -> false);
+  check bool "autonomous admitted" true
+    (match Admission.admit_autonomous state with
+     | Admission.Autonomous_admitted -> true
+     | Admission.Autonomous_denied _ -> false)
+;;
+
+let test_classified_pause_admission () =
+  let state =
+    lifecycle_state ~paused:true ~latched_reason:(Some operator_pause)
+  in
+  check bool "state is a classified pause" true
+    (match state with
+     | Admission.Paused (Admission.Classified reason) ->
+       Keeper_latched_reason.equal reason operator_pause
+     | Admission.Active | Admission.Paused Admission.Unclassified
+     | Admission.Dead_tombstone -> false);
+  check bool "manual one-shot is an explicit recovery" true
+    (match Admission.admit_manual_one_shot state with
+     | Admission.Manual_admitted_paused_recovery (Admission.Classified reason) ->
+       Keeper_latched_reason.equal reason operator_pause
+     | Admission.Manual_admitted_active
+     | Admission.Manual_admitted_paused_recovery Admission.Unclassified
+     | Admission.Manual_denied_dead_tombstone -> false);
+  check bool "autonomous execution is denied" true
+    (match Admission.admit_autonomous state with
+     | Admission.Autonomous_denied
+         (Admission.Autonomous_paused (Admission.Classified reason)) ->
+       Keeper_latched_reason.equal reason operator_pause
+     | Admission.Autonomous_admitted
+     | Admission.Autonomous_denied
+         ( Admission.Autonomous_paused Admission.Unclassified
+         | Admission.Autonomous_dead_tombstone ) -> false)
+;;
+
+let test_unclassified_pause_fails_closed () =
+  let state = lifecycle_state ~paused:true ~latched_reason:None in
+  check bool "missing latch remains paused" true
+    (match state with
+     | Admission.Paused Admission.Unclassified -> true
+     | Admission.Active | Admission.Paused (Admission.Classified _)
+     | Admission.Dead_tombstone -> false);
+  check bool "unclassified pause blocks autonomous execution" true
+    (match Admission.admit_autonomous state with
+     | Admission.Autonomous_denied
+         (Admission.Autonomous_paused Admission.Unclassified) -> true
+     | Admission.Autonomous_admitted
+     | Admission.Autonomous_denied
+         ( Admission.Autonomous_paused (Admission.Classified _)
+         | Admission.Autonomous_dead_tombstone ) -> false)
+;;
+
+let test_dead_tombstone_dominates_stale_paused_bit () =
+  let state =
+    lifecycle_state
+      ~paused:false
+      ~latched_reason:(Some Keeper_latched_reason.Dead_tombstone)
+  in
+  check bool "dead latch is terminal even when paused was cleared" true
+    (match state with
+     | Admission.Dead_tombstone -> true
+     | Admission.Active | Admission.Paused _ -> false);
+  check bool "manual one-shot denied" true
+    (match Admission.admit_manual_one_shot state with
+     | Admission.Manual_denied_dead_tombstone -> true
+     | Admission.Manual_admitted_active
+     | Admission.Manual_admitted_paused_recovery _ -> false);
+  check bool "autonomous execution denied as terminal" true
+    (match Admission.admit_autonomous state with
+     | Admission.Autonomous_denied Admission.Autonomous_dead_tombstone -> true
+     | Admission.Autonomous_admitted
+     | Admission.Autonomous_denied (Admission.Autonomous_paused _) -> false)
+;;
+
+let test_readiness_projects_dead_tombstone () =
+  without_overrides @@ fun () ->
+  let meta =
+    { (ready_meta ()) with
+      paused = false
+    ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+    }
+  in
+  let activation = (Readiness.of_meta meta).autonomous_activation in
+  check bool "dead keeper is not autonomously ready" false activation.ok;
+  check bool "readiness preserves typed terminal denial" true
+    (match activation.blocker with
+     | Some (Readiness.Lifecycle_denied Admission.Autonomous_dead_tombstone) ->
+       true
+     | Some
+         ( Readiness.Lifecycle_denied (Admission.Autonomous_paused _)
+         | Readiness.Autoboot_disabled
+         | Readiness.Proactive_disabled )
+     | None -> false);
+  check string "wire projection distinguishes dead from pause" "dead_tombstone"
+    (Readiness.autonomous_check_value activation)
+;;
+
+let test_health_projection_uses_typed_lifecycle () =
+  let dead_meta =
+    { (ready_meta ()) with
+      paused = true
+    ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+    }
+  in
+  let unclassified_meta =
+    { (ready_meta ()) with paused = true; latched_reason = None }
+  in
+  check bool "health classifies dead tombstone" true
+    (match Fleet_scan.pause_kind dead_meta with
+     | Fleet_scan.Dead_tombstone -> true
+     | Fleet_scan.Active
+     | Fleet_scan.Reconcile_gated
+     | Fleet_scan.Auto_recoverable
+     | Fleet_scan.Operator_paused
+     | Fleet_scan.Latched_paused
+     | Fleet_scan.Unclassified_paused -> false);
+  check bool "health does not mislabel missing reason as operator pause" true
+    (match Fleet_scan.pause_kind unclassified_meta with
+     | Fleet_scan.Unclassified_paused -> true
+     | Fleet_scan.Active
+     | Fleet_scan.Reconcile_gated
+     | Fleet_scan.Auto_recoverable
+     | Fleet_scan.Operator_paused
+     | Fleet_scan.Latched_paused
+     | Fleet_scan.Dead_tombstone -> false)
+;;
 
 let () = init_runtime_default_for_tests ()
 
@@ -251,6 +402,18 @@ let () =
       , [ test_case "default ready" `Quick test_default_autonomous_ready
         ; test_case "global off blocks readiness" `Quick
             test_global_autonomous_off_blocks_readiness
+        ] )
+    ; ( "typed lifecycle admission"
+      , [ test_case "active" `Quick test_active_admission
+        ; test_case "classified pause" `Quick test_classified_pause_admission
+        ; test_case "unclassified pause fails closed" `Quick
+            test_unclassified_pause_fails_closed
+        ; test_case "dead tombstone dominates stale pause bit" `Quick
+            test_dead_tombstone_dominates_stale_paused_bit
+        ; test_case "readiness projects dead tombstone" `Quick
+            test_readiness_projects_dead_tombstone
+        ; test_case "health projects typed lifecycle" `Quick
+            test_health_projection_uses_typed_lifecycle
         ] )
     ]
 ;;

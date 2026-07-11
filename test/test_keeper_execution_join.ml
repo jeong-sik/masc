@@ -161,6 +161,28 @@ let test_agent_failed_matches_typed_sse_event () =
   in
   check string "agent_failed bridge matches typed constructor" expected actual
 
+let test_authorization_errors_have_typed_projection () =
+  let check_projection label expected_domain error =
+    let projection = Error_json.agent_failed_error_projection error in
+    check string (label ^ " domain") expected_domain projection.error_domain;
+    check bool (label ^ " non-retryable") false projection.error_retryable;
+    check (option string)
+      (label ^ " variant")
+      (Some "authorization_error")
+      (string_of_field (member "variant" projection.error_detail))
+  in
+  check_projection
+    "API authorization"
+    "api"
+    (Agent_sdk.Error.Api
+       (Agent_sdk.Retry.AuthorizationError { message = "permission refused" }));
+  check_projection
+    "provider authorization"
+    "provider"
+    (Agent_sdk.Error.Provider
+       (Llm_provider.Error.AuthorizationError
+          { provider = "provider"; detail = "permission refused" }))
+
 let recovery_failed_attempt ~tool_use_id ~input ~error =
   { Agent_sdk.Tool_failure_episode.tool_use_id = tool_use_id
   ; tool_name = "Execute"
@@ -273,6 +295,8 @@ let () =
             test_empty_tool_use_id_omitted_from_payload
         ; test_case "agent_failed matches typed constructor" `Quick
             test_agent_failed_matches_typed_sse_event
+        ; test_case "authorization errors have typed projection" `Quick
+            test_authorization_errors_have_typed_projection
         ; test_case "tool failure episode omits input and error prose" `Quick
             test_tool_failure_episode_projection_omits_inputs_and_error_text
         ; test_case "recovery decision omits model payload" `Quick

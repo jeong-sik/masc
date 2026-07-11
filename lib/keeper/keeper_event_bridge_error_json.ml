@@ -66,6 +66,8 @@ let sdk_api_error_fields = function
     ]
   | Agent_sdk.Retry.AuthError { message } ->
     [ "variant", `String "auth_error"; "message", `String message ]
+  | Agent_sdk.Retry.AuthorizationError { message } ->
+    [ "variant", `String "authorization_error"; "message", `String message ]
   | Agent_sdk.Retry.PaymentRequired { message } ->
     [ "variant", `String "payment_required"; "message", `String message ]
   | Agent_sdk.Retry.InvalidRequest { message; reason } ->
@@ -272,6 +274,12 @@ let sdk_provider_error_fields error =
     ]
   | Llm_provider.Error.AuthError { provider; detail } ->
     [ "variant", `String "auth_error"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.AuthorizationError { provider; detail } ->
+    [ "variant", `String "authorization_error"
     ; "message", `String message
     ; "provider", `String provider
     ; "detail", `String detail

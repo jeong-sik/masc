@@ -241,7 +241,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
         | Some token ->
             match
               Keeper_chat_slack.send_message_with_blocks ~token
-                ~channel:channel_id ~content:safe_content ~blocks:slack_blocks
+                ~channel:channel_id ~content:safe_content ~blocks:slack_blocks ()
             with
             | Error err ->
                 Keeper_surface_post.error_json

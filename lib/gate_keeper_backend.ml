@@ -38,14 +38,15 @@ type connector_kind =
    frees and delivers the reply through the connector's outbound adapter
    ([Keeper_chat_discord.adapter_loop]); [Generic] has no such adapter and falls
    back to the async poll store. *)
-let route_busy_connector (kind : connector_kind) ~channel_id ~user_id :
+let route_busy_connector (kind : connector_kind) ~channel_id ~user_id ~user_name
+    ~team_id ~thread_ts :
     [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ] =
   match kind with
   | Discord -> `Enqueue_chat_queue (Keeper_chat_queue.Discord { channel_id; user_id })
   | Slack ->
-    (* [Keeper_chat_queue.Slack] names the channel field [channel], not
-       [channel_id]; the busy Slack message carries the same conversation id. *)
-    `Enqueue_chat_queue (Keeper_chat_queue.Slack { channel = channel_id; user_id })
+    `Enqueue_chat_queue
+      (Keeper_chat_queue.Slack
+         { channel_id; user_id; user_name; team_id; thread_ts })
   | Generic -> `Async_poll
 
 (* ── Keeper response parsing ─────────────────────────────────── *)
@@ -589,12 +590,29 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
       ~base_path:config.Workspace.base_path
       ~keeper_name
   in
+  let active_chat_queue = Keeper_chat_queue.has_active_receipts ~keeper_name in
+  let should_defer_to_existing_work =
+    match busy_in_flight, active_chat_queue with
+    | Some _, _ -> true
+    | None, Ok active -> active
+    | None, Error error ->
+      Log.Server.error
+        "channel gate chat queue admission unavailable (keeper=%s, lane=%s): %s"
+        keeper_name lane (Keeper_chat_queue.mutation_error_to_string error);
+      true
+  in
+  let slack_reply_thread_ts =
+    match slack_thread_ts metadata with
+    | Some thread_ts -> Some thread_ts
+    | None -> metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
+  in
   let dispatch_result =
-    match busy_in_flight with
-    | Some info ->
+    if should_defer_to_existing_work then
         (match
            route_busy_connector connector_kind
              ~channel_id:channel_workspace_id ~user_id:channel_user_id
+             ~user_name:channel_user_name ~team_id:(slack_team_id metadata)
+             ~thread_ts:slack_reply_thread_ts
          with
          | `Enqueue_chat_queue source ->
              (* RFC-connector-deferred-reply-via-chat-queue: the keeper already holds an in-flight turn. Route the
@@ -615,7 +633,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
                   ; source
                   }
               with
-              | Ok receipt -> `Queued_to_chat_lane (info, receipt)
+              | Ok receipt -> `Queued_to_chat_lane (busy_in_flight, receipt)
               | Error error ->
                 Log.Server.error
                   "channel gate durable chat enqueue failed (keeper=%s, lane=%s): %s"
@@ -624,10 +642,10 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
                 `Chat_queue_error error)
          | `Async_poll ->
              `Async_ack
-               ( info
+               ( busy_in_flight
                , Keeper_tool_surface.dispatch keeper_ctx
                    ~name:"masc_keeper_msg" ~args ))
-    | None ->
+    else
         (* Channel gate needs the final keeper reply when the keeper can run it
            now, not the async request ACK that plain dispatch returns. *)
         `Streaming
@@ -644,14 +662,14 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
       in
       let ack_with_in_flight =
         extract_message_request_ack ~channel ~channel_user_id ~keeper_name
-          ~metadata:(metadata @ in_flight_metadata (Some in_flight))
+          ~metadata:(metadata @ in_flight_metadata in_flight)
           body
       in
       let message_request, reply =
         match ack_with_in_flight with
         | Ok request ->
             ( Some request
-            , busy_ack_reply_text ~in_flight request )
+            , busy_ack_reply_text ?in_flight request )
         | Error failure ->
             (* Backend drift: the keeper accepted the message into its
                async queue but the wire envelope we expected is missing or
@@ -705,7 +723,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
       in
       let reply =
         redact_text
-          (busy_ack_reply_text_queued ~in_flight:(Some in_flight) ~keeper_name
+          (busy_ack_reply_text_queued ~in_flight ~keeper_name
              ~receipt_id:message_request.request_id)
       in
       let stats =

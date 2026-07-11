@@ -19,7 +19,8 @@ type error = Discord_rest_client.error
 val pp_error : Format.formatter -> error -> unit
 
 val send_message :
-  token:string -> channel_id:string -> content:string -> (unit, error) result
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  token:string -> channel_id:string -> content:string -> unit -> (unit, error) result
 (** [send_message ~token ~channel_id ~content] posts to Discord.
     Errors are logged as warnings and returned to the caller.
     Content exceeding Discord's 2000-character limit is split into
@@ -27,6 +28,7 @@ val send_message :
     returned after the remaining chunks have been attempted. *)
 
 val adapter_loop :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   token:string ->
   channel_id:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
@@ -94,6 +96,7 @@ module For_testing : sig
     post_message:(content:string -> (string, error) result) ->
     edit_message:(message_id:string -> content:string -> (unit, error) result) ->
     send_message:(content:string -> (unit, error) result) ->
+    ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     ?base_url:string ->
     ?on_send_result:((unit, error) result -> unit) ->
     unit ->

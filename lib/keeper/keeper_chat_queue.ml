@@ -3,7 +3,13 @@
 type message_source =
   | Dashboard
   | Discord of { channel_id : string; user_id : string }
-  | Slack of { channel : string; user_id : string }
+  | Slack of {
+      channel_id : string;
+      user_id : string;
+      user_name : string;
+      team_id : string option;
+      thread_ts : string option;
+    }
 
 type queued_message = {
   content : string;
@@ -102,6 +108,7 @@ type snapshot_load_error = {
 type mutation_error =
   | Persistence_not_configured
   | Snapshot_unavailable of snapshot_load_error
+  | Invalid_input of string
   | Revision_exhausted
   | Persist_failed of string
 
@@ -114,6 +121,7 @@ let snapshot_load_error_kind_to_string = function
 
 let mutation_error_to_string = function
   | Persistence_not_configured -> "chat queue persistence is not configured"
+  | Invalid_input message -> "chat queue input is invalid: " ^ message
   | Revision_exhausted -> "chat queue revision domain is exhausted"
   | Persist_failed message -> "chat queue persistence failed: " ^ message
   | Snapshot_unavailable error ->
@@ -217,9 +225,9 @@ let continuation_channel_of_message_source ?dashboard_thread_id = function
       ; thread_id = None
       ; user_id
       }
-  | Slack { channel; user_id } ->
+  | Slack { channel_id; user_id; team_id; thread_ts; _ } ->
     Keeper_continuation_channel.Slack
-      { team_id = None; channel_id = channel; thread_ts = None; user_id }
+      { team_id; channel_id; thread_ts; user_id }
 
 let set_transition_observer observer = Atomic.set transition_observer observer
 
@@ -260,11 +268,14 @@ let source_to_yojson = function
       ; "channel_id", `String channel_id
       ; "user_id", `String user_id
       ]
-  | Slack { channel; user_id } ->
+  | Slack { channel_id; user_id; user_name; team_id; thread_ts } ->
     `Assoc
       [ "kind", `String "slack"
-      ; "channel", `String channel
+      ; "channel_id", `String channel_id
       ; "user_id", `String user_id
+      ; "user_name", `String user_name
+      ; ("team_id", Option.fold ~none:`Null ~some:(fun value -> `String value) team_id)
+      ; ("thread_ts", Option.fold ~none:`Null ~some:(fun value -> `String value) thread_ts)
       ]
 
 let required_member json key =
@@ -300,7 +311,11 @@ let required_nonnegative_int json key =
 let optional_string json key =
   match Json_util.assoc_member_opt key json with
   | None | Some `Null -> Ok None
-  | Some (`String value) -> Ok (Some value)
+  | Some (`String value) ->
+    let value = String.trim value in
+    if value = ""
+    then Error (Printf.sprintf "chat queue JSON field %s must be non-empty when present" key)
+    else Ok (Some value)
   | Some _ -> Error (Printf.sprintf "chat queue JSON field %s must be string or null" key)
 
 let source_of_yojson json =
@@ -315,12 +330,25 @@ let source_of_yojson json =
      | Ok _, Ok _ -> Error "discord chat queue source requires non-empty ids"
      | Error error, _ | _, Error error -> Error error)
   | Ok "slack" ->
-    (match required_string json "channel", required_string json "user_id" with
-     | Ok channel, Ok user_id
-       when String.trim channel <> "" && String.trim user_id <> "" ->
-       Ok (Slack { channel; user_id })
-     | Ok _, Ok _ -> Error "slack chat queue source requires non-empty ids"
-     | Error error, _ | _, Error error -> Error error)
+    (match
+       required_string json "channel_id",
+       required_string json "user_id",
+       required_string json "user_name",
+       optional_string json "team_id",
+       optional_string json "thread_ts"
+     with
+     | Ok channel_id, Ok user_id, Ok user_name, Ok team_id, Ok thread_ts
+       when String.trim channel_id <> ""
+            && String.trim user_id <> ""
+            && String.trim user_name <> "" ->
+       Ok (Slack { channel_id; user_id; user_name; team_id; thread_ts })
+     | Ok _, Ok _, Ok _, Ok _, Ok _ ->
+       Error "slack chat queue source requires non-empty channel/user identity"
+     | Error error, _, _, _, _
+     | _, Error error, _, _, _
+     | _, _, Error error, _, _
+     | _, _, _, Error error, _
+     | _, _, _, _, Error error -> Error error)
   | Ok kind -> Error (Printf.sprintf "unsupported chat queue source kind: %s" kind)
 
 let same_source left right =
@@ -330,8 +358,10 @@ let same_source left right =
     String.equal left.channel_id right.channel_id
     && String.equal left.user_id right.user_id
   | Slack left, Slack right ->
-    String.equal left.channel right.channel
+    String.equal left.channel_id right.channel_id
     && String.equal left.user_id right.user_id
+    && Option.equal String.equal left.team_id right.team_id
+    && Option.equal String.equal left.thread_ts right.thread_ts
   | Dashboard, (Discord _ | Slack _)
   | Discord _, (Dashboard | Slack _)
   | Slack _, (Dashboard | Discord _) -> false
@@ -388,7 +418,7 @@ let attachments_of_yojson = function
     loop [] values
   | _ -> Error "chat queue attachments must be an array"
 
-let queued_message_of_yojson json =
+let queued_message_of_yojson_with_source source_parser json =
   match json with
   | `Assoc _ ->
     (match
@@ -402,7 +432,7 @@ let queued_message_of_yojson json =
        (match
           Keeper_multimodal_input.parse_user_blocks json,
           attachments_of_yojson attachments_json,
-          source_of_yojson source_json
+          source_parser source_json
         with
         | Ok user_blocks, Ok attachments, Ok source ->
           Ok { content; user_blocks; attachments; timestamp; source }
@@ -414,6 +444,57 @@ let queued_message_of_yojson json =
      | _, _, _, Error error, _
      | _, _, _, _, Error error -> Error error)
   | _ -> Error "chat queue message must be a JSON object"
+
+let queued_message_of_yojson json =
+  queued_message_of_yojson_with_source source_of_yojson json
+
+let source_of_v1_yojson json =
+  match required_string json "kind" with
+  | Ok "slack" ->
+    (match required_string json "channel", required_string json "user_id" with
+     | Ok channel_id, Ok user_id
+       when String.trim channel_id <> "" && String.trim user_id <> "" ->
+       (* Version 1 predates typed Slack thread/team/name persistence. Preserve
+          its known channel/user identity explicitly; absent fields remain
+          absent rather than being inferred from unrelated values. *)
+       Ok
+         (Slack
+            { channel_id
+            ; user_id
+            ; user_name = user_id
+            ; team_id = None
+            ; thread_ts = None
+            })
+     | Ok _, Ok _ -> Error "legacy slack chat queue source requires non-empty ids"
+     | Error error, _ | _, Error error -> Error error)
+  | Ok _ | Error _ -> source_of_yojson json
+
+let rec validate_json_utf8 path = function
+  | `String value when String.is_valid_utf_8 value -> Ok ()
+  | `String _ -> Error (path ^ " contains malformed UTF-8")
+  | `Assoc fields ->
+    List.fold_left
+      (fun result (key, value) ->
+         Result.bind result (fun () ->
+             if not (String.is_valid_utf_8 key)
+             then Error (path ^ " contains a malformed UTF-8 field name")
+             else validate_json_utf8 (path ^ "." ^ key) value))
+      (Ok ()) fields
+  | `List values | `Tuple values ->
+    List.fold_left
+      (fun result value ->
+         Result.bind result (fun () -> validate_json_utf8 path value))
+      (Ok ()) values
+  | `Variant (name, value) ->
+    if not (String.is_valid_utf_8 name)
+    then Error (path ^ " contains a malformed UTF-8 variant name")
+    else Option.fold ~none:(Ok ()) ~some:(validate_json_utf8 path) value
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> Ok ()
+
+let canonical_queued_message message =
+  let json = queued_message_to_yojson message in
+  Result.bind (validate_json_utf8 "message" json) (fun () ->
+      queued_message_of_yojson json)
 
 let failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
@@ -486,7 +567,6 @@ let snapshot_to_yojson ~revision receipts =
 let save_json_atomic path json =
   Fs_compat.mkdir_p (Filename.dirname path);
   json
-  |> Safe_ops.sanitize_json_utf8
   |> Yojson.Safe.pretty_to_string
   |> Fs_compat.save_file_atomic path
 
@@ -648,7 +728,7 @@ let parse_message_list json =
     let rec loop acc = function
       | [] -> Ok (List.rev acc)
       | value :: rest ->
-        (match queued_message_of_yojson value with
+        (match queued_message_of_yojson_with_source source_of_v1_yojson value with
          | Error _ as error -> error
          | Ok message -> loop (message :: acc) rest)
     in
@@ -859,6 +939,9 @@ let commit (entry : queue_entry) ~path receipts =
 
 let enqueue ~keeper_name message =
   let receipt_id = Receipt_id.generate () in
+  match canonical_queued_message message with
+  | Error message -> Error (Invalid_input message)
+  | Ok message ->
   match mutation_entry ~keeper_name ~create:true with
   | Error _ as error -> error
   | Ok (_, _, None) ->
@@ -965,11 +1048,35 @@ let lease_batch ~keeper_name =
      | `Already_leased lease_id -> `Already_leased lease_id
      | `Error error -> `Error error)
 
-let terminal_state = function
-  | Mark_delivered completion -> Stored_delivered completion
-  | Mark_failed failure -> Stored_failed failure
+let canonical_optional_ref = function
+  | None -> Ok None
+  | Some value ->
+    let value = String.trim value in
+    if value = "" then Error "terminal outcome_ref must be non-empty when present"
+    else if not (String.is_valid_utf_8 value) then Error "terminal outcome_ref contains malformed UTF-8"
+    else Ok (Some value)
+
+let canonical_terminal_state = function
+  | Mark_delivered completion when Float.is_finite completion.completed_at ->
+    Result.map
+      (fun outcome_ref -> Stored_delivered { completion with outcome_ref })
+      (canonical_optional_ref completion.outcome_ref)
+  | Mark_delivered _ -> Error "terminal completed_at must be finite"
+  | Mark_failed failure when not (Float.is_finite failure.completed_at) ->
+    Error "terminal completed_at must be finite"
+  | Mark_failed failure ->
+    let detail = String.trim failure.detail in
+    if detail = "" then Error "terminal failure detail must be non-empty"
+    else if not (String.is_valid_utf_8 detail) then Error "terminal failure detail contains malformed UTF-8"
+    else
+      Result.map
+        (fun outcome_ref -> Stored_failed { failure with detail; outcome_ref })
+        (canonical_optional_ref failure.outcome_ref)
 
 let finalize ~keeper_name ~lease_id ~outcome =
+  match canonical_terminal_state outcome with
+  | Error message -> `Error (Invalid_input message)
+  | Ok terminal_state ->
   match mutation_entry ~keeper_name ~create:false with
   | Error error -> `Error error
   | Ok (_, _, None) -> `Unknown_lease
@@ -994,7 +1101,7 @@ let finalize ~keeper_name ~lease_id ~outcome =
                 (fun receipt ->
                    match receipt.state with
                    | Stored_inflight current when String.equal current.lease_id lease_id ->
-                     { receipt with state = terminal_state outcome }
+                     { receipt with state = terminal_state }
                    | Stored_pending _ | Stored_inflight _
                    | Stored_delivered _ | Stored_failed _ -> receipt)
                 entry.receipts
@@ -1087,6 +1194,20 @@ let inflight_count ~keeper_name =
   | Ok (_, _, None) -> Ok 0
   | Ok (_, _, Some entry) ->
     with_entry_lock entry (fun () -> Ok (List.length (inflight_receipts entry.receipts)))
+
+let has_active_receipts ~keeper_name =
+  match mutation_entry ~keeper_name ~create:false with
+  | Error _ as error -> error
+  | Ok (_, _, None) -> Ok false
+  | Ok (_, _, Some entry) ->
+    with_entry_lock entry (fun () ->
+        Ok
+          (List.exists
+             (fun receipt ->
+                match receipt.state with
+                | Stored_pending _ | Stored_inflight _ -> true
+                | Stored_delivered _ | Stored_failed _ -> false)
+             entry.receipts))
 
 let receipt_state_of_stored = function
   | Stored_pending _ -> Pending

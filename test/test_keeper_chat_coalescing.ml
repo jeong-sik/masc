@@ -333,13 +333,13 @@ let test_persist_failures_roll_back () =
     "failed nack leaves original lease inflight"
     ((Keeper_chat_queue.snapshot ~keeper_name).inflight <> [])
 
-let v1_message_json content =
+let v1_message_json ?(source = `Assoc [ "kind", `String "dashboard" ]) content =
   `Assoc
     [ "content", `String content
     ; "user_blocks", `List []
     ; "attachments", `List []
     ; "timestamp", `Float 1.0
-    ; "source", `Assoc [ "kind", `String "dashboard" ]
+    ; "source", source
     ]
 
 let test_v1_atomic_migration () =
@@ -350,7 +350,18 @@ let test_v1_atomic_migration () =
   let v1 =
     `Assoc
       [ "schema", `String "keeper_chat_queue.v1"
-      ; "items", `List [ v1_message_json "legacy pending" ]
+      ; "items",
+        `List
+          [ v1_message_json "legacy pending"
+          ; v1_message_json
+              ~source:
+                (`Assoc
+                   [ "kind", `String "slack"
+                   ; "channel", `String "C-legacy"
+                   ; "user_id", `String "U-legacy"
+                   ])
+              "legacy slack"
+          ]
       ; ( "inflight"
         , `Assoc
             [ "lease_id", `String "legacy-lease"
@@ -362,7 +373,23 @@ let test_v1_atomic_migration () =
   let report = Keeper_chat_queue.configure_persistence ~base_path in
   check "migration is reported once" (report.migrated_keeper_count = 1);
   let migrated = Keeper_chat_queue.snapshot ~keeper_name in
-  check "legacy inflight is replayed ahead of pending" (List.length migrated.pending = 2);
+  check "legacy inflight is replayed ahead of pending" (List.length migrated.pending = 3);
+  (match List.nth_opt migrated.pending 2 with
+   | Some
+       { message =
+           { source =
+               Keeper_chat_queue.Slack
+                 { channel_id; user_id; user_name; team_id; thread_ts }
+           ; _
+           }
+       ; _
+       } ->
+     check "legacy Slack channel survives migration" (channel_id = "C-legacy");
+     check "legacy Slack user survives migration"
+       (user_id = "U-legacy" && user_name = "U-legacy");
+     check "legacy absent Slack context remains absent"
+       (team_id = None && thread_ts = None)
+   | _ -> check "legacy Slack source migrates explicitly" false);
   let migrated_ids = active_ids migrated.pending in
   check "migration mints durable ids" (List.for_all (( <> ) "") migrated_ids);
   Keeper_chat_queue.For_testing.reset ();
@@ -643,6 +670,80 @@ let test_snapshot_path_rejects_parent_segments () =
                 (Common.keepers_runtime_dir_of_base ~base_path))
              "chat-queue.json")))
 
+let test_writer_rejects_unloadable_values_before_commit () =
+  Printf.printf "Test: writer accepts only values the strict loader can replay\n%!";
+  with_base "keeper-chat-writer-schema" @@ fun base_path ->
+  let keeper_name = "writer-schema" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  (match
+     Keeper_chat_queue.enqueue ~keeper_name
+       (message
+          ~source:
+            (Keeper_chat_queue.Slack
+               { channel_id = ""
+               ; user_id = "U1"
+               ; user_name = "User"
+               ; team_id = None
+               ; thread_ts = Some "171.001"
+               })
+          "invalid source")
+   with
+   | Error (Keeper_chat_queue.Invalid_input _) ->
+     check "invalid source is rejected before acknowledgement" true
+   | Ok _ | Error _ -> check "invalid source is rejected before acknowledgement" false);
+  check "invalid source leaves the queue unchanged"
+    ((Keeper_chat_queue.snapshot ~keeper_name).pending = []);
+  ignore (enqueue_exn ~keeper_name (message "valid") : Keeper_chat_queue.enqueue_receipt);
+  let lease = lease_exn ~keeper_name in
+  (match
+     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+       ~outcome:
+         (Mark_failed
+            { completed_at = 3.0
+            ; kind = Delivery_failed
+            ; detail = "   "
+            ; outcome_ref = None
+            })
+   with
+   | `Error (Keeper_chat_queue.Invalid_input _) ->
+     check "invalid terminal detail is rejected" true
+   | `Finalized _ | `Unknown_lease | `Error _ ->
+     check "invalid terminal detail is rejected" false);
+  check "rejected terminal update leaves receipt inflight"
+    (List.length (Keeper_chat_queue.snapshot ~keeper_name).inflight = 1)
+
+let test_control_bearing_prompt_roundtrips_byte_for_byte () =
+  Printf.printf "Test: JSON persistence does not sanitize prompt strings\n%!";
+  with_base "keeper-chat-control-text" @@ fun base_path ->
+  let keeper_name = "control-text" in
+  let content = "[STATE] Grep\nNEXT\tConstraints BDI\000tail" in
+  ignore (configure base_path : Keeper_chat_queue.configure_report);
+  ignore (enqueue_exn ~keeper_name (message content) : Keeper_chat_queue.enqueue_receipt);
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "control-bearing prompt reload has no schema errors" (report.load_errors = []);
+  match (Keeper_chat_queue.snapshot ~keeper_name).pending with
+  | [ { message; _ } ] ->
+    check "prompt bytes are identical before and after restart"
+      (String.equal content message.content)
+  | _ -> check "one prompt receipt reloads" false
+
+let test_slack_threads_are_distinct_fifo_sources () =
+  Printf.printf "Test: Slack thread identity is a coalescing boundary\n%!";
+  let source thread_ts =
+    Keeper_chat_queue.Slack
+      { channel_id = "C1"
+      ; user_id = "U1"
+      ; user_name = "User"
+      ; team_id = Some "T1"
+      ; thread_ts = Some thread_ts
+      }
+  in
+  check "same actor in different Slack threads does not coalesce"
+    (not
+       (Keeper_chat_queue.same_source
+          (source "171.001")
+          (source "171.002")))
+
 let () =
   Eio_main.run @@ fun _environment ->
   test_durable_receipt_lifecycle ();
@@ -660,6 +761,9 @@ let () =
   test_post_commit_observer_is_central_and_unlocked ();
   test_reconfigure_does_not_leak_receipts_across_base_paths ();
   test_snapshot_path_rejects_parent_segments ();
+  test_writer_rejects_unloadable_values_before_commit ();
+  test_control_bearing_prompt_roundtrips_byte_for_byte ();
+  test_slack_threads_are_distinct_fifo_sources ();
   if !failures > 0
   then begin
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

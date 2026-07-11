@@ -99,11 +99,12 @@ let parse_empty_response ~status ~body =
   if status >= 200 && status < 300 then Ok ()
   else Error (error_of_non2xx ~status ~body)
 
-let send_message ~token ~channel_id ~content ?reply_to_message_id () =
+let send_message ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel_id ~content ?reply_to_message_id () =
   let (url, headers, body) =
     build_request ~token ~channel_id ~content ?reply_to_message_id ()
   in
-  match Masc_http_client.post_sync ~url ~headers ~body () with
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_response ~status ~body
 
@@ -171,17 +172,19 @@ let build_edit_request ~token ~channel_id ~message_id ~content () =
   in
   (url, headers, body)
 
-let edit_message ~token ~channel_id ~message_id ~content () =
+let edit_message ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel_id ~message_id ~content () =
   let (url, headers, body) =
     build_edit_request ~token ~channel_id ~message_id ~content ()
   in
-  match Masc_http_client.patch_sync ~url ~headers ~body () with
+  match Masc_http_client.patch_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_empty_response ~status ~body
 
-let trigger_typing ~token ~channel_id () =
+let trigger_typing ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel_id () =
   let url, headers, body = build_typing_request ~token ~channel_id () in
-  match Masc_http_client.post_sync ~url ~headers ~body () with
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_empty_response ~status ~body
 
@@ -313,18 +316,22 @@ let build_edit_embed_request ~token ~channel_id ~message_id
   let body = Yojson.Safe.to_string (`Assoc fields) in
   (url, headers, body)
 
-let send_embed_message ~token ~channel_id ~content ?embeds () =
+let send_embed_message ?clock
+    ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel_id ~content ?embeds () =
   let (url, headers, body) =
     build_embed_request ~token ~channel_id ~content ?embeds ()
   in
-  match Masc_http_client.post_sync ~url ~headers ~body () with
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_response ~status ~body
 
-let edit_embed_message ~token ~channel_id ~message_id ~content ?embeds () =
+let edit_embed_message ?clock
+    ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel_id ~message_id ~content ?embeds () =
   let (url, headers, body) =
     build_edit_embed_request ~token ~channel_id ~message_id ~content ?embeds ()
   in
-  match Masc_http_client.patch_sync ~url ~headers ~body () with
+  match Masc_http_client.patch_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_empty_response ~status ~body

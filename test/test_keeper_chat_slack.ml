@@ -285,6 +285,18 @@ let test_adapter_empty_terminal_is_error () =
       (contains message "no text or blocks")
   | _ -> fail "empty terminal must settle exactly once with an error"
 
+let test_message_body_preserves_reply_thread () =
+  let body =
+    Masc.Keeper_chat_slack.For_testing.build_message_body
+      ~channel:"C-thread" ~content:"deferred reply" ~blocks:[]
+      ~thread_ts:"1710000000.123456" ()
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  check string "channel retained" "C-thread" (body |> member "channel" |> to_string);
+  check string "reply thread retained" "1710000000.123456"
+    (body |> member "thread_ts" |> to_string)
+
 let () =
   run "keeper_chat_slack"
     [
@@ -340,5 +352,9 @@ let () =
             test_protocol_diagnostic_cannot_mask_final_failure
         ; test_case "empty terminal is explicit failure" `Quick
             test_adapter_empty_terminal_is_error
+        ] )
+    ; ( "thread-routing"
+      , [ test_case "deferred reply keeps thread_ts" `Quick
+            test_message_body_preserves_reply_thread
         ] )
     ]

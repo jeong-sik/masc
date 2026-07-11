@@ -215,23 +215,32 @@ let limit_blocks_for_slack blocks =
     let keep = max 0 (slack_max_blocks - 1) in
     take keep blocks @ [ omitted_blocks_notice (count - keep) ]
 
-let send_message_with_blocks ~token ~channel ~content ~blocks =
-  let content =
-    redact content |> escape_mrkdwn_text |> fun s ->
-    truncate_to_limit s slack_message_limit
-  in
-  let blocks = limit_blocks_for_slack blocks in
-  let fields =
-    [ ("channel", `String channel); ("text", `String content) ]
-  in
+let build_message_body ~channel ~content ~blocks ?thread_ts () =
+  let fields = [ ("channel", `String channel); ("text", `String content) ] in
   let fields =
     match blocks with
     | [] -> fields
     | _ -> fields @ [ ("blocks", `List blocks) ]
   in
-  let body_json = `Assoc fields |> Yojson.Safe.to_string in
+  let fields =
+    match thread_ts with
+    | None -> fields
+    | Some thread_ts -> fields @ [ "thread_ts", `String thread_ts ]
+  in
+  `Assoc fields |> Yojson.Safe.to_string
+
+let send_message_with_blocks ?clock
+    ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ?thread_ts ~token ~channel ~content ~blocks () =
+  let content =
+    redact content |> escape_mrkdwn_text |> fun s ->
+    truncate_to_limit s slack_message_limit
+  in
+  let blocks = limit_blocks_for_slack blocks in
+  let body_json = build_message_body ~channel ~content ~blocks ?thread_ts () in
   match
-    Masc_http_client.post_sync ~url:"https://slack.com/api/chat.postMessage"
+    Masc_http_client.post_sync ?clock ~timeout_sec
+      ~url:"https://slack.com/api/chat.postMessage"
       ~headers:
         [ ("Authorization", "Bearer " ^ token)
         ; ("Content-Type", "application/json")
@@ -266,8 +275,9 @@ let send_message_with_blocks ~token ~channel ~content ~blocks =
             Log.Keeper.warn "keeper_chat_slack: JSON parse error: %s" msg;
             Error (Other ("JSON parse error: " ^ msg))
 
-let send_message ~token ~channel ~content =
-  send_message_with_blocks ~token ~channel ~content ~blocks:[]
+let send_message ?clock ?timeout_sec ?thread_ts ~token ~channel ~content () =
+  send_message_with_blocks ?clock ?timeout_sec ?thread_ts
+    ~token ~channel ~content ~blocks:[] ()
 
 (* ── Adapter loop ────────────────────────────────────────────────── *)
 
@@ -354,11 +364,13 @@ let adapter_loop_with_transport
   in
   loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:None
 
-let adapter_loop ~token ~channel ~events ?base_url ?on_send_result () =
+let adapter_loop ~clock ~token ~channel ?thread_ts ~events ?base_url
+    ?on_send_result () =
   adapter_loop_with_transport
-    ~send_plain:(fun ~content -> send_message ~token ~channel ~content)
+    ~send_plain:(fun ~content ->
+      send_message ~clock ?thread_ts ~token ~channel ~content ())
     ~send_blocks:(fun ~content ~blocks ->
-      send_message_with_blocks ~token ~channel ~content ~blocks)
+      send_message_with_blocks ~clock ?thread_ts ~token ~channel ~content ~blocks ())
     ~events ?base_url ?on_send_result ()
 
 module For_testing = struct
@@ -372,6 +384,7 @@ module For_testing = struct
   let tool_context_block_json = tool_context_block_json
   let content_blocks_of_text = content_blocks_of_text
   let final_message_blocks = final_message_blocks
+  let build_message_body = build_message_body
 
   let adapter_loop = adapter_loop_with_transport
 end

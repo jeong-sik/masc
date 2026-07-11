@@ -101,14 +101,7 @@ let settle_lease state ~keeper_name ~lease_id action =
             lease=%s: %s; finalization will retry"
            keeper_name
            lease_id
-           (match error with
-            | Keeper_chat_queue.Persistence_not_configured ->
-                "persistence_not_configured"
-            | Keeper_chat_queue.Revision_exhausted ->
-                "revision_exhausted"
-            | Keeper_chat_queue.Persist_failed message -> message
-            | Keeper_chat_queue.Snapshot_unavailable load_error ->
-                load_error.message);
+           (Keeper_chat_queue.mutation_error_to_string error);
          `Pending)
     | Nack ->
       (match Keeper_chat_queue.nack ~keeper_name ~lease_id with
@@ -130,14 +123,7 @@ let settle_lease state ~keeper_name ~lease_id action =
             finalization will retry"
            keeper_name
            lease_id
-           (match error with
-            | Keeper_chat_queue.Persistence_not_configured ->
-                "persistence_not_configured"
-            | Keeper_chat_queue.Revision_exhausted ->
-                "revision_exhausted"
-            | Keeper_chat_queue.Persist_failed message -> message
-            | Keeper_chat_queue.Snapshot_unavailable load_error ->
-                load_error.message);
+           (Keeper_chat_queue.mutation_error_to_string error);
          `Pending)
   in
   result
@@ -263,14 +249,7 @@ let start ~sw ~clock ~base_path ~handle_turn =
                        "keeper_chat_consumer: lease_batch persist failed for keeper=%s: \
                         %s; retrying next poll"
                        keeper_name
-                       (match error with
-                        | Keeper_chat_queue.Persistence_not_configured ->
-                            "persistence_not_configured"
-                        | Keeper_chat_queue.Revision_exhausted ->
-                            "revision_exhausted"
-                        | Keeper_chat_queue.Persist_failed message -> message
-                        | Keeper_chat_queue.Snapshot_unavailable load_error ->
-                            load_error.message);
+                       (Keeper_chat_queue.mutation_error_to_string error);
                      clear_dispatching dispatch_state keeper_name
                  | `Leased { Keeper_chat_queue.lease_id; items } ->
                      (match items with

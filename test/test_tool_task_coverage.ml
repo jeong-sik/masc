@@ -3178,6 +3178,46 @@ let () = test "rfc_0034_v2_capacity_check_returns_some_at_limit" (fun () ->
    | None ->
        failwith "expected capacity_error at the per-goal limit"))
 
+(* Gate 0 coverage: handle_transition action=done rejects empty evidence_refs.
+   This gate lives in [Tool_task.handle_transition] (the masc_transition tool
+   path), before the completion review gate. *)
+let () = test "handle_transition_gate0_rejects_done_with_empty_evidence_refs" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("title", `String "Gate 0 coverage task")]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("task_id", `String "task-001")]) in
+  let result = Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [
+      ("task_id", `String "task-001");
+      ("action", `String "done");
+      ("notes", `String "Done but no evidence.");
+      ("evidence_refs", `List []);
+    ]) in
+  assert (not (Tool_result.is_success result));
+  assert (str_contains (Tool_result.message result)
+    "Done action requires at least one evidence_ref"))
+
+let () = test "handle_transition_gate0_allows_done_with_evidence_ref" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("title", `String "Gate 0 pass task")]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("task_id", `String "task-001")]) in
+  (* Will fail past Gate 0 at the completion review gate, but Gate 0 itself
+     should NOT reject — the evidence_ref is present. *)
+  let result = Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [
+      ("task_id", `String "task-001");
+      ("action", `String "done");
+      ("notes", `String "Done with evidence.");
+      ("evidence_refs", `List [ `String "lib/task/tool_task.ml" ]);
+    ]) in
+  (* Gate 0 should not be the rejection reason; if it is, the test fails. *)
+  if not (Tool_result.is_success result) then
+    assert (not (str_contains (Tool_result.message result)
+      "Done action requires at least one evidence_ref")))
+
 let () =
   ensure_test_runtime ();
   Alcotest.run "Task.Tool"

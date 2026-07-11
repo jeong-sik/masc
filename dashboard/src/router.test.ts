@@ -63,8 +63,8 @@ describe('navigate', () => {
     expect(window.location.hash).toBe('#settings?section=runtimes')
 
     navigate('settings', { section: 'account' })
-    expect(route.value.params).toEqual({})
-    expect(window.location.hash).toBe('#settings')
+    expect(route.value.params).toEqual({ section: 'account' })
+    expect(window.location.hash).toBe('#settings?section=account')
   })
 
   it('keeps workspace board deep links routeable for compatibility', () => {

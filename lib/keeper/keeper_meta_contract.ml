@@ -702,16 +702,9 @@ let effective_meta_of_profile_defaults
   let open Keeper_types_profile in
   let has_profile_source = Option.is_some defaults.manifest_path in
   let target_sandbox_profile =
-    match defaults.sandbox_profile, has_profile_source with
+    match defaults.sandbox_profile, defaults.manifest_path with
     | Some profile, _ -> Ok profile
-    (* A present profile that omits sandbox_profile stays fail-closed (#24144):
-       a declared profile must be explicit about its sandbox. *)
-    | None, true ->
-      Error (missing_required_sandbox_profile_error ~keeper_name:meta.name defaults)
-    (* A standalone keeper (no profile manifest) keeps its persisted
-       [meta.sandbox_profile], mirroring [network_mode] below. #24144 made this
-       arm hard-error asymmetrically, rejecting every profile-less keeper. *)
-    | None, false -> Ok meta.sandbox_profile
+    | None, _ -> Error (missing_required_sandbox_profile_error ~keeper_name:meta.name defaults)
   in
   match target_sandbox_profile with
   | Error _ as err -> err

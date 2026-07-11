@@ -43,7 +43,7 @@ type cycle_outcome =
   | Completed of keeper_meta
   | Failed of
       { meta : keeper_meta
-      ; error : Agent_sdk.Error.sdk_error
+      ; failure : Keeper_unified_turn.turn_failure
       }
   | Busy of
       { meta : keeper_meta
@@ -87,7 +87,8 @@ let run_keeper_cycle_admitted
         ?event_bus
         ())
   with
-  | Error err ->
+  | Error failure ->
+    let err = failure.Keeper_unified_turn.error in
     let e_str = Agent_sdk.Error.to_string err in
     Log.Keeper.debug "%s: keeper cycle failed: %s" meta_after_triage.name e_str;
     (* Classify on the typed [Config (InvalidConfig { field = "eio_context" })]
@@ -143,7 +144,7 @@ let run_keeper_cycle_admitted
           ();
         meta_after_triage
     in
-    Failed { meta; error = err }
+    Failed { meta; failure }
   | Ok updated ->
     Keeper_turn_holders.reset_budget_exhaustion ~keeper_name:meta_after_triage.name;
     Observations.clear_provider_timeout_failure_reason

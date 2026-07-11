@@ -12,6 +12,7 @@ type lease_kind = Keeper_event_queue_state.lease_kind =
 
 type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Cycle_busy
+  | Turn_not_scheduled
   | Retry_after_pacing
   | Rotate_now
   | Cancelled
@@ -39,6 +40,10 @@ type settle_result = Keeper_event_queue_state.settle_result =
   | Already_settled of transition_receipt
 
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
+val lease_kind : lease -> lease_kind
+
+val active_lease_result :
+  base_path:string -> keeper_name:string -> (lease option, string) result
 
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Compatibility replay projection: pending followed by active lease stimuli.
@@ -125,6 +130,12 @@ val recover_leases_result :
 (** Registration boundary for a newly-owned lane.  Requeues abandoned leases
     and records one stable [Registration_recovery] transition per lease in the
     same state write. *)
+
+val mark_transition_projected_result :
+  base_path:string ->
+  keeper_name:string ->
+  transition_id:string ->
+  (unit, string) result
 
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit

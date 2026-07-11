@@ -55,6 +55,8 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  claimed_lease : Keeper_registry_event_queue.lease option;
+  event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
@@ -113,11 +115,12 @@ val provider_timeout_policy_decision :
 (** Outcome of one keepalive cycle evaluation.
 
     [cycle_crashed = true] means the cycle's catch-all swallowed an
-    exception to keep the keeper fiber alive (T6 audit). The failure
-    has already been recorded via
+    exception to keep the keeper fiber alive (T6 audit), or a durable
+    event-queue claim/settlement did not commit. The failure has
+    already been recorded via
     [Keeper_registry.increment_turn_failures] — the same counter the
     unified-turn failure path uses — so the caller dispatches
-    [Turn_failed]. A crashed cycle must not refresh the
+    [Turn_failed]. Such a cycle must not refresh the
     work-as-heartbeat lease. *)
 type keepalive_turn_outcome = {
   meta : keeper_meta;
@@ -130,6 +133,16 @@ type keepalive_turn_outcome = {
     and logs at ERROR. Does not raise. *)
 val record_crashed_cycle_failure :
   base_path:string -> keeper_name:string -> exn -> unit
+
+val settlement_of_failure :
+  settled_at:float ->
+  lease:Keeper_registry_event_queue.lease ->
+  Keeper_unified_turn.turn_failure ->
+  Keeper_registry_event_queue.settlement
+(** Pure queue disposition for a failed cycle.  Retry/rotation requeue;
+    deterministic failure creates one judgment successor; failure of an
+    already-leased judgment emits an operator-visible escalation with no
+    recursive successor. *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];

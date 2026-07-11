@@ -196,6 +196,15 @@ val record_streaming_cancelled_observation
   -> unit
   -> unit
 
+type turn_failure =
+  { error : Agent_sdk.Error.sdk_error
+  ; runtime_id : string
+  ; route : Keeper_runtime_failure_route.route
+  }
+(** Exact execution identity and typed disposition route for a failed turn.
+    The heartbeat queue settles from this value; it must not reconstruct a
+    possibly rotated runtime from Keeper meta. *)
+
 val run_keeper_cycle
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -208,7 +217,7 @@ val run_keeper_cycle
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> unit
-  -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
+  -> (Keeper_meta_contract.keeper_meta, turn_failure) result
 
 (** Run a unified keeper turn.
 

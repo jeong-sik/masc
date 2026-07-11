@@ -4,7 +4,7 @@ type cycle_outcome =
   | Completed of Keeper_meta_contract.keeper_meta
   | Failed of
       { meta : Keeper_meta_contract.keeper_meta
-      ; error : Agent_sdk.Error.sdk_error
+      ; failure : Keeper_unified_turn.turn_failure
       }
   | Busy of
       { meta : Keeper_meta_contract.keeper_meta

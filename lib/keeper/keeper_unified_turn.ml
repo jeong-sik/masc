@@ -20,6 +20,12 @@ include Keeper_unified_turn_types
 
 include Keeper_unified_turn_phase_plan
 
+type turn_failure =
+  { error : Agent_sdk.Error.sdk_error
+  ; runtime_id : string
+  ; route : Keeper_runtime_failure_route.route
+  }
+
 let run_keeper_cycle
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -32,7 +38,7 @@ let run_keeper_cycle
       ?event_bus
       ?hitl_resolution
       ()
-  : (keeper_meta, Agent_sdk.Error.sdk_error) result
+  : (keeper_meta, turn_failure) result
   =
   (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
      (Cycle 8/Tier B2, PR #11412).  Action mapping:
@@ -48,6 +54,7 @@ let run_keeper_cycle
      so dashboards/tests can inspect the same routing contract for blocked
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
+  let exact_failure_execution = ref None in
   let hitl_delivery_channel =
     Option.map
       (fun (resolution : Keeper_event_queue.hitl_resolution) -> resolution.channel)
@@ -958,17 +965,15 @@ dominant source of the observed CAS race exhaustion after
                       (String.concat ", " committed_tools)
                       turn_event_summary.event_count
                       (String.concat ", " turn_event_summary.payload_kinds));
-                  (* RFC-0313 W2: route the failure (total over sdk_error) and
-                     record alongside the legacy machinery. The route is
-                     observe-only until the W3 flip: pacing shadow takes the
-                     typed retry_after hint, the route counter feeds Grafana,
-                     and Escalate_judgment enqueues a judgment stimulus
-                     ([enqueue_if_missing] identity-dedups repeats; no
-                     dedicated turn_reason, so scheduling cooldowns are
-                     unchanged). Placed before the escalate call, which may
-                     raise [Keeper_fiber_crash] and must not skip the
-                     observations. *)
+                  (* RFC-0313: route the failure (total over sdk_error), retain
+                     the exact final execution identity, and record pacing plus
+                     telemetry here. Queue ownership lives one boundary out:
+                     the heartbeat settles the current lease and, for
+                     [Escalate_judgment], enqueues its typed successor in the
+                     same durable event-queue transaction. *)
                   let failure_route = Keeper_runtime_failure_route.route_of_error err in
+                  exact_failure_execution :=
+                    Some (final_execution.runtime_id, failure_route);
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string FailureRoute)
                     ~labels:
@@ -984,24 +989,6 @@ dominant source of the observed CAS race exhaustion after
                     ~runtime_id:final_execution.runtime_id
                     ~retry_after:
                       (Keeper_runtime_failure_route.retry_after_of_route failure_route);
-                  (match failure_route with
-                   | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
-                     let fj : Keeper_event_queue.failure_judgment =
-                       { fj_runtime_id = final_execution.runtime_id
-                       ; fj_judgment = judgment
-                       ; fj_detail = detail
-                       }
-                     in
-                     Keeper_registry_event_queue.enqueue
-                       ~base_path:config.base_path
-                       meta.name
-                       { post_id = Keeper_event_queue.failure_judgment_post_id fj
-                       ; urgency = Keeper_event_queue.Normal
-                       ; arrived_at = Time_compat.now ()
-                       ; payload = Keeper_event_queue.Failure_judgment fj
-                       }
-                   | Keeper_runtime_failure_route.Retry_after_pacing _
-                   | Keeper_runtime_failure_route.Rotate_now _ -> ());
                   Keeper_unified_turn_failure.record_failure_and_maybe_escalate
                     ~config
                     ~meta
@@ -1041,7 +1028,7 @@ dominant source of the observed CAS race exhaustion after
                      (Streaming -> Completing -> Done) are emitted once inside
                      [Keeper_unified_turn_success.handle]. Do not duplicate them
                      here; this is the sole caller of that function. *)
-                  let updated_meta =
+                  let success =
                     Keeper_unified_turn_success.handle
                       ~config
                       ~base_dir
@@ -1058,12 +1045,29 @@ dominant source of the observed CAS race exhaustion after
                       ~keeper_turn_id
                       result
                   in
-                  (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)
-                  let turn_state =
-                    { turn_state with cycle_completed = true }
-                  in
-                  post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
-                  Ok updated_meta, turn_state)))))
+                  (match success.failure_judgment with
+                   | Some judgment ->
+                     let route =
+                       Keeper_runtime_failure_route.Escalate_judgment
+                         { judgment = judgment.fj_judgment
+                         ; detail = judgment.fj_detail
+                         }
+                     in
+                     exact_failure_execution :=
+                       Some (final_execution.runtime_id, route);
+                     let error =
+                       Keeper_internal_error.sdk_error_of_masc_internal_error
+                         (Keeper_internal_error.Internal_contract_rejected
+                            { reason = judgment.fj_detail })
+                     in
+                     Error error, turn_state
+                   | None ->
+                     (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)
+                     let turn_state =
+                       { turn_state with cycle_completed = true }
+                     in
+                     post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
+                     Ok success.meta, turn_state))))))
   in
   let append_phase_gate_decision_for_gate turn_plan turn_state =
     Keeper_unified_turn_manifest.append_phase_gate_decision
@@ -1083,10 +1087,20 @@ dominant source of the observed CAS race exhaustion after
       ~turn_state
       ~registry_base_path
   in
+  let failure_of_error error =
+    match !exact_failure_execution with
+    | Some (runtime_id, route) -> { error; runtime_id; route }
+    | None ->
+      { error
+      ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
+      ; route = Keeper_runtime_failure_route.route_of_error error
+      }
+  in
   match phase_gate_outcome with
   | Keeper_unified_turn_phase_gate.Phase_gate_terminal_ok meta -> Ok meta
-  | Keeper_unified_turn_phase_gate.Phase_gate_terminal_error err -> Error err
+  | Keeper_unified_turn_phase_gate.Phase_gate_terminal_error err ->
+    Error (failure_of_error err)
   | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
     let result, _turn_state = main_path turn_state phase_opt in
-    result
+    Result.map_error failure_of_error result
 ;;

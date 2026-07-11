@@ -5,6 +5,7 @@ type lease_kind =
 
 type requeue_reason =
   | Cycle_busy
+  | Turn_not_scheduled
   | Retry_after_pacing
   | Rotate_now
   | Cancelled
@@ -74,6 +75,36 @@ let next_lease_sequence state = state.next_lease_sequence
 let pending state = state.pending
 let leases state = state.leases
 let transition_outbox state = state.transition_outbox
+let lease_kind (lease : lease) = lease.kind
+let active_lease state =
+  match state.leases with
+  | [] -> None
+  | lease :: _ -> Some lease
+;;
+
+let mark_transition_projected ~transition_id state =
+  let found = ref false in
+  let changed = ref false in
+  let transition_outbox =
+    List.map
+      (fun entry ->
+         if String.equal entry.receipt.transition_id transition_id
+         then (
+           found := true;
+           if entry.projected_to_reaction_ledger
+           then entry
+           else (
+             changed := true;
+             { entry with projected_to_reaction_ledger = true }))
+         else entry)
+      state.transition_outbox
+  in
+  if not !found
+  then Error (Printf.sprintf "event queue transition not found: %s" transition_id)
+  else if not !changed
+  then Ok state
+  else Ok { state with transition_outbox }
+;;
 let with_pending pending state = { state with pending }
 let with_revision revision state = { state with revision }
 
@@ -168,6 +199,7 @@ let lease_kind_of_label = function
 
 let requeue_reason_label = function
   | Cycle_busy -> "cycle_busy"
+  | Turn_not_scheduled -> "turn_not_scheduled"
   | Retry_after_pacing -> "retry_after_pacing"
   | Rotate_now -> "rotate_now"
   | Cancelled -> "cancelled"
@@ -177,6 +209,7 @@ let requeue_reason_label = function
 
 let requeue_reason_of_label = function
   | "cycle_busy" -> Ok Cycle_busy
+  | "turn_not_scheduled" -> Ok Turn_not_scheduled
   | "retry_after_pacing" -> Ok Retry_after_pacing
   | "rotate_now" -> Ok Rotate_now
   | "cancelled" -> Ok Cancelled
@@ -232,6 +265,29 @@ let settlement_equal left right =
     false
 ;;
 
+let ( let* ) = Result.bind
+
+let validate_settlement = function
+  | Ack | Requeue _ -> Ok ()
+  | Escalate
+      { reason = Failure_judgment_requested
+      ; successor =
+          Some
+            { Keeper_event_queue.payload =
+                Keeper_event_queue.Failure_judgment _
+            ; _
+            }
+      } ->
+    Ok ()
+  | Escalate { reason = Failure_judgment_failed; successor = None } -> Ok ()
+  | Escalate { reason = Failure_judgment_requested; successor = None } ->
+    Error "failure judgment request settlement requires a typed successor"
+  | Escalate { reason = Failure_judgment_requested; successor = Some _ } ->
+    Error "failure judgment request successor has the wrong payload kind"
+  | Escalate { reason = Failure_judgment_failed; successor = Some _ } ->
+    Error "failed failure judgment must not enqueue a successor"
+;;
+
 let receipt_for_lease ~settled_at ~settlement (lease : lease) =
   let transition_id = transition_id lease settlement in
   { transition_id
@@ -272,6 +328,7 @@ let lease_equal (left : lease) (right : lease) =
 ;;
 
 let settle ~settled_at ~lease ~settlement state =
+  let* () = validate_settlement settlement in
   match committed_lease lease state with
   | None ->
     (match find_prior_receipt lease.lease_id state with
@@ -372,8 +429,6 @@ let release_legacy_inflight stimuli state =
   { state with leases }
 ;;
 
-let ( let* ) = Result.bind
-
 let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
   | _ -> Error (context ^ " must be a JSON object")
@@ -464,8 +519,20 @@ let lease_of_yojson json =
   let* stimuli =
     list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
   in
-  if stimuli = []
+  if Int64.compare sequence 1L < 0
+  then Error "event queue lease sequence must be positive"
+  else if stimuli = []
   then Error "event queue lease must contain at least one stimulus"
+  else if kind = Single && List.length stimuli <> 1
+  then Error "single event queue lease must contain exactly one stimulus"
+  else if
+    kind = Board_batch
+    && not
+         (List.for_all
+            (fun (stimulus : Keeper_event_queue.stimulus) ->
+               Keeper_event_queue.is_board_signal stimulus.payload)
+            stimuli)
+  then Error "board event queue lease contains a non-board stimulus"
   else if not (String.equal lease_id (lease_id_of_sequence sequence))
   then Error (Printf.sprintf "event queue lease id/sequence mismatch: %s" lease_id)
   else Ok { lease_id; sequence; kind; claimed_at; stimuli }
@@ -509,7 +576,9 @@ let settlement_of_yojson json =
         let* successor = Keeper_event_queue.stimulus_of_yojson json in
         Ok (Some successor)
     in
-    Ok (Escalate { reason; successor })
+    let settlement = Escalate { reason; successor } in
+    let* () = validate_settlement settlement in
+    Ok settlement
   | kind -> Error (Printf.sprintf "unknown event queue settlement kind: %s" kind)
 ;;
 
@@ -603,7 +672,9 @@ let duplicate_by key values =
 ;;
 
 let validate_state state =
-  if Int64.compare state.next_lease_sequence 1L < 0
+  if Int64.compare state.revision 0L < 0
+  then Error "event queue revision must not be negative"
+  else if Int64.compare state.next_lease_sequence 1L < 0
   then Error "event queue next lease sequence must be positive"
   else
     match duplicate_by (fun (lease : lease) -> lease.lease_id) state.leases with

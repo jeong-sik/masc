@@ -79,6 +79,11 @@ module For_testing : sig
     -> unit
 end
 
+type handle_result =
+  { meta : Keeper_meta_contract.keeper_meta
+  ; failure_judgment : Keeper_event_queue.failure_judgment option
+  }
+
 val handle
   :  config:Workspace.config
   -> base_dir:string
@@ -95,4 +100,4 @@ val handle
   -> current_turn_blocker_info:Keeper_meta_contract.blocker_info option
   -> keeper_turn_id:int
   -> Keeper_agent_run.run_result
-  -> Keeper_meta_contract.keeper_meta
+  -> handle_result

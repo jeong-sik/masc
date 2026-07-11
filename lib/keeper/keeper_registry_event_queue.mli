@@ -10,6 +10,7 @@ type lease = Keeper_event_queue_persistence.lease
 
 type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Cycle_busy
+  | Turn_not_scheduled
   | Retry_after_pacing
   | Rotate_now
   | Cancelled
@@ -35,6 +36,10 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
   | Already_settled of transition_receipt
 
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
+val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind
+
+val active_lease_result :
+  base_path:string -> string -> (lease option, string) result
 
 val claim_when_result :
   base_path:string ->

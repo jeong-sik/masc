@@ -70,6 +70,18 @@ let test_claim_codec_ack_idempotency () =
     "idempotent outbox cardinality"
     1
     (List.length (State.transition_outbox state));
+  let state =
+    State.mark_transition_projected ~transition_id:receipt.transition_id state
+    |> require_ok "mark transition projected"
+  in
+  let projected = List.hd (State.transition_outbox state) in
+  Alcotest.(check bool)
+    "projection acknowledgement is durable state"
+    true
+    projected.projected_to_reaction_ledger;
+  ignore
+    (State.mark_transition_projected ~transition_id:receipt.transition_id state
+     |> require_ok "projection acknowledgement is idempotent");
   (match
      State.settle
        ~settled_at:13.0
@@ -141,7 +153,112 @@ let test_requeue_and_escalation_are_total () =
     "failed judgment does not enqueue itself"
     0
     (Queue.length (State.pending state));
-  Alcotest.(check int) "both transitions visible" 3 (List.length (State.transition_outbox state))
+  Alcotest.(check int) "both transitions visible" 3 (List.length (State.transition_outbox state));
+  let open Yojson.Safe.Util in
+  let failed_judgment_settlement =
+    State.to_yojson state
+    |> member "transition_outbox"
+    |> to_list
+    |> List.rev
+    |> List.hd
+    |> member "receipt"
+    |> member "settlement"
+  in
+  Alcotest.(check string)
+    "failed judgment receipt is an escalation"
+    "escalate"
+    (failed_judgment_settlement |> member "kind" |> to_string);
+  Alcotest.(check string)
+    "failed judgment receipt preserves the typed reason"
+    "failure_judgment_failed"
+    (failed_judgment_settlement |> member "reason" |> to_string);
+  Alcotest.(check bool)
+    "failed judgment receipt explicitly stores no successor"
+    true
+    (failed_judgment_settlement
+     |> member "successor"
+     |> Yojson.Safe.equal `Null)
+;;
+
+let lease_for stimulus =
+  let state = State.with_pending (queue [ stimulus ]) State.empty in
+  let _state, lease = claim_head state in
+  require_some "fixture lease" lease
+;;
+
+let turn_failure route : Keeper_unified_turn.turn_failure =
+  { error = Agent_sdk.Error.Internal "deterministic fixture"
+  ; runtime_id = "exact-final-runtime"
+  ; route
+  }
+;;
+
+let test_failed_cycle_route_mapping () =
+  let ordinary_lease = lease_for (stimulus "ordinary" 1.0) in
+  let retry_failure =
+    turn_failure
+      (Keeper_runtime_failure_route.Retry_after_pacing
+         { pacing = Keeper_runtime_failure_route.Rate_limited
+         ; retry_after = None
+         })
+  in
+  (match
+     Keeper_heartbeat_loop.settlement_of_failure
+       ~settled_at:2.0
+       ~lease:ordinary_lease
+       retry_failure
+   with
+   | Keeper_registry_event_queue.Requeue
+       Keeper_registry_event_queue.Retry_after_pacing ->
+     ()
+   | _ -> Alcotest.fail "retry route did not requeue the lease");
+  let judgment_failure =
+    turn_failure
+      (Keeper_runtime_failure_route.Escalate_judgment
+         { judgment = Keeper_runtime_failure_route.Contract_violation
+         ; detail = "fixture contract failure"
+         })
+  in
+  (match
+     Keeper_heartbeat_loop.settlement_of_failure
+       ~settled_at:3.0
+       ~lease:ordinary_lease
+       judgment_failure
+   with
+   | Keeper_registry_event_queue.Escalate
+       { reason = Keeper_registry_event_queue.Failure_judgment_requested
+       ; successor = Some { Queue.payload = Queue.Failure_judgment successor; _ }
+       } ->
+     Alcotest.(check string)
+       "successor keeps exact final runtime"
+       "exact-final-runtime"
+       successor.fj_runtime_id
+   | _ -> Alcotest.fail "deterministic failure did not create one judgment successor");
+  let judgment : Queue.failure_judgment =
+    { fj_runtime_id = "source-runtime"
+    ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
+    ; fj_detail = "source failure"
+    }
+  in
+  let leased_judgment =
+    lease_for
+      (stimulus
+         ~payload:(Queue.Failure_judgment judgment)
+         (Queue.failure_judgment_post_id judgment)
+         4.0)
+  in
+  (match
+     Keeper_heartbeat_loop.settlement_of_failure
+       ~settled_at:5.0
+       ~lease:leased_judgment
+       judgment_failure
+   with
+   | Keeper_registry_event_queue.Escalate
+       { reason = Keeper_registry_event_queue.Failure_judgment_failed
+       ; successor = None
+       } ->
+     ()
+   | _ -> Alcotest.fail "failed judgment recursively re-enqueued itself")
 ;;
 
 let rec remove_tree path =
@@ -250,6 +367,7 @@ let () =
     [ ( "state"
       , [ Alcotest.test_case "claim codec ack idempotency" `Quick test_claim_codec_ack_idempotency
         ; Alcotest.test_case "requeue and escalation" `Quick test_requeue_and_escalation_are_total
+        ; Alcotest.test_case "failed cycle route mapping" `Quick test_failed_cycle_route_mapping
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "legacy pair migration" `Quick test_legacy_pair_migrates_once

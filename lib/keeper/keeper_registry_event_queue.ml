@@ -11,6 +11,7 @@ type lease = Keeper_event_queue_persistence.lease
 
 type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Cycle_busy
+  | Turn_not_scheduled
   | Retry_after_pacing
   | Rotate_now
   | Cancelled
@@ -36,6 +37,16 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
   | Already_settled of transition_receipt
 
 let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
+let lease_kind = Keeper_event_queue_persistence.lease_kind
+
+let active_lease_result ~base_path name =
+  match Keeper_registry.get ~base_path name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.active_lease_result
+      ~base_path
+      ~keeper_name:name
+;;
 
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
@@ -220,64 +231,76 @@ let snapshot ~base_path name =
 ;;
 
 let dequeue_when ~base_path name ~ready =
-  match
-    Keeper_event_queue_persistence.claim_when_result
-      ~base_path
-      ~keeper_name:name
-      ~claimed_at:(Time_compat.now ())
-      ~ready
-      ~after_commit:(publish_pending ~base_path name)
-      ()
-  with
-  | Error message ->
-    Log.Keeper.error "registry: durable claim failed name=%s: %s" name message;
-    None
-  | Ok None -> None
-  | Ok (Some lease) ->
-    (match lease_stimuli lease with
-     | [ stimulus ] -> Some stimulus
-     | [] | _ :: _ :: _ ->
-       Log.Keeper.error
-         "registry: single claim returned invalid cardinality name=%s"
-         name;
-       None)
+  match Keeper_registry.get ~base_path name with
+  | None -> None
+  | Some _ ->
+    (match
+       Keeper_event_queue_persistence.claim_when_result
+         ~base_path
+         ~keeper_name:name
+         ~claimed_at:(Time_compat.now ())
+         ~ready
+         ~after_commit:(publish_pending ~base_path name)
+         ()
+     with
+     | Error message ->
+       Log.Keeper.error "registry: durable claim failed name=%s: %s" name message;
+       None
+     | Ok None -> None
+     | Ok (Some lease) ->
+       (match lease_stimuli lease with
+        | [ stimulus ] -> Some stimulus
+        | [] | _ :: _ :: _ ->
+          Log.Keeper.error
+            "registry: single claim returned invalid cardinality name=%s"
+            name;
+          None))
 ;;
 
 let dequeue ~base_path name = dequeue_when ~base_path name ~ready:(fun _ -> true)
 
 let drain_board ~base_path name =
-  match
-    Keeper_event_queue_persistence.claim_board_result
-      ~base_path
-      ~keeper_name:name
-      ~claimed_at:(Time_compat.now ())
-      ~after_commit:(publish_pending ~base_path name)
-      ()
-  with
-  | Error message ->
-    Log.Keeper.error "registry: durable board claim failed name=%s: %s" name message;
-    []
-  | Ok None -> []
-  | Ok (Some lease) -> lease_stimuli lease
+  match Keeper_registry.get ~base_path name with
+  | None -> []
+  | Some _ ->
+    (match
+       Keeper_event_queue_persistence.claim_board_result
+         ~base_path
+         ~keeper_name:name
+         ~claimed_at:(Time_compat.now ())
+         ~after_commit:(publish_pending ~base_path name)
+         ()
+     with
+     | Error message ->
+       Log.Keeper.error "registry: durable board claim failed name=%s: %s" name message;
+       []
+     | Ok None -> []
+     | Ok (Some lease) -> lease_stimuli lease)
 ;;
 
 let claim_when_result ~base_path name ~claimed_at ~ready =
-  Keeper_event_queue_persistence.claim_when_result
-    ~base_path
-    ~keeper_name:name
-    ~claimed_at
-    ~ready
-    ~after_commit:(publish_pending ~base_path name)
-    ()
+  match Keeper_registry.get ~base_path name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.claim_when_result
+      ~base_path
+      ~keeper_name:name
+      ~claimed_at
+      ~ready
+      ~after_commit:(publish_pending ~base_path name)
+      ()
 ;;
 
 let claim_board_result ~base_path name ~claimed_at =
-  Keeper_event_queue_persistence.claim_board_result
-    ~base_path
-    ~keeper_name:name
-    ~claimed_at
-    ~after_commit:(publish_pending ~base_path name)
-    ()
+  match Keeper_registry.get ~base_path name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.claim_board_result
+      ~base_path
+      ~keeper_name:name
+      ~claimed_at
+      ~after_commit:(publish_pending ~base_path name)
+      ()
 ;;
 
 let settle_result ~base_path name ~settled_at ~lease ~settlement =

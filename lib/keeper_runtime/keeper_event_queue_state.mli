@@ -12,6 +12,7 @@ type lease_kind =
 
 type requeue_reason =
   | Cycle_busy
+  | Turn_not_scheduled
   | Retry_after_pacing
   | Rotate_now
   | Cancelled
@@ -65,6 +66,7 @@ val next_lease_sequence : t -> int64
 val pending : t -> Keeper_event_queue.t
 val leases : t -> lease list
 val transition_outbox : t -> outbox_entry list
+val lease_kind : lease -> lease_kind
 
 val with_pending : Keeper_event_queue.t -> t -> t
 val with_revision : int64 -> t -> t
@@ -99,6 +101,14 @@ val settle :
 val recover_leases : settled_at:float -> t -> (t, string) result
 (** Requeue every active lease with [Registration_recovery], preserving claim
     and stimulus order and emitting stable transition receipts. *)
+
+val active_lease : t -> lease option
+(** Oldest unsettled lease, if any.  A restarted lane resumes this lease before
+    claiming new pending work. *)
+
+val mark_transition_projected : transition_id:string -> t -> (t, string) result
+(** Idempotently mark a durable outbox entry after an external projector has
+    materialized its stable [event_id].  Unknown transition ids fail closed. *)
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t

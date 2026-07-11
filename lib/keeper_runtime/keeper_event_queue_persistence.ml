@@ -8,6 +8,7 @@ type lease_kind = State.lease_kind =
 
 type requeue_reason = State.requeue_reason =
   | Cycle_busy
+  | Turn_not_scheduled
   | Retry_after_pacing
   | Rotate_now
   | Cancelled
@@ -35,6 +36,7 @@ type settle_result = State.settle_result =
   | Already_settled of transition_receipt
 
 let lease_stimuli (lease : lease) = lease.stimuli
+let lease_kind = State.lease_kind
 
 let snapshot_filename = "event-queue.json"
 let legacy_inflight_filename = "event-queue-inflight.json"
@@ -249,6 +251,10 @@ let load_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
+let active_lease_result ~base_path ~keeper_name =
+  load_state_result ~base_path ~keeper_name |> Result.map State.active_lease
+;;
+
 let queue_of_stimuli stimuli =
   List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
 ;;
@@ -308,6 +314,46 @@ type snapshot_pair_with_errors =
   ; read_errors : snapshot_read_error list
   }
 
+let diagnose_snapshot_read_error ~base_path ~keeper_name message =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error invalid -> [ { kind = Invalid_path; path = None; message = invalid } ]
+  | Ok owner ->
+    let primary = snapshot_path_of_owner owner in
+    let legacy = legacy_inflight_path_of_owner owner in
+    let inspect path =
+      try
+        if not (Sys.file_exists path)
+        then None
+        else
+          match Safe_ops.read_json_file_safe path with
+          | Error read_message ->
+            Some { kind = Read_failed; path = Some path; message = read_message }
+          | Ok _ -> Some { kind = Parse_failed; path = Some path; message }
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Some
+          { kind = Read_failed
+          ; path = Some path
+          ; message = Printexc.to_string exn
+          }
+    in
+    (match inspect primary with
+     | Some ({ kind = Read_failed; _ } as error) -> [ error ]
+     | Some ({ kind = Parse_failed; _ } as primary_error) ->
+       (match inspect legacy with
+        | Some ({ kind = Read_failed; _ } as error) -> [ error ]
+        | Some ({ kind = Parse_failed; _ } as error) -> [ error ]
+        | Some { kind = Invalid_path; _ } -> [ primary_error ]
+        | None -> [ primary_error ])
+     | Some { kind = Invalid_path; _ } ->
+       [ { kind = Invalid_path; path = None; message } ]
+     | None ->
+       (match inspect legacy with
+        | Some error -> [ error ]
+        | None -> [ { kind = Parse_failed; path = None; message } ]))
+;;
+
 let load_snapshot_pair_with_errors ~base_path ~keeper_name =
   match load_state_result ~base_path ~keeper_name with
   | Ok state ->
@@ -315,7 +361,7 @@ let load_snapshot_pair_with_errors ~base_path ~keeper_name =
   | Error message ->
     { pending = Keeper_event_queue.empty
     ; inflight = Keeper_event_queue.empty
-    ; read_errors = [ { kind = Parse_failed; path = None; message } ]
+    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
     }
 ;;
 
@@ -509,6 +555,17 @@ let recover_leases_result
     match State.recover_leases ~settled_at state with
     | Error _ as error -> error
     | Ok state -> Ok (state, ()))
+;;
+
+let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =
+  commit_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _ -> ())
+    (fun state ->
+       match State.mark_transition_projected ~transition_id state with
+       | Error _ as error -> error
+       | Ok state -> Ok (state, ()))
 ;;
 
 let record_inflight ~base_path ~keeper_name stimuli =

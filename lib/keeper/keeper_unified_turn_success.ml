@@ -735,6 +735,7 @@ let completion_contract_attention_detail ~reason_code =
 let record_completion_contract_attention_failure
       ~(config : Workspace.config)
       ~(updated_meta : Keeper_meta_contract.keeper_meta)
+      ~runtime_id
       ~reason_code
   =
   let base_path = config.Workspace.base_path in
@@ -754,31 +755,22 @@ let record_completion_contract_attention_failure
   let count = Keeper_registry.get_turn_failures ~base_path updated_meta.name in
   if Keeper_pacing_shadow.pacing_enforced ()
   then (
-    (* RFC-0313 W3: contract attention after a runtime success is a judgment
-       stimulus, not a pause. The keeper keeps running; its own next turn
-       receives the typed [Failure_judgment] as input (identity-deduped in
-       the queue, no dedicated turn_reason, scheduling cadence unchanged). *)
+    (* Return the typed successor to the owning heartbeat lease transaction.
+       Enqueueing here would commit the successor separately from acknowledging
+       the stimulus that caused this turn. *)
     let fj : Keeper_event_queue.failure_judgment =
-      { fj_runtime_id = Keeper_meta_contract.runtime_id_of_meta updated_meta
+      { fj_runtime_id = runtime_id
       ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
       ; fj_detail = detail
       }
     in
-    Keeper_registry_event_queue.enqueue
-      ~base_path
-      updated_meta.name
-      { post_id = Keeper_event_queue.failure_judgment_post_id fj
-      ; urgency = Keeper_event_queue.Normal
-      ; arrived_at = Time_compat.now ()
-      ; payload = Keeper_event_queue.Failure_judgment fj
-      };
     Log.Keeper.warn
       "%s: completion contract attention (streak=%d, reason=%s) escalated as \
-       judgment stimulus; keeper keeps running (RFC-0313 W3)"
+       an atomic judgment successor (RFC-0313 W3)"
       updated_meta.name
       count
       reason_code;
-    updated_meta)
+    updated_meta, Some fj)
   else (
     let pause_threshold = Runtime.pause_threshold () in
     let turn_fail_streak_threshold =
@@ -819,7 +811,7 @@ let record_completion_contract_attention_failure
           count
           turn_fail_streak_threshold
           reason_code;
-        paused_meta
+        paused_meta, None
       | Error sync_err ->
         Log.Keeper.error
           "%s: completion contract attention auto-pause sync failed: %s \
@@ -833,8 +825,8 @@ let record_completion_contract_attention_failure
             ; "site", "completion_contract_attention_auto_pause"
             ]
           ();
-        pause_meta)
-    else updated_meta)
+        pause_meta, None)
+    else updated_meta, None)
 ;;
 
 let emit_terminal_fsm
@@ -842,6 +834,7 @@ let emit_terminal_fsm
       ~meta
       ~keeper_turn_id
       ~updated_meta
+      ~runtime_id
       ~terminal_outcome
       result
   =
@@ -856,6 +849,7 @@ let emit_terminal_fsm
       record_completion_contract_attention_failure
         ~config
         ~updated_meta
+        ~runtime_id
         ~reason_code
     in
     Keeper_turn_fsm.emit_transition
@@ -872,8 +866,13 @@ let emit_terminal_fsm
       ~turn_id:keeper_turn_id
       ~prev:Keeper_turn_fsm.Completing
       Keeper_turn_fsm.Done;
-    updated_meta
+    updated_meta, None
 ;;
+
+type handle_result =
+  { meta : Keeper_meta_contract.keeper_meta
+  ; failure_judgment : Keeper_event_queue.failure_judgment option
+  }
 
 let handle
       ~config
@@ -1010,11 +1009,15 @@ let handle
      computed before side effects, so metrics, decision records, activity graph,
      meta writes, health/failure accounting, and FSM emission cannot disagree
      on whether this turn completed or failed its completion contract. *)
-  emit_terminal_fsm
+  let meta, failure_judgment =
+    emit_terminal_fsm
     ~config
     ~meta
     ~keeper_turn_id
     ~updated_meta
+    ~runtime_id:final_execution.runtime_id
     ~terminal_outcome
     result
+  in
+  { meta; failure_judgment }
 ;;

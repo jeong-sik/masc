@@ -41,7 +41,7 @@ beforeEach(() => {
   // View prefs are module-level persistent signals — reset to defaults so
   // sort/filter choices made by one test never leak into the next.
   rosterFilterPref.value = 'all'
-  rosterSortPref.value = 'recent'
+  rosterSortPref.value = 'status'
   vi.mocked(navigate).mockClear()
   vi.mocked(runKeeperAction).mockClear()
   host = document.createElement('div')
@@ -55,15 +55,16 @@ afterEach(() => {
 })
 
 describe('KeeperWorkspaceRoster', () => {
-  // The default sort is now '최근순' (flat, no headers); status grouping is opt-in.
+  // Status grouping is the keeper-v2 default; helper remains for tests that
+  // explicitly switch away and back.
   const selectStatusSort = () =>
     fireEvent.change(host.querySelector('.kw-roster-sort') as HTMLSelectElement, { target: { value: 'status' } })
 
-  it('renders attention first while preserving status groups', () => {
+  it('renders each keeper once in lifecycle groups while attention stays a row signal', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     selectStatusSort()
     const labels = Array.from(host.querySelectorAll('.kw-roster-group-label')).map(g => g.textContent)
-    expect(labels).toEqual(['주의 필요', '실행 중', '대기 · 일시정지'])
+    expect(labels).toEqual(['실행 중', '대기', '중지'])
     expect(host.querySelectorAll('.kw-kp-row').length).toBe(3)
   })
 
@@ -73,7 +74,7 @@ describe('KeeperWorkspaceRoster', () => {
     expect(host.querySelector('.kw-roster.roster')).not.toBeNull()
     selectStatusSort()
     const firstHeader = host.querySelector('.kw-roster-group.roster-group') as HTMLElement
-    expect(firstHeader?.getAttribute('title')).toBe('주의 필요')
+    expect(firstHeader?.getAttribute('title')).toBe('실행 중')
 
     const toggle = host.querySelector('.rfilter-icon') as HTMLButtonElement
     expect(toggle).not.toBeNull()
@@ -165,7 +166,7 @@ describe('KeeperWorkspaceRoster', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="blocked" />`, host)
 
     const attention = host.querySelector('.kp-att') as HTMLElement
-    expect(attention?.textContent).toBe('주의 1')
+    expect(attention?.textContent).toBe('▲ 1')
     expect(attention?.getAttribute('title')).toContain('메시지 수가 아니라')
   })
 
@@ -296,14 +297,14 @@ describe('KeeperWorkspaceRoster', () => {
     expect(host.querySelector('[data-testid="kw-roster-menu"]')?.textContent).toContain('rama')
   })
 
-  it('renders the v2.3 attention-first group headers with counts', () => {
+  it('renders lifecycle group headers with counts', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     selectStatusSort()
     const headers = Array.from(host.querySelectorAll('.kw-roster-group'))
     expect(headers.map(h => h.textContent)).toEqual([
-      expect.stringContaining('주의 필요'),
       expect.stringContaining('실행 중'),
-      expect.stringContaining('대기 · 일시정지'),
+      expect.stringContaining('대기'),
+      expect.stringContaining('중지'),
     ])
     expect(Array.from(host.querySelectorAll('.kw-roster-group-n')).map(n => n.textContent)).toEqual(['1', '1', '1'])
   })
@@ -374,26 +375,25 @@ describe('KeeperWorkspaceRoster', () => {
     expect(host.querySelector('.kw-roster-group .kw-roster-group-label')?.textContent).toBe('실행 중')
   })
 
-  it('renders the sort select defaulting to 최근순 (recent) order', () => {
+  it('renders the sort select defaulting to lifecycle status groups', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     const sortSel = host.querySelector('.kw-roster-sort') as HTMLSelectElement
     expect(sortSel).not.toBeNull()
-    expect(sortSel.value).toBe('recent')
+    expect(sortSel.value).toBe('status')
     expect(Array.from(sortSel.options).map(o => o.value)).toEqual(['recent', 'status', 'name', 'att'])
-    // recent mode is a flat list: no status/attention group headers by default
-    expect(host.querySelectorAll('.kw-roster-group').length).toBe(0)
-    // switching to 상태순 brings the bucket group headers back
-    selectStatusSort()
     expect(host.querySelectorAll('.kw-roster-group').length).toBeGreaterThan(0)
   })
 
-  it('defaults to most-recent-first order (activity, not name)', () => {
+  it('supports explicit most-recent-first order (activity, not name)', () => {
     keepers.value = [
       mk({ name: 'albini', status: 'running', last_activity_ago_s: 3600 }),
       mk({ name: 'zed', status: 'running', last_activity_ago_s: 5 }),
       mk({ name: 'mara', status: 'running', last_activity_ago_s: 120 }),
     ]
     render(html`<${KeeperWorkspaceRoster} activeName="zed" />`, host)
+    fireEvent.change(host.querySelector('.kw-roster-sort') as HTMLSelectElement, {
+      target: { value: 'recent' },
+    })
     const order = Array.from(host.querySelectorAll('.kw-kp-row')).map(r =>
       r.textContent?.includes('zed') ? 'zed' : r.textContent?.includes('mara') ? 'mara' : 'albini',
     )
@@ -469,7 +469,7 @@ describe('KeeperWorkspaceRoster', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     selectStatusSort()
     const counts = Array.from(host.querySelectorAll('.kw-roster-group-n')).map(n => n.textContent)
-    // FIXTURE: 1 attention row (rama), then running and paused status buckets.
+    // FIXTURE: one running, one paused, and one offline keeper.
     expect(counts).toEqual(['1', '1', '1'])
   })
 
@@ -482,7 +482,7 @@ describe('KeeperWorkspaceRoster', () => {
     selectStatusSort()
 
     const labels = Array.from(host.querySelectorAll('.kw-roster-group-label')).map(g => g.textContent)
-    expect(labels).toEqual(['실행 중', '중지 · 종료됨'])
+    expect(labels).toEqual(['실행 중', '중지'])
   })
 
   it('closes the row command menu on Escape only (not on any keypress) and on scroll', () => {

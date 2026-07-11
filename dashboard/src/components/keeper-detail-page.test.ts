@@ -63,11 +63,9 @@ describe('KeeperWorkspaceRoster', () => {
     // v2 filter chips carry the SHORT label + count ('실행' + '1'), not the old
     // combined '실행중1' chip label (rails.jsx filter chips).
     expect(container.textContent).toContain('실행1')
-    // The roster now defaults to '최근순' (flat list, no status group headers).
-    // status-bucket grouping/headers are covered exhaustively in
-    // keeper-workspace-roster.test.ts, so this test asserts the flat default and
-    // the counts/search/selection it is named for (no redundant grouping checks).
-    expect(container.querySelectorAll('.roster-group').length).toBe(0)
+    // The standalone defaults to lifecycle grouping, so the integrated detail
+    // surface exposes running, waiting, and stopped groups immediately.
+    expect(container.querySelectorAll('.roster-group').length).toBe(3)
     expect(container.querySelectorAll('.kw-kp-row').length).toBe(3)
     // v2 mounts the search input only after toggling the '⌕' .rfilter-icon
     // (searchOpen defaults false); the class is now .roster-search.

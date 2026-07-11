@@ -704,7 +704,7 @@ function healthChipClass(tone: DashboardHealthChipTone): string {
   }
 }
 
-export function DashboardHealthStrip() {
+export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
   useEffect(() => {
     let disposed = false
     let inFlight = false
@@ -783,6 +783,8 @@ export function DashboardHealthStrip() {
   return html`
     <div
       class="v2-health-strip flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-1.5 text-xs"
+      style=${hidden ? { display: 'none' } : undefined}
+      aria-hidden=${hidden ? 'true' : undefined}
       role="status"
       aria-label="Dashboard runtime health"
       data-testid="dashboard-health-strip"

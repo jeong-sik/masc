@@ -88,6 +88,16 @@ export function shouldSuppressFloatingChrome({
   return keeperDetailMode || mobileDrawerOpen || isPrimaryDashboardSurface(currentTab)
 }
 
+// The keeper-v2 primary shell keeps its operational summary in the top bar and
+// routes deeper health evidence through Monitor. Rendering the same facts as a
+// second full-width strip shifts every primary surface below the prototype's
+// fixed 50px chrome and duplicates the existing navigation path. Retain the
+// strip for non-primary diagnostic/plugin surfaces where that top-level health
+// context is otherwise absent.
+export function shouldShowDashboardHealthStrip(currentTab: TabId): boolean {
+  return !isPrimaryDashboardSurface(currentTab)
+}
+
 const LazyAgentDetailOverlay = lazy(async () => ({
   default: (await import('./components/agent-detail')).AgentDetailOverlay,
 }))
@@ -320,7 +330,9 @@ export function App() {
           remote-auth warning + the runtime health chip bar. Both self-gate
           (render null when there is no warning / no health signal). */ ''}
       ${compactChromeMode ? null : html`<${RemoteWarningBanner} />`}
-      ${compactChromeMode ? null : html`<${DashboardHealthStrip} />`}
+      ${compactChromeMode
+        ? null
+        : html`<${DashboardHealthStrip} hidden=${!shouldShowDashboardHealthStrip(currentTab)} />`}
 
       <div class="v2-stage">
         <div class="v2-body" style=${{ gridTemplateColumns: cols }}>

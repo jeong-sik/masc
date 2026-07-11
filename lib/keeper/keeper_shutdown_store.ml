@@ -11,6 +11,10 @@ type error =
       ; actual : int
       }
 
+type persist_blocked_result =
+  | State_preserved of Keeper_shutdown_types.t
+  | Blocked_persisted of Keeper_shutdown_types.t
+
 let error_to_string = function
   | Already_exists path -> Printf.sprintf "shutdown operation already exists: %s" path
   | Not_found path -> Printf.sprintf "shutdown operation not found: %s" path
@@ -547,6 +551,30 @@ let replace ~config ~expected_revision operation =
            (Operation_id.to_string operation.operation_id)))
 ;;
 
+let persist_blocked_latest ~config ~identity ~failure ~updated_at =
+  let operation_path = path ~config identity.operation_id in
+  with_operation_lock ~access:Write operation_path (fun () ->
+    match load_unlocked ~config identity.operation_id with
+    | Error _ as error -> error
+    | Ok existing when not (same_identity existing identity) ->
+      Error (Identity_mismatch (Operation_id.to_string identity.operation_id))
+    | Ok existing ->
+      (match existing.phase with
+       | Finalized _ | Blocked _ | Reconciliation_required _ ->
+         Ok (State_preserved existing)
+       | Prepared | Joined_idle | Finalizing_tasks _ | Cleanup_ready _ ->
+         let blocked =
+           { existing with
+             revision = existing.revision + 1
+           ; phase = Blocked failure
+           ; updated_at
+           }
+         in
+         Keeper_fs.save_json_atomic operation_path (to_json blocked)
+         |> Result.map_error (fun detail -> Io_error detail)
+         |> Result.map (fun () -> Blocked_persisted blocked)))
+;;
+
 let load ~config operation_id =
   let operation_path = path ~config operation_id in
   with_operation_lock ~access:Read operation_path (fun () ->
@@ -592,3 +620,10 @@ let list_for_keeper ~config ~keeper_name =
   |> Result.map
        (List.filter (fun operation -> String.equal operation.keeper_name keeper_name))
 ;;
+
+module For_testing = struct
+  let with_operation_write_lock ~config operation_id f =
+    let operation_path = path ~config operation_id in
+    with_operation_lock ~access:Write operation_path f
+  ;;
+end

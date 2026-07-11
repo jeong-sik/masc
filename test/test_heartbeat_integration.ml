@@ -29,6 +29,7 @@ module Shutdown_types = Masc.Keeper_shutdown_types
 module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_prepare_join = Masc.Keeper_shutdown_prepare_join
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
+module Shutdown_runtime = Masc.Keeper_shutdown_runtime
 module Keeper_meta_store = Masc.Keeper_meta_store
 
 let bp = "/tmp/test-heartbeat-integ"
@@ -821,6 +822,77 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Error (Shutdown_store.Identity_mismatch _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "shutdown store accepted a different lane identity");
+      let worker_failure = Failure "worker exploded after durable join" in
+      let holder_locked_p, holder_locked_r = Eio.Promise.create () in
+      let release_holder_p, release_holder_r = Eio.Promise.create () in
+      let holder_done_p, holder_done_r = Eio.Promise.create () in
+      let worker_started_p, worker_started_r = Eio.Promise.create () in
+      let exception Cancel_worker in
+      Eio.Switch.run @@ fun test_sw ->
+      Eio.Fiber.fork ~sw:test_sw (fun () ->
+        Shutdown_store.For_testing.with_operation_write_lock
+          ~config
+          operation_id
+          (fun () ->
+             Eio.Promise.resolve holder_locked_r ();
+             Eio.Promise.await release_holder_p);
+        Eio.Promise.resolve holder_done_r ());
+      Eio.Promise.await holder_locked_p;
+      (try
+         Eio.Switch.run (fun worker_sw ->
+           Eio.Fiber.fork ~sw:worker_sw (fun () ->
+             Eio.Promise.resolve worker_started_r ();
+             Shutdown_runtime.For_testing.persist_unhandled_failure
+               ~config
+               operation
+               worker_failure);
+           Eio.Promise.await worker_started_p;
+           Eio.Switch.fail worker_sw Cancel_worker;
+           Eio.Promise.resolve release_holder_r ())
+       with
+       | Cancel_worker -> ());
+      Eio.Promise.await holder_done_p;
+      let blocked =
+        match Shutdown_store.load ~config operation_id with
+        | Ok blocked -> blocked
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      check int
+        "unhandled worker failure advances the latest durable revision"
+        (joined.revision + 1)
+        blocked.revision;
+      (match blocked.phase with
+       | Shutdown_types.Blocked { stage = Shutdown_types.Record_update; detail } ->
+         check string
+           "unhandled worker failure detail"
+           (Printexc.to_string worker_failure)
+           detail
+       | Shutdown_types.Prepared
+       | Shutdown_types.Joined_idle
+       | Shutdown_types.Finalizing_tasks _
+       | Shutdown_types.Cleanup_ready _
+       | Shutdown_types.Reconciliation_required _
+       | Shutdown_types.Finalized _
+       | Shutdown_types.Blocked _ ->
+         fail "unhandled worker failure did not persist typed blocked evidence");
+      Shutdown_runtime.For_testing.persist_unhandled_failure
+        ~config
+        operation
+        (Failure "later worker failure");
+      let preserved =
+        match Shutdown_store.load ~config operation_id with
+        | Ok preserved -> preserved
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      check int
+        "later worker failure preserves blocked revision"
+        blocked.revision
+        preserved.revision;
+      check
+        bool
+        "later worker failure preserves first blocked evidence"
+        true
+        (preserved.phase = blocked.phase);
       (match Shutdown_store.list_for_keeper ~config ~keeper_name:meta.name with
        | Ok [ listed ] ->
          check bool

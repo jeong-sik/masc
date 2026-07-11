@@ -657,6 +657,13 @@ export function applyKeeperStreamEvent(
         const revision = asNumber(queued?.queue_revision)
         const pendingCount = asNumber(queued?.pending_count)
         const inflightCount = asNumber(queued?.inflight_count)
+        const shutdownOperationId = (() => {
+          const raw = queued?.shutdown_operation_id
+          if (raw === null) return null
+          if (typeof raw !== 'string') return undefined
+          const normalized = raw.trim()
+          return normalized.length > 0 ? normalized : undefined
+        })()
         if (
           !isKeeperChatReceiptId(receiptId)
           || typeof revision !== 'number'
@@ -671,6 +678,9 @@ export function applyKeeperStreamEvent(
         ) {
           return 'Keeper queue acceptance is missing its durable receipt metadata.'
         }
+        if (shutdownOperationId === undefined) {
+          return 'Keeper queue acceptance has invalid shutdown operation metadata.'
+        }
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
           delivery: 'queued',
@@ -678,6 +688,7 @@ export function applyKeeperStreamEvent(
           details: {
             ...(entry.details ?? {}),
             queueReceiptId: receiptId,
+            queueShutdownOperationId: shutdownOperationId,
             queueRevision: revision,
             queuePendingCount: pendingCount,
             queueInflightCount: inflightCount,

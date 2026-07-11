@@ -801,6 +801,8 @@ export interface KeeperConversationDetails {
   /** Durable server receipt for a busy chat message accepted into the Keeper
    * queue. This is distinct from the browser-local draft queue. */
   queueReceiptId?: string | null
+  /** Shutdown fence that caused this message to be deferred, when present. */
+  queueShutdownOperationId?: string | null
   queueRevision?: number | null
   queuePendingCount?: number | null
   queueInflightCount?: number | null

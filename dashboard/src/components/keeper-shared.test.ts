@@ -996,6 +996,7 @@ describe('KeeperConversationPanel', () => {
         streamState: null,
         details: {
           queueReceiptId: `chatq_00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+          queueShutdownOperationId: queueState === 'pending' ? 'shutdown-op-7' : null,
           queueRevision: index + 1,
           queueState,
         },
@@ -1018,6 +1019,9 @@ describe('KeeperConversationPanel', () => {
       expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.textContent).toContain('처리 완료')
       expect(container.querySelector('[data-chat-queue-state-badge="failed"]')?.textContent).toContain('처리 실패')
       expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.getAttribute('title')).toContain('chatq_')
+      const shutdownBadge = container.querySelector('[data-chat-queue-state-badge][data-chat-queue-shutdown-operation-id="shutdown-op-7"]')
+      expect(shutdownBadge?.textContent).toContain('종료 후 처리')
+      expect(shutdownBadge?.getAttribute('title')).toContain('shutdown operation shutdown-op-7')
     })
   })
 

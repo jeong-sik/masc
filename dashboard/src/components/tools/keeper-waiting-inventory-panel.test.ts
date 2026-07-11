@@ -13,9 +13,9 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
     generated_at: '2026-07-04T00:00:00Z',
     supported_states: ['idle', 'busy', 'waiting', 'deferred'],
     keeper_count_known: true,
-    keeper_count: 3,
-    waiting_keeper_count: 2,
-    row_count: 4,
+    keeper_count: 4,
+    waiting_keeper_count: 3,
+    row_count: 5,
     global_row_count: 1,
     global_pending_confirm_count_known: true,
     global_pending_confirm_count: 1,
@@ -25,6 +25,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       chat_queue_inflight: 1,
       schedule_waiting: 1,
       turn_admission_waiting: 1,
+      turn_admission_shutdown: 1,
     },
     keepers: [
       {
@@ -96,6 +97,27 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         waiting_count: 0,
         waiting_on: [],
       },
+      {
+        keeper_name: 'stopping-one',
+        state: 'deferred',
+        waiting_count: 1,
+        sources: {
+          turn_admission_shutdown: 1,
+        },
+        waiting_on: [
+          {
+            keeper_name: 'stopping-one',
+            source: 'turn_admission_shutdown',
+            waiting_on: 'shutdown',
+            wake_producer: 'keeper_turn_admission',
+            next_action: 'keeper_shutdown_finalize',
+            detail: {
+              shutdown_operation_id: 'shutdown-op-7',
+              admission_fenced: true,
+            },
+          },
+        ],
+      },
     ],
     global_waiting_on: [
       {
@@ -133,6 +155,14 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('turn admission waiting')
     expect(container.textContent).toContain('producer keeper turn admission')
     expect(container.textContent).toContain('turn slot release')
+    expect(container.textContent).toContain('turn admission shutdown')
+    expect(container.textContent).toContain('keeper shutdown finalize')
+    expect(container.textContent).toContain('shutdown operation shutdown-op-7')
+    expect(container.textContent).toContain('admission fenced')
+    expect(container.querySelector('[data-keeper-shutdown-operation-id="shutdown-op-7"]')).not.toBeNull()
+    const shutdownChip = [...container.querySelectorAll('[data-status-chip]')]
+      .find(chip => chip.textContent?.trim() === 'turn admission shutdown')
+    expect(shutdownChip?.getAttribute('data-status-chip-tone')).toBe('info')
     expect(container.textContent).toContain('event queue pending')
     expect(container.textContent).toContain('producer keeper supervisor')
     expect(container.textContent).toContain('producer keeper no progress recovery')
@@ -235,10 +265,11 @@ describe('KeeperLaneInventoryPanel', () => {
     render(html`<${KeeperLaneInventoryPanel} inventory=${inventoryFixture()} />`, container)
 
     const cards = container.querySelectorAll('[data-testid="keeper-lane-card"]')
-    expect(cards).toHaveLength(3)
+    expect(cards).toHaveLength(4)
     expect(container.querySelector('[data-keeper-lane="sangsu"]')?.textContent).toContain('event queue pending')
     expect(container.querySelector('[data-keeper-lane="busy-one"]')?.textContent).toContain('turn admission waiting')
     expect(container.querySelector('[data-keeper-lane="idle-one"]')?.textContent).toContain('no keeper-specific waiting rows')
+    expect(container.querySelector('[data-keeper-lane="stopping-one"]')?.textContent).toContain('turn admission shutdown')
     expect(container.textContent).toContain('Global lane evidence')
     expect(container.textContent).toContain('producer schedule runner')
   })

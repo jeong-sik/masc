@@ -448,6 +448,7 @@ function showDeliveryBadge(entry: KeeperConversationEntry, variant: ChatTranscri
 
 function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
   const receiptId = entry.details?.queueReceiptId?.trim()
+  const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
   const queueState = entry.details?.queueState
   if (!receiptId || !queueState) return null
   const label = (() => {
@@ -459,14 +460,21 @@ function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
       default: return '상태 확인 필요'
     }
   })()
+  const shutdownLabel = shutdownOperationId ? ' · 종료 후 처리' : ''
+  const title = [
+    `receipt ${receiptId}`,
+    label,
+    shutdownOperationId ? `shutdown operation ${shutdownOperationId}` : null,
+  ].filter((value): value is string => value !== null).join(' · ')
   return html`
     <span
       class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
-      title=${`receipt ${receiptId} · ${label}`}
+      title=${title}
       data-chat-queue-state-badge=${queueState}
       data-chat-queue-receipt=${receiptId}
+      data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
     >
-      ${label}
+      ${label}${shutdownLabel}
     </span>
   `
 }
@@ -606,6 +614,7 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     formatCurrency(details.costUsd) ? { label: '비용', value: formatCurrency(details.costUsd)! } : null,
     details.traceId ? { label: '트레이스', value: details.traceId } : null,
     details.queueReceiptId ? { label: '큐 receipt', value: details.queueReceiptId } : null,
+    details.queueShutdownOperationId ? { label: '종료 작업 ID', value: details.queueShutdownOperationId } : null,
     details.queueState ? { label: '큐 상태', value: details.queueState } : null,
     details.queueFailureKind ? { label: '큐 실패', value: details.queueFailureKind } : null,
     typeof details.queueRevision === 'number' ? { label: '큐 revision', value: `${details.queueRevision}` } : null,
@@ -2490,6 +2499,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-speaker-authority=${entry.speakerAuthority ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-queue-receipt-id=${entry.details?.queueReceiptId ?? undefined}
+      data-chat-queue-shutdown-operation-id=${entry.details?.queueShutdownOperationId ?? undefined}
       data-chat-queue-state=${entry.details?.queueState ?? undefined}
       data-chat-queue-revision=${entry.details?.queueRevision ?? undefined}
       data-chat-queue-pending-count=${entry.details?.queuePendingCount ?? undefined}

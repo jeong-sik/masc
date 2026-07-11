@@ -200,6 +200,10 @@ export {
   fetchCostLatency,
 } from './dashboard-keeper-cost'
 
+export {
+  parseDashboardKeeperWaitingSource,
+} from './dashboard-tools-prompts'
+
 export { fetchDashboardMissionBriefing, fetchDashboardPlanning } from './dashboard-mission'
 
 

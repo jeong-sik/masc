@@ -48,6 +48,7 @@ export function sourceTone(source: string | null | undefined): StatusChipTone {
       return 'warn'
     case 'fusion_running':
     case 'background_task':
+    case 'turn_admission_shutdown':
       return 'info'
     default:
       return 'neutral'
@@ -120,6 +121,25 @@ function WaitingRowReceiptDetail({ row }: { row: DashboardKeeperWaitingRow }) {
   `
 }
 
+function WaitingRowShutdownDetail({ row }: { row: DashboardKeeperWaitingRow }) {
+  if (row.source !== 'turn_admission_shutdown') return null
+  const detail = asDetailRecord(row.detail)
+  const operationId = typeof detail?.shutdown_operation_id === 'string'
+    ? detail.shutdown_operation_id.trim()
+    : ''
+  if (!operationId) return null
+  const admissionFenced = detail?.admission_fenced === true
+  return html`
+    <div
+      class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]"
+      data-keeper-shutdown-operation-id=${operationId}
+    >
+      <span class="min-w-0 break-all font-mono">shutdown operation ${operationId}</span>
+      ${admissionFenced ? html`<span>admission fenced</span>` : null}
+    </div>
+  `
+}
+
 function WaitingRow({ row }: { row: DashboardKeeperWaitingRow }) {
   const wakeProducer = evidenceLabel(row.wake_producer, 'wake producer missing')
   const nextAction = evidenceLabel(row.next_action, 'next action missing')
@@ -136,6 +156,7 @@ function WaitingRow({ row }: { row: DashboardKeeperWaitingRow }) {
         <span class="font-mono">${nextAction}</span>
       </div>
       <${WaitingRowReceiptDetail} row=${row} />
+      <${WaitingRowShutdownDetail} row=${row} />
     </div>
   `
 }

@@ -1,5 +1,35 @@
 type t = Unix.file_descr
 
+module Segment = struct
+  type t = string
+
+  type error =
+    | Empty
+    | Dot
+    | Dot_dot
+    | Contains_separator
+    | Contains_nul
+
+  let of_string = function
+    | "" -> Error Empty
+    | "." -> Error Dot
+    | ".." -> Error Dot_dot
+    | value when String.contains value '/' -> Error Contains_separator
+    | value when String.contains value '\000' -> Error Contains_nul
+    | value -> Ok value
+  ;;
+
+  let to_string value = value
+
+  let error_to_string = function
+    | Empty -> "path segment is empty"
+    | Dot -> "path segment is dot"
+    | Dot_dot -> "path segment is dot-dot"
+    | Contains_separator -> "path segment contains a separator"
+    | Contains_nul -> "path segment contains NUL"
+  ;;
+end
+
 type kind =
   | Regular_file
   | Directory
@@ -13,6 +43,13 @@ type stat =
   ; inode : int64
   ; link_count : int64
   }
+
+type mutation_error =
+  | Not_committed of
+      { cause : exn
+      ; cleanup_error : exn option
+      }
+  | Committed_not_durable of exn
 
 external open_root_fd : string -> Unix.file_descr = "masc_anchored_open_root"
 
@@ -60,18 +97,20 @@ external stat_at_raw
   -> (int * int64 * int64 * int64 * int64) option
   = "masc_anchored_stat"
 
-external read_dir_raw : Unix.file_descr -> string list = "masc_anchored_readdir"
+external fdopendir : Unix.file_descr -> Unix.dir_handle = "masc_anchored_fdopendir"
 
-let is_single_segment value =
-  (not (String.equal value ""))
-  && not (String.equal value ".")
-  && not (String.equal value "..")
-  && String.equal (Filename.basename value) value
-;;
+let segment_value = Segment.to_string
 
-let require_segment ~operation value =
-  if not (is_single_segment value)
-  then invalid_arg (Printf.sprintf "%s: expected one path segment: %S" operation value)
+let mutation_error_to_string = function
+  | Not_committed { cause; cleanup_error = None } ->
+    Printf.sprintf "not committed: %s" (Printexc.to_string cause)
+  | Not_committed { cause; cleanup_error = Some cleanup_error } ->
+    Printf.sprintf
+      "not committed: %s; cleanup failed: %s"
+      (Printexc.to_string cause)
+      (Printexc.to_string cleanup_error)
+  | Committed_not_durable cause ->
+    Printf.sprintf "committed but not durable: %s" (Printexc.to_string cause)
 ;;
 
 let combine_close ~operation fd f =
@@ -106,34 +145,36 @@ let with_open_root path f =
 ;;
 
 let with_open_dir parent name f =
-  require_segment ~operation:"with_open_dir" name;
-  let fd = open_dir_fd parent name in
+  let fd = open_dir_fd parent (segment_value name) in
   combine_close ~operation:"anchored directory transaction" fd (fun () -> f fd)
+;;
+
+let with_open_dir_opt parent name f =
+  match open_dir_fd parent (segment_value name) with
+  | fd ->
+    Some
+      (combine_close ~operation:"anchored optional-directory transaction" fd
+         (fun () -> f fd))
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
 ;;
 
 let fsync fd = Unix.fsync fd
 
 let with_ensure_dir parent ~name ~perm ~enforce_perm f =
-  require_segment ~operation:"with_ensure_dir" name;
-  let created =
-    match open_dir_fd parent name with
+  let name_value = segment_value name in
+  let needs_publish, fd =
+    match open_dir_fd parent name_value with
     | fd -> false, fd
     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-      (match mkdir_at parent name perm with
+      (match mkdir_at parent name_value perm with
        | () -> ()
        | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-      let fd = open_dir_fd parent name in
-      true, fd
+      true, open_dir_fd parent name_value
   in
-  let was_created, fd = created in
   combine_close ~operation:"anchored ensured-directory transaction" fd (fun () ->
-    if was_created then fsync parent;
-    if enforce_perm
-    then (
-      Unix.fchmod fd perm;
-      fsync fd)
-    else if was_created
-    then fsync fd;
+    if enforce_perm then Unix.fchmod fd perm;
+    if needs_publish || enforce_perm then fsync fd;
+    if needs_publish then fsync parent;
     f fd)
 ;;
 
@@ -146,11 +187,10 @@ let kind_of_int = function
 ;;
 
 let stat dir name =
-  require_segment ~operation:"stat" name;
   Option.map
     (fun (kind, size, device, inode, link_count) ->
        { kind = kind_of_int kind; size; device; inode; link_count })
-    (stat_at_raw dir name)
+    (stat_at_raw dir (segment_value name))
 ;;
 
 let same_identity left right =
@@ -173,44 +213,59 @@ let stat_of_unix (metadata : Unix.stats) =
   }
 ;;
 
+let read_from_fd ~name fd =
+  let metadata = Unix.fstat fd in
+  if metadata.Unix.st_kind <> Unix.S_REG
+  then raise (Unix.Unix_error (Unix.EINVAL, "anchored_read", name));
+  let buffer = Bytes.create 65536 in
+  let content = Buffer.create (min metadata.Unix.st_size 65536) in
+  let rec loop () =
+    match Unix.read fd buffer 0 (Bytes.length buffer) with
+    | 0 -> Buffer.contents content
+    | count ->
+      Buffer.add_subbytes content buffer 0 count;
+      loop ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
+  in
+  loop ()
+;;
+
+let read_file_opt dir name =
+  let name_value = segment_value name in
+  match open_read_fd dir name_value with
+  | fd ->
+    Some
+      (combine_close ~operation:"anchored read" fd (fun () ->
+         read_from_fd ~name:name_value fd))
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
+;;
+
 let read_file dir name =
-  require_segment ~operation:"read_file" name;
-  let fd = open_read_fd dir name in
-  combine_close ~operation:"anchored read" fd (fun () ->
-    let metadata = Unix.fstat fd in
-    if metadata.Unix.st_kind <> Unix.S_REG
-    then raise (Unix.Unix_error (Unix.EINVAL, "anchored_read", name));
-    let buffer = Bytes.create 65536 in
-    let content = Buffer.create (min metadata.Unix.st_size 65536) in
-    let rec loop () =
-      match Unix.read fd buffer 0 (Bytes.length buffer) with
-      | 0 -> Buffer.contents content
-      | count ->
-        Buffer.add_subbytes content buffer 0 count;
-        loop ()
-      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
-    in
-    loop ())
+  match read_file_opt dir name with
+  | Some content -> content
+  | None ->
+    raise
+      (Unix.Unix_error (Unix.ENOENT, "anchored_read", segment_value name))
 ;;
 
 let fsync_file dir name =
-  require_segment ~operation:"fsync_file" name;
-  let fd = open_read_fd dir name in
+  let name_value = segment_value name in
+  let fd = open_read_fd dir name_value in
   combine_close ~operation:"anchored file fsync" fd (fun () ->
     let metadata = Unix.fstat fd in
     if metadata.Unix.st_kind <> Unix.S_REG
-    then raise (Unix.Unix_error (Unix.EINVAL, "anchored_fsync_file", name));
+    then raise (Unix.Unix_error (Unix.EINVAL, "anchored_fsync_file", name_value));
     Unix.fsync fd;
     stat_of_unix metadata)
 ;;
 
 let chmod_file dir name perm =
-  require_segment ~operation:"chmod_file" name;
-  let fd = open_read_fd dir name in
+  let name_value = segment_value name in
+  let fd = open_read_fd dir name_value in
   combine_close ~operation:"anchored file chmod" fd (fun () ->
     let metadata = Unix.fstat fd in
     if metadata.Unix.st_kind <> Unix.S_REG
-    then raise (Unix.Unix_error (Unix.EINVAL, "anchored_chmod_file", name));
+    then raise (Unix.Unix_error (Unix.EINVAL, "anchored_chmod_file", name_value));
     Unix.fchmod fd perm;
     Unix.fsync fd)
 ;;
@@ -233,117 +288,225 @@ let temp_counter = Atomic.make 0
 
 let rec create_temporary dir =
   let sequence = Atomic.fetch_and_add temp_counter 1 in
-  let name = Printf.sprintf ".atomic_%x_%x.tmp" (Unix.getpid ()) sequence in
-  match create_exclusive_fd dir name 0o600 with
+  let raw = Printf.sprintf ".atomic_%x_%x.tmp" (Unix.getpid ()) sequence in
+  let name =
+    match Segment.of_string raw with
+    | Ok name -> name
+    | Error error ->
+      invalid_arg
+        (Printf.sprintf
+           "generated invalid atomic filename: %s"
+           (Segment.error_to_string error))
+  in
+  match create_exclusive_fd dir (segment_value name) 0o600 with
   | fd -> name, fd
   | exception Unix.Unix_error (Unix.EEXIST, _, _) -> create_temporary dir
 ;;
 
-let unlink_if_exists dir name =
-  require_segment ~operation:"unlink_if_exists" name;
-  match unlink_at dir name with
-  | () ->
+let cleanup_temp dir name =
+  try
+    unlink_at dir (segment_value name);
     fsync dir;
-    true
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
+    None
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> None
+  | exn -> Some exn
 ;;
 
-let save_file_atomic dir ~name ~perm content =
-  require_segment ~operation:"save_file_atomic" name;
-  let temp_name, fd = create_temporary dir in
-  let cleanup () =
-    match unlink_if_exists dir temp_name with
-    | true | false -> Ok ()
-    | exception exn -> Error exn
+let atomic_replace dir ~name ~perm content =
+  let temp_result =
+    try Ok (create_temporary dir) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error exn
   in
-  let write_outcome =
-    try
-      write_all fd content;
-      Unix.fchmod fd perm;
-      Unix.fsync fd;
-      Ok ()
-    with
+  match temp_result with
+  | Error cause -> Error (Not_committed { cause; cleanup_error = None })
+  | Ok (temp_name, fd) ->
+    let write_outcome =
+      try
+        write_all fd content;
+        Unix.fchmod fd perm;
+        Unix.fsync fd;
+        Ok ()
+      with
+      | exn -> Error (exn, Printexc.get_raw_backtrace ())
+    in
+    let close_outcome =
+      try
+        Unix.close fd;
+        Ok ()
+      with
+      | exn -> Error exn
+    in
+    let before_commit =
+      match write_outcome, close_outcome with
+      | Ok (), Ok () -> Ok ()
+      | Error (exn, backtrace), Ok () -> Error (exn, backtrace)
+      | Ok (), Error exn -> Error (exn, Printexc.get_raw_backtrace ())
+      | Error (write_error, backtrace), Error close_error ->
+        Error
+          ( Failure
+              (Printf.sprintf
+                 "anchored atomic write failed (%s); close also failed (%s)"
+                 (Printexc.to_string write_error)
+                 (Printexc.to_string close_error))
+          , backtrace )
+    in
+    (match before_commit with
+     | Error ((Eio.Cancel.Cancelled _ as cause), backtrace) ->
+       (match cleanup_temp dir temp_name with
+        | None -> ()
+        | Some cleanup_error ->
+          Printf.eprintf
+            "[fs_compat] cancelled anchored-write cleanup failed name=%s: %s\n%!"
+            (segment_value temp_name)
+            (Printexc.to_string cleanup_error));
+       Printexc.raise_with_backtrace cause backtrace
+     | Error (cause, _) ->
+       Error
+         (Not_committed
+            { cause; cleanup_error = cleanup_temp dir temp_name })
+     | Ok () ->
+       (match
+          rename_at
+            dir
+            (segment_value temp_name)
+            dir
+            (segment_value name)
+        with
+        | exception Eio.Cancel.Cancelled _ as exn ->
+          let cleanup_error = cleanup_temp dir temp_name in
+          (match cleanup_error with
+           | None -> ()
+           | Some error ->
+             Printf.eprintf
+               "[fs_compat] cancelled anchored-rename cleanup failed name=%s: %s\n%!"
+               (segment_value temp_name)
+               (Printexc.to_string error));
+          raise exn
+        | exception cause ->
+          Error
+            (Not_committed
+               { cause; cleanup_error = cleanup_temp dir temp_name })
+        | () ->
+          (match fsync dir with
+           | () -> Ok ()
+           | exception cause -> Error (Committed_not_durable cause))))
+;;
+
+let unlink_if_exists dir name =
+  match unlink_at dir (segment_value name) with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok `Missing
+  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exception cause ->
+    Error (Not_committed { cause; cleanup_error = None })
+  | () ->
+    (match fsync dir with
+     | () -> Ok `Removed
+     | exception cause -> Error (Committed_not_durable cause))
+;;
+
+let rename ~src_dir ~src ~dst_dir ~dst =
+  match
+    rename_at
+      src_dir
+      (segment_value src)
+      dst_dir
+      (segment_value dst)
+  with
+  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exception cause ->
+    Error (Not_committed { cause; cleanup_error = None })
+  | () ->
+    (try
+       fsync dst_dir;
+       if src_dir != dst_dir then fsync src_dir;
+       Ok ()
+     with
+     | cause -> Error (Committed_not_durable cause))
+;;
+
+let link_no_replace ~src_dir ~src ~dst_dir ~dst =
+  match
+    link_at
+      src_dir
+      (segment_value src)
+      dst_dir
+      (segment_value dst)
+  with
+  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exception cause ->
+    Error (Not_committed { cause; cleanup_error = None })
+  | () ->
+    (match fsync dst_dir with
+     | () -> Ok ()
+     | exception cause -> Error (Committed_not_durable cause))
+;;
+
+let combine_closedir handle f =
+  let outcome =
+    try Ok (f ()) with
     | exn -> Error (exn, Printexc.get_raw_backtrace ())
   in
   let close_outcome =
     try
-      Unix.close fd;
+      Unix.closedir handle;
       Ok ()
     with
     | exn -> Error exn
   in
-  let primary =
-    match write_outcome, close_outcome with
-    | Ok (), Ok () -> Ok ()
-    | Error (exn, _), Ok () | Ok (), Error exn -> Error exn
-    | Error (write_error, _), Error close_error ->
-      Error
-        (Failure
-           (Printf.sprintf
-              "anchored atomic write failed (%s); close also failed (%s)"
-              (Printexc.to_string write_error)
-              (Printexc.to_string close_error)))
+  match outcome, close_outcome with
+  | Ok value, Ok () -> value
+  | Error (exn, backtrace), Ok () -> Printexc.raise_with_backtrace exn backtrace
+  | Ok _, Error close_error -> raise close_error
+  | Error (primary, _), Error close_error ->
+    raise
+      (Failure
+         (Printf.sprintf
+            "anchored readdir failed (%s); closedir also failed (%s)"
+            (Printexc.to_string primary)
+            (Printexc.to_string close_error)))
+;;
+
+let read_dir dir =
+  let duplicate = Unix.dup ~cloexec:true dir in
+  let handle =
+    try fdopendir duplicate with
+    | exn ->
+      let close_error =
+        try
+          Unix.close duplicate;
+          None
+        with
+        | close_error -> Some close_error
+      in
+      (match close_error with
+       | None -> raise exn
+       | Some close_error ->
+         raise
+           (Failure
+              (Printf.sprintf
+                 "fdopendir failed (%s); duplicate close also failed (%s)"
+                 (Printexc.to_string exn)
+                 (Printexc.to_string close_error))))
   in
-  match primary with
-  | Error exn ->
-    (match exn with
-     | Eio.Cancel.Cancelled _ ->
-       (match cleanup () with
-        | Ok () -> ()
-        | Error cleanup_error ->
-          Printf.eprintf
-            "[fs_compat] cancelled anchored-write cleanup failed name=%s: %s\n%!"
-            temp_name
-            (Printexc.to_string cleanup_error));
-       raise exn
-     | _ ->
-       let detail =
-         match cleanup () with
-         | Ok () -> Printexc.to_string exn
-         | Error cleanup_error ->
-           Printf.sprintf
-             "%s; temporary cleanup failed: %s"
-             (Printexc.to_string exn)
-             (Printexc.to_string cleanup_error)
-       in
-       Error (Printf.sprintf "save_file_atomic %s: %s" name detail))
-  | Ok () ->
-    (match rename_at dir temp_name dir name with
-     | () ->
-       (match fsync dir with
-        | () -> Ok ()
-        | exception exn ->
-          Error
-            (Printf.sprintf
-               "save_file_atomic %s committed but directory fsync failed: %s"
-               name
-               (Printexc.to_string exn)))
-     | exception exn ->
-       let detail =
-         match cleanup () with
-         | Ok () -> Printexc.to_string exn
-         | Error cleanup_error ->
-           Printf.sprintf
-             "%s; temporary cleanup failed: %s"
-             (Printexc.to_string exn)
-             (Printexc.to_string cleanup_error)
-       in
-       Error (Printf.sprintf "save_file_atomic %s: %s" name detail))
-;;
-
-let rename ~src_dir ~src ~dst_dir ~dst =
-  require_segment ~operation:"rename source" src;
-  require_segment ~operation:"rename destination" dst;
-  rename_at src_dir src dst_dir dst;
-  fsync dst_dir;
-  if src_dir != dst_dir then fsync src_dir
-;;
-
-let link_no_replace ~src_dir ~src ~dst_dir ~dst =
-  require_segment ~operation:"link source" src;
-  require_segment ~operation:"link destination" dst;
-  link_at src_dir src dst_dir dst;
-  fsync dst_dir
-;;
-
-let read_dir dir = read_dir_raw dir |> List.sort String.compare
+  combine_closedir handle (fun () ->
+    let rec loop acc =
+      match Unix.readdir handle with
+      | "." | ".." -> loop acc
+      | raw ->
+        (match Segment.of_string raw with
+         | Ok segment -> loop (segment :: acc)
+         | Error error ->
+           raise
+             (Failure
+                (Printf.sprintf
+                   "filesystem returned invalid directory entry: %s"
+                   (Segment.error_to_string error))))
+      | exception End_of_file ->
+        List.sort
+          (fun left right ->
+             String.compare (segment_value left) (segment_value right))
+          acc
+    in
+    loop [])

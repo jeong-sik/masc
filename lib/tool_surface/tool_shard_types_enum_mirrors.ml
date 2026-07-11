@@ -5,7 +5,8 @@
     downstream keeper/board module. A direct dependency would form a
     cycle (Tool_shard -> Keeper_alerting -> Tool_shard via
     [keeper_model_tools]), so each value is hand-kept in lock-step
-    and protected by a sync regression test in [test/test_types.ml].
+    and protected by a sync regression test in
+    [test/test_tool_shard_enum_mirror_sync.ml] (#24096).
 
     Canonical owners (single source of truth per enum):
       - [sort_order_enum_strings]

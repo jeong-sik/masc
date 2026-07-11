@@ -10,9 +10,21 @@ type request_error =
   | Request_host_rejected of Server_auth.request_host_rejection
   | Token_operation_failed of string
 
+let request_error_status : request_error -> Httpun.Status.t = function
+  | Request_host_rejected
+      ( Server_auth.Missing_request_host
+      | Server_auth.Multiple_request_hosts
+      | Server_auth.Malformed_request_host ) ->
+    `Bad_request
+  | Request_host_rejected (Server_auth.Non_loopback_request_host _) -> `Forbidden
+  | Token_operation_failed _ -> `Internal_server_error
+;;
+
 let request_error_code = function
   | Request_host_rejected Server_auth.Missing_request_host ->
     "dashboard_dev_token_host_missing"
+  | Request_host_rejected Server_auth.Multiple_request_hosts ->
+    "dashboard_dev_token_host_multiple"
   | Request_host_rejected Server_auth.Malformed_request_host ->
     "dashboard_dev_token_host_malformed"
   | Request_host_rejected (Server_auth.Non_loopback_request_host _) ->
@@ -23,6 +35,8 @@ let request_error_code = function
 let request_error_to_string = function
   | Request_host_rejected Server_auth.Missing_request_host ->
     "dashboard dev-token request is missing the Host header"
+  | Request_host_rejected Server_auth.Multiple_request_hosts ->
+    "dashboard dev-token request contains more than one Host header field"
   | Request_host_rejected Server_auth.Malformed_request_host ->
     "dashboard dev-token request has a malformed Host authority"
   | Request_host_rejected (Server_auth.Non_loopback_request_host host) ->

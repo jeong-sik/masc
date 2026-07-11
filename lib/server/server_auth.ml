@@ -455,6 +455,7 @@ let host_port_scheme_of_origin origin =
 
 type request_host_rejection =
   | Missing_request_host
+  | Multiple_request_hosts
   | Malformed_request_host
   | Non_loopback_request_host of string
 
@@ -551,23 +552,27 @@ let parse_request_host_header raw =
         | Error () -> None
 ;;
 
-let admit_loopback_request_host request =
-  match Httpun.Headers.get request.Httpun.Request.headers "host" with
-  | None -> Error Missing_request_host
-  | Some raw ->
+let request_host_of_request request =
+  match Httpun.Headers.get_multi request.Httpun.Request.headers "host" with
+  | [] -> Error Missing_request_host
+  | [ raw ] ->
     (match parse_request_host_header raw with
-     | None -> Error Malformed_request_host
-     | Some ({ host; _ } as admitted) when is_loopback_host host -> Ok admitted
-     | Some { host; _ } -> Error (Non_loopback_request_host host))
+     | Some admitted -> Ok admitted
+     | None -> Error Malformed_request_host)
+  | _ -> Error Multiple_request_hosts
+;;
+
+let admit_loopback_request_host request =
+  match request_host_of_request request with
+  | Error rejection -> Error rejection
+  | Ok ({ host; _ } as admitted) when is_loopback_host host -> Ok admitted
+  | Ok { host; _ } -> Error (Non_loopback_request_host host)
 ;;
 
 let host_port_of_request request =
-  match Httpun.Headers.get request.Httpun.Request.headers "host" with
-  | None -> None
-  | Some host_header ->
-    Option.map
-      (fun { host; port } -> host, port)
-      (parse_request_host_header host_header)
+  match request_host_of_request request with
+  | Ok { host; port } -> Some (host, port)
+  | Error _ -> None
 
 (* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
    can be toggled without restarting the server process. *)

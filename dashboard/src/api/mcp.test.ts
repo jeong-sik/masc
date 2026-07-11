@@ -92,6 +92,14 @@ function setupMcpSessionMocks(sessionId: string) {
     )
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 /** Find a fetchWithTimeout call by matching the JSON body's "method" field. */
 function findCallByMethod(method: string) {
   return callsByMethod(method)[0]
@@ -141,10 +149,94 @@ describe('mcpHeaders auth integration', () => {
 
     const { callMcpTool } = await import('./mcp')
     await expect(callMcpTool('masc_status', {}))
-      .rejects.toThrow('MCP authentication changed during session initialization')
+      .rejects.toThrow('MCP authentication changed during request')
 
     expect(callsByMethod('notifications/initialized')).toHaveLength(0)
     expect(callsByMethod('tools/call')).toHaveLength(0)
+  }, 60_000)
+
+  it('does not let a delayed old-token tool response replace the current session', async () => {
+    let tokenRevision = 0
+    currentStoredTokenRevision.mockImplementation(() => tokenRevision)
+    setupMcpSessionMocks('sess-token-a')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    const delayedOldResponse = deferred<Response>()
+    fetchWithTimeout.mockImplementationOnce(() => delayedOldResponse.promise)
+    const oldCall = callMcpTool('masc_status', {})
+    await vi.waitFor(() => {
+      expect(callsByMethod('tools/call')).toHaveLength(2)
+    })
+
+    tokenRevision = 1
+    setupMcpSessionMocks('sess-token-b')
+    await callMcpTool('masc_status', {})
+
+    delayedOldResponse.resolve(new Response(
+      'data: {"result":{"content":[{"type":"text","text":"stale"}]}}\n',
+      { status: 200, headers: { 'Mcp-Session-Id': 'sess-token-a' } },
+    ))
+    await expect(oldCall).rejects.toThrow('MCP authentication changed during request')
+
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response('data: {"result":{"content":[{"type":"text","text":"fresh"}]}}\n', { status: 200 }),
+    )
+    await callMcpTool('masc_status', {})
+
+    expect(callsByMethod('initialize')).toHaveLength(2)
+    const latestToolCall = callsByMethod('tools/call').at(-1)
+    expect((latestToolCall?.[1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-token-b')
+  }, 60_000)
+
+  it('keeps a newer initializer authoritative when an older initializer finishes last', async () => {
+    let tokenRevision = 0
+    currentStoredTokenRevision.mockImplementation(() => tokenRevision)
+    const initializeA = deferred<Response>()
+    const initializeB = deferred<Response>()
+    fetchWithTimeout.mockImplementationOnce(() => initializeA.promise)
+
+    const { callMcpTool } = await import('./mcp')
+    const callA = callMcpTool('masc_status', {})
+    await vi.waitFor(() => {
+      expect(callsByMethod('initialize')).toHaveLength(1)
+    })
+
+    tokenRevision = 1
+    fetchWithTimeout
+      .mockImplementationOnce(() => initializeB.promise)
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"content":[{"type":"text","text":"b"}]}}\n', { status: 200 }),
+      )
+    const callB = callMcpTool('masc_status', {})
+    await vi.waitFor(() => {
+      expect(callsByMethod('initialize')).toHaveLength(2)
+    })
+
+    initializeB.resolve(new Response('{}', {
+      status: 200,
+      headers: { 'Mcp-Session-Id': 'sess-init-b' },
+    }))
+    await expect(callB).resolves.toBe('b')
+
+    initializeA.resolve(new Response('{}', {
+      status: 200,
+      headers: { 'Mcp-Session-Id': 'sess-init-a' },
+    }))
+    await expect(callA).rejects.toThrow('MCP authentication changed during request')
+
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response('data: {"result":{"content":[{"type":"text","text":"still-b"}]}}\n', { status: 200 }),
+    )
+    await callMcpTool('masc_status', {})
+
+    expect(callsByMethod('initialize')).toHaveLength(2)
+    const latestToolCall = callsByMethod('tools/call').at(-1)
+    expect((latestToolCall?.[1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-init-b')
   }, 60_000)
 
   it('includes Authorization header from authHeaders in MCP initialize request', async () => {

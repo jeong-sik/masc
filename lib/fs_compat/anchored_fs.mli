@@ -63,6 +63,23 @@ val with_ensure_dir :
     When [enforce_perm] is true, the opened directory is [fchmod]ed. Creation is
     committed as [mkdirat -> openat -> fchmod -> fsync(child) -> fsync(parent)]. *)
 
+type ensure_step =
+  { name : Segment.t
+  ; perm : int
+  ; enforce_perm : bool
+  }
+
+val with_ensure_path :
+  root:string -> ensure_step list -> (t -> 'a) -> 'a
+(** Open [root], walk [steps] one descriptor-relative component at a time, and
+    retain only the leaf descriptor for the callback. Missing components are
+    created with the same durability contract as {!with_ensure_dir}. *)
+
+val with_open_path_opt :
+  root:string -> Segment.t list -> (t -> 'a) -> 'a option
+(** Read-only counterpart of {!with_ensure_path}. [None] means a component was
+    absent. Ancestor descriptors are closed before the callback. *)
+
 val stat : t -> Segment.t -> stat option
 (** Inspect one child entry without following a symlink. [None] means ENOENT;
     every other error is raised. This is a diagnostic snapshot, not authority

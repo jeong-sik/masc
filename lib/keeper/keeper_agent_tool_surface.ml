@@ -254,7 +254,6 @@ let tool_search_alias_entries =
   ; "masc_status", "상태 현황 방 룸 요약"
   ; "masc_dashboard", "대시보드 현황 대시 보드 개요"
   ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
-  ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
   ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
   ; "masc_web_fetch", "웹 페이지 가져오기 읽기 URL 페치"
 

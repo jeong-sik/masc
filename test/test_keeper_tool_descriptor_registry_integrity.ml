@@ -263,23 +263,37 @@ let test_registered_cluster_model_projections_are_explicit () =
   in
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
-    [ "masc_library_list"
-    ; "masc_library_add"
-    ; "masc_library_promote"
-    ; "masc_recurring_add"
+    [ "masc_recurring_add"
     ; "masc_recurring_list"
     ; "masc_recurring_remove"
     ; "masc_runtime_verify"
     ; "masc_runtime_ollama_probe"
     ; "masc_goal_hygiene_review"
-    ; "masc_gc"
     ];
   List.iter
     (fun name -> check_projection name Descriptor.Dispatch_only)
-    [ "masc_library_read"; "masc_library_search" ];
+    [ "masc_library_add"
+    ; "masc_library_list"
+    ; "masc_library_promote"
+    ; "masc_library_read"
+    ; "masc_library_search"
+    ; "masc_pause"
+    ; "masc_resume"
+    ];
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
     [ "keeper_library_read"; "keeper_library_search" ]
+;;
+
+let test_system_internal_descriptors_are_dispatch_only () =
+  all_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    if Tool_catalog_surfaces.is_system_internal_hidden descriptor.internal_name
+    then
+      Alcotest.(check bool)
+        (descriptor.internal_name ^ " stays outside the Keeper model surface")
+        true
+        (descriptor.keeper_model_projection = Descriptor.Dispatch_only))
 ;;
 
 let test_dynamic_model_description_projection_is_explicit () =
@@ -1510,6 +1524,10 @@ let () =
             "registered cluster model projections are explicit"
             `Quick
             test_registered_cluster_model_projections_are_explicit
+        ; test_case
+            "system-internal descriptors are dispatch-only"
+            `Quick
+            test_system_internal_descriptors_are_dispatch_only
         ; test_case
             "dynamic model description projection is explicit"
             `Quick

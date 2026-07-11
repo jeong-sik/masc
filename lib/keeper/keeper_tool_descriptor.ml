@@ -914,6 +914,10 @@ let find_voice_schema_opt name =
   find_schema_input_opt Tool_shard_types.voice_tools name
 ;;
 
+let find_misc_schema_opt name =
+  find_schema_input_opt Tool_schemas_misc.schemas name
+;;
+
 let find_base_schema_opt name =
   match find_schema_input_opt Tool_shard_types.base_tools name with
   | Some _ as schema -> schema
@@ -972,8 +976,11 @@ let find_masc_schema_opt name =
 let find_cluster_schema_opt name =
   (* Priority preserves the historical hidden keeper namespace ownership:
      keeper taskboard wrappers first, then typed board wrappers, voice,
-     then public masc_* aggregates. The namespaces are expected to be
-     disjoint; this order is not a conflict resolver. *)
+     the generated misc/control registry, then public masc_* aggregates.
+     The namespaces are expected to be disjoint; this order is not a conflict
+     resolver. [masc_pause]/[masc_resume] deliberately stay out of Config's
+     public schema list, so their canonical Tool_schemas_misc definitions must
+     be read directly rather than replaced by a permissive placeholder. *)
   match find_taskboard_schema_opt name with
   | Some _ as schema -> schema
   | None ->
@@ -982,7 +989,10 @@ let find_cluster_schema_opt name =
      | None ->
        (match find_voice_schema_opt name with
         | Some _ as schema -> schema
-        | None -> find_masc_schema_opt name))
+        | None ->
+          (match find_misc_schema_opt name with
+           | Some _ as schema -> schema
+           | None -> find_masc_schema_opt name)))
 ;;
 
 let base_schema_input name =
@@ -1249,6 +1259,11 @@ let cluster_policy ?(polling_read = false) ~readonly ~inline_safe ~maintenance_o
 let cluster_descriptor_with_schema_source ?(polling_read = false)
       ~keeper_model_projection ~input_schema_source ~input_schema ~id ~name
       ~description ~handler ~readonly ~inline_safe ~maintenance_only () =
+  let keeper_model_projection =
+    if Tool_catalog_surfaces.is_system_internal_hidden name
+    then Dispatch_only
+    else keeper_model_projection
+  in
   let policy =
     cluster_policy ~polling_read ~readonly ~inline_safe ~maintenance_only ()
   in
@@ -1496,14 +1511,14 @@ let masc_misc_descriptor id name description ~readonly =
 
 let masc_control_descriptor id name description ~readonly =
   cluster_descriptor
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection:Dispatch_only
     ~id:("masc.control." ^ id)
     ~name
     ~description
     ~handler:Tool_masc_control_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:false
+    ~maintenance_only:true
     ()
 ;;
 

@@ -1,18 +1,16 @@
-(** Regression: durable event-queue persistence must not poison its shared,
-    process-global Eio mutex on a disk write failure (audit 2026-06-29).
+(** Regression: durable event-queue persistence must not poison an owner's Eio
+    gate on a disk write failure (audit 2026-06-29, owner isolation 2026-07-11).
 
     Before the fix, [save_json_atomic] called [Fs_compat.mkdir_p] — which raises
     (Sys_error / Unix_error) on ENOTDIR/ENOSPC/EROFS — inside the
     [Eio.Mutex.use_rw] critical section. [use_rw] poisons the mutex permanently
-    on a raised exception, so a single disk error blocked durable snapshots for
-    EVERY keeper for the lifetime of the process.
+    on a raised exception, so the old process-global lock could block durable
+    snapshots for every keeper for the lifetime of the process.
 
-    This test drives the Eio path (so [Eio_context.get_switch_opt] returns
-    [Some], selecting the poison-prone [eio_write_mu]) and asserts that a failed
-    persist leaves the mutex usable for a subsequent valid persist. On the
-    unfixed code the second persist's [with_write_lock] raises
-    [Eio.Mutex.Poisoned], [persist] swallows it, the snapshot file is never
-    written, and the [Sys.file_exists] assertion fails (RED). *)
+    This test drives the Eio path and repairs the failing filesystem ancestor
+    before retrying the exact same canonical owner. The retry therefore proves
+    that the owner's cooperative gate remains usable; a different BasePath
+    cannot accidentally make the assertion pass through lock isolation. *)
 
 let rec rm_rf path =
   if Sys.file_exists path
@@ -35,7 +33,8 @@ let () =
   let net = Eio.Stdenv.net env in
   Eio.Switch.run @@ fun sw ->
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw @@ fun () ->
-  (* Exercise the Eio mutex (poison-prone path), not the Stdlib fallback. *)
+  (* [Eio_main.run] makes this an Eio fiber; [with_test_env] supplies the
+     existing filesystem/network test context but does not select the lock. *)
   assert (Eio_context.get_switch_opt () <> None);
 
   let keeper_name = "poison_probe" in
@@ -44,25 +43,25 @@ let () =
   (* 1) Force mkdir_p to raise inside the critical section: a base path whose
         ancestor is a regular file yields ENOTDIR. [persist] logs the failure as
         a warning and returns; pre-fix it ALSO poisoned the shared mutex. *)
-  let blocker_file = Filename.temp_file "kqp_poison_blocker" "" in
-  let bad_base = Filename.concat blocker_file "base" in
-  Keeper_event_queue_persistence.persist ~base_path:bad_base ~keeper_name queue;
+  let blocker_path = Filename.temp_file "kqp_poison_blocker" "" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists blocker_path then rm_rf blocker_path)
+    (fun () ->
+      let base_path = Filename.concat blocker_path "base" in
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name queue;
 
-  (* 2) A valid persist on a real directory. If step 1 poisoned the mutex,
-        [with_write_lock] raises [Eio.Mutex.Poisoned], [persist] swallows it, and
-        the snapshot is never written -> the assertion below fails. *)
-  let good_base = Filename.temp_dir "kqp_poison_ok" "" in
-  Keeper_event_queue_persistence.persist ~base_path:good_base ~keeper_name queue;
-  let path = snapshot_path ~base_path:good_base ~keeper_name in
-  assert (Sys.file_exists path);
+      (* 2) Replace the invalid ancestor and retry the same owner identity. *)
+      Sys.remove blocker_path;
+      Unix.mkdir blocker_path 0o755;
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name queue;
+      let path = snapshot_path ~base_path ~keeper_name in
+      assert (Sys.file_exists path);
 
-  (* 3) The lock still serializes correctly after recovery: load round-trips the
-        persisted (empty) queue without raising. *)
-  let restored =
-    Keeper_event_queue_persistence.load ~base_path:good_base ~keeper_name
-  in
-  assert (Keeper_event_queue.is_empty restored);
+      (* 3) The lock still serializes correctly after recovery: load round-trips
+         the persisted (empty) queue without raising. *)
+      let restored =
+        Keeper_event_queue_persistence.load ~base_path ~keeper_name
+      in
+      assert (Keeper_event_queue.is_empty restored));
 
-  rm_rf good_base;
-  (try Sys.remove blocker_file with _ -> ());
   print_endline "test_keeper_event_queue_persist_poison: OK"

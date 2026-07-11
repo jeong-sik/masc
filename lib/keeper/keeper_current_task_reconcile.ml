@@ -5,22 +5,28 @@
     Keeper_agent_tool_surface, so lifecycle transitions can update keeper meta
     without creating a keeper tool-surface dependency cycle. *)
 
+let resolved_agent_names_result ~(config : Workspace.config) ~(agent_name : string) =
+  try
+    let actual_name = Workspace.resolve_agent_name config agent_name in
+    Ok ([ agent_name; actual_name ] |> List.sort_uniq String.compare)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
 let resolved_agent_names ~(config : Workspace.config) ~(agent_name : string) =
-  let actual_name =
-    try Workspace.resolve_agent_name config agent_name
-    with
-    | Sys_error _ | Yojson.Json_error _ -> agent_name
-    | exn ->
+  match resolved_agent_names_result ~config ~agent_name with
+  | Ok names -> names
+  | Error detail ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ReconcileFailures)
         ~labels:[("keeper", agent_name); ("phase", "resolve_agent")]
         ();
       Log.Keeper.warn
         "resolve_agent_name failed while reconciling current task for %s: %s"
-        agent_name (Printexc.to_string exn);
-      agent_name
-  in
-  [ agent_name; actual_name ] |> List.sort_uniq String.compare
+        agent_name
+        detail;
+      [ agent_name ]
 
 let task_id_of_owned_active_task ~(keeper_name : string) (task : Masc_domain.task) =
   match Keeper_id.Task_id.of_string task.id with
@@ -40,9 +46,8 @@ type owned_active_task =
   ; task : Masc_domain.task
   }
 
-let owned_active_tasks_for_meta ~(config : Workspace.config)
-    ~(meta : Keeper_meta_contract.keeper_meta) =
-  let names = resolved_agent_names ~config ~agent_name:meta.agent_name in
+let owned_active_tasks_for_names ~(config : Workspace.config)
+    ~(meta : Keeper_meta_contract.keeper_meta) names =
   let matches assignee = List.mem assignee names in
   try
     match Workspace_backlog.read_backlog_r config with
@@ -83,6 +88,28 @@ let owned_active_tasks_for_meta ~(config : Workspace.config)
       "owned task reconciliation failed: %s"
       message;
     Error message
+
+let owned_active_tasks_for_meta ~(config : Workspace.config)
+    ~(meta : Keeper_meta_contract.keeper_meta) =
+  let names = resolved_agent_names ~config ~agent_name:meta.agent_name in
+  owned_active_tasks_for_names ~config ~meta names
+;;
+
+let owned_active_tasks_for_meta_strict ~(config : Workspace.config)
+    ~(meta : Keeper_meta_contract.keeper_meta) =
+  match resolved_agent_names_result ~config ~agent_name:meta.agent_name with
+  | Error detail ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ReconcileFailures)
+      ~labels:[ "keeper", meta.name; "phase", "shutdown_resolve_agent" ]
+      ();
+    Log.Keeper.warn
+      ~keeper_name:meta.name
+      "shutdown task ownership resolution failed: %s"
+      detail;
+    Error detail
+  | Ok names -> owned_active_tasks_for_names ~config ~meta names
+;;
 
 let active_status_rank = function
   | Masc_domain.InProgress _ -> 0

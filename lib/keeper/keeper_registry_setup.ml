@@ -1076,17 +1076,76 @@ let clear_turn_switch ~base_path name =
   set_turn_switch ~base_path name None
 ;;
 
+type exact_turn_interrupt_result =
+  | Exact_turn_cancelled of int
+  | Exact_no_turn_in_flight
+  | Exact_turn_cancel_failed of
+      { turn_id : int option
+      ; detail : string
+      }
+
+let interrupt_current_turn_exact observed_entry =
+  let current_entry =
+    StringMap.find_opt
+      (registry_key
+         ~base_path:observed_entry.base_path
+         observed_entry.name)
+      (Atomic.get registry)
+  in
+  match current_entry with
+  | None ->
+    Exact_turn_cancel_failed
+      { turn_id = None; detail = "registry entry disappeared before turn cancellation" }
+  | Some entry
+    when not
+           (Keeper_lane.Id.equal
+              (Keeper_lane.id entry.lane)
+              (Keeper_lane.id observed_entry.lane)) ->
+    Exact_turn_cancel_failed
+      { turn_id = None; detail = "a newer same-name lane owns the registry entry" }
+  | Some entry ->
+  let turn_id =
+    Option.map
+      (fun observation -> observation.turn_id)
+      entry.current_turn_observation
+  in
+    match Atomic.exchange entry.current_turn_switch None, turn_id with
+    | None, None -> Exact_no_turn_in_flight
+    | None, Some turn_id ->
+       Exact_turn_cancel_failed
+         { turn_id = Some turn_id
+         ; detail = "turn observation exists without a live turn switch"
+         }
+    | Some turn_sw, observed_turn_id ->
+      (try
+         Eio.Switch.fail turn_sw Operator_interrupt;
+         match observed_turn_id with
+         | Some turn_id -> Exact_turn_cancelled turn_id
+         | None ->
+           Exact_turn_cancel_failed
+             { turn_id = None
+             ; detail = "live turn switch exists without a turn observation"
+             }
+       with
+       | exn ->
+         Exact_turn_cancel_failed
+           { turn_id = observed_turn_id
+           ; detail = Printexc.to_string exn
+           })
+;;
+
 let interrupt_current_turn ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> `No_turn_in_flight
   | Some entry ->
-    (match entry.current_turn_observation with
-     | None -> `No_turn_in_flight
-     | Some obs ->
-       match Atomic.exchange entry.current_turn_switch None with
-       | None -> `No_turn_in_flight
-       | Some sw ->
-         (try Eio.Switch.fail sw Operator_interrupt with
-          | Invalid_argument _ -> ());
-         `Cancelled obs.turn_id)
+    (match interrupt_current_turn_exact entry with
+     | Exact_turn_cancelled turn_id -> `Cancelled turn_id
+     | Exact_no_turn_in_flight -> `No_turn_in_flight
+     | Exact_turn_cancel_failed { detail; _ } ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string LifecycleDispatchRejections)
+         ~labels:[ "keeper", name; "event", "turn_cancel_failed" ]
+         ();
+       Log.Keeper.warn "%s: turn cancellation failed: %s" name detail;
+       `No_turn_in_flight)
 ;;

@@ -301,6 +301,19 @@ val clear_turn_switch : base_path:string -> string -> unit
 val interrupt_current_turn :
   base_path:string -> string -> [ `Cancelled of int | `No_turn_in_flight ]
 
+type exact_turn_interrupt_result =
+  | Exact_turn_cancelled of int
+  | Exact_no_turn_in_flight
+  | Exact_turn_cancel_failed of
+      { turn_id : int option
+      ; detail : string
+      }
+
+(** Cancel the turn switch retained by this exact registry entry. Unlike the
+    name-based compatibility API, failure is returned explicitly. *)
+val interrupt_current_turn_exact :
+  registry_entry -> exact_turn_interrupt_result
+
 (** Record the verdict reasons from a [keeper_cycle_decision] that
     chose to skip the next turn.  Stamps [last_skip_observation] with
     [(now, reasons)] so the stale watchdog can surface *why* a keeper

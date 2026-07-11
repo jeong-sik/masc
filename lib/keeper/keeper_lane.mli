@@ -16,6 +16,7 @@ end
 
 type outcome =
   | Completed
+  | Shutdown_requested
   | Cancelled_by_parent of exn
   | Failed of exn
 
@@ -28,6 +29,12 @@ type start_error =
   | Already_started
   | Already_exited
   | Fork_failed of exn
+
+type cancel_result =
+  | Cancel_requested
+  | Cancel_already_requested
+  | Cancel_already_exiting
+  | Cancel_signal_failed of exn
 
 val start_error_to_string : start_error -> string
 
@@ -47,6 +54,11 @@ val fork :
 (** Resolve a lane for which the launch gate rejected the fiber before it
     started.  This keeps the join contract total for every registry entry. *)
 val reject_before_start : t -> reason:exn -> (unit, start_error) result
+
+(** Request cancellation of this exact lane scope. The request is remembered
+    even if the fiber has not attached its switch yet. This does not join; use
+    [await_exit] for that boundary. *)
+val request_cancel : t -> cancel_result
 
 val exited : t -> exit Eio.Promise.t
 val peek_exit : t -> exit option

@@ -1731,7 +1731,7 @@ let expire_stale ~max_wait_s =
                 let decision = Agent_sdk.Hooks.Reject reason in
                 (match deliver_resolution ~base_path:entry.audit_base_path entry decision with
                  | Error _ -> ()
-                 | Ok signal ->
+                 | Ok committed ->
                    (match entry.lane_policy with
                     | Blocking -> atomic_update pending (fun map -> SMap.remove id map)
                     | Nonblocking -> ());
@@ -1739,10 +1739,12 @@ let expire_stale ~max_wait_s =
                    (match entry.lane_policy with
                     | Blocking -> ()
                     | Nonblocking -> atomic_update pending (fun map -> SMap.remove id map));
-                   Option.iter
-                     (signal_resolution_after_commit
+                   (match committed with
+                    | Blocking_owned -> ()
+                    | Nonblocking_durable ->
+                      signal_resolution_after_commit
+                        ~base_path:entry.audit_base_path
                         ~keeper_name:entry.keeper_name
-                        ~approval_id:id)
-                     signal)) )
+                        ~approval_id:id))))
     candidates
 ;;

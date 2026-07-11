@@ -4,27 +4,71 @@
    Without the fsync pair, a crash between the rename and the kernel's
    dirty-page flush can leave the target truncated or zero-length —
    observed on backlog.json after an abrupt shutdown (2026-04-18). *)
-let fsync_path path =
-  let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
-  Stdlib.Fun.protect
-    ~finally:(fun () ->
-      try Unix.close fd with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Stdlib.Printf.eprintf
-          "[fs_compat] fsync_path close failed: %s\n%!"
-          (Printexc.to_string exn))
-    (fun () ->
-      try Unix.fsync fd with
-      | Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->
-        (* Some filesystems (tmpfs on some kernels) reject fsync. The data
-           is still durable to the extent the underlying FS offers. *)
-        ())
+type fsync_target =
+  | Regular_file
+  | Directory
+
+let same_file_identity left right =
+  left.Unix.st_dev = right.Unix.st_dev
+  && left.Unix.st_ino = right.Unix.st_ino
+;;
+
+let expected_kind = function
+  | Regular_file -> Unix.S_REG
+  | Directory -> Unix.S_DIR
+;;
+
+let fsync_operation = function
+  | Regular_file -> "fsync_regular_file"
+  | Directory -> "fsync_directory"
+;;
+
+let fsync_path ?expected ~target path =
+  let operation = fsync_operation target in
+  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  let sync_result =
+    try
+      let actual = Unix.fstat fd in
+      if actual.Unix.st_kind <> expected_kind target
+      then
+        raise
+          (Unix.Unix_error
+             ((match target with
+               | Regular_file -> Unix.EINVAL
+               | Directory -> Unix.ENOTDIR),
+              operation,
+              path));
+      (match expected with
+       | Some expected when not (same_file_identity expected actual) ->
+         raise (Unix.Unix_error (Unix.EAGAIN, operation, path))
+       | Some _ | None -> ());
+      Unix.fsync fd;
+      Ok ()
+    with
+    | exn -> Error exn
+  in
+  let close_result =
+    try
+      Unix.close fd;
+      Ok ()
+    with
+    | exn -> Error exn
+  in
+  match sync_result, close_result with
+  | Ok (), Ok () -> ()
+  | Error exn, Ok () | Ok (), Error exn -> raise exn
+  | Error primary, Error close_error ->
+    Stdlib.Printf.eprintf
+      "[fs_compat] %s close also failed path=%s: %s\n%!"
+      operation
+      path
+      (Printexc.to_string close_error);
+    raise primary
 ;;
 
 let fsync_directory path =
   try
-    fsync_path path;
+    fsync_path ~target:Directory path;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -40,17 +84,13 @@ let fsync_directory path =
 let atomic_tmp_prefix = ".atomic_"
 let atomic_tmp_suffix = ".tmp"
 
-let save_file_atomic
-  ~(save_file : string -> string -> unit)
-  (path : string)
-  (content : string)
-  : (unit, string) Result.t
-  =
+let save_file_atomic (path : string) (content : string) : (unit, string) Result.t =
   let dir = Stdlib.Filename.dirname path in
   match
     try
       Ok
-        (Stdlib.Filename.temp_file
+        (Stdlib.Filename.open_temp_file
+           ~mode:[ Open_binary ]
            ~temp_dir:dir
            atomic_tmp_prefix
            atomic_tmp_suffix)
@@ -64,40 +104,101 @@ let save_file_atomic
          "save_file_atomic %s: temp creation failed: %s"
          path
          (Printexc.to_string exn))
-  | Ok tmp ->
-    let cleanup_tmp () =
-      try
-        Unix.unlink tmp;
-        Ok ()
-      with
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
-      | exn -> Error (Printexc.to_string exn)
-    in
-    (try
-       save_file tmp content;
-       fsync_path tmp;
-       Stdlib.Sys.rename tmp path;
-       fsync_path dir;
-       Ok ()
+  | Ok (tmp, output) ->
+    (match
+       try Ok (Unix.fstat (Unix.descr_of_out_channel output)) with
+       | exn -> Error exn
      with
-     | Eio.Cancel.Cancelled _ as exn ->
-       (match cleanup_tmp () with
-        | Ok () -> ()
-        | Error detail ->
+     | Error inspect_error ->
+       (try Stdlib.close_out output with
+        | close_error ->
           Stdlib.Printf.eprintf
-            "[fs_compat] cancelled atomic-write cleanup failed path=%s: %s\n%!"
+            "[fs_compat] atomic-write close also failed path=%s: %s\n%!"
             tmp
-            detail);
-       raise exn
-     | exn ->
-       let primary = Printexc.to_string exn in
-       let detail =
-         match cleanup_tmp () with
-         | Ok () -> primary
-         | Error cleanup ->
-           Printf.sprintf "%s; temp cleanup failed: %s" primary cleanup
+            (Printexc.to_string close_error));
+       Error
+         (Printf.sprintf
+            "save_file_atomic %s: cannot inspect atomically-opened temp %s: %s; temp retained"
+            path
+            tmp
+            (Printexc.to_string inspect_error))
+     | Ok temp_identity ->
+       let cleanup_tmp () =
+         try
+           let actual = Unix.lstat tmp in
+           if
+             actual.Unix.st_kind = Unix.S_REG
+             && same_file_identity temp_identity actual
+           then (
+             Unix.unlink tmp;
+             Ok ())
+           else
+             Error
+               (Printf.sprintf
+                  "refusing to unlink replaced atomic-write temp path: %s"
+                  tmp)
+         with
+         | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+         | exn -> Error (Printexc.to_string exn)
        in
-       Error (Printf.sprintf "save_file_atomic %s: %s" path detail))
+       let write_result =
+         match
+           try
+             Stdlib.output_string output content;
+             Ok ()
+           with
+           | exn -> Error exn
+         with
+         | Ok () ->
+           (try
+              Stdlib.close_out output;
+              Ok ()
+            with
+            | exn -> Error exn)
+         | Error primary ->
+           (try Stdlib.close_out output with
+            | close_error ->
+              Stdlib.Printf.eprintf
+                "[fs_compat] atomic-write close also failed path=%s: %s\n%!"
+                tmp
+                (Printexc.to_string close_error));
+           Error primary
+       in
+       (try
+          (match write_result with
+           | Ok () -> ()
+           | Error exn -> raise exn);
+          fsync_path ~expected:temp_identity ~target:Regular_file tmp;
+          let temp_after_sync = Unix.lstat tmp in
+          if
+            temp_after_sync.Unix.st_kind <> Unix.S_REG
+            || not (same_file_identity temp_identity temp_after_sync)
+          then
+            raise
+              (Unix.Unix_error
+                 (Unix.EAGAIN, "save_file_atomic", tmp));
+          Stdlib.Sys.rename tmp path;
+          fsync_path ~target:Directory dir;
+          Ok ()
+        with
+        | Eio.Cancel.Cancelled _ as exn ->
+          (match cleanup_tmp () with
+           | Ok () -> ()
+           | Error detail ->
+             Stdlib.Printf.eprintf
+               "[fs_compat] cancelled atomic-write cleanup failed path=%s: %s\n%!"
+               tmp
+               detail);
+          raise exn
+        | exn ->
+          let primary = Printexc.to_string exn in
+          let detail =
+            match cleanup_tmp () with
+            | Ok () -> primary
+            | Error cleanup ->
+              Printf.sprintf "%s; temp cleanup failed: %s" primary cleanup
+          in
+          Error (Printf.sprintf "save_file_atomic %s: %s" path detail)))
 ;;
 
 let is_atomic_orphan_name name =
@@ -133,11 +234,28 @@ let recover_atomic_orphan ~path ~recovered_root ~bucket =
       then Error (Printf.sprintf "atomic-write orphan is not a regular file: %s" path)
       else if stat.Unix.st_size = 0
       then (
+        fsync_path ~expected:stat ~target:Regular_file path;
+        let source_before_unlink = Unix.lstat path in
+        if
+          source_before_unlink.Unix.st_kind <> Unix.S_REG
+          || not (same_file_identity stat source_before_unlink)
+        then
+          raise
+            (Unix.Unix_error
+               (Unix.EAGAIN, "recover_atomic_orphan", path));
         Stdlib.Sys.remove path;
-        fsync_path (Stdlib.Filename.dirname path);
+        fsync_path ~target:Directory (Stdlib.Filename.dirname path);
         Ok Deleted_zero_length)
       else (
-        fsync_path path;
+        fsync_path ~expected:stat ~target:Regular_file path;
+        let source_after_sync = Unix.lstat path in
+        if
+          source_after_sync.Unix.st_kind <> Unix.S_REG
+          || not (same_file_identity stat source_after_sync)
+        then
+          raise
+            (Unix.Unix_error
+               (Unix.EAGAIN, "recover_atomic_orphan", path));
         let recovered_root_stat = Unix.lstat recovered_root in
         if recovered_root_stat.Unix.st_kind <> Unix.S_DIR
         then
@@ -166,13 +284,23 @@ let recover_atomic_orphan ~path ~recovered_root ~bucket =
           let source_dir = Stdlib.Filename.dirname path in
           let finish_existing_link destination_stat =
             if
-              stat.Unix.st_dev = destination_stat.Unix.st_dev
-              && stat.Unix.st_ino = destination_stat.Unix.st_ino
+              destination_stat.Unix.st_kind = Unix.S_REG
+              && same_file_identity stat destination_stat
             then (
-              fsync_path recovered_dir;
-              Unix.unlink path;
-              fsync_path source_dir;
-              Ok (Preserved_nonempty destination))
+              let source_before_unlink = Unix.lstat path in
+              if
+                source_before_unlink.Unix.st_kind <> Unix.S_REG
+                || not (same_file_identity stat source_before_unlink)
+              then
+                Error
+                  (Printf.sprintf
+                     "atomic-write recovery source changed before unlink: %s"
+                     path)
+              else (
+                fsync_path ~target:Directory recovered_dir;
+                Unix.unlink path;
+                fsync_path ~target:Directory source_dir;
+                Ok (Preserved_nonempty destination)))
             else
               Error
                 (Printf.sprintf
@@ -182,12 +310,10 @@ let recover_atomic_orphan ~path ~recovered_root ~bucket =
           (match Unix.lstat destination with
            | destination_stat -> finish_existing_link destination_stat
            | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-             (match Unix.link path destination with
+             (match Unix.link ~follow:false path destination with
               | () ->
-                fsync_path recovered_dir;
-                Unix.unlink path;
-                fsync_path source_dir;
-                Ok (Preserved_nonempty destination)
+                let destination_stat = Unix.lstat destination in
+                finish_existing_link destination_stat
               | exception Unix.Unix_error (Unix.EEXIST, _, _) ->
                 Error
                   (Printf.sprintf
@@ -228,7 +354,7 @@ let cleanup_atomic_orphans
       let stat = Unix.lstat path in
       if stat.Unix.st_kind = Unix.S_DIR
       then (
-        fsync_path (Stdlib.Filename.dirname path);
+        fsync_path ~target:Directory (Stdlib.Filename.dirname path);
         Ok ())
       else
         Error

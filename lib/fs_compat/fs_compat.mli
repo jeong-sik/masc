@@ -3,6 +3,8 @@
     @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
+module Anchored_dir : module type of Anchored_fs
+
 (** #9921: raised by mutating [Fs_compat] entry points
     ([append_file], [save_file], [mkdir_p]) when the target path falls
     under [HOME] and the process is a test executable. Defense in depth
@@ -38,8 +40,9 @@ val load_file_opt : string -> string option
 (** Save string to file (overwrite). *)
 val save_file : string -> string -> unit
 
-(** Write content to path via temp file + rename.
-    Returns [Error msg] on I/O failure instead of raising. *)
+(** Write content to path via temp file + rename. When the Eio runtime is
+    registered, the complete blocking Unix transaction is offloaded to a
+    system thread. Returns [Error msg] on I/O failure instead of raising. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
 val save_file_atomic_unix : string -> string -> (unit, string) result
@@ -48,8 +51,8 @@ val save_file_atomic_unix : string -> string -> (unit, string) result
     via [Eio_unix.run_in_systhread]); never call it directly from an Eio fiber. *)
 
 val fsync_directory : string -> (unit, string) result
-(** Durably publish directory-entry changes without hiding unsupported I/O
-    failures. *)
+(** Durably publish directory-entry changes. Rejects non-directories and
+    returns unsupported I/O and close failures explicitly. *)
 
 (** [true] iff [name] matches the [.atomic_*.tmp] pattern produced
     by [Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp"] inside
@@ -137,8 +140,9 @@ val mkdir_p : string -> unit
 
 val mkdir_p_durable_unix : string -> unit
 (** Blocking recursive directory creation followed by parent-directory fsync
-    for every newly-created path segment. Callers running in Eio must offload
-    the complete transaction to a system thread. *)
+    for every path segment observed missing. A symlink or non-directory found
+    at the target or while walking the missing suffix is rejected. Callers
+    running in Eio must offload the complete transaction to a system thread. *)
 
 (** [mkdir_p_memoized path] is [mkdir_p] but skips the stat/mkdir
     syscalls on every call after the first for the same [path].

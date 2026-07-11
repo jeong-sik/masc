@@ -1,3 +1,5 @@
+module Anchored_dir = Anchored_fs
+
 (** Filesystem Compatibility Layer - Eio-native I/O with fallback
 
     Provides a unified filesystem API for gradual migration from
@@ -205,11 +207,13 @@ let append_file_durable_unix (path : string) (content : string) : unit =
     ~finally:(fun () -> Stdlib.Mutex.unlock mu)
     (fun () ->
       let fd =
-        Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
+        Unix.openfile
+          path
+          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+          0o644
       in
-      Stdlib.Fun.protect
-        ~finally:(fun () -> Unix.close fd)
-        (fun () ->
+      let write_result =
+        try
           let rec write_all offset =
             if offset < String.length content
             then
@@ -226,7 +230,27 @@ let append_file_durable_unix (path : string) (content : string) : unit =
               | wrote -> write_all (offset + wrote)
           in
           write_all 0;
-          Unix.fsync fd);
+          Unix.fsync fd;
+          Ok ()
+        with
+        | exn -> Error exn
+      in
+      let close_result =
+        try
+          Unix.close fd;
+          Ok ()
+        with
+        | exn -> Error exn
+      in
+      (match write_result, close_result with
+       | Ok (), Ok () -> ()
+       | Error exn, Ok () | Ok (), Error exn -> raise exn
+       | Error primary, Error close_error ->
+         Stdlib.Printf.eprintf
+           "[fs_compat] durable append close also failed path=%s: %s\n%!"
+           path
+           (Printexc.to_string close_error);
+         raise primary);
       match Atomic_write.fsync_directory (Filename.dirname path) with
       | Ok () -> ()
       | Error detail -> raise (Sys_error detail))
@@ -248,32 +272,36 @@ let mkdir_p_unix (path : string) : unit =
 
 let mkdir_p_durable_unix path =
   test_exec_home_guard ~op:"mkdir_p_durable_unix" path;
-  let rec missing_directories current acc =
+  let rec ensure_directory current =
     if
       String.equal current ""
       || String.equal current "."
       || String.equal current "/"
-    then acc
+    then ()
     else
-      match Unix.stat current with
-      | stat when stat.Unix.st_kind = Unix.S_DIR -> acc
+      match Unix.lstat current with
+      | stat when stat.Unix.st_kind = Unix.S_DIR -> ()
       | _ ->
         raise
           (Unix.Unix_error
              (Unix.ENOTDIR, "mkdir_p_durable_unix", current))
       | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-        missing_directories
-          (Filename.dirname current)
-          (current :: acc)
+        let parent = Filename.dirname current in
+        ensure_directory parent;
+        (match Unix.mkdir current 0o755 with
+         | () -> ()
+         | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+        (match Unix.lstat current with
+         | stat when stat.Unix.st_kind = Unix.S_DIR -> ()
+         | _ ->
+           raise
+             (Unix.Unix_error
+                (Unix.ENOTDIR, "mkdir_p_durable_unix", current)));
+        (match Atomic_write.fsync_directory parent with
+         | Ok () -> ()
+         | Error detail -> raise (Sys_error detail))
   in
-  let created = missing_directories path [] in
-  mkdir_p_unix path;
-  List.iter
-    (fun created_dir ->
-       match Atomic_write.fsync_directory (Filename.dirname created_dir) with
-       | Ok () -> ()
-       | Error detail -> raise (Sys_error detail))
-    created
+  ensure_directory path
 ;;
 
 (** Load entire file contents as string.
@@ -302,12 +330,17 @@ let save_file (path : string) (content : string) : unit =
 ;;
 
 let save_file_atomic path content =
-  Atomic_write.save_file_atomic ~save_file path content
+  test_exec_home_guard ~op:"save_file_atomic" path;
+  match Atomic.get global_fs with
+  | Some _ ->
+    (try Eio_unix.run_in_systhread (fun () -> Atomic_write.save_file_atomic path content) with
+     | Stdlib.Effect.Unhandled _ -> Atomic_write.save_file_atomic path content)
+  | None -> Atomic_write.save_file_atomic path content
 ;;
 
 let save_file_atomic_unix path content =
   test_exec_home_guard ~op:"save_file_atomic_unix" path;
-  Atomic_write.save_file_atomic ~save_file:save_file_unix path content
+  Atomic_write.save_file_atomic path content
 ;;
 
 let fsync_directory path = Atomic_write.fsync_directory path

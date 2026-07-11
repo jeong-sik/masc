@@ -603,7 +603,7 @@ goal = "testing file load"
   output_string oc content;
   close_out oc;
   (match KTP.load_keeper_toml tmp with
-   | Error e -> fail e
+   | Error e -> fail (KTP.keeper_toml_load_error_to_string e)
    | Ok (name, defaults) ->
      check string "name from toml" "test-keeper" name;
      check (option string) "goal" (Some "testing file load") defaults.goal;
@@ -621,7 +621,7 @@ goal = "analyze stuff"
   output_string oc content;
   close_out oc;
   (match KTP.load_keeper_toml path with
-   | Error e -> fail e
+   | Error e -> fail (KTP.keeper_toml_load_error_to_string e)
    | Ok (name, _) ->
      check string "name from filename" "my-analyzer" name);
   Sys.remove path
@@ -673,7 +673,7 @@ persona_name = "sangsu"
 
 |};
       match KTP.load_keeper_toml child_path with
-      | Error e -> fail e
+      | Error e -> fail (KTP.keeper_toml_load_error_to_string e)
       | Ok (name, defaults) ->
           check string "name from filename" "sangsu" name;
           check (option string) "base sandbox" (Some "docker")
@@ -716,7 +716,7 @@ goal = "beta goal"
   write_file "not-toml.json" {|{"ignored": true}|};
   let result = KTP.discover_keepers_toml tmp_dir in
   check int "two keepers" 2 (List.length result);
-  let names = List.map fst result in
+  let names = List.map KTP.keeper_toml_discovery_name result in
   check bool "has alpha" true (List.mem "alpha" names);
   check bool "has beta" true (List.mem "beta" names);
   (* Cleanup *)
@@ -729,7 +729,7 @@ let test_discover_nonexistent_dir () =
   let result = KTP.discover_keepers_toml "/nonexistent/path/keepers" in
   check int "nonexistent dir" 0 (List.length result)
 
-let test_discover_skips_bad_files () =
+let test_discover_retains_invalid_files () =
   let tmp_dir = Filename.temp_file "keeper_discover" "" in
   Sys.remove tmp_dir;
   Unix.mkdir tmp_dir 0o755;
@@ -745,8 +745,15 @@ goal = "works"
 |};
   write_file "bad.toml" "[broken";
   let result = KTP.discover_keepers_toml tmp_dir in
-  check int "one good keeper" 1 (List.length result);
-  check string "good name" "good" (fst (List.hd result));
+  check int "valid and invalid keepers remain visible" 2 (List.length result);
+  let names = List.map KTP.keeper_toml_discovery_name result in
+  check (list string) "configured names" [ "bad"; "good" ] names;
+  (match List.hd result with
+   | KTP.Invalid { keeper_name; error } ->
+     check string "invalid keeper name comes from file" "bad" keeper_name;
+     check bool "invalid file keeps parse kind" true
+       (error.kind = KTP.Parse_error)
+   | KTP.Loaded _ -> fail "expected bad.toml to remain as Invalid");
   Array.iter
     (fun f -> Sys.remove (Filename.concat tmp_dir f))
     (Sys.readdir tmp_dir);
@@ -780,7 +787,12 @@ let test_bundled_keeper_profiles_resolve_prompt_defaults () =
            let path = Filename.concat keepers_dir file in
            let name = Filename.chop_extension file in
            match KTP.load_keeper_profile_defaults_result name with
-           | Error e -> fail (Printf.sprintf "%s failed to resolve: %s" path e)
+           | Error e ->
+             fail
+               (Printf.sprintf
+                  "%s failed to resolve: %s"
+                  path
+                  (KTP.keeper_toml_load_error_to_string e))
            | Ok _defaults -> ()))
 
 let test_bundled_issue_king_uses_local_sandbox () =
@@ -794,7 +806,11 @@ let test_bundled_issue_king_uses_local_sandbox () =
             (Filename.concat (Filename.concat repo "config") "personas");
           Config_dir_resolver.reset ();
           match KTP.load_keeper_profile_defaults_result "issue_king" with
-          | Error e -> fail (Printf.sprintf "issue_king failed to resolve: %s" e)
+          | Error e ->
+            fail
+              (Printf.sprintf
+                 "issue_king failed to resolve: %s"
+                 (KTP.keeper_toml_load_error_to_string e))
           | Ok defaults ->
             check (option string) "issue_king sandbox" (Some "local")
               (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
@@ -827,6 +843,177 @@ let write_file path content =
   let oc = open_out path in
   output_string oc content;
   close_out oc
+
+let with_profile_base f =
+  with_env_restore [ "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ] @@ fun () ->
+  Unix.putenv "MASC_CONFIG_DIR" "";
+  Unix.putenv "MASC_PERSONAS_DIR" "";
+  Config_dir_resolver.reset ();
+  with_temp_dir "keeper-profile-base" @@ fun base_path ->
+  let config_dir = Filename.concat (Filename.concat base_path ".masc") "config" in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  mkdir_p keepers_dir;
+  f ~base_path ~config_dir ~keepers_dir
+
+let expect_profile_load_error ~base_path ~keeper_name ~kind ~failing_path =
+  match
+    KTP.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      keeper_name
+  with
+  | Ok _ -> failf "expected %s profile to fail closed" keeper_name
+  | Error error ->
+    check bool "typed load error kind" true (error.kind = kind);
+    check string "failing path" failing_path error.failing_path;
+    error
+
+let test_invalid_child_profile_fails_closed_before_dispatch () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let keeper_path = Filename.concat keepers_dir "broken.toml" in
+  write_file keeper_path
+    "[keeper]\npersona_name = \"analyst\"\n[keeper.oas_env]\n\
+     MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = \"not-an-int\"\n";
+  let error =
+    expect_profile_load_error
+      ~base_path
+      ~keeper_name:"broken"
+      ~kind:KTP.Profile_error
+      ~failing_path:keeper_path
+  in
+  check string "keeper path" keeper_path error.keeper_path;
+  match
+    Masc.Keeper_unified_turn_pre_dispatch.load_profile_defaults
+      ~base_path
+      ~keeper_name:"broken"
+  with
+  | Ok _ -> fail "invalid profile reached runtime execution construction"
+  | Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+    check string "typed SDK config field" "keeper.profile" field;
+    check bool "SDK error retains failing path" true
+      (contains_substring detail keeper_path)
+  | Error err ->
+    failf "expected typed InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
+
+let test_default_source_snapshot_uses_explicit_base_path () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let keeper_path = Filename.concat keepers_dir "snapshot-broken.toml" in
+  write_file keeper_path "[broken";
+  let snapshot =
+    KTP.keeper_default_source_snapshot ~base_path "snapshot-broken"
+  in
+  check (option string) "invalid source is not projected" None snapshot.source_kind;
+  match snapshot.config_error with
+  | None -> fail "expected explicit-base snapshot to retain config error"
+  | Some error ->
+    check bool "snapshot parse kind" true (error.kind = KTP.Parse_error);
+    check string "snapshot keeper path" keeper_path error.keeper_path;
+    check string "snapshot failing path" keeper_path error.failing_path
+
+let test_missing_base_profile_fails_closed () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let keeper_path = Filename.concat keepers_dir "missing-base.toml" in
+  let base_path_expected = Filename.concat keepers_dir "base.toml" in
+  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"test\"\n";
+  let error =
+    expect_profile_load_error
+      ~base_path
+      ~keeper_name:"missing-base"
+      ~kind:KTP.Read_error
+      ~failing_path:base_path_expected
+  in
+  check string "child keeper path retained" keeper_path error.keeper_path
+
+let test_parse_invalid_base_profile_fails_closed () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let keeper_path = Filename.concat keepers_dir "parse-base.toml" in
+  let invalid_base_path = Filename.concat keepers_dir "base.toml" in
+  write_file invalid_base_path "[broken";
+  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"test\"\n";
+  ignore
+    (expect_profile_load_error
+       ~base_path
+       ~keeper_name:"parse-base"
+       ~kind:KTP.Parse_error
+       ~failing_path:invalid_base_path)
+
+let test_profile_invalid_base_profile_fails_closed () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let keeper_path = Filename.concat keepers_dir "profile-base.toml" in
+  let invalid_base_path = Filename.concat keepers_dir "base.toml" in
+  write_file
+    invalid_base_path
+    "[keeper]\ngoal = \"base\"\n[keeper.oas_env]\n\
+     MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = \"8192\"\n";
+  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"child\"\n";
+  ignore
+    (expect_profile_load_error
+       ~base_path
+       ~keeper_name:"profile-base"
+       ~kind:KTP.Profile_error
+       ~failing_path:invalid_base_path)
+
+let test_unreadable_base_profile_fails_closed () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let keeper_path = Filename.concat keepers_dir "unreadable-base.toml" in
+  let directory_base_path = Filename.concat keepers_dir "base.toml" in
+  Unix.mkdir directory_base_path 0o755;
+  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"test\"\n";
+  ignore
+    (expect_profile_load_error
+       ~base_path
+       ~keeper_name:"unreadable-base"
+       ~kind:KTP.Read_error
+       ~failing_path:directory_base_path)
+
+let test_absent_profile_is_legitimate_empty_defaults () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir:_ ->
+  match
+    KTP.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      "absent"
+  with
+  | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
+  | Ok defaults ->
+    check (option string) "no manifest" None defaults.manifest_path;
+    check (option string) "no goal" None defaults.goal
+
+let test_persona_without_keeper_toml_remains_valid () =
+  with_profile_base @@ fun ~base_path ~config_dir ~keepers_dir:_ ->
+  let persona_dir = Filename.concat (Filename.concat config_dir "personas") "analyst" in
+  mkdir_p persona_dir;
+  let profile_path = Filename.concat persona_dir "profile.json" in
+  write_file profile_path
+    {|{"keeper":{"goal":"observe","instructions":"reason carefully"}}|};
+  match
+    KTP.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      "analyst"
+  with
+  | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
+  | Ok defaults ->
+    check (option string) "persona goal" (Some "observe") defaults.goal;
+    check (option string) "persona manifest" (Some profile_path)
+      defaults.manifest_path
+
+let test_keeper_config_directory_probe_is_typed () =
+  let path = Filename.temp_file "keeper-config-not-dir" ".toml" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      match KTP.keeper_toml_config_errors_in_dir_result path with
+      | Ok _ -> fail "expected non-directory config path to fail the probe"
+      | Error error ->
+        check bool "closed probe kind" true
+          (error.kind = KTP.Not_a_directory);
+        check (option string) "probe path" (Some path) error.directory_path;
+        let json = KTP.keeper_config_probe_error_to_json error in
+        let open Yojson.Safe.Util in
+        check string "projected probe kind" "not_a_directory"
+          (json |> member "kind" |> to_string);
+        check bool "probe is blocking" true
+          (json |> member "blocking" |> to_bool))
 
 let restore_env name = function
   | Some value -> Unix.putenv name value
@@ -1475,7 +1662,9 @@ typo_field = 42
   in
   let before_unknown_metric = unknown_metric () in
   match KTP.load_keeper_toml tmp with
-  | Error e -> Sys.remove tmp; fail e
+  | Error e ->
+    Sys.remove tmp;
+    fail (KTP.keeper_toml_load_error_to_string e)
   | Ok (_, defaults) ->
     Sys.remove tmp;
     check (slist string String.compare)
@@ -1528,6 +1717,8 @@ let test_health_json_surfaces_keeper_toml_unknown_keys () =
   with_config_dir @@ fun config_dir ->
   let keepers_dir = Filename.concat config_dir "keepers" in
   mkdir_p keepers_dir;
+  write_file (Filename.concat keepers_dir "base.toml")
+    "[keeper]\nsandbox_profile = \"local\"\n";
   write_file (Filename.concat keepers_dir "alpha.toml")
     {|
 [keeper]
@@ -1586,6 +1777,38 @@ legacy_scope = "removed"
           (List.length rows)));
   check (float 0.0001) "health scan does not increment warning metric"
     before_unknown_metric (unknown_metric ())
+
+let test_health_json_surfaces_typed_keeper_config_error () =
+  with_config_dir @@ fun config_dir ->
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  mkdir_p keepers_dir;
+  let keeper_path = Filename.concat keepers_dir "broken.toml" in
+  let base_path = Filename.concat keepers_dir "missing-base.toml" in
+  write_file keeper_path
+    "[keeper]\nbase = \"missing-base.toml\"\ngoal = \"test\"\n";
+  let request = Httpun.Request.create `GET "/health" in
+  let json = Runtime.make_health_json request in
+  let open Yojson.Safe.Util in
+  check int "config error count" 1
+    (json |> member "keeper_config_error_count" |> to_int);
+  check string "schema terminal reason" "config_invalid"
+    (json |> member "keeper_config_schema_terminal_reason" |> to_string);
+  check bool "config schema blocks dispatch" true
+    (json |> member "keeper_config_schema_blocking" |> to_bool);
+  let rows = json |> member "keeper_config_errors" |> to_list in
+  match rows with
+  | [ row ] ->
+    check string "keeper" "broken" (row |> member "keeper" |> to_string);
+    check string "typed kind" "read_error" (row |> member "kind" |> to_string);
+    check string "child path" keeper_path
+      (row |> member "keeper_path" |> to_string);
+    check string "failing base path" base_path
+      (row |> member "failing_path" |> to_string);
+    check string "terminal reason" "config_invalid"
+      (row |> member "terminal_reason" |> to_string);
+    check string "repair action" "fix_keeper_toml_config"
+      (row |> member "next_action" |> to_string)
+  | _ -> failf "expected one typed config error row, got %d" (List.length rows)
 
 let test_health_json_build_exposes_runtime_binary_identity () =
   with_config_dir @@ fun _config_dir ->
@@ -1758,6 +1981,8 @@ let () =
             test_keeper_toml_unknown_keys_in_dir_reports_files;
           test_case "health JSON surfaces unknown keys" `Quick
             test_health_json_surfaces_keeper_toml_unknown_keys;
+          test_case "health JSON surfaces typed config errors" `Quick
+            test_health_json_surfaces_typed_keeper_config_error;
           test_case "health JSON build exposes runtime binary identity" `Quick
             test_health_json_build_exposes_runtime_binary_identity;
           test_case "unknown TOML warning key normalizes order" `Quick
@@ -1791,13 +2016,32 @@ let () =
           test_case "invalid name" `Quick test_load_invalid_name;
           test_case "inherits base defaults" `Quick
             test_load_keeper_toml_inherits_base_defaults;
+          test_case "invalid child blocks before dispatch" `Quick
+            test_invalid_child_profile_fails_closed_before_dispatch;
+          test_case "default source snapshot uses explicit base path" `Quick
+            test_default_source_snapshot_uses_explicit_base_path;
+          test_case "missing base fails closed" `Quick
+            test_missing_base_profile_fails_closed;
+          test_case "parse-invalid base fails closed" `Quick
+            test_parse_invalid_base_profile_fails_closed;
+          test_case "profile-invalid base fails closed" `Quick
+            test_profile_invalid_base_profile_fails_closed;
+          test_case "unreadable base fails closed" `Quick
+            test_unreadable_base_profile_fails_closed;
+          test_case "absent profile is valid empty defaults" `Quick
+            test_absent_profile_is_legitimate_empty_defaults;
+          test_case "persona without keeper TOML remains valid" `Quick
+            test_persona_without_keeper_toml_remains_valid;
+          test_case "config directory probe is typed" `Quick
+            test_keeper_config_directory_probe_is_typed;
         ] );
       ( "discovery",
         [
           test_case "empty dir" `Quick test_discover_empty_dir;
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
-          test_case "skips bad files" `Quick test_discover_skips_bad_files;
+          test_case "retains invalid files" `Quick
+            test_discover_retains_invalid_files;
           test_case "materializable helper uses base path" `Quick
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick

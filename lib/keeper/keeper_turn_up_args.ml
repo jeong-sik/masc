@@ -222,7 +222,14 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
     let instructions_arg = get_string_opt args "instructions" in
-    let profile_defaults = load_keeper_profile_defaults name in
+    match
+      load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path
+        name
+    with
+    | Error error ->
+      Error (tool_result_error (keeper_toml_load_error_to_string error))
+    | Ok profile_defaults ->
     let sandbox_profile_error =
       match profile_defaults.sandbox_profile with
       | None ->

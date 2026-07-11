@@ -110,6 +110,7 @@ function isKeeperPhaseToken(value: string): value is KeeperPhaseToken {
  *  `lifecycle_phase` enum, which leaked "Running"/"Compacting"/"HandingOff"
  *  into the UI. */
 export function keeperPhaseLabel(keeper: Keeper): string {
+  if (keeper.config_error?.blocking === true) return '설정 차단'
   const token = phaseTokenFromKeeper(keeper)
   return PHASE_LABEL_KO[token] ?? token
 }
@@ -135,7 +136,8 @@ export function keeperStatusTone(keeper: Keeper): FleetTone {
  *  rail cannot silently diverge. */
 export function keeperFleetTone(keeper: Keeper): FleetTone {
   if (
-    keeper.needs_attention === true
+    keeper.config_error?.blocking === true
+    || keeper.needs_attention === true
     || (keeper.blocked_task_count ?? 0) > 0
     || keeper.current_gate?.kind === 'approval_required'
   ) return 'bad'

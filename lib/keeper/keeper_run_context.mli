@@ -36,8 +36,9 @@ val build_base_system_prompt :
 (** Build the keeper base system prompt from the same persisted meta/profile
     inputs used by {!prepare_run_context}. *)
 
-val resolve_max_tokens_for_runtime :
+val resolve_max_tokens_for_runtime_with_profile :
      keeper_name:string
+  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> runtime_id:string
   -> ?max_tokens:int
   -> unit
@@ -56,6 +57,7 @@ val resolve_max_tokens_for_runtime :
 val prepare_run_context :
      config:Workspace.config
   -> meta:keeper_meta
+  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> base_dir:string
   -> max_context:int
   -> runtime_id:string
@@ -66,4 +68,5 @@ val prepare_run_context :
   -> unit
   -> run_context
 (** Resolve [temperature] as the caller fallback; a temperature declared by the
-    selected runtime model always wins. *)
+    selected runtime model always wins. [profile_defaults] is the immutable
+    pre-dispatch snapshot and is never reloaded inside this function. *)

@@ -150,6 +150,7 @@ val per_provider_timeout_for_turn
 val run_turn
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> base_dir:string
   -> max_context:int

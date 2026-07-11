@@ -511,30 +511,15 @@ let full_health_operator_summary ~keeper_fleet_safety
 let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
-  let keeper_config_parse_errors =
-    try Keeper_types_profile.keeper_toml_config_errors () with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-        [
-          {
-            Keeper_types_profile.keeper_name = "unknown";
-            path = "";
-            error = Printexc.to_string exn;
-            reason = "health_probe_failed";
-          };
-        ]
+  let keeper_config_errors, keeper_config_probe_error =
+    match Keeper_types_profile.keeper_toml_config_errors_result () with
+    | Ok errors -> errors, None
+    | Error error -> [], Some error
   in
   let keeper_config_unknown_keys =
-    try Keeper_types_profile.keeper_toml_unknown_keys () with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-        [
-          {
-            Keeper_types_profile.keeper_name = "unknown";
-            path = "";
-            unknown_keys = [ "health_probe_failed: " ^ Printexc.to_string exn ];
-          };
-        ]
+    match keeper_config_probe_error with
+    | Some _ -> []
+    | None -> Keeper_types_profile.keeper_toml_unknown_keys ()
   in
   let keeper_config_unknown_key_count =
     List.fold_left
@@ -543,12 +528,15 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
       0
       keeper_config_unknown_keys
   in
-  let keeper_config_parse_error_count = List.length keeper_config_parse_errors in
+  let keeper_config_error_count = List.length keeper_config_errors in
   let keeper_config_schema_blocking =
-    keeper_config_parse_error_count > 0 || keeper_config_unknown_key_count > 0
+    keeper_config_error_count > 0
+    || Option.is_some keeper_config_probe_error
+    || keeper_config_unknown_key_count > 0
   in
   let keeper_config_schema_terminal_reason =
-    if keeper_config_parse_error_count > 0 then "config_parse_failed"
+    if keeper_config_error_count > 0 then "config_invalid"
+    else if Option.is_some keeper_config_probe_error then "config_probe_failed"
     else if keeper_config_unknown_key_count > 0 then "config_unknown_keys"
     else "none"
   in
@@ -718,12 +706,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
        but ops still need a quick count without external telemetry. List names
        so an operator can correlate with the structured blocker cause. *)
     (key_paused_keepers, paused_keepers_json);
-    ("keeper_config_parse_error_count",
-     `Int keeper_config_parse_error_count);
-    ( "keeper_config_parse_errors",
+    ("keeper_config_error_count",
+     `Int keeper_config_error_count);
+    ( "keeper_config_errors",
       `List
         (List.map Keeper_types_profile.keeper_toml_config_error_to_json
-           keeper_config_parse_errors) );
+           keeper_config_errors) );
+    ( "keeper_config_probe_error",
+      Option.map Keeper_types_profile.keeper_config_probe_error_to_json
+        keeper_config_probe_error
+      |> Option.value ~default:`Null );
     ( "keeper_config_unknown_key_count",
       `Int keeper_config_unknown_key_count );
     ( "keeper_config_unknown_keys",
@@ -815,8 +807,9 @@ let full_health_cached_field_names =
     "keeper_board_event_collection";
     "keeper_event_queue";
     "paused_keepers";
-    "keeper_config_parse_error_count";
-    "keeper_config_parse_errors";
+    "keeper_config_error_count";
+    "keeper_config_errors";
+    "keeper_config_probe_error";
     "keeper_config_unknown_key_count";
     "keeper_config_unknown_keys";
     "keeper_config_schema_status";
@@ -905,8 +898,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("names", `List []);
           ("component_timed_out", `Bool component_timed_out);
         ] );
-    ("keeper_config_parse_error_count", `Int 0);
-    ("keeper_config_parse_errors", `List []);
+    ("keeper_config_error_count", `Int 0);
+    ("keeper_config_errors", `List []);
+    ("keeper_config_probe_error", `Null);
     ("keeper_config_unknown_key_count", `Int 0);
     ("keeper_config_unknown_keys", `List []);
     ("keeper_config_schema_status", `String status);

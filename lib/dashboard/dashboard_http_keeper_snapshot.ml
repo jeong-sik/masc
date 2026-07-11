@@ -49,7 +49,20 @@ let keeper_config_json (config : Workspace.config) (name : string)
   | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
-      let defaults = Keeper_types_profile.load_keeper_profile_defaults m.name in
+      let defaults, profile_config_error =
+        match
+          Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+            ~base_path:config.base_path
+            m.name
+        with
+        | Ok defaults -> defaults, None
+        | Error error ->
+          ( Keeper_types_profile.empty_keeper_profile_defaults
+          , Some
+              (Keeper_types_profile.keeper_toml_config_error_of_load_error
+                 ~keeper_name:m.name
+                 error) )
+      in
       let persona_extended =
         Keeper_types_profile.resolved_persona_name ~keeper_name:m.name defaults
         |> Keeper_types_profile.load_persona_extended
@@ -186,10 +199,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
           `String (runtime)
         | Error (`Unresolved _) -> `Null
       in
-      let profile_defaults =
-        Keeper_types_profile.load_keeper_profile_defaults name
-      in
-      let per_provider_timeout = profile_defaults.per_provider_timeout in
+      let per_provider_timeout = defaults.per_provider_timeout in
       let execution =
         `Assoc [
           ("selected_runtime_id", `String runtime_id);
@@ -228,10 +238,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
         ]
       in
       let drift =
-        let toml_defaults =
-          Keeper_types_profile.load_keeper_profile_defaults name
-        in
-        drift_surface_json ~unknown_toml_keys:toml_defaults.unknown_toml_keys
+        drift_surface_json ~unknown_toml_keys:defaults.unknown_toml_keys
       in
       let handoff =
         `Assoc [
@@ -335,6 +342,10 @@ let keeper_config_json (config : Workspace.config) (name : string)
 	         ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
 	         ("pipeline_stage_detail", `String pipeline_stage_detail);
 	         ("state_diagram", `String state_diagram);
+         ( "config_error",
+           Option.map Keeper_types_profile.keeper_toml_config_error_to_json
+             profile_config_error
+           |> Option.value ~default:`Null );
          ("decision_pipeline_diagram", `String decision_pipeline_diagram);
          ("prompt", prompt);
          ("execution", execution);

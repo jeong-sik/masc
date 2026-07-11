@@ -21,15 +21,7 @@ let empty_paused_keeper_scan =
 
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
-let effective_autoboot_enabled config name (meta : Keeper_meta_contract.keeper_meta) =
-  match
-    (Keeper_types_profile.load_keeper_profile_defaults_for_base_path
-       ~base_path:config.Workspace.base_path
-       name)
-      .autoboot_enabled
-  with
-  | Some value -> value
-  | None -> meta.autoboot_enabled
+let effective_autoboot_enabled = Keeper_meta_store.effective_autoboot_enabled
 
 let blocker_class_string (info : Keeper_meta_contract.blocker_info option) =
   Option.map (fun (info : Keeper_meta_contract.blocker_info) ->
@@ -728,8 +720,7 @@ let blocked_keeper_action = function
   | Not_bootable -> Add_keeper_toml_or_disable_stale_autoboot_meta
   | Boot_failure Keeper_runtime.Missing_meta -> Run_keeper_up_or_recreate_meta
   | Boot_failure Keeper_runtime.Meta_read_error -> Repair_keeper_meta_file
-  | Boot_failure Keeper_runtime.Config_parse_failed
-  | Boot_failure Keeper_runtime.Invalid_profile ->
+  | Boot_failure Keeper_runtime.Config_invalid ->
       Repair_keeper_toml_config
   | Boot_failure Keeper_runtime.Sandbox_profile_required ->
       Add_sandbox_profile_to_keeper_toml
@@ -988,6 +979,7 @@ let blocked_keeper_detail_json
         [
           ("last_bootstrap_reason", `Null);
           ("last_bootstrap_error", `Null);
+          ("last_bootstrap_config_error", `Null);
           ("last_bootstrap_recorded_at", `Null);
         ]
     | Some failure ->
@@ -997,6 +989,15 @@ let blocked_keeper_detail_json
               (Keeper_runtime.boot_meta_failure_cause_label
                  failure.Keeper_runtime.cause) );
           ("last_bootstrap_error", `String failure.Keeper_runtime.error);
+          ( "last_bootstrap_config_error"
+          , Option.map
+              (fun error ->
+                 Keeper_types_profile.keeper_toml_config_error_of_load_error
+                   ~keeper_name:name
+                   error
+                 |> Keeper_types_profile.keeper_toml_config_error_to_json)
+              failure.Keeper_runtime.config_error
+            |> Option.value ~default:`Null );
           ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
         ]
   in

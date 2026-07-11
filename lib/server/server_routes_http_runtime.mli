@@ -133,7 +133,7 @@ val make_health_json :
     [operator_action_reasons] /
     [keeper_fibers] / [keeper_fd_pressure] / [fd_accountant] /
     [keeper_fleet_safety] / [keeper_reaction_ledger] / [paused_keepers] /
-    [keeper_config_parse_error_count] / [keeper_config_parse_errors] /
+    [keeper_config_error_count] / [keeper_config_errors] /
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
     [keeper_config_schema_status] / [keeper_config_schema_blocking] /
     [keeper_config_schema_terminal_reason] /

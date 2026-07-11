@@ -15,6 +15,23 @@
     override, [runtime_execution.max_tokens] is [None] and no [max_tokens]
     field goes on the request. *)
 
+val profile_load_error :
+     keeper_name:string
+  -> Keeper_types_profile.keeper_toml_load_error
+  -> Agent_sdk.Error.sdk_error
+(** Project a typed keeper-profile load failure into the public SDK error
+    channel without recovering meaning from the rendered detail string. *)
+
+val load_profile_defaults :
+     base_path:string
+  -> keeper_name:string
+  -> ( Keeper_types_profile.keeper_profile_defaults
+     , Agent_sdk.Error.sdk_error )
+     result
+(** Load one immutable profile snapshot at the pre-dispatch boundary. Invalid
+    child or inherited base TOML returns [Config InvalidConfig]; persona-only
+    and genuinely absent profiles remain valid empty/default snapshots. *)
+
 val build_runtime_execution
   :  meta:Keeper_meta_contract.keeper_meta
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults

@@ -755,6 +755,47 @@ let test_declarative_boot_records_goal_required_failure () =
       check bool "recorded failure keeps raw error" true
         (String_util.contains_substring failure.error "goal is required")
 
+let test_declarative_boot_records_typed_invalid_config_failure () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "invalid-config" in
+  let keeper_path =
+    Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml")
+  in
+  write_file keeper_path "[broken";
+  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  let ctx = keeper_runtime_context env sw config in
+  check bool "invalid configured keeper remains discoverable" true
+    (List.mem name (Keeper_meta_store.configured_keeper_names config));
+  check bool "invalid configured keeper is not executable" false
+    (List.mem name (KR.bootable_keeper_names config));
+  (match KR.load_or_materialize_boot_meta ctx name with
+   | Ok _ -> fail "expected invalid keeper config to block materialization"
+   | Error err ->
+     check bool "operator-facing error retains path" true
+       (String_util.contains_substring err keeper_path));
+  match KR.boot_meta_failure_for ~base_path:config.base_path ~name with
+  | None -> fail "expected invalid config boot failure to be recorded"
+  | Some failure ->
+    check string "generic typed config cause" "config_invalid"
+      (KR.boot_meta_failure_cause_label failure.cause);
+    (match failure.config_error with
+     | None -> fail "expected typed config error on boot failure"
+     | Some error ->
+       check bool "parse kind retained" true
+         (error.kind = Keeper_types_profile.Parse_error);
+       check string "keeper path retained" keeper_path error.keeper_path;
+       check string "failing path retained" keeper_path error.failing_path)
+
 let test_reconcile_materializes_configured_keeper_without_meta () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->
@@ -3731,6 +3772,8 @@ let () =
         test_declarative_boot_materializes_goal_from_instructions;
       test_case "declarative boot records goal-required failure" `Quick
         test_declarative_boot_records_goal_required_failure;
+      test_case "declarative boot records typed invalid-config failure" `Quick
+        test_declarative_boot_records_typed_invalid_config_failure;
       test_case "reconcile materializes configured keeper without meta" `Quick
         test_reconcile_materializes_configured_keeper_without_meta;
       test_case "reconcile does not double-start materialized keeper" `Quick

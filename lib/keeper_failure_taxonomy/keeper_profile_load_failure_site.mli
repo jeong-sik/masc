@@ -8,9 +8,8 @@
 type t =
   | Personas_root (** Could not enumerate the personas root directory. *)
   | Personas_dirs_resolve (** Failed to resolve one or more configured personas dirs. *)
-  | Toml_skip (** TOML parse skipped because the file was unreadable / invalid. *)
-  | Toml_fallback (** TOML load fell back to defaults after a soft error. *)
-  | Materializable_check (** Runtime materialization probe failed open visibly. *)
+  | Toml_discovery_error (** Discovery retained an unreadable / invalid TOML entry. *)
+  | Materializable_check (** Runtime materialization probe failed and blocked admission. *)
   | Load_persona_extended (** Extended persona body failed to load. *)
   | Agent_md_read (** AGENT.md sidecar read failed. *)
   | List_persona_summaries (** Building the persona-summary listing raised an error. *)

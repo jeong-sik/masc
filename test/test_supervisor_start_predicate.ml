@@ -163,7 +163,7 @@ let test_configured_keeper_names_uses_workspace_base_path () =
         [ "bravo"; "shared" ]
         (Masc.Keeper_types_profile.discover_keepers_toml
            (Config_dir_resolver.keepers_dir ())
-         |> List.map fst);
+         |> List.map Masc.Keeper_types_profile.keeper_toml_discovery_name);
       check (list string) "configured keepers use Workspace.config base path"
         [ "alpha"; "shared" ]
         (Keeper_meta_store.configured_keeper_names config_a);

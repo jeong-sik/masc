@@ -113,26 +113,70 @@ val merge_keeper_profile_defaults :
   overlay:keeper_profile_defaults ->
   keeper_profile_defaults
 
-val load_keeper_toml : string -> (string * keeper_profile_defaults, string) result
-val log_toml_skip_once : file:string -> error:string -> bool
-val reset_logged_toml_skip_for_test : unit -> unit
-val discover_keepers_toml : string -> (string * keeper_profile_defaults) list
+type keeper_toml_error_kind =
+  Keeper_types_profile_toml.keeper_toml_error_kind =
+  | Read_error
+  | Parse_error
+  | Profile_error
+  | Invalid_name
+
+type keeper_toml_load_error =
+  Keeper_types_profile_toml.keeper_toml_load_error =
+  { keeper_path : string
+  ; failing_path : string
+  ; kind : keeper_toml_error_kind
+  ; detail : string
+  }
+
+val keeper_toml_error_kind_to_string : keeper_toml_error_kind -> string
+val keeper_toml_load_error_to_string : keeper_toml_load_error -> string
+val keeper_toml_load_error_paths : keeper_toml_load_error -> string list
+val load_keeper_toml :
+  string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
+
+type keeper_toml_discovery =
+  Keeper_types_profile_toml.keeper_toml_discovery =
+  | Loaded of
+      { keeper_name : string
+      ; defaults : keeper_profile_defaults
+      }
+  | Invalid of
+      { keeper_name : string
+      ; error : keeper_toml_load_error
+      }
+
+val keeper_toml_discovery_name : keeper_toml_discovery -> string
+val discover_keepers_toml : string -> keeper_toml_discovery list
 val keeper_toml_path_opt : string -> string option
 val keeper_toml_path_opt_for_base_path :
   base_path:string -> string -> string option
 val load_keeper_profile_defaults_from_persona : string -> keeper_profile_defaults
 val load_keeper_profile_defaults_result_for_base_path :
-  base_path:string -> string -> (keeper_profile_defaults, string) result
+  base_path:string ->
+  string ->
+  (keeper_profile_defaults, keeper_toml_load_error) result
 val resolved_persona_name : keeper_name:string -> keeper_profile_defaults -> string
-val load_keeper_profile_defaults_result : string -> (keeper_profile_defaults, string) result
+val load_keeper_profile_defaults_result :
+  string -> (keeper_profile_defaults, keeper_toml_load_error) result
 val invalidate_keeper_profile_defaults_cache : string -> unit
-val classify_toml_failure_reason : string -> string
 
 type keeper_toml_config_error =
   { keeper_name : string
-  ; path : string
-  ; error : string
-  ; reason : string
+  ; keeper_path : string
+  ; failing_path : string
+  ; kind : keeper_toml_error_kind
+  ; detail : string
+  }
+
+type keeper_config_probe_error_kind =
+  | Directory_resolution_error
+  | Not_a_directory
+  | Directory_read_error
+
+type keeper_config_probe_error =
+  { directory_path : string option
+  ; kind : keeper_config_probe_error_kind
+  ; detail : string
   }
 
 type keeper_toml_unknown_keys =
@@ -142,26 +186,28 @@ type keeper_toml_unknown_keys =
   }
 
 val keeper_toml_config_error_to_json : keeper_toml_config_error -> Yojson.Safe.t
+val keeper_config_probe_error_to_json : keeper_config_probe_error -> Yojson.Safe.t
+val keeper_toml_config_error_of_load_error :
+  keeper_name:string -> keeper_toml_load_error -> keeper_toml_config_error
 val keeper_toml_unknown_keys_to_json : keeper_toml_unknown_keys -> Yojson.Safe.t
 val keeper_name_of_toml_path : string -> string
 val keeper_toml_unknown_keys_of_path : string -> keeper_toml_unknown_keys option
 val keeper_toml_config_error_of_path : string -> keeper_toml_config_error option
-val keeper_toml_config_errors_in_dir : string -> keeper_toml_config_error list
+val keeper_toml_config_errors_in_dir_result :
+  string -> (keeper_toml_config_error list, keeper_config_probe_error) result
 val keeper_toml_unknown_keys_in_dir : string -> keeper_toml_unknown_keys list
-val keeper_toml_config_errors : unit -> keeper_toml_config_error list
+val keeper_toml_config_errors_result :
+  unit -> (keeper_toml_config_error list, keeper_config_probe_error) result
 val keeper_toml_unknown_keys : unit -> keeper_toml_unknown_keys list
-val keeper_toml_config_errors_json : unit -> Yojson.Safe.t
-val keeper_toml_config_error_for_name : string -> keeper_toml_config_error option
-val load_keeper_profile_defaults_for_base_path :
-  base_path:string -> string -> keeper_profile_defaults
-val load_keeper_profile_defaults : string -> keeper_profile_defaults
 
 type keeper_default_source_snapshot =
   { source_kind : string option
   ; defaults : keeper_profile_defaults
+  ; config_error : keeper_toml_load_error option
   }
 
-val keeper_default_source_snapshot : string -> keeper_default_source_snapshot
+val keeper_default_source_snapshot :
+  base_path:string -> string -> keeper_default_source_snapshot
 val persona_description_max_chars : int
 val load_persona_extended : ?max_chars:int -> string -> string option
 val load_persona_summary : string -> persona_summary option

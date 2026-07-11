@@ -89,16 +89,10 @@ let resolve_max_tokens_for_runtime_with_profile ~keeper_name ~profile_defaults
   | Some _ as override -> override
   | None -> max_tokens_override ~keeper_name profile_defaults
 
-let resolve_max_tokens_for_runtime ~keeper_name ~runtime_id ?max_tokens () =
-  let profile_defaults =
-    Keeper_types_profile.load_keeper_profile_defaults keeper_name
-  in
-  resolve_max_tokens_for_runtime_with_profile
-    ~keeper_name ~profile_defaults ?max_tokens ~runtime_id ()
-
 let prepare_run_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(base_dir : string)
       ~(max_context : int)
       ~(runtime_id : string)
@@ -119,7 +113,6 @@ let prepare_run_context
     else
       meta
   in
-  let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   (* 0. Resolve inference parameters via Runtime_inference *)
   let fallback_temperature () =
     match temperature with

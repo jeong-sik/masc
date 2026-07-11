@@ -1534,7 +1534,7 @@ let test_seed_of_thinking_support_gate_contract () =
    request value the model catalog ceiling was never meant to supply. MASC
    keeps that ceiling observable but does not reinterpret it as a request;
    OAS owns envelope-specific validation and clamp policy.
-   [Keeper_run_context.resolve_max_tokens_for_runtime] replaces it
+   [Keeper_run_context.resolve_max_tokens_for_runtime_with_profile] replaces it
    with a two-source-only contract: an explicit caller [?max_tokens] argument,
    or a per-keeper [MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS] profile override
    (exercised separately in test_keeper_toml.ml's oas_env tests). Absent both,
@@ -1547,8 +1547,9 @@ let test_resolve_max_tokens_for_runtime_no_override_is_none () =
       "unconfigured keeper + no caller override sends no max_tokens, even for \
        a reasoning runtime with a declared catalog ceiling"
       None
-      (Keeper_run_context.resolve_max_tokens_for_runtime
+      (Keeper_run_context.resolve_max_tokens_for_runtime_with_profile
          ~keeper_name:"masc24067-unconfigured-keeper"
+         ~profile_defaults:Keeper_types_profile.empty_keeper_profile_defaults
          ~runtime_id:"ollama_cloud.thinkdefault"
          ()))
 ;;
@@ -1559,8 +1560,9 @@ let test_resolve_max_tokens_for_runtime_caller_override_is_some () =
       "explicit caller max_tokens argument passes through as Some, unchanged \
        by the target runtime's catalog ceiling"
       (Some 4096)
-      (Keeper_run_context.resolve_max_tokens_for_runtime
+      (Keeper_run_context.resolve_max_tokens_for_runtime_with_profile
          ~keeper_name:"masc24067-unconfigured-keeper"
+         ~profile_defaults:Keeper_types_profile.empty_keeper_profile_defaults
          ~runtime_id:"ollama_cloud.thinkdefault"
          ~max_tokens:4096
          ()))

@@ -352,13 +352,15 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
   with_model_catalog_content runtime_thinking_lane_model_catalog @@ fun () ->
   with_runtime_config runtime_toml_thinking_lane (fun () ->
     let max_tokens_for_runtime ~runtime_id =
-      Masc.Keeper_run_context.resolve_max_tokens_for_runtime
+      Masc.Keeper_run_context.resolve_max_tokens_for_runtime_with_profile
         ~keeper_name:"policy-test"
+        ~profile_defaults:Masc.Keeper_types_profile.empty_keeper_profile_defaults
         ~runtime_id
         ()
     in
     (* masc#24067 / oas#2517: [max_tokens_for_runtime] above always resolves
-       through [Keeper_run_context.resolve_max_tokens_for_runtime] with no
+       through [Keeper_run_context.resolve_max_tokens_for_runtime_with_profile]
+       with no
        caller override and an unconfigured "policy-test" keeper profile, so
        every candidate below gets [None] — including the reasoning candidate,
        which under the deleted [Runtime_inference.resolve_max_tokens] used to

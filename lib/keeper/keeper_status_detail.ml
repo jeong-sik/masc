@@ -862,7 +862,10 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ]);
            ("drift",
              let toml_defaults =
-               Keeper_types_profile.load_keeper_profile_defaults name
+               (Keeper_types_profile.keeper_default_source_snapshot
+                  ~base_path:config.Workspace.base_path
+                  name)
+                 .defaults
              in
              drift_surface_json
                ~unknown_toml_keys:toml_defaults.unknown_toml_keys);

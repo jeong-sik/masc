@@ -1054,7 +1054,6 @@
   test_dashboard_k2_feeds
   test_keeper_profile_normalize_10552
   test_personality_field_diff_10269
-  test_toml_skip_dedup_10259
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
@@ -1252,7 +1251,6 @@
   test_dashboard_k2_feeds
   test_keeper_profile_normalize_10552
   test_personality_field_diff_10269
-  test_toml_skip_dedup_10259
   test_discovery_history_models_10404
   test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch

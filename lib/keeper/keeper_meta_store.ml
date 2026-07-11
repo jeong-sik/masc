@@ -93,7 +93,7 @@ let configured_keeper_names config =
   Keeper_types_profile.discover_keepers_toml
     (Config_dir_resolver.keepers_dir_for_base_path
        ~base_path:config.Workspace.base_path)
-  |> List.map fst
+  |> List.map Keeper_types_profile.keeper_toml_discovery_name
   |> dedupe_keep_order
 ;;
 
@@ -116,24 +116,28 @@ let keeper_names config =
 
 let declarative_autoboot_enabled_by_default config name =
   match
-    (load_keeper_profile_defaults_for_base_path
-       ~base_path:config.Workspace.base_path
-       name)
-      .autoboot_enabled
+    load_keeper_profile_defaults_result_for_base_path
+      ~base_path:config.Workspace.base_path
+      name
   with
-  | Some false -> false
-  | Some true | None -> true
+  | Error _ -> false
+  | Ok defaults ->
+    (match defaults.autoboot_enabled with
+     | Some false -> false
+     | Some true | None -> true)
 ;;
 
 let effective_autoboot_enabled config name meta =
   match
-    (load_keeper_profile_defaults_for_base_path
-       ~base_path:config.Workspace.base_path
-       name)
-      .autoboot_enabled
+    load_keeper_profile_defaults_result_for_base_path
+      ~base_path:config.Workspace.base_path
+      name
   with
-  | Some value -> value
-  | None -> meta.autoboot_enabled
+  | Error _ -> false
+  | Ok defaults ->
+    (match defaults.autoboot_enabled with
+     | Some value -> value
+     | None -> meta.autoboot_enabled)
 ;;
 
 let keepalive_keeper_names config =
@@ -247,7 +251,11 @@ let read_effective_meta_resolved config name
   | Error _ as err -> err
   | Ok None -> Ok None
   | Ok (Some (resolved_name, meta)) -> (
-      match Keeper_meta_contract.effective_meta_result meta with
+      match
+        Keeper_meta_contract.effective_meta_result
+          ~base_path:config.Workspace.base_path
+          meta
+      with
       | Ok meta -> Ok (Some (resolved_name, meta))
       | Error msg -> Error msg)
 ;;

@@ -40,7 +40,11 @@ let is_generic_status = function
 
 (* Semantic weight multiplier by event kind.
    Completion events score high; routine lifecycle events score low. *)
-let semantic_multiplier = function
+let semantic_multiplier kind =
+  match tool_execution_event_kind_of_string kind with
+  | Some (External_tool_called | Keeper_in_turn_tool_executed) -> 0.3
+  | None ->
+    (match kind with
   | "task.done" | "task.approved" | "decision.resolved" | "operation.finalized" -> 5.0
   | "task.created" | "task.claimed" | "decision.opened" -> 3.0
   | "agent.handoff" | "agent.spawned" -> 3.0
@@ -56,9 +60,8 @@ let semantic_multiplier = function
   | "keeper.compaction" | "keeper.guardrail" -> 0.5
   | "keeper.autonomy_started" | "keeper.autonomy_completed" -> 1.5
   | "operation.paused" | "operation.stopped" -> 0.5
-  | "keeper.turn_completed" -> 0.4
-  | "tool.called" | "keeper.tool_exec" -> 0.3
-  | _ -> 1.0
+     | "keeper.turn_completed" -> 0.4
+     | _ -> 1.0)
 
 let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
     ~(kind : string) ~(label : string)
@@ -167,6 +170,14 @@ let reduce_event ~nodes ~edges (value : event) =
         | None -> ())
     | None -> ()
   in
+  (match tool_execution_event_kind_of_string value.kind with
+  | Some (External_tool_called | Keeper_in_turn_tool_executed) ->
+    (match actor_id, subject_id with
+     | Some source, Some target ->
+       ensure_edge edges ~source ~target ~kind:"calls_tool" ~active:false
+         ~ts_iso:value.ts_iso ~meta:value.payload
+     | None, _ | _, None -> ())
+  | None ->
   (match value.kind with
   | "agent.session_bound" -> set_subject_status Active
   | "agent.left" -> set_subject_status Offline
@@ -332,10 +343,4 @@ let reduce_event ~nodes ~edges (value : event) =
   | "keeper.autonomy_completed" -> set_actor_status Active
   | "keeper.guardrail" -> set_actor_status Guardrail
   | "keeper.compaction" -> set_actor_status Compacting
-  | "tool.called" | "keeper.tool_exec" ->
-      (match (actor_id, subject_id) with
-      | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"calls_tool" ~active:false
-            ~ts_iso:value.ts_iso ~meta:value.payload
-      | (None, _) | (_, None) -> ())
-  | _kind -> Log.Misc.debug "reduce_event: unhandled kind=%s" _kind)
+  | _kind -> Log.Misc.debug "reduce_event: unhandled kind=%s" _kind))

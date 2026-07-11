@@ -1,33 +1,39 @@
-let tool_exec_kind = "keeper.tool_exec"
-
 let emit_tool_exec
       ~config
-      ~agent_name
-      ~keeper_name
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~tool_name
       ~success
       ~duration_ms
-      ~outcome
+      ~typed_outcome
       ~provider
-      ~turn_id
+      ~keeper_turn_id
+      ~oas_turn
+      ~task_id
       ()
   =
   try
     ignore
       (Activity_graph.emit
          config
-         ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
+         ~actor:(Activity_graph.entity ~kind:"agent" meta.agent_name)
          ~subject:(Activity_graph.entity ~kind:"tool" tool_name)
-         ~kind:tool_exec_kind
+         ~kind:
+           (Activity_graph.tool_execution_event_kind_to_string
+              Activity_graph.Keeper_in_turn_tool_executed)
          ~payload:
            (`Assoc
                [ "tool_name", `String tool_name
                ; "success", `Bool success
                ; "duration_ms", `Int duration_ms
-               ; "outcome", `String outcome
+               ; ( "typed_outcome"
+                 , match typed_outcome with
+                   | Some outcome -> Keeper_tool_outcome.to_json outcome
+                   | None -> `Null )
                ; "provider", `String provider
-               ; "keeper_name", `String keeper_name
-               ; "turn_id", `String turn_id
+               ; "keeper_name", `String meta.name
+               ; "keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id
+               ; "oas_turn", `Int oas_turn
+               ; "task_id", Json_util.string_opt_to_json task_id
                ; "source", `String "keeper_in_turn"
                ])
          ~tags:[ "tool"; "keeper"; (if success then "success" else "failure") ]
@@ -36,9 +42,9 @@ let emit_tool_exec
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Keeper.warn
-      ~keeper_name
-      "keeper.tool_exec activity emit failed for %s: %s"
-      tool_name
-      (Printexc.to_string exn)
+    Keeper_callback_failure.record
+      ~base_dir:config.base_path
+      ~meta
+      ~callback:"keeper_tool_activity_emit"
+      exn
 ;;

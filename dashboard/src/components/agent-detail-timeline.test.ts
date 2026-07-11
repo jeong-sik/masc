@@ -48,11 +48,18 @@ describe('ToolCallEventRow source badge', () => {
 
   it('marks keeper in-turn executions (keeper.tool_exec producer)', () => {
     const host = renderRow(
-      toolCallEvent({ tool_name: 'masc_status', success: true, source: 'keeper_in_turn' }),
+      toolCallEvent({
+        tool_name: 'masc_status',
+        success: true,
+        source: 'keeper_in_turn',
+        keeper_turn_id: 7,
+        oas_turn: 2,
+      }),
     )
     const badge = host.querySelector('[data-tool-source="keeper_in_turn"]')
     expect(badge).not.toBeNull()
     expect(badge?.textContent).toBe('턴 내')
+    expect(host.querySelector('[data-keeper-turn-id="7"]')?.textContent).toBe('턴 7 · 스텝 2')
   })
 
   it('renders no source badge when the source is absent (external tool.called)', () => {
@@ -63,4 +70,3 @@ describe('ToolCallEventRow source badge', () => {
     expect(host.textContent).toContain('external_tool')
   })
 })
-

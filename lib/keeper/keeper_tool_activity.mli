@@ -12,25 +12,24 @@
     Emission is fire-and-forget: a failed append must never change the tool
     call's result. [Eio.Cancel.Cancelled] is re-raised (never absorbed). *)
 
-val tool_exec_kind : string
-(** ["keeper.tool_exec"] — matched by the agent-timeline read model and the
-    activity-graph reducer. *)
-
 val emit_tool_exec :
   config:Workspace_utils.config ->
-  agent_name:string ->
-  keeper_name:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
   tool_name:string ->
   success:bool ->
   duration_ms:int ->
-  outcome:string ->
+  typed_outcome:Keeper_tool_outcome.t option ->
   provider:string ->
-  turn_id:string ->
+  keeper_turn_id:int option ->
+  oas_turn:int ->
+  task_id:string option ->
   unit ->
   unit
-(** Appends one [keeper.tool_exec] event. [agent_name] becomes the actor id
+(** Appends one [keeper.tool_exec] event. [meta.agent_name] becomes the actor id
     (the same identity form [keeper.turn_completed] uses, so
     [Tool_agent_timeline.identity_matches] resolves both through one
-    predicate); [keeper_name] is carried in the payload for the payload-side
-    identity fallback. [tool_name]/[success]/[duration_ms] follow the
-    [tool.called] payload contract the timeline detail projection reads. *)
+    predicate); [meta.name] is carried for the payload-side identity fallback.
+    [keeper_turn_id] is the absolute Keeper-lane turn and [oas_turn] is the
+    model/tool-loop step inside it; task identity is carried separately and is
+    never substituted for either turn id. Typed outcome JSON is preserved
+    without reconstructing a string category. *)

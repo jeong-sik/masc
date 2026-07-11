@@ -106,6 +106,8 @@ export function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: n
   // keeper_in_turn = keeper executed the tool inside its own turn
   // (keeper.tool_exec producer, #23540); absent/other = external MCP dispatch.
   const isKeeperInTurn = d.source === 'keeper_in_turn'
+  const keeperTurnId = typeof d.keeper_turn_id === 'number' ? d.keeper_turn_id : null
+  const oasTurn = typeof d.oas_turn === 'number' ? d.oas_turn : null
 
   return html`
     <div class="v2-monitoring-row flex flex-col py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s var(--ease-out)' }}>
@@ -123,6 +125,9 @@ export function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: n
           : html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
         ${isKeeperInTurn
           ? html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)]" data-tool-source="keeper_in_turn" title="keeper가 자기 턴 안에서 실행한 도구">턴 내</span>`
+          : null}
+        ${keeperTurnId != null
+          ? html`<span class="text-2xs font-mono text-[var(--color-fg-secondary)]" data-keeper-turn-id=${keeperTurnId} title="Keeper 절대 턴과 그 안의 모델 스텝">턴 ${keeperTurnId}${oasTurn != null ? ` · 스텝 ${oasTurn}` : ''}</span>`
           : null}
         <span class="flex-1"></span>
         ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}

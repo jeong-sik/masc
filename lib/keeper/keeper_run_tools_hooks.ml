@@ -297,14 +297,15 @@ let assemble_hooks
               keeper working through its own turn. *)
            Keeper_tool_activity.emit_tool_exec
              ~config
-             ~agent_name:acc.meta.Keeper_meta_contract.agent_name
-             ~keeper_name:acc.meta.name
+             ~meta:acc.meta
              ~tool_name
              ~success
              ~duration_ms:(int_of_float (Float.round duration_ms))
-             ~outcome:typed_outcome_str
+             ~typed_outcome
              ~provider
-             ~turn_id
+             ~keeper_turn_id:manifest_keeper_turn_id
+             ~oas_turn:acc.current_turn
+             ~task_id
              ()))
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard
         ()

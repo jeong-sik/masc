@@ -1576,7 +1576,7 @@ let test_resolve_max_tokens_reasoning_small_ceiling_respected () =
          ~fallback:fallback_sentinel))
 ;;
 
-let test_resolve_max_tokens_reasoning_big_ceiling_clamped () =
+let test_resolve_max_tokens_reasoning_keeps_full_ceiling () =
   with_runtime_thinking (fun () ->
     (* reasoning-big-out declares max_output_tokens = 200000. The declared
        ceiling passes through unmodified: no MASC-side operational bound
@@ -1992,9 +1992,9 @@ let () =
             `Quick
             test_resolve_max_tokens_reasoning_small_ceiling_respected
         ; Alcotest.test_case
-            "reasoning runtime, ceiling above bound -> clamped to bound"
+            "reasoning runtime keeps full catalog ceiling"
             `Quick
-            test_resolve_max_tokens_reasoning_big_ceiling_clamped
+            test_resolve_max_tokens_reasoning_keeps_full_ceiling
         ; Alcotest.test_case
             "unknown runtime id -> caller fallback"
             `Quick

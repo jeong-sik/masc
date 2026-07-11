@@ -33,8 +33,9 @@ let resolve_temperature ~runtime_id ~fallback =
    turn a thinking truncation into a max_tokens rejection. Non-reasoning
    runtimes keep the caller's flat [fallback] unchanged. Raising or bounding a
    specific model is a catalog change (declare [max_output_tokens]); the value
-   lives in the model catalog, not here. Provider-side overshoot protection is
-   the OAS backend clamp to the per-model catalog cap (clamp + one-shot WARN). *)
+   lives in the OAS model catalog, not here. The selected value is already that
+   catalog ceiling, so this path does not rely on every provider serializer
+   implementing a second clamp. *)
 let resolve_max_tokens ~runtime_id ~fallback =
   match Runtime.thinking_support_of_runtime_id runtime_id with
   | Some true ->

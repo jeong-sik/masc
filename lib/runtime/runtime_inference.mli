@@ -7,9 +7,9 @@ val resolve_max_tokens :
   runtime_id:string -> fallback:(unit -> int) -> int
 (** Thinking-capable runtime with a catalog-declared [max_output_tokens]:
     the full declared ceiling (no MASC-side bound — budgets are
-    aggregation-only). Otherwise the caller's [fallback]. Overshoot
-    protection against provider 400s is the OAS backend clamp to the
-    per-model catalog cap. *)
+    aggregation-only). Otherwise the caller's [fallback]. The selected value
+    is already the OAS model-catalog ceiling; this path does not assume a
+    second clamp in every provider serializer. *)
 
 type seed = {
   thinking_budget : int option;

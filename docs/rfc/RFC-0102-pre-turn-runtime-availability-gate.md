@@ -1,17 +1,25 @@
 ---
 rfc: "0102"
 title: "Pre-turn runtime availability gate — reuse, not new surface"
-status: Implemented
+status: Superseded
 created: 2026-05-17
-updated: 2026-05-22
+updated: 2026-07-11
 author: vincent
 supersedes: []
-superseded_by: null
-related: ["0009", "0012", "0022", "0042", "0072", "0088"]
+superseded_by: "0206"
+related: ["0009", "0012", "0022", "0042", "0072", "0088", "0206", "0207"]
 implementation_prs: [15814]
 ---
 
 # RFC-0102 — Pre-turn runtime availability gate
+
+> **Superseded (2026-07-11):** RFC-0206 replaced the legacy health-filtered
+> candidate fail-open decision point with the typed `Runtime` boundary. RFC-0207
+> subsequently introduced per-Keeper ordered runtime lanes, whose candidates are
+> resolved by `Keeper_turn_driver` and checked per attempt by
+> `Keeper_turn_driver_provider_attempt`. It did not restore the helper removed in
+> PR #24186. The design and examples below describe the historical RFC-0102
+> implementation, not the current dispatch path.
 
 - Related RFCs (layer hand-offs):
   - **RFC-0009** Runtime Trust Phase 2 — *pre-attempt ordering*
@@ -56,7 +64,7 @@ call site and (b) a case-split in an existing fail-open policy.
 | Per-provider cooldown read | `Runtime_health_tracker.is_in_cooldown : t -> provider_key:string -> bool` | `lib/runtime/runtime_health_tracker.mli:276` |
 | `Phase_gating → Done(Skipped)` emission template (with `record_pre_dispatch_terminal_observation` + `Trajectory.Gated`) | already in 4 arms (`supervisor_stop`, `non_executable_phase`, etc.) | `lib/keeper/keeper_unified_turn.ml:155,164,195,204,235,415,466,479` |
 | Runtime-recovery probe (already in production) | `runtime_recovered` closure using named-provider runtime resolution + `Runtime_health_filter.filter_healthy_strict` | `lib/keeper/keeper_stale_watchdog.ml:749-770` |
-| Current fail-open policy site (decision point) | `fail_open_health_filtered_candidates` + the `health_cooldown_fail_open` branch | `lib/keeper/keeper_turn_driver.ml:325-345` |
+| Historical fail-open policy site (removed by RFC-0206 / PR #24186) | pre-filter candidate fallback + `health_cooldown_fail_open` | archived RFC-0102 implementation |
 
 The watchdog and the (to-be-added) phase_gating gate need the **same**
 logical question — *is this runtime currently capable of producing any
@@ -154,17 +162,18 @@ first iteration — it preserves the watchdog's existing semantics
 (active resolve + strict filter). A cached variant is a follow-up
 *if and only if* per-turn invocation cost proves measurable (see §8 Q3).
 
-### 4.2 Case-split the fail-open policy
+### 4.2 Historical case-split policy (superseded)
 
-In `keeper_turn_driver.ml`'s `fail_open_health_filtered_candidates`,
-replace the boolean fail-open with a typed dispatch:
+The original implementation replaced its boolean fail-open decision with a
+typed dispatch. This is retained as historical rationale only; the current
+runtime-lane path uses the typed boundaries named in the supersession note.
 
 ```
 match rejection_or_ok with
 | Ok healthy -> healthy
 | Error (All_local_unhealthy _) ->
   (* unchanged: fail-open, surface provider result *)
-  fail_open_health_filtered_candidates ~... ; []
+  retry the pre-filter candidates
 | Error (All_missing_api_key _) ->
   (* new: fail-closed, return No_providers_available directly *)
   ... raise No_providers_available

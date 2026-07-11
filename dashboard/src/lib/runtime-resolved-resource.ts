@@ -13,11 +13,25 @@ import { fetchRuntimeResolved, type RuntimeResolvedResponse } from '../api/dashb
 const runtimeResolvedResource = createAsyncResource<RuntimeResolvedResponse>()
 export const runtimeResolvedState = runtimeResolvedResource.state
 
-export function loadRuntimeResolved(): void {
-  if (runtimeResolvedState.value.status !== 'idle') return
-  void runtimeResolvedResource.load(fetchRuntimeResolved)
+export function loadRuntimeResolved(): Promise<void> {
+  if (runtimeResolvedState.value.status !== 'idle') return Promise.resolve()
+  return runtimeResolvedResource.load(fetchRuntimeResolved)
 }
 
 export function resetRuntimeResolved(): void {
   runtimeResolvedResource.reset()
+}
+
+export async function reloadRuntimeResolved(): Promise<void> {
+  runtimeResolvedResource.reset()
+  let loadError: unknown = null
+  await runtimeResolvedResource.load(async () => {
+    try {
+      return await fetchRuntimeResolved()
+    } catch (error) {
+      loadError = error
+      throw error
+    }
+  })
+  if (loadError) throw loadError
 }

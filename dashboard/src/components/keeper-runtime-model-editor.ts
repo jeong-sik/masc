@@ -37,6 +37,7 @@ import {
   loadRuntimeResolved,
   runtimeResolvedState,
 } from '../lib/runtime-resolved-resource'
+import type { RuntimeAssignment } from '../api/schemas/runtime-resolved'
 import {
   runtimeCatalogDeclaredSpec,
   runtimeCatalogEffectiveCapabilities,
@@ -168,18 +169,40 @@ function EditorHeader() {
 // did not. Sourced from GET /api/v1/runtime/resolved (read-only; no new write
 // path, no string matching — the resolved endpoint already types this as a
 // closed 'explicit' | 'default' union).
-function AssignmentSourceBadge({ source }: { source: 'explicit' | 'default' }) {
-  const tone = source === 'explicit'
+function AssignmentSourceBadge({ assignment }: { assignment: RuntimeAssignment }) {
+  const tone = assignment.assignment_source === 'explicit'
     ? 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
     : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'
+  const target = assignment.resolved.id ?? assignment.resolved.kind
   return html`
     <span
       class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${tone}"
       data-testid="keeper-runtime-assignment-source"
+      data-assignment-source=${assignment.assignment_source}
+      data-assignment-target-kind=${assignment.resolved.kind}
     >
-      ${source}
+      ${assignment.assignment_source} → ${target}
     </span>
   `
+}
+
+function AssignmentTruth({
+  state,
+  keeperName,
+}: {
+  state: typeof runtimeResolvedState.value
+  keeperName: string
+}) {
+  if (state.status === 'idle' || state.status === 'loading') {
+    return html`<span class="text-3xs text-[var(--color-fg-muted)]" data-testid="keeper-runtime-assignment-loading">assignment 불러오는 중</span>`
+  }
+  if (state.status === 'error') {
+    return html`<span class="text-3xs text-[var(--color-status-danger)]" data-testid="keeper-runtime-assignment-error">assignment 확인 실패: ${state.message}</span>`
+  }
+  const assignment = state.data.assignments.find(item => item.keeper === keeperName)
+  return assignment
+    ? html`<${AssignmentSourceBadge} assignment=${assignment} />`
+    : html`<span class="text-3xs text-[var(--color-status-warn)]" data-testid="keeper-runtime-assignment-missing">assignment projection에 Keeper가 없습니다.</span>`
 }
 
 export function KeeperRuntimeModelEditor({
@@ -214,15 +237,9 @@ export function KeeperRuntimeModelEditor({
   const catalog = catalogState.status === 'loaded' ? catalogState.data : []
   const runtimeEntry = findRuntimeCatalogEntry(catalog, current)
 
-  loadRuntimeResolved()
+  void loadRuntimeResolved()
   const resolvedState = runtimeResolvedState.value
-  const assignment =
-    resolvedState.status === 'loaded'
-      ? (resolvedState.data.assignments.find(a => a.keeper === keeperName) ?? null)
-      : null
-  const assignmentBadge = assignment
-    ? html`<${AssignmentSourceBadge} source=${assignment.assignment_source} />`
-    : null
+  const assignmentTruth = html`<${AssignmentTruth} state=${resolvedState} keeperName=${keeperName} />`
 
   const canonicalRow =
     canonical && canonical !== current
@@ -241,7 +258,7 @@ export function KeeperRuntimeModelEditor({
         <${EditorHeader} />
         <div class="flex flex-wrap items-center gap-2">
           <div class="text-sm font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</div>
-          ${assignmentBadge}
+          ${assignmentTruth}
         </div>
         ${canonicalRow}
         ${summary}
@@ -261,7 +278,7 @@ export function KeeperRuntimeModelEditor({
       <${EditorHeader} />
       <div class="flex flex-wrap items-center gap-2">
         <div class="text-2xs text-[var(--color-fg-muted)]">현재 <span class="font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</span></div>
-        ${assignmentBadge}
+        ${assignmentTruth}
       </div>
       ${canonicalRow}
       ${summary}

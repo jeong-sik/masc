@@ -487,7 +487,9 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     await flush()
 
     const badge = container.querySelector('[data-testid="keeper-runtime-assignment-source"]')
-    expect(badge?.textContent?.trim()).toBe('explicit')
+    expect(badge?.textContent?.trim()).toBe('explicit → a.one')
+    expect(badge?.getAttribute('data-assignment-source')).toBe('explicit')
+    expect(badge?.getAttribute('data-assignment-target-kind')).toBe('single_runtime')
   })
 
   it('shows a default assignment_source badge for a keeper riding [runtime].default with no explicit entry', async () => {
@@ -505,10 +507,10 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     await flush()
 
     const badge = container.querySelector('[data-testid="keeper-runtime-assignment-source"]')
-    expect(badge?.textContent?.trim()).toBe('default')
+    expect(badge?.textContent?.trim()).toBe('default → a.one')
   })
 
-  it('renders no assignment_source badge when the resolved endpoint has no entry for this keeper', async () => {
+  it('surfaces a missing assignment projection instead of hiding it', async () => {
     refs.config = makeConfig({ selected_runtime_id: 'a.one' })
     refs.resolved.mockResolvedValue(makeRuntimeResolved({ assignments: [] }))
     render(
@@ -519,5 +521,21 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     await flush()
 
     expect(container.querySelector('[data-testid="keeper-runtime-assignment-source"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-runtime-assignment-missing"]')?.textContent)
+      .toContain('assignment projection에 Keeper가 없습니다')
+  })
+
+  it('surfaces a runtime-resolved fetch error instead of rendering an absent badge', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    refs.resolved.mockRejectedValue(new Error('runtime resolved unavailable'))
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="error-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    expect(container.querySelector('[data-testid="keeper-runtime-assignment-error"]')?.textContent)
+      .toContain('runtime resolved unavailable')
   })
 })

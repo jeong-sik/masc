@@ -3453,7 +3453,9 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                      let execution_history =
                        schedule_execution_history_projection executions
                      in
-                     let last_execution = List.hd_opt executions in
+                     let last_execution =
+                       match executions with [] -> None | latest :: _ -> Some latest
+                     in
                      schedule_request_dashboard_json ~now ~config ~state ?last_execution
                        ~execution_history request)
                   request_rows) )

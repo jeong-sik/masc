@@ -60,7 +60,17 @@ export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'notes'] as const
 // previously activated a layer with no data to render — a silent no-op.
 // Gated here so the toolbar disables the affordance instead.
 const VIEW_GATED_LAYER_KINDS: ReadonlySet<string> = new Set(['time', 'parallel'])
-const VIEW_GATE_TOOLTIP = 'BLAME 뷰에서만 사용할 수 있습니다 (git blame ownership 데이터 필요)'
+
+export function layerAvailableInView(kind: string, view: ViewTab): boolean {
+  return !VIEW_GATED_LAYER_KINDS.has(kind) || view === 'blame'
+}
+
+export function availableLayersForView(
+  layers: ReadonlySet<string>,
+  view: ViewTab,
+): ReadonlySet<string> {
+  return new Set(Array.from(layers).filter(kind => layerAvailableInView(kind, view)))
+}
 
 interface IdeToolbarProps {
   readonly activeView: ViewTab
@@ -118,6 +128,7 @@ export function IdeToolbar({
   }, [])
   const { active, isActive } = useLayeredOverlay(controller)
   const [contextFocus, setContextFocus] = useState(ideContextFocus.value)
+  const availableLayers = IDE_LAYERS.filter(layer => layerAvailableInView(layer.kind, activeView))
 
   useEffect(() => {
     controller.setActive(activeLayers)
@@ -140,7 +151,7 @@ export function IdeToolbar({
       keywords: `${tab.id} ${tab.label} editor mode`,
       handler: () => onViewChange(tab.id),
     })),
-    ...IDE_LAYERS.map(layer => ({
+    ...availableLayers.map(layer => ({
       id: `layer-${layer.kind}`,
       title: `${isActive(layer.kind) ? 'Hide' : 'Show'} ${layer.label} layer`,
       keywords: `toggle ${layer.kind} ${layer.description}`,
@@ -245,15 +256,12 @@ export function IdeToolbar({
         class="ide-toolbar-layers flex min-w-0 items-center gap-1.5 overflow-x-auto pb-0.5 font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"
       >
         <span class="shrink-0">LAYERS</span>
-        ${IDE_LAYERS.map(layer => {
-          const viewGated = VIEW_GATED_LAYER_KINDS.has(layer.kind) && activeView !== 'blame'
-          return html`
+        ${availableLayers.map(layer => html`
           <button
             type="button"
             aria-pressed=${isActive(layer.kind) ? 'true' : 'false'}
-            disabled=${viewGated}
             onClick=${() => handleLayerToggle(layer.kind)}
-            title=${viewGated ? `${layer.description} — ${VIEW_GATE_TOOLTIP}` : layer.description}
+            title=${layer.description}
             class=${TOOLBAR_BUTTON_BASE}
             style=${{
               background: isActive(layer.kind)
@@ -268,10 +276,9 @@ export function IdeToolbar({
                 : 'var(--color-border-default)',
             }}
           >${layer.label}</button>
-        `
-        })}
-        ${active.size > 0
-          ? html`<span class="shrink-0 text-[var(--color-fg-disabled)]">${active.size} active</span>`
+        `)}
+        ${availableLayers.some(layer => active.has(layer.kind))
+          ? html`<span class="shrink-0 text-[var(--color-fg-disabled)]">${availableLayers.filter(layer => active.has(layer.kind)).length} active</span>`
           : null}
       </div>
     </div>

@@ -25,6 +25,7 @@ import {
   IDE_LAYER_LABELS,
   REVIEW_FOCUS_LAYERS,
   IdeToolbar,
+  availableLayersForView,
 } from './ide-toolbar'
 import { IdeBreadcrumb } from './ide-breadcrumb'
 import { IdeReviewFocusStrip } from './ide-review-focus-strip'
@@ -1033,7 +1034,10 @@ export function IdeShell() {
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
   const lspStatus = useSignalValue(lspStatusSnapshot)
   const reviewFocusActive = activeFocus === 'review' && activeView === 'unified'
-  const activeLayers = layersFromRoute(route.value.params.layers, reviewFocusActive ? activeFocus : null)
+  const activeLayers = availableLayersForView(
+    layersFromRoute(route.value.params.layers, reviewFocusActive ? activeFocus : null),
+    activeView,
+  )
   const terminalOpen = route.value.params.terminal === 'open'
   // The reference IDE keeps the drawer in the shell at all times. A route can
   // still opt out explicitly, while only `terminal=open` starts live output.
@@ -1069,7 +1073,15 @@ export function IdeShell() {
 
   const handleViewChange = (next: ViewTab) => {
     setActiveView(next)
-    const nextParams: Record<string, string> = { ...route.value.params, section: 'ide-shell', view: next }
+    const leavingImplicitReview =
+      next !== 'unified'
+      && focusFromRoute(route.value.params.focus) === 'review'
+      && !route.value.params.layers?.trim()
+    const compatibleLayers = availableLayersForView(
+      leavingImplicitReview ? new Set() : activeLayers,
+      next,
+    )
+    const nextParams = paramsWithLayers(route.value.params, next, compatibleLayers)
     if (next !== 'unified' && focusFromRoute(nextParams.focus) === 'review') {
       delete nextParams.focus
       if (nextParams.layers?.trim().toLowerCase() === EMPTY_LAYER_PARAM) delete nextParams.layers

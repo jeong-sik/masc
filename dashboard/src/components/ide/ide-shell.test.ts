@@ -181,7 +181,7 @@ describe('IdeShell', () => {
     )
   })
 
-  it('hydrates layer buttons from the route layers param', () => {
+  it('hydrates only view-compatible layers from the route layers param', () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source', layers: 'time,notes' },
@@ -195,16 +195,16 @@ describe('IdeShell', () => {
     expect(container.querySelector('.v2-ide-toolbar')).not.toBeNull()
     expect(container.querySelector('[data-testid="ide-readiness-notice"]')?.textContent)
       .toBe('experimental')
-    expect(buttonByText(container, 'Time').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
-    expect(buttonByText(container, 'Parallel').getAttribute('aria-pressed')).toBe('false')
+    const layerButtons = container.querySelectorAll('[data-testid="ide-toolbar-layers"] button')
+    expect(Array.from(layerButtons).some(button => button.textContent === 'Time')).toBe(false)
+    expect(Array.from(layerButtons).some(button => button.textContent === 'Parallel')).toBe(false)
     expect(container.textContent).toContain('PERSISTENCE MAP')
     expect(container.textContent).toContain('Active overlays')
-    expect(container.textContent).toContain('Time')
     expect(container.textContent).toContain('Notes')
   })
 
-  it('disables time/parallel layer buttons outside the BLAME view with an explanatory tooltip', () => {
+  it('removes BLAME-only layers and command actions outside the BLAME view', async () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source', layers: 'time,parallel' },
@@ -213,19 +213,18 @@ describe('IdeShell', () => {
 
     render(h(IdeShell, {}), container)
 
-    const timeBtn = buttonByText(container, 'Time')
-    const parallelBtn = buttonByText(container, 'Parallel')
-    expect(timeBtn.disabled).toBe(true)
-    expect(parallelBtn.disabled).toBe(true)
-    expect(timeBtn.getAttribute('title')).toContain('BLAME 뷰에서만')
-    expect(parallelBtn.getAttribute('title')).toContain('BLAME 뷰에서만')
-    // Deep-linked active state survives the gate — disabled communicates
-    // "can't toggle here", not "silently cleared".
-    expect(timeBtn.getAttribute('aria-pressed')).toBe('true')
-    expect(parallelBtn.getAttribute('aria-pressed')).toBe('true')
-    // Trace/Notes are not view-gated.
+    const layers = container.querySelector('[data-testid="ide-toolbar-layers"]')
+    expect(layers?.textContent).not.toContain('Time')
+    expect(layers?.textContent).not.toContain('Parallel')
     expect(buttonByText(container, 'Trace').disabled).toBe(false)
     expect(buttonByText(container, 'Notes').disabled).toBe(false)
+
+    const input = ideCommandInput(container)
+    input.value = 'parallel'
+    fireEvent.input(input)
+    await waitFor(() => expect(input.getAttribute('aria-expanded')).toBe('true'))
+    const options = Array.from(container.querySelectorAll('[role="option"]'))
+    expect(options.some(option => option.textContent?.includes('Parallel'))).toBe(false)
   })
 
   it('enables time/parallel layer buttons in the BLAME view', () => {
@@ -239,6 +238,22 @@ describe('IdeShell', () => {
 
     expect(buttonByText(container, 'Time').disabled).toBe(false)
     expect(buttonByText(container, 'Parallel').disabled).toBe(false)
+  })
+
+  it('drops BLAME-only layers from the route when leaving BLAME', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'blame', layers: 'time,parallel,notes' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    fireEvent.click(buttonByText(container, 'SOURCE'))
+
+    expect(route.value.params.view).toBe('source')
+    expect(route.value.params.layers).toBe('notes')
+    expect(container.querySelector('[data-testid="ide-toolbar-layers"]')?.textContent)
+      .not.toContain('Time')
   })
 
   it('removed the decorative tools/approve/runtime/explode layer chips', () => {
@@ -261,8 +276,10 @@ describe('IdeShell', () => {
     expect(layerLabels).not.toContain('Approve')
     expect(layerLabels).not.toContain('Runtime')
     expect(layerLabels).not.toContain('EXPLODE')
+    expect(layerLabels).not.toContain('Time')
+    expect(layerLabels).not.toContain('Parallel')
     expect(layerLabels).toEqual(
-      expect.arrayContaining(['Time', 'Parallel', 'Notes', 'Trace']),
+      expect.arrayContaining(['Notes', 'Trace']),
     )
   })
 
@@ -798,10 +815,11 @@ describe('IdeShell', () => {
     expect(container.querySelector('[aria-label="Unified diff preview"]')).not.toBeNull()
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
-    expect(buttonByText(container, 'Parallel').getAttribute('aria-pressed')).toBe('false')
+    expect(container.querySelector('[data-testid="ide-toolbar-layers"]')?.textContent)
+      .not.toContain('Parallel')
   })
 
-  it('lets explicit review-focus layers override the default review bundle', () => {
+  it('filters view-incompatible explicit review-focus layers', () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'unified', focus: 'review', layers: 'parallel' },
@@ -811,7 +829,8 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
-    expect(buttonByText(container, 'Parallel').getAttribute('aria-pressed')).toBe('true')
+    expect(container.querySelector('[data-testid="ide-toolbar-layers"]')?.textContent)
+      .not.toContain('Parallel')
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
   })
@@ -882,7 +901,7 @@ describe('IdeShell', () => {
   it('runs layer commands from the IDE command bar', async () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'source' },
+      params: { section: 'ide-shell', view: 'blame' },
       postId: null,
     }
 

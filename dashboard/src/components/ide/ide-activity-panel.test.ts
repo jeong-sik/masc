@@ -93,6 +93,112 @@ describe('IdeActivityPanel', () => {
     expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).toBeNull()
   })
 
+  it('hides the previous repository snapshot immediately when scope is cleared', async () => {
+    let activityCalls = 0
+    let resolveUnscopedGraph: ((response: Response) => void) | null = null
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            events: [{
+              type: 'turn',
+              keeper_id: 'repo-a-keeper',
+              turn_id: 'turn-repo-a',
+              phase: 'completed',
+              timestamp_ms: 100,
+            }],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      activityCalls += 1
+      if (activityCalls === 1) {
+        return new Response(JSON.stringify({ events: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Promise<Response>(resolve => {
+        resolveUnscopedGraph = resolve
+      })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { repoId: 'repo-a' }), container)
+    await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
+
+    render(h(IdeActivityPanel, {}), container)
+    expect(container.textContent).not.toContain('turn-repo-a')
+    expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
+
+    await waitFor(() => expect(resolveUnscopedGraph).not.toBeNull())
+    resolveUnscopedGraph!(new Response(JSON.stringify({ events: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    await waitFor(() => {
+      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('loaded')
+    })
+  })
+
+  it('does not expose repository A events while repository B is loading', async () => {
+    let resolveRepoB: ((response: Response) => void) | null = null
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/activity/events')) {
+        return new Response(JSON.stringify({ events: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('repo_id=repo-a')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            events: [{
+              type: 'turn',
+              keeper_id: 'repo-a-keeper',
+              turn_id: 'turn-repo-a',
+              phase: 'completed',
+              timestamp_ms: 100,
+            }],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('repo_id=repo-b')) {
+        return new Promise<Response>(resolve => {
+          resolveRepoB = resolve
+        })
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { repoId: 'repo-a' }), container)
+    await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
+
+    render(h(IdeActivityPanel, { repoId: 'repo-b' }), container)
+    expect(container.textContent).not.toContain('turn-repo-a')
+    await waitFor(() => expect(resolveRepoB).not.toBeNull())
+
+    resolveRepoB!(new Response(JSON.stringify({
+      ok: true,
+      data: {
+        events: [{
+          type: 'turn',
+          keeper_id: 'repo-b-keeper',
+          turn_id: 'turn-repo-b',
+          phase: 'completed',
+          timestamp_ms: 200,
+        }],
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    await waitFor(() => expect(container.textContent).toContain('turn-repo-b'))
+    expect(container.textContent).not.toContain('turn-repo-a')
+  })
+
   it('treats a null active file as no active file', () => {
     const container = document.createElement('div')
     render(h(IdeActivityPanel, { activeFile: null }), container)

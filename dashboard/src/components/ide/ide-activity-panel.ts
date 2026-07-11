@@ -75,16 +75,7 @@ interface GraphFetchResult {
   readonly ok: boolean
 }
 
-interface ActivityFetchResult extends GraphFetchResult {
-  /**
-   * Whether the IDE-bridge portion of the feed (repo/keeper-lane scoped
-   * observations) was actually queried. False when neither repoId nor
-   * keeperLane is set — distinct from a real fetch that came back empty,
-   * so the render can tell "nothing to observe here" apart from "no
-   * scope selected" instead of collapsing both into one empty state.
-   */
-  readonly scoped: boolean
-}
+type ActivityFetchResult = GraphFetchResult
 
 type ActivityRefreshTone = 'loading' | 'live' | 'stale' | 'offline'
 
@@ -96,6 +87,7 @@ interface ActivityRefreshState {
 }
 
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
+const EMPTY_KEEPERS: ReadonlyArray<string> = []
 const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
 const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
 const EMPTY_DIAGNOSTICS: ReadonlyArray<LspDiagnosticAnchor> = []
@@ -226,7 +218,6 @@ async function fetchActivityEvents(
     // "no keeper activity" from "the activity source is broken" otherwise.
     ok: graph.ok && bridge.ok,
     events: mergeRunActivityEvents(graph.events, bridge.events),
-    scoped: bridge.scoped,
   }
 }
 
@@ -248,7 +239,6 @@ async function fetchActivityGraphEvents(): Promise<GraphFetchResult> {
 interface BridgeFetchResult {
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly ok: boolean
-  readonly scoped: boolean
 }
 
 /**
@@ -271,11 +261,9 @@ async function fetchIdeBridgeRunActivityEvents(
     sources.push(fetchIdeEvents({ limit: 50, scope: { kind: 'keeper_lane', keeperId: lane } }))
   }
   // Neither scope is set: there is nothing to query, not a request that
-  // happened to find zero events. `ok: true` here would previously read
-  // identically to a genuine empty-but-healthy fetch — `scoped: false`
-  // is the caller's signal to render "no scope selected" instead of
-  // "no recent activity".
-  if (sources.length === 0) return { events: EMPTY_ACTIVITY, ok: true, scoped: false }
+  // happened to find zero events. The caller derives the visible no-scope
+  // state from the current props, before any asynchronous response arrives.
+  if (sources.length === 0) return { events: EMPTY_ACTIVITY, ok: true }
   const settled = await Promise.allSettled(sources)
   const events: RunActivityEvent[] = []
   let ok = true
@@ -288,7 +276,7 @@ async function fetchIdeBridgeRunActivityEvents(
       ok = false
     }
   }
-  return { events, ok, scoped: true }
+  return { events, ok }
 }
 
 function mergeRunActivityEvents(
@@ -479,6 +467,14 @@ function normalizedPollMs(value: number | undefined): number | null {
   return Math.floor(value)
 }
 
+function activityScopeKey(repoId?: string | null, keeperLane?: string | null): string {
+  return JSON.stringify([repoId?.trim() || null, keeperLane?.trim() || null])
+}
+
+function hasActivityBridgeScope(repoId?: string | null, keeperLane?: string | null): boolean {
+  return Boolean(repoId?.trim()) || Boolean(keeperLane?.trim())
+}
+
 export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile: rawActiveFile = '',
@@ -495,15 +491,18 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     return store
   }, [])
   const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
-  // Lazy-initialized from props so the first render (before the async
-  // fetch resolves) already reflects whether a scope is selected, instead
-  // of flashing "no recent activity" for a scoped panel that just hasn't
-  // loaded yet.
-  const [bridgeScoped, setBridgeScoped] = useState(
-    () => Boolean(repoId?.trim()) || Boolean(keeperLane?.trim()),
-  )
+  const requestedScopeKey = activityScopeKey(repoId, keeperLane)
+  const bridgeScoped = hasActivityBridgeScope(repoId, keeperLane)
+  const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null)
+  const loadedScopeKeyRef = useRef<string | null>(null)
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
   const refreshMs = normalizedPollMs(pollMs)
+
+  useEffect(() => {
+    if (loadedScopeKeyRef.current !== requestedScopeKey) {
+      setRefreshState(INITIAL_REFRESH_STATE)
+    }
+  }, [requestedScopeKey])
 
   useEffect(() => {
     let cancelled = false
@@ -515,12 +514,13 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, workspaceId, ok, scoped } = await fetchActivityEvents(repoId, keeperLane)
+      const { events, workspaceId, ok } = await fetchActivityEvents(repoId, keeperLane)
       if (cancelled) return
-      setBridgeScoped(scoped)
       if (ok) {
         store.reset(workspaceId)
         store.seed(events)
+        loadedScopeKeyRef.current = requestedScopeKey
+        setLoadedScopeKey(requestedScopeKey)
         setRefreshState({
           tone: 'live',
           lastOkMs: Date.now(),
@@ -528,9 +528,10 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
           failedCount: 0,
         })
       } else {
+        const sameScopeSnapshot = loadedScopeKeyRef.current === requestedScopeKey
         setRefreshState(prev => ({
-          tone: prev.lastOkMs === null ? 'offline' : 'stale',
-          lastOkMs: prev.lastOkMs,
+          tone: sameScopeSnapshot && prev.lastOkMs !== null ? 'stale' : 'offline',
+          lastOkMs: sameScopeSnapshot ? prev.lastOkMs : null,
           lastAttemptMs: attemptMs,
           failedCount: prev.failedCount + 1,
         }))
@@ -542,7 +543,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       cancelled = true
       if (timer !== null) clearTimeout(timer)
     }
-  }, [store, refreshMs, repoId, keeperLane])
+  }, [store, refreshMs, repoId, keeperLane, requestedScopeKey])
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)
@@ -550,8 +551,9 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   useSignalValue(ideConversationThreadSnapshot)
   useSignalValue(lspDiagnosticSnapshot)
 
-  const events = store.events()
-  const keepers = store.knownKeepers()
+  const snapshotMatchesScope = loadedScopeKey === requestedScopeKey
+  const events = snapshotMatchesScope ? store.events() : EMPTY_ACTIVITY
+  const keepers = snapshotMatchesScope ? store.knownKeepers() : EMPTY_KEEPERS
   const presence = globalPresenceSnapshot.value
   const overlay = cursorOverlaySignal.value
   const threadSnapshot = ideConversationThreadSnapshot.value

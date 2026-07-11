@@ -97,6 +97,14 @@ export function canonicalKeeperName(rawName: string | null | undefined): string 
   return null
 }
 
+// Canonicalize a raw identity candidate for comparison against a primary
+// name. Falls back to the raw value when it does not match any known
+// canonicalization pattern (e.g. an arbitrary hyphenated runtime name),
+// so genuinely distinct identities are never coerced into a false match.
+function canonicalOrSelf(value: string): string {
+  return canonicalKeeperName(value) ?? value
+}
+
 export function runtimeAgentName(
   keeperName: string | null | undefined,
   agentName: string | null | undefined,
@@ -105,7 +113,28 @@ export function runtimeAgentName(
   const agent = trimmedOrNull(agentName)
   if (!agent) return null
   if (!keeper) return agent
-  return agent === keeper ? null : agent
+  return canonicalOrSelf(agent).toLowerCase() === keeper.toLowerCase() ? null : agent
+}
+
+// Second identity handle for a keeper row (e.g. the fleet roster's namespace
+// line): the first raw candidate — keeper_id, then agent_name — whose
+// canonical form differs from the already-displayed primary name. Wrapper
+// forms (`keeper-X-agent`), generated nickname prefixes, and `keeper_id ==
+// name` all canonicalize to the same value as the primary name and collapse
+// to null, so a row never shows the same identity twice.
+export function keeperSecondaryIdentity(
+  keeperId: string | null | undefined,
+  keeperName: string | null | undefined,
+  agentName: string | null | undefined,
+): string | null {
+  const primary = keeperPrimaryName(keeperName, agentName)
+  if (!primary) return null
+
+  for (const candidate of [trimmedOrNull(keeperId), trimmedOrNull(agentName)]) {
+    if (!candidate) continue
+    if (canonicalOrSelf(candidate).toLowerCase() !== primary.toLowerCase()) return candidate
+  }
+  return null
 }
 
 export function keeperPrimaryName(

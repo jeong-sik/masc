@@ -1,7 +1,9 @@
 // MASC Dashboard — Runtime Roster
 // Workspace agents, keeper runtime fibers, configured keepers, and task owners
-// are separate surfaces. This roster may display them together, but labels
-// must not imply they are the same namespace.
+// are separate surfaces internally (see common/keeper-identity.ts:
+// keeperIdentityKeys / keeperPrincipalKey). That distinction is enforced in
+// code and code review, not by disclaimer copy rendered to the operator —
+// this roster never explains its own namespace model in the UI.
 
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
@@ -24,6 +26,7 @@ import {
   keeperIdentityKeys,
   keeperPrincipalKey,
   keeperPrimaryName,
+  keeperSecondaryIdentity,
 } from './common/keeper-identity'
 import { AgentAvatar } from './overview/agent-avatar'
 import { AgentPresence } from './common/agent-presence'
@@ -895,10 +898,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     loadedCount: scopedAgents.length,
     expectedCount: expectedScopedCount,
   })
-  const resultCountLabel =
-    expectedScopedCount > scopedAgents.length
-      ? `항목 ${filtered.length}개 표시 · 예상 ${expectedScopedCount}개`
-      : `항목 ${filtered.length}개 표시 중`
   const liveKeepers = runtimeCounts.live.keepers
   const livePausedKeepers = runtimeCounts.live.pausedKeepers
   const liveOfflineKeepers = runtimeCounts.live.offlineKeepers
@@ -1071,7 +1070,16 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const selectedVitals = selectedRow
     ? fleetRuntimeVitals(selectedRow.keeperRuntime, selectedRow.contextMeta?.detail ?? null)
     : []
-  const selectedKeeperId = selectedRow?.keeperRuntime?.keeper_id?.trim() || null
+  // Same collapse rule as the roster row's namespace line: only echo a
+  // second identity handle when it is genuinely distinct from the name
+  // already shown as selectedRow.displayName.
+  const selectedSecondaryIdentity = selectedRow
+    ? keeperSecondaryIdentity(
+        selectedRow.keeperRuntime?.keeper_id,
+        selectedRow.keeperRuntime?.name,
+        selectedRow.keeperRuntime?.agent_name ?? selectedRow.agent.name,
+      )
+    : null
   const selectedKoreanName = selectedRow?.keeperRuntime?.koreanName?.trim()
     || selectedRow?.agent.koreanName?.trim()
     || null
@@ -1112,11 +1120,17 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const latestTool = row.recentTools[0] ?? (row.toolCallCount != null && row.toolCallCount > 0 ? `${row.toolCallCount} calls` : '—')
     const ctxPct = row.contextMeta?.pct ?? null
     const ctxHot = ctxPct != null && ctxPct >= FLEET_CTX_HOT_PCT
-    // namespace line: keeper id is the closest stable namespace handle the
-    // roster row model carries; agents without a keeper runtime show none.
-    const namespaceLine = row.keeperRuntime?.keeper_id?.trim()
-      || row.keeperRuntime?.agent_name?.trim()
-      || null
+    // namespace line: a second identity handle only when it is genuinely
+    // distinct from the displayed name (row.displayName above). keeper_id
+    // equal to the name, and the keeper-X-agent wrapper of the name, both
+    // canonicalize to the same identity and collapse to null here — a row
+    // never shows the same identity twice.
+    const namespaceLine = keeperSecondaryIdentity(
+      row.keeperRuntime?.keeper_id,
+      row.keeperRuntime?.name,
+      row.keeperRuntime?.agent_name ?? row.agent.name,
+    )
+    const runtimeDisplay = keeperDisplayRuntime(row.keeperRuntime)
 
     const handleRowKey = (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -1185,6 +1199,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         </div>
 
         <div
+          class="fl-runtime ${runtimeDisplay ? '' : 'none'}"
+          title=${runtimeDisplay?.value ?? '런타임 정보 없음'}
+          aria-label=${`런타임 ${runtimeDisplay?.value ?? '없음'}`}
+        >${runtimeDisplay?.value ?? '—'}</div>
+
+        <div
           class="fl-tool ${row.recentTools.length || (row.toolCallCount ?? 0) > 0 ? '' : 'none'}"
           title=${latestTool}
           aria-label=${`최근 도구 ${latestTool}`}
@@ -1216,12 +1236,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <span class="fl-hpill">오프라인 rows <b>${healthOffline}</b></span>
               ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
             </div>
-            <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-              <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">workspace agents ≠ keeper fibers</span>
-              <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">configured keeper ≠ running fiber</span>
-              <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">task owner ≠ live agent</span>
-            </div>
-            <span class="inline-flex w-fit items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
           </div>
 
           ${showExecutionFallbackState
@@ -1262,6 +1276,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <span>Keeper</span>
             <span>운영판정 · 차단 · 단계</span>
             <span>컨텍스트</span>
+            <span>런타임</span>
             <span>최근 도구</span>
             <span class="r">액션</span>
           </div>
@@ -1310,11 +1325,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               </span>
               <div class="min-w-0">
                 <h3 class="fl-as-name m-0 truncate">${selectedRow.displayName}</h3>
-                ${selectedKoreanName || selectedKeeperId ? html`
+                ${selectedKoreanName || selectedSecondaryIdentity ? html`
                   <div class="fl-as-kr">
                     ${selectedKoreanName ?? ''}
-                    ${selectedKoreanName && selectedKeeperId ? ' · ' : ''}
-                    ${selectedKeeperId ? html`<span class="font-mono">${selectedKeeperId}</span>` : null}
+                    ${selectedKoreanName && selectedSecondaryIdentity ? ' · ' : ''}
+                    ${selectedSecondaryIdentity ? html`<span class="font-mono">${selectedSecondaryIdentity}</span>` : null}
                   </div>
                 ` : null}
                 <div class="mt-1.5 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">

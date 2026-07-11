@@ -770,7 +770,7 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('old blocker that should stay out of the roster')
   })
 
-  it('labels workspace agents, keeper fibers, configured keepers, and task owners as separate surfaces', async () => {
+  it('does not render the internal namespace-separation disclaimer strip', async () => {
     agents.value = [
       makeAgent({
         name: 'dashboard',
@@ -794,10 +794,90 @@ describe('AgentRoster live-only cards', () => {
     await flushUi()
 
     const text = container.textContent ?? ''
-    expect(text).toContain('workspace agents ≠ keeper fibers')
-    expect(text).toContain('configured keeper ≠ running fiber')
-    expect(text).toContain('task owner ≠ live agent')
+    // the three developer-notes chips are gone outright ...
+    expect(text).not.toContain('workspace agents ≠ keeper fibers')
+    expect(text).not.toContain('configured keeper ≠ running fiber')
+    expect(text).not.toContain('task owner ≠ live agent')
+    // ... and so is the redundant "항목 N개 표시" count chip (already
+    // covered by the fl-health pills and the fl-foot ticks below).
+    expect(text).not.toMatch(/항목 \d+개 표시/)
+    // the real, data-backed health pills stay.
+    expect(container.querySelector('.fl-health')).not.toBeNull()
     expect(text).toContain('runtime rows')
+  })
+
+  it('shows a single canonical name when keeper_id and the agent_name wrapper both canonicalize to the keeper name', async () => {
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        keeper_id: 'sangsu',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    expect(row.querySelector('.fl-name b')?.textContent).toBe('sangsu')
+    // no second identity line — keeper_id and the wrapper agent_name both
+    // canonicalize to the same name already shown above.
+    expect(row.querySelector('.fl-ns')).toBeNull()
+  })
+
+  it('renders the runtime column in the fleet list row (previously only visible in the aside)', async () => {
+    agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'nick0cave',
+        agent_name: 'keeper-nick0cave-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        runtime_canonical: 'claude',
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    expect(container.querySelector('.fl-rhead')?.textContent).toContain('런타임')
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    expect(row.querySelector('.fl-runtime')?.textContent).toBe('claude')
+  })
+
+  it('renders an explicit dash in the runtime column when no runtime is resolvable, never a silent blank', async () => {
+    agents.value = [makeAgent({ name: 'keeper-albini-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'albini',
+        agent_name: 'keeper-albini-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const runtimeCell = row.querySelector('.fl-runtime') as HTMLElement
+    expect(runtimeCell.textContent).toBe('—')
+    expect(runtimeCell.classList.contains('none')).toBe(true)
   })
 
   it('treats keeper-only rows as first-class runtime rows when agent registry is empty', async () => {

@@ -21,7 +21,7 @@
      Last track = action cell (멈춤/깨움/종료): the 3 text buttons render ~156px,
      so the track must be wide enough or the button group overflows left into the
      context value (fl-ctx-val) on a selected/hovered row. */
-  --fl-cols: minmax(196px, 1.3fr) 184px 140px minmax(108px, 1fr) 160px;
+  --fl-cols: minmax(196px, 1.3fr) 184px 140px 120px minmax(108px, 1fr) 160px;
   --fl-gap: 14px;
 }
 
@@ -146,6 +146,11 @@
 .fl-ctx-val.hot { color: var(--status-bad); }
 .fl-ctx-val.zero { color: var(--text-dim); }
 
+/* runtime cell — which provider (claude/codex/gemini, canonical id) a keeper
+   is on. Was previously only visible in the aside after selecting a row. */
+.fl-runtime { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-runtime.none { color: var(--text-dim); }
+
 /* last tool cell */
 .fl-tool { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fl-tool.none { color: var(--text-dim); }
@@ -254,10 +259,11 @@
 .fl-attn-item[data-sev="bad"] { color: var(--text-bright); }
 
 /* ── responsive: progressively shed columns instead of letting strings collide ── */
-/* mid width — aside still present, but main is tight: drop 최근 도구 first */
+/* mid width — aside still present, but main is tight: drop 최근 도구 first,
+   keep 런타임 (5 tracks remain: Keeper / 운영판정 / 컨텍스트 / 런타임 / 액션). */
 @media (max-width: 1320px) and (min-width: 1101px) {
-  .fl-shell { --fl-cols: minmax(168px, 1.3fr) 168px 132px 160px; }
-  .fl-rhead span:nth-child(4), .fl-row .fl-tool { display: none; }
+  .fl-shell { --fl-cols: minmax(168px, 1.3fr) 168px 132px 110px 160px; }
+  .fl-rhead span:nth-child(5), .fl-row .fl-tool { display: none; }
 }
 
 @media (max-width: 1100px) {
@@ -284,7 +290,7 @@
     border: 0;
   }
   .fl-row { align-items: start; }
-  .fl-row .fl-ctx, .fl-row .fl-tool { display: none; }
+  .fl-row .fl-ctx, .fl-row .fl-tool, .fl-row .fl-runtime { display: none; }
   .fl-row .fl-state, .fl-row .fl-actcell { margin-left: var(--fl-mobile-row-indent); }
   .fl-row .fl-actcell { justify-content: flex-start; flex-wrap: wrap; }
   .fl-top { height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 10px 14px; }

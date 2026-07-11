@@ -1324,7 +1324,7 @@ let start_keeper_loops
              match turn_outcome, delivery_outcome with
              | Some (Delivered { outcome_ref }), Ok () ->
                  Keeper_chat_consumer.Delivered
-                   { outcome_ref = Some outcome_ref }
+                   { outcome_ref }
              | Some (Delivered { outcome_ref }), Error (kind, detail) ->
                  Keeper_chat_consumer.Failed
                    { kind; detail; outcome_ref = Some outcome_ref }

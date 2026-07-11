@@ -7,7 +7,7 @@ let poll_interval_sec =
   | None -> 1.0
 
 type turn_outcome =
-  | Delivered of { outcome_ref : string option }
+  | Delivered of { outcome_ref : string }
   | Failed of
       { kind : Keeper_chat_queue.failure_kind
       ; detail : string
@@ -173,11 +173,21 @@ let retry_pending_finalization state ~keeper_name =
     | `Settled | `Pending -> ());
     true
 
+let canonical_turn_ref_string value =
+  if not (String.is_valid_utf_8 value) then None
+  else
+    match Ids.Turn_ref.of_string value with
+    | Some turn_ref
+      when String.equal (Ids.Turn_ref.to_string turn_ref) value ->
+      Some value
+    | Some _ | None -> None
+
 let canonical_optional_outcome_ref = function
-  | None -> None
+  | None -> None, false
   | Some value ->
-    let value = Safe_ops.sanitize_text_utf8 value |> String.trim in
-    if String.equal value "" then None else Some value
+    (match canonical_turn_ref_string value with
+     | Some value -> Some value, false
+     | None -> None, true)
 
 let canonical_failure_detail detail =
   let detail = Safe_ops.sanitize_text_utf8 detail |> String.trim in
@@ -187,16 +197,35 @@ let canonical_failure_detail detail =
 
 let finalization_of_turn_outcome ~clock = function
   | Delivered { outcome_ref } ->
-      Keeper_chat_queue.Mark_delivered
-        { completed_at = Eio.Time.now clock
-        ; outcome_ref = canonical_optional_outcome_ref outcome_ref
-        }
+      (match canonical_turn_ref_string outcome_ref with
+       | Some outcome_ref ->
+         Keeper_chat_queue.Mark_delivered
+           { completed_at = Eio.Time.now clock
+           ; outcome_ref = Some outcome_ref
+           }
+       | None ->
+         Keeper_chat_queue.Mark_failed
+           { completed_at = Eio.Time.now clock
+           ; kind = Keeper_chat_queue.Internal_error
+           ; detail =
+               "queued turn claimed delivery with an invalid turn_ref"
+           ; outcome_ref = None
+           })
   | Failed { kind; detail; outcome_ref } ->
+      let outcome_ref, invalid_outcome_ref =
+        canonical_optional_outcome_ref outcome_ref
+      in
+      let detail = canonical_failure_detail detail in
+      let detail =
+        if invalid_outcome_ref
+        then detail ^ "; invalid turn_ref omitted from terminal correlation"
+        else detail
+      in
       Keeper_chat_queue.Mark_failed
         { completed_at = Eio.Time.now clock
         ; kind
-        ; detail = canonical_failure_detail detail
-        ; outcome_ref = canonical_optional_outcome_ref outcome_ref
+        ; detail
+        ; outcome_ref
         }
 
 let run_leased_turn state ~sw ~clock ~handle_turn ~keeper_name ~lease_id ~queued =

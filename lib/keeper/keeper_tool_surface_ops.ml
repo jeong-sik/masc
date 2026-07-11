@@ -860,28 +860,14 @@ let handle_keeper_msg_stream_if_free
     else
       (* A connector message already accepted for a live/raw Keeper identity
          must remain queueable even if metadata resolution is temporarily
-         unavailable. This is a failure-path observation only: successfully
-         resolved requests still use the post-lock queue recheck in
-         [run_chat_if_free] as the authoritative admission boundary. *)
-      let slot =
-        Keeper_turn_admission.snapshot_for
+         unavailable. Run the resolution error itself through the same
+         post-lock admission boundary: a held slot, parked waiter, active
+         receipt, or queue read error returns Busy; only an atomically free
+         lane returns the original metadata error. *)
+      Keeper_turn_admission.run_chat_if_free
           ~base_path:ctx.config.base_path
           ~keeper_name:raw_name
-      in
-      let queue_busy =
-        match Keeper_chat_queue.has_active_receipts ~keeper_name:raw_name with
-        | Ok active -> active
-        | Error _ -> true
-      in
-      if Option.is_some slot.snapshot_in_flight
-         || slot.snapshot_waiting > 0
-         || queue_busy
-      then
-        `Busy
-          { Keeper_turn_admission.waiting = slot.snapshot_waiting
-          ; in_flight = slot.snapshot_in_flight
-          }
-      else `Ran (tool_result_error err)
+          (fun () -> tool_result_error err)
   | Ok name ->
     let resolved_args = with_keeper_name args name in
     let event_bus = Keeper_event_bus.get () in

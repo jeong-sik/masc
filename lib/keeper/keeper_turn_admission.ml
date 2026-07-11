@@ -553,6 +553,12 @@ let fleet_health_json ~base_path ~keeper_names =
 module For_testing = struct
   let reset () = Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.reset slots)
 
+  let with_unpublished_turn_lock ~base_path ~keeper_name f =
+    let slot = slot_for ~base_path ~keeper_name in
+    Eio.Mutex.lock slot.turn_mu;
+    Fun.protect ~finally:(fun () -> Eio.Mutex.unlock slot.turn_mu) f
+  ;;
+
   let peek ~base_path ~keeper_name =
     let key = Keeper_registry_types.registry_key ~base_path keeper_name in
     Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key)

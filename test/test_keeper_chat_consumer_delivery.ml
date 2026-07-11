@@ -159,7 +159,7 @@ let test_delivery_finalizes_terminal_receipt () =
       let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~queued_message =
         captured := Some (dispatched_keeper, queued_message);
         Keeper_chat_consumer.Delivered
-          { outcome_ref = Some "turn:delivered-1" }
+          { outcome_ref = "trace-delivered#1" }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -172,7 +172,7 @@ let test_delivery_finalizes_terminal_receipt () =
           (match receipt.state with
            | Keeper_chat_queue.Delivered completion ->
              check "delivery stores the typed outcome reference"
-               (completion.outcome_ref = Some "turn:delivered-1")
+               (completion.outcome_ref = Some "trace-delivered#1")
            | Pending | Inflight _ | Failed _ ->
              check "delivery state is Delivered" false));
       (match !captured with
@@ -206,7 +206,7 @@ let test_explicit_failure_finalizes_failed_receipt () =
         Keeper_chat_consumer.Failed
           { kind = Keeper_chat_queue.Delivery_failed
           ; detail = "connector rejected outbound delivery"
-          ; outcome_ref = Some "delivery:failed-1"
+          ; outcome_ref = Some "trace-delivery-failed#1"
           }
       in
       with_consumer_switch (fun sw ->
@@ -225,7 +225,7 @@ let test_explicit_failure_finalizes_failed_receipt () =
                (String.equal failure.detail
                   "connector rejected outbound delivery");
              check "failure outcome reference is preserved"
-               (failure.outcome_ref = Some "delivery:failed-1")
+               (failure.outcome_ref = Some "trace-delivery-failed#1")
            | Pending | Inflight _ | Delivered _ ->
              check "explicit failure state is Failed" false));
       check_terminal_snapshot ~label:"explicit failure" ~keeper_name
@@ -312,7 +312,7 @@ let test_dispatch_is_concurrent_per_keeper () =
           Eio.Promise.resolve resolve_first_started ();
           Eio.Promise.await release_first;
           Keeper_chat_consumer.Delivered
-            { outcome_ref = Some ("turn:" ^ dispatched_keeper) }
+            { outcome_ref = "trace-" ^ dispatched_keeper ^ "#2" }
         | Some first when String.equal first dispatched_keeper ->
           check "one keeper is not dispatched twice concurrently" false;
           Keeper_chat_consumer.Failed
@@ -324,7 +324,7 @@ let test_dispatch_is_concurrent_per_keeper () =
           second_keeper := Some dispatched_keeper;
           Eio.Promise.resolve resolve_second_started ();
           Keeper_chat_consumer.Delivered
-            { outcome_ref = Some ("turn:" ^ dispatched_keeper) }
+            { outcome_ref = "trace-" ^ dispatched_keeper ^ "#2" }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -379,7 +379,7 @@ let test_finalization_persistence_retry_does_not_redeliver () =
         incr calls;
         Keeper_chat_queue.For_testing.fail_next_persist ();
         Keeper_chat_consumer.Delivered
-          { outcome_ref = Some "turn:finalized-after-retry" }
+          { outcome_ref = "trace-finalized-after-retry#3" }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -392,11 +392,44 @@ let test_finalization_persistence_retry_does_not_redeliver () =
           (match receipt.state with
            | Keeper_chat_queue.Delivered completion ->
              check "retried finalization preserves the outcome reference"
-               (completion.outcome_ref = Some "turn:finalized-after-retry")
+               (completion.outcome_ref = Some "trace-finalized-after-retry#3")
            | Pending | Inflight _ | Failed _ ->
              check "retried finalization reaches Delivered" false));
       check "finalization retry does not re-run handle_turn" (!calls = 1);
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
+        ~receipt_id:accepted.receipt_id)
+
+let test_invalid_delivered_turn_ref_fails_closed () =
+  Printf.printf
+    "Test: Delivered with an invalid turn_ref becomes a terminal failure\n%!";
+  with_env (fun ~base ~clock ->
+    match
+      enqueue_checked ~label:"invalid turn_ref enqueue" ~keeper_name
+        (discord_msg ~content:"invalid delivered ref"
+           ~channel_id:"channel-invalid-ref" ~user_id:"user-invalid-ref"
+           ~timestamp:6.5)
+    with
+    | None -> ()
+    | Some accepted ->
+      let handle_turn ~sw:_ ~keeper_name:_ ~queued_message:_ =
+        Keeper_chat_consumer.Delivered { outcome_ref = "trace#0042" }
+      in
+      with_consumer_switch (fun sw ->
+        Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+        match
+          await_receipt ~clock ~seconds:5.0 ~keeper_name
+            ~receipt_id:accepted.receipt_id ~accept:is_failed
+        with
+        | Some { state = Keeper_chat_queue.Failed failure; _ } ->
+          check "invalid Delivered ref is an internal failure"
+            (failure.kind = Keeper_chat_queue.Internal_error);
+          check "invalid Delivered ref is not persisted as a join key"
+            (failure.outcome_ref = None);
+          check "invalid Delivered ref has diagnostic detail"
+            (String.trim failure.detail <> "")
+        | Some { state = Pending | Inflight _ | Delivered _; _ } | None ->
+          check "invalid Delivered ref never reaches Delivered" false);
+      check_terminal_snapshot ~label:"invalid delivered ref" ~keeper_name
         ~receipt_id:accepted.receipt_id)
 
 let test_invalid_delivery_diagnostic_does_not_block_lane () =
@@ -425,7 +458,7 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
             ; detail = "HTTP response body: \255"
             ; outcome_ref = Some " delivery:\255 "
             })
-        else Keeper_chat_consumer.Delivered { outcome_ref = Some "turn:next" }
+        else Keeper_chat_consumer.Delivered { outcome_ref = "trace-next#4" }
       in
       with_consumer_switch (fun sw ->
         Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
@@ -447,7 +480,9 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
              check "malformed diagnostic is repaired to valid UTF-8"
                (String.is_valid_utf_8 failure.detail);
              check "original failure kind is preserved"
-               (failure.kind = Keeper_chat_queue.Delivery_failed)
+               (failure.kind = Keeper_chat_queue.Delivery_failed);
+             check "invalid failure turn_ref is omitted, never repaired"
+               (failure.outcome_ref = None)
            | Some { state = Pending | Inflight _ | Delivered _; _ } | None ->
              check "malformed diagnostic reaches terminal Failed" false);
           check "next queued turn dispatches after repaired terminal outcome"
@@ -467,6 +502,7 @@ let () =
   test_structured_cancellation_nacks_and_preserves_receipt ();
   test_dispatch_is_concurrent_per_keeper ();
   test_finalization_persistence_retry_does_not_redeliver ();
+  test_invalid_delivered_turn_ref_fails_closed ();
   test_invalid_delivery_diagnostic_does_not_block_lane ();
   if !failures > 0
   then (

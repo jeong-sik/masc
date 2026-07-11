@@ -251,6 +251,12 @@ module For_testing : sig
   val reset : unit -> unit
   (** Drop every slot. Only safe when no turn is in flight. *)
 
+  val with_unpublished_turn_lock :
+    base_path:string -> keeper_name:string -> (unit -> 'a) -> 'a
+  (** Hold the raw turn mutex without publishing [in_flight_info]. Constructs
+      the documented lock-to-observability window for deterministic admission
+      regression tests. *)
+
   val peek
     :  base_path:string
     -> keeper_name:string

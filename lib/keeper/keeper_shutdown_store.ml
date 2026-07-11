@@ -587,27 +587,39 @@ let list_unlocked ~config =
   then Ok []
   else
     try
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.sort String.compare
-      |> List.fold_left
-           (fun result filename ->
-              let* operations = result in
-              if not (Filename.check_suffix filename ".json")
-              then
-                Error
-                  (Decode_error
-                     (Printf.sprintf "unexpected shutdown store entry: %s" filename))
-              else
-                let raw_id = Filename.chop_suffix filename ".json" in
-                let* operation_id =
-                  Operation_id.of_string raw_id
-                  |> Result.map_error (fun e -> Decode_error e)
-                in
-                let* operation = load ~config operation_id in
-                Ok (operation :: operations))
-           (Ok [])
-      |> Result.map List.rev
+      (* Per-record isolation: one malformed entry must not sink the whole
+         inventory, which would block every keeper's autoboot recovery.  Each
+         bad record is quarantined with a WARN so the loss stays observable
+         (not silent), while the healthy records are still returned.  Only a
+         directory-level I/O failure escapes as [Error]. *)
+      let operations =
+        Sys.readdir dir
+        |> Array.to_list
+        |> List.sort String.compare
+        |> List.filter_map (fun filename ->
+             if not (Filename.check_suffix filename ".json")
+             then (
+               Log.Keeper.warn
+                 "shutdown store: skipping non-json entry %s" filename;
+               None)
+             else
+               let raw_id = Filename.chop_suffix filename ".json" in
+               match Operation_id.of_string raw_id with
+               | Error e ->
+                 Log.Keeper.warn
+                   "shutdown store: skipping undecodable operation id %s: %s"
+                   filename e;
+                 None
+               | Ok operation_id ->
+                 (match load ~config operation_id with
+                  | Error e ->
+                    Log.Keeper.warn
+                      "shutdown store: skipping unreadable record %s: %s"
+                      filename (error_to_string e);
+                    None
+                  | Ok operation -> Some operation))
+      in
+      Ok operations
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Io_error (Printexc.to_string exn))

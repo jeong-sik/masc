@@ -915,6 +915,82 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
       | Error error -> fail (Shutdown_store.error_to_string error)
       | Ok _ -> fail "unsupported shutdown schema was accepted")
 
+let test_shutdown_store_list_all_isolates_malformed_records () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-store-isolation" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let persist name =
+        let meta = make_meta name in
+        let operation_id = Shutdown_types.Operation_id.generate () in
+        let lane = Lane.create () in
+        let now = Masc_domain.now_iso () in
+        let operation : Shutdown_types.t =
+          { schema_version = Shutdown_types.schema_version
+          ; revision = 0
+          ; operation_id
+          ; keeper_name = meta.name
+          ; lane_id = Lane.id lane
+          ; trace_id = meta.runtime.trace_id
+          ; generation = meta.runtime.generation
+          ; actor = "tester"
+          ; cleanup_intent = { remove_meta = false; remove_session = false }
+          ; turn_disposition = Shutdown_types.No_inflight_turn
+          ; expected_backlog_version = backlog_version
+          ; owned_task_ids = []
+          ; join_evidence = None
+          ; phase = Shutdown_types.Prepared
+          ; created_at = now
+          ; updated_at = now
+          }
+        in
+        (match Shutdown_store.persist_new ~config operation with
+         | Ok () -> ()
+         | Error error -> fail (Shutdown_store.error_to_string error));
+        meta.name
+      in
+      let name_a = persist "healthy-a" in
+      let name_b = persist "healthy-b" in
+      (* A malformed neighbor (stray non-json and a corrupt .json) must be
+         quarantined without sinking the healthy records — the pre-fix fold
+         collapsed the whole inventory to [Error], blocking every autoboot. *)
+      let records_dir =
+        Filename.dirname
+          (Shutdown_store.path ~config (Shutdown_types.Operation_id.generate ()))
+      in
+      let write path content =
+        let oc = open_out path in
+        output_string oc content;
+        close_out oc
+      in
+      write (Filename.concat records_dir "not-a-record.txt") "garbage";
+      write (Filename.concat records_dir "corrupt.json") "{ not valid json";
+      match Shutdown_store.list_all ~config with
+      | Error error ->
+        fail
+          (Printf.sprintf
+             "list_all must isolate malformed entries, not fail wholesale: %s"
+             (Shutdown_store.error_to_string error))
+      | Ok operations ->
+        let names =
+          List.map (fun (o : Shutdown_types.t) -> o.keeper_name) operations
+        in
+        check int "healthy records survive malformed neighbors" 2
+          (List.length operations);
+        check bool "healthy-a retained" true (List.mem name_a names);
+        check bool "healthy-b retained" true (List.mem name_b names))
+
 let test_keeper_shutdown_prepare_joins_idle_lane () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1774,6 +1850,8 @@ let () =
         test_keeper_lane_cancel_is_lane_local_and_joinable;
       test_case "shutdown store round-trip and identity guard" `Quick
         test_keeper_shutdown_store_round_trip_and_identity_guard;
+      test_case "shutdown store list_all isolates malformed records" `Quick
+        test_shutdown_store_list_all_isolates_malformed_records;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown prepare joins not-started lane" `Quick

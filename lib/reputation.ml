@@ -171,7 +171,7 @@ let count_tasks_from_backlog (config : Workspace.config) ~(agent_name : string)
              Stdlib.incr completed
          | Masc_domain.Todo
          | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
-         | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ());
+         | Masc_domain.Done _ | Masc_domain.Cancelled _ | Masc_domain.OperatorBlocked _ -> ());
   (!claimed, !completed)
 
 (** {1 Board Counting} *)

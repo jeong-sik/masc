@@ -170,7 +170,8 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
              | Masc_domain.Todo
              | Masc_domain.AwaitingVerification _
              | Masc_domain.Done _
-             | Masc_domain.Cancelled _ -> None)
+             | Masc_domain.Cancelled _ -> None
+             | Masc_domain.OperatorBlocked _ -> None)
     in
     match owned_task with
     | Some task_id ->

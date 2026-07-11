@@ -265,6 +265,8 @@ let transition_task_outcome_r
               | Masc_domain.Cancelled _, _ ->
                 " Remediation: task is already cancelled. Use masc_add_task for new work \
                  or masc_tasks to find claimable items."
+              | Masc_domain.OperatorBlocked _, _ ->
+                " Remediation: task is operator-blocked. Operator must unblock before any transition."
               | _ -> ""
             in
             Error
@@ -397,7 +399,8 @@ let transition_task_outcome_r
          | Masc_domain.Claimed _
          | Masc_domain.InProgress _
          | Masc_domain.AwaitingVerification _
-         | Masc_domain.Cancelled _ -> ());
+         | Masc_domain.Cancelled _
+         | Masc_domain.OperatorBlocked _ -> ());;
         (match action, task.task_status with
          | Masc_domain.Release, Masc_domain.Todo ->
 (* Idempotent: already in backlog, nothing to release. *)
@@ -413,7 +416,8 @@ let transition_task_outcome_r
          | Masc_domain.Release, Masc_domain.InProgress _
          | Masc_domain.Release, Masc_domain.AwaitingVerification _
          | Masc_domain.Release, Masc_domain.Done _
-         | Masc_domain.Release, Masc_domain.Cancelled _ -> ());
+         | Masc_domain.Release, Masc_domain.Cancelled _
+         | Masc_domain.Release, Masc_domain.OperatorBlocked _ -> ());
 (* #10719: surface tasks that have crossed oscillation thresholds so dashboards/triage can pick them up before they reach 20+ cycles with zero progress. *)
         (match action with
          | Masc_domain.Release ->
@@ -492,7 +496,8 @@ let transition_task_outcome_r
                     | Masc_domain.Claimed _
                     | Masc_domain.InProgress _
                     | Masc_domain.Done _
-                    | Masc_domain.Cancelled _ -> ())
+                    | Masc_domain.Cancelled _
+                    | Masc_domain.OperatorBlocked _ -> ())
                  | Masc_domain.Claim
                  | Masc_domain.Start
                  | Masc_domain.Done_action
@@ -542,7 +547,8 @@ let transition_task_outcome_r
                  | Masc_domain.Claimed _
                  | Masc_domain.InProgress _
                  | Masc_domain.Done _
-                 | Masc_domain.Cancelled _ -> ())
+                 | Masc_domain.Cancelled _
+                 | Masc_domain.OperatorBlocked _ -> ())
               | Masc_domain.Reject_verification ->
                 (match task.task_status with
                  | Masc_domain.AwaitingVerification { verification_id; _ } ->
@@ -564,7 +570,8 @@ let transition_task_outcome_r
                  | Masc_domain.Claimed _
                  | Masc_domain.InProgress _
                  | Masc_domain.Done _
-                 | Masc_domain.Cancelled _ -> ())
+                 | Masc_domain.Cancelled _
+                 | Masc_domain.OperatorBlocked _ -> ())
               | Masc_domain.Claim
               | Masc_domain.Start
               | Masc_domain.Done_action
@@ -665,7 +672,8 @@ let transition_task_outcome_r
                | Masc_domain.Claimed _
                | Masc_domain.InProgress _
                | Masc_domain.AwaitingVerification _
-               | Masc_domain.Cancelled _ -> `Assoc [ "task_id", `String task_id ]
+               | Masc_domain.Cancelled _
+               | Masc_domain.OperatorBlocked _ -> `Assoc [ "task_id", `String task_id ]
              in
              emit_task_activity
                config
@@ -737,7 +745,8 @@ let transition_task_outcome_r
            | Masc_domain.Claimed _
            | Masc_domain.InProgress _
            | Masc_domain.AwaitingVerification _
-           | Masc_domain.Cancelled _ -> ());
+           | Masc_domain.Cancelled _
+           | Masc_domain.OperatorBlocked _ -> ());
           (match action with
            | Masc_domain.Cancel ->
              Workspace_task_cleanup.run_cancel_hooks config ~agent_name

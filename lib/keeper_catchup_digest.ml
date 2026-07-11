@@ -215,6 +215,7 @@ let task_status_snapshot_fields (status : Masc_domain.task_status) =
     Some assignee, phase, verifier, Some submitted_at, Some verification_id
   | Masc_domain.Done { assignee; _ } -> Some assignee, None, None, None, None
   | Masc_domain.Cancelled { cancelled_by; _ } -> Some cancelled_by, None, None, None, None
+  | Masc_domain.OperatorBlocked { blocked_by; _ } -> Some blocked_by, None, None, None, None
 ;;
 
 let task_snapshot_of_task (task : Masc_domain.task) =

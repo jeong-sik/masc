@@ -145,6 +145,18 @@ let task_status_info_of_task (task : Masc_domain.task) =
         cancelled_at = Some cancelled_at;
         reason;
       }
+  | Masc_domain.OperatorBlocked { blocked_by; blocked_at; reason } ->
+      {
+        status;
+        assignee = None;
+        claimed_at = None;
+        started_at = None;
+        completed_at = None;
+        notes = None;
+        cancelled_by = Some blocked_by;
+        cancelled_at = Some blocked_at;
+        reason = Some reason;
+      }
   | Masc_domain.AwaitingVerification { assignee; submitted_at; _ } ->
       {
         status;

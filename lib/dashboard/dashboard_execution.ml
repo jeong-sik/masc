@@ -513,6 +513,7 @@ let task_updated_at (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Done { completed_at; _ } -> completed_at
   | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Masc_domain.OperatorBlocked { blocked_at; _ } -> blocked_at
   | Masc_domain.InProgress { started_at; _ } -> started_at
   | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
   | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
@@ -523,6 +524,7 @@ let task_completed_at (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Done { completed_at; _ } -> Some completed_at
   | Masc_domain.Cancelled { cancelled_at; _ } -> Some cancelled_at
+  | Masc_domain.OperatorBlocked { blocked_at; _ } -> Some blocked_at
   | Masc_domain.Todo
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _

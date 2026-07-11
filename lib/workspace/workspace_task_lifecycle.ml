@@ -79,6 +79,7 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
        [predecessor_task_id]. *)
     Held_terminal task.task_status
   | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
+  | Masc_domain.OperatorBlocked { blocked_by; _ } -> Held_by_other blocked_by
 ;;
 
 (* RFC-0262: a transition that overrides the assignee guard is permitted when

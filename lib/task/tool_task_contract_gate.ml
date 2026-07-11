@@ -60,6 +60,12 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
            (Printf.sprintf
               "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"
               task_id cancelled_by)))
+    | Masc_domain.OperatorBlocked { blocked_by; _ } ->
+      Some
+        (Masc_domain.Task (Masc_domain.Task_error.InvalidState
+           (Printf.sprintf
+              "task %s is operator-blocked by %s; operator must unblock before any transition"
+              task_id blocked_by)))
     | Masc_domain.AwaitingVerification { assignee; _ } ->
       Some
         (Masc_domain.Task (Masc_domain.Task_error.InvalidState

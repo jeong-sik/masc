@@ -625,6 +625,7 @@ let release_stale_claims config ~ttl_seconds =
       | Masc_domain.AwaitingVerification _
       | Masc_domain.Done _
       | Masc_domain.Cancelled _ -> None
+      | Masc_domain.OperatorBlocked _ -> None
     in
     let older_than_ttl task =
       match status_timestamp task.task_status with

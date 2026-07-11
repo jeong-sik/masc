@@ -189,6 +189,10 @@ val keeper_model_names : t -> string list
     the model schema, so these aliases cannot become duplicate model tools. *)
 val keeper_candidate_names : t -> string list
 
+(** Every name owned by a descriptor, including dispatch-only names. This is
+    for name-integrity checks, never Keeper execution admission. *)
+val registered_names : t -> string list
+
 val public_names_of_descriptor : t -> string list
 val public_names : unit -> string list
 val internal_names : t -> string list

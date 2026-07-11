@@ -19,7 +19,7 @@ type tried_source =
   | Registry_internal_candidate (** S5: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** S6: Keeper_tool_registry.effective_core_tools *)
   | Tool_schema                 (** S7: policy tool-schema inventory name extraction *)
-  | Descriptor_registry         (** S7.5: candidate names projected by
+  | Descriptor_registry         (** S7.5: registered names projected by
                                     Keeper_tool_descriptor.all_descriptors *)
   | System_internal             (** S8: Tool_catalog_surfaces.is_system_internal_hidden —
                                     system-internal tools (masc_gc, masc_reset,
@@ -83,13 +83,12 @@ let resolve name =
       else if
         List.exists
           (fun (d : Keeper_tool_descriptor.t) ->
-             List.mem normalized (Keeper_tool_descriptor.keeper_candidate_names d))
+             List.mem normalized (Keeper_tool_descriptor.registered_names d))
           (Keeper_tool_descriptor.all_descriptors ())
       then
-        (* Only Keeper-candidate descriptor names are admitted here. A
-           dispatch-only descriptor still owns runtime metadata, but must not
-           shadow the later System_internal source or become a Keeper tool by
-           virtue of existing in the descriptor registry. *)
+        (* This resolver validates names embedded in prompt/continuity text; it
+           does not grant Keeper execution. Registered dispatch-only names must
+           therefore remain valid without entering the candidate projection. *)
         Resolved { canonical = normalized; via = Descriptor_registry }
       else if Tool_catalog_surfaces.is_system_internal_hidden normalized then
         (* System-internal tools (masc_gc, masc_reset, masc_cleanup_zombies, …)
@@ -145,7 +144,7 @@ let all_admitting_sources name =
   if
     List.exists
       (fun (d : Keeper_tool_descriptor.t) ->
-        String.equal d.Keeper_tool_descriptor.public_name normalized)
+        List.mem normalized (Keeper_tool_descriptor.registered_names d))
       (Keeper_tool_descriptor.all_descriptors ())
   then sources := Descriptor_registry :: !sources;
   if Tool_catalog_surfaces.is_system_internal_hidden normalized then

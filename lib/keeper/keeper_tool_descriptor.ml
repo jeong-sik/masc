@@ -1518,7 +1518,7 @@ let masc_control_descriptor id name description ~readonly =
     ~handler:Tool_masc_control_dispatch
     ~readonly
     ~inline_safe:false
-    ~maintenance_only:true
+    ~maintenance_only:false
     ()
 ;;
 
@@ -2144,6 +2144,11 @@ let keeper_candidate_names descriptor =
   | (Descriptor_owned | Canonical_registry), Internal_name ->
     [ descriptor.internal_name ]
   | (Descriptor_owned | Canonical_registry), Dispatch_only -> []
+;;
+
+let registered_names descriptor =
+  descriptor.internal_name :: descriptor.public_name :: descriptor.public_aliases
+  |> List.sort_uniq String.compare
 ;;
 
 let model_visible_descriptors () =

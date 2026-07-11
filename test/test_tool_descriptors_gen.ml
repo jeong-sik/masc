@@ -82,6 +82,27 @@ let test_masc_spawn_is_not_generated () =
     (has_schema "masc_spawn" Tool_schemas_misc.schemas)
 ;;
 
+let test_control_schemas_are_generated () =
+  let properties schema =
+    match schema.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc properties) -> properties
+       | _ -> Alcotest.failf "%s has no object properties" schema.name)
+    | _ -> Alcotest.failf "%s has a non-object schema" schema.name
+  in
+  let pause = find_by_name "masc_pause" Tool_descriptors_gen.schemas in
+  let resume = find_by_name "masc_resume" Tool_descriptors_gen.schemas in
+  Alcotest.(check bool)
+    "masc_pause has reason property"
+    true
+    (List.mem_assoc "reason" (properties pause));
+  Alcotest.(check int)
+    "masc_resume has no input properties"
+    0
+    (List.length (properties resume))
+;;
+
 let test_masc_tool_help_name_matches () =
   let gen = find_by_name "masc_tool_help" Tool_descriptors_gen.schemas in
   let hand = find_by_name "masc_tool_help" Tool_schemas_misc.schemas in
@@ -334,6 +355,12 @@ let () =
         ] )
     ; ( "retired tool exclusion"
       , [ Alcotest.test_case "masc_spawn removed" `Quick test_masc_spawn_is_not_generated
+        ] )
+    ; ( "control schema SSOT"
+      , [ Alcotest.test_case
+            "pause and resume are generated"
+            `Quick
+            test_control_schemas_are_generated
         ] )
     ; ( "masc_tool_help field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_tool_help_name_matches

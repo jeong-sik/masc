@@ -3,8 +3,9 @@
     Every descendant lookup is relative to an already-open directory file
     descriptor. Path components are never re-resolved from an absolute string,
     so replacing a managed ancestor with a symlink cannot redirect an active
-    transaction outside its root capability. These calls are blocking and must
-    run in a system thread when invoked from Eio. *)
+    transaction outside its root capability. Filesystem syscalls are dispatched
+    to a system thread when an Eio runtime is active; callbacks continue on the
+    caller's fiber and must not be invoked from a system-thread-only body. *)
 
 type t
 

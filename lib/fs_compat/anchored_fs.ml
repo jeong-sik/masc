@@ -148,6 +148,11 @@ let stat_of_raw (kind, size, device, inode, link_count) =
   { kind = kind_of_int kind; size; device; inode; link_count }
 ;;
 
+let run_blocking f =
+  try Eio_unix.run_in_systhread f with
+  | Effect.Unhandled _ -> f ()
+;;
+
 let combine_close ~operation fd f =
   let outcome =
     try Ok (f ()) with
@@ -155,7 +160,7 @@ let combine_close ~operation fd f =
   in
   let close_outcome =
     try
-      Unix.close fd;
+      run_blocking (fun () -> Unix.close fd);
       Ok ()
     with
     | exn -> Error exn
@@ -171,43 +176,44 @@ let combine_close ~operation fd f =
 ;;
 
 let with_open_root path f =
-  let fd = open_root_fd path in
+  let fd = run_blocking (fun () -> open_root_fd path) in
   combine_close ~operation:"anchored root transaction" fd (fun () -> f fd)
 ;;
 
 let open_lock_file dir ~name ~perm =
-  let name_value = segment_value name in
-  let created, fd =
-    match create_exclusive_fd dir name_value perm with
-    | fd -> true, fd
-    | exception Unix.Unix_error (Unix.EEXIST, _, _) ->
-      false, open_write_fd dir name_value
-  in
-  try
-    let metadata = stat_of_raw (fstat_raw fd) in
-    if metadata.kind <> Regular_file
-    then
-      raise
-        (Unix.Unix_error
-           (Unix.EINVAL, "anchored_lock_file", name_value));
-    if created
-    then (
-      Unix.fsync fd;
-      Unix.fsync dir);
-    { descriptor = fd; metadata }
-  with
-  | exn ->
-    let primary_backtrace = Printexc.get_raw_backtrace () in
-    (match Unix.close fd with
-     | () -> Printexc.raise_with_backtrace exn primary_backtrace
-     | exception close_error ->
-       raise
-         (Descriptor_cleanup_failed
-            { operation = "anchored lock-file acquisition"
-            ; primary = exn
-            ; primary_backtrace
-            ; close_error
-            }))
+  run_blocking (fun () ->
+    let name_value = segment_value name in
+    let created, fd =
+      match create_exclusive_fd dir name_value perm with
+      | fd -> true, fd
+      | exception Unix.Unix_error (Unix.EEXIST, _, _) ->
+        false, open_write_fd dir name_value
+    in
+    try
+      let metadata = stat_of_raw (fstat_raw fd) in
+      if metadata.kind <> Regular_file
+      then
+        raise
+          (Unix.Unix_error
+             (Unix.EINVAL, "anchored_lock_file", name_value));
+      if created
+      then (
+        Unix.fsync fd;
+        Unix.fsync dir);
+      { descriptor = fd; metadata }
+    with
+    | exn ->
+      let primary_backtrace = Printexc.get_raw_backtrace () in
+      (match Unix.close fd with
+       | () -> Printexc.raise_with_backtrace exn primary_backtrace
+       | exception close_error ->
+         raise
+           (Descriptor_cleanup_failed
+              { operation = "anchored lock-file acquisition"
+              ; primary = exn
+              ; primary_backtrace
+              ; close_error
+              })))
 ;;
 
 let lock_file_descriptor file = file.descriptor
@@ -216,16 +222,17 @@ let lock_file_identity file =
   file.metadata.device, file.metadata.inode
 ;;
 
-let close_lock_file file = Unix.close file.descriptor
+let close_lock_file file =
+  run_blocking (fun () -> Unix.close file.descriptor)
 ;;
 
 let with_open_dir parent name f =
-  let fd = open_dir_fd parent (segment_value name) in
+  let fd = run_blocking (fun () -> open_dir_fd parent (segment_value name)) in
   combine_close ~operation:"anchored directory transaction" fd (fun () -> f fd)
 ;;
 
 let with_open_dir_opt parent name f =
-  match open_dir_fd parent (segment_value name) with
+  match run_blocking (fun () -> open_dir_fd parent (segment_value name)) with
   | fd ->
     Some
       (combine_close ~operation:"anchored optional-directory transaction" fd
@@ -233,10 +240,10 @@ let with_open_dir_opt parent name f =
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
 ;;
 
-let fsync fd = Unix.fsync fd
+let fsync fd = run_blocking (fun () -> Unix.fsync fd)
 
 let close_after_primary ~operation fd primary backtrace =
-  match Unix.close fd with
+  match run_blocking (fun () -> Unix.close fd) with
   | () -> Printexc.raise_with_backtrace primary backtrace
   | exception close_error ->
     raise
@@ -274,7 +281,10 @@ let open_ensured_child parent ~name ~perm ~enforce_perm =
 ;;
 
 let with_ensure_dir parent ~name ~perm ~enforce_perm f =
-  let fd = open_ensured_child parent ~name ~perm ~enforce_perm in
+  let fd =
+    run_blocking (fun () ->
+      open_ensured_child parent ~name ~perm ~enforce_perm)
+  in
   combine_close ~operation:"anchored ensured-directory transaction" fd (fun () ->
     f fd)
 ;;
@@ -286,11 +296,11 @@ type ensure_step =
   }
 
 let close_parent_before_descending ~parent ~child =
-  match Unix.close parent with
+  match run_blocking (fun () -> Unix.close parent) with
   | () -> child
   | exception parent_close_error ->
     let primary_backtrace = Printexc.get_raw_backtrace () in
-    (match Unix.close child with
+    (match run_blocking (fun () -> Unix.close child) with
      | () -> raise parent_close_error
      | exception child_close_error ->
        raise
@@ -309,7 +319,10 @@ let with_ensure_path ~root steps f =
         (fun () -> f current)
     | { name; perm; enforce_perm } :: rest ->
       let next =
-        try open_ensured_child current ~name ~perm ~enforce_perm with
+        try
+          run_blocking (fun () ->
+            open_ensured_child current ~name ~perm ~enforce_perm)
+        with
         | exn ->
           close_after_primary
             ~operation:"anchored ensured-path acquisition"
@@ -319,7 +332,7 @@ let with_ensure_path ~root steps f =
       in
       walk (close_parent_before_descending ~parent:current ~child:next) rest
   in
-  walk (open_root_fd root) steps
+  walk (run_blocking (fun () -> open_root_fd root)) steps
 ;;
 
 let with_open_path_opt ~root steps f =
@@ -329,7 +342,9 @@ let with_open_path_opt ~root steps f =
         (combine_close ~operation:"anchored existing-path transaction" current
            (fun () -> f current))
     | name :: rest ->
-      (match open_dir_fd current (segment_value name) with
+      (match
+         run_blocking (fun () -> open_dir_fd current (segment_value name))
+       with
        | next ->
          walk
            (close_parent_before_descending ~parent:current ~child:next)
@@ -344,11 +359,12 @@ let with_open_path_opt ~root steps f =
            exn
            (Printexc.get_raw_backtrace ()))
   in
-  walk (open_root_fd root) steps
+  walk (run_blocking (fun () -> open_root_fd root)) steps
 ;;
 
 let stat dir name =
-  Option.map stat_of_raw (stat_at_raw dir (segment_value name))
+  run_blocking (fun () ->
+    Option.map stat_of_raw (stat_at_raw dir (segment_value name)))
 ;;
 
 let same_identity (left : stat) (right : stat) =
@@ -390,11 +406,11 @@ let read_from_fd ~name fd =
 
 let read_file_opt dir name =
   let name_value = segment_value name in
-  match open_read_fd dir name_value with
+  match run_blocking (fun () -> open_read_fd dir name_value) with
   | fd ->
     Some
       (combine_close ~operation:"anchored read" fd (fun () ->
-         read_from_fd ~name:name_value fd))
+         run_blocking (fun () -> read_from_fd ~name:name_value fd)))
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
 ;;
 
@@ -408,24 +424,26 @@ let read_file dir name =
 
 let fsync_file dir name =
   let name_value = segment_value name in
-  let fd = open_read_fd dir name_value in
+  let fd = run_blocking (fun () -> open_read_fd dir name_value) in
   combine_close ~operation:"anchored file fsync" fd (fun () ->
-    let metadata = Unix.fstat fd in
-    if metadata.Unix.st_kind <> Unix.S_REG
-    then raise (Unix.Unix_error (Unix.EINVAL, "anchored_fsync_file", name_value));
-    Unix.fsync fd;
-    stat_of_unix metadata)
+    run_blocking (fun () ->
+      let metadata = Unix.fstat fd in
+      if metadata.Unix.st_kind <> Unix.S_REG
+      then raise (Unix.Unix_error (Unix.EINVAL, "anchored_fsync_file", name_value));
+      Unix.fsync fd;
+      stat_of_unix metadata))
 ;;
 
 let chmod_file dir name perm =
   let name_value = segment_value name in
-  let fd = open_read_fd dir name_value in
+  let fd = run_blocking (fun () -> open_read_fd dir name_value) in
   combine_close ~operation:"anchored file chmod" fd (fun () ->
-    let metadata = Unix.fstat fd in
-    if metadata.Unix.st_kind <> Unix.S_REG
-    then raise (Unix.Unix_error (Unix.EINVAL, "anchored_chmod_file", name_value));
-    Unix.fchmod fd perm;
-    Unix.fsync fd)
+    run_blocking (fun () ->
+      let metadata = Unix.fstat fd in
+      if metadata.Unix.st_kind <> Unix.S_REG
+      then raise (Unix.Unix_error (Unix.EINVAL, "anchored_chmod_file", name_value));
+      Unix.fchmod fd perm;
+      Unix.fsync fd))
 ;;
 
 let write_all fd content =
@@ -474,7 +492,7 @@ let cleanup_temp dir name =
   | exn -> Some exn
 ;;
 
-let atomic_replace dir ~name ~perm content =
+let atomic_replace_blocking dir ~name ~perm content =
   let temp_result =
     try Ok (create_temporary dir) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -556,7 +574,11 @@ let atomic_replace dir ~name ~perm content =
            | exception cause -> Error (Committed_not_durable cause))))
 ;;
 
-let unlink_if_exists dir name =
+let atomic_replace dir ~name ~perm content =
+  run_blocking (fun () -> atomic_replace_blocking dir ~name ~perm content)
+;;
+
+let unlink_if_exists_blocking dir name =
   match unlink_at dir (segment_value name) with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok `Missing
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -568,7 +590,11 @@ let unlink_if_exists dir name =
      | exception cause -> Error (Committed_not_durable cause))
 ;;
 
-let rename ~src_dir ~src ~dst_dir ~dst =
+let unlink_if_exists dir name =
+  run_blocking (fun () -> unlink_if_exists_blocking dir name)
+;;
+
+let rename_blocking ~src_dir ~src ~dst_dir ~dst =
   match
     rename_at
       src_dir
@@ -588,7 +614,11 @@ let rename ~src_dir ~src ~dst_dir ~dst =
      | cause -> Error (Committed_not_durable cause))
 ;;
 
-let link_no_replace ~src_dir ~src ~dst_dir ~dst =
+let rename ~src_dir ~src ~dst_dir ~dst =
+  run_blocking (fun () -> rename_blocking ~src_dir ~src ~dst_dir ~dst)
+;;
+
+let link_no_replace_blocking ~src_dir ~src ~dst_dir ~dst =
   match
     link_at
       src_dir
@@ -603,6 +633,10 @@ let link_no_replace ~src_dir ~src ~dst_dir ~dst =
     (match fsync dst_dir with
      | () -> Ok ()
      | exception cause -> Error (Committed_not_durable cause))
+;;
+
+let link_no_replace ~src_dir ~src ~dst_dir ~dst =
+  run_blocking (fun () -> link_no_replace_blocking ~src_dir ~src ~dst_dir ~dst)
 ;;
 
 let combine_closedir handle f =
@@ -631,7 +665,7 @@ let combine_closedir handle f =
          })
 ;;
 
-let read_dir dir =
+let read_dir_blocking dir =
   let duplicate = Unix.dup ~cloexec:true dir in
   let handle =
     try fdopendir duplicate with
@@ -675,3 +709,6 @@ let read_dir dir =
           acc
     in
     loop [])
+;;
+
+let read_dir dir = run_blocking (fun () -> read_dir_blocking dir)

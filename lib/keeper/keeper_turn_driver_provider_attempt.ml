@@ -415,10 +415,12 @@ let network_error_kind_is_terminal
 
 let sdk_error_is_terminal_provider_runtime_failure
     (err : Agent_sdk.Error.sdk_error) : bool =
-  let direct_typed_network =
+  let direct_typed_terminal =
     match err with
-    | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
-    | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) ->
+    | Agent_sdk.Error.Api
+        (Llm_provider.Retry.AuthError _ | Llm_provider.Retry.NotFound _)
+    | Agent_sdk.Error.Provider
+        (Llm_provider.Error.AuthError _ | Llm_provider.Error.NotFound _) ->
         true
     | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError { kind; _ }) ->
         network_error_kind_is_terminal kind
@@ -440,7 +442,7 @@ let sdk_error_is_terminal_provider_runtime_failure
         message_looks_like_terminal_provider_runtime_failure message
     | _ -> false
   in
-  direct_typed_network
+  direct_typed_terminal
   || direct_api_message
   || message_looks_like_terminal_provider_runtime_failure
        (Agent_sdk.Error.to_string err)

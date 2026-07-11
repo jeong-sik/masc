@@ -34,8 +34,21 @@ import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
+import { Checkbox } from './common/checkbox'
+import { ActionButton } from './common/button'
 import { logDisplayKind } from './log-classification'
 import { tweaksDensity, type Density } from './tweaks-panel'
+import {
+  NOTIFY_EVENT_KINDS,
+  NOTIFY_EVENT_LABELS,
+  notificationDeliveryError,
+  notificationPermission,
+  notifyRules,
+  refreshNotificationPermission,
+  requestNotificationPermission,
+  setNotifyRuleEnabled,
+  type NotifyEventKind,
+} from '../notifications'
 import type { ComponentChildren } from 'preact'
 import { errorToString } from '../lib/format-string'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
@@ -178,10 +191,10 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
   {
     id: 'settings-notify-routing',
     section: 'notify',
-    label: 'Notification routing',
-    kind: 'unsupported',
-    source: 'no dashboard writer exposed',
-    action: 'render read-only unsupported state',
+    label: 'Browser notification delivery',
+    kind: 'browser-local',
+    source: 'Notification permission + dashboard:notify:rules-v1 localStorage',
+    action: 'browser-local writer; delivers on typed SSE events the operator opts into',
   },
   {
     id: 'settings-prompts',
@@ -734,6 +747,70 @@ function ThresholdTruthRow({
   `
 }
 
+// notify-permission / notify-rule-toggle — browser-local writer for
+// masc issue #54's browser notification path. notificationPermission and
+// notifyRules are @preact/signals values owned by ../notifications; reading
+// `.value` here subscribes this render the same way `tweaksDensity.value`
+// does above for display/density.
+function NotifyPermissionRow() {
+  const permission = notificationPermission.value
+  const deliveryError = notificationDeliveryError.value
+  const handleEnable = () => { void requestNotificationPermission() }
+  useEffect(() => {
+    const refresh = () => { refreshNotificationPermission() }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [])
+  return html`
+    <${SetRow} label="Browser notifications" hint="This browser's Notification permission — requested only when you click Enable">
+      <div class="set-truth-value" data-testid="notify-permission-state">
+        <span class="mono" data-testid="notify-permission-value">${permission}</span>
+        ${permission === 'default'
+          ? html`<${ActionButton} variant="primary" size="sm" testId="notify-permission-request" onClick=${handleEnable}>Enable notifications<//>`
+          : null}
+        ${permission === 'denied'
+          ? html`<span class="set-truth-source">Blocked — re-enable from this browser's site permissions for this page.</span>`
+          : null}
+        ${permission === 'unsupported'
+          ? html`<span class="set-truth-source">This browser has no Notification API.</span>`
+          : null}
+        ${permission === 'granted'
+          ? html`<span class="set-truth-source">Enabled</span>`
+          : null}
+        ${deliveryError
+          ? html`<span class="set-truth-source text-[var(--color-status-danger)]" data-testid="notify-delivery-error">${deliveryError}</span>`
+          : null}
+      </div>
+    <//>
+  `
+}
+
+function NotifyEventToggleRow({ kind }: { kind: NotifyEventKind }) {
+  const enabled = notifyRules.value[kind] ?? true
+  const label = NOTIFY_EVENT_LABELS[kind]
+  return html`
+    <${SetRow} label=${label} hint=${kind}>
+      <div class="set-truth-value" data-testid=${`notify-rule-row-${kind}`}>
+        <${Checkbox}
+          checked=${enabled}
+          ariaLabel=${`Notify on ${label}`}
+          testId=${`notify-rule-toggle-${kind}`}
+          onChange=${(next: boolean) => setNotifyRuleEnabled(kind, next)}
+        />
+        <span class="set-truth-source">${enabled ? 'notify' : 'muted'}</span>
+      </div>
+    <//>
+  `
+}
+
 function PathTruthRow({
   label,
   item,
@@ -1221,7 +1298,6 @@ export function SettingsSurface() {
   const ctxHandoffEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT')
   const runtimeWarningEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO')
   const signalStaleEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_SIGNAL_STALE_SEC')
-  const alertDedupEntry = configEntry(dashboardConfig, 'MASC_ALERT_DEDUP_WINDOW_SEC')
 
   return html`
     <main class="v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary" data-screen-label="설정" data-testid="settings-surface">
@@ -1640,7 +1716,7 @@ export function SettingsSurface() {
 
             ${sec === 'notify' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                알림 임계값은 현재 서버 config projection에서 읽습니다. 이 화면은 아직 알림 라우팅 writer를 노출하지 않으므로 브라우저-only 토글을 만들지 않습니다.
+                알림 임계값은 서버 config projection에서 읽는 실측값입니다. 브라우저 알림 전달 규칙(아래)은 이 브라우저에만 저장되며 서버 설정을 그림자화하지 않습니다.
               </div>
               ${dashboardConfigStatus === 'loading'
                 ? html`<div class="set-hint" data-testid="notify-config-loading">알림 임계값을 불러오는 중...</div>`
@@ -1669,15 +1745,11 @@ export function SettingsSurface() {
                         value=${formatThresholdPercent(configEntryDisplayValue(runtimeWarningEntry))}
                       />
                       <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
-                      <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
-                      <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
-                        <div class="set-truth-value" data-testid="notify-routing-readonly">
-                          <span class="mono">read-only</span>
-                          <span class="set-truth-source">no writer</span>
-                        </div>
-                      <//>
                     </div>
                   `}
+              <div class="set-sub-h">Browser notification delivery</div>
+              <${NotifyPermissionRow} />
+              ${NOTIFY_EVENT_KINDS.map(kind => html`<${NotifyEventToggleRow} key=${kind} kind=${kind} />`)}
             `}
 
             ${sec === 'display' && html`

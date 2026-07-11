@@ -175,7 +175,7 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 
 ### 3.4 Keeper (Env_config_keeper)
 
-Keeper 부트스트랩, 메트릭 로테이션, 알림 팬아웃, Supervisor 설정.
+Keeper 부트스트랩, 메트릭 로테이션, Supervisor 설정.
 
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
@@ -184,12 +184,6 @@ Keeper 부트스트랩, 메트릭 로테이션, 알림 팬아웃, Supervisor 설
 | `MASC_KEEPER_BOOTSTRAP_MAX_SCAN` | int | 10000 | 최대 스캔 파일 수 |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | int | 10485760 | 메트릭 파일 로테이션 크기 (10MB) |
 | `MASC_KEEPER_METRICS_MAX_ROTATED` | int | 1 | 보관할 로테이션 파일 수 |
-| `MASC_KEEPER_ALERT_ENABLED` | bool | true | 알림 마스터 스위치 |
-| `MASC_KEEPER_ALERT_MIN_SCORE` | float | 0.70 | 알림 최소 점수 |
-| `MASC_KEEPER_ALERT_BOARD_ENABLED` | bool | true | Board 팬아웃 |
-| `MASC_KEEPER_ALERT_SLACK_ENABLED` | bool | true | Slack 팬아웃 |
-| `MASC_KEEPER_ALERT_GITHUB_ENABLED` | bool | false | GitHub Issue 팬아웃 |
-| `MASC_KEEPER_ALERT_GITHUB_MIN_SCORE` | float | 0.85 | GitHub 최소 점수 |
 | `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | int | 5 | 최대 재시작 시도 |
 | `MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S` | float | 10.0 | 지수 백오프 기본 지연 |
 | `MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S` | float | 300.0 | 백오프 상한 |

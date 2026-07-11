@@ -36,28 +36,6 @@ module KeeperWireCapture : sig
   val max_bytes : unit -> int
 end
 
-(** {1 Keeper interesting-alert fanout} *)
-
-module KeeperAlert : sig
-  val enabled : bool
-  val min_score : float
-  val max_body_chars : int
-  val max_retries : int
-  val retry_base_delay_ms : int
-  val board_enabled : bool
-  val board_author : string
-  val board_hearth : string
-  val board_visibility : string
-  val slack_enabled : bool
-  val slack_webhook_url : string
-  val slack_dm_enabled : bool
-  val slack_dm_user_id : string
-  val github_enabled : bool
-  val github_repo : string
-  val github_label : string
-  val github_min_score : float
-end
-
 (** {1 Keeper supervisor} *)
 
 module KeeperSupervisor : sig
@@ -187,12 +165,6 @@ end
 module KeeperReducer : sig
   val cap_message_tokens : int
   val cap_message_keep_recent : int
-end
-
-(** {1 Alert dedup} *)
-
-module AlertDedup : sig
-  val window_sec : float
 end
 
 (** {1 Work-as-Heartbeat (Phase 1)} *)

@@ -1167,3 +1167,108 @@ spots and unique insights, and prefer the most complete resolution. \
 Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 timeout_s = 300.0
+
+# ── Staged-JoJ-capable preset (RFC-0283 staged_judge_of_judges) ──────────────
+# staged_judge_of_judges는 judge 수가 [fusion].staged_judge_group_size(=3)의
+# 정확한 배수이면서 group_size*2(=6) 이상이어야 한다 (fusion_policy.staged_judge_groups).
+# 지금까지 충족 preset이 0이라 topology가 도구 스키마에 노출되고도 모든 호출이
+# config 에러로 fail-closed되는 죽은 옵션이었다. council은 6개 lens 심판을
+# 3개씩 2 stage로 나눈다: stage 1 = evidence/coverage/risk, stage 2 =
+# feasibility/simplicity/adversarial. 각 stage meta가 그룹 종합을 만들고 최종
+# meta judge(judge=)가 stage 종합들을 재조정한다. label이 정체성을 주므로
+# 같은 모델이 다른 lens로 반복 등장해도 Duplicate_judge가 아니다 (quorum 주석과
+# 동일 계약). judge/meta 경로는 provider-native structured output을 요구하므로
+# 심판 런타임은 전부 supports-structured-output=true 선언 모델만 쓴다.
+# 키퍼 사용: masc_fusion preset="council" topology="staged_judge_of_judges"
+# (judge_of_judges topology도 동일 preset으로 사용 가능 — 6 lens 병렬 후 meta).
+[fusion.presets.council]
+panel = [
+  "ollama_cloud.ollama-cloud-devstral-2-123b",
+  "ollama_cloud.ollama-cloud-devstral-small-2-24b",
+  "ollama_cloud.ollama-cloud-ministral-3-14b",
+]
+panel_system_prompt = """
+You are an expert panelist. Answer the user's question directly and concisely \
+with your best independent analysis. Do not defer to other models; give your \
+own view.
+"""
+judge = "ollama_cloud.ollama-cloud-ministral-3-14b"
+judge_system_prompt = """
+You are the meta-judge. You are given stage syntheses, each produced by a group \
+of judges evaluating the same panel of model answers through different lenses. \
+Reconcile them: where the stages agree, state the consensus; where they diverge, \
+adjudicate with reasons; surface any blind spot that a single stage missed. \
+Produce one resolved answer. Respond with ONLY the requested JSON object, no \
+prose and no code fences.
+"""
+panel_timeout_s = 300.0
+judge_timeout_s = 300.0
+meta_timeout_s = 300.0
+web_tools = false
+max_tool_calls_per_panel = 0
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-devstral-2-123b"
+label = "evidence"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through an EVIDENCE lens: weigh each claim by how well it is supported, flag \
+unsupported assertions, and prefer conclusions grounded in verifiable reasoning. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+timeout_s = 300.0
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
+label = "coverage"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a COVERAGE lens: map what each answer addresses and omits, surface blind \
+spots and unique insights, and prefer the most complete resolution. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+timeout_s = 300.0
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-ministral-3-14b"
+label = "risk"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a RISK lens: identify failure modes, hidden assumptions, and worst-case \
+consequences each answer implies, and prefer the resolution that degrades most \
+gracefully. Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+timeout_s = 300.0
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-devstral-2-123b"
+label = "feasibility"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a FEASIBILITY lens: judge how implementable each proposal is with the \
+stated constraints and resources, and prefer the most actionable resolution. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+timeout_s = 300.0
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
+label = "simplicity"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a SIMPLICITY lens: prefer the resolution with the fewest moving parts \
+that still answers the question fully, and flag accidental complexity. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+timeout_s = 300.0
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-ministral-3-14b"
+label = "adversarial"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through an ADVERSARIAL lens: actively try to refute each answer's key claims, \
+keep only what survives refutation, and prefer the most defensible resolution. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+timeout_s = 300.0

@@ -59,6 +59,45 @@ let test_with_lock_inside_eio () =
   check int "single call" 1 !calls;
   check bool "lock table tracked" true (File_lock_eio.lock_count () >= 1)
 
+let test_descriptor_lock_identity_ignores_path_alias () =
+  with_temp_path @@ fun path ->
+  Unix.mkdir path 0o700;
+  let lock_path = Filename.concat path "state.lock" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_if_exists lock_path)
+    (fun () ->
+      let alias = Filename.concat path Filename.current_dir_name in
+      let module Dir = Fs_compat.Anchored_dir in
+      let segment =
+        match Dir.Segment.of_string "state.lock" with
+        | Ok segment -> segment
+        | Error error -> Alcotest.fail (Dir.Segment.error_to_string error)
+      in
+      Dir.with_open_root path @@ fun first ->
+      Dir.with_open_root alias @@ fun second ->
+      let first_identity = Dir.identity first in
+      let second_identity = Dir.identity second in
+      let key (identity : Dir.directory_identity) =
+        File_lock_eio.Key.directory_entry
+          ~directory_device:identity.device
+          ~directory_inode:identity.inode
+          ~entry:(Dir.Segment.to_string segment)
+      in
+      let first_key = key first_identity in
+      let second_key = key second_identity in
+      check bool
+        "directory aliases share one typed lock key"
+        true
+        (File_lock_eio.Key.equal first_key second_key);
+      let calls = ref 0 in
+      File_lock_eio.with_lock_file
+        ~key:first_key
+        ~path:lock_path
+        ~with_file:(fun callback ->
+          Dir.with_lock_file first ~name:segment ~perm:0o600 callback)
+        (fun () -> incr calls);
+      check int "descriptor lock body called once" 1 !calls)
+
 let () =
   run "file_lock_eio"
     [
@@ -68,5 +107,9 @@ let () =
           test_case "acquire_flock_retry works without Eio context" `Quick
             test_acquire_flock_retry_without_eio;
           test_case "works inside Eio context" `Quick test_with_lock_inside_eio;
+          test_case
+            "descriptor identity ignores path aliases"
+            `Quick
+            test_descriptor_lock_identity_ignores_path_alias;
         ] );
     ]

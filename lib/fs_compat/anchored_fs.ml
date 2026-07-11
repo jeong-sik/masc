@@ -44,6 +44,11 @@ type stat =
   ; link_count : int64
   }
 
+type directory_identity =
+  { device : int64
+  ; inode : int64
+  }
+
 type mutation_error =
   | Not_committed of
       { cause : exn
@@ -64,6 +69,12 @@ external open_read_fd
   -> string
   -> Unix.file_descr
   = "masc_anchored_open_read"
+
+external open_write_fd
+  :  Unix.file_descr
+  -> string
+  -> Unix.file_descr
+  = "masc_anchored_open_write"
 
 external create_exclusive_fd
   :  Unix.file_descr
@@ -142,6 +153,37 @@ let combine_close ~operation fd f =
 let with_open_root path f =
   let fd = open_root_fd path in
   combine_close ~operation:"anchored root transaction" fd (fun () -> f fd)
+;;
+
+let identity fd =
+  let metadata = Unix.fstat fd in
+  if metadata.Unix.st_kind <> Unix.S_DIR
+  then raise (Unix.Unix_error (Unix.ENOTDIR, "anchored_identity", ""));
+  { device = Int64.of_int metadata.Unix.st_dev
+  ; inode = Int64.of_int metadata.Unix.st_ino
+  }
+;;
+
+let with_lock_file dir ~name ~perm f =
+  let name_value = segment_value name in
+  let created, fd =
+    match create_exclusive_fd dir name_value perm with
+    | fd -> true, fd
+    | exception Unix.Unix_error (Unix.EEXIST, _, _) ->
+      false, open_write_fd dir name_value
+  in
+  combine_close ~operation:"anchored lock-file transaction" fd (fun () ->
+    let metadata = Unix.fstat fd in
+    if metadata.Unix.st_kind <> Unix.S_REG
+    then
+      raise
+        (Unix.Unix_error
+           (Unix.EINVAL, "anchored_lock_file", name_value));
+    if created
+    then (
+      Unix.fsync fd;
+      Unix.fsync dir);
+    f fd)
 ;;
 
 let with_open_dir parent name f =
@@ -285,7 +327,7 @@ let stat dir name =
     (stat_at_raw dir (segment_value name))
 ;;
 
-let same_identity left right =
+let same_identity (left : stat) (right : stat) =
   Int64.equal left.device right.device && Int64.equal left.inode right.inode
 ;;
 

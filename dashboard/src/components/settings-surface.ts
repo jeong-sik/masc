@@ -893,7 +893,7 @@ function NotifyEventToggleRow({ kind }: { kind: NotifyEventKind }) {
   const label = NOTIFY_EVENT_LABELS[kind]
   return html`
     <${SetRow} label=${label} hint=${kind}>
-      <div class="set-truth-value" data-testid=${`notify-rule-row-${kind}`}>
+      <label class="set-truth-value v2-mobile-operator-target" data-testid=${`notify-rule-row-${kind}`}>
         <${Checkbox}
           checked=${enabled}
           ariaLabel=${`Notify on ${label}`}
@@ -901,7 +901,7 @@ function NotifyEventToggleRow({ kind }: { kind: NotifyEventKind }) {
           onChange=${(next: boolean) => setNotifyRuleEnabled(kind, next)}
         />
         <span class="set-truth-source">${enabled ? 'notify' : 'muted'}</span>
-      </div>
+      </label>
     <//>
   `
 }

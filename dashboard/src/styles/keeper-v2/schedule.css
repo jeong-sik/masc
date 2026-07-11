@@ -184,8 +184,8 @@
   .sch-surf summary,
   .sch-surf input,
   .sch-surf select {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
   }
 }
 

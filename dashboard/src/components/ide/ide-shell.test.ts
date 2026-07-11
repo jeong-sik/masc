@@ -1204,13 +1204,15 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     const treeButton = container.querySelector<HTMLButtonElement>('[data-testid="ide-tree-toggle"]')
-    expect(treeButton?.getAttribute('aria-pressed')).toBe('false')
+    expect(treeButton?.getAttribute('aria-expanded')).toBe('true')
+    expect(treeButton?.getAttribute('aria-controls')).toBe('ide-file-tree')
     expect(container.querySelector('.ide-plane-tree')).not.toBeNull()
 
     fireEvent.click(treeButton!)
     expect(route.value.params.tree).toBe('hidden')
     expect(container.querySelector('.ide-plane-shell')?.getAttribute('data-tree-collapsed')).toBe('true')
     expect(container.querySelector('.ide-plane-tree')).toBeNull()
+    expect(container.querySelector('[data-testid="ide-tree-toggle"]')?.getAttribute('aria-expanded')).toBe('false')
 
     fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="ide-tree-toggle"]')!)
     expect(route.value.params.tree).toBeUndefined()
@@ -1236,6 +1238,19 @@ describe('IdeShell', () => {
       expect(container.querySelector('.ide-plane-shell')?.getAttribute('data-mobile-viewport')).toBe('true')
       expect(container.querySelector('[data-testid="ide-right-rail"]')).toBeNull()
       expect(container.querySelector('.ide-activity-panel')).toBeNull()
+      const treeButton = container.querySelector<HTMLButtonElement>('[data-testid="ide-tree-toggle"]')
+      expect(treeButton?.getAttribute('aria-expanded')).toBe('false')
+      expect(container.querySelector('[data-testid="ide-file-tree"]')).toBeNull()
+
+      fireEvent.click(treeButton!)
+      expect(route.value.params.tree).toBe('open')
+      expect(container.querySelector('.ide-plane-shell')?.getAttribute('data-tree-collapsed')).toBe('false')
+      expect(container.querySelector('[data-testid="ide-file-tree"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="ide-tree-toggle"]')?.getAttribute('aria-expanded')).toBe('true')
+
+      fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="ide-tree-toggle"]')!)
+      expect(route.value.params.tree).toBeUndefined()
+      expect(container.querySelector('[data-testid="ide-file-tree"]')).toBeNull()
       expect(vi.mocked(fetch).mock.calls.some(([input]) =>
         String(input).includes('/api/v1/activity/events'),
       )).toBe(false)

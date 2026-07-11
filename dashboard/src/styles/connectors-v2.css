@@ -1103,8 +1103,8 @@
   .v2-connectors-surface summary,
   .v2-connectors-surface input,
   .v2-connectors-surface select {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
   }
 
   .v2-connectors-surface .cn-runtime-paths > span {

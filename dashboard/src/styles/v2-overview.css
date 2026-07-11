@@ -190,8 +190,8 @@
 @media (max-width: 640px) {
   .v2-overview-surface button,
   .v2-overview-surface summary {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
   }
 
   .v2-overview-surface.ov {

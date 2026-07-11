@@ -325,7 +325,7 @@ function BoardSummary() {
       <${ActionButton}
         variant="ghost"
         size="sm"
-        class="v2-workspace-action ${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
+        class="v2-workspace-action bd-summary-action ${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
         onClick=${() => navigateBoard({ focus: 'curation' })}
         ariaLabel="보드 큐레이션 열기"
       >
@@ -337,7 +337,7 @@ function BoardSummary() {
       <${ActionButton}
         variant="ghost"
         size="sm"
-        class="v2-workspace-action !px-2"
+        class="v2-workspace-action bd-summary-action !px-2"
         onClick=${() => navigateBoard({ focus: 'karma' })}
         ariaLabel="보드 카르마 열기"
       >
@@ -447,7 +447,7 @@ function PostCard({ post }: { post: BoardPost }) {
       <div class="bd-post-h">
         <${BdAuthor} label=${authorSigilLabel} />
         <a
-          class="who"
+          class="who bd-author-action"
           href=${`#monitoring/agents/${encodeURIComponent(post.author_identity?.raw ?? post.author)}`}
           title=${authorTitle}
           onClick=${(e: Event) => {
@@ -468,7 +468,7 @@ function PostCard({ post }: { post: BoardPost }) {
         ` : null}
         ${boardHearthFilter.value === '' && post.hearth ? html`<span class="bd-badge">${post.hearth}</span>` : null}
         <span class="ts"><${TimeAgo} timestamp=${post.created_at} /></span>
-        <label class="bd-post-select-target" onClick=${(e: Event) => e.stopPropagation()}>
+        <label class="bd-post-select-target v2-mobile-operator-target" onClick=${(e: Event) => e.stopPropagation()}>
           <${Checkbox}
             ariaLabel=${`게시글 선택: ${post.id}`}
             class="!w-4 !h-4"

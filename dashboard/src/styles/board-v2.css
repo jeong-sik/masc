@@ -916,15 +916,16 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
+    width: var(--mobile-touch-target-min);
+    height: var(--mobile-touch-target-min);
     margin-left: auto;
     cursor: pointer;
+    touch-action: manipulation;
   }
 
   .v2-board-surface .bd-feed-head input,
   .v2-board-surface .bd-feed-head select {
-    min-height: 40px;
+    min-height: var(--mobile-touch-target-min);
   }
 
   .v2-board-surface .bd-post-body :not(pre) > code {
@@ -959,17 +960,38 @@
   .v2-board-surface .bd-mobile-queue,
   .v2-board-surface .bd-react,
   .v2-board-surface .bd-category-pagination button {
-    min-height: 40px;
+    min-height: var(--mobile-touch-target-min);
   }
 
   .v2-board-surface .bd-react,
   .v2-board-surface .bd-post-foot button[aria-label] {
-    min-width: 40px;
+    min-width: var(--mobile-touch-target-min);
   }
 
   .board-reaction-bar button {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
+
+  .bd-share-action,
+  .bd-meta-summary,
+  .bd-author-action,
+  .bd-comment-filter,
+  .board-comment .v2-workspace-action {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
+
+  .v2-board-surface .bd-summary .bd-summary-action,
+  .v2-workspace-surface .bd-summary .bd-summary-action {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
+
+  .bd-meta-summary,
+  .bd-author-action {
+    display: inline-flex;
+    align-items: center;
   }
 }
 
@@ -1031,7 +1053,7 @@
   .v2-board-surface .bd-composer-mobile-toggle {
     flex: none;
     min-width: 58px;
-    min-height: 40px;
+    min-height: var(--mobile-touch-target-min);
     padding: 6px 10px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--volt-dim);

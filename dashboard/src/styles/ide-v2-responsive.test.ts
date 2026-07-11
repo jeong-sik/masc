@@ -54,9 +54,16 @@ describe('keeper-v2 IDE responsive contract', () => {
       .toBe('block')
   })
 
-  it('hides controls for panes that mobile layout cannot render', () => {
-    expect(declarations(`${MOBILE_SHELL} .ide-v2-tree-toggle`).display).toBe('none')
+  it('keeps the mobile file tree reachable while hiding the unavailable polling rail', () => {
+    expect(declarations(`${MOBILE_SHELL} .ide-v2-tree-toggle`).display).toBe('inline-flex')
     expect(declarations(`${MOBILE_SHELL} .ide-v2-rail-toggle`).display).toBe('none')
+    const drawer = declarations(`${MOBILE_SHELL} .ide-v2-body.ide-plane-grid .ide-plane-tree`)
+    expect(drawer.display).toBe('flex')
+    expect(drawer.position).toBe('absolute')
+    expect(drawer.width).toBe('min(86vw, 340px)')
+    expect(drawer['z-index']).toBe('var(--z-overlay)')
+    expect(declarations(`${MOBILE_SHELL} .ide-v2-tree .ide-explorer-row`)['min-height'])
+      .toBe('var(--mobile-touch-target-min)')
   })
 
   it('keeps the advanced toolbar popover inside the mobile viewport', () => {

@@ -766,6 +766,9 @@ describe('BoardSurface Component', () => {
     expect(screen.getByTestId('bd-context-infer-post-share')).toHaveAttribute('aria-label', '맥락 추론 요청: post-share')
 
     const xShare = screen.getByTestId('bd-share-x-post-share') as HTMLAnchorElement
+    expect(xShare).toHaveClass('bd-share-x')
+    expect(xShare).toHaveClass('bd-share-action')
+    expect(screen.getByTestId('bd-share-link-post-share')).toHaveClass('bd-share-action')
     expect(xShare).toHaveAttribute('target', '_blank')
     expect(xShare).toHaveAttribute('rel', expect.stringContaining('noopener'))
     expect(xShare.href).toContain('https://twitter.com/intent/tweet?')

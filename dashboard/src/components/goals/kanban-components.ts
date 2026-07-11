@@ -251,7 +251,7 @@ function KanbanCard({ task }: { task: Task }) {
           href=${link.href}
           target="_blank"
           rel="noreferrer"
-          class="v2-workspace-action inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          class="v2-workspace-action v2-mobile-operator-target inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
         >
           ${link.label}
           <span aria-hidden="true">\u2197</span>

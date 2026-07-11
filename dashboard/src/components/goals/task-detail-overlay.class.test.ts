@@ -11,6 +11,11 @@ describe('TaskDetailOverlay source class hygiene', () => {
     expect(src).not.toContain('rounded-[var(--r-1)]-t-2xl')
   })
 
+  it('opts the verification intervention CTA into the runtime mobile target contract', () => {
+    const src = readFileSync(SOURCE, 'utf-8')
+    expect(src).toContain('class="v2-mobile-operator-target inline-flex items-center rounded-[var(--r-1)]')
+  })
+
   it('renders the predecessor lineage section in the overview (RFC-0323 G-9)', () => {
     const src = readFileSync(SOURCE, 'utf-8')
     expect(src).toContain('function PredecessorSection')

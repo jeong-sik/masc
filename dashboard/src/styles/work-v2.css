@@ -1884,7 +1884,7 @@
   .wk-newgoal,
   .wk-task-claim,
   .wk-task-kp {
-    min-height: 40px;
+    min-height: var(--mobile-touch-target-min);
   }
 
   .wk-metric {

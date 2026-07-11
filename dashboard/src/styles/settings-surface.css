@@ -152,7 +152,7 @@
   .set-nav-item {
     align-items: center;
     flex: none;
-    min-height: 40px;
+    min-height: var(--mobile-touch-target-min);
     margin: 6px 2px;
     padding: 8px 12px;
   }

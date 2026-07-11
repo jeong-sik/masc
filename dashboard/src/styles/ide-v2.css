@@ -1230,9 +1230,28 @@
   grid-template-columns: minmax(0, 1fr) !important;
 }
 
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid {
+  position: relative;
+}
+
 .ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree,
 .ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid .ide-plane-tree {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  width: min(86vw, 340px);
+  max-width: 100%;
+  border-right: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-panel);
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree-resize {
   display: none;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree .ide-explorer-row {
+  min-height: var(--mobile-touch-target-min);
 }
 
 .ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid .ide-plane-editor {
@@ -1243,16 +1262,28 @@
   display: block;
 }
 
-.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree-toggle,
 .ide-plane-shell[data-mobile-viewport="true"] .ide-v2-rail-toggle {
   display: none;
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] .ide-v2-tree-toggle {
+  display: inline-flex;
 }
 
 .ide-plane-shell[data-mobile-viewport="true"] .v2-ide-action,
 .ide-plane-shell[data-mobile-viewport="true"] .ide-v2-action,
 .ide-plane-shell[data-mobile-viewport="true"] .execute-output-drawer-toggle,
 .ide-plane-shell[data-mobile-viewport="true"] .ide-interject-fab,
+.ide-plane-shell[data-mobile-viewport="true"] button.ide-remote,
+.ide-plane-shell[data-mobile-viewport="true"] a.ide-web,
 .ide-plane-shell[data-mobile-viewport="true"] summary.chip {
-  min-width: 40px;
-  min-height: 40px;
+  min-width: var(--mobile-touch-target-min);
+  min-height: var(--mobile-touch-target-min);
+}
+
+.ide-plane-shell[data-mobile-viewport="true"] button.ide-remote,
+.ide-plane-shell[data-mobile-viewport="true"] a.ide-web {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }

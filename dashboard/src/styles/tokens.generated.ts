@@ -318,6 +318,7 @@ export const TOKENS = {
   "ctrlHSm": { name: "--ctrl-h-sm", value: "calc(var(--density) * 20px)", tier: "role", kind: "dimension" },
   "ctrlH": { name: "--ctrl-h", value: "calc(var(--density) * 24px)", tier: "role", kind: "dimension" },
   "ctrlHLg": { name: "--ctrl-h-lg", value: "calc(var(--density) * 28px)", tier: "role", kind: "dimension" },
+  "mobileTouchTargetMin": { name: "--mobile-touch-target-min", value: "calc(var(--grid-unit) * 5)", tier: "role", kind: "dimension" },
   "_densityScope": { name: "--_density-scope", value: "1", tier: "role", kind: "number" },
   "elev0Bg": { name: "--elev-0-bg", value: "var(--bg-0)", tier: "role", kind: "color" },
   "elev0Border": { name: "--elev-0-border", value: "transparent", tier: "role", kind: "color" },

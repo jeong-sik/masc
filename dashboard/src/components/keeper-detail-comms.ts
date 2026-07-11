@@ -127,7 +127,7 @@ export function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
                   <span class="text-xs text-[var(--color-fg-secondary)] truncate flex-1">${pr.title}</span>
                   <${MonoBadge}>${pr.branch}</${MonoBadge}>
                   ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}
-                  <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-3xs text-[var(--color-accent-fg)] hover:underline flex-shrink-0">PR</a>
+                  <a href=${pr.pr_url} target="_blank" rel="noopener" class="v2-mobile-operator-target inline-flex items-center text-3xs text-[var(--color-accent-fg)] hover:underline flex-shrink-0">PR</a>
                 </div>
               `)}
             </div>

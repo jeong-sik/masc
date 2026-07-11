@@ -277,7 +277,7 @@ function CommentItem({
             >${repliesExpanded ? '−' : '+'}</button>
           ` : null}
           <span class="text-xs">${authorAvatar(authorAvatarKey)}</span>
-          <${ActionButton} variant="subtle" size="sm" class="text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}<//>
+          <${ActionButton} variant="subtle" size="sm" class="bd-author-action text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}<//>
           <span class="text-2xs text-[var(--color-fg-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <${ModerationBadge} status=${comment.moderation_status} reportCount=${comment.report_count} targetLabel="댓글" />
           <div class="ml-auto flex items-center gap-1">
@@ -425,7 +425,7 @@ export function CommentThread({
           placeholder="댓글 내용 검색"
           ariaLabel="댓글 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="ml-auto min-w-35 max-w-55 flex-1 !px-2 !py-1 !text-2xs"
+          class="bd-comment-filter ml-auto min-w-35 max-w-55 flex-1 !px-2 !py-1 !text-2xs"
         />
       </div>
       ${isFiltering && filteredRoots.length === 0 ? html`
@@ -603,7 +603,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <!-- Author and meta -->
           <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--color-border-divider)]">
             <span class="text-sm">${authorAvatar(authorAvatarKey)}</span>
-            <${ActionButton} variant="subtle" size="sm" class="text-xs text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(post.author, undefined, post.author_identity)}>${authorLabel}<//>
+            <${ActionButton} variant="subtle" size="sm" class="bd-author-action text-xs text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(post.author, undefined, post.author_identity)}>${authorLabel}<//>
             <span class="text-2xs text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
             <span
               class="text-2xs text-[var(--color-fg-muted)]"
@@ -668,7 +668,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           ${post.meta
             ? html`
                 <details class="mt-1">
-                  <summary class="cursor-pointer text-xs text-[var(--color-fg-secondary)] py-1.5 hover:text-[var(--color-fg-primary)] transition-colors">운영 메타</summary>
+                  <summary class="bd-meta-summary cursor-pointer text-xs text-[var(--color-fg-secondary)] py-1.5 hover:text-[var(--color-fg-primary)] transition-colors">운영 메타</summary>
                   <div class="mt-2 p-3 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-divider)]">
                     ${post.meta.source ? html`<div class="text-xs text-[var(--color-fg-primary)]"><span class="text-[var(--color-fg-secondary)]">출처:</span> ${post.meta.source}</div>` : null}
                   </div>

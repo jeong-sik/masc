@@ -48,6 +48,7 @@ type owned_active_task =
 
 type owned_active_tasks_snapshot =
   { tasks : owned_active_task list
+  ; backlog_tasks : Masc_domain.task list
   ; backlog_version : int
   }
 
@@ -82,7 +83,7 @@ let owned_active_tasks_snapshot_for_names ~(config : Workspace.config)
           | Masc_domain.Done _
           | Masc_domain.Cancelled _ -> None)
       in
-      Ok { tasks; backlog_version = backlog.version }
+      Ok { tasks; backlog_tasks = backlog.tasks; backlog_version = backlog.version }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

@@ -7,6 +7,7 @@ type owned_active_task = {
 
 type owned_active_tasks_snapshot =
   { tasks : owned_active_task list
+  ; backlog_tasks : Masc_domain.task list
   ; backlog_version : int
   }
 
@@ -25,7 +26,9 @@ val owned_active_tasks_for_meta_strict :
   meta:Keeper_meta_contract.keeper_meta ->
   (owned_active_task list, string) result
 
-(** Strict ownership and the backlog CAS version captured by the same read. *)
+(** Strict ownership, task records, and the backlog CAS version captured by the
+    same read. The complete task snapshot lets lifecycle transactions reconcile
+    their own durable receipts without racing a second backlog read. *)
 val owned_active_tasks_snapshot_for_meta_strict :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

@@ -964,7 +964,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
   Fun.protect
     ~finally:(fun () ->
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
-      Keeper_turn_admission.For_testing.reset ();
+      Masc.Keeper_turn_admission.For_testing.reset ();
       R.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -1003,6 +1003,15 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         ; updated_at = Masc_domain.now_iso ()
         }
       in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           ~operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "fresh shutdown finalization fixture was already reserved");
       (match Shutdown_store.persist_new ~config operation with
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
@@ -1020,6 +1029,26 @@ let test_keeper_shutdown_finalizes_idle_operation () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Blocked _ -> fail "shutdown did not reach Finalized");
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           ~operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "finalized shutdown did not release its admission fence");
+      (match Shutdown_finalize.run ~config ~entry:None finalized with
+       | Ok _ -> ()
+       | Error error -> fail (Shutdown_finalize.error_to_string error));
+      (match
+         Masc.Keeper_turn_admission.run_if_free
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           (fun () -> ())
+       with
+       | `Ran () -> ()
+       | `Busy _ -> fail "finalized shutdown replay left admission fenced");
       match Keeper_meta_store.read_meta config meta.name with
       | Ok (Some retained) ->
         check bool "retained Keeper is paused" true retained.paused;
@@ -1027,6 +1056,178 @@ let test_keeper_shutdown_finalizes_idle_operation () =
           (Option.is_none retained.current_task_id)
       | Ok None -> fail "retained Keeper metadata disappeared"
       | Error detail -> fail detail)
+
+let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-meta-replay" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let meta = make_meta "shutdown-meta-replay-keeper" in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let backlog_version =
+        match Masc.Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let cleanup : Shutdown_types.cleanup_evidence =
+        { settled_task_ids = []; pending_confirms_removed = 0 }
+      in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_id = Lane.id (Lane.create ())
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "operator"
+        ; cleanup_intent = { remove_meta = true; remove_session = false }
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase = Shutdown_types.Cleanup_ready cleanup
+        ; created_at = Masc_domain.now_iso ()
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         Keeper_meta_store.remove_meta_if_identity
+           config
+           ~name:meta.name
+           ~trace_id:meta.runtime.trace_id
+           ~generation:meta.runtime.generation
+       with
+       | Ok () -> ()
+       | Error error -> fail (Keeper_meta_store.identity_remove_error_to_string error));
+      match Shutdown_finalize.run ~config ~entry:None operation with
+      | Ok { phase = Shutdown_types.Finalized evidence; _ } ->
+        check bool "meta cleanup remains complete on replay" true evidence.meta_removed
+      | Ok _ -> fail "meta cleanup replay did not reach Finalized"
+      | Error error -> fail (Shutdown_finalize.error_to_string error))
+
+let test_keeper_shutdown_recovers_committed_task_receipt () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-task-receipt" in
+  Fun.protect
+    ~finally:(fun () ->
+      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let meta = make_meta "shutdown-task-receipt-keeper" in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      Shutdown_finalize.register_remove_pending_confirms_by_target
+        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+      let task_id_wire =
+        match
+          Masc.Workspace.add_task_with_result
+            config
+            ~title:"shutdown receipt fixture"
+            ~priority:1
+            ~description:"durable task settlement"
+        with
+        | Ok created -> created.task_id
+        | Error error -> fail (Masc.Workspace.add_task_error_to_string error)
+      in
+      (match
+         Masc.Workspace.claim_task_r
+           config
+           ~agent_name:meta.agent_name
+           ~task_id:task_id_wire
+           ()
+       with
+       | Ok _ -> ()
+       | Error error -> fail (Masc_domain.masc_error_to_string error));
+      let task_id =
+        match Keeper_id.Task_id.of_string task_id_wire with
+        | Ok task_id -> task_id
+        | Error detail -> fail detail
+      in
+      let backlog_version =
+        match Masc.Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_id = Lane.id (Lane.create ())
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "operator"
+        ; cleanup_intent = { remove_meta = false; remove_session = false }
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = [ task_id ]
+        ; join_evidence = None
+        ; phase = Shutdown_types.Joined_idle
+        ; created_at = Masc_domain.now_iso ()
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let handoff_context : Masc_domain.task_handoff_context =
+        { summary = "Keeper stopped; task returned to the durable backlog"
+        ; reason = Some "Keeper shutdown operation completed lane join"
+        ; next_step = Some "A live Keeper may reclaim this task"
+        ; failure_mode = None
+        ; reclaim_policy = Some Masc_domain.Allow_reclaim
+        ; evidence_refs =
+            [ "masc://keeper-shutdown/"
+              ^ Shutdown_types.Operation_id.to_string operation_id
+            ]
+        ; updated_at = Some (Masc_domain.now_iso ())
+        ; updated_by = Some operation.actor
+        }
+      in
+      (match
+         Masc.Workspace.release_task_r
+           config
+           ~agent_name:meta.agent_name
+           ~task_id:task_id_wire
+           ~expected_version:backlog_version
+           ~handoff_context
+           ()
+       with
+       | Ok _ -> ()
+       | Error error -> fail (Masc_domain.masc_error_to_string error));
+      match Shutdown_finalize.run ~config ~entry:None operation with
+      | Ok { phase = Shutdown_types.Finalized evidence; _ } ->
+        check int
+          "committed release receipt is recovered exactly once"
+          1
+          (List.length evidence.cleanup.settled_task_ids)
+      | Ok _ -> fail "task receipt recovery did not reach Finalized"
+      | Error error -> fail (Shutdown_finalize.error_to_string error))
 
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
@@ -1455,6 +1656,10 @@ let () =
         test_keeper_shutdown_prepare_failure_rolls_back_fence;
       test_case "shutdown finalizes idle operation" `Quick
         test_keeper_shutdown_finalizes_idle_operation;
+      test_case "shutdown cleanup replays after meta removal" `Quick
+        test_keeper_shutdown_cleanup_replays_after_meta_removal;
+      test_case "shutdown recovers committed task receipt" `Quick
+        test_keeper_shutdown_recovers_committed_task_receipt;
       test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick

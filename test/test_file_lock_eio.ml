@@ -1,5 +1,7 @@
 open Alcotest
 
+exception Body_failure
+
 let cleanup_if_exists path =
   if Sys.file_exists path then
     if Sys.is_directory path then
@@ -122,9 +124,9 @@ let test_descriptor_lock_hard_link_alias_serializes_and_recovers () =
           Eio.Promise.await second_entered;
           (match
              with_descriptor_lock first ~segment:primary ~path:primary_path (fun () ->
-               failwith "body failure")
+               raise Body_failure)
            with
-           | exception Failure "body failure" -> ()
+           | exception Body_failure -> ()
            | () -> Alcotest.fail "expected body failure");
           with_descriptor_lock first ~segment:alias ~path:alias_path (fun () -> ())))
 

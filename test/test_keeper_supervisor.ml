@@ -21,8 +21,13 @@ module KSP = Masc.Keeper_supervisor_self_preservation
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 module Lane = Masc.Keeper_lane
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
+module Shutdown_store = Masc.Keeper_shutdown_store
+module Shutdown_types = Masc.Keeper_shutdown_types
 module Subprocess_registry = Masc.Keeper_subprocess_registry
 module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
+module Process_switch = Masc.Keeper_process_switch
+module Tool_accumulator = Masc.Keeper_tool_emission_hook
+module Latched_reason = Masc.Keeper_latched_reason
 
 let supervisor_agent_name = Sup.supervisor_agent_name
 
@@ -46,6 +51,15 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let rec wait_until ~clock ~deadline predicate =
+  if predicate ()
+  then true
+  else if Eio.Time.now clock >= deadline
+  then false
+  else (
+    Eio.Time.sleep clock 0.01;
+    wait_until ~clock ~deadline predicate)
 
 let rec mkdir_p path =
   if path = "" || path = "." || path = "/" then ()
@@ -3275,8 +3289,24 @@ let test_prune_stale_paused_meta_unregisters_entry () =
   Eio.Switch.run @@ fun sw ->
   with_config_dir @@ fun config_dir ->
   let base_dir = temp_dir () in
+  let lifecycle_bus =
+    Agent_sdk.Event_bus.create
+      ~policy:Agent_sdk.Event_bus.Drop_oldest
+      ()
+  in
+  let lifecycle_subscription =
+    Agent_sdk.Event_bus.subscribe
+      ~purpose:"stale-paused-prune-test"
+      lifecycle_bus
+  in
+  Masc_event_bus.set lifecycle_bus;
   Fun.protect
     ~finally:(fun () ->
+      Agent_sdk.Event_bus.unsubscribe lifecycle_bus lifecycle_subscription;
+      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
+      Shutdown_finalize.For_testing.reset_completion_handler ();
+      Process_switch.For_testing.clear ();
+      Tool_accumulator.drop_keeper_accumulator "stale-paused-prune";
       Reg.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
@@ -3284,6 +3314,11 @@ let test_prune_stale_paused_meta_unregisters_entry () =
       let config = Masc.Workspace.default_config base_dir in
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "stale-paused-prune" in
+      Sup.set_global_switch sw;
+      Shutdown_finalize.register_remove_pending_confirms_by_target
+        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+      Shutdown_finalize.register_completion_handler
+        Tombstone_cleanup.handle_completion;
       write_keeper_toml config_dir ~name;
       (* Just beyond the configured cleanup TTL, and
          [auto_resume_after_sec = None] keeps Phase 3.5 auto-resume out of
@@ -3309,6 +3344,7 @@ let test_prune_stale_paused_meta_unregisters_entry () =
        | Ok () -> ()
        | Error err -> fail err);
       let _entry = Reg.register ~base_path:config.base_path name stale_meta in
+      ignore (Tool_accumulator.accumulator_for_keeper name);
       (match Reg.dispatch_event ~base_path:config.base_path name KSM.Operator_pause with
        | Ok _ -> ()
        | Error err ->
@@ -3330,9 +3366,189 @@ let test_prune_stale_paused_meta_unregisters_entry () =
         }
       in
       sweep_and_recover_no_materialize ctx;
+      let finalized =
+        wait_until
+          ~clock:ctx.clock
+          ~deadline:(Eio.Time.now ctx.clock +. 2.0)
+          (fun () ->
+             (not (Sys.file_exists meta_path))
+             && not (Reg.is_registered ~base_path:config.base_path name)
+             &&
+             match Shutdown_store.list_for_keeper ~config ~keeper_name:name with
+             | Ok
+                 [ { phase =
+                       Shutdown_types.Finalized
+                         { completion =
+                             Shutdown_types.Completion_delivered
+                               Shutdown_types.Paused_meta_pruned
+                         ; _
+                         }
+                   ; _
+                   } ] -> true
+             | Ok _ | Error _ -> false)
+      in
+      check bool "durable paused prune finalized" true finalized;
       check bool "stale paused meta file pruned" false (Sys.file_exists meta_path);
       check bool "pruned keeper unregistered (no ghost wake candidate)" false
-        (Reg.is_registered ~base_path:config.base_path name))
+        (Reg.is_registered ~base_path:config.base_path name);
+      check bool
+        "pruned keeper accumulator dropped"
+        false
+        (List.mem name (Tool_accumulator.registered_keeper_names ()));
+      (match Shutdown_store.list_for_keeper ~config ~keeper_name:name with
+       | Ok
+           [ { lane_ownership = Shutdown_types.Registered_lane _
+             ; phase =
+                 Shutdown_types.Finalized
+                   { completion =
+                       Shutdown_types.Completion_delivered
+                         Shutdown_types.Paused_meta_pruned
+                   ; registry_unregistered = true
+                   ; accumulator_dropped = true
+                   ; _
+                   }
+             ; _
+             } ] -> ()
+       | Ok _ -> fail "registered paused prune lost its durable final receipt"
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let paused_pruned_events =
+        Agent_sdk.Event_bus.drain lifecycle_subscription
+        |> List.filter (fun (event : Agent_sdk.Event_bus.event) ->
+             match event.payload with
+             | Agent_sdk.Event_bus.Custom
+                 ("masc.keeper.lifecycle", `Assoc fields) ->
+               List.assoc_opt "event" fields = Some (`String "paused_pruned")
+             | _ -> false)
+      in
+      check int "paused prune completion event emitted once" 1
+        (List.length paused_pruned_events))
+
+let test_prune_stale_paused_dormant_meta_uses_durable_owner () =
+  ensure_test_runtime ();
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
+  let base_dir = temp_dir () in
+  let lifecycle_bus =
+    Agent_sdk.Event_bus.create
+      ~policy:Agent_sdk.Event_bus.Drop_oldest
+      ()
+  in
+  let lifecycle_subscription =
+    Agent_sdk.Event_bus.subscribe
+      ~purpose:"stale-paused-dormant-prune-test"
+      lifecycle_bus
+  in
+  Masc_event_bus.set lifecycle_bus;
+  let name = "stale-paused-dormant-prune" in
+  Fun.protect
+    ~finally:(fun () ->
+      Agent_sdk.Event_bus.unsubscribe lifecycle_bus lifecycle_subscription;
+      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
+      Shutdown_finalize.For_testing.reset_completion_handler ();
+      Process_switch.For_testing.clear ();
+      Tool_accumulator.drop_keeper_accumulator name;
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg =
+        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+      in
+      Sup.set_global_switch sw;
+      Shutdown_finalize.register_remove_pending_confirms_by_target
+        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+      Shutdown_finalize.register_completion_handler
+        Tombstone_cleanup.handle_completion;
+      write_keeper_toml config_dir ~name;
+      let stale_timestamp =
+        let t =
+          Unix.gmtime
+            (Unix.time () -. Env_config.KeeperSupervisor.paused_cleanup_ttl_sec
+             -. 1.0)
+        in
+        Printf.sprintf
+          "%04d-%02d-%02dT%02d:%02d:%02dZ"
+          (t.tm_year + 1900)
+          (t.tm_mon + 1)
+          t.tm_mday
+          t.tm_hour
+          t.tm_min
+          t.tm_sec
+      in
+      let stale_meta =
+        { (make_meta name) with
+          paused = true
+        ; latched_reason =
+            Some
+              (Latched_reason.Operator_paused
+                 { operator_actor = Latched_reason.operator_actor_keeper_down })
+        ; auto_resume_after_sec = None
+        ; updated_at = stale_timestamp
+        }
+      in
+      (match Keeper_meta_store.write_meta config stale_meta with
+       | Ok () -> ()
+       | Error error -> fail error);
+      ignore (Tool_accumulator.accumulator_for_keeper name);
+      check bool
+        "precondition: dormant paused Keeper has no registry lane"
+        false
+        (Reg.is_registered ~base_path:config.base_path name);
+      let meta_path = Keeper_types_profile.keeper_meta_path config name in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      let finalized =
+        wait_until
+          ~clock:ctx.clock
+          ~deadline:(Eio.Time.now ctx.clock +. 2.0)
+          (fun () ->
+             match Shutdown_store.list_for_keeper ~config ~keeper_name:name with
+             | Ok
+                 [ { lane_ownership = Shutdown_types.Dormant_meta
+                   ; phase =
+                       Shutdown_types.Finalized
+                         { completion =
+                             Shutdown_types.Completion_delivered
+                               Shutdown_types.Paused_meta_pruned
+                         ; meta_removed = true
+                         ; registry_unregistered = false
+                         ; accumulator_dropped = true
+                         ; _
+                         }
+                   ; _
+                   } ] -> true
+             | Ok _ | Error _ -> false)
+      in
+      check bool "dormant paused prune finalized" true finalized;
+      check bool "dormant paused meta removed" false (Sys.file_exists meta_path);
+      check bool
+        "dormant paused accumulator dropped"
+        false
+        (List.mem name (Tool_accumulator.registered_keeper_names ()));
+      let paused_pruned_events =
+        Agent_sdk.Event_bus.drain lifecycle_subscription
+        |> List.filter (fun (event : Agent_sdk.Event_bus.event) ->
+             match event.payload with
+             | Agent_sdk.Event_bus.Custom
+                 ("masc.keeper.lifecycle", `Assoc fields) ->
+               List.assoc_opt "event" fields = Some (`String "paused_pruned")
+             | _ -> false)
+      in
+      check int
+        "dormant paused prune completion event emitted once"
+        1
+        (List.length paused_pruned_events))
 
 (* Test: operator-paused keeper ([auto_resume_after_sec = None]) is NOT
    auto-resumed by the sweep — only the human can clear it. *)
@@ -4090,6 +4306,8 @@ let () =
         test_sweep_auto_resumes_registered_paused_entry;
       test_case "prune of stale paused meta unregisters the registry entry" `Quick
         test_prune_stale_paused_meta_unregisters_entry;
+      test_case "prune of stale dormant paused meta keeps a durable owner" `Quick
+        test_prune_stale_paused_dormant_meta_uses_durable_owner;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick
         test_operator_pause_not_auto_resumed;
       test_case "turn timeout blocker without resume policy is auto-recoverable"

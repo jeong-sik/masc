@@ -272,7 +272,10 @@ let send_audio_block ~token ~channel_id ~base_url ~audio_token ~message_text
   let content =
     Printf.sprintf "🔊 %s%s\n%s" duration_prefix message_text url
   in
-  ignore (send_message ~token ~channel_id ~content : (unit, error) result)
+  (* Rich audio is a side message, not the primary terminal delivery receipt.
+     [send_message] already logs the concrete transport error. *)
+  match send_message ~token ~channel_id ~content with
+  | Ok () | Error _ -> ()
 
 let truncate_embed_desc s =
   let max_len = 3900 in

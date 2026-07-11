@@ -606,7 +606,7 @@ let receipt_identity_of_job (job : job) =
   }
 ;;
 
-let make_terminal_receipt lease ~ended_at ~outcome ~detail =
+let make_terminal_receipt (lease : lease) ~ended_at ~outcome ~detail =
   let started_at = lease.started_at in
   if
     (not (Float.is_finite started_at))

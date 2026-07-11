@@ -11,7 +11,6 @@
     instead of at every call site in {!Runtime_agent}. *)
 
 val publish_lifecycle :
-  Agent_sdk.Event_bus.t ->
   name:string ->
   event:string ->
   detail:string ->
@@ -22,12 +21,8 @@ val publish_lifecycle :
   unit ->
   unit
 (** Publish a [Custom "masc.oas_worker.<event>"] event on the
-    process-wide [Masc_event_bus]. The first argument is
-    accepted but **ignored** — the function looks up the bus via
-    [Masc_event_bus.get ()] internally; the parameter is kept
-    for backwards-compatibility with callers that already thread
-    the bus through, and for symmetry with sibling lifecycle
-    publishers that do consume their bus argument.
+    process-wide [Masc_event_bus]. Missing bootstrap state is surfaced by a
+    one-shot warning instead of silently dropping every lifecycle event.
 
     Optional [error] / [session_id] / [status] fields are
     included in the payload only when [Some] and non-empty

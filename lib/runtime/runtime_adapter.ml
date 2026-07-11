@@ -270,20 +270,6 @@ let supports_tool_choice_override_of_model_spec (spec : Runtime_schema.model_spe
   | None -> None
 ;;
 
-let max_output_tokens_of_model_spec (spec : Runtime_schema.model_spec) =
-  match spec.capabilities with
-  | Some capabilities -> capabilities.max_output_tokens
-  | None -> None
-;;
-
-let effective_max_tokens_for_model spec requested =
-  match requested, max_output_tokens_of_model_spec spec with
-  | Some configured, Some capability -> Some (min configured capability)
-  | Some configured, None -> Some configured
-  | None, Some capability -> Some capability
-  | None, None -> None
-;;
-
 (* --- provider × model spec → Provider_config.t ---
 
    v1 drops the [Provider_tool_support.runtime_capabilities_override] that the
@@ -291,10 +277,9 @@ let effective_max_tokens_for_model spec requested =
    now-removed alias layer); [binding_to_provider_config] never consumed it. *)
 let provider_config_from_declared_provider ?keep_alive ?num_ctx
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
-    ~(max_tokens : int option) : (Llm_provider.Provider_config.t, string) result =
+    : (Llm_provider.Provider_config.t, string) result =
   let registry_entry = find_registry_entry provider.id in
   let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
-  let max_tokens = effective_max_tokens_for_model spec max_tokens in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
@@ -331,7 +316,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~request_path
             ?max_context:spec.max_context
             ?supports_tool_choice_override
-            ?max_tokens
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p
@@ -352,7 +336,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~headers:(Option.value ~default:[] provider.headers)
             ?max_context:spec.max_context
             ?supports_tool_choice_override
-            ?max_tokens
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p
@@ -373,16 +356,6 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
   | Some spec ->
-    let max_tokens =
-      (* Priced bindings historically sized [max_tokens] from the declared
-         [max-context] override. With the override now optional, an absent
-         override yields [None] and OAS resolves the output ceiling from its
-         capability catalog ([effective_max_output_tokens]) instead of
-         inheriting the input window. *)
-      match binding.price_input, binding.price_output with
-      | Some input_cost, Some _ when input_cost > 0.0 -> spec.max_context
-      | _ -> None
-    in
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
@@ -395,6 +368,5 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          ?keep_alive:binding.keep_alive
          ?num_ctx:binding.num_ctx
          provider
-         spec
-         ~max_tokens)
+         spec)
 ;;

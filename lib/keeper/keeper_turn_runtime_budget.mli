@@ -15,7 +15,7 @@ type runtime_execution = {
   max_context_resolution : max_context_resolution;
   max_context : int;
   temperature : float;
-  max_tokens : int;
+  max_tokens : int option;
 }
 
 val next_fail_open_runtime_for_turn :

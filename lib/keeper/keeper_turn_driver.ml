@@ -300,7 +300,7 @@ type attempt_inference_policy =
   { attempt_temperature : float
   ; attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
-  ; attempt_max_tokens : int
+  ; attempt_max_tokens : int option
   }
 
 let attempt_inference_policy
@@ -349,7 +349,10 @@ let run_named
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
-    ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
+    (* masc#24067 / oas#2517: no flat-int default. Omitting [?max_tokens]
+       means [None] — no request [max_tokens] field, not a synthesized
+       fallback. *)
+    ?max_tokens
     ?max_tokens_for_runtime
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails

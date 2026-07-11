@@ -8,7 +8,7 @@ open Keeper_types_profile
 type run_context =
   { meta : keeper_meta
   ; temperature : float
-  ; max_tokens : int
+  ; max_tokens : int option
   ; context_injector : Agent_sdk.Hooks.context_injector
   ; shared_context : Agent_sdk.Context.t
   ; session_dir : string
@@ -41,13 +41,17 @@ val resolve_max_tokens_for_runtime :
   -> runtime_id:string
   -> ?max_tokens:int
   -> unit
-  -> int
-(** Resolve the keeper turn max-token budget for a concrete runtime id.
+  -> int option
+(** Resolve the keeper turn max-token request value for a concrete runtime id.
 
-    [max_tokens] is an explicit caller override and is capped through
-    {!Runtime_inference.cap_max_tokens_to_runtime_ceiling}. When absent, the
-    keeper profile/env fallback is passed through
-    {!Runtime_inference.resolve_max_tokens} for the supplied runtime. *)
+    [Some caller_override] wins when [max_tokens] is an explicit argument
+    and passes through unchanged (the OAS provider serializer owns
+    validation/clamp against the catalog ceiling, oas#2517).
+    Otherwise, an explicit per-keeper profile/env override
+    ([MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS] via
+    {!Keeper_types_profile.unified_max_tokens_override_of_oas_env}) wins.
+    Absent both, the result is [None]: the caller must not synthesize a
+    request value — no [max_tokens] field goes on the request. *)
 
 val prepare_run_context :
      config:Workspace.config

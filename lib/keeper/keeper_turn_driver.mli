@@ -117,7 +117,7 @@ val run_named :
   ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_tokens_for_runtime:(runtime_id:string -> int) ->
+  ?max_tokens_for_runtime:(runtime_id:string -> int option) ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
@@ -167,7 +167,7 @@ type attempt_inference_policy =
   { attempt_temperature : float
   ; attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
-  ; attempt_max_tokens : int
+  ; attempt_max_tokens : int option
   }
 
 module For_testing : sig
@@ -243,11 +243,11 @@ module For_testing : sig
     (context_window_rebudget, Agent_sdk.Error.sdk_error) result
 
   val attempt_inference_policy :
-    ?max_tokens_for_runtime:(runtime_id:string -> int) ->
+    ?max_tokens_for_runtime:(runtime_id:string -> int option) ->
     runtime_id:string ->
     fallback_temperature:float ->
     fallback_enable_thinking:bool option ->
-    fallback_max_tokens:int ->
+    fallback_max_tokens:int option ->
     unit ->
     attempt_inference_policy
 

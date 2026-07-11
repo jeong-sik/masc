@@ -11,7 +11,7 @@ open Keeper_types_profile
 type run_context =
   { meta : keeper_meta
   ; temperature : float
-  ; max_tokens : int
+  ; max_tokens : int option
   ; context_injector : Agent_sdk.Hooks.context_injector
   ; shared_context : Agent_sdk.Context.t
   ; session_dir : string
@@ -71,28 +71,23 @@ let build_base_system_prompt
     ~home_ground:config.base_path
     ()
 
-let max_tokens_fallback ~keeper_name profile_defaults () =
-  match
-    Keeper_types_profile.unified_max_tokens_override_of_oas_env
-      ~keeper_name
-      profile_defaults.oas_env
-  with
-  | Some value -> value
-  | None -> 8192
+(* masc#24067 / oas#2517: no flat int fallback. The only "no explicit
+   override" outcome is [None] — no max_tokens field goes on the request. *)
+let max_tokens_override ~keeper_name profile_defaults =
+  Keeper_types_profile.unified_max_tokens_override_of_oas_env
+    ~keeper_name
+    profile_defaults.oas_env
 
 let resolve_max_tokens_for_runtime_with_profile ~keeper_name ~profile_defaults
-      ?max_tokens ~runtime_id ()
+      ?max_tokens ~runtime_id:_ ()
   =
   match max_tokens with
-  | Some t ->
-    Runtime_inference.cap_max_tokens_to_runtime_ceiling
-      ~runtime_id
-      ~source:"caller_override"
-      t
-  | None ->
-    Runtime_inference.resolve_max_tokens
-      ~runtime_id
-      ~fallback:(max_tokens_fallback ~keeper_name profile_defaults)
+  (* Explicit caller override passes through unchanged; the OAS provider
+     serializer owns validation/clamp against the catalog ceiling
+     (oas#2517). The former [cap_max_tokens_to_runtime_ceiling] here was an
+     identity stub. *)
+  | Some _ as override -> override
+  | None -> max_tokens_override ~keeper_name profile_defaults
 
 let resolve_max_tokens_for_runtime ~keeper_name ~runtime_id ?max_tokens () =
   let profile_defaults =

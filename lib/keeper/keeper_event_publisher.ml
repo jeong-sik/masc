@@ -192,15 +192,18 @@ let publish_runtime_execution_built
     ~temperature
     ~generation
   =
-  let payload = `Assoc [
-    ("keeper_name", `String keeper_name);
-    ("runtime_id", `String runtime_id);
-    ("max_tokens", `Int max_tokens);
-    ("max_context", `Int max_context);
-    ("max_context_resolution", `String (string_of_int effective_budget));
-    ("temperature", `Float temperature);
-    ("generation", `Int generation);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
+  let payload =
+    `Assoc
+      ([ ("keeper_name", `String keeper_name)
+       ; ("runtime_id", `String runtime_id)
+       ]
+       @ Runtime_max_tokens.telemetry_fields max_tokens
+       @ [ ("max_context", `Int max_context)
+         ; ("max_context_resolution", `String (string_of_int effective_budget))
+         ; ("temperature", `Float temperature)
+         ; ("generation", `Int generation)
+         ; ("timestamp", `Float (Time_compat.now ()))
+         ])
+  in
   masc_publish
     (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))

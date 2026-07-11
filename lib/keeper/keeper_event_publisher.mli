@@ -130,10 +130,13 @@ val publish_audit_event :
 
     Shape: [{id, ts, actor, kind, target?, summary, severity, payload?}]. *)
 
+(** [max_tokens] is always represented on the wire as an integer or [null].
+    The payload also carries [max_tokens_source]: [explicit_override] for
+    [Some _], [omitted] for [None]. *)
 val publish_runtime_execution_built :
   keeper_name:string ->
   runtime_id:string ->
-  max_tokens:int ->
+  max_tokens:int option ->
   max_context:int ->
   effective_budget:int ->
   temperature:float ->

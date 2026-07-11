@@ -1340,6 +1340,26 @@ MASC_KEEPER_UNIFIED_MAX_TOKENS = 4096
         None
         (KTP.unified_max_tokens_override_of_oas_env d.oas_env)
 
+let test_oas_env_rejects_invalid_unified_max_tokens () =
+  List.iter
+    (fun raw ->
+      let input =
+        Printf.sprintf
+          "[keeper]\npersona_name = \"analyst\"\n[keeper.oas_env]\nMASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = %s\n"
+          raw
+      in
+      match TL.parse_toml input with
+      | Error e -> fail e
+      | Ok doc ->
+        (match KTP.profile_defaults_of_toml doc with
+         | Ok _ -> failf "expected invalid unified max_tokens rejection for %s" raw
+         | Error detail ->
+           check bool "error names unified max_tokens key" true
+             (contains_substring detail "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS");
+           check bool "error requires a positive integer" true
+             (contains_substring detail "positive integer")))
+    [ "\"not-an-int\""; "\"8192\""; "true"; "1.5"; "0"; "-1" ]
+
 let test_oas_env_drops_non_oas_prefix () =
   (* Guards against ambient env injection via keeper TOML: arbitrary keys
      outside the audited allowlist are silently dropped. *)
@@ -1730,6 +1750,8 @@ let () =
             test_oas_env_parses_allowed_keys;
           test_case "rejects legacy unified max tokens alias" `Quick
             test_oas_env_rejects_legacy_unified_max_tokens_alias;
+          test_case "rejects invalid unified max tokens" `Quick
+            test_oas_env_rejects_invalid_unified_max_tokens;
           test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
             test_oas_env_drops_non_oas_prefix;
           test_case "empty when table absent" `Quick

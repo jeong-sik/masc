@@ -53,7 +53,13 @@ type config = {
           streams are not killed by total duration; streaming liveness is
           owned by [stream_idle_timeout_s] and the attempt liveness
           observer. Non-HTTP transports ignore it. *)
-  max_tokens : int;
+  max_tokens : int option;
+      (** Request-time output token budget. [None] means no [max_tokens]
+          field goes on the request at all — the keeper lane's default
+          (masc#24067 / oas#2517): the OAS capability catalog ceiling is a
+          validation bound, never a synthesized request value. [Some n] is
+          an explicit operator/profile override or a non-keeper caller's
+          deliberate request budget. *)
   temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
   context_reducer : Agent_sdk.Context_reducer.t option;

@@ -695,9 +695,42 @@ let test_runtime_adapter_materializes_deepseek_openai_compat () =
     check string "model_id" "deepseek-v4-pro" provider_cfg.model_id;
     check string "api key" "ds-test-key" (Llm_provider.Secret.header_value provider_cfg.api_key);
     check (option int) "max_context" (Some 1000000) provider_cfg.max_context;
-    check (option int) "max_tokens" (Some 384000) provider_cfg.max_tokens;
+    check (option int) "max_tokens is not synthesized from capability" None
+      provider_cfg.max_tokens;
     check int "Authorization header count" 0
       (normalized_header_count "Authorization" provider_cfg.headers))
+
+let test_runtime_adapter_max_tokens_wire_omission_and_explicit_override () =
+  with_deepseek_env "ds-test-key" (fun () ->
+    let provider_cfg = deepseek_provider_config_or_fail () in
+    let body =
+      Llm_provider.Backend_openai.build_request_assoc
+        ~config:provider_cfg
+        ~messages:[]
+        ()
+    in
+    (match body with
+     | `Assoc fields ->
+       check bool "catalog capability does not become a wire max_tokens field"
+         false
+         (List.mem_assoc "max_tokens" fields)
+     | _ -> fail "expected OpenAI request object");
+    let explicit_cfg =
+      { provider_cfg with Llm_provider.Provider_config.max_tokens = Some 2048 }
+    in
+    let explicit_body =
+      Llm_provider.Backend_openai.build_request_assoc
+        ~config:explicit_cfg
+        ~messages:[]
+        ()
+    in
+    match explicit_body with
+    | `Assoc fields ->
+      check (option (of_pp Yojson.Safe.pp))
+        "explicit override reaches wire unchanged"
+        (Some (`Int 2048))
+        (List.assoc_opt "max_tokens" fields)
+    | _ -> fail "expected explicit OpenAI request object")
 
 let test_runtime_toml_accepts_glm_coding_capability () =
   let cfg = glm_coding_runtime_config_or_fail () in
@@ -724,7 +757,8 @@ let test_runtime_adapter_materializes_glm_coding_provider () =
     check string "model_id" "glm-4.7" provider_cfg.model_id;
     check string "api key uses coding lane" "coding-key" (Llm_provider.Secret.header_value provider_cfg.api_key);
     check (option int) "max_context" (Some 200000) provider_cfg.max_context;
-    check (option int) "max_tokens" (Some 128000) provider_cfg.max_tokens;
+    check (option int) "max_tokens is not synthesized from capability" None
+      provider_cfg.max_tokens;
     check (option bool) "tool choice override" (Some false)
       provider_cfg.supports_tool_choice_override;
     check int "Authorization header count" 0
@@ -1171,6 +1205,64 @@ let test_runtime_agent_context_uses_configured_turn_budget () =
   check int "resume adds fresh per-call turn budget" 31
     prepared.agent_config.max_turns
 
+let test_runtime_agent_context_preserves_max_tokens_intent () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let check_builder_max_tokens expected max_tokens =
+        let config =
+          Runtime_agent.default_config
+            ~name:"oas-runpod_mtp.qwen"
+            ~provider_cfg:(provider_cfg ())
+            ~system_prompt:""
+            ~tools:[]
+        in
+        let config = { config with max_tokens } in
+        let builder =
+          Runtime_agent_context.builder_without_approval
+            ~net:(Eio.Stdenv.net env)
+            ~config
+            ()
+        in
+        match Agent_sdk.Builder.build_safe builder with
+        | Error err -> fail (Agent_sdk.Error.to_string err)
+        | Ok agent ->
+          check (option int) "builder max_tokens intent" expected
+            (Agent_sdk.Agent.state agent).config.max_tokens;
+          Eio.Switch.on_release sw (fun () -> Agent_sdk.Agent.close agent)
+      in
+      check_builder_max_tokens None None;
+      check_builder_max_tokens (Some 2048) (Some 2048)))
+
+let test_runtime_agent_lifecycle_attrs_preserve_max_tokens_intent () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let fields = Runtime_agent.Lifecycle_for_testing.provider_attrs config in
+  check (option (of_pp Yojson.Safe.pp)) "omitted lifecycle value"
+    (Some `Null)
+    (List.assoc_opt "max_tokens" fields);
+  check (option string) "omitted lifecycle source"
+    (Some "omitted")
+    (Option.bind
+       (List.assoc_opt "max_tokens_source" fields)
+       Yojson.Safe.Util.to_string_option);
+  let explicit_fields =
+    Runtime_agent.Lifecycle_for_testing.provider_attrs
+      { config with max_tokens = Some 2048 }
+  in
+  check (option (of_pp Yojson.Safe.pp)) "explicit lifecycle value"
+    (Some (`Int 2048))
+    (List.assoc_opt "max_tokens" explicit_fields);
+  check (option string) "explicit lifecycle source"
+    (Some "explicit_override")
+    (Option.bind
+       (List.assoc_opt "max_tokens_source" explicit_fields)
+       Yojson.Safe.Util.to_string_option)
+
 let test_runtime_agent_context_preserves_provider_sampling_config () =
   let provider_cfg =
     { (provider_cfg ()) with
@@ -1542,6 +1634,10 @@ let () =
             `Quick
             test_runtime_adapter_materializes_deepseek_openai_compat
         ; test_case
+            "runtime max_tokens wire omission and explicit override"
+            `Quick
+            test_runtime_adapter_max_tokens_wire_omission_and_explicit_override
+        ; test_case
             "runtime adapter materializes GLM Coding Plan provider"
             `Quick
             test_runtime_adapter_materializes_glm_coding_provider
@@ -1573,6 +1669,14 @@ let () =
             "runtime agent context uses configured turn budget"
             `Quick
             test_runtime_agent_context_uses_configured_turn_budget
+        ; test_case
+            "runtime agent context preserves max_tokens intent"
+            `Quick
+            test_runtime_agent_context_preserves_max_tokens_intent
+        ; test_case
+            "runtime lifecycle attrs preserve max_tokens intent"
+            `Quick
+            test_runtime_agent_lifecycle_attrs_preserve_max_tokens_intent
         ; test_case
             "runtime agent context preserves provider sampling config"
             `Quick

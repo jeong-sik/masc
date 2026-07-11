@@ -1207,9 +1207,9 @@ let max_context_of_runtime_id (id : string) : int option =
    [None] when the runtime is unknown or the catalog row leaves it unset.
    Mirrors [max_context_of_runtime_id] but projects the OAS-typed capability
    rather than the runtime.toml [model] record, because max output is owned by
-   the provider/model catalog, not the per-binding runtime config. Consumed by
-   [Runtime_inference.resolve_max_tokens] to size reasoning turns from the
-   model's own ceiling. *)
+   the provider/model catalog, not the per-binding runtime config. This is an
+   observable capability ceiling only. OAS owns request validation and clamp
+   policy; MASC never turns this value into a request default. *)
 let max_output_tokens_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
   | Some rt ->

@@ -101,7 +101,6 @@ let classify_masc_internal_error = function
       | Keeper_internal_error.Admission_queue_timeout _
       | Keeper_internal_error.Admission_queue_rejected _
       | Keeper_internal_error.Turn_timeout _
-      | Keeper_internal_error.Max_tokens_ceiling_violation _
       | Keeper_internal_error.Ambiguous_post_commit _
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _

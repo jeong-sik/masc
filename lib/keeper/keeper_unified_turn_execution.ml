@@ -217,7 +217,7 @@ let run (ctx : ctx)
                  ~runtime_rotation_attempts:
                    (List.rev turn_state.runtime_rotation_attempts)
                  ~temperature:execution.temperature
-                 ~max_tokens:execution.max_tokens
+                 ?max_tokens:execution.max_tokens
                  ~oas_timeout_s
                  ~oas_timeout_is_explicit:false
                  ~trajectory_acc

@@ -43,7 +43,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
     Some Admission_queue_wait_timeout
   | Some (Keeper_turn_driver.Admission_queue_rejected _) -> None
   | Some (Keeper_turn_driver.Provider_timeout _) -> None
-  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _) -> None
   | Some (Keeper_turn_driver.Turn_timeout _) -> Some Turn_timeout
   | Some (Keeper_turn_driver.Ambiguous_post_commit { is_timeout; _ }) ->
     Some
@@ -140,7 +139,6 @@ let runtime_blocker_surface_of_masc_internal_error = function
   | Keeper_turn_driver.Admission_queue_rejected _
   | Keeper_turn_driver.Turn_timeout _
   | Keeper_turn_driver.Provider_timeout _
-  | Keeper_turn_driver.Max_tokens_ceiling_violation _
   | Keeper_turn_driver.Ambiguous_post_commit _
   | Keeper_turn_driver.Internal_unhandled_exception _
   | Keeper_turn_driver.Internal_bridge_exception _

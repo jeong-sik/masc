@@ -357,13 +357,22 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
         ~runtime_id
         ()
     in
+    (* masc#24067 / oas#2517: [max_tokens_for_runtime] above always resolves
+       through [Keeper_run_context.resolve_max_tokens_for_runtime] with no
+       caller override and an unconfigured "policy-test" keeper profile, so
+       every candidate below gets [None] — including the reasoning candidate,
+       which under the deleted [Runtime_inference.resolve_max_tokens] used to
+       size itself from the OAS catalog ceiling. [fallback_max_tokens] is
+       [None] in all three calls because a resolver is always supplied, so it
+       is never consulted; see [test_max_tokens_for_runtime_omitted_uses_fallback]
+       below for the branch where it is. *)
     let lane_policy =
       Driver.For_testing.attempt_inference_policy
         ~max_tokens_for_runtime
         ~runtime_id:"mixed"
         ~fallback_temperature:0.25
         ~fallback_enable_thinking:None
-        ~fallback_max_tokens:8192
+        ~fallback_max_tokens:None
         ()
     in
     Alcotest.(check (option bool))
@@ -378,9 +387,9 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       "lane id has no preserve thinking policy"
       None
       lane_policy.Driver.attempt_preserve_thinking;
-    Alcotest.(check int)
-      "lane id keeps caller max_tokens fallback"
-      8192
+    Alcotest.(check (option int))
+      "lane id: no override configured -> None (masc#24067 / oas#2517)"
+      None
       lane_policy.Driver.attempt_max_tokens;
     let thinking_policy =
       Driver.For_testing.attempt_inference_policy
@@ -388,7 +397,7 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
         ~runtime_id:"thinking.reasoning_big"
         ~fallback_temperature:0.25
         ~fallback_enable_thinking:(Some false)
-        ~fallback_max_tokens:8192
+        ~fallback_max_tokens:None
         ()
     in
     Alcotest.(check (option bool))
@@ -403,9 +412,10 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       "thinking candidate preserves thinking when configured"
       (Some true)
       thinking_policy.Driver.attempt_preserve_thinking;
-    Alcotest.(check int)
-      "thinking candidate sizes from catalog ceiling"
-      32768
+    Alcotest.(check (option int))
+      "thinking candidate: no override configured -> None, not the catalog \
+       ceiling (masc#24067 / oas#2517)"
+      None
       thinking_policy.Driver.attempt_max_tokens;
     let non_thinking_policy =
       Driver.For_testing.attempt_inference_policy
@@ -413,7 +423,7 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
         ~runtime_id:"plain.non_reasoning"
         ~fallback_temperature:0.25
         ~fallback_enable_thinking:(Some true)
-        ~fallback_max_tokens:8192
+        ~fallback_max_tokens:None
         ()
     in
     Alcotest.(check (option bool))
@@ -428,10 +438,61 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
       "non-thinking candidate disables preserve thinking"
       (Some false)
       non_thinking_policy.Driver.attempt_preserve_thinking;
-    Alcotest.(check int)
-      "non-thinking candidate keeps caller max_tokens fallback"
-      8192
+    Alcotest.(check (option int))
+      "non-thinking candidate: no override configured -> None (masc#24067 / \
+       oas#2517)"
+      None
       non_thinking_policy.Driver.attempt_max_tokens)
+
+(* masc#24067 / oas#2517 regression: when the caller supplies no
+   [max_tokens_for_runtime] resolver at all, [attempt_inference_policy] must
+   still honor an explicit [fallback_max_tokens] verbatim — the option
+   contract only forbids *synthesizing* a value, not carrying one the caller
+   deliberately provided. *)
+let test_max_tokens_for_runtime_omitted_uses_fallback () =
+  let policy =
+    Driver.For_testing.attempt_inference_policy
+      ~runtime_id:"mixed"
+      ~fallback_temperature:0.25
+      ~fallback_enable_thinking:None
+      ~fallback_max_tokens:(Some 4096)
+      ()
+  in
+  Alcotest.(check (option int))
+    "no resolver supplied -> caller fallback_max_tokens passes through"
+    (Some 4096)
+    policy.Driver.attempt_max_tokens;
+  let policy_no_fallback =
+    Driver.For_testing.attempt_inference_policy
+      ~runtime_id:"mixed"
+      ~fallback_temperature:0.25
+      ~fallback_enable_thinking:None
+      ~fallback_max_tokens:None
+      ()
+  in
+  Alcotest.(check (option int))
+    "no resolver, no fallback -> None (never synthesized)"
+    None
+    policy_no_fallback.Driver.attempt_max_tokens
+
+let test_explicit_max_tokens_survives_each_failover_candidate () =
+  let max_tokens_for_runtime ~runtime_id:_ = Some 4096 in
+  List.iter
+    (fun runtime_id ->
+      let policy =
+        Driver.For_testing.attempt_inference_policy
+          ~max_tokens_for_runtime
+          ~runtime_id
+          ~fallback_temperature:0.25
+          ~fallback_enable_thinking:None
+          ~fallback_max_tokens:None
+          ()
+      in
+      Alcotest.(check (option int))
+        (runtime_id ^ " preserves explicit max_tokens")
+        (Some 4096)
+        policy.Driver.attempt_max_tokens)
+    [ "primary.test_model"; "fallback.test_model" ]
 
 let test_resolve_assignment_missing () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -934,6 +995,14 @@ let () =
             "attempt inference policy uses attempt runtime"
             `Quick
             test_attempt_inference_policy_uses_attempt_runtime;
+          Alcotest.test_case
+            "max_tokens_for_runtime omitted uses caller fallback (masc#24067)"
+            `Quick
+            test_max_tokens_for_runtime_omitted_uses_fallback;
+          Alcotest.test_case
+            "explicit max_tokens survives every failover candidate (masc#24067)"
+            `Quick
+            test_explicit_max_tokens_survives_each_failover_candidate;
           Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick

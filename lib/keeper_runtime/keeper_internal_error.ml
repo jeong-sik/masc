@@ -314,12 +314,6 @@ type masc_internal_error =
       min_required_sec : float;
       phase : string;
     }
-  | Max_tokens_ceiling_violation of {
-      runtime_id : string;
-      requested_max_tokens : int;
-      provider_ceiling : int;
-      reason : string;
-    }
   | Ambiguous_post_commit of {
       is_timeout : bool;
       tools : string list;
@@ -590,17 +584,6 @@ let masc_internal_error_to_json = function
         ("min_required_sec", `Float min_required_sec);
         ("phase", `String phase);
       ]
-  | Max_tokens_ceiling_violation
-      { runtime_id; requested_max_tokens; provider_ceiling; reason } ->
-    let runtime_id = runtime_id_to_string runtime_id in
-    `Assoc
-      [
-        ("kind", `String "max_tokens_ceiling_violation");
-        ("runtime_id", `String runtime_id);
-        ("requested_max_tokens", `Int requested_max_tokens);
-        ("provider_ceiling", `Int provider_ceiling);
-        ("reason", `String reason);
-      ]
   | Ambiguous_post_commit { is_timeout; tools; original_error } ->
     `Assoc
       [
@@ -738,15 +721,6 @@ let summary_of_masc_internal_error = function
            "Provider timeout exhausted; phase=%s; source=%s; budget=%.1fs; remaining=%s; min_required=%.1fs; estimated_input_tokens=%d; keeper_turn_timeout=%.1fs"
            phase source budget_sec remaining min_required_sec
            estimated_input_tokens keeper_turn_timeout_sec)
-  | Max_tokens_ceiling_violation
-      { runtime_id; requested_max_tokens; provider_ceiling; reason } ->
-    Some
-      (Printf.sprintf
-         "Invalid max_tokens budget for runtime %s; requested_max_tokens=%d; provider_ceiling=%d; reason=%s"
-         (runtime_id_to_string runtime_id)
-         requested_max_tokens
-         provider_ceiling
-         reason)
   | Accept_rejected
       {
         scope;
@@ -856,7 +830,6 @@ let kind_of_masc_internal_error = function
   | Admission_queue_rejected _ -> "admission_queue_rejected"
   | Turn_timeout _ -> "turn_timeout"
   | Provider_timeout _ -> "provider_timeout"
-  | Max_tokens_ceiling_violation _ -> "max_tokens_ceiling_violation"
   | Ambiguous_post_commit _ -> "ambiguous_post_commit"
   | Internal_unhandled_exception _ -> "internal_unhandled_exception"
   | Internal_bridge_exception _ -> "internal_bridge_exception"
@@ -866,8 +839,7 @@ let runtime_id_of_masc_internal_error = function
   | Runtime_exhausted { runtime_id; _ }
   | Capacity_backpressure { runtime_id; _ }
   | Resumable_cli_session { runtime_id; _ }
-  | Admission_queue_timeout { runtime_id; _ }
-  | Max_tokens_ceiling_violation { runtime_id; _ } ->
+  | Admission_queue_timeout { runtime_id; _ } ->
       let runtime_id = runtime_id_to_string runtime_id in
       if String.equal (String.trim runtime_id) "" then "unknown"
       else runtime_id
@@ -938,7 +910,6 @@ let accept_no_progress_retry_kind = function
   | Admission_queue_rejected _
   | Turn_timeout _
   | Provider_timeout _
-  | Max_tokens_ceiling_violation _
   | Ambiguous_post_commit _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
@@ -1143,24 +1114,6 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                              (string_opt_of_assoc "phase" json);
                        })
               | _ -> None)
-          | _ -> None)
-      | Some (`String "max_tokens_ceiling_violation") -> (
-          match
-            string_opt_of_assoc "runtime_id" json,
-            int_opt_of_assoc "requested_max_tokens" json,
-            int_opt_of_assoc "provider_ceiling" json
-          with
-          | Some runtime_id, Some requested_max_tokens, Some provider_ceiling ->
-            Some
-              (Max_tokens_ceiling_violation
-                 {
-                   runtime_id;
-                   requested_max_tokens;
-                   provider_ceiling;
-                   reason =
-                     Option.value ~default:"unknown"
-                       (string_opt_of_assoc "reason" json);
-                 })
           | _ -> None)
       | Some (`String "ambiguous_post_commit") -> (
           match string_opt_of_assoc "original_error" json with

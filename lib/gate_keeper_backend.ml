@@ -585,72 +585,55 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
                  "channel gate text snapshot callback failed (keeper=%s): %s"
                  keeper_name (Printexc.to_string exn))
   in
-  let busy_in_flight =
-    Keeper_turn_admission.in_flight
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-  in
-  let active_chat_queue = Keeper_chat_queue.has_active_receipts ~keeper_name in
-  let should_defer_to_existing_work =
-    match busy_in_flight, active_chat_queue with
-    | Some _, _ -> true
-    | None, Ok active -> active
-    | None, Error error ->
-      Log.Server.error
-        "channel gate chat queue admission unavailable (keeper=%s, lane=%s): %s"
-        keeper_name lane (Keeper_chat_queue.mutation_error_to_string error);
-      true
-  in
   let slack_reply_thread_ts =
     match slack_thread_ts metadata with
     | Some thread_ts -> Some thread_ts
     | None -> metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
   in
+  let defer_to_existing_work in_flight =
+    match
+      route_busy_connector connector_kind
+        ~channel_id:channel_workspace_id ~user_id:channel_user_id
+        ~user_name:channel_user_name ~team_id:(slack_team_id metadata)
+        ~thread_ts:slack_reply_thread_ts
+    with
+    | `Enqueue_chat_queue source ->
+      (* RFC-connector-deferred-reply-via-chat-queue: route accepted connector
+         input onto the durable queue whenever the authoritative if-free
+         admission reports Busy. This includes a receipt committed or leased
+         after any outer observation but before the turn slot was acquired. *)
+      (match
+         Keeper_chat_queue.enqueue ~keeper_name
+           { Keeper_chat_queue.content = String.trim content
+           ; user_blocks = []
+           ; attachments = []
+           ; timestamp = Eio.Time.now clock
+           ; source
+           }
+       with
+       | Ok receipt -> `Queued_to_chat_lane (in_flight, receipt)
+       | Error error ->
+         Log.Server.error
+           "channel gate durable chat enqueue failed (keeper=%s, lane=%s): %s"
+           keeper_name lane
+           (Keeper_chat_queue.mutation_error_to_string error);
+         `Chat_queue_error error)
+    | `Async_poll ->
+      `Async_ack
+        ( in_flight
+        , Keeper_tool_surface.dispatch keeper_ctx
+            ~name:"masc_keeper_msg" ~args )
+  in
   let dispatch_result =
-    if should_defer_to_existing_work then
-        (match
-           route_busy_connector connector_kind
-             ~channel_id:channel_workspace_id ~user_id:channel_user_id
-             ~user_name:channel_user_name ~team_id:(slack_team_id metadata)
-             ~thread_ts:slack_reply_thread_ts
-         with
-         | `Enqueue_chat_queue source ->
-             (* RFC-connector-deferred-reply-via-chat-queue: the keeper already holds an in-flight turn. Route the
-                connector message onto [Keeper_chat_queue] so the serial
-                [Keeper_chat_consumer] drains it once the slot frees and delivers
-                the deferred reply through the connector's outbound adapter
-                ([Keeper_chat_discord.adapter_loop]). The async [masc_keeper_msg]
-                store ([Keeper_msg_async]) has no outbound path, so a busy
-                connector message routed there is answered into the dashboard
-                transcript only and never reaches the channel — the RFC-connector-deferred-reply-via-chat-queue
-                root cause. *)
-             (match
-                Keeper_chat_queue.enqueue ~keeper_name
-                  { Keeper_chat_queue.content = String.trim content
-                  ; user_blocks = []
-                  ; attachments = []
-                  ; timestamp = Eio.Time.now clock
-                  ; source
-                  }
-              with
-              | Ok receipt -> `Queued_to_chat_lane (busy_in_flight, receipt)
-              | Error error ->
-                Log.Server.error
-                  "channel gate durable chat enqueue failed (keeper=%s, lane=%s): %s"
-                  keeper_name lane
-                  (Keeper_chat_queue.mutation_error_to_string error);
-                `Chat_queue_error error)
-         | `Async_poll ->
-             `Async_ack
-               ( busy_in_flight
-               , Keeper_tool_surface.dispatch keeper_ctx
-                   ~name:"masc_keeper_msg" ~args ))
-    else
-        (* Channel gate needs the final keeper reply when the keeper can run it
-           now, not the async request ACK that plain dispatch returns. *)
-        `Streaming
-          (Keeper_tool_surface.dispatch_stream ~on_text_delta keeper_ctx
-             ~name:"masc_keeper_msg" ~args)
+    (* The admission boundary, not a route-level peek, owns the FIFO decision.
+       It rechecks the durable queue after acquiring the Keeper turn slot. *)
+    match
+      Keeper_tool_surface.dispatch_stream_if_free ~on_text_delta keeper_ctx
+        ~name:"masc_keeper_msg" ~args
+    with
+    | `Ran result -> `Streaming result
+    | `Busy { Keeper_turn_admission.in_flight; _ } ->
+      defer_to_existing_work in_flight
   in
   match dispatch_result with
   | `Async_ack (in_flight, Some result) when Tool_result.is_success result ->

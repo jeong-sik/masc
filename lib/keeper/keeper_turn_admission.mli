@@ -131,7 +131,11 @@ val run_chat_if_free
     in-flight turn. Dashboard direct-stream callers use this to preserve live
     streaming for idle keepers while atomically routing busy keepers to the
     durable chat queue. Existing parked chat waiters have priority: when
-    [chat_waiting] is true this returns [`Busy] without attempting the lock. *)
+    [chat_waiting] is true this returns [`Busy] without attempting the lock.
+    After acquiring the turn slot it rechecks both parked waiters and active
+    durable receipts. This post-lock check is the direct-admission
+    linearization point: a receipt committed or leased after an outer route
+    peek cannot be overtaken, and queue read errors fail closed as [`Busy]. *)
 
 val in_flight
   :  base_path:string

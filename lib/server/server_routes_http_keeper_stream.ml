@@ -1056,11 +1056,12 @@ and queued_turn_failure_kind =
   | Turn_cancelled
   | No_visible_reply
   | Continuation_checkpoint_without_reply
+  | Missing_turn_ref
   | Transcript_persist_failed
   | Stream_projection_failed
 
 and queued_turn_outcome =
-  | Delivered of { outcome_ref : string option }
+  | Delivered of { outcome_ref : string }
   | Failed of
       { kind : queued_turn_failure_kind
       ; detail : string
@@ -1073,8 +1074,19 @@ let queued_turn_failure_kind_to_string = function
   | No_visible_reply -> "no_visible_reply"
   | Continuation_checkpoint_without_reply ->
       "continuation_checkpoint_without_reply"
+  | Missing_turn_ref -> "missing_turn_ref"
   | Transcript_persist_failed -> "transcript_persist_failed"
   | Stream_projection_failed -> "stream_projection_failed"
+
+let queued_delivery_outcome_of_turn_ref = function
+  | Some turn_ref ->
+      Delivered { outcome_ref = Ids.Turn_ref.to_string turn_ref }
+  | None ->
+      Failed
+        { kind = Missing_turn_ref
+        ; detail =
+            "queued turn persisted a reply but the reply payload had no valid turn_ref"
+        }
 
 type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 
@@ -1388,8 +1400,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             in
             (* RFC-0233 §7: the keeper minted this turn's join key into the
                reply payload (keeper_turn.ml). Decode it via the shared
-               reply-payload parser — never repair: a malformed or absent
-               value reads as None and the row simply carries no turn_ref. *)
+               reply-payload parser — never repair. A direct turn may retain
+               an uncorrelated row for diagnostics; a queued turn fails closed
+               below because Delivered requires the exact join key. *)
             let turn_ref =
               Keeper_turn_outcome.turn_ref_of_reply_payload payload_json_opt
             in
@@ -1466,11 +1479,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                          ~keeper_name:payload.name ~source:chat_source ?content ();
                        if queued_turn
                        then
-                         Some
-                           (Delivered
-                              { outcome_ref =
-                                  Option.map Ids.Turn_ref.to_string turn_ref
-                              })
+                         Some (queued_delivery_outcome_of_turn_ref turn_ref)
                        else None
                    | Error persist_error ->
                        if queued_turn
@@ -2171,6 +2180,8 @@ module For_testing = struct
 
   let extract_visible_reply = extract_visible_reply
   let direct_reply_terminal_error = direct_reply_terminal_error
+  let queued_delivery_outcome_of_turn_ref =
+    queued_delivery_outcome_of_turn_ref
   let visible_reply_with_stream_fallback = visible_reply_with_stream_fallback
   let redacted_visible_reply_with_stream_fallback =
     redacted_visible_reply_with_stream_fallback

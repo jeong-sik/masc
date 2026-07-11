@@ -171,6 +171,13 @@ The autonomous lane yields while the Keeper has either pending or inflight chat
 receipts. Leasing must not create a race window in which an autonomous turn can
 overtake the queued chat turn.
 
+Direct Dashboard and connector turns use non-blocking admission. Route-level
+queue observations are only fast paths: after acquiring the Keeper turn slot,
+the admission boundary rereads parked waiters and active durable receipts before
+running the turn. A receipt committed or leased before that post-lock read wins
+FIFO priority; queue read errors fail closed and route the message through the
+durable enqueue/error path.
+
 Queue state and finalization state are per Keeper. Different Keepers may drain
 concurrently. A corrupt snapshot, connector failure, or stuck finalization for
 one Keeper must not block another Keeper lane.
@@ -213,6 +220,14 @@ parsing as well as response headers, and the Dashboard permits only one terminal
 convergence read per Keeper at a time. Failed, empty, stale, or timed-out reads
 remain pending for the next visible-panel poll.
 
+`Delivered.outcome_ref` is non-optional at the queued-turn boundary. If a
+successful-looking provider reply omits or malforms `turn_ref`, the transcript
+row is retained for diagnosis but the receipt terminates as typed
+`Missing_turn_ref`/`Internal_error`; the server never fabricates a join key or
+emits `Delivered` without one. If a legacy or corrupt snapshot still projects a
+`Delivered` receipt without a nonblank key, the Dashboard surfaces a correlation
+invariant error and stops terminal-convergence retries for that receipt.
+
 ### 6.2 Authoritative queue projection
 
 `Server_keeper_waiting_inventory` exposes separate
@@ -244,10 +259,13 @@ Focused regression coverage must prove:
 - cancellation nacks, while unexpected exceptions become terminal failures;
 - failed finalization persistence retries without redelivering the turn;
 - different Keeper queues dispatch concurrently;
+- a receipt committed after a stale outer peek still blocks direct admission,
+  both while Pending and Inflight;
 - connector ACK receipt matches the durable snapshot;
 - Discord/Slack terminal callback failures remain visible;
 - Dashboard busy ACK rows remain `queued` after `RUN_FINISHED`;
 - pending/inflight/read-error rows reach the Dashboard projection; and
+- missing or malformed queued-turn `turn_ref` never reaches `Delivered`; and
 - queue-change SSE triggers an authoritative refresh.
 
 Full Dune remains CI authority. Local validation uses focused repo wrapper

@@ -76,6 +76,62 @@ let test_chat_if_free_never_parks () =
     Eio.Promise.resolve set_release ())
 ;;
 
+let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
+  reset ();
+  Printf.printf
+    "Test 1c: run_chat_if_free rechecks durable receipts after a stale outer peek\n%!";
+  check
+    "outer precheck initially observes no active receipt"
+    (Keeper_chat_queue.has_active_receipts ~keeper_name = Ok false);
+  let message : Keeper_chat_queue.queued_message =
+    { content = "queued first"
+    ; user_blocks = []
+    ; attachments = []
+    ; timestamp = Time_compat.now ()
+    ; source = Keeper_chat_queue.Dashboard
+    }
+  in
+  let receipt = Keeper_chat_queue.enqueue ~keeper_name message in
+  check "receipt commits after the stale outer peek" (Result.is_ok receipt);
+  let direct_ran = ref false in
+  (match
+     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
+       direct_ran := true)
+   with
+   | `Busy { Keeper_turn_admission.waiting = 0; in_flight = None } ->
+     check "pending receipt blocks direct admission" true
+   | `Busy _ | `Ran () -> check "pending receipt blocks direct admission" false);
+  check "pending receipt is not overtaken" (not !direct_ran);
+  let lease =
+    match Keeper_chat_queue.lease_batch ~keeper_name with
+    | `Leased lease -> lease
+    | `Empty | `Already_leased _ | `Error _ ->
+      failwith "expected the committed receipt to lease"
+  in
+  (match
+     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
+       direct_ran := true)
+   with
+   | `Busy _ -> check "inflight receipt blocks direct admission" true
+   | `Ran () -> check "inflight receipt blocks direct admission" false);
+  check "inflight receipt is not overtaken" (not !direct_ran);
+  (match
+     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+       ~outcome:
+         (Keeper_chat_queue.Mark_delivered
+            { completed_at = Time_compat.now (); outcome_ref = Some "turn#1" })
+   with
+   | `Finalized _ -> ()
+   | `Unknown_lease | `Error _ -> failwith "expected the lease to finalize");
+  (match
+     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
+       direct_ran := true)
+   with
+   | `Ran () -> check "terminal receipt no longer blocks direct admission" true
+   | `Busy _ -> check "terminal receipt no longer blocks direct admission" false);
+  check "direct turn runs only after receipt terminalizes" !direct_ran
+;;
+
 let test_autonomous_skips_in_flight_chat () =
   reset ();
   Printf.printf "Test 2: autonomous lane skips while a chat turn is in flight\n%!";
@@ -480,6 +536,7 @@ let () =
   Eio_main.run @@ fun _env ->
   test_free_slot_admits ();
   test_chat_if_free_never_parks ();
+  test_chat_if_free_rechecks_durable_queue_after_stale_peek ();
   test_autonomous_skips_in_flight_chat ();
   test_chat_turns_serialize ();
   test_distinct_keepers_do_not_block_each_other ();

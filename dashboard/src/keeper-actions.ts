@@ -862,11 +862,35 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
           })
           break
         case 'delivered':
-          if (currentState !== 'delivered' && currentState !== 'failed') {
-            const receiptTargets = pendingTerminalTranscriptConvergence.get(keeperName)
-              ?? new Map<string, string | null>()
-            receiptTargets.set(receiptId, receipt.state.outcomeRef)
-            pendingTerminalTranscriptConvergence.set(keeperName, receiptTargets)
+          {
+            const outcomeRef = receipt.state.outcomeRef?.trim() ?? ''
+            if (!outcomeRef) {
+              const correlationError =
+                '큐 처리 결과 무결성 오류: Delivered receipt에 outcome_ref가 없습니다.'
+              const receiptTargets = pendingTerminalTranscriptConvergence.get(keeperName)
+              receiptTargets?.delete(receiptId)
+              if (receiptTargets?.size === 0) {
+                pendingTerminalTranscriptConvergence.delete(keeperName)
+              }
+              setRecordValue(keeperActionErrors, keeperName, correlationError)
+              finalizeAssistantEntry(keeperName, entry.id, {
+                delivery: 'error',
+                streamState: null,
+                details: {
+                  ...details,
+                  queueCorrelationError: 'missing_outcome_ref',
+                },
+                error: correlationError,
+                streamContract,
+              })
+              break
+            }
+            if (currentState !== 'delivered' && currentState !== 'failed') {
+              const receiptTargets = pendingTerminalTranscriptConvergence.get(keeperName)
+                ?? new Map<string, string | null>()
+              receiptTargets.set(receiptId, outcomeRef)
+              pendingTerminalTranscriptConvergence.set(keeperName, receiptTargets)
+            }
           }
           finalizeAssistantEntry(keeperName, entry.id, {
             delivery: 'delivered',

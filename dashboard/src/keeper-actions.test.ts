@@ -252,6 +252,29 @@ describe('reconcileKeeperChatReceipts', () => {
     })
   })
 
+  it('fails closed instead of retrying forever when Delivered lacks outcome_ref', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 4,
+      state: { kind: 'delivered', completedAt: 42, outcomeRef: null },
+    })
+
+    await reconcileKeeperChatReceipts('echo')
+
+    const entry = keeperThreads.value.echo?.find(candidate => (
+      candidate.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))
+    expect(entry?.delivery).toBe('error')
+    expect(entry?.details?.queueCorrelationError).toBe('missing_outcome_ref')
+    expect(entry?.error).toContain('outcome_ref')
+    expect(keeperActionErrors.value.echo).toContain('outcome_ref')
+    expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+
+    await reconcileKeeperChatReceipts('echo')
+    expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+  })
+
   it('forces transcript convergence when only the terminal queue receipt is observed', async () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',

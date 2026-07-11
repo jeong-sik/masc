@@ -117,5 +117,22 @@ val percentile : float array -> float -> float
 
 val start_keepalive :
   ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
+
+type joined_stop =
+  { lane_exit : Keeper_lane.exit
+  ; terminal : Keeper_registry.done_resolution
+  }
+
+type joined_stop_result =
+  | Keeper_not_registered
+  | Keeper_joined of joined_stop
+
+(** Request cooperative stop without claiming that the lane has exited. *)
 val stop_keepalive : ?base_path:string -> string -> unit
+
+(** Request cooperative stop and join the exact registry entry observed by
+    this call. No timeout is invented: callers choose whether to await. *)
+val stop_keepalive_and_await :
+  base_path:string -> string -> joined_stop_result
+
 val stop_all_keepalives : unit -> unit

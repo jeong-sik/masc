@@ -24,6 +24,7 @@ module KHL = Masc.Keeper_heartbeat_loop
 module Obs = Masc.Keeper_heartbeat_loop_observations
 module WO = Masc.Keeper_world_observation
 module Health = Masc.Health
+module Lane = Masc.Keeper_lane
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -99,7 +100,12 @@ let make_meta name =
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
 
 let resolve_done_for_test reg value =
-  ignore (R.resolve_done reg ~source:"test_fixture" value)
+  ignore (R.resolve_done reg ~source:"test_fixture" value);
+  match
+    Lane.reject_before_start reg.lane ~reason:(Failure "synthetic terminal fixture")
+  with
+  | Ok () -> ()
+  | Error error -> fail (Lane.start_error_to_string error)
 
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
@@ -332,8 +338,8 @@ let test_self_preservation_min_candidates_not_met () =
 
 (** Verify the dominated_by_sweep logic from reconcile_keepalive_keepers.
     Running/Paused/Crashed/Dead = sweep-owned (reconcile must skip).
-    Stopped with resolved done_p = reconcile-eligible.
-    Stopped with unresolved done_p = sweep will handle. *)
+    Stopped with a resolved terminal and joined lane = reconcile-eligible.
+    Stopped with an unjoined lane = sweep will handle. *)
 let test_reconcile_predicate_sweep_owned () =
   R.clear ();
   (* Running = sweep-owned *)
@@ -365,7 +371,7 @@ let test_reconcile_predicate_stopped_resolved () =
   ignore (R.dispatch_event ~base_path:bp "s1" KSM.Stop_requested);
   ignore (R.dispatch_event ~base_path:bp "s1" KSM.Drain_complete);
   resolve_done_for_test reg `Stopped;
-  (* Stopped + resolved done_p = reconcile-eligible *)
+  (* Stopped + resolved done_p + joined lane = reconcile-eligible *)
   (match R.get ~base_path:bp "s1" with
    | Some e ->
      check string "stopped" "stopped" (KSM.phase_to_string e.phase);
@@ -377,7 +383,7 @@ let test_reconcile_predicate_stopped_resolved () =
        | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
-       | KSM.Stopped -> Eio.Promise.peek e.done_p = None
+       | KSM.Stopped -> not (R.lane_has_exited e)
      in
      check bool "not dominated (reconcile-eligible)" false dominated
    | None -> fail "expected s1")
@@ -398,7 +404,7 @@ let test_reconcile_predicate_stopped_unresolved () =
        | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
-       | KSM.Stopped -> Eio.Promise.peek e.done_p = None
+       | KSM.Stopped -> not (R.lane_has_exited e)
      in
      check bool "dominated (sweep will handle)" true dominated
    | None -> fail "expected s2")
@@ -603,19 +609,81 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       let stopped_resolved =
         wait_until ~clock:ctx.clock ~timeout_s:1.0 (fun () ->
           match R.get ~base_path:config.base_path keeper_name with
-          | Some entry -> Option.is_some (Eio.Promise.peek entry.done_p)
+          | Some entry ->
+            Option.is_some (Eio.Promise.peek entry.done_p)
+            && R.lane_has_exited entry
           | None -> false)
       in
       match R.get ~base_path:config.base_path keeper_name with
       | None -> fail "expected direct-lifecycle registry entry"
       | Some entry ->
         check string "state stopped" "stopped" (KSM.phase_to_string entry.phase);
-        check bool "done promise resolved eventually" true stopped_resolved;
+        check bool "terminal and lane join resolve eventually" true stopped_resolved;
         (match Eio.Promise.peek entry.done_p with
          | Some `Stopped -> ()
          | Some (`Crashed reason) ->
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
+
+let test_keeper_lane_join_waits_for_children_and_cleanup () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun parent_sw ->
+  let lane = Lane.create () in
+  let release_p, release_r = Eio.Promise.create () in
+  let child_finished = Atomic.make false in
+  let cleanup_observed_child = Atomic.make false in
+  (match
+     Lane.fork
+       ~sw:parent_sw
+       lane
+       ~run:(fun lane_sw ->
+         Eio.Fiber.fork ~sw:lane_sw (fun () ->
+           Eio.Promise.await release_p;
+           Atomic.set child_finished true))
+       ~cleanup:(fun _outcome ->
+         Atomic.set cleanup_observed_child (Atomic.get child_finished);
+         Ok ())
+   with
+   | Ok () -> ()
+   | Error error -> fail (Lane.start_error_to_string error));
+  Eio.Fiber.yield ();
+  check bool
+    "lane exit waits for attached child"
+    true
+    (Option.is_none (Lane.peek_exit lane));
+  Eio.Promise.resolve release_r ();
+  let exit = Lane.await_exit lane in
+  (match exit.outcome with
+   | Lane.Completed -> ()
+   | Lane.Cancelled_by_parent cause ->
+     fail ("unexpected parent cancellation: " ^ Printexc.to_string cause)
+   | Lane.Failed exn -> fail ("unexpected lane failure: " ^ Printexc.to_string exn));
+  check bool "child finished before join" true (Atomic.get child_finished);
+  check bool
+    "cleanup ran after child join"
+    true
+    (Atomic.get cleanup_observed_child);
+  check (option string) "cleanup succeeded" None exit.cleanup_error
+
+let test_keeper_lane_surfaces_cleanup_failure () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun parent_sw ->
+  let lane = Lane.create () in
+  (match
+     Lane.fork
+       ~sw:parent_sw
+       lane
+       ~run:(fun _lane_sw -> ())
+       ~cleanup:(fun _outcome -> Error "cleanup evidence")
+   with
+   | Ok () -> ()
+   | Error error -> fail (Lane.start_error_to_string error));
+  let exit = Lane.await_exit lane in
+  check
+    (option string)
+    "cleanup failure remains observable"
+    (Some "cleanup evidence")
+    exit.cleanup_error
 
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
@@ -703,7 +771,7 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           (Option.is_none (Eio.Promise.peek entry.done_p));
         Masc.Keeper_keepalive.stop_keepalive keeper_name)
 
-let test_stop_keepalive_resolves_running_entry_immediately () =
+let test_stop_keepalive_only_requests_lane_stop () =
   R.clear ();
   let keeper_name = "manual-stop-entry" in
   let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
@@ -711,12 +779,20 @@ let test_stop_keepalive_resolves_running_entry_immediately () =
   match R.get ~base_path:bp keeper_name with
   | None -> fail "expected manual-stop-entry in registry"
   | Some entry ->
-    check string "state stopped immediately" "stopped" (KSM.phase_to_string entry.phase);
-    (match Eio.Promise.peek reg.done_p with
-     | Some `Stopped -> ()
-     | Some (`Crashed reason) ->
-       fail ("expected stopped promise, got crashed: " ^ reason)
-     | None -> fail "expected manual stop to resolve done_p")
+    check bool "stop signal set" true (Atomic.get entry.fiber_stop);
+    check bool "wakeup signal set" true (Atomic.get entry.fiber_wakeup);
+    check string
+      "phase remains owned by lane"
+      "running"
+      (KSM.phase_to_string entry.phase);
+    check bool
+      "terminal promise is not a stop-request acknowledgement"
+      true
+      (Option.is_none (Eio.Promise.peek reg.done_p));
+    check bool
+      "unstarted synthetic entry has not joined"
+      true
+      (not (R.lane_has_exited entry))
 
 let test_stop_keepalive_preserves_existing_crash_outcome () =
   R.clear ();
@@ -1018,14 +1094,18 @@ let () =
         test_crashed_cycle_records_turn_failure;
     ];
     "direct_keepalive", [
-      test_case "stop resolves done promise" `Quick
+      test_case "stop resolves done after lane exit" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "lane join waits for children and cleanup" `Quick
+        test_keeper_lane_join_waits_for_children_and_cleanup;
+      test_case "lane join surfaces cleanup failure" `Quick
+        test_keeper_lane_surfaces_cleanup_failure;
       test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick
         test_start_keepalive_reclaims_finished_failing_entry;
-      test_case "manual stop resolves running entry immediately" `Quick
-        test_stop_keepalive_resolves_running_entry_immediately;
+      test_case "manual stop only requests lane stop" `Quick
+        test_stop_keepalive_only_requests_lane_stop;
       test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
       test_case "resolve_done reports prior outcome" `Quick

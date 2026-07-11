@@ -66,6 +66,16 @@ val prepare_fiber_launch :
 (** Unregister a keeper (removes from registry). *)
 val unregister : base_path:string -> string -> unit
 
+type unregister_exact_result =
+  | Exact_unregistered
+  | Exact_entry_missing
+  | Exact_entry_replaced
+
+(** Remove [entry] only if it is still the exact registry value for its
+    [(base_path, name)] key. This prevents a stale sweep from unregistering a
+    newer same-name lane. *)
+val unregister_exact : registry_entry -> unregister_exact_result
+
 (** Look up a keeper by name. *)
 val get : base_path:string -> string -> registry_entry option
 

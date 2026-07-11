@@ -552,7 +552,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       Keeper_registry.record_crash ~base_path entry.name ts msg;
       Keeper_registry_error_recording.record ~base_path entry.name msg;
       match Keeper_registry.get ~base_path entry.name with
-      | Some updated -> queue_crashed_entry acc updated msg
+      | Some updated when Keeper_registry.lane_has_exited updated ->
+        queue_crashed_entry acc updated msg
+      | Some _ -> acc
       | None -> acc
   in
   (* 2-level supervision slice: process the flat registry through stable
@@ -568,7 +570,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          { acc with to_cleanup_dead = entry :: acc.to_cleanup_dead }
        | _ -> acc)
     | Keeper_state_machine.Stopped ->
-      { acc with to_unregister = entry :: acc.to_unregister }
+      if Keeper_registry.lane_has_exited entry
+      then { acc with to_unregister = entry :: acc.to_unregister }
+      else acc
     | Keeper_state_machine.Running
     | Keeper_state_machine.Paused
     | Keeper_state_machine.Crashed
@@ -652,8 +656,14 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
               ~stale_seconds
               ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts;
             acc)
-       | Some `Stopped -> { acc with to_unregister = entry :: acc.to_unregister }
-       | Some (`Crashed msg) -> queue_crashed_entry acc entry msg)
+       | Some `Stopped ->
+         if Keeper_registry.lane_has_exited entry
+         then { acc with to_unregister = entry :: acc.to_unregister }
+         else acc
+       | Some (`Crashed msg) ->
+         if Keeper_registry.lane_has_exited entry
+         then queue_crashed_entry acc entry msg
+         else acc)
   in
   let entry_cohorts = supervision_cohorts entries in
   let sweep_ym = Eio_guard.create_yield_meter () in
@@ -671,12 +681,27 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
       empty_sweep_acc
       entry_cohorts
   in
+  let unregister_exact_and_drop (entry : Keeper_registry.registry_entry) =
+    match Keeper_registry.unregister_exact entry with
+    | Keeper_registry.Exact_unregistered ->
+      Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
+      true
+    | Keeper_registry.Exact_entry_missing -> false
+    | Keeper_registry.Exact_entry_replaced ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string SupervisorCleanupFailures)
+        ~labels:[ "keeper", entry.name; "site", "stale_entry_replaced" ]
+        ();
+      Log.Keeper.warn
+        "%s: stale supervisor entry was not unregistered because a newer lane owns the name"
+        entry.name;
+      false
+  in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       Keeper_registry.unregister ~base_path entry.name;
-       (* K4c — restart-budget exhaustion: keeper is permanently
-       removed (no respawn), so reclaim its accumulator slot. *)
-       Keeper_tool_emission_hook.drop_keeper_accumulator entry.name)
+       (* K4c — reclaim only when this exact lane was removed. A stale
+          sweep must not drop the accumulator of a newer same-name lane. *)
+       ignore (unregister_exact_and_drop entry : bool))
     final_acc.to_unregister;
   List.iter
     (fun ((entry : Keeper_registry.registry_entry), msg) ->
@@ -835,11 +860,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)
            ~labels:[ "keeper", old_entry.name; "outcome", "meta_unavailable" ]
-           ();
+         ();
          Log.Keeper.error "%s: cannot read meta for restart, removing" old_entry.name;
-         Keeper_registry.unregister ~base_path old_entry.name;
-         (* K4c — restart-meta read failure: keeper abandoned, drop. *)
-         Keeper_tool_emission_hook.drop_keeper_accumulator old_entry.name)
+         (* K4c — restart-meta read failure: abandon only the exact crashed
+            lane observed by this sweep. *)
+         ignore (unregister_exact_and_drop old_entry : bool))
     restart_list;
   (* Phase 2: restore paused reconcile gates whose approval queue was lost
      on restart. The queue itself is in-memory, but paused keeper meta is

@@ -102,6 +102,7 @@ type registry_entry =
   ; event_queue : Keeper_event_queue.t Atomic.t
   ; started_at : float
   ; grpc_close : (unit -> unit) option Atomic.t
+  ; lane : Keeper_lane.t
   ; done_p : done_resolution Eio.Promise.t
   ; done_r : done_resolution Eio.Promise.u
   ; restart_count : int
@@ -186,6 +187,8 @@ let resolve_done entry ~source (value : done_resolution) =
        in
        Done_already_resolved { source; previous })
 ;;
+
+let lane_has_exited entry = Option.is_some (Keeper_lane.peek_exit entry.lane)
 
 let registry_key ~base_path name =
   if String.contains name '\x1f'

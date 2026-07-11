@@ -441,16 +441,22 @@ let fiber_health_of ~base_path name =
          Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
        in
        if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie
-     | Stopped | Offline -> Fiber_unknown
+     | Stopped ->
+       if lane_has_exited entry then Fiber_unknown else Fiber_alive
+     | Offline -> Fiber_unknown
      | Running | Paused | Failing | Overflowed | Compacting | HandingOff | Draining ->
        (match Eio.Promise.peek entry.done_p with
         | None -> Fiber_alive
-        | Some `Stopped -> Fiber_unknown
+        | Some `Stopped ->
+          if lane_has_exited entry then Fiber_unknown else Fiber_alive
         | Some (`Crashed _) ->
-          let max_restarts =
-            Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
-          in
-          if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie))
+          if not (lane_has_exited entry)
+          then Fiber_alive
+          else
+            let max_restarts =
+              Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
+            in
+            if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie))
 ;;
 
 let crash_log_of ~base_path name =

@@ -59,8 +59,9 @@ let reconcile_keepalive_keepers
          | Keeper_state_machine.Restarting -> true
          | Keeper_state_machine.Offline -> false
          | Keeper_state_machine.Stopped ->
-           (* Stopped with unresolved fiber → sweep will clean up *)
-             Eio.Promise.peek e.done_p = None)
+           (* A terminal event is not a join. The sweep owns cleanup until
+              the exact lane scope has released all fibers and resources. *)
+           not (Keeper_registry.lane_has_exited e))
     in
     if not dominated_by_sweep
     then (

@@ -65,6 +65,24 @@ let test_update_entry_rejects_corrupted_result () =
   | Some e -> check string "original base_path preserved" original_base_path e.base_path
 ;;
 
+let test_unregister_exact_preserves_replacement_lane () =
+  KR.clear ();
+  let old_entry = register "alice" in
+  let replacement = register "alice" in
+  (match KR.unregister_exact old_entry with
+   | KR.Exact_entry_replaced -> ()
+   | KR.Exact_unregistered -> fail "stale entry removed its replacement lane"
+   | KR.Exact_entry_missing -> fail "replacement lane unexpectedly missing");
+  (match KR.get ~base_path "alice" with
+   | Some current ->
+     check bool "replacement remains registered" true (current == replacement)
+   | None -> fail "replacement lane was removed");
+  match KR.unregister_exact replacement with
+  | KR.Exact_unregistered -> ()
+  | KR.Exact_entry_missing -> fail "replacement disappeared before exact removal"
+  | KR.Exact_entry_replaced -> fail "replacement identity changed unexpectedly"
+;;
+
 let test_dispatch_write_failure_skips_phase_side_effects () =
   KR.clear ();
   KLH.reset_for_testing ();
@@ -218,6 +236,12 @@ let () =
             "rejects corrupted closure result and preserves original"
             `Quick
             test_update_entry_rejects_corrupted_result
+        ] )
+    ; ( "unregister_exact"
+      , [ test_case
+            "stale entry preserves replacement lane"
+            `Quick
+            test_unregister_exact_preserves_replacement_lane
         ] )
     ; ( "dispatch_event"
       , [ test_case

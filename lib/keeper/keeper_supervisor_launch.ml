@@ -110,9 +110,29 @@ let launch_supervised_fiber_body
       (* determinism-contract: allow — ctx.sw fallback is the same deterministic
          default used before the ref -> Atomic conversion. *)
       let sw = Option.value (Atomic.get global_switch) ~default:ctx.sw in
-      Eio.Fiber.fork ~sw body
+      match
+        Keeper_lane.fork
+          ~sw
+          reg.lane
+          ~run:body
+          ~cleanup:(fun _ -> Ok ())
+      with
+      | Ok () -> ()
+      | Error error ->
+        let detail = Keeper_lane.start_error_to_string error in
+        Keeper_registry.set_failure_reason
+          ~base_path
+          meta.name
+          (Some (Keeper_registry.Exception detail));
+        ignore
+          (Keeper_registry.resolve_done
+             reg
+             ~source:"supervisor_lane_start_rejected"
+             (`Crashed detail)
+           : Keeper_registry.done_resolve_result)
     in
-    fork_body (fun () ->
+    fork_body (fun lane_sw ->
+      let ctx = { ctx with sw = lane_sw } in
       let resolved = Atomic.make false in
       (* Issue #18901 follow-up: distinguish parent-cancellation from
          genuine missed-resolution in the finally branch. The body's
@@ -568,6 +588,13 @@ let launch_supervised_fiber
       |> should_publish_lifecycle_for_done_signal
     then
       publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed meta.name reason ();
+    (match Keeper_lane.reject_before_start reg.lane ~reason:(Failure reason) with
+     | Ok () -> ()
+     | Error lane_error ->
+       Log.Keeper.error
+         "%s: rejected launch could not close lane join contract: %s"
+         meta.name
+         (Keeper_lane.start_error_to_string lane_error));
     Error err
   | Ok _ ->
     launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg;

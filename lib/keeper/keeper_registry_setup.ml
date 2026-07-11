@@ -356,6 +356,7 @@ let register_with_state
     ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
+    ; lane = Keeper_lane.create ()
     ; done_p
     ; done_r
     ; restart_count = 0
@@ -451,6 +452,7 @@ let register_restarting ~base_path name meta
     ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
+    ; lane = Keeper_lane.create ()
     ; done_p
     ; done_r
     ; restart_count = 0
@@ -499,36 +501,78 @@ let register_restarting ~base_path name meta
   loop ()
 ;;
 
-let unregister ~base_path name =
-  Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;
+type unregister_exact_result =
+  | Exact_unregistered
+  | Exact_entry_missing
+  | Exact_entry_replaced
+
+type remove_entry_result =
+  | Entry_removed of registry_entry
+  | Entry_missing
+  | Entry_replaced
+
+let remove_entry ?expected ~base_path name =
   let key = registry_key ~base_path name in
   let rec loop () =
     let current = Atomic.get registry in
-    let before = StringMap.find_opt key current in
-    let updated = StringMap.remove key current in
-    if not (Atomic.compare_and_set registry current updated) then loop () else before
+    match StringMap.find_opt key current with
+    | None -> Entry_missing
+    | Some entry ->
+      (match expected with
+       | Some expected_entry when entry != expected_entry -> Entry_replaced
+       | None | Some _ ->
+         let updated = StringMap.remove key current in
+         if Atomic.compare_and_set registry current updated
+         then Entry_removed entry
+         else loop ())
   in
-  let signal_fibers_to_stop entry =
-(* The watchdog and heartbeat fibers hold their own reference to [entry] via the closure they were forked with, so removing the entry from the registry map does not stop them. Without an explicit fibe... *)
-    Atomic.set entry.fiber_stop true;
-    Atomic.set entry.fiber_wakeup true
-  in
-  match loop () with
-  | Some entry when entry.phase = Running ->
-    signal_fibers_to_stop entry;
-    decr_running_count_clamped ();
+  loop ()
+;;
+
+let finish_unregistration entry =
+  (* The watchdog and heartbeat fibers retain [entry] in their closures.
+     Removing the map binding therefore must also signal that exact lane. *)
+  Atomic.set entry.fiber_stop true;
+  Atomic.set entry.fiber_wakeup true;
+  if entry.phase = Running then decr_running_count_clamped ()
+;;
+
+let unregister ~base_path name =
+  Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;
+  match remove_entry ~base_path name with
+  | Entry_removed entry when entry.phase = Running ->
+    finish_unregistration entry;
     Log.Keeper.debug
       "registry: unregistered running keeper name=%s running_count=%d"
       name
       (Atomic.get running_count_atomic)
-  | Some entry ->
-    signal_fibers_to_stop entry;
+  | Entry_removed entry ->
+    finish_unregistration entry;
     Log.Keeper.debug
       "registry: unregistered non-running keeper name=%s state=%s"
       name
       (Keeper_state_machine.phase_to_string entry.phase)
-  | None ->
+  | Entry_missing ->
     Log.Keeper.warn "registry: attempted to unregister non-existent keeper name=%s" name
+  | Entry_replaced ->
+    Log.Keeper.error
+      "registry: unconditional unregister reported a replaced entry name=%s base_path=%s"
+      name
+      base_path
+;;
+
+let unregister_exact entry =
+  match
+    remove_entry
+      ~expected:entry
+      ~base_path:entry.base_path
+      entry.name
+  with
+  | Entry_removed removed ->
+    finish_unregistration removed;
+    Exact_unregistered
+  | Entry_missing -> Exact_entry_missing
+  | Entry_replaced -> Exact_entry_replaced
 ;;
 
 let health_of_entry ~base_path name entry =

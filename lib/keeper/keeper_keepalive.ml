@@ -780,7 +780,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       Keeper_registry.get ~base_path:ctx.config.base_path m.name
     in
     let reclaimable_stale_entry (entry : Keeper_registry.registry_entry) =
-      let finished = Option.is_some (Eio.Promise.peek entry.done_p) in
+      let finished =
+        Option.is_some (Eio.Promise.peek entry.done_p)
+        && Keeper_registry.lane_has_exited entry
+      in
       match entry.phase with
       | Keeper_state_machine.Stopped -> finished
       | Keeper_state_machine.Failing
@@ -810,7 +813,13 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             "start_keepalive: reclaiming stale registered entry %s phase=%s"
             m.name
             (Keeper_state_machine.phase_to_string entry.phase));
-       Keeper_registry.unregister ~base_path:ctx.config.base_path m.name
+       (match Keeper_registry.unregister_exact entry with
+        | Keeper_registry.Exact_unregistered
+        | Keeper_registry.Exact_entry_missing -> ()
+        | Keeper_registry.Exact_entry_replaced ->
+          Log.Keeper.info
+            "start_keepalive: stale entry for %s was already replaced; keeping the newer lane"
+            m.name)
      | _ -> ());
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
     then
@@ -876,22 +885,35 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             ~phase:Keeper_state_machine.Crashed
             ~keeper_name:m.name
             ~detail:reason
-            ()
+            ();
+        (match Keeper_lane.reject_before_start reg.lane ~reason:(Failure reason) with
+         | Ok () -> ()
+         | Error lane_error ->
+           Log.Keeper.error
+             "%s: rejected launch could not close lane join contract: %s"
+             m.name
+             (Keeper_lane.start_error_to_string lane_error))
       | Ok () ->
         let stop = reg.fiber_stop in
         let wakeup = reg.fiber_wakeup in
-        (* Start optional gRPC heartbeat fiber *)
-        let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
-        (match grpc_close with
-         | Some _ ->
-           Keeper_registry.set_grpc_close ~base_path:ctx.config.base_path m.name grpc_close
-         | None -> ());
         let live_meta = bootstrap_live_keeper_meta ~ctx m in
         Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
         (* Telemetry feedback refresh loop removed in #6814:
          behavioral_stats no longer consumed by build_prompt. *)
         publish_keeper_started ~live_meta;
-        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+        (match
+           Keeper_lane.fork
+             ~sw:ctx.sw
+             reg.lane
+             ~run:(fun lane_sw ->
+        let ctx = { ctx with sw = lane_sw } in
+        (* The sidecar is part of this Keeper lane. It cannot outlive the
+           lane's structured-concurrency scope. *)
+        let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
+        (match grpc_close with
+         | Some _ ->
+           Keeper_registry.set_grpc_close ~base_path:ctx.config.base_path m.name grpc_close
+         | None -> ());
         let record_crash failure_reason =
           record_keeper_crashed
             reg
@@ -927,14 +949,16 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
          Cancelled (the outer one is in flight) and log non-cancel
          exceptions instead of propagating them. Mirrors
          keeper_agent_run.ml and keeper_unified_turn.ml:990. *)
-        let safe_cleanup_tracking () =
+        let cleanup_tracking _outcome =
           try
             Keeper_registry.cleanup_tracking
               ~base_path:ctx.config.base_path
-              live_meta.name
+              live_meta.name;
+            Ok ()
           with
-          | Eio.Cancel.Cancelled _ -> ()
+          | Eio.Cancel.Cancelled _ as exn -> Error (Printexc.to_string exn)
           | e ->
+            let detail = Printexc.to_string e in
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string CleanupTrackingFailures)
               ~labels:[ "keeper", live_meta.name; "site", "heartbeat_finally" ]
@@ -945,67 +969,78 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
               ~details:
                 (`Assoc
                   [ "keeper", `String live_meta.name
-                  ; "error", `String (Printexc.to_string e)
+                  ; "error", `String detail
                   ])
               (Printf.sprintf
                  "%s: cleanup_tracking in heartbeat finally raised: %s"
                  live_meta.name
-                 (Printexc.to_string e))
+                 detail);
+            Error detail
         in
-        Eio_guard.protect
-          (fun () ->
-             try
-               run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup;
-               record_loop_exit ()
-             with
-             | Keeper_registry.Keeper_fiber_crash ->
-               if Atomic.get stop
-               then record_stopped "manual stop"
-               else (
-                 let reason =
-                   match
-                     Keeper_registry.get ~base_path:ctx.config.base_path live_meta.name
-                   with
-                   | Some e ->
-                     Option.value
-                       ~default:(Keeper_registry.Exception "fiber_crash")
-                       e.last_failure_reason
-                   | None -> Keeper_registry.Exception "fiber_crash"
-                 in
-                 record_crash reason)
-             | Eio.Cancel.Cancelled _ ->
-               record_stopped "cancelled"
-             | exn ->
-               if Atomic.get stop
-               then record_stopped "manual stop"
-               else (
-                 Otel_metric_store.inc_counter
-                   Keeper_metrics.(to_string HeartbeatFailures)
-                   ~labels:[ "keeper", live_meta.name; "phase", "loop_crash" ]
-                   ();
-                 Log.Keeper.emit
-                   Log.Error
-                   ~category:Log.Heartbeat
-                   ~details:
-                     (`Assoc
-                       [ "keeper", `String live_meta.name
-                       ; "error", `String (Printexc.to_string exn)
-                       ])
-                   (Printf.sprintf
-                      "heartbeat loop for %s crashed: %s"
-                      live_meta.name
-                      (Printexc.to_string exn));
-                 record_crash (Keeper_registry.Exception (Printexc.to_string exn))))
-          ~finally:safe_cleanup_tracking))
+        (try
+           run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup;
+           record_loop_exit ()
+         with
+         | Keeper_registry.Keeper_fiber_crash ->
+           if Atomic.get stop
+           then record_stopped "manual stop"
+           else (
+             let reason =
+               match
+                 Keeper_registry.get ~base_path:ctx.config.base_path live_meta.name
+               with
+               | Some e ->
+                 Option.value
+                   ~default:(Keeper_registry.Exception "fiber_crash")
+                   e.last_failure_reason
+               | None -> Keeper_registry.Exception "fiber_crash"
+             in
+             record_crash reason)
+         | Eio.Cancel.Cancelled _ ->
+           record_stopped "cancelled"
+         | exn ->
+           if Atomic.get stop
+           then record_stopped "manual stop"
+           else (
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string HeartbeatFailures)
+               ~labels:[ "keeper", live_meta.name; "phase", "loop_crash" ]
+               ();
+             Log.Keeper.emit
+               Log.Error
+               ~category:Log.Heartbeat
+               ~details:
+                 (`Assoc
+                   [ "keeper", `String live_meta.name
+                   ; "error", `String (Printexc.to_string exn)
+                   ])
+               (Printf.sprintf
+                  "heartbeat loop for %s crashed: %s"
+                  live_meta.name
+                  (Printexc.to_string exn));
+             record_crash (Keeper_registry.Exception (Printexc.to_string exn)))))
+             ~cleanup:cleanup_tracking
+         with
+         | Ok () -> ()
+         | Error error ->
+           let detail = Keeper_lane.start_error_to_string error in
+           record_keeper_crashed
+             reg
+             ~base_path:ctx.config.base_path
+             ~keeper_name:live_meta.name
+             ~failure_reason:(Keeper_registry.Exception detail)))
 ;;
 
-let stop_keepalive ?base_path name =
-  let entries =
-    Keeper_registry.all ?base_path ()
-    |> List.filter (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name)
-  in
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
+type joined_stop =
+  { lane_exit : Keeper_lane.exit
+  ; terminal : Keeper_registry.done_resolution
+  }
+
+type joined_stop_result =
+  | Keeper_not_registered
+  | Keeper_joined of joined_stop
+
+let request_entry_stop (entry : Keeper_registry.registry_entry) =
        (* tla-lint: allow-mutation: fiber signal — stop+wakeup pair triggers cooperative shutdown *)
        Atomic.set entry.fiber_stop true;
        Atomic.set entry.fiber_wakeup true;
@@ -1023,18 +1058,24 @@ let stop_keepalive ?base_path name =
                "masc_keeper_grpc_close_failures"
                ~labels:[ "keeper", entry.meta.name ]
                ())
-        | None -> ());
-       match entry.phase with
-       | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
-       | _ ->
-         if
-           record_keeper_stopped
-             entry
-             ~base_path:entry.base_path
-             ~keeper_name:entry.name
-             ~detail:"manual stop"
-         then Keeper_registry.cleanup_tracking ~base_path:entry.base_path entry.name)
-    entries
+        | None -> ())
+;;
+
+let stop_keepalive ?base_path name =
+  Keeper_registry.all ?base_path ()
+  |> List.filter (fun (entry : Keeper_registry.registry_entry) ->
+    String.equal entry.name name)
+  |> List.iter request_entry_stop
+;;
+
+let stop_keepalive_and_await ~base_path name =
+  match Keeper_registry.get ~base_path name with
+  | None -> Keeper_not_registered
+  | Some entry ->
+    request_entry_stop entry;
+    let lane_exit = Keeper_lane.await_exit entry.lane in
+    let terminal = Eio.Promise.await entry.done_p in
+    Keeper_joined { lane_exit; terminal }
 ;;
 
 (** Stop all running keepers. Used in test cleanup to prevent orphaned

@@ -161,9 +161,6 @@ let keeper_toml_path_opt name =
 let keeper_toml_path_opt_for_base_path ~base_path name =
   Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path name
 
-let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
-  Keeper_types_profile_persona_defaults.load ~name
-
 let load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name
     : keeper_profile_defaults =
   Keeper_types_profile_persona_defaults.load_from_dirs ~persona_dirs ~name

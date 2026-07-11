@@ -1155,7 +1155,11 @@ let test_persona_defaults_load_prompt_fields () =
   }
 }
 |};
-  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
+  let defaults =
+    match KTP.load_keeper_profile_defaults_result "probe" with
+    | Ok defaults -> defaults
+    | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
+  in
   check (option string) "goal still loads" (Some "test persona keeper")
     defaults.goal;
   check (option string) "instructions load" (Some "legacy instructions")
@@ -1179,7 +1183,11 @@ let test_persona_resolver_rejects_operator_todo_profile () =
   (match KTP.load_persona_summary "probe" with
    | Some _ -> fail "placeholder persona summary should be hidden"
    | None -> ());
-  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
+  let defaults =
+    match KTP.load_keeper_profile_defaults_result "probe" with
+    | Ok defaults -> defaults
+    | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
+  in
   check (option string) "placeholder manifest rejected" None defaults.manifest_path;
   check (option string) "placeholder goal rejected" None defaults.goal;
   match

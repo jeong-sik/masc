@@ -631,8 +631,25 @@ name = "tech_glutton"
 persona_name = "executor"
 goal = "plan coding work"
 |};
-  check string "drift check honors TOML persona_name" "executor"
-    (Sup.persona_name_for_drift_check (make_meta "tech_glutton"))
+  match Sup.persona_name_for_drift_check (make_meta "tech_glutton") with
+  | Ok persona_name ->
+    check string "drift check honors TOML persona_name" "executor" persona_name
+  | Error error ->
+    fail (Keeper_types_profile.keeper_toml_load_error_to_string error)
+
+let test_persona_drift_check_preserves_invalid_config () =
+  with_config_dir @@ fun config_dir ->
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  write_file
+    (Filename.concat keepers_dir "invalid.toml")
+    "[keeper\nname = \"invalid\"\n";
+  match Sup.persona_name_for_drift_check (make_meta "invalid") with
+  | Error _ -> ()
+  | Ok persona_name ->
+    fail
+      (Printf.sprintf
+         "invalid config must not fall back to persona identity %S"
+         persona_name)
 
 let test_persona_drift_path_points_to_profile_json () =
   with_config_dir @@ fun config_dir ->
@@ -3760,6 +3777,8 @@ let () =
     "persona_drift", [
       test_case "drift check honors TOML persona_name" `Quick
         test_persona_drift_check_uses_toml_persona_name;
+      test_case "drift check preserves invalid config" `Quick
+        test_persona_drift_check_preserves_invalid_config;
       test_case "drift path points to profile.json" `Quick
         test_persona_drift_path_points_to_profile_json;
       test_case "missing persona with inline TOML is WARN" `Quick

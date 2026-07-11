@@ -150,7 +150,6 @@ val discover_keepers_toml : string -> keeper_toml_discovery list
 val keeper_toml_path_opt : string -> string option
 val keeper_toml_path_opt_for_base_path :
   base_path:string -> string -> string option
-val load_keeper_profile_defaults_from_persona : string -> keeper_profile_defaults
 val load_keeper_profile_defaults_result_for_base_path :
   base_path:string ->
   string ->

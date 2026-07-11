@@ -463,10 +463,10 @@ let write_all fd content =
 let temp_counter = Atomic.make 0
 
 let rec create_temporary dir =
-  (* NDT-OK: PID and process-local sequence only mint an exclusive temporary
-     entry name. Correctness comes from [O_EXCL] and retries on [EEXIST]; no
-     policy, ordering, or replay decision depends on the generated spelling. *)
   let sequence = Atomic.fetch_and_add temp_counter 1 in
+  (* PID and process-local sequence only mint an exclusive temporary entry
+     name. Correctness comes from [O_EXCL] and retries on [EEXIST]; no policy,
+     ordering, or replay decision depends on the generated spelling. NDT-OK. *)
   let raw = Printf.sprintf ".atomic_%x_%x.tmp" (Unix.getpid ()) sequence in
   let name =
     match Segment.of_string raw with

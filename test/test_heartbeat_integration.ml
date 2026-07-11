@@ -102,13 +102,13 @@ let make_meta name =
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
 
 let retain_operator_cleanup : Shutdown_types.cleanup_intent =
-  { meta_disposition = Shutdown_types.Retain_operator_pause
+  { reason = Shutdown_types.Operator_stop_retain_meta
   ; remove_session = false
   }
 ;;
 
 let remove_meta_cleanup : Shutdown_types.cleanup_intent =
-  { meta_disposition = Shutdown_types.Remove_meta
+  { reason = Shutdown_types.Operator_stop_remove_meta
   ; remove_session = false
   }
 ;;
@@ -145,6 +145,72 @@ let configure_keeper_chat_persistence ~base_path =
     Alcotest.failf
       "keeper chat persistence fixture failed: %s"
       (String.concat "; " (List.map describe errors))
+let stale_paused_cleanup (meta : Keeper_meta_contract.keeper_meta)
+    : Shutdown_types.cleanup_intent
+  =
+  { reason =
+      Shutdown_types.Stale_paused_prune
+        { meta_version = meta.meta_version
+        ; last_updated = meta.updated_at
+        ; latched_reason = meta.latched_reason
+        }
+  ; remove_session = false
+  }
+;;
+
+let replace_assoc_field key value fields =
+  (key, value) :: List.remove_assoc key fields
+;;
+
+let shutdown_schema3_fixture (operation : Shutdown_types.t) =
+  let lane_id =
+    match operation.lane_ownership with
+    | Shutdown_types.Registered_lane lane_id -> Lane.Id.to_string lane_id
+    | Shutdown_types.Dormant_meta ->
+      fail "schema 3 fixture cannot encode dormant lane ownership"
+  in
+  let meta_disposition =
+    match operation.cleanup_intent.reason with
+    | Shutdown_types.Operator_stop_retain_meta -> "retain_operator_pause"
+    | Shutdown_types.Operator_stop_remove_meta -> "remove_meta"
+    | Shutdown_types.Dead_tombstone_cleanup -> "retain_dead_tombstone"
+    | Shutdown_types.Stale_paused_prune _ ->
+      fail "schema 3 fixture cannot encode stale paused cleanup"
+  in
+  match Shutdown_store.to_json operation with
+  | `Assoc fields ->
+    let phase =
+      match List.assoc_opt "phase" fields with
+      | Some (`Assoc phase_fields) ->
+        let phase_fields =
+          match List.assoc_opt "evidence" phase_fields with
+          | Some (`Assoc evidence_fields) ->
+            replace_assoc_field
+              "evidence"
+              (`Assoc (List.remove_assoc "accumulator_dropped" evidence_fields))
+              phase_fields
+          | Some _
+          | None -> phase_fields
+        in
+        `Assoc phase_fields
+      | Some phase -> phase
+      | None -> fail "current shutdown JSON omitted phase"
+    in
+    `Assoc
+      (fields
+       |> List.remove_assoc "lane_ownership"
+       |> replace_assoc_field "schema_version" (`Int 3)
+       |> replace_assoc_field "lane_id" (`String lane_id)
+       |> replace_assoc_field
+            "cleanup_intent"
+            (`Assoc
+              [ "meta_disposition", `String meta_disposition
+              ; "remove_session", `Bool operation.cleanup_intent.remove_session
+              ])
+       |> replace_assoc_field "phase" phase)
+  | _ -> fail "shutdown JSON codec did not return an object"
+;;
+
 let resolve_done_for_test reg value =
   ignore (R.resolve_done reg ~source:"test_fixture" value);
   match
@@ -828,7 +894,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         ; revision = 0
         ; operation_id
         ; keeper_name = meta.name
-        ; lane_id = Lane.id lane
+        ; lane_ownership = Shutdown_types.Registered_lane (Lane.id lane)
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.generation
         ; actor = "tester"
@@ -859,6 +925,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
               ; meta_removed = false
               ; session_removed = false
               ; registry_unregistered = false
+              ; accumulator_dropped = false
               ; completion =
                   Shutdown_types.Completion_pending
                     Shutdown_types.Dead_tombstone_reaped
@@ -871,16 +938,61 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
              (Shutdown_types.Finalized_completion_mismatch _)) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "store accepted completion outside dead-tombstone intent");
+      let legacy_finalized =
+        { operation with
+          phase =
+            Shutdown_types.Finalized
+              { cleanup =
+                  { settled_task_ids = []; pending_confirms_removed = 0 }
+              ; meta_removed = false
+              ; session_removed = false
+              ; registry_unregistered = true
+              ; accumulator_dropped = true
+              ; completion = Shutdown_types.Completion_not_requested
+              }
+        }
+      in
+      let migrated =
+        match
+          legacy_finalized
+          |> shutdown_schema3_fixture
+          |> Shutdown_store.of_json
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      check int
+        "schema 3 shutdown record migrates to current schema"
+        Shutdown_types.schema_version
+        migrated.schema_version;
+      (match migrated.lane_ownership, migrated.cleanup_intent.reason with
+       | Shutdown_types.Registered_lane migrated_lane,
+         Shutdown_types.Operator_stop_retain_meta ->
+         check bool
+           "schema 3 lane identity survives migration"
+           true
+           (Lane.Id.equal (Lane.id lane) migrated_lane)
+       | _ -> fail "schema 3 ownership or cleanup intent changed during migration");
+      (match migrated.phase with
+       | Shutdown_types.Finalized { accumulator_dropped = true; _ } -> ()
+       | Shutdown_types.Finalized _ ->
+         fail "schema 3 unregister receipt did not restore accumulator evidence"
+       | _ -> fail "schema 3 finalized phase changed during migration");
       let loaded =
         match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
         | Ok loaded -> loaded
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
       check string "shutdown keeper round-trip" operation.keeper_name loaded.keeper_name;
-      check bool
-        "shutdown lane identity round-trip"
-        true
-        (Lane.Id.equal operation.lane_id loaded.lane_id);
+      (match operation.lane_ownership, loaded.lane_ownership with
+       | Shutdown_types.Registered_lane expected,
+         Shutdown_types.Registered_lane actual ->
+         check bool
+           "shutdown lane identity round-trip"
+           true
+           (Lane.Id.equal expected actual)
+       | (Shutdown_types.Registered_lane _ | Shutdown_types.Dormant_meta), _ ->
+         fail "shutdown lane ownership changed during round-trip");
       let joined =
         { loaded with
           revision = loaded.revision + 1
@@ -901,7 +1013,11 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Error (Shutdown_store.Revision_conflict _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "stale shutdown snapshot overwrote a newer revision");
-      let mismatched = { joined with lane_id = Lane.id (Lane.create ()) } in
+      let mismatched =
+        { joined with
+          lane_ownership = Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
+        }
+      in
       (match
          Shutdown_store.replace
            ~config
@@ -1080,7 +1196,8 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           ; revision = 0
           ; operation_id = Shutdown_types.Operation_id.generate ()
           ; keeper_name = meta.name
-          ; lane_id = Lane.id (Lane.create ())
+          ; lane_ownership =
+              Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
           ; trace_id = meta.runtime.trace_id
           ; generation = meta.runtime.generation
           ; actor = "tester"
@@ -1205,6 +1322,268 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           true
           (recovered.phase = recoverable_operation.phase)
       | Error detail -> fail detail)
+
+let test_stale_prune_dormant_prepare_rejects_version_change () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "stale-prune-prepare-version" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "supervisor")
+      in
+      let name = "stale-prune-version-race" in
+      let initial =
+        { (make_meta name) with
+          paused = true
+        ; updated_at = "2026-01-01T00:00:00Z"
+        }
+      in
+      (match Keeper_meta_store.write_meta config initial with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let observed =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "stale prune fixture metadata disappeared"
+        | Error detail -> fail detail
+      in
+      (match Keeper_meta_store.write_meta config observed with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let latest =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "version-raced metadata disappeared"
+        | Error detail -> fail detail
+      in
+      check int
+        "precondition: metadata version advanced"
+        (observed.meta_version + 1)
+        latest.meta_version;
+      (match
+         Shutdown_prepare_join.prepare_dormant
+           ~config
+           ~meta:observed
+           ~request:
+             { actor = "supervisor"
+             ; cleanup_intent = stale_paused_cleanup observed
+             }
+       with
+       | Error
+           (Shutdown_prepare_join.Meta_snapshot_version_changed
+             { expected; actual }) ->
+         check int "guard expected version" observed.meta_version expected;
+         check int "guard actual version" latest.meta_version actual
+       | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+       | Ok _ -> fail "stale prune accepted metadata after its version changed");
+      let snapshot =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:name
+      in
+      check bool
+        "failed dormant prepare rolls back admission"
+        true
+        (Option.is_none snapshot.snapshot_shutdown_operation_id);
+      (match Shutdown_store.list_for_keeper ~config ~keeper_name:name with
+       | Ok [] -> ()
+       | Ok _ -> fail "failed dormant prepare persisted a shutdown operation"
+       | Error error -> fail (Shutdown_store.error_to_string error)))
+
+let test_stale_prune_registered_prepare_requires_paused_lane () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "stale-prune-phase-guard" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "supervisor")
+      in
+      let name = "stale-prune-running-lane" in
+      let initial =
+        { (make_meta name) with
+          paused = true
+        ; updated_at = "2026-01-01T00:00:00Z"
+        }
+      in
+      (match Keeper_meta_store.write_meta config initial with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let observed =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "stale prune fixture metadata disappeared"
+        | Error detail -> fail detail
+      in
+      let entry = R.register ~base_path:config.base_path name observed in
+      check string
+        "precondition: registered lane is running"
+        "running"
+        (KSM.phase_to_string entry.phase);
+      (match
+         Shutdown_prepare_join.prepare
+           ~config
+           ~entry
+           ~request:
+             { actor = "supervisor"
+             ; cleanup_intent = stale_paused_cleanup observed
+             }
+       with
+       | Error (Shutdown_prepare_join.Stale_prune_lane_not_paused KSM.Running) ->
+         ()
+       | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+       | Ok _ -> fail "stale prune accepted a non-paused registered lane");
+      let snapshot =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:name
+      in
+      check bool
+        "failed registered prepare rolls back admission"
+        true
+        (Option.is_none snapshot.snapshot_shutdown_operation_id))
+
+let test_stale_prune_cleanup_ready_preserves_newer_meta () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "stale-prune-finalize-version" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "supervisor")
+      in
+      let name = "stale-prune-finalize-race" in
+      let initial =
+        { (make_meta name) with
+          paused = true
+        ; updated_at = "2026-01-01T00:00:00Z"
+        }
+      in
+      (match Keeper_meta_store.write_meta config initial with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let observed =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "stale prune fixture metadata disappeared"
+        | Error detail -> fail detail
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id = Shutdown_types.Operation_id.generate ()
+        ; keeper_name = name
+        ; lane_ownership = Shutdown_types.Dormant_meta
+        ; trace_id = observed.runtime.trace_id
+        ; generation = observed.runtime.generation
+        ; actor = "supervisor"
+        ; cleanup_intent = stale_paused_cleanup observed
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase =
+            Shutdown_types.Cleanup_ready
+              { settled_task_ids = []; pending_confirms_removed = 0 }
+        ; created_at = Masc_domain.now_iso ()
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         Masc.Keeper_turn_admission.restore_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~operation_id:operation.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_restored
+       | Masc.Keeper_turn_admission.Shutdown_restore_conflict _ ->
+         fail "stale prune fixture could not restore its admission owner");
+      (match Keeper_meta_store.write_meta config observed with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let latest =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "version-raced metadata disappeared"
+        | Error detail -> fail detail
+      in
+      (match Shutdown_finalize.run ~config ~entry:None operation with
+       | Error
+           (Shutdown_finalize.Finalization_blocked
+             { phase =
+                 Shutdown_types.Blocked
+                   { stage = Shutdown_types.Meta_remove; _ }
+             ; _
+             }) -> ()
+       | Error error -> fail (Shutdown_finalize.error_to_string error)
+       | Ok _ -> fail "stale prune deleted metadata after its version changed");
+      let preserved =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "stale prune removed newer metadata"
+        | Error detail -> fail detail
+      in
+      check int
+        "newer metadata version is preserved"
+        latest.meta_version
+        preserved.meta_version;
+      let durable =
+        match
+          Shutdown_store.load
+            ~config
+            ~keeper_name:name
+            operation.operation_id
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match durable.phase with
+       | Shutdown_types.Blocked { stage = Shutdown_types.Meta_remove; _ } -> ()
+       | Shutdown_types.Prepared
+       | Shutdown_types.Joined_idle
+       | Shutdown_types.Finalizing_tasks _
+       | Shutdown_types.Cleanup_ready _
+       | Shutdown_types.Reconciliation_required _
+       | Shutdown_types.Finalized _
+       | Shutdown_types.Blocked _ ->
+         fail "stale prune version race was not durably blocked");
+      let snapshot =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:name
+      in
+      check bool
+        "blocked destructive cleanup keeps admission fenced"
+        true
+        (match snapshot.snapshot_shutdown_operation_id with
+         | Some operation_id ->
+           Shutdown_types.Operation_id.equal operation.operation_id operation_id
+         | None -> false))
 
 let test_keeper_shutdown_prepare_joins_idle_lane () =
   Eio_main.run @@ fun env ->
@@ -1421,7 +1800,8 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         ; revision = 0
         ; operation_id
         ; keeper_name = meta.name
-        ; lane_id = Lane.id (Lane.create ())
+        ; lane_ownership =
+            Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.generation
         ; actor = "operator"
@@ -1548,12 +1928,12 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
         ; revision = 0
         ; operation_id
         ; keeper_name = meta.name
-        ; lane_id = Lane.id entry.lane
+        ; lane_ownership = Shutdown_types.Registered_lane (Lane.id entry.lane)
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.generation
         ; actor = "supervisor"
         ; cleanup_intent =
-            { meta_disposition = Shutdown_types.Retain_dead_tombstone
+            { reason = Shutdown_types.Dead_tombstone_cleanup
             ; remove_session = false
             }
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -1774,7 +2154,8 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
         ; revision = 0
         ; operation_id
         ; keeper_name = meta.name
-        ; lane_id = Lane.id (Lane.create ())
+        ; lane_ownership =
+            Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.generation
         ; actor = "operator"
@@ -1863,7 +2244,8 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
         ; revision = 0
         ; operation_id
         ; keeper_name = meta.name
-        ; lane_id = Lane.id (Lane.create ())
+        ; lane_ownership =
+            Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
         ; generation = meta.runtime.generation
         ; actor = "operator"
@@ -2362,6 +2744,12 @@ let () =
         test_keeper_shutdown_store_round_trip_and_identity_guard;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
+      test_case "stale dormant prepare rejects a newer meta version" `Quick
+        test_stale_prune_dormant_prepare_rejects_version_change;
+      test_case "stale registered prepare requires a paused lane" `Quick
+        test_stale_prune_registered_prepare_requires_paused_lane;
+      test_case "stale cleanup-ready preserves a newer meta version" `Quick
+        test_stale_prune_cleanup_ready_preserves_newer_meta;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown prepare joins not-started lane" `Quick

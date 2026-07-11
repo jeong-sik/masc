@@ -1359,6 +1359,18 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
         (Filename.concat keepers_dir "base.toml")
         "[keeper]\nautoboot_enabled = true\n";
       Config_dir_resolver.reset ();
+      (* EP34-DIAG: static analysis says count must be 3 (base discovered,
+         uncached filter, autoboot=true -> materializable). Log the actual
+         discovered names and per-name materializability to pinpoint whether
+         base is (a) absent from configured_keeper_names or (b) present but
+         filtered non-materializable. *)
+      List.iter
+        (fun n ->
+          Printf.eprintf "[EP34b] name=%s materializable=%b\n%!" n
+            (Lib.Keeper_types_profile
+             .keeper_profile_defaults_materializable_for_name
+               ~base_path:config.base_path n))
+        (Lib.Keeper_meta_store.configured_keeper_names config);
       let json =
         Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
       in

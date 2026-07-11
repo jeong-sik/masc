@@ -102,14 +102,10 @@ export interface WorkspaceFetchIssueContext {
 
 type WorkspaceFetchIssueScope = Pick<WorkspaceFetchIssueContext, 'filePath' | 'keeper' | 'repoId'>
 
-export function selectInitialIdeFilePath(
+function firstFilePath(
   nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>,
 ): string | null {
-  // Finder metadata is a real workspace entry but never a useful first editor
-  // target. Prefer the first editable file while retaining a fallback for the
-  // unusual workspace that contains only metadata files.
-  const firstFile = nodes.find(node => !node.hasChildren && !node.path.endsWith('/.DS_Store') && node.path !== '.DS_Store')
-    ?? nodes.find(node => !node.hasChildren)
+  const firstFile = nodes.find(node => !node.hasChildren)
   return firstFile?.path ?? null
 }
 
@@ -428,7 +424,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
       const hasCurrentFile =
         filePath !== null && nodes.some(node => node.path === filePath && !node.hasChildren)
-      const nextFile = hasCurrentFile ? null : selectInitialIdeFilePath(nodes)
+      const nextFile = hasCurrentFile ? null : firstFilePath(nodes)
       if (nextFile && nextFile !== activeIdeFile.value) {
         activeIdeFile.value = nextFile
       }

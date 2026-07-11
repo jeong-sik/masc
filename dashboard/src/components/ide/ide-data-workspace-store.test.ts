@@ -31,7 +31,6 @@ import {
   replaceWorkspaceFetchIssue,
   retainCurrentWorkspaceFetchIssues,
   sameWorkspaceTreeIdentity,
-  selectInitialIdeFilePath,
   selectPreferredIdeRepositoryId,
   workspaceFetchIssueFromError,
   workspaceTreeIdentity,
@@ -206,13 +205,6 @@ describe('selectPreferredIdeRepositoryId', () => {
 })
 
 describe('workspace fetch diagnostics', () => {
-  it('does not choose Finder metadata as the default editor file', () => {
-    expect(selectInitialIdeFilePath([
-      { path: '.DS_Store', hasChildren: false },
-      { path: 'lib/scheduler/round.ml', hasChildren: false },
-    ])).toBe('lib/scheduler/round.ml')
-  })
-
   it('loads regions after the active file commits and projects them to source ownership', async () => {
     const previousFile = activeIdeFile.value
     const previousKeeper = activeKeeperName.value

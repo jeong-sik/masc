@@ -198,7 +198,7 @@ describe('IdeShell', () => {
     expect(buttonByText(container, 'Time').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Tools').getAttribute('aria-pressed')).toBe('false')
-    expect(container.textContent).toContain('EVENT TIMELINE')
+    expect(container.textContent).toContain('PERSISTENCE MAP')
     expect(container.textContent).toContain('Active overlays')
     expect(container.textContent).toContain('Time')
     expect(container.textContent).toContain('Approve')
@@ -501,7 +501,6 @@ describe('IdeShell', () => {
     expect(chipLabels).toEqual([
       'SOURCE',
       'lib/runtime.ml',
-      'terminal',
       'PR L42 Runtime review',
       'Task task-runtime',
       'PR #15035',
@@ -914,7 +913,7 @@ describe('IdeShell', () => {
     expect(btn.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('uses the reference IDE activity rail and persistent terminal by default', () => {
+  it('preserves keeper context and chat while keeping the terminal drawer present', () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -926,7 +925,9 @@ describe('IdeShell', () => {
     const rail = container.querySelector('[data-testid="ide-right-rail"]')
     expect(rail).not.toBeNull()
     expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
-    expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
+    expect(buttonByText(container, 'Work Context').getAttribute('aria-selected')).toBe('true')
+    expect(buttonByText(container, 'Work Context').getAttribute('title'))
+      .toBe('Keeper work, persistence, memory, and chat scoped to the active IDE context')
     expect(buttonByText(container, '활동').getAttribute('title'))
       .toBe('Workspace and keeper activity linked to the active file and repository')
     expect(buttonByText(container, '어노테이션').getAttribute('title'))
@@ -935,9 +936,13 @@ describe('IdeShell', () => {
       .toBe('Live keeper file focus and cursor stream status')
     expect(container.querySelector('[data-testid="ide-dashboard-connection"]')?.getAttribute('title'))
       .toContain('Dashboard event transport')
-    expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
+    expect(container.querySelector('[data-testid="ide-right-context-stack"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="ide-primary-conversation-rail"]')).not.toBeNull()
+    expect(container.querySelector('.ide-plane-activity')).toBeNull()
     expect(container.querySelector('[data-testid="ide-cursor-rail"]')).toBeNull()
     expect(container.querySelector('[data-testid="execute-output-drawer"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="execute-output-drawer"]')?.textContent)
+      .toContain('waiting for Execute output')
     expect(container.querySelector('[data-testid="ide-interject-fab"]')).not.toBeNull()
   })
 
@@ -989,8 +994,14 @@ describe('IdeShell', () => {
       },
     }
 
+    expect(buttonByText(container, 'Work Context').getAttribute('aria-selected')).toBe('true')
+    expect(container.querySelector('[data-testid="ide-right-context-stack"]')).not.toBeNull()
+    expect(container.querySelector('.ide-plane-activity')).toBeNull()
+
+    fireEvent.click(buttonByText(container, '활동'))
     expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
     expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
+    expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
     expect(container.querySelector('[data-testid="ide-annotation-rail"]')).toBeNull()
 
     fireEvent.click(buttonByText(container, '어노테이션'))

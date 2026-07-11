@@ -566,7 +566,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--fs-9);
   line-height: 1.2;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -602,7 +602,7 @@
   min-width: 0;
   color: var(--text-dim);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
 }
 
 .ide-annotation-rail-path {

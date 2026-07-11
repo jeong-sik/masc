@@ -393,13 +393,19 @@ let turn_disposition_equal left right =
   | Inflight_effect_unknown _, No_inflight_turn -> false
 ;;
 
-let stale_paused_context_equal left right =
+let stale_paused_context_equal
+    (left : stale_paused_context)
+    (right : stale_paused_context)
+  =
   Int.equal left.meta_version right.meta_version
   && String.equal left.last_updated right.last_updated
   && option_equal Keeper_latched_reason.equal left.latched_reason right.latched_reason
 ;;
 
-let dashboard_purge_context_equal left right =
+let dashboard_purge_context_equal
+    (left : dashboard_purge_context)
+    (right : dashboard_purge_context)
+  =
   String.equal left.requested_name right.requested_name
   && String.equal left.agent_name right.agent_name
   && Int.equal left.meta_version right.meta_version

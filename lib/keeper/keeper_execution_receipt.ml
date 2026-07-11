@@ -372,6 +372,7 @@ let operator_disposition (receipt : t)
       | Keeper_terminal_reason.Turn_budget_exhausted _ -> true
       | Runtime_exhausted _
       | Capacity_backpressure _
+      | Model_unavailable _
       | Config_or_auth _
       | Provider_runtime_failure _
       | Completion_contract_violation _
@@ -422,6 +423,7 @@ let operator_disposition (receipt : t)
        | Keeper_terminal_reason.Pre_dispatch_success _ -> true
        | Runtime_exhausted _
        | Capacity_backpressure _
+       | Model_unavailable _
        | Config_or_auth _
        | Provider_runtime_failure _
        | Completion_contract_violation _

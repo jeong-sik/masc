@@ -51,7 +51,8 @@ let test_active_goal_ids_filter_claimable_tasks () =
       let scope =
         Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
       in
-      check string "mode" "active_goal_ids" scope.mode;
+      check string "mode" "active_goal_ids"
+        (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
       check (list string) "effective goal ids" [ "goal-a" ] scope.effective_goal_ids;
       let tasks = Workspace.get_tasks_raw config in
       let included =
@@ -90,7 +91,7 @@ let test_no_scoped_match_falls_back_to_all_tasks () =
         Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
       in
       check string "fallback mode" "empty_goal_scope_fallback_all_tasks"
-        scope.mode;
+        (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
       check (option string) "fallback reason recorded"
         (Some "no_scoped_claimable_tasks") scope.fallback_reason;
       check (list string) "effective goal ids preserved" [ "goal-a" ]
@@ -124,7 +125,7 @@ let test_preloaded_tasks_fall_back_to_all_tasks () =
           ~meta ~tasks ()
       in
       check string "fallback mode" "empty_goal_scope_fallback_all_tasks"
-        scope.mode;
+        (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
       check (option string) "fallback reason recorded"
         (Some "no_scoped_claimable_tasks") scope.fallback_reason;
       check (list string) "effective goal ids preserved" [ "goal-a" ]
@@ -145,7 +146,8 @@ let test_scoped_match_present_keeps_isolation () =
       let scope =
         Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
       in
-      check string "scoped mode" "active_goal_ids" scope.mode;
+      check string "scoped mode" "active_goal_ids"
+        (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
       check (option string) "no fallback reason" None scope.fallback_reason;
       let tasks = Workspace.get_tasks_raw config in
       let included =

@@ -200,24 +200,6 @@ let append_file_unix (path : string) (content : string) : unit =
         (fun () -> Stdlib.output_string oc content))
 ;;
 
-let write_all_fd ~path fd content =
-  let rec loop offset =
-    if offset < String.length content
-    then
-      match
-        Unix.write_substring
-          fd
-          content
-          offset
-          (String.length content - offset)
-      with
-      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop offset
-      | 0 -> raise (Sys_error (Printf.sprintf "%s: zero-byte append" path))
-      | wrote -> loop (offset + wrote)
-  in
-  loop 0
-;;
-
 let append_file_durable_unix (path : string) (content : string) : unit =
   let mu = get_append_path_mutex path in
   Stdlib.Mutex.lock mu;
@@ -232,7 +214,22 @@ let append_file_durable_unix (path : string) (content : string) : unit =
       in
       let write_result =
         try
-          write_all_fd ~path fd content;
+          let rec write_all offset =
+            if offset < String.length content
+            then
+              match
+                Unix.write_substring
+                  fd
+                  content
+                  offset
+                  (String.length content - offset)
+              with
+              | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_all offset
+              | 0 ->
+                raise (Sys_error (Printf.sprintf "%s: zero-byte append" path))
+              | wrote -> write_all (offset + wrote)
+          in
+          write_all 0;
           Unix.fsync fd;
           Ok ()
         with

@@ -68,7 +68,9 @@ let with_facts_lock ?clock ~keeper_id f =
   Io.with_facts_lock
     ?clock
     ~keeper_id
-    ~on_timeout:(fun msg -> Transport_failed ("consolidation " ^ msg))
+    ~on_timeout:(fun timeout ->
+      Transport_failed
+        ("consolidation " ^ Io.lock_timeout_to_string timeout))
     f
 ;;
 
@@ -121,15 +123,15 @@ let messages_for_consolidation facts =
 ;;
 
 let rewrite_if_snapshot_current ?clock ~keeper_id ~facts ~survivors ~before ~after () =
-  with_facts_lock ?clock ~keeper_id (fun () ->
-    match Io.read_facts_all_strict ~keeper_id with
+  with_facts_lock ?clock ~keeper_id (fun lock ->
+    match Io.read_facts_all_strict_in_lock lock with
     | Error msg ->
       Unparseable ("consolidation fact store changed before rewrite: " ^ msg)
     | Ok current ->
       if not (Io.same_fact_snapshot facts current)
       then Snapshot_changed { before; current = List.length current }
       else (
-        Io.rewrite_facts_atomically ~keeper_id survivors;
+        Io.rewrite_facts_in_lock lock survivors;
         Consolidated { before; after }))
 ;;
 

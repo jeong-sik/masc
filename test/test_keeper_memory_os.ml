@@ -2205,10 +2205,11 @@ let test_with_facts_lock_propagates_body_failure () =
          Memory_io.with_facts_lock
            ~clock
            ~keeper_id
-           ~on_timeout:(fun msg ->
+           ~on_timeout:(fun timeout ->
              Alcotest.fail
-               ("body Failure was misclassified as a lock timeout: " ^ msg))
-           (fun () -> failwith "body exploded")
+               ("body Failure was misclassified as a lock timeout: "
+                ^ Memory_io.lock_timeout_to_string timeout))
+           (fun _lock -> failwith "body exploded")
        with
        | _ -> Alcotest.fail "expected body Failure to propagate"
        | exception Failure msg when String.equal msg "body exploded" -> ()
@@ -2218,8 +2219,11 @@ let test_with_facts_lock_propagates_body_failure () =
         Memory_io.with_facts_lock
           ~clock
           ~keeper_id
-          ~on_timeout:(fun msg -> Alcotest.fail ("lock was not released: " ^ msg))
-          (fun () -> "reacquired")
+          ~on_timeout:(fun timeout ->
+            Alcotest.fail
+              ("lock was not released: "
+               ^ Memory_io.lock_timeout_to_string timeout))
+          (fun _lock -> "reacquired")
       in
       Alcotest.(check string) "lock reacquired after body exception" "reacquired" reacquired))
 ;;
@@ -2234,8 +2238,8 @@ let test_with_facts_lock_timeout_uses_on_timeout () =
           Memory_io.with_facts_lock
             ~clock
             ~keeper_id
-            ~on_timeout:(fun msg -> msg)
-            (fun () -> "unexpected body result")
+            ~on_timeout:Memory_io.lock_timeout_to_string
+            (fun _lock -> "unexpected body result")
         in
         Alcotest.(check bool)
           "timeout used on_timeout"
@@ -2245,8 +2249,11 @@ let test_with_facts_lock_timeout_uses_on_timeout () =
         Memory_io.with_facts_lock
           ~clock
           ~keeper_id
-          ~on_timeout:(fun msg -> Alcotest.fail ("lock was not released: " ^ msg))
-          (fun () -> "reacquired")
+          ~on_timeout:(fun timeout ->
+            Alcotest.fail
+              ("lock was not released: "
+               ^ Memory_io.lock_timeout_to_string timeout))
+          (fun _lock -> "reacquired")
       in
       Alcotest.(check string) "lock reacquired after timeout" "reacquired" reacquired))
 ;;

@@ -59,6 +59,12 @@ let expect_invalid_argument label f =
   | exception Invalid_argument _ -> ()
 ;;
 
+let expect_filesystem_rejection label f =
+  match f () with
+  | () -> Alcotest.failf "%s: expected filesystem rejection" label
+  | exception Unix.Unix_error _ -> ()
+;;
+
 let test_explicit_root_isolates_append_and_generation () =
   with_temp_roots (fun ~first ~second ->
     let keeper_id =
@@ -77,15 +83,9 @@ let test_explicit_root_isolates_append_and_generation () =
     Memory_io.with_episode_bundle_lock_for_keepers_dir
       ~keepers_dir:first
       ~keeper_id
-      (fun () ->
-         Memory_io.append_episode_for_keepers_dir
-           ~keepers_dir:first
-           ~keeper_id
-           first_episode;
-         Memory_io.append_event_for_keepers_dir
-           ~keepers_dir:first
-           ~keeper_id
-           first_episode);
+      (fun bundle ->
+         Memory_io.append_episode_in_bundle bundle first_episode;
+         Memory_io.append_event_in_bundle bundle first_episode);
     Alcotest.(check bool)
       "first root receives event"
       true
@@ -115,6 +115,24 @@ let test_explicit_root_isolates_append_and_generation () =
     Alcotest.(check int)
       "first generation advances"
       5
+      (Memory_io.next_generation_with_floor_for_keepers_dir
+         ~keepers_dir:first
+         ~floor:0
+         ~keeper_id
+         ~trace_id);
+    Memory_io.with_episode_bundle_lock_for_keepers_dir
+      ~keepers_dir:first
+      ~keeper_id
+      (fun bundle ->
+         Memory_io.append_episode_in_bundle
+           bundle
+           (episode
+              ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
+              ~generation:10_000
+              ~created_at:2_000.0));
+    Alcotest.(check int)
+      "generation scan keeps every decimal digit"
+      10_001
       (Memory_io.next_generation_with_floor_for_keepers_dir
          ~keepers_dir:first
          ~floor:0
@@ -152,16 +170,13 @@ let test_explicit_root_scopes_merge_and_retention () =
       Memory_io.with_facts_lock_for_keepers_dir
         ~keepers_dir:first
         ~keeper_id
-        ~on_timeout:Alcotest.fail
-        (fun () ->
-          Memory_io.rewrite_facts_atomically_for_keepers_dir
-            ~keepers_dir:first
-            ~keeper_id:keeper_id_string
-            [ existing ];
-          Memory_io.merge_and_cap_facts_for_keepers_dir
-            ~keepers_dir:first
+        ~on_timeout:(fun timeout ->
+          Alcotest.fail (Memory_io.lock_timeout_to_string timeout))
+        (fun lock ->
+          Memory_io.rewrite_facts_in_lock lock [ existing ];
+          Memory_io.merge_and_cap_facts_in_lock
+            lock
             ~now:3.0
-            ~keeper_id
             ~merge:(fun ~existing:_ ~incoming -> incoming)
             ~incoming:[ incoming ]
             ~keep:2
@@ -182,7 +197,7 @@ let test_explicit_root_scopes_merge_and_retention () =
       Memory_io.with_episode_bundle_lock_for_keepers_dir
         ~keepers_dir:first
         ~keeper_id
-        (fun () ->
+        (fun bundle ->
           List.iter
             (fun generation ->
               let persisted =
@@ -191,23 +206,15 @@ let test_explicit_root_scopes_merge_and_retention () =
                   ~generation
                   ~created_at:(10.0 +. float_of_int generation)
               in
-              Memory_io.append_episode_for_keepers_dir
-                ~keepers_dir:first
-                ~keeper_id
-                persisted;
-              Memory_io.append_event_for_keepers_dir
-                ~keepers_dir:first
-                ~keeper_id
-                persisted)
+              Memory_io.append_episode_in_bundle bundle persisted;
+              Memory_io.append_event_in_bundle bundle persisted)
             [ 0; 1; 2 ];
-          ( Memory_io.cap_events_for_keepers_dir
-              ~keepers_dir:first
-              ~keeper_id
+          ( Memory_io.cap_events_in_bundle
+              bundle
               ~keep:1
               ~trigger:2
-          , Memory_io.cap_episode_files_for_keepers_dir
-              ~keepers_dir:first
-              ~keeper_id
+          , Memory_io.cap_episode_files_in_bundle
+              bundle
               ~keep:1
               ~trigger:2 ))
     in
@@ -251,6 +258,71 @@ let test_invalid_episode_trace_is_rejected_before_io () =
          (Filename.concat first (Keeper_id.Keeper_name.to_string keeper_id))))
 ;;
 
+let test_invalid_facts_keeper_is_rejected_before_io () =
+  with_temp_roots (fun ~first ~second:_ ->
+    expect_invalid_argument "invalid facts keeper" (fun () ->
+      Memory_io.rewrite_facts_atomically_for_keepers_dir
+        ~keepers_dir:first
+        ~keeper_id:"../escape"
+        []);
+    Alcotest.(check (list string))
+      "invalid keeper creates no artifact"
+      []
+      (Sys.readdir first |> Array.to_list))
+;;
+
+let test_bundle_capability_survives_root_substitution () =
+  with_temp_roots (fun ~first ~second ->
+    let keeper_id =
+      Keeper_id.Keeper_name.of_string "substitution-keeper" |> Result.get_ok
+    in
+    let keeper_id_string = Keeper_id.Keeper_name.to_string keeper_id in
+    let detached = Filename.concat (Filename.dirname first) "detached-first" in
+    let persisted =
+      episode
+        ~trace_id:"substitution-trace"
+        ~generation:0
+        ~created_at:1.0
+    in
+    Memory_io.with_episode_bundle_lock_for_keepers_dir
+      ~keepers_dir:first
+      ~keeper_id
+      (fun bundle ->
+        Unix.rename first detached;
+        Unix.symlink second first;
+        Memory_io.append_event_in_bundle bundle persisted);
+    Alcotest.(check string)
+      "retained descriptor receives event"
+      (Yojson.Safe.to_string (Types.episode_to_json persisted) ^ "\n")
+      (Fs_compat.load_file
+         (Memory_io.events_path_for_keepers_dir
+            ~keepers_dir:detached
+            ~keeper_id:keeper_id_string));
+    Alcotest.(check bool)
+      "replacement target stays untouched"
+      false
+      (Sys.file_exists
+         (Memory_io.events_path_for_keepers_dir
+            ~keepers_dir:second
+            ~keeper_id:keeper_id_string));
+    Sys.remove first;
+    Unix.rename detached first)
+;;
+
+let test_dotted_keeper_uses_ambient_api () =
+  with_temp_roots (fun ~first ~second:_ ->
+    let keeper_id = "keeper.alpha" in
+    let persisted =
+      episode ~trace_id:"dotted-trace" ~generation:0 ~created_at:1.0
+    in
+    Memory_io.For_testing.with_keepers_dir first (fun () ->
+      Memory_io.append_event ~keeper_id persisted;
+      Alcotest.(check int)
+        "dotted keeper event is readable"
+        1
+        (List.length (Memory_io.read_events_tail ~keeper_id ~n:1))))
+;;
+
 let test_symlinked_episodes_directory_is_rejected () =
   with_temp_roots (fun ~first ~second ->
     let keeper_id =
@@ -266,7 +338,7 @@ let test_symlinked_episodes_directory_is_rejected () =
     let trace_id =
       Keeper_id.Trace_id.of_string "symlink-episodes-trace" |> Result.get_ok
     in
-    expect_invalid_argument "symlinked episodes directory" (fun () ->
+    expect_filesystem_rejection "symlinked episodes directory" (fun () ->
       Memory_io.append_episode_for_keepers_dir
         ~keepers_dir:first
         ~keeper_id
@@ -296,7 +368,7 @@ let test_symlinked_events_file_is_rejected () =
     let trace_id =
       Keeper_id.Trace_id.of_string "symlink-events-trace" |> Result.get_ok
     in
-    expect_invalid_argument "symlinked events file" (fun () ->
+    expect_filesystem_rejection "symlinked events file" (fun () ->
       Memory_io.append_event_for_keepers_dir
         ~keepers_dir:first
         ~keeper_id
@@ -326,6 +398,18 @@ let () =
             "invalid episode trace is rejected before I/O"
             `Quick
             test_invalid_episode_trace_is_rejected_before_io
+        ; Alcotest.test_case
+            "invalid facts keeper is rejected before I/O"
+            `Quick
+            test_invalid_facts_keeper_is_rejected_before_io
+        ; Alcotest.test_case
+            "bundle capability survives root substitution"
+            `Quick
+            test_bundle_capability_survives_root_substitution
+        ; Alcotest.test_case
+            "dotted keeper uses ambient API"
+            `Quick
+            test_dotted_keeper_uses_ambient_api
         ; Alcotest.test_case
             "symlinked episodes directory is rejected"
             `Quick

@@ -137,6 +137,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         (fun _ -> ())
         (parse_unified_max_tokens_override_of_oas_env oas_env))
   in
+  (* [tool_access_defaults_result] must remain the final bind: its successful
+     payload is consumed by the record-building [Result.map] below. *)
   let result =
     Result.bind result (fun () -> tool_access_defaults_result)
   in

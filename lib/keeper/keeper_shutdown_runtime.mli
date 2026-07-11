@@ -10,7 +10,21 @@ and worker_start_error =
   | Worker_supervisor_stopping of exn
   | Worker_fork_failed of exn
 
+type restored_inventory =
+  { operations : Keeper_shutdown_types.t list
+  ; blocked_keeper_names : string list
+  ; corrupt_records : Keeper_shutdown_store.corrupt_record list
+  }
+
 val submit_error_to_string : submit_error -> string
+
+(** Restore admission from owner-addressable durable inventory. Corrupt
+    payloads fence their path owner and remain explicit in [corrupt_records];
+    valid operations for unrelated Keepers remain recoverable. *)
+val restore_inventory_admission :
+  config:Workspace.config ->
+  Keeper_shutdown_store.inventory_entry list ->
+  (restored_inventory, string) result
 
 (** Fence admission and persist the operation synchronously, then fork lane
     join/finalization on the process-lifetime Keeper supervisor switch. The

@@ -10,6 +10,12 @@ and worker_start_error =
   | Worker_supervisor_stopping of exn
   | Worker_fork_failed of exn
 
+type restored_inventory =
+  { operations : Keeper_shutdown_types.t list
+  ; blocked_keeper_names : string list
+  ; corrupt_records : Keeper_shutdown_store.corrupt_record list
+  }
+
 let submit_error_to_string = function
   | Prepare_error error -> Keeper_shutdown_prepare_join.error_to_string error
   | Existing_operation_load_error error -> Keeper_shutdown_store.error_to_string error
@@ -19,6 +25,78 @@ let submit_error_to_string = function
     Printf.sprintf "Keeper shutdown process supervisor is stopping: %s" (Printexc.to_string exn)
   | Worker_start_error (Worker_fork_failed exn) ->
     Printf.sprintf "Keeper shutdown worker fork failed: %s" (Printexc.to_string exn)
+;;
+
+let operation_requires_fence operation =
+  match operation.phase with
+  | Finalized _ -> false
+  | Prepared
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Blocked _ -> true
+;;
+
+let restore_admission ~config ~keeper_name ~operation_id =
+  match
+    Keeper_turn_admission.restore_shutdown
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+      ~operation_id
+  with
+  | Keeper_turn_admission.Shutdown_restored
+  | Keeper_turn_admission.Shutdown_already_restored -> Ok ()
+  | Keeper_turn_admission.Shutdown_restore_conflict existing ->
+    Error
+      (Printf.sprintf
+         "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
+         keeper_name
+         (Operation_id.to_string operation_id)
+         (Operation_id.to_string existing))
+;;
+
+let restore_inventory_admission ~config inventory =
+  let rec loop operations blocked corrupt_records = function
+    | [] ->
+      Ok
+        { operations = List.rev operations
+        ; blocked_keeper_names = List.sort_uniq String.compare blocked
+        ; corrupt_records = List.rev corrupt_records
+        }
+    | Keeper_shutdown_store.Operation operation :: rest ->
+      if operation_requires_fence operation
+      then
+        (match
+           restore_admission
+             ~config
+             ~keeper_name:operation.keeper_name
+             ~operation_id:operation.operation_id
+         with
+         | Error _ as error -> error
+         | Ok () ->
+           loop
+             (operation :: operations)
+             (operation.keeper_name :: blocked)
+             corrupt_records
+             rest)
+      else loop (operation :: operations) blocked corrupt_records rest
+    | Keeper_shutdown_store.Corrupt_record corrupt :: rest ->
+      (match
+         restore_admission
+           ~config
+           ~keeper_name:corrupt.keeper_name
+           ~operation_id:corrupt.operation_id
+       with
+       | Error _ as error -> error
+       | Ok () ->
+         loop
+           operations
+           (corrupt.keeper_name :: blocked)
+           (corrupt :: corrupt_records)
+           rest)
+  in
+  loop [] [] [] inventory
 ;;
 
 let worker_mu = Eio.Mutex.create ()
@@ -173,7 +251,7 @@ let submit ~config ~entry ~request =
   | Ok operation ->
     start_or_error ~config ~entry operation
   | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
-    (match Keeper_shutdown_store.load ~config operation_id with
+    (match Keeper_shutdown_store.load ~config ~keeper_name:entry.name operation_id with
      | Error error -> Error (Existing_operation_load_error error)
      | Ok operation -> start_or_error ~config ~entry operation)
   | Error error -> Error (Prepare_error error)
@@ -235,9 +313,25 @@ let recover_operation ~config operation =
 ;;
 
 let recover_at_boot ~config =
-  match Keeper_shutdown_store.list_all ~config with
+  match Keeper_shutdown_store.scan_inventory ~config with
   | Error error -> [ Error (Keeper_shutdown_store.error_to_string error) ]
-  | Ok operations -> List.map (recover_operation ~config) operations
+  | Ok inventory ->
+    (match restore_inventory_admission ~config inventory with
+     | Error detail -> [ Error detail ]
+     | Ok restored ->
+       let corrupt_results =
+         List.map
+           (fun corrupt ->
+              Error
+                (Printf.sprintf
+                   "corrupt shutdown operation fenced: keeper=%s operation=%s path=%s error=%s"
+                   corrupt.Keeper_shutdown_store.keeper_name
+                   (Operation_id.to_string corrupt.operation_id)
+                   corrupt.path
+                   (Keeper_shutdown_store.error_to_string corrupt.error)))
+           restored.corrupt_records
+       in
+       List.map (recover_operation ~config) restored.operations @ corrupt_results)
 ;;
 
 module For_testing = struct

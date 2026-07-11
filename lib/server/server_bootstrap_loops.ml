@@ -336,52 +336,27 @@ let start_keeper_loops
   let shutdown_inventory_p, shutdown_inventory_r = Eio.Promise.create () in
   let config = Mcp_server.workspace_config state in
   fork_subsystem "keeper_shutdown_recovery" (fun () ->
-    let operation_requires_fence operation =
-      match operation.Keeper_shutdown_types.phase with
-      | Keeper_shutdown_types.Finalized _ -> false
-      | Keeper_shutdown_types.Prepared
-      | Keeper_shutdown_types.Joined_idle
-      | Keeper_shutdown_types.Finalizing_tasks _
-      | Keeper_shutdown_types.Cleanup_ready _
-      | Keeper_shutdown_types.Reconciliation_required _
-      | Keeper_shutdown_types.Blocked _ -> true
-    in
     let inventory =
-      match Keeper_shutdown_store.list_all ~config with
+      match Keeper_shutdown_store.scan_inventory ~config with
       | Error error -> Error (Keeper_shutdown_store.error_to_string error)
-      | Ok operations ->
-        List.fold_left
-          (fun restored operation ->
-             match restored with
-             | Error _ as error -> error
-             | Ok () when not (operation_requires_fence operation) -> Ok ()
-             | Ok () ->
-               (match
-                  Keeper_turn_admission.restore_shutdown
-                    ~base_path:config.base_path
-                    ~keeper_name:operation.keeper_name
-                    ~operation_id:operation.operation_id
-                with
-                | Keeper_turn_admission.Shutdown_restored
-                | Keeper_turn_admission.Shutdown_already_restored -> Ok ()
-                | Keeper_turn_admission.Shutdown_restore_conflict existing ->
-                  Error
-                    (Printf.sprintf
-                       "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
-                       operation.keeper_name
-                       (Keeper_shutdown_types.Operation_id.to_string
-                          operation.operation_id)
-                       (Keeper_shutdown_types.Operation_id.to_string existing))))
-          (Ok ())
-          operations
-        |> Result.map (fun () -> operations)
+      | Ok entries ->
+        Keeper_shutdown_runtime.restore_inventory_admission ~config entries
     in
     Eio.Promise.resolve shutdown_inventory_r inventory;
     match inventory with
     | Error detail ->
       Log.Keeper.error "shutdown recovery inventory failed: %s" detail;
       failwith detail
-    | Ok operations ->
+    | Ok restored ->
+      List.iter
+        (fun corrupt ->
+           Log.Keeper.error
+             "corrupt shutdown operation retained under an exact Keeper admission fence: keeper=%s operation=%s path=%s error=%s"
+             corrupt.Keeper_shutdown_store.keeper_name
+             (Keeper_shutdown_types.Operation_id.to_string corrupt.operation_id)
+             corrupt.path
+             (Keeper_shutdown_store.error_to_string corrupt.error))
+        restored.corrupt_records;
       Eio.Switch.run (fun recovery_sw ->
         List.iter
           (fun operation ->
@@ -407,7 +382,7 @@ let start_keeper_loops
                    operation.Keeper_shutdown_types.keeper_name
                    (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
                    (Printexc.to_string exn)))
-          operations));
+          restored.operations));
   let wait_for_lazy_startup () =
     (* Combines #10843 (per-task elapsed diagnostic, merged via #10854) with
        a per-task boot guard.  The diagnostic surface stays as #10854
@@ -927,19 +902,7 @@ let start_keeper_loops
       let shutdown_blocked_names_result =
         match shutdown_inventory with
         | Error detail -> Error detail
-        | Ok operations ->
-          Ok
-            (operations
-             |> List.filter_map (fun operation ->
-               match operation.Keeper_shutdown_types.phase with
-               | Keeper_shutdown_types.Finalized _ -> None
-               | Keeper_shutdown_types.Prepared
-               | Keeper_shutdown_types.Joined_idle
-               | Keeper_shutdown_types.Finalizing_tasks _
-               | Keeper_shutdown_types.Cleanup_ready _
-               | Keeper_shutdown_types.Reconciliation_required _
-               | Keeper_shutdown_types.Blocked _ -> Some operation.keeper_name)
-             |> List.sort_uniq String.compare)
+        | Ok restored -> Ok restored.Keeper_shutdown_runtime.blocked_keeper_names
       in
       let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in

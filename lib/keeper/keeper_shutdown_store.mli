@@ -1,7 +1,8 @@
 (** Atomic persistence for Keeper shutdown operations under the configured
-    MASC base path. Reads and writes are serialized per operation path; an
-    unrelated Keeper operation never holds the same lock across filesystem
-    I/O. *)
+    MASC base path. Reads and writes are serialized per operation path, while
+    a per-Keeper inventory lock keeps directory scans from observing atomic
+    writer temporaries. Unrelated Keepers never share either lock across
+    filesystem I/O. *)
 
 type error =
   | Already_exists of string
@@ -18,12 +19,24 @@ type persist_blocked_result =
   | State_preserved of Keeper_shutdown_types.t
   | Blocked_persisted of Keeper_shutdown_types.t
 
+type corrupt_record =
+  { keeper_name : string
+  ; operation_id : Keeper_shutdown_types.Operation_id.t
+  ; path : string
+  ; error : error
+  }
+
+type inventory_entry =
+  | Operation of Keeper_shutdown_types.t
+  | Corrupt_record of corrupt_record
+
 val error_to_string : error -> string
 
 val path :
   config:Workspace.config ->
+  keeper_name:string ->
   Keeper_shutdown_types.Operation_id.t ->
-  string
+  (string, error) result
 
 val to_json : Keeper_shutdown_types.t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (Keeper_shutdown_types.t, error) result
@@ -51,6 +64,7 @@ val persist_blocked_latest :
 
 val load :
   config:Workspace.config ->
+  keeper_name:string ->
   Keeper_shutdown_types.Operation_id.t ->
   (Keeper_shutdown_types.t, error) result
 
@@ -59,14 +73,21 @@ val list_for_keeper :
   keeper_name:string ->
   (Keeper_shutdown_types.t list, error) result
 
-val list_all :
+(** Enumerate every owner-addressable operation independently. A corrupt
+    payload remains associated with the Keeper and operation identities from
+    its validated directory/file path, so boot can fence only that Keeper and
+    continue recovering unrelated lanes. Store entries whose path does not
+    encode both identities still fail the outer result because they cannot be
+    isolated safely. *)
+val scan_inventory :
   config:Workspace.config ->
-  (Keeper_shutdown_types.t list, error) result
+  (inventory_entry list, error) result
 
 module For_testing : sig
   val with_operation_write_lock :
     config:Workspace.config ->
+    keeper_name:string ->
     Keeper_shutdown_types.Operation_id.t ->
     (unit -> 'a) ->
-    'a
+    ('a, error) result
 end

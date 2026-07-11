@@ -783,7 +783,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "duplicate shutdown operation overwrote its record");
       let loaded =
-        match Shutdown_store.load ~config operation_id with
+        match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
         | Ok loaded -> loaded
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
@@ -830,12 +830,17 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
       let exception Cancel_worker in
       Eio.Switch.run @@ fun test_sw ->
       Eio.Fiber.fork ~sw:test_sw (fun () ->
-        Shutdown_store.For_testing.with_operation_write_lock
-          ~config
-          operation_id
-          (fun () ->
-             Eio.Promise.resolve holder_locked_r ();
-             Eio.Promise.await release_holder_p);
+        (match
+           Shutdown_store.For_testing.with_operation_write_lock
+             ~config
+             ~keeper_name:meta.name
+             operation_id
+             (fun () ->
+                Eio.Promise.resolve holder_locked_r ();
+                Eio.Promise.await release_holder_p)
+         with
+         | Ok () -> ()
+         | Error error -> fail (Shutdown_store.error_to_string error));
         Eio.Promise.resolve holder_done_r ());
       Eio.Promise.await holder_locked_p;
       (try
@@ -853,7 +858,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Cancel_worker -> ());
       Eio.Promise.await holder_done_p;
       let blocked =
-        match Shutdown_store.load ~config operation_id with
+        match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
         | Ok blocked -> blocked
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
@@ -880,7 +885,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         operation
         (Failure "later worker failure");
       let preserved =
-        match Shutdown_store.load ~config operation_id with
+        match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
         | Ok preserved -> preserved
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
@@ -912,6 +917,171 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
       | Error (Shutdown_store.Decode_error _) -> ()
       | Error error -> fail (Shutdown_store.error_to_string error)
       | Ok _ -> fail "unsupported shutdown schema was accepted")
+
+let test_keeper_shutdown_store_isolates_corrupt_owner () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-store-corrupt-owner" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let dotted_owner_operation_id = Shutdown_types.Operation_id.generate () in
+      (match
+         Shutdown_store.path
+           ~config
+           ~keeper_name:"dotted.owner"
+           dotted_owner_operation_id
+       with
+       | Ok path ->
+         check string
+           "portable dotted Keeper name has an exact owner codec"
+           "_dotted.owner"
+           (Filename.basename (Filename.dirname path))
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let operation name phase =
+        let meta = make_meta name in
+        let now = Masc_domain.now_iso () in
+        let operation : Shutdown_types.t =
+          { schema_version = Shutdown_types.schema_version
+          ; revision = 0
+          ; operation_id = Shutdown_types.Operation_id.generate ()
+          ; keeper_name = meta.name
+          ; lane_id = Lane.id (Lane.create ())
+          ; trace_id = meta.runtime.trace_id
+          ; generation = meta.runtime.generation
+          ; actor = "tester"
+          ; cleanup_intent = { remove_meta = false; remove_session = false }
+          ; turn_disposition = Shutdown_types.No_inflight_turn
+          ; expected_backlog_version = backlog_version
+          ; owned_task_ids = []
+          ; join_evidence = None
+          ; phase
+          ; created_at = now
+          ; updated_at = now
+          }
+        in
+        (match Shutdown_store.persist_new ~config operation with
+         | Ok () -> operation
+         | Error error -> fail (Shutdown_store.error_to_string error))
+      in
+      let corrupt_operation = operation "corrupt-owner" Shutdown_types.Prepared in
+      let recoverable_operation =
+        operation
+          "recoverable-owner"
+          (Shutdown_types.Blocked
+             { stage = Shutdown_types.Record_update
+             ; detail = "operator repair required"
+             })
+      in
+      let corrupt_path =
+        match
+          Shutdown_store.path
+            ~config
+            ~keeper_name:corrupt_operation.keeper_name
+            corrupt_operation.operation_id
+        with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match Fs_compat.save_file_atomic corrupt_path "{not-json" with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let inventory =
+        match Shutdown_store.scan_inventory ~config with
+        | Ok inventory -> inventory
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      let operations, corrupt_records =
+        List.fold_left
+          (fun (operations, corrupt_records) -> function
+             | Shutdown_store.Operation operation -> operation :: operations, corrupt_records
+             | Shutdown_store.Corrupt_record corrupt ->
+               operations, corrupt :: corrupt_records)
+          ([], [])
+          inventory
+      in
+      (match operations with
+       | [ operation ] ->
+         check string
+           "unrelated valid operation remains recoverable"
+           recoverable_operation.keeper_name
+           operation.keeper_name
+       | _ -> fail "corrupt inventory hid or duplicated the valid operation");
+      (match corrupt_records with
+       | [ corrupt ] ->
+         check string
+           "corrupt payload retains path owner"
+           corrupt_operation.keeper_name
+           corrupt.keeper_name;
+         check bool
+           "corrupt payload retains path operation id"
+           true
+           (Shutdown_types.Operation_id.equal
+              corrupt_operation.operation_id
+              corrupt.operation_id)
+       | _ -> fail "corrupt operation was not isolated as one typed record");
+      (match
+         Shutdown_store.list_for_keeper
+           ~config
+           ~keeper_name:corrupt_operation.keeper_name
+       with
+       | Error (Shutdown_store.Decode_error _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok _ -> fail "corrupt owner inventory was reported as healthy");
+      (match
+         Shutdown_store.list_for_keeper
+           ~config
+           ~keeper_name:recoverable_operation.keeper_name
+       with
+       | Ok [ _ ] -> ()
+       | Ok _ -> fail "recoverable owner inventory changed cardinality"
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let restored =
+        match Shutdown_runtime.restore_inventory_admission ~config inventory with
+        | Ok restored -> restored
+        | Error detail -> fail detail
+      in
+      check (list string)
+        "corrupt and valid non-terminal owners are fenced independently"
+        [ corrupt_operation.keeper_name; recoverable_operation.keeper_name ]
+        restored.blocked_keeper_names;
+      check int "one corrupt record remains explicit" 1
+        (List.length restored.corrupt_records);
+      check int "one valid operation remains recoverable" 1
+        (List.length restored.operations);
+      (match
+         Masc.Keeper_turn_admission.run_if_free
+           ~base_path:config.base_path
+           ~keeper_name:corrupt_operation.keeper_name
+           (fun () -> ())
+       with
+       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested operation_id) ->
+         check bool
+           "corrupt owner fence retains durable operation id"
+           true
+           (Shutdown_types.Operation_id.equal
+              corrupt_operation.operation_id
+              operation_id)
+       | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
+       | `Ran () -> fail "corrupt owner admission was reopened");
+      match Shutdown_runtime.recover_operation ~config recoverable_operation with
+      | Ok recovered ->
+        check bool
+          "unrelated blocked operation remains explicitly recoverable"
+          true
+          (recovered.phase = recoverable_operation.phase)
+      | Error detail -> fail detail)
 
 let test_keeper_shutdown_prepare_joins_idle_lane () =
   Eio_main.run @@ fun env ->
@@ -1054,7 +1224,9 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
       let entry = R.register ~base_path:config.base_path name (make_meta name) in
       let probe_operation_id = Shutdown_types.Operation_id.generate () in
       let records_dir =
-        Filename.dirname (Shutdown_store.path ~config probe_operation_id)
+        match Shutdown_store.path ~config ~keeper_name:name probe_operation_id with
+        | Ok path -> Filename.dirname path
+        | Error error -> fail (Shutdown_store.error_to_string error)
       in
       let blocker = open_out records_dir in
       close_out blocker;
@@ -1772,6 +1944,8 @@ let () =
         test_keeper_lane_cancel_is_lane_local_and_joinable;
       test_case "shutdown store round-trip and identity guard" `Quick
         test_keeper_shutdown_store_round_trip_and_identity_guard;
+      test_case "shutdown store isolates corrupt owner" `Quick
+        test_keeper_shutdown_store_isolates_corrupt_owner;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown prepare joins not-started lane" `Quick

@@ -15,6 +15,17 @@ type persist_blocked_result =
   | State_preserved of Keeper_shutdown_types.t
   | Blocked_persisted of Keeper_shutdown_types.t
 
+type corrupt_record =
+  { keeper_name : string
+  ; operation_id : Operation_id.t
+  ; path : string
+  ; error : error
+  }
+
+type inventory_entry =
+  | Operation of Keeper_shutdown_types.t
+  | Corrupt_record of corrupt_record
+
 let error_to_string = function
   | Already_exists path -> Printf.sprintf "shutdown operation already exists: %s" path
   | Not_found path -> Printf.sprintf "shutdown operation not found: %s" path
@@ -77,10 +88,74 @@ let records_dir (config : Workspace.config) =
   Filename.concat (Workspace.keepers_runtime_dir config) ".shutdown-operations"
 ;;
 
-let path ~config operation_id =
-  Filename.concat
-    (records_dir config)
-    (Keeper_shutdown_types.Operation_id.to_string operation_id ^ ".json")
+(* Prefixing the portable Keeper name makes the path component reversible and
+   keeps the valid names [.] and [..] from becoming directory traversal. The
+   one-byte codec also stays below the existing [<keeper>.json] meta-path
+   overhead for every name that current persistence can represent. *)
+let owner_dir_prefix = "_"
+
+let owner_dir_name_of_keeper_name keeper_name =
+  if Safe_identifier.is_portable_name keeper_name
+  then Ok (owner_dir_prefix ^ keeper_name)
+  else
+    Error
+      (Identity_mismatch
+         (Safe_identifier.portable_name_error ~field:"shutdown Keeper owner"))
+;;
+
+let keeper_name_of_owner_dir_name owner_dir_name =
+  let prefix_length = String.length owner_dir_prefix in
+  if
+    String.length owner_dir_name > prefix_length
+    && String.equal
+         (String.sub owner_dir_name 0 prefix_length)
+         owner_dir_prefix
+  then
+    let keeper_name =
+      String.sub
+        owner_dir_name
+        prefix_length
+        (String.length owner_dir_name - prefix_length)
+    in
+    if Safe_identifier.is_portable_name keeper_name
+    then Ok keeper_name
+    else
+      Error
+        (Safe_identifier.portable_name_error ~field:"shutdown Keeper owner")
+  else
+    Error
+      (Printf.sprintf
+         "shutdown Keeper owner directory must use the %S codec"
+         owner_dir_prefix)
+;;
+
+let keeper_records_dir config keeper_name =
+  owner_dir_name_of_keeper_name keeper_name
+  |> Result.map (fun owner_dir_name ->
+    Filename.concat
+      (records_dir config)
+      owner_dir_name)
+;;
+
+let path ~config ~keeper_name operation_id =
+  keeper_records_dir config keeper_name
+  |> Result.map (fun keeper_dir ->
+    Filename.concat
+      keeper_dir
+      (Keeper_shutdown_types.Operation_id.to_string operation_id ^ ".json"))
+;;
+
+let path_for_operation ~config operation =
+  path
+    ~config
+    ~keeper_name:operation.keeper_name
+    operation.operation_id
+;;
+
+let with_keeper_inventory_lock ~access ~config ~keeper_name f =
+  match keeper_records_dir config keeper_name with
+  | Error _ as error -> error
+  | Ok keeper_dir -> with_operation_lock ~access keeper_dir f
 ;;
 
 let int_option_to_json = function
@@ -496,29 +571,63 @@ let of_json json =
       }
 ;;
 
-let load_unlocked ~config operation_id =
-  let operation_path = path ~config operation_id in
+let contextualize_error operation_path = function
+  | Decode_error detail -> Decode_error (Printf.sprintf "%s: %s" operation_path detail)
+  | Io_error detail -> Io_error (Printf.sprintf "%s: %s" operation_path detail)
+  | Identity_mismatch detail ->
+    Identity_mismatch (Printf.sprintf "%s: %s" operation_path detail)
+  | (Already_exists _ | Not_found _ | Revision_conflict _) as error -> error
+;;
+
+let load_path_unlocked ~operation_path ~keeper_name ~operation_id =
   if not (Fs_compat.file_exists operation_path)
   then Error (Not_found operation_path)
   else
     try
-      Fs_compat.load_file operation_path
-      |> Yojson.Safe.from_string
-      |> of_json
+      let operation_result =
+        Fs_compat.load_file operation_path
+        |> Yojson.Safe.from_string
+        |> of_json
+        |> Result.map_error (contextualize_error operation_path)
+      in
+      match operation_result with
+      | Error _ as error -> error
+      | Ok operation
+        when String.equal keeper_name operation.keeper_name
+             && Operation_id.equal operation_id operation.operation_id -> Ok operation
+      | Ok operation ->
+        Error
+          (Identity_mismatch
+             (Printf.sprintf
+                "%s: path owner=%s operation=%s, payload owner=%s operation=%s"
+                operation_path
+                keeper_name
+                (Operation_id.to_string operation_id)
+                operation.keeper_name
+                (Operation_id.to_string operation.operation_id)))
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Yojson.Json_error detail -> Error (Decode_error detail)
-    | exn -> Error (Io_error (Printexc.to_string exn))
+    | Yojson.Json_error detail ->
+      Error (Decode_error (Printf.sprintf "%s: %s" operation_path detail))
+    | exn ->
+      Error
+        (Io_error
+           (Printf.sprintf "%s: %s" operation_path (Printexc.to_string exn)))
 ;;
 
 let persist_new ~config operation =
-  let operation_path = path ~config operation.operation_id in
-  with_operation_lock ~access:Write operation_path (fun () ->
-    if Fs_compat.file_exists operation_path
-    then Error (Already_exists operation_path)
-    else
-      Keeper_fs.save_json_atomic operation_path (to_json operation)
-      |> Result.map_error (fun detail -> Io_error detail))
+  let* operation_path = path_for_operation ~config operation in
+  with_keeper_inventory_lock
+    ~access:Write
+    ~config
+    ~keeper_name:operation.keeper_name
+    (fun () ->
+       with_operation_lock ~access:Write operation_path (fun () ->
+         if Fs_compat.file_exists operation_path
+         then Error (Already_exists operation_path)
+         else
+           Keeper_fs.save_json_atomic operation_path (to_json operation)
+           |> Result.map_error (fun detail -> Io_error detail)))
 ;;
 
 let same_identity left right =
@@ -530,58 +639,152 @@ let same_identity left right =
 ;;
 
 let replace ~config ~expected_revision operation =
-  let operation_path = path ~config operation.operation_id in
-  with_operation_lock ~access:Write operation_path (fun () ->
-    match load_unlocked ~config operation.operation_id with
-    | Error _ as error -> error
-    | Ok existing when not (Int.equal existing.revision expected_revision) ->
-      Error (Revision_conflict { expected = expected_revision; actual = existing.revision })
-    | Ok _ when not (Int.equal operation.revision (expected_revision + 1)) ->
-      Error
-        (Revision_conflict
-           { expected = expected_revision + 1
-           ; actual = operation.revision
-           })
-    | Ok existing when same_identity existing operation ->
-      Keeper_fs.save_json_atomic operation_path (to_json operation)
-      |> Result.map_error (fun detail -> Io_error detail)
-    | Ok _ ->
-      Error
-        (Identity_mismatch
-           (Operation_id.to_string operation.operation_id)))
+  let* operation_path = path_for_operation ~config operation in
+  with_keeper_inventory_lock
+    ~access:Write
+    ~config
+    ~keeper_name:operation.keeper_name
+    (fun () ->
+       with_operation_lock ~access:Write operation_path (fun () ->
+         match
+           load_path_unlocked
+             ~operation_path
+             ~keeper_name:operation.keeper_name
+             ~operation_id:operation.operation_id
+         with
+         | Error _ as error -> error
+         | Ok existing when not (Int.equal existing.revision expected_revision) ->
+           Error
+             (Revision_conflict
+                { expected = expected_revision; actual = existing.revision })
+         | Ok _ when not (Int.equal operation.revision (expected_revision + 1)) ->
+           Error
+             (Revision_conflict
+                { expected = expected_revision + 1
+                ; actual = operation.revision
+                })
+         | Ok existing when same_identity existing operation ->
+           Keeper_fs.save_json_atomic operation_path (to_json operation)
+           |> Result.map_error (fun detail -> Io_error detail)
+         | Ok _ ->
+           Error
+             (Identity_mismatch
+                (Operation_id.to_string operation.operation_id))))
 ;;
 
 let persist_blocked_latest ~config ~identity ~failure ~updated_at =
-  let operation_path = path ~config identity.operation_id in
-  with_operation_lock ~access:Write operation_path (fun () ->
-    match load_unlocked ~config identity.operation_id with
-    | Error _ as error -> error
-    | Ok existing when not (same_identity existing identity) ->
-      Error (Identity_mismatch (Operation_id.to_string identity.operation_id))
-    | Ok existing ->
-      (match existing.phase with
-       | Finalized _ | Blocked _ | Reconciliation_required _ ->
-         Ok (State_preserved existing)
-       | Prepared | Joined_idle | Finalizing_tasks _ | Cleanup_ready _ ->
-         let blocked =
-           { existing with
-             revision = existing.revision + 1
-           ; phase = Blocked failure
-           ; updated_at
-           }
-         in
-         Keeper_fs.save_json_atomic operation_path (to_json blocked)
-         |> Result.map_error (fun detail -> Io_error detail)
-         |> Result.map (fun () -> Blocked_persisted blocked)))
+  let* operation_path = path_for_operation ~config identity in
+  with_keeper_inventory_lock
+    ~access:Write
+    ~config
+    ~keeper_name:identity.keeper_name
+    (fun () ->
+       with_operation_lock ~access:Write operation_path (fun () ->
+         match
+           load_path_unlocked
+             ~operation_path
+             ~keeper_name:identity.keeper_name
+             ~operation_id:identity.operation_id
+         with
+         | Error _ as error -> error
+         | Ok existing when not (same_identity existing identity) ->
+           Error (Identity_mismatch (Operation_id.to_string identity.operation_id))
+         | Ok existing ->
+           (match existing.phase with
+            | Finalized _ | Blocked _ | Reconciliation_required _ ->
+              Ok (State_preserved existing)
+            | Prepared | Joined_idle | Finalizing_tasks _ | Cleanup_ready _ ->
+              let blocked =
+                { existing with
+                  revision = existing.revision + 1
+                ; phase = Blocked failure
+                ; updated_at
+                }
+              in
+              Keeper_fs.save_json_atomic operation_path (to_json blocked)
+              |> Result.map_error (fun detail -> Io_error detail)
+              |> Result.map (fun () -> Blocked_persisted blocked))))
 ;;
 
-let load ~config operation_id =
-  let operation_path = path ~config operation_id in
+let load ~config ~keeper_name operation_id =
+  let* operation_path = path ~config ~keeper_name operation_id in
   with_operation_lock ~access:Read operation_path (fun () ->
-    load_unlocked ~config operation_id)
+    load_path_unlocked ~operation_path ~keeper_name ~operation_id)
 ;;
 
-let list_unlocked ~config =
+let scan_keeper_dir ~config ~keeper_name =
+  let* dir = keeper_records_dir config keeper_name in
+  if not (Fs_compat.file_exists dir)
+  then Ok []
+  else
+    with_operation_lock ~access:Read dir (fun () ->
+    let* () =
+      try
+        match (Unix.lstat dir).Unix.st_kind with
+        | Unix.S_DIR -> Ok ()
+        | Unix.S_REG
+        | Unix.S_LNK
+        | Unix.S_CHR
+        | Unix.S_BLK
+        | Unix.S_FIFO
+        | Unix.S_SOCK ->
+          Error
+            (Decode_error
+               (Printf.sprintf
+                  "shutdown store owner entry is not a directory: %s"
+                  dir))
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Error
+          (Io_error
+             (Printf.sprintf "%s: %s" dir (Printexc.to_string exn)))
+    in
+    (try
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.fold_left
+           (fun result filename ->
+              let* entries = result in
+              if not (Filename.check_suffix filename ".json")
+              then
+                Error
+                  (Decode_error
+                     (Printf.sprintf
+                        "unexpected shutdown store entry for Keeper %s: %s"
+                        keeper_name
+                        filename))
+              else
+                let raw_id = Filename.chop_suffix filename ".json" in
+                let* operation_id =
+                  Operation_id.of_string raw_id
+                  |> Result.map_error (fun e -> Decode_error e)
+                in
+                let operation_path = Filename.concat dir filename in
+                let loaded =
+                  with_operation_lock ~access:Read operation_path (fun () ->
+                    load_path_unlocked
+                      ~operation_path
+                      ~keeper_name
+                      ~operation_id)
+                in
+                let entry =
+                  match loaded with
+                  | Ok operation -> Operation operation
+                  | Error error ->
+                    Corrupt_record
+                      { keeper_name; operation_id; path = operation_path; error }
+                in
+                Ok (entry :: entries))
+           (Ok [])
+      |> Result.map List.rev
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Io_error (Printexc.to_string exn))))
+;;
+
+let scan_inventory ~config =
   let dir = records_dir config in
   if not (Fs_compat.file_exists dir)
   then Ok []
@@ -591,21 +794,22 @@ let list_unlocked ~config =
       |> Array.to_list
       |> List.sort String.compare
       |> List.fold_left
-           (fun result filename ->
-              let* operations = result in
-              if not (Filename.check_suffix filename ".json")
-              then
-                Error
-                  (Decode_error
-                     (Printf.sprintf "unexpected shutdown store entry: %s" filename))
-              else
-                let raw_id = Filename.chop_suffix filename ".json" in
-                let* operation_id =
-                  Operation_id.of_string raw_id
-                  |> Result.map_error (fun e -> Decode_error e)
-                in
-                let* operation = load ~config operation_id in
-                Ok (operation :: operations))
+           (fun result owner_dir_name ->
+              let* entries = result in
+              let owner_path = Filename.concat dir owner_dir_name in
+              let* validated_name =
+                keeper_name_of_owner_dir_name owner_dir_name
+                |> Result.map_error (fun detail ->
+                  Decode_error
+                    (Printf.sprintf
+                       "shutdown store entry has no isolatable Keeper owner: %s (%s)"
+                       owner_path
+                       detail))
+              in
+              let* keeper_entries =
+                scan_keeper_dir ~config ~keeper_name:validated_name
+              in
+              Ok (List.rev_append keeper_entries entries))
            (Ok [])
       |> Result.map List.rev
     with
@@ -613,17 +817,22 @@ let list_unlocked ~config =
     | exn -> Error (Io_error (Printexc.to_string exn))
 ;;
 
-let list_all ~config = list_unlocked ~config
-
 let list_for_keeper ~config ~keeper_name =
-  list_unlocked ~config
-  |> Result.map
-       (List.filter (fun operation -> String.equal operation.keeper_name keeper_name))
+  let* inventory = scan_keeper_dir ~config ~keeper_name in
+  inventory
+  |> List.fold_left
+       (fun result entry ->
+          let* operations = result in
+          match entry with
+          | Operation operation -> Ok (operation :: operations)
+          | Corrupt_record corrupt -> Error corrupt.error)
+       (Ok [])
+  |> Result.map List.rev
 ;;
 
 module For_testing = struct
-  let with_operation_write_lock ~config operation_id f =
-    let operation_path = path ~config operation_id in
-    with_operation_lock ~access:Write operation_path f
+  let with_operation_write_lock ~config ~keeper_name operation_id f =
+    let* operation_path = path ~config ~keeper_name operation_id in
+    Ok (with_operation_lock ~access:Write operation_path f)
   ;;
 end

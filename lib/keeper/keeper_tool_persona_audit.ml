@@ -298,8 +298,7 @@ let item ~(config : Workspace.config) requested_name =
       ("default_source_kind", Json_util.string_opt_to_json default_source_kind);
       ("default_manifest_path", Json_util.string_opt_to_json defaults.manifest_path);
       ( "config_error",
-        Option.map keeper_toml_config_error_to_json config_error
-        |> Option.value ~default:`Null );
+        Json_util.option_to_yojson keeper_toml_config_error_to_json config_error );
       ("persona_name", Json_util.string_opt_to_json persona_name);
       ("explicit_persona_name", Json_util.string_opt_to_json explicit_persona_name);
       ("persona_profile", existing_path_json ~candidates:persona_candidates persona_profile_path);

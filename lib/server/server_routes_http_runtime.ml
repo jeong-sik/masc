@@ -713,9 +713,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
         (List.map Keeper_types_profile.keeper_toml_config_error_to_json
            keeper_config_errors) );
     ( "keeper_config_probe_error",
-      Option.map Keeper_types_profile.keeper_config_probe_error_to_json
-        keeper_config_probe_error
-      |> Option.value ~default:`Null );
+      Json_util.option_to_yojson
+        Keeper_types_profile.keeper_config_probe_error_to_json
+        keeper_config_probe_error );
     ( "keeper_config_unknown_key_count",
       `Int keeper_config_unknown_key_count );
     ( "keeper_config_unknown_keys",

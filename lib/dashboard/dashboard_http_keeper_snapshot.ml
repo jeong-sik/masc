@@ -343,9 +343,9 @@ let keeper_config_json (config : Workspace.config) (name : string)
 	         ("pipeline_stage_detail", `String pipeline_stage_detail);
 	         ("state_diagram", `String state_diagram);
          ( "config_error",
-           Option.map Keeper_types_profile.keeper_toml_config_error_to_json
-             profile_config_error
-           |> Option.value ~default:`Null );
+           Json_util.option_to_yojson
+             Keeper_types_profile.keeper_toml_config_error_to_json
+             profile_config_error );
          ("decision_pipeline_diagram", `String decision_pipeline_diagram);
          ("prompt", prompt);
          ("execution", execution);

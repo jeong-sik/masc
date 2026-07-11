@@ -990,14 +990,13 @@ let blocked_keeper_detail_json
                  failure.Keeper_runtime.cause) );
           ("last_bootstrap_error", `String failure.Keeper_runtime.error);
           ( "last_bootstrap_config_error"
-          , Option.map
+          , Json_util.option_to_yojson
               (fun error ->
                  Keeper_types_profile.keeper_toml_config_error_of_load_error
                    ~keeper_name:name
                    error
                  |> Keeper_types_profile.keeper_toml_config_error_to_json)
-              failure.Keeper_runtime.config_error
-            |> Option.value ~default:`Null );
+              failure.Keeper_runtime.config_error );
           ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
         ]
   in

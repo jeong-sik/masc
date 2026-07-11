@@ -519,6 +519,17 @@ let schema_property_names schema =
       (Yojson.Safe.to_string other)
 ;;
 
+let schema_property_field schema property field =
+  let open Yojson.Safe.Util in
+  schema |> member "properties" |> member property |> member field
+;;
+
+let schema_property_enum_strings schema property =
+  let open Yojson.Safe.Util in
+  schema |> member "properties" |> member property |> member "enum" |> to_list
+  |> List.map to_string
+;;
+
 let schema_forbids_additional_properties schema =
   match schema with
   | `Assoc fields ->
@@ -526,6 +537,100 @@ let schema_forbids_additional_properties schema =
      | Some (`Bool false) -> true
      | _ -> false)
   | other -> Alcotest.failf "input_schema is not an object: %s" (Yojson.Safe.to_string other)
+;;
+
+let required_keeper_schema name =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+      Masc.Keeper_schema.schemas
+  with
+  | Some schema -> schema
+  | None -> Alcotest.failf "missing keeper schema: %s" name
+;;
+
+let test_sandbox_control_descriptors_use_exact_canonical_schemas () =
+  let check_json label expected actual =
+    Alcotest.(check bool) label true (Yojson.Safe.equal expected actual)
+  in
+  let check_descriptor name expected_properties expected_required =
+    let descriptor = required_internal_descriptor name in
+    let canonical = required_keeper_schema name in
+    Alcotest.(check bool)
+      (name ^ " uses the canonical registry")
+      true
+      (descriptor.input_schema_source = Descriptor.Canonical_registry);
+    check_json
+      (name ^ " descriptor preserves the owning schema")
+      canonical.input_schema
+      descriptor.input_schema;
+    Alcotest.(check (list string))
+      (name ^ " exposes exactly the handler arguments")
+      (List.sort String.compare expected_properties)
+      (List.sort String.compare (schema_property_names descriptor.input_schema));
+    Alcotest.(check (list string))
+      (name ^ " required arguments match the handler")
+      expected_required
+      (schema_required_fields descriptor.input_schema);
+    Alcotest.(check bool)
+      (name ^ " rejects unknown arguments")
+      true
+      (schema_forbids_additional_properties descriptor.input_schema);
+    descriptor.input_schema
+  in
+  let start_schema =
+    check_descriptor
+      "masc_keeper_sandbox_start"
+      [ "name"; "network_mode"; "ttl_sec"; "timeout_sec" ]
+      [ "name" ]
+  in
+  Alcotest.(check (list string))
+    "sandbox start network modes match the owning keeper contract"
+    Masc.Keeper_schema.network_mode_enum_strings
+    (schema_property_enum_strings start_schema "network_mode");
+  check_json
+    "sandbox start ttl default"
+    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.default)
+    (schema_property_field start_schema "ttl_sec" "default");
+  check_json
+    "sandbox start ttl minimum"
+    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.minimum)
+    (schema_property_field start_schema "ttl_sec" "minimum");
+  check_json
+    "sandbox start ttl maximum"
+    (`Float Masc.Keeper_sandbox_control_contract.managed_ttl_sec.maximum)
+    (schema_property_field start_schema "ttl_sec" "maximum");
+  check_json
+    "sandbox start timeout default"
+    (`Float Masc.Keeper_sandbox_control_contract.operation_timeout_sec.default)
+    (schema_property_field start_schema "timeout_sec" "default");
+  let stop_schema =
+    check_descriptor
+      "masc_keeper_sandbox_stop"
+      [ "container_kind"; "name"; "prune_stale"; "timeout_sec" ]
+      []
+  in
+  let runtime_stop_scopes =
+    Masc.Keeper_sandbox_control_contract.stop_scope_strings
+  in
+  Alcotest.(check (list string))
+    "sandbox stop enum matches the runtime parser"
+    runtime_stop_scopes
+    (schema_property_enum_strings stop_schema "container_kind");
+  check_json
+    "sandbox stop scope default"
+    (`String
+      (Masc.Keeper_sandbox_control_contract.stop_scope_to_string
+         Masc.Keeper_sandbox_control_contract.default_stop_scope))
+    (schema_property_field stop_schema "container_kind" "default");
+  check_json
+    "sandbox stop prune default"
+    (`Bool false)
+    (schema_property_field stop_schema "prune_stale" "default");
+  check_json
+    "sandbox stop timeout default"
+    (`Float Masc.Keeper_sandbox_control_contract.operation_timeout_sec.default)
+    (schema_property_field stop_schema "timeout_sec" "default")
 ;;
 
 let required_board_schema name =
@@ -1519,6 +1624,10 @@ let () =
             "cluster descriptors have no missing canonical schemas"
             `Quick
             test_cluster_descriptors_have_no_missing_canonical_schemas
+        ; test_case
+            "sandbox control descriptors use exact canonical schemas"
+            `Quick
+            test_sandbox_control_descriptors_use_exact_canonical_schemas
         ; test_case
             "missing canonical schema is fail-closed"
             `Quick

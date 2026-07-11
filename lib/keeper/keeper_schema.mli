@@ -6,6 +6,9 @@
 val network_mode_enum_strings : string list
 (** Allowed values for explicit sandbox-management tool inputs. *)
 
+val sandbox_stop_scope_enum_strings : string list
+(** Allowed container scopes for the explicit sandbox-stop tool. *)
+
 
 val tail_order_enum_strings : string list
 (** Allowed values for log-tail ordering options. *)

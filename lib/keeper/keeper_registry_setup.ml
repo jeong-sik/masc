@@ -42,6 +42,7 @@ let registry_entry_validation_error_to_string = function
 ;;
 
 let registry_key_parts = Keeper_registry_types.registry_key_parts
+let canonical_base_path_exn = Keeper_registry_types.canonical_base_path_exn
 
 let has_blank_tool_name names =
   List.exists (fun name -> String.equal (String.trim name) "") names
@@ -82,6 +83,7 @@ let validate_runtime_fields (runtime : agent_runtime_state) =
 ;;
 
 let validate_registry_entry ~base_path name (entry : registry_entry) =
+  let base_path = canonical_base_path_exn base_path in
   let expected_name = String.trim name in
   if not (String.equal entry.base_path base_path)
   then Error (Base_path_mismatch { expected = base_path; actual = entry.base_path })
@@ -401,6 +403,7 @@ let register_with_state_result
       ~(phase : Keeper_state_machine.phase)
       ~(conditions : Keeper_state_machine.conditions)
   =
+  let base_path = canonical_base_path_exn base_path in
   let meta = canonicalize_registry_meta ~operation:"register" ~base_path name meta in
   Log.Keeper.info
     "registry: registering keeper name=%s base_path=%s phase=%s"
@@ -557,6 +560,7 @@ type register_restarting_error =
 let register_restarting ~base_path name meta
   : (registry_entry, register_restarting_error) result
   =
+  let base_path = canonical_base_path_exn base_path in
   let meta =
     canonicalize_registry_meta ~operation:"register_restarting" ~base_path name meta
   in
@@ -748,6 +752,7 @@ let get ~base_path name =
 ;;
 
 let all ?base_path () =
+  let base_path = Option.map canonical_base_path_exn base_path in
   StringMap.fold
     (fun key v acc ->
        match registry_key_parts key with
@@ -771,6 +776,7 @@ let all ?base_path () =
 ;;
 
 let update_meta ~base_path name meta =
+  let base_path = canonical_base_path_exn base_path in
   match validate_registry_meta ~base_path name meta with
   | Error reason ->
       record_invalid_registry_entry ~operation:"update_meta" ~name reason
@@ -779,6 +785,7 @@ let update_meta ~base_path name meta =
 ;;
 
 let reload_meta_from_disk ~base_path name =
+  let base_path = canonical_base_path_exn base_path in
   let config = Workspace.default_config base_path in
   match read_meta config name with
   | Error msg -> Error msg
@@ -808,6 +815,7 @@ let reload_meta_from_disk ~base_path name =
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
 let sync_meta_if_registered ~base_path name meta =
+  let base_path = canonical_base_path_exn base_path in
   match validate_registry_meta ~base_path name meta with
   | Error reason ->
       record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason

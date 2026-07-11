@@ -37,7 +37,44 @@ let config_category_enum_strings =
   ]
 ;;
 
-(* [schemas] is the generated misc schema set. Descriptor-owned web backend
+type control_operation =
+  | Pause
+  | Resume
+
+let control_operations = [ Pause; Resume ]
+
+let control_operation_id = function
+  | Pause -> "pause"
+  | Resume -> "resume"
+;;
+
+let control_schema = function
+  | Pause -> Tool_descriptors_gen.masc_pause_schema
+  | Resume -> Tool_descriptors_gen.masc_resume_schema
+;;
+
+let control_schemas = List.map control_schema control_operations
+
+let surface_audit_schema ~remote =
+  { name = "masc_surface_audit"
+  ; description =
+      (if remote
+       then
+         "Read dashboard surface readiness, exposure policy, and evidence references. Use this before pointing operators to an experimental surface."
+       else
+         "Read dashboard surface readiness, exposure policy, and evidence references. Use this to decide whether a surface belongs in main navigation, Lab, or should stay hidden.")
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; "properties", `Assoc [ "surface_id", `Assoc [ "type", `String "string" ] ]
+        ; "additionalProperties", `Bool false
+        ]
+  }
+;;
+
+(* [schemas] is the generated public misc schema set. Operator control schemas
+   use the dedicated typed projection above so they remain registered without
+   entering Config's public/front-door inventory. Descriptor-owned web backend
    names (masc_web_search / masc_web_fetch) are intentionally not generated
    here; [Config.raw_all_tool_schemas] projects them from
    [Keeper_tool_descriptor.public_descriptors] so the keeper universe still

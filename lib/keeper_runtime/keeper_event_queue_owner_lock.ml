@@ -38,22 +38,10 @@ let resolve_error_to_string = function
 ;;
 
 let canonical_base_path raw =
-  let normalized = Env_config_core.normalize_masc_base_path_input raw in
-  if String.equal normalized ""
-  then Error (Invalid_base_path "path is empty after normalization")
-  else
-    let absolute =
-      if Filename.is_relative normalized
-      then Filename.concat (Config_dir_resolver.current_working_dir ()) normalized
-      else normalized
-    in
-    let canonical = Env_config_core.normalize_masc_base_path_input absolute in
-    if String.equal canonical "" || Filename.is_relative canonical
-    then
-      Error
-        (Invalid_base_path
-           (Printf.sprintf "could not derive an absolute path from %S" raw))
-    else Ok canonical
+  Config_dir_resolver.canonical_base_path raw
+  |> Result.map_error (fun error ->
+    Invalid_base_path
+      (Config_dir_resolver.canonical_base_path_error_to_string error))
 ;;
 
 let resolve ~base_path ~keeper_name =

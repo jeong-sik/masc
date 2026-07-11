@@ -5,6 +5,7 @@ import {
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS,
   authHeaders,
+  currentStoredTokenRevision,
   currentDashboardActor,
   getStoredToken,
   getStoredTokenMeta,
@@ -26,6 +27,7 @@ const MCP_SESSION_BLOCKED = '__blocked__'
 const MCP_UNKNOWN_SESSION_MESSAGE = 'Unknown Mcp-Session-Id'
 
 let mcpSessionId: string | null = null
+let observedTokenRevision = currentStoredTokenRevision()
 let initPromise: Promise<void> | null = null
 let initCooldownTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -123,6 +125,15 @@ function resetMcpSessionOnly(): void {
   }
 }
 
+function synchronizeMcpAuthRevision(): void {
+  const currentRevision = currentStoredTokenRevision()
+  if (observedTokenRevision !== currentRevision) {
+    resetMcpSessionOnly()
+    resetDevTokenBootstrap()
+    observedTokenRevision = currentRevision
+  }
+}
+
 function mcpBodyMethod(body: unknown): string | null {
   if (typeof body !== 'object' || body === null) return null
   const method = (body as Record<string, unknown>).method
@@ -186,6 +197,7 @@ async function mcpPost(
 let blockedToastShown = false
 
 async function ensureSession(): Promise<void> {
+  synchronizeMcpAuthRevision()
   if (mcpSessionId === MCP_SESSION_BLOCKED) {
     if (!blockedToastShown) {
       blockedToastShown = true
@@ -202,6 +214,8 @@ async function ensureSession(): Promise<void> {
   if (initPromise) return initPromise
   initPromise = (async () => {
     await ensureDevToken()
+    const tokenRevision = currentStoredTokenRevision()
+    observedTokenRevision = tokenRevision
     try {
       const res = await fetchWithTimeout('/mcp', {
         method: 'POST',
@@ -217,6 +231,9 @@ async function ensureSession(): Promise<void> {
           id: 0,
         }),
       }, MCP_INITIALIZE_TIMEOUT_MS)
+      if (currentStoredTokenRevision() !== tokenRevision) {
+        throw new Error('MCP authentication changed during session initialization')
+      }
       if (!res.ok) {
         if (res.status === 403) {
           mcpSessionId = MCP_SESSION_BLOCKED
@@ -225,7 +242,9 @@ async function ensureSession(): Promise<void> {
         throw await apiRequestErrorFromResponse('POST', '/mcp initialize', res)
       }
       const sid = res.headers.get('Mcp-Session-Id')
-      if (sid) mcpSessionId = sid
+      if (sid) {
+        mcpSessionId = sid
+      }
       // Send initialized notification
       if (mcpSessionId) {
         await fetchWithTimeout('/mcp', {
@@ -256,6 +275,7 @@ async function ensureSession(): Promise<void> {
 export function resetMcpClientState(): void {
   resetMcpSessionOnly()
   resetDevTokenBootstrap()
+  observedTokenRevision = currentStoredTokenRevision()
 }
 
 // --- MCP over HTTP helper ---
@@ -288,6 +308,7 @@ async function callMcpToolInternal(
   args: Record<string, unknown>,
 ): Promise<string> {
   const requestId = String(Math.floor(Date.now() % 1000000))
+  synchronizeMcpAuthRevision()
   let phase = mcpSessionId ? 'tools/call' : 'initialize'
   try {
     await ensureSession()

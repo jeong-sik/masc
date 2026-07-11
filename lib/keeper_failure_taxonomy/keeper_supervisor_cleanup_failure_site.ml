@@ -3,12 +3,14 @@ type t =
   | Reconcile_gate_rejected
   | Dead_tombstone_submission
   | Force_watchdog_crash
-  | Paused_meta_prune
+  | Paused_meta_read
+  | Paused_meta_prune_submission
 
 let to_label = function
   | Fiber_start_rejected -> "fiber_start_rejected"
   | Reconcile_gate_rejected -> "reconcile_gate_rejected"
   | Dead_tombstone_submission -> "dead_tombstone_submission"
   | Force_watchdog_crash -> "force_watchdog_crash"
-  | Paused_meta_prune -> "paused_meta_prune"
+  | Paused_meta_read -> "paused_meta_read"
+  | Paused_meta_prune_submission -> "paused_meta_prune_submission"
 ;;

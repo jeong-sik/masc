@@ -1,5 +1,5 @@
-(** Durable types for one Keeper shutdown operation.  These records describe
-    lifecycle coordination only; task ownership remains authoritative in the
+(** Durable types for one Keeper lifecycle cleanup operation. These records
+    describe coordination only; task ownership remains authoritative in the
     Workspace backlog. *)
 
 module Operation_id : sig
@@ -16,7 +16,21 @@ type meta_disposition =
   | Retain_dead_tombstone
   | Remove_meta
 
-type completion_action = Dead_tombstone_reaped
+type stale_paused_context =
+  { meta_version : int
+  ; last_updated : string
+  ; latched_reason : Keeper_latched_reason.t option
+  }
+
+type cleanup_reason =
+  | Operator_stop_retain_meta
+  | Operator_stop_remove_meta
+  | Dead_tombstone_cleanup
+  | Stale_paused_prune of stale_paused_context
+
+type completion_action =
+  | Dead_tombstone_reaped
+  | Paused_meta_pruned
 
 type completion_receipt =
   | Completion_not_requested
@@ -24,9 +38,13 @@ type completion_receipt =
   | Completion_delivered of completion_action
 
 type cleanup_intent =
-  { meta_disposition : meta_disposition
+  { reason : cleanup_reason
   ; remove_session : bool
   }
+
+type lane_ownership =
+  | Registered_lane of Keeper_lane.Id.t
+  | Dormant_meta
 
 type admission_lane =
   | Autonomous
@@ -90,6 +108,7 @@ type finalization_evidence =
   ; meta_removed : bool
   ; session_removed : bool
   ; registry_unregistered : bool
+  ; accumulator_dropped : bool
   ; completion : completion_receipt
   }
 
@@ -107,7 +126,7 @@ type t =
   ; revision : int
   ; operation_id : Operation_id.t
   ; keeper_name : string
-  ; lane_id : Keeper_lane.Id.t
+  ; lane_ownership : lane_ownership
   ; trace_id : Keeper_id.Trace_id.t
   ; generation : int
   ; actor : string
@@ -134,13 +153,16 @@ type invariant_error =
       { expected_session_removed : bool
       ; actual_session_removed : bool
       }
-  | Finalized_completion_mismatch of meta_disposition * completion_receipt
+  | Required_accumulator_not_dropped
+  | Finalized_completion_mismatch of cleanup_reason * completion_receipt
 
 val schema_version : int
 val meta_disposition_to_string : meta_disposition -> string
 val meta_disposition_of_string : string -> (meta_disposition, string) result
+val meta_disposition_of_cleanup_reason : cleanup_reason -> meta_disposition
 val completion_action_to_string : completion_action -> string
 val completion_action_of_string : string -> (completion_action, string) result
+val completion_action_of_cleanup_reason : cleanup_reason -> completion_action option
 val invariant_error_to_string : invariant_error -> string
 val validate : t -> (unit, invariant_error) result
 val immutable_fields_equal : t -> t -> bool

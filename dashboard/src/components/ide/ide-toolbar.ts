@@ -35,24 +35,32 @@ const TOOLBAR_BUTTON_BASE =
 
 const VIEW_TAB_BASE = 'ide-v2-view'
 
+// 'tools' / 'approve' / 'runtime' / 'explode' were removed (masc#24069 #49):
+// they rendered as toggleable chips but had no backing data source or render
+// branch — see ide-editor-blame.ts's IDE_LAYER_ORDER comment for detail. The
+// 'keeper-trace' entry's `conflictsWith: ['runtime']` (RFC-0028 §10) is
+// dropped with 'runtime': there is nothing left for it to conflict with.
 export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'time', label: 'Time', description: '변경 timestamp gradient' },
   { kind: 'parallel', label: 'Parallel', description: '동시 keeper 작업 표시' },
-  { kind: 'tools', label: 'Tools', description: 'MCP tool 호출' },
-  { kind: 'approve', label: 'Approve', description: 'APPROVE thread 마커' },
   { kind: 'notes', label: 'Notes', description: 'NOTE/SUGGEST 마커' },
-  { kind: 'runtime', label: 'Runtime', description: 'provider/model/cost/latency gutter chip' },
   {
     kind: 'keeper-trace',
     label: 'Trace',
     description: '3-source stitched gutter chip (anchored-thread / runtime-hop / decision-log)',
-    conflictsWith: ['runtime'],
   },
-  { kind: 'explode', label: 'EXPLODE', description: 'per-keeper ghost copies', mutuallyExclusive: true },
 ]
 
 export const IDE_LAYER_LABELS = new Map(IDE_LAYERS.map(layer => [layer.kind, layer.label]))
-export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'approve', 'notes'] as const
+export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'notes'] as const
+
+// 'time' / 'parallel' read per-line git-blame ownership data
+// (ide-data-workspace-store.ts fetchGitBlame) that is only populated when
+// the editor is showing the BLAME view. Toggling either in another view
+// previously activated a layer with no data to render — a silent no-op.
+// Gated here so the toolbar disables the affordance instead.
+const VIEW_GATED_LAYER_KINDS: ReadonlySet<string> = new Set(['time', 'parallel'])
+const VIEW_GATE_TOOLTIP = 'BLAME 뷰에서만 사용할 수 있습니다 (git blame ownership 데이터 필요)'
 
 interface IdeToolbarProps {
   readonly activeView: ViewTab
@@ -237,12 +245,15 @@ export function IdeToolbar({
         class="ide-toolbar-layers flex min-w-0 items-center gap-1.5 overflow-x-auto pb-0.5 font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"
       >
         <span class="shrink-0">LAYERS</span>
-        ${IDE_LAYERS.map(layer => html`
+        ${IDE_LAYERS.map(layer => {
+          const viewGated = VIEW_GATED_LAYER_KINDS.has(layer.kind) && activeView !== 'blame'
+          return html`
           <button
             type="button"
             aria-pressed=${isActive(layer.kind) ? 'true' : 'false'}
+            disabled=${viewGated}
             onClick=${() => handleLayerToggle(layer.kind)}
-            title=${layer.description}
+            title=${viewGated ? `${layer.description} — ${VIEW_GATE_TOOLTIP}` : layer.description}
             class=${TOOLBAR_BUTTON_BASE}
             style=${{
               background: isActive(layer.kind)
@@ -253,13 +264,12 @@ export function IdeToolbar({
                 : 'var(--color-fg-secondary)',
               border: '1px solid',
               borderColor: isActive(layer.kind)
-                ? layer.mutuallyExclusive
-                  ? 'var(--color-status-warn)'
-                  : 'var(--color-accent-fg)'
+                ? 'var(--color-accent-fg)'
                 : 'var(--color-border-default)',
             }}
           >${layer.label}</button>
-        `)}
+        `
+        })}
         ${active.size > 0
           ? html`<span class="shrink-0 text-[var(--color-fg-disabled)]">${active.size} active</span>`
           : null}

@@ -99,13 +99,9 @@ export const IDE_TREE_WIDTH_MIN = 180
 export const IDE_TREE_WIDTH_MAX = 360
 const STATUSBAR_LAYER_PRIORITY: ReadonlyArray<string> = [
   'keeper-trace',
-  'approve',
   'notes',
-  'runtime',
   'time',
   'parallel',
-  'tools',
-  'explode',
 ]
 const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
   source: 'SOURCE',
@@ -1323,7 +1319,7 @@ export function IdeShell() {
               class="ide-plane-conversation ide-v2-rail v2-ide-panel"
               data-testid="ide-right-rail"
             >
-              <div class="ide-v2-rail-tabs ide-rail-tabs" role="tablist" aria-label="IDE right rail">
+              <div class="ide-v2-rail-tabs" role="tablist" aria-label="IDE right rail">
                 ${IDE_RIGHT_RAIL_TABS.map(tab => html`
                   <button
                     key=${tab.id}
@@ -1332,7 +1328,7 @@ export function IdeShell() {
                     aria-selected=${rightRailTab === tab.id ? 'true' : 'false'}
                     aria-label=${tab.title}
                     title=${tab.title}
-                    class=${`ide-v2-rail-tab ide-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
+                    class=${`ide-v2-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
                     onClick=${() => setRightRailTab(tab.id)}
                   >${tab.label}</button>
                 `)}

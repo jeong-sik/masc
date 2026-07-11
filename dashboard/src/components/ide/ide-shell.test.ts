@@ -184,7 +184,7 @@ describe('IdeShell', () => {
   it('hydrates layer buttons from the route layers param', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'source', layers: 'time,approve' },
+      params: { section: 'ide-shell', view: 'source', layers: 'time,notes' },
       postId: null,
     }
 
@@ -196,12 +196,74 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-testid="ide-readiness-notice"]')?.textContent)
       .toBe('experimental')
     expect(buttonByText(container, 'Time').getAttribute('aria-pressed')).toBe('true')
-    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
-    expect(buttonByText(container, 'Tools').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Parallel').getAttribute('aria-pressed')).toBe('false')
     expect(container.textContent).toContain('PERSISTENCE MAP')
     expect(container.textContent).toContain('Active overlays')
     expect(container.textContent).toContain('Time')
-    expect(container.textContent).toContain('Approve')
+    expect(container.textContent).toContain('Notes')
+  })
+
+  it('disables time/parallel layer buttons outside the BLAME view with an explanatory tooltip', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', layers: 'time,parallel' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const timeBtn = buttonByText(container, 'Time')
+    const parallelBtn = buttonByText(container, 'Parallel')
+    expect(timeBtn.disabled).toBe(true)
+    expect(parallelBtn.disabled).toBe(true)
+    expect(timeBtn.getAttribute('title')).toContain('BLAME 뷰에서만')
+    expect(parallelBtn.getAttribute('title')).toContain('BLAME 뷰에서만')
+    // Deep-linked active state survives the gate — disabled communicates
+    // "can't toggle here", not "silently cleared".
+    expect(timeBtn.getAttribute('aria-pressed')).toBe('true')
+    expect(parallelBtn.getAttribute('aria-pressed')).toBe('true')
+    // Trace/Notes are not view-gated.
+    expect(buttonByText(container, 'Trace').disabled).toBe(false)
+    expect(buttonByText(container, 'Notes').disabled).toBe(false)
+  })
+
+  it('enables time/parallel layer buttons in the BLAME view', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'blame' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(buttonByText(container, 'Time').disabled).toBe(false)
+    expect(buttonByText(container, 'Parallel').disabled).toBe(false)
+  })
+
+  it('removed the decorative tools/approve/runtime/explode layer chips', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    // Scope to the layers group: the context route-group chips legitimately
+    // render a 'Runtime' button, so a container-wide text probe would match
+    // the wrong feature and mask a layer-chip regression.
+    const layers = container.querySelector('[data-testid="ide-toolbar-layers"]')
+    expect(layers).not.toBeNull()
+    const layerLabels = Array.from(layers!.querySelectorAll('button'))
+      .map(button => button.textContent?.trim())
+    expect(layerLabels).not.toContain('Tools')
+    expect(layerLabels).not.toContain('Approve')
+    expect(layerLabels).not.toContain('Runtime')
+    expect(layerLabels).not.toContain('EXPLODE')
+    expect(layerLabels).toEqual(
+      expect.arrayContaining(['Time', 'Parallel', 'Notes', 'Trace']),
+    )
   })
 
   it('renders repository git status without the dirty-count stub', async () => {
@@ -314,7 +376,7 @@ describe('IdeShell', () => {
   it('derives compact operational statusbar chips from IDE route context', () => {
     const model = deriveIdeStatusbarModel({
       activeView: 'split-diff',
-      activeLayers: new Set(['keeper-trace', 'approve']),
+      activeLayers: new Set(['keeper-trace', 'notes']),
       activeFilePath: 'dashboard/src/components/ide/ide-shell.ts',
       findOpen: true,
       terminalOpen: true,
@@ -708,19 +770,19 @@ describe('IdeShell', () => {
   it('persists layer toggles back to the route', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'split-diff', layers: 'time,approve' },
+      params: { section: 'ide-shell', view: 'split-diff', layers: 'notes' },
       postId: null,
     }
 
     render(h(IdeShell, {}), container)
     expect(container.querySelector('[aria-label="Split diff preview"]')).not.toBeNull()
-    fireEvent.click(buttonByText(container, 'Tools'))
+    fireEvent.click(buttonByText(container, 'Trace'))
 
     expect(route.value.params.view).toBe('split-diff')
-    expect(route.value.params.layers).toBe('approve,time,tools')
+    expect(route.value.params.layers).toBe('keeper-trace,notes')
 
-    fireEvent.click(buttonByText(container, 'EXPLODE'))
-    expect(route.value.params.layers).toBe('explode')
+    fireEvent.click(buttonByText(container, 'Notes'))
+    expect(route.value.params.layers).toBe('keeper-trace')
   })
 
   it('turns focus=review into a unified review workspace with review layers', () => {
@@ -735,24 +797,22 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
     expect(container.querySelector('[aria-label="Unified diff preview"]')).not.toBeNull()
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
-    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
-    expect(buttonByText(container, 'Runtime').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Parallel').getAttribute('aria-pressed')).toBe('false')
   })
 
   it('lets explicit review-focus layers override the default review bundle', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'unified', focus: 'review', layers: 'runtime' },
+      params: { section: 'ide-shell', view: 'unified', focus: 'review', layers: 'parallel' },
       postId: null,
     }
 
     render(h(IdeShell, {}), container)
 
     expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
-    expect(buttonByText(container, 'Runtime').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Parallel').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
-    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
   })
 
@@ -765,13 +825,11 @@ describe('IdeShell', () => {
 
     render(h(IdeShell, {}), container)
     fireEvent.click(buttonByText(container, 'Trace'))
-    fireEvent.click(buttonByText(container, 'Approve'))
     fireEvent.click(buttonByText(container, 'Notes'))
 
     expect(route.value.params.layers).toBe('none')
     expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
-    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
   })
 
@@ -786,7 +844,6 @@ describe('IdeShell', () => {
 
     expect(container.querySelector('[data-testid="ide-review-focus"]')).toBeNull()
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
-    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
   })
 
@@ -831,12 +888,12 @@ describe('IdeShell', () => {
 
     render(h(IdeShell, {}), container)
     const input = ideCommandInput(container)
-    input.value = 'runtime'
+    input.value = 'parallel'
     fireEvent.input(input)
     await waitFor(() => expect(container.querySelector('[role="listbox"]')).not.toBeNull())
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(route.value.params.layers).toBe('runtime')
+    expect(route.value.params.layers).toBe('parallel')
   })
 
   it('runs the rails command from the IDE command bar', async () => {
@@ -892,27 +949,6 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-testid="ide-find-panel"]')).not.toBeNull()
   })
 
-  it('renders the Runtime layer button and toggles it via URL', () => {
-    route.value = {
-      tab: 'code',
-      params: { section: 'ide-shell', view: 'source' },
-      postId: null,
-    }
-
-    render(h(IdeShell, {}), container)
-
-    const btn = buttonByText(container, 'Runtime')
-    expect(btn.getAttribute('aria-pressed')).toBe('false')
-
-    fireEvent.click(btn)
-    expect(route.value.params.layers).toBe('runtime')
-    expect(btn.getAttribute('aria-pressed')).toBe('true')
-
-    fireEvent.click(btn)
-    expect(route.value.params.layers).toBeUndefined()
-    expect(btn.getAttribute('aria-pressed')).toBe('false')
-  })
-
   it('preserves keeper context and chat while keeping the terminal drawer present', () => {
     route.value = {
       tab: 'code',
@@ -945,6 +981,36 @@ describe('IdeShell', () => {
       .toContain('waiting for Execute output')
     expect(container.querySelector('[data-testid="ide-interject-fab"]')).not.toBeNull()
   })
+
+  it('keeps default right rail context diagnostics bounded above the primary conversation rail', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const rail = container.querySelector('[data-testid="ide-right-rail"]')
+    const contextStack = container.querySelector('[data-testid="ide-right-context-stack"]')
+    const primaryRail = container.querySelector('[data-testid="ide-primary-conversation-rail"]')
+    expect(rail).not.toBeNull()
+    expect(contextStack).not.toBeNull()
+    expect(primaryRail).not.toBeNull()
+    expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
+    expect(buttonByText(container, 'Work Context').getAttribute('aria-selected')).toBe('true')
+    // rail tab labels renamed by #24081 ('Run Activity' → '활동', 'Keeper
+    // Cursors' → '커서'); the diagnostics-bounding assertions are unchanged.
+    expect(buttonByText(container, '활동').getAttribute('title'))
+      .toBe('Workspace and keeper activity linked to the active file and repository')
+    expect(buttonByText(container, '커서').getAttribute('title'))
+      .toBe('Live keeper file focus and cursor stream status')
+    expect(container.querySelector('[data-testid="ide-dashboard-connection"]')?.getAttribute('title'))
+      .toContain('Dashboard event transport')
+    expect(container.querySelector('.ide-plane-activity')).toBeNull()
+    expect(container.querySelector('[data-testid="ide-cursor-rail"]')).toBeNull()
+  })
+
 
   it('switches the IDE right rail tabs and renders cursor stream focus', async () => {
     route.value = {
@@ -1126,18 +1192,18 @@ describe('IdeShell', () => {
     expect(getLocalStorageItem(IDE_TREE_WIDTH_STORAGE_KEY)).toBe(String(IDE_TREE_WIDTH_MAX))
   })
 
-  it('hydrates runtime layer button from the ?layers=runtime URL param', () => {
+  it('hydrates the trace layer button from the ?layers=keeper-trace URL param', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'source', layers: 'runtime' },
+      params: { section: 'ide-shell', view: 'source', layers: 'keeper-trace' },
       postId: null,
     }
 
     render(h(IdeShell, {}), container)
 
-    expect(buttonByText(container, 'Runtime').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
     expect(container.textContent).toContain('Active overlays')
-    expect(container.textContent).toContain('Runtime')
+    expect(container.textContent).toContain('Trace')
   })
 
   it('mounts the OverlayKeeperTrace overlay when the keeper-trace layer is toggled on', () => {

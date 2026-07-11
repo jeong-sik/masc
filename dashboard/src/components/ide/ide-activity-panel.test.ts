@@ -58,6 +58,41 @@ describe('IdeActivityPanel', () => {
     expect(container.textContent).toContain('no keeper activity')
   })
 
+  it('shows a no-scope message instead of "no recent activity" when neither repoId nor keeperLane is set', async () => {
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, {}), container)
+
+    await waitFor(() => {
+      const notice = container.querySelector('[data-testid="ide-activity-no-scope"]')
+      expect(notice?.textContent).toBe('관측 스코프(저장소/keeper)가 선택되지 않았습니다')
+    })
+    expect(container.textContent).not.toContain('no recent activity')
+  })
+
+  it('shows "no recent activity" (not the no-scope message) when a scoped fetch genuinely finds nothing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({ ok: true, data: { events: [] } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { repoId: 'masc' }), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('no recent activity')
+    })
+    expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).toBeNull()
+  })
+
   it('treats a null active file as no active file', () => {
     const container = document.createElement('div')
     render(h(IdeActivityPanel, { activeFile: null }), container)
@@ -598,7 +633,10 @@ describe('IdeActivityPanel', () => {
     await waitFor(() => {
       expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
     })
-    expect(container.textContent).toContain('no recent activity')
+    // No repoId/keeperLane was passed: the empty list explains the missing
+    // scope rather than claiming "no recent activity" (which would imply
+    // a real, merely-empty fetch happened).
+    expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
   })
 
   it('degrades the refresh tone when the keeper lane fetch fails', async () => {

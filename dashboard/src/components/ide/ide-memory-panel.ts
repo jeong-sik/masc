@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'preact/hooks'
 import { MemoryLens } from '../memory/memory-lens'
 import type { MemoryLensProps } from '../memory/memory-lens'
 import { appendIdeScopeParams, type IdeScope } from '../../api/ide'
+import { extractApiError, get } from '../../api/core'
 
 interface MemoryEntry {
   readonly id: string
@@ -150,7 +151,21 @@ export function IdeMemoryPanel({ keeperName, scope, repoId, canonicalUrl }: IdeM
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Mirrors api/ide.ts's resolveIdeScope: the server requires exactly one
+  // of repo_id / canonical_url / keeper_lane. Without one it fails closed
+  // with 400 missing_ide_scope — checking here first means the panel never
+  // makes that doomed request and never surfaces its bare status code.
+  const hasScope = Boolean(scope) || Boolean(repoId?.trim()) || Boolean(canonicalUrl?.trim())
+
   const fetchMemory = useCallback(async () => {
+    if (!hasScope) {
+      setEntries([])
+      setTotal(0)
+      setContract(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -158,18 +173,16 @@ export function IdeMemoryPanel({ keeperName, scope, repoId, canonicalUrl }: IdeM
       if (keeperName) params.set('keeper_id', keeperName)
       appendIdeScopeParams(params, { scope, repoId, canonicalUrl })
       params.set('limit', '50')
-      const res = await fetch(`/api/v1/ide/memory?${params}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data: MemoryResponse = await res.json()
+      const data = await get<MemoryResponse>(`/api/v1/ide/memory?${params}`)
       setEntries(data.entries)
       setTotal(data.total)
       setContract(data.contract ?? null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load')
+      setError(extractApiError(e, 'Failed to load memory entries').message)
     } finally {
       setLoading(false)
     }
-  }, [keeperName, scope, repoId, canonicalUrl])
+  }, [hasScope, keeperName, scope, repoId, canonicalUrl])
 
   useEffect(() => {
     fetchMemory()
@@ -193,19 +206,21 @@ export function IdeMemoryPanel({ keeperName, scope, repoId, canonicalUrl }: IdeM
           <button
             class="ide-memory-panel__refresh v2-ide-action"
             onClick=${fetchMemory}
-            disabled=${loading}
+            disabled=${loading || !hasScope}
             title="Refresh memory entries"
           >↻</button>
           <span class="ide-memory-panel__count">${total}</span>
         </span>
       </div>
-      ${loading
-        ? html`<div class="ide-memory-panel__loading">Loading...</div>`
-        : error
-          ? html`<div class="ide-memory-panel__error">${error}</div>`
-          : entries.length === 0
-            ? html`<div class="ide-memory-panel__empty">No memory entries</div>`
-            : html`
+      ${!hasScope
+        ? html`<div class="ide-memory-panel__empty" data-testid="ide-memory-panel-no-scope">저장소를 선택하면 메모리를 조회합니다</div>`
+        : loading
+          ? html`<div class="ide-memory-panel__loading">Loading...</div>`
+          : error
+            ? html`<div class="ide-memory-panel__error" data-testid="ide-memory-panel-error">${error}</div>`
+            : entries.length === 0
+              ? html`<div class="ide-memory-panel__empty">No memory entries</div>`
+              : html`
               <div class="ide-memory-panel__list">
                 ${entries.map(
                   (entry) => html`

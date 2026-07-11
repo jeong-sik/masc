@@ -69,10 +69,21 @@ interface ApiActivityResponse {
   readonly latest_seq?: number
 }
 
-interface ActivityFetchResult {
+interface GraphFetchResult {
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly workspaceId: string
   readonly ok: boolean
+}
+
+interface ActivityFetchResult extends GraphFetchResult {
+  /**
+   * Whether the IDE-bridge portion of the feed (repo/keeper-lane scoped
+   * observations) was actually queried. False when neither repoId nor
+   * keeperLane is set — distinct from a real fetch that came back empty,
+   * so the render can tell "nothing to observe here" apart from "no
+   * scope selected" instead of collapsing both into one empty state.
+   */
+  readonly scoped: boolean
 }
 
 type ActivityRefreshTone = 'loading' | 'live' | 'stale' | 'offline'
@@ -209,16 +220,17 @@ async function fetchActivityEvents(
   const graph = await fetchActivityGraphEvents()
   const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, repoId, keeperLane)
   return {
-    ...graph,
+    workspaceId: graph.workspaceId,
     // A bridge fetch failure must degrade the refresh tone instead of
     // rendering an empty-but-"live" feed: an operator cannot distinguish
     // "no keeper activity" from "the activity source is broken" otherwise.
     ok: graph.ok && bridge.ok,
     events: mergeRunActivityEvents(graph.events, bridge.events),
+    scoped: bridge.scoped,
   }
 }
 
-async function fetchActivityGraphEvents(): Promise<ActivityFetchResult> {
+async function fetchActivityGraphEvents(): Promise<GraphFetchResult> {
   try {
     const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
     const rawEvents = data.events
@@ -236,6 +248,7 @@ async function fetchActivityGraphEvents(): Promise<ActivityFetchResult> {
 interface BridgeFetchResult {
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly ok: boolean
+  readonly scoped: boolean
 }
 
 /**
@@ -257,7 +270,12 @@ async function fetchIdeBridgeRunActivityEvents(
   if (lane) {
     sources.push(fetchIdeEvents({ limit: 50, scope: { kind: 'keeper_lane', keeperId: lane } }))
   }
-  if (sources.length === 0) return { events: EMPTY_ACTIVITY, ok: true }
+  // Neither scope is set: there is nothing to query, not a request that
+  // happened to find zero events. `ok: true` here would previously read
+  // identically to a genuine empty-but-healthy fetch — `scoped: false`
+  // is the caller's signal to render "no scope selected" instead of
+  // "no recent activity".
+  if (sources.length === 0) return { events: EMPTY_ACTIVITY, ok: true, scoped: false }
   const settled = await Promise.allSettled(sources)
   const events: RunActivityEvent[] = []
   let ok = true
@@ -270,7 +288,7 @@ async function fetchIdeBridgeRunActivityEvents(
       ok = false
     }
   }
-  return { events, ok }
+  return { events, ok, scoped: true }
 }
 
 function mergeRunActivityEvents(
@@ -477,6 +495,13 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     return store
   }, [])
   const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
+  // Lazy-initialized from props so the first render (before the async
+  // fetch resolves) already reflects whether a scope is selected, instead
+  // of flashing "no recent activity" for a scoped panel that just hasn't
+  // loaded yet.
+  const [bridgeScoped, setBridgeScoped] = useState(
+    () => Boolean(repoId?.trim()) || Boolean(keeperLane?.trim()),
+  )
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
   const refreshMs = normalizedPollMs(pollMs)
 
@@ -490,8 +515,9 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, workspaceId, ok } = await fetchActivityEvents(repoId, keeperLane)
+      const { events, workspaceId, ok, scoped } = await fetchActivityEvents(repoId, keeperLane)
       if (cancelled) return
+      setBridgeScoped(scoped)
       if (ok) {
         store.reset(workspaceId)
         store.seed(events)
@@ -577,7 +603,9 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         class="ide-rail-list ide-activity-list"
       >
         ${events.length === 0
-          ? html`<li class="ide-rail-empty">no recent activity</li>`
+          ? bridgeScoped
+            ? html`<li class="ide-rail-empty">no recent activity</li>`
+            : html`<li class="ide-rail-empty" data-testid="ide-activity-no-scope">관측 스코프(저장소/keeper)가 선택되지 않았습니다</li>`
           : events.map(item => html`<${ActivityRow} item=${item} presence=${presence} overlay=${overlay} />`)}
       </ol>
     </div>

@@ -690,9 +690,12 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 
 /* activity rail */
 .ide-rail { border-left: 1px solid var(--border-main); background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep) 70%); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.ide-rail-tabs { flex: none; display: flex; gap: 2px; padding: 9px 10px 0; border-bottom: 1px solid var(--border-soft); }
-.ide-rail-tab { font-family: var(--font-ui); font-size: var(--fs-11); padding: 6px 11px; border: 0; background: none; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; }
-.ide-rail-tab.on { color: var(--volt-strong); border-bottom-color: var(--volt); }
+/* .ide-rail-tabs / .ide-rail-tab were a duplicate of ide-v2.css's
+   .ide-v2-rail-tabs / .ide-v2-rail-tab (same DOM nodes carry both class
+   pairs). This file loads after ide-v2.css (main.ts import order), so at
+   equal specificity these rules silently won and overrode ide-v2.css's
+   font-size/padding, causing the IDE right-rail tab labels to wrap.
+   Removed here so ide-v2.css is the single owner; see ide-v2.css:381-405. */
 .ide-rail-scroll { flex: 1; overflow-y: auto; padding: 11px 12px; display: flex; flex-direction: column; gap: 9px; }
 .ide-ev { display: grid; grid-template-columns: 24px 1fr; gap: 8px; padding: 8px 9px; border-radius: var(--radius-sm); background: var(--bg-card); border: 1px solid var(--border-soft); }
 .ide-ev .ico { width: 22px; height: 22px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: var(--fs-10); background: var(--bg-deep); border: 1px solid var(--border-main); color: var(--text-dim); }

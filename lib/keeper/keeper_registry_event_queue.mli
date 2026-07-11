@@ -30,6 +30,7 @@ type settlement = Keeper_event_queue_persistence.settlement =
       }
 
 type transition_receipt = Keeper_event_queue_persistence.transition_receipt
+type outbox_entry = Keeper_event_queue_persistence.outbox_entry
 
 type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
@@ -40,6 +41,12 @@ val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind
 
 val active_lease_result :
   base_path:string -> string -> (lease option, string) result
+
+val transition_outbox_result :
+  base_path:string -> string -> (outbox_entry list, string) result
+
+val mark_transition_projected_result :
+  base_path:string -> string -> transition_id:string -> (unit, string) result
 
 val claim_when_result :
   base_path:string ->

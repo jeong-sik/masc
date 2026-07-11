@@ -51,7 +51,6 @@ type transition_receipt =
 type outbox_entry =
   { receipt : transition_receipt
   ; stimuli : Keeper_event_queue.stimulus list
-  ; projected_to_reaction_ledger : bool
   }
 
 type t
@@ -65,6 +64,7 @@ val revision : t -> int64
 val next_lease_sequence : t -> int64
 val pending : t -> Keeper_event_queue.t
 val leases : t -> lease list
+val last_settlement : t -> transition_receipt option
 val transition_outbox : t -> outbox_entry list
 val lease_kind : lease -> lease_kind
 
@@ -107,8 +107,9 @@ val active_lease : t -> lease option
     claiming new pending work. *)
 
 val mark_transition_projected : transition_id:string -> t -> (t, string) result
-(** Idempotently mark a durable outbox entry after an external projector has
-    materialized its stable [event_id].  Unknown transition ids fail closed. *)
+(** Atomically retire a durable outbox entry after an external projector has
+    materialized its stable [event_id], retaining only the last receipt for an
+    immediate idempotent retry. Unknown transition ids fail closed. *)
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
@@ -121,6 +122,7 @@ val release_legacy_inflight :
 
 val lease_to_yojson : lease -> Yojson.Safe.t
 val lease_of_yojson : Yojson.Safe.t -> (lease, string) result
+val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 

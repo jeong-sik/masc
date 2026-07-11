@@ -54,10 +54,6 @@ let record_event_queue_stimulus_turn_started =
   Stimulus_intake.record_event_queue_stimulus_turn_started
 ;;
 
-let record_event_queue_stimulus_ack =
-  Stimulus_intake.record_event_queue_stimulus_ack
-;;
-
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
@@ -205,26 +201,6 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
     stimuli
 ;;
 
-let record_schedule_due_event_queue_ack_reactions ~ctx ~keeper_name stimuli =
-  List.iter
-    (fun (stimulus : Keeper_event_queue.stimulus) ->
-       match stimulus.payload with
-       | Keeper_event_queue.Schedule_due _ ->
-         record_event_queue_stimulus_ack ~ctx ~keeper_name stimulus
-       | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Fusion_completed _
-       | Keeper_event_queue.Bg_completed _
-       | Keeper_event_queue.Bootstrap
-       | Keeper_event_queue.No_progress_recovery
-       | Keeper_event_queue.Connector_attention _
-       | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Goal_verification_failed _
-       | Keeper_event_queue.Failure_judgment _
-       | Keeper_event_queue.Goal_assigned _
-       | Keeper_event_queue.Goal_stagnation _ -> ())
-    stimuli
-;;
-
 let mark_connector_attention_ignored_after_turn ~base_path ~keeper_name event_ids =
   match event_ids with
   | [] -> ()
@@ -354,6 +330,45 @@ let settlement_of_cycle_outcome ~settled_at ~stop_requested ~lease = function
         Keeper_registry_event_queue.Turn_not_scheduled
 ;;
 
+let reaction_kind_of_settlement = function
+  | Keeper_registry_event_queue.Ack -> Keeper_reaction_ledger.Event_queue_ack
+  | Keeper_registry_event_queue.Requeue _ ->
+    Keeper_reaction_ledger.Event_queue_requeued
+  | Keeper_registry_event_queue.Escalate _ ->
+    Keeper_reaction_ledger.Event_queue_escalated
+;;
+
+let project_transition_outbox ~base_path ~keeper_name =
+  let rec project_stimuli ~reaction_kind ~receipt = function
+    | [] -> Ok ()
+    | stimulus :: rest ->
+      (match
+         Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+           ~base_path
+           ~keeper_name
+           ~reaction_kind
+           ~receipt
+           stimulus
+       with
+       | Error _ as error -> error
+       | Ok () -> project_stimuli ~reaction_kind ~receipt rest)
+  in
+  match Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name with
+  | Error _ as error -> error
+  | Ok [] -> Ok ()
+  | Ok [ (entry : Keeper_registry_event_queue.outbox_entry) ] ->
+    let receipt = entry.receipt in
+    let reaction_kind = reaction_kind_of_settlement receipt.settlement in
+    (match project_stimuli ~reaction_kind ~receipt entry.stimuli with
+     | Error _ as error -> error
+     | Ok () ->
+       Keeper_registry_event_queue.mark_transition_projected_result
+         ~base_path
+         keeper_name
+         ~transition_id:receipt.transition_id)
+  | Ok (_ :: _ :: _) -> Error "event queue state has multiple unprojected transitions"
+;;
+
 let settle_claimed_lease
       ~base_path
       ~keeper_name
@@ -441,6 +456,13 @@ let run_keepalive_unified_turn
              message)
     in
     try
+      (match
+         project_transition_outbox
+           ~base_path:ctx.config.base_path
+           ~keeper_name:meta_after_triage.name
+       with
+       | Ok () -> ()
+       | Error message -> raise (Event_queue_settlement_failed message));
       (* RFC-0310 §3.3: before intake, surface any live goal that has gone
          stale as a Goal_stagnation stimulus so it flows through the normal
          event-queue intake below and drives this turn. The producer is
@@ -769,16 +791,19 @@ let run_keepalive_unified_turn
               ( Keeper_registry_event_queue.Settled _
               | Keeper_registry_event_queue.Already_settled _ ) ->
             lease_settled := true;
+            (match
+               project_transition_outbox
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:meta_after_triage.name
+             with
+             | Error message -> raise (Event_queue_settlement_failed message)
+             | Ok () -> ());
             if settlement_is_ack settlement
-            then (
-              record_schedule_due_event_queue_ack_reactions
-                ~ctx
-                ~keeper_name:meta_after_triage.name
-                !consumed_stimuli;
+            then
               mark_connector_attention_ignored_after_turn
                 ~base_path:ctx.config.base_path
                 ~keeper_name:meta_after_triage.name
-                (connector_attention_event_ids_of_stimuli !consumed_stimuli))));
+                (connector_attention_event_ids_of_stimuli !consumed_stimuli)));
       { meta = meta_after_cycle; cycle_crashed = !settlement_failed }
     with
     | Eio.Cancel.Cancelled _ as e ->

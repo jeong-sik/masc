@@ -31,6 +31,7 @@ type settlement = Keeper_event_queue_persistence.settlement =
       }
 
 type transition_receipt = Keeper_event_queue_persistence.transition_receipt
+type outbox_entry = Keeper_event_queue_persistence.outbox_entry
 
 type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
@@ -46,6 +47,19 @@ let active_lease_result ~base_path name =
     Keeper_event_queue_persistence.active_lease_result
       ~base_path
       ~keeper_name:name
+;;
+
+let transition_outbox_result ~base_path name =
+  Keeper_event_queue_persistence.transition_outbox_result
+    ~base_path
+    ~keeper_name:name
+;;
+
+let mark_transition_projected_result ~base_path name ~transition_id =
+  Keeper_event_queue_persistence.mark_transition_projected_result
+    ~base_path
+    ~keeper_name:name
+    ~transition_id
 ;;
 
 let rec queue_contains queue stimulus =

@@ -45,6 +45,11 @@ val lease_kind : lease -> lease_kind
 val active_lease_result :
   base_path:string -> keeper_name:string -> (lease option, string) result
 
+val transition_outbox_result :
+  base_path:string -> keeper_name:string -> (outbox_entry list, string) result
+(** Read the single pending projection entry for this Keeper lane.  The state
+    machine blocks new claims until this list is drained. *)
+
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Compatibility replay projection: pending followed by active lease stimuli.
     New live registry code should use {!load_pending} after explicitly

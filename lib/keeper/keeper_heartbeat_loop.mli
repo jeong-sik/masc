@@ -144,6 +144,12 @@ val settlement_of_failure :
     already-leased judgment emits an operator-visible escalation with no
     recursive successor. *)
 
+val project_transition_outbox :
+  base_path:string -> keeper_name:string -> (unit, string) result
+(** Idempotently materialize the lane's single durable transition into the
+    reaction ledger, then retire the outbox entry. New claims remain blocked
+    while this projection is incomplete. *)
+
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
     [0] maps to [Turn_succeeded]. *)

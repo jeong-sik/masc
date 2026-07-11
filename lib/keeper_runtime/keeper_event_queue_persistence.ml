@@ -211,19 +211,38 @@ let migrate_unlocked owner pending legacy_inflight =
        remove_legacy_inflight_unlocked owner |> Result.map (fun () -> state)))
 ;;
 
+let state_accounts_for_stimulus state stimulus =
+  let same candidate =
+    Keeper_event_queue.stimulus_identity_equal candidate stimulus
+  in
+  List.exists same (Keeper_event_queue.to_list (State.pending state))
+  || List.exists
+       (fun (lease : lease) -> List.exists same lease.stimuli)
+       (State.leases state)
+  || List.exists
+       (fun (entry : outbox_entry) -> List.exists same entry.stimuli)
+       (State.transition_outbox state)
+;;
+
+let reconcile_v2_legacy_residue_unlocked owner state legacy =
+  let legacy_stimuli = Keeper_event_queue.to_list legacy in
+  if List.for_all (state_accounts_for_stimulus state) legacy_stimuli
+  then remove_legacy_inflight_unlocked owner |> Result.map (fun () -> state)
+  else
+    Error
+      (Printf.sprintf
+         "v2 event queue conflicts with legacy inflight residue: %s"
+         (legacy_inflight_path_of_owner owner))
+;;
+
 let load_state_unlocked owner =
   match read_primary_unlocked owner with
   | Error _ as error -> error
   | Ok (Primary_v2 state) ->
-    let legacy_path = legacy_inflight_path_of_owner owner in
-    (match read_json_if_present legacy_path with
+    (match read_legacy_inflight_unlocked owner with
      | Error _ as error -> error
      | Ok None -> Ok state
-     | Ok (Some _) ->
-       Error
-         (Printf.sprintf
-            "v2 event queue has forbidden legacy inflight residue: %s"
-            legacy_path))
+     | Ok (Some legacy) -> reconcile_v2_legacy_residue_unlocked owner state legacy)
   | Ok Primary_missing ->
     (match read_legacy_inflight_unlocked owner with
      | Error _ as error -> error
@@ -253,6 +272,10 @@ let load_state_result ~base_path ~keeper_name =
 
 let active_lease_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.active_lease
+;;
+
+let transition_outbox_result ~base_path ~keeper_name =
+  load_state_result ~base_path ~keeper_name |> Result.map State.transition_outbox
 ;;
 
 let queue_of_stimuli stimuli =
@@ -675,7 +698,6 @@ type keeper_summary =
   ; inflight_oldest : float option
   ; oldest : float option
   ; outbox_count : int
-  ; unprojected_outbox_count : int
   ; counts_complete : bool
   ; read_errors : string list
   }
@@ -695,12 +717,6 @@ let keeper_summary ~base_path keeper_name =
     ; inflight_oldest
     ; oldest = min_float_opt pending_oldest inflight_oldest
     ; outbox_count = List.length outbox
-    ; unprojected_outbox_count =
-        List.fold_left
-          (fun count (entry : outbox_entry) ->
-             if entry.projected_to_reaction_ledger then count else count + 1)
-          0
-          outbox
     ; counts_complete = true
     ; read_errors = []
     }
@@ -716,7 +732,6 @@ let keeper_summary ~base_path keeper_name =
     ; inflight_oldest = None
     ; oldest = None
     ; outbox_count = 0
-    ; unprojected_outbox_count = 0
     ; counts_complete = false
     ; read_errors
     }
@@ -735,7 +750,6 @@ let keeper_summary_json ~now (summary : keeper_summary) =
     ; "inflight_oldest_arrived_at_unix", json_of_float_opt summary.inflight_oldest
     ; "inflight_oldest_age_seconds", age_seconds_json ~now summary.inflight_oldest
     ; "transition_outbox_count", `Int summary.outbox_count
-    ; "unprojected_transition_outbox_count", `Int summary.unprojected_outbox_count
     ; "counts_complete", `Bool summary.counts_complete
     ; "read_errors", `List (List.map (fun message -> `String message) summary.read_errors)
     ]
@@ -778,13 +792,6 @@ let fleet_summary_json ~now ~base_path =
       0
       summaries
   in
-  let unprojected_outbox_count =
-    List.fold_left
-      (fun total (summary : keeper_summary) ->
-         total + summary.unprojected_outbox_count)
-      0
-      summaries
-  in
   let oldest =
     List.fold_left
       (fun oldest (summary : keeper_summary) -> min_float_opt oldest summary.oldest)
@@ -810,7 +817,7 @@ let fleet_summary_json ~now ~base_path =
   `Assoc
     [ "schema", `String "masc.keeper_event_queue.fleet_summary.v1"
     ; "status", `String (if read_errors = [] then "ok" else "degraded")
-    ; "operator_action_required", `Bool (read_errors <> [] || unprojected_outbox_count > 0)
+    ; "operator_action_required", `Bool (read_errors <> [] || outbox_count > 0)
     ; "base_path", `String projection_base_path
     ; ( "keepers_runtime_dir"
       , `String (Common.keepers_runtime_dir_of_base ~base_path:projection_base_path) )
@@ -820,7 +827,6 @@ let fleet_summary_json ~now ~base_path =
     ; "inflight_count", `Int inflight_count
     ; "total_count", `Int (pending_count + inflight_count)
     ; "transition_outbox_count", `Int outbox_count
-    ; "unprojected_transition_outbox_count", `Int unprojected_outbox_count
     ; "counts_complete", `Bool counts_complete
     ; "oldest_arrived_at_unix", json_of_float_opt oldest
     ; "oldest_age_seconds", age_seconds_json ~now oldest

@@ -59,14 +59,6 @@ let record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus =
     stimulus
 ;;
 
-let record_event_queue_stimulus_ack ~ctx ~keeper_name stimulus =
-  record_event_queue_stimulus_reaction
-    ~ctx
-    ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
-    stimulus
-;;
-
 let record_recovery_stimulus_turn_started ~ctx ~keeper_name stimulus =
   record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
 ;;

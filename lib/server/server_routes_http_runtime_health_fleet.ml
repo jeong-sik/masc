@@ -164,7 +164,7 @@ let keeper_event_queue_health_json () =
       ; "inflight_count", `Int 0
       ; "total_count", `Int 0
       ; "transition_outbox_count", `Int 0
-      ; "unprojected_transition_outbox_count", `Int 0
+      ; "counts_complete", `Bool false
       ; "oldest_arrived_at_unix", `Null
       ; "oldest_age_seconds", `Null
       ; "pending_by_keeper", `List []

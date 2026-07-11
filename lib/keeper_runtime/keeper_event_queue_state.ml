@@ -44,7 +44,6 @@ type transition_receipt =
 type outbox_entry =
   { receipt : transition_receipt
   ; stimuli : Keeper_event_queue.stimulus list
-  ; projected_to_reaction_ledger : bool
   }
 
 type t =
@@ -52,6 +51,7 @@ type t =
   ; next_lease_sequence : int64
   ; pending : Keeper_event_queue.t
   ; leases : lease list
+  ; last_settlement : transition_receipt option
   ; transition_outbox : outbox_entry list
   }
 
@@ -66,6 +66,7 @@ let empty =
   ; next_lease_sequence = 1L
   ; pending = Keeper_event_queue.empty
   ; leases = []
+  ; last_settlement = None
   ; transition_outbox = []
   }
 ;;
@@ -74,6 +75,7 @@ let revision state = state.revision
 let next_lease_sequence state = state.next_lease_sequence
 let pending state = state.pending
 let leases state = state.leases
+let last_settlement state = state.last_settlement
 let transition_outbox state = state.transition_outbox
 let lease_kind (lease : lease) = lease.kind
 let active_lease state =
@@ -83,27 +85,21 @@ let active_lease state =
 ;;
 
 let mark_transition_projected ~transition_id state =
-  let found = ref false in
-  let changed = ref false in
-  let transition_outbox =
-    List.map
-      (fun entry ->
-         if String.equal entry.receipt.transition_id transition_id
-         then (
-           found := true;
-           if entry.projected_to_reaction_ledger
-           then entry
-           else (
-             changed := true;
-             { entry with projected_to_reaction_ledger = true }))
-         else entry)
-      state.transition_outbox
-  in
-  if not !found
-  then Error (Printf.sprintf "event queue transition not found: %s" transition_id)
-  else if not !changed
-  then Ok state
-  else Ok { state with transition_outbox }
+  match state.transition_outbox with
+  | [ entry ] when String.equal entry.receipt.transition_id transition_id ->
+    Ok
+      { state with
+        last_settlement = Some entry.receipt
+      ; transition_outbox = []
+      }
+  | [] ->
+    (match state.last_settlement with
+     | Some receipt when String.equal receipt.transition_id transition_id -> Ok state
+     | Some _ | None ->
+       Error (Printf.sprintf "event queue transition not found: %s" transition_id))
+  | [ _ ] ->
+    Error (Printf.sprintf "event queue transition not found: %s" transition_id)
+  | _ :: _ :: _ -> Error "event queue state has multiple unprojected transitions"
 ;;
 let with_pending pending state = { state with pending }
 let with_revision revision state = { state with revision }
@@ -161,8 +157,14 @@ let make_lease ~kind ~claimed_at stimuli state =
       , Some lease )
 ;;
 
+let lease_admission_blocked state =
+  state.leases <> [] || state.transition_outbox <> []
+;;
+
 let claim_when ~claimed_at ~ready state =
-  match Keeper_event_queue.dequeue state.pending with
+  if lease_admission_blocked state
+  then Ok (state, None)
+  else match Keeper_event_queue.dequeue state.pending with
   | None -> Ok (state, None)
   | Some (stimulus, _) when not (ready stimulus) -> Ok (state, None)
   | Some (stimulus, pending) ->
@@ -174,14 +176,20 @@ let claim_when ~claimed_at ~ready state =
 ;;
 
 let claim_board ~claimed_at state =
-  let stimuli, pending = Keeper_event_queue.drain_board_all state.pending in
-  make_lease ~kind:Board_batch ~claimed_at:(Some claimed_at) stimuli { state with pending }
+  if lease_admission_blocked state
+  then Ok (state, None)
+  else (
+    let stimuli, pending = Keeper_event_queue.drain_board_all state.pending in
+    make_lease ~kind:Board_batch ~claimed_at:(Some claimed_at) stimuli { state with pending })
 ;;
 
 let add_legacy_inflight stimuli state =
-  let stimuli = Keeper_event_queue.uniq_stimuli stimuli in
-  let pending = remove_stimuli state.pending stimuli in
-  make_lease ~kind:Legacy_inflight ~claimed_at:None stimuli { state with pending }
+  if lease_admission_blocked state
+  then Error "event queue cannot migrate legacy inflight work while a lease or outbox exists"
+  else (
+    let stimuli = Keeper_event_queue.uniq_stimuli stimuli in
+    let pending = remove_stimuli state.pending stimuli in
+    make_lease ~kind:Legacy_inflight ~claimed_at:None stimuli { state with pending })
 ;;
 
 let lease_kind_label = function
@@ -300,11 +308,13 @@ let receipt_for_lease ~settled_at ~settlement (lease : lease) =
 ;;
 
 let find_prior_receipt lease_id state =
-  state.transition_outbox
-  |> List.find_map (fun entry ->
-    if String.equal entry.receipt.lease_id lease_id
-    then Some entry.receipt
-    else None)
+  match state.transition_outbox with
+  | [ entry ] when String.equal entry.receipt.lease_id lease_id -> Some entry.receipt
+  | [] | [ _ ] ->
+    (match state.last_settlement with
+     | Some receipt when String.equal receipt.lease_id lease_id -> Some receipt
+     | Some _ | None -> None)
+  | _ :: _ :: _ -> None
 ;;
 
 let remove_lease lease_id leases =
@@ -357,14 +367,13 @@ let settle ~settled_at ~lease ~settlement state =
     let outbox_entry =
       { receipt
       ; stimuli = committed.stimuli
-      ; projected_to_reaction_ledger = false
       }
     in
     Ok
       ( { state with
           pending
         ; leases = remove_lease committed.lease_id state.leases
-        ; transition_outbox = state.transition_outbox @ [ outbox_entry ]
+        ; transition_outbox = [ outbox_entry ]
         }
       , Settled receipt )
 ;;
@@ -453,13 +462,6 @@ let float_field ~context name fields =
   | `Float value -> Ok value
   | `Int value -> Ok (float_of_int value)
   | _ -> Error (Printf.sprintf "%s.%s must be a number" context name)
-;;
-
-let bool_field ~context name fields =
-  let* value = required_field ~context name fields in
-  match value with
-  | `Bool value -> Ok value
-  | _ -> Error (Printf.sprintf "%s.%s must be a boolean" context name)
 ;;
 
 let int64_field ~context name fields =
@@ -582,7 +584,7 @@ let settlement_of_yojson json =
   | kind -> Error (Printf.sprintf "unknown event queue settlement kind: %s" kind)
 ;;
 
-let receipt_to_yojson receipt =
+let transition_receipt_to_yojson receipt =
   `Assoc
     [ "transition_id", `String receipt.transition_id
     ; "event_id", `String receipt.event_id
@@ -627,9 +629,8 @@ let receipt_of_yojson json =
 
 let outbox_entry_to_yojson entry =
   `Assoc
-    [ "receipt", receipt_to_yojson entry.receipt
+    [ "receipt", transition_receipt_to_yojson entry.receipt
     ; "stimuli", `List (List.map Keeper_event_queue.stimulus_to_yojson entry.stimuli)
-    ; "projected_to_reaction_ledger", `Bool entry.projected_to_reaction_ledger
     ]
 ;;
 
@@ -641,10 +642,7 @@ let outbox_entry_of_yojson json =
   let* stimuli =
     list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
   in
-  let* projected_to_reaction_ledger =
-    bool_field ~context "projected_to_reaction_ledger" fields
-  in
-  Ok { receipt; stimuli; projected_to_reaction_ledger }
+  Ok { receipt; stimuli }
 ;;
 
 let to_yojson state =
@@ -654,6 +652,10 @@ let to_yojson state =
     ; "next_lease_sequence", int64_json state.next_lease_sequence
     ; "pending", Keeper_event_queue.queue_to_yojson state.pending
     ; "leases", `List (List.map lease_to_yojson state.leases)
+    ; ( "last_settlement"
+      , match state.last_settlement with
+        | None -> `Null
+        | Some receipt -> transition_receipt_to_yojson receipt )
     ; ( "transition_outbox"
       , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
     ]
@@ -676,6 +678,18 @@ let validate_state state =
   then Error "event queue revision must not be negative"
   else if Int64.compare state.next_lease_sequence 1L < 0
   then Error "event queue next lease sequence must be positive"
+  else if List.length state.leases > 1
+  then Error "event queue state must contain at most one active lease"
+  else if List.length state.transition_outbox > 1
+  then Error "event queue state must contain at most one unprojected transition"
+  else if state.leases <> [] && state.transition_outbox <> []
+  then Error "event queue state cannot contain both an active lease and an outbox transition"
+  else if
+    match state.last_settlement, state.transition_outbox with
+    | Some receipt, [ entry ] ->
+      String.equal receipt.transition_id entry.receipt.transition_id
+    | None, _ | Some _, ([] | _ :: _ :: _) -> false
+  then Error "event queue last settlement duplicates the unprojected transition"
   else
     match duplicate_by (fun (lease : lease) -> lease.lease_id) state.leases with
     | Some lease_id -> Error (Printf.sprintf "duplicate event queue lease id: %s" lease_id)
@@ -700,6 +714,11 @@ let validate_state state =
              max_sequence
              state.transition_outbox
          in
+         let max_sequence =
+           match state.last_settlement with
+           | None -> max_sequence
+           | Some receipt -> Int64.max max_sequence receipt.lease_sequence
+         in
          if Int64.compare state.next_lease_sequence max_sequence <= 0
          then
            Error
@@ -719,9 +738,21 @@ let of_yojson json =
     let* pending_json = required_field ~context "pending" fields in
     let* pending = Keeper_event_queue.queue_of_yojson pending_json in
     let* leases = list_field ~context "leases" lease_of_yojson fields in
+    let* last_settlement =
+      match List.assoc_opt "last_settlement" fields with
+      | Some `Null -> Ok None
+      | Some json -> receipt_of_yojson json |> Result.map Option.some
+      | None -> Error "keeper event queue state missing required field last_settlement"
+    in
     let* transition_outbox =
       list_field ~context "transition_outbox" outbox_entry_of_yojson fields
     in
     validate_state
-      { revision; next_lease_sequence; pending; leases; transition_outbox }
+      { revision
+      ; next_lease_sequence
+      ; pending
+      ; leases
+      ; last_settlement
+      ; transition_outbox
+      }
 ;;

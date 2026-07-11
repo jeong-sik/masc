@@ -74,11 +74,15 @@ let test_claim_codec_ack_idempotency () =
     State.mark_transition_projected ~transition_id:receipt.transition_id state
     |> require_ok "mark transition projected"
   in
-  let projected = List.hd (State.transition_outbox state) in
-  Alcotest.(check bool)
-    "projection acknowledgement is durable state"
-    true
-    projected.projected_to_reaction_ledger;
+  Alcotest.(check int)
+    "projected outbox is retired"
+    0
+    (List.length (State.transition_outbox state));
+  let projected = require_some "last projected settlement" (State.last_settlement state) in
+  Alcotest.(check string)
+    "projection acknowledgement retains the last receipt"
+    receipt.transition_id
+    projected.transition_id;
   ignore
     (State.mark_transition_projected ~transition_id:receipt.transition_id state
      |> require_ok "projection acknowledgement is idempotent");
@@ -105,6 +109,26 @@ let test_requeue_and_escalation_are_total () =
       ~settlement:(State.Requeue State.Retry_after_pacing)
       state
     |> require_ok "retry requeue"
+  in
+  let retry_receipt =
+    match State.transition_outbox state with
+    | [ entry ] -> entry.receipt
+    | _ -> Alcotest.fail "retry settlement must create one outbox entry"
+  in
+  let blocked_state, blocked_lease = claim_head state in
+  Alcotest.(check bool)
+    "unprojected outbox blocks the next claim"
+    true
+    (Option.is_none blocked_lease);
+  Alcotest.(check (list string))
+    "blocked claim preserves pending work"
+    [ "retry" ]
+    (post_ids (State.pending blocked_state));
+  let state =
+    State.mark_transition_projected
+      ~transition_id:retry_receipt.transition_id
+      blocked_state
+    |> require_ok "project retry transition"
   in
   Alcotest.(check (list string)) "retry restored" [ "retry" ] (post_ids (State.pending state));
   let state, lease = claim_head state in
@@ -133,6 +157,15 @@ let test_requeue_and_escalation_are_total () =
       state
     |> require_ok "atomic judgment successor"
   in
+  let escalation_receipt =
+    match State.transition_outbox state with
+    | [ entry ] -> entry.receipt
+    | _ -> Alcotest.fail "judgment escalation must create one outbox entry"
+  in
+  let state =
+    State.mark_transition_projected ~transition_id:escalation_receipt.transition_id state
+    |> require_ok "project judgment escalation"
+  in
   Alcotest.(check (list string))
     "original consumed and successor pending"
     [ successor.post_id ]
@@ -153,7 +186,10 @@ let test_requeue_and_escalation_are_total () =
     "failed judgment does not enqueue itself"
     0
     (Queue.length (State.pending state));
-  Alcotest.(check int) "both transitions visible" 3 (List.length (State.transition_outbox state));
+  Alcotest.(check int)
+    "only the unprojected transition remains in state"
+    1
+    (List.length (State.transition_outbox state));
   let open Yojson.Safe.Util in
   let failed_judgment_settlement =
     State.to_yojson state
@@ -336,10 +372,84 @@ let test_legacy_pair_migrates_once () =
       "migration recovery receipt retained"
       1
       (List.length (State.transition_outbox state));
+    write_queue legacy (queue [ stimulus "leased" 2.0 ]);
+    let resumed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "resume completed migration cleanup"
+    in
+    Alcotest.(check (list string))
+      "crash residue does not duplicate migrated stimulus"
+      [ "leased"; "pending" ]
+      (post_ids (State.pending resumed));
+    Alcotest.(check bool)
+      "verified crash residue removed"
+      false
+      (Sys.file_exists legacy);
     write_queue legacy (queue [ stimulus "forbidden-residue" 3.0 ]);
     (match Persistence.load_state_result ~base_path ~keeper_name with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "v2 state silently accepted legacy residue"))
+;;
+
+let test_transition_outbox_projects_with_stable_identity () =
+  with_temp_dir "keeper-event-queue-v2-outbox" (fun base_path ->
+    let keeper_name = "projection_keeper" in
+    let source = stimulus "projected-source" 1.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending source)
+    |> require_ok "seed projection source";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim projection source"
+      |> require_some "projection lease"
+    in
+    let receipt =
+      match
+        Persistence.settle_result
+          ~base_path
+          ~keeper_name
+          ~settled_at:3.0
+          ~lease
+          ~settlement:State.Ack
+          ()
+        |> require_ok "settle projection source"
+      with
+      | Persistence.Settled receipt -> receipt
+      | Persistence.Already_settled _ ->
+        Alcotest.fail "first projection settlement was already settled"
+    in
+    Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
+    |> require_ok "project transition outbox";
+    let state =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load projected state"
+    in
+    Alcotest.(check int)
+      "projection retires outbox"
+      0
+      (List.length (State.transition_outbox state));
+    Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+      ~base_path
+      ~keeper_name
+      ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+      ~receipt
+      source
+    |> require_ok "replay stable transition reaction";
+    let summary =
+      Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:20
+    in
+    let open Yojson.Safe.Util in
+    Alcotest.(check int)
+      "stable event id deduplicates crash replay"
+      1
+      (summary |> member "event_queue_ack_count" |> to_int);
+    Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
+    |> require_ok "empty outbox projection is idempotent")
 ;;
 
 let test_failed_owner_write_does_not_block_peer_lane () =
@@ -387,6 +497,10 @@ let () =
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "legacy pair migration" `Quick test_legacy_pair_migrates_once
+        ; Alcotest.test_case
+            "transition outbox projection"
+            `Quick
+            test_transition_outbox_projects_with_stable_identity
         ; Alcotest.test_case
             "lane write fault isolation"
             `Quick

@@ -699,7 +699,8 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
    propagate it. The failure is still counted + warn-logged here so callers that
    use the unit wrapper below keep the existing swallow-and-count telemetry. *)
 let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () :
+    ?surface ?conversation_id ?audio ?blocks ?(kind = Row_kind.Utterance)
+    ?turn_ref ?stream_lifecycle () :
     (unit, string) result =
   try
     ensure_dir_once ~base_dir;
@@ -711,7 +712,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     let ts = Time_compat.now () in
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
-        ?audio ?blocks ?turn_ref ?stream_lifecycle ()
+        ?audio ?blocks ~kind ?turn_ref ?stream_lifecycle ()
     in
     Fs_compat.append_file path (line ^ "\n");
     Ok ()
@@ -730,10 +731,11 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
    failure is already counted + logged inside the [_result] variant). New callers
    that must surface the failure call [append_assistant_message_result] directly. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () =
+    ?surface ?conversation_id ?audio ?blocks ?(kind = Row_kind.Utterance)
+    ?turn_ref ?stream_lifecycle () =
   ignore
     (append_assistant_message_result ~base_dir ~keeper_name ~content ?surface
-       ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle ()
+       ?conversation_id ?audio ?blocks ~kind ?turn_ref ?stream_lifecycle ()
       : (unit, string) result)
 
 (* RFC-0226: inbound user line recorded at delivery time, before (and

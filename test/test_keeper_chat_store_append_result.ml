@@ -53,6 +53,27 @@ let test_error_when_path_under_a_file () =
         "append under a non-directory path is Error" true
         (Result.is_error result))
 
+let test_persists_typed_transport_failure () =
+  let base_dir = temp_base_path "keeper-chat-store-kind" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let result =
+        S.append_assistant_message_result ~base_dir ~keeper_name
+          ~content:"upstream request failed"
+          ~kind:S.Row_kind.Transport_failure
+          ()
+      in
+      Alcotest.(check bool) "typed append succeeds" true (Result.is_ok result);
+      match S.load ~base_dir ~keeper_name with
+      | [ message ] ->
+          Alcotest.(check bool)
+            "assistant-only failure is not persisted as keeper speech" true
+            (S.Row_kind.equal message.kind S.Row_kind.Transport_failure)
+      | messages ->
+          Alcotest.failf "expected one persisted row, got %d"
+            (List.length messages))
+
 let () =
   Alcotest.run "keeper_chat_store_append_result"
     [
@@ -61,5 +82,7 @@ let () =
           Alcotest.test_case "writable dir -> Ok" `Quick test_ok_on_writable_dir;
           Alcotest.test_case "path under a file -> Error" `Quick
             test_error_when_path_under_a_file;
+          Alcotest.test_case "typed transport failure" `Quick
+            test_persists_typed_transport_failure;
         ] );
     ]

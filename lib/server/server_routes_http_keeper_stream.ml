@@ -1250,6 +1250,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
          ~keeper_name:payload.name
          ~content:(persisted_error_reply err)
          ~surface:chat_surface
+         ~kind:Keeper_chat_store.Row_kind.Transport_failure
          ~stream_lifecycle:errored_stream_lifecycle
          ()
       else

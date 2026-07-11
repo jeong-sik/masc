@@ -250,7 +250,9 @@ val append_turn :
 (** [append_assistant_message_result] is {!append_assistant_message} that
     returns [Error msg] on a write failure instead of swallowing it (the failure
     is still counted + warn-logged). For callers whose own contract requires
-    surfacing a chat-append failure — e.g. {!Fusion_sink.emit}. *)
+    surfacing a chat-append failure — e.g. {!Fusion_sink.emit}.
+    [kind] declares whether the row is a keeper utterance or a typed transport
+    failure; it defaults to [Utterance]. *)
 val append_assistant_message_result :
   base_dir:string ->
   keeper_name:string ->
@@ -259,6 +261,7 @@ val append_assistant_message_result :
   ?conversation_id:string ->
   ?audio:audio_clip ->
   ?blocks:chat_block list ->
+  ?kind:Row_kind.t ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
   unit ->
@@ -268,7 +271,8 @@ val append_assistant_message_result :
     ?conversation_id ()]
     appends one keeper-initiated assistant line with no paired user
     turn (RFC-0223 P4 [keeper_surface_post]). Same failure policy as
-    {!append_turn} (failure is counted + logged, not raised). *)
+    {!append_turn} (failure is counted + logged, not raised). [kind] defaults
+    to [Utterance]. *)
 val append_assistant_message :
   base_dir:string ->
   keeper_name:string ->
@@ -277,6 +281,7 @@ val append_assistant_message :
   ?conversation_id:string ->
   ?audio:audio_clip ->
   ?blocks:chat_block list ->
+  ?kind:Row_kind.t ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
   unit ->

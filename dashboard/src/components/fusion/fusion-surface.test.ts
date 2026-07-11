@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
@@ -15,6 +17,14 @@ import {
 } from '../../store'
 import type { FusionJudgeNode } from '../../lib/fusion-meta'
 import { FusionJudgesStrip, FusionSurface } from './fusion-surface'
+
+describe('Fusion mobile overflow contract', () => {
+  it('wraps backend-owned identifiers and keeps the list refresh compact', () => {
+    const css = readFileSync(resolve(__dirname, '../../styles/fusion-v2.css'), 'utf8')
+    expect(css).toMatch(/\.v2-fusion-surface \.fus-list-refresh\s*\{\s*width:\s*32px;/)
+    expect(css).toMatch(/\.v2-fusion-surface \.fus-run-id-row h1,[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?white-space:\s*normal;/)
+  })
+})
 
 // Mock only the refresh side effects; keep the real signals (fusionBoardLoading /
 // fusionRunsLoading) via ...actual so the component reads live state. The manual
@@ -776,6 +786,35 @@ describe('FusionSurface', () => {
     expect(container.querySelector('[data-testid="fusion-registry-row"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="fusion-detail"]')?.textContent).toContain('fus-evidence')
     expect(container.querySelector('[data-testid="fusion-registry-detail"]')).toBeNull()
+  })
+
+  it('does not bypass paging when the default board-backed run follows many registry rows', () => {
+    fusionRuns.value = Array.from({ length: 100 }, (_, index) => ({
+      runId: `registry-${index}`,
+      keeper: 'sangsu',
+      preset: 'balanced',
+      startedAt: 1_900_000_000 - index,
+      status: 'running' as const,
+    }))
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-evidence',
+        created_at: '2026-01-01T00:00:00Z',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-evidence',
+          question: 'Which evidence is actionable?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Board-backed detail.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Use the evidence pane.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelectorAll('.fus-run-row')).toHaveLength(30)
+    expect(container.querySelector('[data-testid="fusion-detail"]')?.textContent).toContain('fus-evidence')
+    expect(container.querySelector('[data-testid="fusion-list-more"]')?.textContent).toContain('71개 남음')
   })
 
   it('renders preset from registry when board meta does not carry it', () => {

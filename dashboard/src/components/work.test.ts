@@ -491,6 +491,23 @@ describe('Work', () => {
       expect(screen.getByText('Backlog task 8')).toBeTruthy()
     })
 
+    it('virtualizes a large backlog while preserving the full live count', () => {
+      tasks.value = Array.from({ length: 100 }, (_, index) => ({
+        id: `U-${index + 1}`,
+        title: `Backlog task ${index + 1}`,
+        status: 'todo' as const,
+      }))
+
+      render(html`<${Work} />`)
+
+      const backlog = screen.getByTestId('work-backlog')
+      expect(backlog.querySelector('.wk-backlog-h')?.textContent).toContain('100')
+      expect(backlog.querySelector('.virtual-list-spacer')).not.toBeNull()
+      expect(backlog.querySelectorAll('.wk-task-claim').length).toBeGreaterThan(0)
+      expect(backlog.querySelectorAll('.wk-task-claim').length).toBeLessThan(100)
+      expect(backlog.textContent).toContain('Backlog task 1')
+    })
+
     it('expands inline task detail for gate evidence and handoff context', () => {
       goals.value = [
         { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

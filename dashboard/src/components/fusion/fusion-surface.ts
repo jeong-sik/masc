@@ -1325,7 +1325,10 @@ export function FusionSurface() {
   // panel/judge evidence workspace. Without an explicit routed selection,
   // open the newest board-backed run so the default detail pane is useful;
   // registry rows remain selectable and keep their honest sparse detail.
-  const selected = merged.find(run => run.runId === selectedRunId)
+  const routedSelected = selectedRunId
+    ? merged.find(run => run.runId === selectedRunId)
+    : undefined
+  const selected = routedSelected
     ?? merged.find(run => run.kind === 'board')
     ?? merged[0]
     ?? null
@@ -1336,8 +1339,8 @@ export function FusionSurface() {
   // always extends far enough to include the routed selection so the active
   // row never disappears from the list.
   const [visibleCount, setVisibleCount] = useState(FUSION_LIST_PAGE_SIZE)
-  const selectedIndex = selected
-    ? merged.findIndex(run => run.runId === selected.runId)
+  const selectedIndex = routedSelected
+    ? merged.findIndex(run => run.runId === routedSelected.runId)
     : -1
   const effectiveCount = Math.max(visibleCount, selectedIndex + 1)
   const visibleRuns = merged.slice(0, effectiveCount)

@@ -692,7 +692,7 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 // TTL values from config/constants.ts
 
 let inflightDashboardRefresh: Promise<void> | null = null
-let inflightShellRefresh: Promise<void> | null = null
+let inflightShellRefresh: Promise<boolean> | null = null
 let inflightShellRefreshLight = false
 let lastShellRefreshAt = 0
 
@@ -991,23 +991,25 @@ export function hydrateShellSnapshot(
   lastShellRefreshAt = Date.now()
 }
 
-export async function refreshShell(opts?: RefreshOptions): Promise<void> {
+export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
   const wantsLight = opts?.light === true
   if (inflightShellRefresh) {
     if (wantsLight || !inflightShellRefreshLight) return inflightShellRefresh
     await inflightShellRefresh
   }
-  if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return
+  if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return true
   inflightShellRefreshLight = wantsLight
   inflightShellRefresh = (async () => {
     try {
       const data = await fetchDashboardShell({ light: wantsLight })
       hydrateShellSnapshot(data, { light: wantsLight })
+      return true
     } catch (err) {
       setCanonicalDashboardActor(null)
       shellAuthSummary.value = null
       console.warn('[Dashboard] shell fetch error:', err)
       showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
+      return false
     } finally {
       inflightShellRefresh = null
       inflightShellRefreshLight = false

@@ -306,6 +306,7 @@ function BoardSummary() {
   const metrics = boardLatencyMetrics.value
   return html`
     <div class="bd-summary v2-workspace-panel ss-card mx-6 flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 text-xs text-text-secondary" data-testid="bd-summary">
+      <h1 class="sr-only">Board</h1>
       <span class="font-semibold text-text-primary tabular-nums text-md">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {
@@ -1510,6 +1511,7 @@ export function BoardSurface() {
       data-detail-width=${String(detailWidth)}
       data-detail-open=${String(detailOpen)}
     >
+      <h1 class="sr-only">Board</h1>
       <!-- Collapse is driven by the inline --bd-detail-width custom property
            (0 when no detail is open), which BOTH the legacy board-v2.css and the
            keeper-v2 surfaces.css .bd-body grids consume as their third track.

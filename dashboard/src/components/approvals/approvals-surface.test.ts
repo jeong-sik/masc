@@ -832,4 +832,10 @@ describe('ApprovalsSurface', () => {
     const railRule = css.match(/\.ap-detail-panel\s*\{([^}]*)\}/)?.[1] ?? ''
     expect(railRule).toContain('position: sticky')
   })
+
+  it('collapses the approvals shell to one column on narrow viewports', () => {
+    const css = readFileSync(resolve(__dirname, '../../styles/approvals-v2.css'), 'utf8')
+    expect(css).toMatch(/@media \(max-width: 980px\)[\s\S]*?\.ap-surface\s*\{\s*flex-direction:\s*column;/)
+    expect(css).toMatch(/\.ap-surface\s*>\s*\.ov-scroll\s*\{[^}]*width:\s*100%/)
+  })
 })

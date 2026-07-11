@@ -427,7 +427,11 @@ function AccountSettingsSection() {
     setClearing(true)
     try {
       clearStoredToken()
-      await refreshShell({ force: true })
+      const refreshed = await refreshShell({ force: true })
+      if (!refreshed) {
+        showToast('Token은 지웠지만 auth 상태를 다시 확인하지 못했습니다.', 'error')
+        return
+      }
       showToast('Dashboard token을 지우고 auth 상태를 다시 확인했습니다.', 'success')
     } catch (error) {
       showToast(`Auth 갱신 실패: ${errorToString(error)}`, 'error')

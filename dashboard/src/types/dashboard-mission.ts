@@ -525,6 +525,7 @@ export interface OperatorSnapshot {
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
   admission_queue?: AdmissionQueueSnapshot | null
+  admission_queue_error?: string | null
   operator_judge_runtime?: OperatorJudgeRuntime | null
   persistent_agents?: OperatorKeeperSnapshot[]
   recent_messages: Message[]

@@ -868,6 +868,29 @@ describe('AgentRoster live-only cards', () => {
     expect(capacity?.textContent).toContain('oas_runtime')
   })
 
+  it('shows an explicit diagnostic when the admission projection is invalid', async () => {
+    operatorSnapshot.value = {
+      admission_queue: null,
+      admission_queue_error: 'Admission projection counters are inconsistent.',
+    } as any
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+
+    expect(container.querySelector('[data-testid="fleet-admission-capacity"]')).toBeNull()
+    expect(container.querySelector('[data-testid="fleet-admission-error"]')?.textContent)
+      .toContain('counters are inconsistent')
+  })
+
+  it('owns the Keeper Fleet h1 when the generic monitoring header is absent', async () => {
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+
+    expect(container.querySelector('h1')?.textContent).toBe('Keeper Fleet')
+  })
+
   it('uses the explicit agent_name relation while showing only the keeper display name', async () => {
     agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
     keepers.value = [
@@ -1745,6 +1768,7 @@ describe('AgentRoster live-only cards', () => {
     const css = readFileSync(resolve(__dirname, '../styles/keeper-v2/fleet.css'), 'utf8')
     const query = '(max-width: 1100px) and (min-width: 721px)'
     const responsiveBlock = cssMediaBlock(css, query)
+    const tabletHeaderBlock = cssMediaBlock(css, '(max-width: 900px)')
 
     for (const width of [800, 1024]) {
       expect(width).toBeGreaterThanOrEqual(721)
@@ -1755,6 +1779,8 @@ describe('AgentRoster live-only cards', () => {
     expect(responsiveBlock).toContain('--fl-cols: minmax(168px, 1.3fr) minmax(150px, 1fr) minmax(104px, 0.8fr) 160px')
     expect(responsiveBlock).toContain('.fl-row .fl-ctx, .fl-row .fl-tool { display: none; }')
     expect(responsiveBlock).not.toContain('.fl-row .fl-runtime')
+    expect(tabletHeaderBlock).toContain('.fl-top { height: auto; flex-wrap: wrap;')
+    expect(tabletHeaderBlock).toContain('.fl-health { width: 100%; order: 3; }')
     expect(css).toContain('@media (max-width: 720px)')
     expect(css).toContain('.fl-attn-list')
     expect(css).toContain('.fl-attn-item[data-sev="bad"]')

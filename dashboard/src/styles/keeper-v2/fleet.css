@@ -35,7 +35,7 @@
 .fl-brand { display: flex; flex-direction: column; justify-content: center; gap: 1px; flex: none; }
 .fl-brand .ov-eyebrow { margin-bottom: 0; }
 .fl-crumb { font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-dim); white-space: nowrap; }
-.fl-title { font-family: var(--font-display); font-weight: 600; font-size: 18px; letter-spacing: -0.005em; color: var(--text-bright); white-space: nowrap; }
+.fl-title { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 1.2; letter-spacing: -0.005em; color: var(--text-bright); white-space: nowrap; }
 .fl-health { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fl-hpill {
   display: inline-flex; align-items: center; gap: 7px;
@@ -277,6 +277,12 @@
   .fl-aside { display: none; }
 }
 
+@media (max-width: 900px) {
+  .fl-top { height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 10px 14px; }
+  .fl-spacer { display: none; }
+  .fl-health { width: 100%; order: 3; }
+}
+
 /* 800px and 1024px operator windows: keep runtime provenance and actions,
    shed context/tool telemetry, and use four tracks that fit without horizontal
    overflow. The 720px layout below remains the single-column mobile mode. */
@@ -312,9 +318,6 @@
   .fl-row .fl-ctx, .fl-row .fl-tool, .fl-row .fl-runtime { display: none; }
   .fl-row .fl-state, .fl-row .fl-actcell { margin-left: var(--fl-mobile-row-indent); }
   .fl-row .fl-actcell { justify-content: flex-start; flex-wrap: wrap; }
-  .fl-top { height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 10px 14px; }
-  .fl-spacer { display: none; }
-  .fl-health { width: 100%; order: 3; }
   .fl-row, .fl-group { padding-left: 16px; padding-right: 16px; }
   .fl-foot { gap: 14px; overflow-x: auto; }
 }

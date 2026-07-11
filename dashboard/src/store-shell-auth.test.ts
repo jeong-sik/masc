@@ -53,8 +53,9 @@ describe('refreshShell auth failure handling', () => {
       keeper_msg_error: null,
     }
 
-    await store.refreshShell({ force: true })
+    const refreshed = await store.refreshShell({ force: true })
 
+    expect(refreshed).toBe(false)
     expect(sessionActor.currentCanonicalDashboardActor()).toBeNull()
     expect(store.shellAuthSummary.value).toBeNull()
     expect(toastMocks.showToast).toHaveBeenCalledWith(

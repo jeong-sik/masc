@@ -641,8 +641,12 @@
   }
 
   .v2-logs-advanced-menu .v2-logs-advanced {
-    right: auto;
-    left: 0;
+    position: fixed;
+    top: auto;
+    right: 12px;
+    bottom: auto;
+    left: 12px;
+    width: auto;
   }
 
   .v2-logs-detail {

@@ -35,6 +35,7 @@ export function FlowControlPanel() {
   const isInitializing = state === 'initializing'
   const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const admission = operatorSnapshot.value?.admission_queue ?? null
+  const admissionError = operatorSnapshot.value?.admission_queue_error ?? null
   return html`
     <div class="v2-command-surface flex flex-col gap-4">
       <${SurfaceCard} variant="compact" class="v2-command-panel mb-4">
@@ -47,6 +48,10 @@ export function FlowControlPanel() {
           <span>Throttle owner: ${admission.throttle_owner}</span>
           <span>${admission.active}/${admission.max_concurrent} observed inflight</span>
         </div>
+      ` : admissionError ? html`
+        <p class="mb-3 text-2xs text-[var(--color-status-warn)]" role="status" data-testid="flow-admission-error">
+          Admission observation unavailable: ${admissionError}
+        </p>
       ` : null}
       ${mutationAccess.allowed ? null : html`
         <p class="mb-3 text-2xs text-[var(--color-status-warn)]">

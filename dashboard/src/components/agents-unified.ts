@@ -65,6 +65,7 @@ function FleetAndFsmHubPanel() {
   const [pinned, setPinned] = useState<string | null>(null)
   return html`
     <div class="v2-monitoring-panel flex flex-col gap-4">
+      <h1 class="sr-only">Keeper Fleet FSM</h1>
       <${FleetFsmMatrix} onSelectKeeper=${(name: string) => setPinned(name)} />
       <${CompositeFsmFlowchart} />
       <${FsmHub} selectedName=${pinned} />

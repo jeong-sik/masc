@@ -10,6 +10,7 @@ type MockOperatorSnapshot = {
     available: number
     queue_depth: number
   } | null
+  admission_queue_error?: string | null
 } | null
 
 const {
@@ -123,6 +124,20 @@ describe('FlowControlPanel', () => {
     expect(status).not.toBeNull()
     expect(status!.textContent).toContain('oas_runtime')
     expect(status!.textContent).toContain('1/3')
+  })
+
+  it('shows an explicit admission diagnostic when the projection is invalid', async () => {
+    operatorSnapshot.value = {
+      admission_queue: null,
+      admission_queue_error: 'Admission projection counters are inconsistent.',
+    }
+
+    render(html`<${FlowControlPanel} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="flow-admission-observation"]')).toBeNull()
+    expect(container.querySelector('[data-testid="flow-admission-error"]')?.textContent)
+      .toContain('counters are inconsistent')
   })
 
 })

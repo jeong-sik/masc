@@ -882,6 +882,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value
   const namespaceName = namespaceStatus?.project ?? 'default'
   const admission = operatorSnapshot.value?.admission_queue ?? null
+  const admissionError = operatorSnapshot.value?.admission_queue_error ?? null
 
   const scopedAgents = useMemo(
     () => scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, keeperFilter, keeperRuntimeLookup),
@@ -1254,7 +1255,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       <header class="fl-top" aria-label="Keeper Fleet summary">
         <div class="fl-brand">
           <span class="ov-eyebrow">Observatory</span>
-          <span class="fl-title">Keeper Fleet</span>
+          <h1 class="fl-title">Keeper Fleet</h1>
         </div>
         <div class="fl-health">
           <span class="fl-hpill ok">런타임 가능 <b>${healthRun}</b></span>
@@ -1307,6 +1308,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <strong>${admission.throttle_owner}</strong>
           </div>
         </section>
+      ` : admissionError ? html`
+        <div class="fl-fallback error" role="status" data-testid="fleet-admission-error">
+          <strong>Admission 관측 불가</strong>
+          <span>${admissionError}</span>
+        </div>
       ` : null}
 
       <div class="fl-body">

@@ -930,6 +930,26 @@ button.fus-reconcile-row:hover {
     overflow-wrap: anywhere;
     white-space: normal;
   }
+
+  .v2-fusion-surface .fus-list-refresh {
+    width: 32px;
+  }
+
+  .v2-fusion-surface .fus-run-id-row h1,
+  .v2-fusion-surface .fus-dec-badge,
+  .v2-fusion-surface .fus-pipe-node {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .v2-fusion-surface .fus-run-by {
+    flex-wrap: wrap;
+  }
+
+  .v2-fusion-surface .fus-run-by .spacer {
+    display: none;
+  }
 }
 
 /* RFC-0266 §7 Phase 4 — fusion run status panel (registry-backed live strip).

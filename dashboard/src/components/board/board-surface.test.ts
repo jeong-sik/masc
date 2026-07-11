@@ -283,6 +283,7 @@ describe('BoardSurface Component', () => {
     // and "전체 피드" heading are the only structure above the posts. board is
     // in SURFACE_OWN_LEAD_IDS so the generic SurfaceLead is also suppressed.
     expect(container.querySelector('header.v2-surface-header')).toBeNull()
+    expect(container.querySelector('h1')?.textContent).toBe('Board')
   })
 
   it('collapses the detail column by default (two-column rail + feed)', () => {

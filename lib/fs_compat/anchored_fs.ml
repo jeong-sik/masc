@@ -160,7 +160,20 @@ let with_open_dir_opt parent name f =
 
 let fsync fd = Unix.fsync fd
 
-let with_ensure_dir parent ~name ~perm ~enforce_perm f =
+let close_after_primary ~operation fd primary backtrace =
+  match Unix.close fd with
+  | () -> Printexc.raise_with_backtrace primary backtrace
+  | exception close_error ->
+    raise
+      (Failure
+         (Printf.sprintf
+            "%s failed (%s); descriptor close also failed (%s)"
+            operation
+            (Printexc.to_string primary)
+            (Printexc.to_string close_error)))
+;;
+
+let open_ensured_child parent ~name ~perm ~enforce_perm =
   let name_value = segment_value name in
   let needs_publish, fd =
     match open_dir_fd parent name_value with
@@ -171,11 +184,90 @@ let with_ensure_dir parent ~name ~perm ~enforce_perm f =
        | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ());
       true, open_dir_fd parent name_value
   in
-  combine_close ~operation:"anchored ensured-directory transaction" fd (fun () ->
+  (try
     if enforce_perm then Unix.fchmod fd perm;
     if needs_publish || enforce_perm then fsync fd;
     if needs_publish then fsync parent;
+    fd
+   with
+   | exn ->
+     close_after_primary
+       ~operation:"anchored ensured-directory acquisition"
+       fd
+       exn
+       (Printexc.get_raw_backtrace ()))
+;;
+
+let with_ensure_dir parent ~name ~perm ~enforce_perm f =
+  let fd = open_ensured_child parent ~name ~perm ~enforce_perm in
+  combine_close ~operation:"anchored ensured-directory transaction" fd (fun () ->
     f fd)
+;;
+
+type ensure_step =
+  { name : Segment.t
+  ; perm : int
+  ; enforce_perm : bool
+  }
+
+let close_parent_before_descending ~parent ~child =
+  match Unix.close parent with
+  | () -> child
+  | exception parent_close_error ->
+    (match Unix.close child with
+     | () -> raise parent_close_error
+     | exception child_close_error ->
+       raise
+         (Failure
+            (Printf.sprintf
+               "ancestor close failed (%s); child close also failed (%s)"
+               (Printexc.to_string parent_close_error)
+               (Printexc.to_string child_close_error))))
+;;
+
+let with_ensure_path ~root steps f =
+  let rec walk current = function
+    | [] ->
+      combine_close ~operation:"anchored ensured-path transaction" current
+        (fun () -> f current)
+    | { name; perm; enforce_perm } :: rest ->
+      let next =
+        try open_ensured_child current ~name ~perm ~enforce_perm with
+        | exn ->
+          close_after_primary
+            ~operation:"anchored ensured-path acquisition"
+            current
+            exn
+            (Printexc.get_raw_backtrace ())
+      in
+      walk (close_parent_before_descending ~parent:current ~child:next) rest
+  in
+  walk (open_root_fd root) steps
+;;
+
+let with_open_path_opt ~root steps f =
+  let rec walk current = function
+    | [] ->
+      Some
+        (combine_close ~operation:"anchored existing-path transaction" current
+           (fun () -> f current))
+    | name :: rest ->
+      (match open_dir_fd current (segment_value name) with
+       | next ->
+         walk
+           (close_parent_before_descending ~parent:current ~child:next)
+           rest
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+         combine_close ~operation:"anchored missing-path close" current
+           (fun () -> None)
+       | exception exn ->
+         close_after_primary
+           ~operation:"anchored existing-path acquisition"
+           current
+           exn
+           (Printexc.get_raw_backtrace ()))
+  in
+  walk (open_root_fd root) steps
 ;;
 
 let kind_of_int = function

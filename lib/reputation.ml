@@ -280,6 +280,8 @@ let build_board_vote_totals ~votes_path ~posts_path ~comments_path :
   index_authors (load_jsonl_safe comments_path);
   let by_author : (string, int * int) Hashtbl.t = Hashtbl.create 256 in
   let bump recipient select =
+    (* DET-OK: accumulator zero-init — an absent table entry means "no votes
+       counted yet for this author", not an unknown/unparsed input. *)
     let prev = Hashtbl.find_opt by_author recipient |> Option.value ~default:(0, 0) in
     Hashtbl.replace by_author recipient (select prev)
   in
@@ -324,6 +326,9 @@ let board_vote_totals_table board_dir : (string, int * int) Hashtbl.t =
     self-votes. [(0, 0)] when the author has never received a peer vote —
     callers use that to mean "no evidence" (see {!Board_sort.wilson_lower_bound}). *)
 let votes_received_in_dir ~(board_dir : string) ~(agent_name : string) : int * int =
+  (* DET-OK: (0, 0) is the documented no-evidence value for an author with no
+     received peer votes (contract above) — not a permissive unknown-input
+     default; callers surface it as an explicit absent badge state. *)
   Hashtbl.find_opt (board_vote_totals_table board_dir) agent_name
   |> Option.value ~default:(0, 0)
 

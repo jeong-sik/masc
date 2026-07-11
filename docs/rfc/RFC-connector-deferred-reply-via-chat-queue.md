@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0203", "0217", "0223", "0225", "0226", "0232", "masc#23925"]
-implementation_prs: []
+implementation_prs: [24139]
 ---
 
 # RFC: Durable Keeper chat receipts and connector delivery settlement

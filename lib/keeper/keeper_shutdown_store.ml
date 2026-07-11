@@ -693,17 +693,6 @@ let persist_new ~config operation =
            |> Result.map_error (fun detail -> Io_error detail)))
 ;;
 
-let same_identity
-    (left : Keeper_shutdown_types.t)
-    (right : Keeper_shutdown_types.t)
-  =
-  Operation_id.equal left.operation_id right.operation_id
-  && String.equal left.keeper_name right.keeper_name
-  && Keeper_lane.Id.equal left.lane_id right.lane_id
-  && Keeper_id.Trace_id.equal left.trace_id right.trace_id
-  && Int.equal left.generation right.generation
-;;
-
 let replace ~config ~expected_revision operation =
   let* () = validate_operation operation in
   let* operation_path = path_for_operation ~config operation in
@@ -730,7 +719,7 @@ let replace ~config ~expected_revision operation =
                 { expected = expected_revision + 1
                 ; actual = operation.revision
                 })
-         | Ok existing when same_identity existing operation ->
+         | Ok existing when Keeper_shutdown_types.immutable_fields_equal existing operation ->
            Keeper_fs.save_json_atomic operation_path (to_json operation)
            |> Result.map_error (fun detail -> Io_error detail)
          | Ok _ ->
@@ -755,7 +744,9 @@ let persist_blocked_latest ~config ~identity ~failure ~updated_at =
              ~operation_id:identity.operation_id
          with
          | Error _ as error -> error
-         | Ok existing when not (same_identity existing identity) ->
+         | Ok existing
+           when not
+                  (Keeper_shutdown_types.immutable_fields_equal existing identity) ->
            Error (Identity_mismatch (Operation_id.to_string identity.operation_id))
          | Ok existing ->
            (match existing.phase with

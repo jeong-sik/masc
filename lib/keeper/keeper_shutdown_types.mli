@@ -142,6 +142,10 @@ val completion_action_to_string : completion_action -> string
 val completion_action_of_string : string -> (completion_action, string) result
 val invariant_error_to_string : invariant_error -> string
 val validate : t -> (unit, invariant_error) result
+val immutable_fields_equal : t -> t -> bool
+(** Compare every operation field that must remain fixed across revision
+    replacement. Progress fields ([revision], backlog version, join/finalization
+    evidence, phase, and [updated_at]) are intentionally excluded. *)
 val admission_lane_to_string : admission_lane -> string
 val admission_lane_of_string : string -> (admission_lane, string) result
 val failure_stage_to_string : failure_stage -> string

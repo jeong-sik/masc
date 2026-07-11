@@ -259,6 +259,67 @@ let validate operation =
     | Blocked _ -> Ok ()
 ;;
 
+let option_equal equal left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right -> equal left right
+  | None, Some _
+  | Some _, None -> false
+;;
+
+let admission_lane_equal left right =
+  match left, right with
+  | Autonomous, Autonomous
+  | Chat, Chat -> true
+  | Autonomous, Chat
+  | Chat, Autonomous -> false
+;;
+
+let active_turn_equal left right =
+  option_equal admission_lane_equal left.lane right.lane
+  && option_equal Float.equal left.admitted_at right.admitted_at
+  && option_equal Int.equal left.observed_turn_id right.observed_turn_id
+  && option_equal Float.equal left.observation_started_at right.observation_started_at
+;;
+
+let turn_disposition_equal left right =
+  match left, right with
+  | No_inflight_turn, No_inflight_turn -> true
+  | Inflight_effect_unknown left, Inflight_effect_unknown right ->
+    active_turn_equal left right
+  | No_inflight_turn, Inflight_effect_unknown _
+  | Inflight_effect_unknown _, No_inflight_turn -> false
+;;
+
+let meta_disposition_equal left right =
+  match left, right with
+  | Retain_operator_pause, Retain_operator_pause
+  | Retain_dead_tombstone, Retain_dead_tombstone
+  | Remove_meta, Remove_meta -> true
+  | Retain_operator_pause, (Retain_dead_tombstone | Remove_meta)
+  | Retain_dead_tombstone, (Retain_operator_pause | Remove_meta)
+  | Remove_meta, (Retain_operator_pause | Retain_dead_tombstone) -> false
+;;
+
+let cleanup_intent_equal left right =
+  meta_disposition_equal left.meta_disposition right.meta_disposition
+  && Bool.equal left.remove_session right.remove_session
+;;
+
+let immutable_fields_equal left right =
+  Int.equal left.schema_version right.schema_version
+  && Operation_id.equal left.operation_id right.operation_id
+  && String.equal left.keeper_name right.keeper_name
+  && Keeper_lane.Id.equal left.lane_id right.lane_id
+  && Keeper_id.Trace_id.equal left.trace_id right.trace_id
+  && Int.equal left.generation right.generation
+  && String.equal left.actor right.actor
+  && cleanup_intent_equal left.cleanup_intent right.cleanup_intent
+  && turn_disposition_equal left.turn_disposition right.turn_disposition
+  && List.equal Keeper_id.Task_id.equal left.owned_task_ids right.owned_task_ids
+  && String.equal left.created_at right.created_at
+;;
+
 let admission_lane_to_string = function
   | Autonomous -> "autonomous"
   | Chat -> "chat"

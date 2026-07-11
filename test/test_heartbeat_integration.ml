@@ -861,6 +861,21 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Error (Shutdown_store.Identity_mismatch _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "shutdown store accepted a different lane identity");
+      let mutated_cleanup =
+        { joined with
+          revision = joined.revision + 1
+        ; cleanup_intent = remove_meta_cleanup
+        }
+      in
+      (match
+         Shutdown_store.replace
+           ~config
+           ~expected_revision:joined.revision
+           mutated_cleanup
+       with
+       | Error (Shutdown_store.Identity_mismatch _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok () -> fail "shutdown store accepted a changed cleanup intent");
       let worker_failure = Failure "worker exploded after durable join" in
       let holder_locked_p, holder_locked_r = Eio.Promise.create () in
       let release_holder_p, release_holder_r = Eio.Promise.create () in

@@ -39,6 +39,12 @@ type failure_stage =
   | Turn_join
   | Lane_join
   | Record_update
+  | Task_settlement
+  | Pending_confirm_cleanup
+  | Meta_update
+  | Meta_remove
+  | Session_remove
+  | Registry_unregister
 
 type failure =
   { stage : failure_stage
@@ -61,14 +67,30 @@ type join_evidence =
   ; cleanup_error : string option
   }
 
+type cleanup_evidence =
+  { settled_task_ids : Keeper_id.Task_id.t list
+  ; pending_confirms_removed : int
+  }
+
+type finalization_evidence =
+  { cleanup : cleanup_evidence
+  ; meta_removed : bool
+  ; session_removed : bool
+  ; registry_unregistered : bool
+  }
+
 type phase =
   | Prepared
   | Joined_idle
+  | Finalizing_tasks of Keeper_id.Task_id.t list
+  | Cleanup_ready of cleanup_evidence
   | Reconciliation_required of active_turn
+  | Finalized of finalization_evidence
   | Blocked of failure
 
 type t =
   { schema_version : int
+  ; revision : int
   ; operation_id : Operation_id.t
   ; keeper_name : string
   ; lane_id : Keeper_lane.Id.t
@@ -77,6 +99,7 @@ type t =
   ; actor : string
   ; cleanup_intent : cleanup_intent
   ; turn_disposition : turn_disposition
+  ; expected_backlog_version : int
   ; owned_task_ids : Keeper_id.Task_id.t list
   ; join_evidence : join_evidence option
   ; phase : phase

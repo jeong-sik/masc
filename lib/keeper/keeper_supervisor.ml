@@ -833,6 +833,15 @@ let sweep_and_recover ~load_or_materialize_keeper_meta ~pacing_enforced (ctx : _
                append happened after the mark_dead post-processing above, so it
                had no effect in the current sweep. We keep the metric/log and
                intentionally do not accumulate, preserving the prior behavior. *)
+          | Error (Keeper_registry.Restart_shutdown_reserved operation_id) ->
+            Log.Keeper.info
+              "%s: restart skipped because shutdown operation %s owns admission"
+              old_entry.name
+              (Keeper_shutdown_types.Operation_id.to_string operation_id);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
+              ()
           | Ok reg ->
             Keeper_registry.restore_supervisor_state
               ~base_path

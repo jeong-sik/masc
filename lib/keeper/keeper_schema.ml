@@ -405,7 +405,7 @@ let keeper_schemas : tool_schema list = [
 
   {
     name = "masc_keeper_down";
-    description = "Stop a keeper. Optionally remove underlying files.";
+    description = "Submit a durable, non-blocking Keeper shutdown. Returns an operation_id immediately after admission is fenced and the ownership snapshot is persisted. Repeating the call returns the existing operation state.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

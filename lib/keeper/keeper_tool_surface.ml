@@ -826,10 +826,16 @@ let () =
     | "masc_keeper_down" ->
       Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
       Keeper_tool_surface_ops.invalidate_status_cache (Tool_args.get_string args "name" "");
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (Keeper_turn_lifecycle.handle_keeper_down_config ~config args))
+      (match sw, clock with
+       | Some sw, Some clock ->
+         let ctx : _ Keeper_types_profile.context =
+           { config; agent_name; sw; clock; proc_mgr; net }
+         in
+         Some
+           (tool_result_with_tool_name
+              ~tool_name:name
+              (Keeper_turn_lifecycle.handle_keeper_down ctx args))
+       | _ -> eio_context_missing name)
     (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools.  Require both
        sw and clock from caller; gracefully fail when invoked from a
        path without Eio context. *)

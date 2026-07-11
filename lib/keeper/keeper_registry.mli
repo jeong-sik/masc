@@ -36,6 +36,19 @@ val register : base_path:string -> string -> keeper_meta -> registry_entry
     runtime actually launches the fiber. *)
 val register_offline : base_path:string -> string -> keeper_meta -> registry_entry
 
+type registration_error =
+  | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_invalid of registry_entry_validation_error
+
+(** Production registration gate: the final registry CAS is serialized with
+    Keeper shutdown reservation. Event-queue loading remains outside the
+    non-yielding fence critical section. *)
+val register_offline_if_admitted :
+  base_path:string ->
+  string ->
+  keeper_meta ->
+  (registry_entry, registration_error) result
+
 (** R-A-6.a — error variant for [register_restarting].
     [Budget_already_exhausted] is returned (not raised — the API is
     Result-based) when the caller attempts to revive a keeper whose
@@ -43,6 +56,7 @@ val register_offline : base_path:string -> string -> keeper_meta -> registry_ent
     violate TLA+ §S3 BudgetNeverRevives. *)
 type register_restarting_error =
   | Budget_already_exhausted of { name : string }
+  | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 (** Register a keeper that is about to relaunch after a crash.
     The entry starts in [Restarting] and must receive [Fiber_started] when the

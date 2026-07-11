@@ -34,6 +34,15 @@ type rollback_shutdown_result =
   | Shutdown_not_reserved
   | Shutdown_reserved_by_other of Keeper_shutdown_types.Operation_id.t
 
+type restore_shutdown_result =
+  | Shutdown_restored
+  | Shutdown_already_restored
+  | Shutdown_restore_conflict of Keeper_shutdown_types.Operation_id.t
+
+type 'a registration_commit_result =
+  | Registration_committed of 'a
+  | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
 type slot_snapshot =
   { snapshot_keeper_name : string
   ; snapshot_slot_created : bool
@@ -306,6 +315,26 @@ let rollback_shutdown ~base_path ~keeper_name ~operation_id =
       slot.shutdown_operation_id <- None;
       Shutdown_rolled_back
     | Some existing -> Shutdown_reserved_by_other existing)
+;;
+
+let restore_shutdown ~base_path ~keeper_name ~operation_id =
+  let slot = slot_for ~base_path ~keeper_name in
+  Stdlib.Mutex.protect slot.state_mu (fun () ->
+    match slot.shutdown_operation_id with
+    | None ->
+      slot.shutdown_operation_id <- Some operation_id;
+      Shutdown_restored
+    | Some existing when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
+      Shutdown_already_restored
+    | Some existing -> Shutdown_restore_conflict existing)
+;;
+
+let commit_registration_if_open ~base_path ~keeper_name commit =
+  let slot = slot_for ~base_path ~keeper_name in
+  Stdlib.Mutex.protect slot.state_mu (fun () ->
+    match slot.shutdown_operation_id with
+    | Some operation_id -> Registration_shutdown_reserved operation_id
+    | None -> Registration_committed (commit ()))
 ;;
 
 let await_idle_after_shutdown ~base_path ~keeper_name =

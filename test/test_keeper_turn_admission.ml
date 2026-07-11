@@ -492,6 +492,58 @@ let test_shutdown_reservation_fences_and_rolls_back () =
   | `Ran _ | `Busy _ -> check "rollback re-opens admission" false
 ;;
 
+let test_shutdown_reservation_restores_durable_owner () =
+  reset ();
+  Printf.printf "Test 12: durable shutdown owner restores before registration\n%!";
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  let other_operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match
+     Keeper_turn_admission.restore_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_restored -> ()
+   | Keeper_turn_admission.Shutdown_already_restored
+   | Keeper_turn_admission.Shutdown_restore_conflict _ ->
+     check "fresh durable owner restores" false);
+  (match
+     Keeper_turn_admission.restore_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+   with
+   | Keeper_turn_admission.Shutdown_already_restored -> ()
+   | Keeper_turn_admission.Shutdown_restored
+   | Keeper_turn_admission.Shutdown_restore_conflict _ ->
+     check "same durable owner restores idempotently" false);
+  (match
+     Keeper_turn_admission.restore_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id:other_operation_id
+   with
+   | Keeper_turn_admission.Shutdown_restore_conflict existing ->
+     check
+       "different durable owner cannot replace restored fence"
+       (Keeper_shutdown_types.Operation_id.equal existing operation_id)
+   | Keeper_turn_admission.Shutdown_restored
+   | Keeper_turn_admission.Shutdown_already_restored ->
+     check "different durable owner is rejected" false);
+  match
+    Keeper_turn_admission.commit_registration_if_open
+      ~base_path
+      ~keeper_name
+      (fun () -> ())
+  with
+  | Keeper_turn_admission.Registration_shutdown_reserved existing ->
+    check
+      "registration sees restored durable owner"
+      (Keeper_shutdown_types.Operation_id.equal existing operation_id)
+  | Keeper_turn_admission.Registration_committed () ->
+    check "registration cannot cross restored fence" false
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   test_free_slot_admits ();
@@ -506,6 +558,7 @@ let () =
   test_idle_loop_yields_to_parked_chat ();
   test_autonomous_yields_to_queued_connector_message ();
   test_shutdown_reservation_fences_and_rolls_back ();
+  test_shutdown_reservation_restores_durable_owner ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

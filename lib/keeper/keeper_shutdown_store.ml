@@ -6,6 +6,14 @@ type error =
   | Io_error of string
   | Decode_error of string
   | Identity_mismatch of string
+  | Revision_conflict of
+      { expected : int
+      ; actual : int
+      }
+
+type persist_blocked_result =
+  | State_preserved of Keeper_shutdown_types.t
+  | Blocked_persisted of Keeper_shutdown_types.t
 
 let error_to_string = function
   | Already_exists path -> Printf.sprintf "shutdown operation already exists: %s" path
@@ -14,6 +22,11 @@ let error_to_string = function
   | Decode_error detail -> Printf.sprintf "shutdown operation decode failed: %s" detail
   | Identity_mismatch detail ->
     Printf.sprintf "shutdown operation identity mismatch: %s" detail
+  | Revision_conflict { expected; actual } ->
+    Printf.sprintf
+      "shutdown operation revision conflict: expected %d, actual %d"
+      expected
+      actual
 ;;
 
 type operation_lock =
@@ -108,13 +121,51 @@ let failure_to_json failure =
     ]
 ;;
 
+let task_ids_to_json task_ids =
+  `List
+    (List.map
+       (fun task_id -> `String (Keeper_id.Task_id.to_string task_id))
+       task_ids)
+;;
+
+let cleanup_evidence_to_json evidence =
+  `Assoc
+    [ "settled_task_ids", task_ids_to_json evidence.settled_task_ids
+    ; "pending_confirms_removed", `Int evidence.pending_confirms_removed
+    ]
+;;
+
+let finalization_evidence_to_json evidence =
+  `Assoc
+    [ "cleanup", cleanup_evidence_to_json evidence.cleanup
+    ; "meta_removed", `Bool evidence.meta_removed
+    ; "session_removed", `Bool evidence.session_removed
+    ; "registry_unregistered", `Bool evidence.registry_unregistered
+    ]
+;;
+
 let phase_to_json = function
   | Prepared -> `Assoc [ "kind", `String "prepared" ]
   | Joined_idle -> `Assoc [ "kind", `String "joined_idle" ]
+  | Finalizing_tasks settled_task_ids ->
+    `Assoc
+      [ "kind", `String "finalizing_tasks"
+      ; "settled_task_ids", task_ids_to_json settled_task_ids
+      ]
+  | Cleanup_ready evidence ->
+    `Assoc
+      [ "kind", `String "cleanup_ready"
+      ; "evidence", cleanup_evidence_to_json evidence
+      ]
   | Reconciliation_required turn ->
     `Assoc
       [ "kind", `String "reconciliation_required"
       ; "active_turn", active_turn_to_json turn
+      ]
+  | Finalized evidence ->
+    `Assoc
+      [ "kind", `String "finalized"
+      ; "evidence", finalization_evidence_to_json evidence
       ]
   | Blocked failure ->
     `Assoc
@@ -161,6 +212,7 @@ let join_evidence_to_json evidence =
 let to_json operation =
   `Assoc
     [ "schema_version", `Int operation.schema_version
+    ; "revision", `Int operation.revision
     ; "operation_id", `String (Operation_id.to_string operation.operation_id)
     ; "keeper_name", `String operation.keeper_name
     ; "lane_id", `String (Keeper_lane.Id.to_string operation.lane_id)
@@ -173,11 +225,8 @@ let to_json operation =
           ; "remove_session", `Bool operation.cleanup_intent.remove_session
           ] )
     ; "turn_disposition", turn_disposition_to_json operation.turn_disposition
-    ; ( "owned_task_ids"
-      , `List
-          (List.map
-             (fun task_id -> `String (Keeper_id.Task_id.to_string task_id))
-             operation.owned_task_ids) )
+    ; "expected_backlog_version", `Int operation.expected_backlog_version
+    ; "owned_task_ids", task_ids_to_json operation.owned_task_ids
     ; ( "join_evidence"
       , match operation.join_evidence with
         | None -> `Null
@@ -283,15 +332,62 @@ let failure_of_json json =
   Ok { stage; detail }
 ;;
 
+let task_ids_field_of_json field json =
+  match assoc field json with
+  | Error _ as error -> error
+  | Ok (`List values) ->
+    List.fold_left
+      (fun result value ->
+         let* task_ids = result in
+         match value with
+         | `String raw ->
+           let* task_id =
+             Keeper_id.Task_id.of_string raw
+             |> Result.map_error (fun e -> Decode_error e)
+           in
+           Ok (task_id :: task_ids)
+         | _ -> Error (decode_error (field ^ "[]") "a string"))
+      (Ok [])
+      values
+    |> Result.map List.rev
+  | Ok _ -> Error (decode_error field "an array")
+;;
+
+let cleanup_evidence_of_json json =
+  let* settled_task_ids = task_ids_field_of_json "settled_task_ids" json in
+  let* pending_confirms_removed = int "pending_confirms_removed" json in
+  Ok { settled_task_ids; pending_confirms_removed }
+;;
+
+let finalization_evidence_of_json json =
+  let* cleanup_json = assoc "cleanup" json in
+  let* cleanup = cleanup_evidence_of_json cleanup_json in
+  let* meta_removed = bool "meta_removed" json in
+  let* session_removed = bool "session_removed" json in
+  let* registry_unregistered = bool "registry_unregistered" json in
+  Ok { cleanup; meta_removed; session_removed; registry_unregistered }
+;;
+
 let phase_of_json json =
   let* kind = string "kind" json in
   match kind with
   | "prepared" -> Ok Prepared
   | "joined_idle" -> Ok Joined_idle
+  | "finalizing_tasks" ->
+    let* settled_task_ids = task_ids_field_of_json "settled_task_ids" json in
+    Ok (Finalizing_tasks settled_task_ids)
+  | "cleanup_ready" ->
+    let* evidence_json = assoc "evidence" json in
+    let* evidence = cleanup_evidence_of_json evidence_json in
+    Ok (Cleanup_ready evidence)
   | "reconciliation_required" ->
     let* active_json = assoc "active_turn" json in
     let* turn = active_turn_of_json active_json in
     Ok (Reconciliation_required turn)
+  | "finalized" ->
+    let* evidence_json = assoc "evidence" json in
+    let* evidence = finalization_evidence_of_json evidence_json in
+    Ok (Finalized evidence)
   | "blocked" ->
     let* failure_json = assoc "failure" json in
     let* failure = failure_of_json failure_json in
@@ -339,27 +435,6 @@ let optional_join_evidence_of_json json =
   | Error _ as error -> error
 ;;
 
-let task_ids_of_json json =
-  match assoc "owned_task_ids" json with
-  | Error _ as error -> error
-  | Ok (`List values) ->
-    List.fold_left
-      (fun result value ->
-         let* task_ids = result in
-         match value with
-         | `String raw ->
-           let* task_id =
-             Keeper_id.Task_id.of_string raw
-             |> Result.map_error (fun e -> Decode_error e)
-           in
-           Ok (task_id :: task_ids)
-         | _ -> Error (decode_error "owned_task_ids[]" "a string"))
-      (Ok [])
-      values
-    |> Result.map List.rev
-  | Ok _ -> Error (decode_error "owned_task_ids" "an array")
-;;
-
 let of_json json =
   let* decoded_schema_version = int "schema_version" json in
   if decoded_schema_version <> schema_version
@@ -371,6 +446,7 @@ let of_json json =
             decoded_schema_version))
   else
     let* operation_id_wire = string "operation_id" json in
+    let* revision = int "revision" json in
     let* operation_id =
       Operation_id.of_string operation_id_wire
       |> Result.map_error (fun e -> Decode_error e)
@@ -393,7 +469,8 @@ let of_json json =
     let* remove_session = bool "remove_session" cleanup_json in
     let* turn_json = assoc "turn_disposition" json in
     let* turn_disposition = turn_disposition_of_json turn_json in
-    let* owned_task_ids = task_ids_of_json json in
+    let* expected_backlog_version = int "expected_backlog_version" json in
+    let* owned_task_ids = task_ids_field_of_json "owned_task_ids" json in
     let* join_evidence = optional_join_evidence_of_json json in
     let* phase_json = assoc "phase" json in
     let* phase = phase_of_json phase_json in
@@ -401,6 +478,7 @@ let of_json json =
     let* updated_at = string "updated_at" json in
     Ok
       { schema_version = decoded_schema_version
+      ; revision
       ; operation_id
       ; keeper_name
       ; lane_id
@@ -409,6 +487,7 @@ let of_json json =
       ; actor
       ; cleanup_intent = { remove_meta; remove_session }
       ; turn_disposition
+      ; expected_backlog_version
       ; owned_task_ids
       ; join_evidence
       ; phase
@@ -450,11 +529,19 @@ let same_identity left right =
   && Int.equal left.generation right.generation
 ;;
 
-let replace ~config operation =
+let replace ~config ~expected_revision operation =
   let operation_path = path ~config operation.operation_id in
   with_operation_lock ~access:Write operation_path (fun () ->
     match load_unlocked ~config operation.operation_id with
     | Error _ as error -> error
+    | Ok existing when not (Int.equal existing.revision expected_revision) ->
+      Error (Revision_conflict { expected = expected_revision; actual = existing.revision })
+    | Ok _ when not (Int.equal operation.revision (expected_revision + 1)) ->
+      Error
+        (Revision_conflict
+           { expected = expected_revision + 1
+           ; actual = operation.revision
+           })
     | Ok existing when same_identity existing operation ->
       Keeper_fs.save_json_atomic operation_path (to_json operation)
       |> Result.map_error (fun detail -> Io_error detail)
@@ -464,13 +551,37 @@ let replace ~config operation =
            (Operation_id.to_string operation.operation_id)))
 ;;
 
+let persist_blocked_latest ~config ~identity ~failure ~updated_at =
+  let operation_path = path ~config identity.operation_id in
+  with_operation_lock ~access:Write operation_path (fun () ->
+    match load_unlocked ~config identity.operation_id with
+    | Error _ as error -> error
+    | Ok existing when not (same_identity existing identity) ->
+      Error (Identity_mismatch (Operation_id.to_string identity.operation_id))
+    | Ok existing ->
+      (match existing.phase with
+       | Finalized _ | Blocked _ | Reconciliation_required _ ->
+         Ok (State_preserved existing)
+       | Prepared | Joined_idle | Finalizing_tasks _ | Cleanup_ready _ ->
+         let blocked =
+           { existing with
+             revision = existing.revision + 1
+           ; phase = Blocked failure
+           ; updated_at
+           }
+         in
+         Keeper_fs.save_json_atomic operation_path (to_json blocked)
+         |> Result.map_error (fun detail -> Io_error detail)
+         |> Result.map (fun () -> Blocked_persisted blocked)))
+;;
+
 let load ~config operation_id =
   let operation_path = path ~config operation_id in
   with_operation_lock ~access:Read operation_path (fun () ->
     load_unlocked ~config operation_id)
 ;;
 
-let list_for_keeper ~config ~keeper_name =
+let list_unlocked ~config =
   let dir = records_dir config in
   if not (Fs_compat.file_exists dir)
   then Ok []
@@ -486,9 +597,7 @@ let list_for_keeper ~config ~keeper_name =
               then
                 Error
                   (Decode_error
-                     (Printf.sprintf
-                        "unexpected shutdown store entry: %s"
-                        filename))
+                     (Printf.sprintf "unexpected shutdown store entry: %s" filename))
               else
                 let raw_id = Filename.chop_suffix filename ".json" in
                 let* operation_id =
@@ -496,12 +605,25 @@ let list_for_keeper ~config ~keeper_name =
                   |> Result.map_error (fun e -> Decode_error e)
                 in
                 let* operation = load ~config operation_id in
-                if String.equal operation.keeper_name keeper_name
-                then Ok (operation :: operations)
-                else Ok operations)
+                Ok (operation :: operations))
            (Ok [])
       |> Result.map List.rev
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Io_error (Printexc.to_string exn))
 ;;
+
+let list_all ~config = list_unlocked ~config
+
+let list_for_keeper ~config ~keeper_name =
+  list_unlocked ~config
+  |> Result.map
+       (List.filter (fun operation -> String.equal operation.keeper_name keeper_name))
+;;
+
+module For_testing = struct
+  let with_operation_write_lock ~config operation_id f =
+    let operation_path = path ~config operation_id in
+    with_operation_lock ~access:Write operation_path f
+  ;;
+end

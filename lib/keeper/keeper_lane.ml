@@ -1,5 +1,6 @@
 type outcome =
   | Completed
+  | Shutdown_before_start
   | Shutdown_requested
   | Cancelled_by_parent of exn
   | Failed of exn
@@ -159,7 +160,7 @@ let rec request_cancel t =
       Atomic.set t.state Exited;
       Eio.Promise.resolve
         t.exited_r
-        { outcome = Shutdown_requested; cleanup_error = None };
+        { outcome = Shutdown_before_start; cleanup_error = None };
       Cancel_requested)
     else request_cancel t
   | Starting ->

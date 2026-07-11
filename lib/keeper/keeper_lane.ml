@@ -166,7 +166,7 @@ let rec request_cancel t =
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
-         ignore (Atomic.compare_and_set t.state Cancellation_requested current);
+         let _ = Atomic.compare_and_set t.state Cancellation_requested current in
          Cancel_signal_failed exn)
     else request_cancel t
   | Cancellation_requested -> Cancel_already_requested

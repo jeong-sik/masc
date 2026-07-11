@@ -42,25 +42,40 @@ let release_worker operation =
 ;;
 
 let persist_unhandled_failure ~config operation exn =
-  let blocked =
-    { operation with
-      revision = operation.revision + 1
-    ; phase = Blocked { stage = Record_update; detail = Printexc.to_string exn }
-    ; updated_at = Masc_domain.now_iso ()
-    }
-  in
-  match
-    Keeper_shutdown_store.replace
-      ~config
-      ~expected_revision:operation.revision
-      blocked
-  with
-  | Ok () -> ()
-  | Error store_error ->
+  let detail = Printexc.to_string exn in
+  Eio.Cancel.protect (fun () ->
     Log.Keeper.error
-      "shutdown operation %s failed and its blocked state could not be persisted: %s"
+      "shutdown worker failed; persisting durable failure evidence: keeper=%s operation=%s error=%s"
+      operation.keeper_name
       (worker_key operation)
-      (Keeper_shutdown_store.error_to_string store_error)
+      detail;
+    match
+      Keeper_shutdown_store.persist_blocked_latest
+        ~config
+        ~identity:operation
+        ~failure:{ stage = Record_update; detail }
+        ~updated_at:(Masc_domain.now_iso ())
+    with
+    | Ok (Keeper_shutdown_store.Blocked_persisted blocked) ->
+      Log.Keeper.error
+        "shutdown worker failed; blocked state persisted: keeper=%s operation=%s revision=%d error=%s"
+        blocked.keeper_name
+        (worker_key blocked)
+        blocked.revision
+        detail
+    | Ok (Keeper_shutdown_store.State_preserved current) ->
+      Log.Keeper.error
+        "shutdown worker failed after a durable non-progress state; preserving it: keeper=%s operation=%s revision=%d error=%s"
+        current.keeper_name
+        (worker_key current)
+        current.revision
+        detail
+    | Error store_error ->
+      Log.Keeper.error
+        "shutdown operation %s failed and its blocked state could not be persisted: worker_error=%s store_error=%s"
+        (worker_key operation)
+        detail
+        (Keeper_shutdown_store.error_to_string store_error))
 ;;
 
 let finalize_if_ready ~config ~entry operation =
@@ -224,3 +239,7 @@ let recover_at_boot ~config =
   | Error error -> [ Error (Keeper_shutdown_store.error_to_string error) ]
   | Ok operations -> List.map (recover_operation ~config) operations
 ;;
+
+module For_testing = struct
+  let persist_unhandled_failure = persist_unhandled_failure
+end

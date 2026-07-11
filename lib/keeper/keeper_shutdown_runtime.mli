@@ -34,3 +34,11 @@ val recover_operation :
   config:Workspace.config ->
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, string) result
+
+module For_testing : sig
+  val persist_unhandled_failure :
+    config:Workspace.config ->
+    Keeper_shutdown_types.t ->
+    exn ->
+    unit
+end

@@ -1360,6 +1360,55 @@ let test_oas_env_rejects_invalid_unified_max_tokens () =
              (contains_substring detail "positive integer")))
     [ "\"not-an-int\""; "\"8192\""; "true"; "1.5"; "0"; "-1" ]
 
+(* Direct pins for the typed override surface re-exported through
+   Masc.Keeper_types_profile.  The TOML load path front-runs this parser
+   with [validate_unified_max_tokens_toml_value], so the parser's own Error
+   arm is only reachable for callers handing in raw (key, value) pairs —
+   cover it here.  Referencing all three values through [KTP] also pins the
+   toml mirror-mli re-export chain whose drift broke main (#24124). *)
+let test_parse_unified_max_tokens_override_direct () =
+  let key = KTP.keeper_unified_max_tokens_oas_env_key in
+  (match KTP.parse_unified_max_tokens_override_of_oas_env [] with
+   | Ok None -> ()
+   | Ok (Some v) -> failf "expected Ok None for absent key, got Some %d" v
+   | Error e -> failf "expected Ok None for absent key, got Error %s" e);
+  (match KTP.parse_unified_max_tokens_override_of_oas_env [ (key, "8192") ] with
+   | Ok (Some 8192) -> ()
+   | Ok (Some v) -> failf "expected Ok (Some 8192), got Some %d" v
+   | Ok None -> fail "expected Ok (Some 8192), got Ok None"
+   | Error e -> failf "expected Ok (Some 8192), got Error %s" e);
+  List.iter
+    (fun raw ->
+      match KTP.parse_unified_max_tokens_override_of_oas_env [ (key, raw) ] with
+      | Ok _ -> failf "expected Error for %S" raw
+      | Error detail ->
+        check bool "error names the oas_env key" true
+          (contains_substring detail key);
+        check bool "error requires a positive integer" true
+          (contains_substring detail "positive integer"))
+    [ "not-an-int"; "0"; "-1"; "1.5"; "" ]
+
+let test_validate_unified_max_tokens_toml_key_direct () =
+  let toml_key = KTP.keeper_unified_max_tokens_toml_key in
+  (match KTP.validate_unified_max_tokens_toml_value [] with
+   | Ok () -> ()
+   | Error e -> failf "expected Ok () for absent key, got Error %s" e);
+  (match
+     KTP.validate_unified_max_tokens_toml_value [ (toml_key, TL.Toml_int 8192) ]
+   with
+   | Ok () -> ()
+   | Error e -> failf "expected Ok () for positive int, got Error %s" e);
+  List.iter
+    (fun value ->
+      match KTP.validate_unified_max_tokens_toml_value [ (toml_key, value) ] with
+      | Ok () -> fail "expected Error for non-positive/non-int TOML value"
+      | Error detail ->
+        check bool "error names the toml key" true
+          (contains_substring detail toml_key);
+        check bool "error requires a positive integer" true
+          (contains_substring detail "positive integer"))
+    [ TL.Toml_int 0; TL.Toml_int (-1); TL.Toml_string "8192"; TL.Toml_bool true ]
+
 let test_oas_env_drops_non_oas_prefix () =
   (* Guards against ambient env injection via keeper TOML: arbitrary keys
      outside the audited allowlist are silently dropped. *)
@@ -1752,6 +1801,10 @@ let () =
             test_oas_env_rejects_legacy_unified_max_tokens_alias;
           test_case "rejects invalid unified max tokens" `Quick
             test_oas_env_rejects_invalid_unified_max_tokens;
+          test_case "parse override direct surface (typed errors)" `Quick
+            test_parse_unified_max_tokens_override_direct;
+          test_case "validate toml key direct surface (typed errors)" `Quick
+            test_validate_unified_max_tokens_toml_key_direct;
           test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
             test_oas_env_drops_non_oas_prefix;
           test_case "empty when table absent" `Quick

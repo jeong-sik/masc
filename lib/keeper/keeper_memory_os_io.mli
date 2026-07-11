@@ -61,6 +61,20 @@ val next_generation_with_floor_for_keepers_dir :
 
 (** {1 Atomic writes} *)
 
+type episode_bundle
+type facts_lock
+(** Scoped capabilities retained while the corresponding descriptor-anchored
+    lock is held. Values must not escape their callback. *)
+
+type lock_timeout =
+  { caller : string
+  ; path : string
+  ; attempts : int
+  }
+
+val lock_timeout_to_string : lock_timeout -> string
+val raise_lock_timeout : lock_timeout -> 'a
+
 (** Run [f] against the channel then close it, releasing the descriptor on every
     exit path — including when [close_out]'s flush raises, which OCaml's
     [close_out] leaves the fd open on. The body's exception propagates (so
@@ -75,6 +89,8 @@ val append_event_for_keepers_dir :
 val append_episode : keeper_id:string -> episode -> unit
 val append_episode_for_keepers_dir :
   keepers_dir:string -> keeper_id:Keeper_id.Keeper_name.t -> episode -> unit
+val append_event_in_bundle : episode_bundle -> episode -> unit
+val append_episode_in_bundle : episode_bundle -> episode -> unit
 
 (** Serialize a cross-file episode bundle write for one keeper. Callers that
     write facts plus episode/event artifacts should take this before the facts
@@ -84,14 +100,14 @@ val append_episode_for_keepers_dir :
 val with_episode_bundle_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   keeper_id:string ->
-  (unit -> 'a) ->
+  (episode_bundle -> 'a) ->
   'a
 
 val with_episode_bundle_lock_for_keepers_dir :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   keepers_dir:string ->
   keeper_id:Keeper_id.Keeper_name.t ->
-  (unit -> 'a) ->
+  (episode_bundle -> 'a) ->
   'a
 
 val append_episode_bundle : keeper_id:string -> episode -> unit
@@ -115,7 +131,7 @@ val fact_fingerprint : fact -> string
 val same_fact_snapshot : fact list -> fact list -> bool
 
 (** [with_facts_lock ?clock ~keeper_id ~on_timeout f] runs [f] holding the
-    per-keeper facts lock. On flock-acquisition timeout, [on_timeout msg] produces
+    per-keeper facts lock. On flock-acquisition timeout, [on_timeout timeout] produces
     the result instead of raising {!File_lock_eio.Flock_timeout}, so callers can
     return a typed skip/no-op for a contended cycle. Non-timeout exceptions from
     [f] propagate after the lock finalizer runs. Keep [on_timeout] total and
@@ -123,8 +139,8 @@ val same_fact_snapshot : fact list -> fact list -> bool
 val with_facts_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> keeper_id:string
-  -> on_timeout:(string -> 'a)
-  -> (unit -> 'a)
+  -> on_timeout:(lock_timeout -> 'a)
+  -> (facts_lock -> 'a)
   -> 'a
 
 (** Explicit-root form of {!with_facts_lock}. [keeper_id] is already validated,
@@ -135,9 +151,21 @@ val with_facts_lock_for_keepers_dir :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> keepers_dir:string
   -> keeper_id:Keeper_id.Keeper_name.t
-  -> on_timeout:(string -> 'a)
-  -> (unit -> 'a)
+  -> on_timeout:(lock_timeout -> 'a)
+  -> (facts_lock -> 'a)
   -> 'a
+
+val with_facts_lock_in_bundle :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> episode_bundle
+  -> on_timeout:(lock_timeout -> 'a)
+  -> (facts_lock -> 'a)
+  -> 'a
+(** Acquire the facts lock from an existing bundle capability, retaining the
+    same opened keepers directory across both locks. *)
+
+val read_facts_all_strict_in_lock : facts_lock -> (fact list, string) result
+val rewrite_facts_in_lock : facts_lock -> fact list -> unit
 
 val save_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t -> unit
 val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t option
@@ -193,10 +221,13 @@ val cap_events_for_keepers_dir :
   trigger:int ->
   int
 
+val cap_events_in_bundle : episode_bundle -> keep:int -> trigger:int -> int
+
 (** RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
     parseable-file count exceeds [trigger], keep the [keep] most-recent files by
-    recency and best-effort unlink the rest; otherwise no-op. Unparseable files
-    are left untouched. Returns the number unlinked. *)
+    recency and durably unlink the rest; otherwise no-op. Unparseable files are
+    left untouched. Every unlink failure is surfaced. Returns the number
+    unlinked. *)
 val cap_episode_files :
   keeper_id:string -> keep:int -> trigger:int -> int
 val cap_episode_files_for_keepers_dir :
@@ -205,6 +236,9 @@ val cap_episode_files_for_keepers_dir :
   keep:int ->
   trigger:int ->
   int
+
+val cap_episode_files_in_bundle :
+  episode_bundle -> keep:int -> trigger:int -> int
 
 (** Read and parse every fact in the store (unbounded; used by retention). *)
 val read_all_facts : keeper_id:string -> fact list
@@ -252,13 +286,21 @@ val merge_and_cap_facts :
   -> rank:(fact -> float)
   -> fact_merge_stats
 
-(** The explicit-root merge is a read-modify-rewrite operation. Its caller must
-    hold {!with_facts_lock_for_keepers_dir}; if an episode bundle is also being
-    published, the caller must hold the bundle lock before the facts lock. *)
+(** The explicit-root merge acquires its own descriptor-anchored facts lock. *)
 val merge_and_cap_facts_for_keepers_dir :
   keepers_dir:string
   -> now:float
   -> keeper_id:Keeper_id.Keeper_name.t
+  -> merge:(existing:fact -> incoming:fact -> fact)
+  -> incoming:fact list
+  -> keep:int
+  -> trigger:int
+  -> rank:(fact -> float)
+  -> fact_merge_stats
+
+val merge_and_cap_facts_in_lock :
+  facts_lock
+  -> now:float
   -> merge:(existing:fact -> incoming:fact -> fact)
   -> incoming:fact list
   -> keep:int

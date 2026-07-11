@@ -9,6 +9,7 @@ open Alcotest
 module KR = Masc.Keeper_registry
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KLH = Masc.Keeper_lifecycle_hooks
+module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
 module KSM = Keeper_state_machine
 module Lane = Masc.Keeper_lane
 

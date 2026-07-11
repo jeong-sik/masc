@@ -21,6 +21,7 @@ module KT = Keeper_types
 module KSM = Keeper_state_machine
 module Cfg = Env_config
 module KHL = Masc.Keeper_heartbeat_loop
+module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
 module Obs = Masc.Keeper_heartbeat_loop_observations
 module WO = Masc.Keeper_world_observation
 module Health = Masc.Health

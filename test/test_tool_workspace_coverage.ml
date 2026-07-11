@@ -294,7 +294,19 @@ let () =
       assert (str_contains msg "Attention:");
       assert_contains msg "35 unclaimed task(s) are available right now.";
       assert (str_contains msg "Summary: active=35, done=0, cancelled=0, total=35");
-      assert (str_contains msg "and 5 more active tasks")
+      assert_contains msg "and 5 more active tasks (use masc_tasks for full list)";
+      assert_not_contains msg "use keeper_tasks_list for full list";
+      (match
+         Tool_workspace.dispatch_for_keeper ctx ~name:"masc_status" ~args
+       with
+       | Some keeper_result ->
+         let keeper_message = Tool_result.message keeper_result in
+         assert (Tool_result.is_success keeper_result);
+         assert_contains
+           keeper_message
+           "and 5 more active tasks (use keeper_tasks_list for full list)";
+         assert_not_contains keeper_message "use masc_tasks for full list"
+       | None -> failwith "Keeper status dispatch returned None")
     | None -> failwith "dispatch returned None")
 ;;
 

@@ -77,7 +77,7 @@ let tools_for_affordance = function
   | Task_claim ->
     [ "keeper_task_claim" ]
   | Task_audit ->
-    [ "keeper_tasks_audit"; "keeper_tasks_list"; "masc_tasks" ]
+    [ "keeper_tasks_audit"; "keeper_tasks_list" ]
   | Task_verify ->
     (* RFC-0323 G-4: a verify turn clears pending_verification via
        masc_transition action=approve/reject. keeper_task_done is excluded —
@@ -90,7 +90,7 @@ let tools_for_affordance = function
    task/world state (and thus clear the signal that surfaced it)?  Exhaustive
    match over the closed [turn_affordance] sum, so adding a new affordance
    forces a decision here at compile time.  [Task_audit] is the sole
-   advisory-only affordance: its tools (keeper_tasks_audit/list, masc_tasks)
+   advisory-only affordance: its tools (keeper_tasks_audit/list)
    are read-only, so a keeper woken by a [Task_audit]-only signal cannot clear
    that signal — driving a proactive turn on it produces an unbounded no-op
    livelock (the failed_task incident, 2026-06-21..24).
@@ -250,12 +250,10 @@ let tool_search_alias_entries =
   ; "masc_keeper_list", "키퍼 목록 현황"
   ; "masc_keeper_msg", "키퍼 메시지 전달 대화"
   ; "masc_keeper_status", "키퍼 상태 확인"
-  ; "masc_tasks", "태스크 목록 할일 작업"
   ; "masc_add_task", "태스크 추가 등록 생성"
   ; "masc_status", "상태 현황 방 룸 요약"
   ; "masc_dashboard", "대시보드 현황 대시 보드 개요"
   ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
-  ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
   ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
   ; "masc_web_fetch", "웹 페이지 가져오기 읽기 URL 페치"
 

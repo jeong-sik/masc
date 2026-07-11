@@ -604,5 +604,5 @@ let execute_tool_eio
 let () =
   Workspace_dispatch_ref.dispatch
   := fun ~config ~agent_name ~name ~args ->
-    Tool_workspace.dispatch { config; agent_name } ~name ~args
+    Tool_workspace.dispatch_for_keeper { config; agent_name } ~name ~args
 ;;

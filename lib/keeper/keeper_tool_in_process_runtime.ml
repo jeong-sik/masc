@@ -397,7 +397,7 @@ let handle_masc_task ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~a
   let ctx : Task.Tool.context =
     { config; agent_name = meta.name; sw = None }
   in
-  Task.Tool.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Task.Tool.dispatch_for_keeper ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
 let handle_masc_plan ~(config : Workspace.config) ~name ~args =

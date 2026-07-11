@@ -43,8 +43,25 @@ let build_keeper_index () =
   in
   Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries
 
+let model_name_for_tool name =
+  match Keeper_tool_descriptor_resolution.descriptor_for_tool_name name with
+  | None -> name
+  | Some descriptor ->
+    (match Keeper_tool_descriptor.keeper_model_names descriptor with
+     | [ model_name ] -> model_name
+     | [] ->
+       Alcotest.failf
+         "tool %S has no Keeper model projection"
+         name
+     | model_names ->
+       Alcotest.failf
+         "tool %S has multiple Keeper model projections: %s"
+         name
+         (String.concat ", " model_names))
+
 (** Check that [expected_tool] appears in BM25 top-k results for [query]. *)
 let assert_retrieves ~label index query expected_tool =
+  let expected_tool = model_name_for_tool expected_tool in
   let retrieved = Agent_sdk.Tool_index.retrieve index query in
   let names = List.map fst retrieved in
   let rank = match List.find_index (fun n -> String.equal n expected_tool) names with
@@ -62,6 +79,8 @@ let assert_retrieves ~label index query expected_tool =
   rank
 
 let assert_ranks_before ~label index query ~preferred ~discouraged =
+  let preferred = model_name_for_tool preferred in
+  let discouraged = model_name_for_tool discouraged in
   let retrieved = Agent_sdk.Tool_index.retrieve index query in
   let names = List.map fst retrieved in
   let rank name =
@@ -280,8 +299,10 @@ let test_prefer_fs_edit_over_bash () =
   let retrieved = Agent_sdk.Tool_index.retrieve idx
     "create a new file called notes.md with some content" in
   let names = List.map fst retrieved in
-  let fs_edit_rank = List.find_index (fun n -> String.equal n "tool_edit_file") names in
-  let bash_rank = List.find_index (fun n -> String.equal n "tool_execute") names in
+  let edit_name = model_name_for_tool "tool_edit_file" in
+  let execute_name = model_name_for_tool "tool_execute" in
+  let fs_edit_rank = List.find_index (fun n -> String.equal n edit_name) names in
+  let bash_rank = List.find_index (fun n -> String.equal n execute_name) names in
   match fs_edit_rank, bash_rank with
   | Some fe, Some ba ->
     Alcotest.(check bool)
@@ -313,7 +334,12 @@ let test_search_alias_entries_target_keeper_universe () =
   let missing =
     Keeper_agent_tool_surface.tool_search_alias_entries
     |> List.map fst
-    |> List.filter (fun name -> not (List.mem name tool_names))
+    |> List.filter (fun name ->
+      match Keeper_tool_descriptor_resolution.descriptor_for_tool_name name with
+      | Some descriptor ->
+        Keeper_tool_descriptor.keeper_model_names descriptor
+        |> List.for_all (fun model_name -> not (List.mem model_name tool_names))
+      | None -> not (List.mem name tool_names))
   in
   Alcotest.(check (list string))
     "alias entries resolve to keeper universe tools" [] missing

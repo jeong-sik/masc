@@ -226,8 +226,6 @@ let public_mcp_non_descriptor_names =
      the surface entries without this allowlist edit while main was red. *)
   ; "masc_persona_create"
   ; "masc_persona_update"
-  ; "masc_runtime_verify"
-  ; "masc_runtime_ollama_probe"
   ]
 ;;
 

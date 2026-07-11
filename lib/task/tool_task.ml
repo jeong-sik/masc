@@ -21,7 +21,11 @@ let task_log_error ~task_id fmt =
     (fun message -> Log.Task.error "task_id=%s %s" task_id message)
     fmt
 
-let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id ~action_s =
+let missing_live_task_transition_rejection ~task_list_projection ~tool_name
+      ~start_time ctx ~task_id ~action_s =
+  let task_list_name =
+    Tool_capability_projection.task_list_name task_list_projection
+  in
   sync_owner_current_task_binding ctx;
   sync_planning_current_task_with_owned_task ctx;
   task_log_warn ~task_id
@@ -33,13 +37,13 @@ let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id ~
     ~start_time
     (workflow_rejection_payload_json
        ~rule_id:"stale_task_id_not_found"
-       ~tool_suggestion:"keeper_tasks_list"
+       ~tool_suggestion:task_list_name
        ~hint:
          "The requested task_id is absent from the live backlog. Do not retry \
-          this task_id from memory; refresh keeper_tasks_list or masc_tasks and \
+          this task_id from memory; refresh the projected task-list tool and \
           choose a live task."
        ~scope_policy:"observe"
-       ~alternatives:[ "keeper_tasks_list"; "masc_tasks"; "keeper_task_claim" ]
+       ~alternatives:[ task_list_name; "keeper_task_claim" ]
        ~extra_fields:
          [ "task_id", `String task_id
          ; "action", `String action_s
@@ -51,10 +55,12 @@ let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id ~
            bindings and suppressed transition action=%s."
           task_id action_s))
 
-let rec handle_done ~tool_name ~start_time ctx args =
+let rec handle_done
+      ?(task_list_projection = Tool_capability_projection.External_masc_tasks)
+      ~tool_name ~start_time ctx args =
   let notes = get_string args "notes" "" in
   let evidence_refs = get_string_list args "evidence_refs" in
-  handle_transition ~tool_name ~start_time ctx
+  handle_transition ~task_list_projection ~tool_name ~start_time ctx
     (`Assoc
        [
          ("task_id", Json_util.assoc_member_opt "task_id" args |> Option.value ~default:`Null);
@@ -119,7 +125,12 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
        task_log_error ~task_id "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
   result_to_response ~tool_name ~start_time result
 
-and handle_transition ~tool_name ~start_time ctx args =
+and handle_transition
+      ?(task_list_projection = Tool_capability_projection.External_masc_tasks)
+      ~tool_name ~start_time ctx args =
+  let task_list_name =
+    Tool_capability_projection.task_list_name task_list_projection
+  in
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Client_identity and must not
@@ -212,7 +223,13 @@ and handle_transition ~tool_name ~start_time ctx args =
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   match task_opt with
   | None ->
-    missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id ~action_s
+    missing_live_task_transition_rejection
+      ~task_list_projection
+      ~tool_name
+      ~start_time
+      ctx
+      ~task_id
+      ~action_s
   | Some _ ->
   let release_owner_mismatch_rejection =
     match action, task_opt with
@@ -246,7 +263,7 @@ and handle_transition ~tool_name ~start_time ctx args =
                     on the board, or inspect and claim different unowned work."
                  ~scope_policy:"observe"
                  ~alternatives:
-                   [ "keeper_board_post"; "masc_board_post"; "keeper_tasks_list"; "keeper_task_claim" ]
+                   [ "keeper_board_post"; "masc_board_post"; task_list_name; "keeper_task_claim" ]
                  ~extra_fields:
                    [ "task_id", `String task_id
                    ; "task_status", `String status
@@ -304,26 +321,26 @@ and handle_transition ~tool_name ~start_time ctx args =
             "The task is still todo. Use masc_transition with action=claim for \
              this task_id, then action=start, and call keeper_task_done only \
              after the deliverable is complete."
-        , [ "masc_transition"; "keeper_task_claim"; "keeper_tasks_list" ] )
+        , [ "masc_transition"; "keeper_task_claim"; task_list_name ] )
       | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
         ( Some "task_done_requires_current_owner"
-        , Some "keeper_tasks_list"
+        , Some task_list_name
         , Some
             "Another agent owns this task. Inspect the task list, ask for handoff, \
              or claim different unowned work instead of retrying keeper_task_done."
-        , [ "keeper_tasks_list"; "keeper_board_post"; "keeper_task_claim" ] )
+        , [ task_list_name; "keeper_board_post"; "keeper_task_claim" ] )
       | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
         ( Some "task_done_invalid_lifecycle_state"
-        , Some "keeper_tasks_list"
+        , Some task_list_name
         , Some
             "The task lifecycle state does not accept keeper_task_done. Inspect \
              task status and use the valid next lifecycle action."
-        , [ "keeper_tasks_list"; "masc_transition" ] )
+        , [ task_list_name; "masc_transition" ] )
       | _ ->
         ( Some "task_done_lifecycle_rejected"
-        , Some "keeper_tasks_list"
+        , Some task_list_name
         , Some "Inspect the task status before trying another lifecycle action."
-        , [ "keeper_tasks_list"; "masc_transition" ] )
+        , [ task_list_name; "masc_transition" ] )
     in
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)
@@ -350,14 +367,14 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~start_time
       (workflow_rejection_payload_json
          ~rule_id:"task_transition_invalid_state"
-         ~tool_suggestion:"keeper_tasks_list"
+         ~tool_suggestion:task_list_name
          ~hint:
            "The requested lifecycle transition is not valid for the task's current \
             state. Inspect the task status and use a valid next action instead of \
             retrying the same transition."
          ~scope_policy:"observe"
          ~recoverable:false
-         ~alternatives:[ "keeper_tasks_list"; "masc_tasks"; "masc_transition" ]
+         ~alternatives:[ task_list_name; "masc_transition" ]
          ~extra_fields:
            [ "task_id", `String task_id
            ; "action", `String action_s
@@ -861,7 +878,7 @@ let handle_task_history ~tool_name ~start_time ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch ctx ~name ~args : Tool_result.result option =
+let dispatch_with_task_list_projection task_list_projection ctx ~name ~args =
   let start = Time_compat.now () in
   match name with
   | "masc_add_task" -> Some (handle_add_task ~tool_name:name ~start_time:start ctx args)
@@ -871,9 +888,32 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       if String.equal task_id ""
       then Some (handle_claim_next ~tool_name:name ~start_time:start ctx args)
       else Some (handle_claim ~tool_name:name ~start_time:start ctx args)
-  | "masc_transition" -> Some (handle_transition ~tool_name:name ~start_time:start ctx args)
+  | "masc_transition" ->
+    Some
+      (handle_transition
+         ~task_list_projection
+         ~tool_name:name
+         ~start_time:start
+         ctx
+         args)
   | "masc_update_priority" -> Some (handle_update_priority ~tool_name:name ~start_time:start ctx args)
   | "masc_task_set_goal" -> Some (handle_set_goal ~tool_name:name ~start_time:start ctx args)
   | "masc_tasks" -> Some (handle_tasks ~tool_name:name ~start_time:start ctx args)
   | "masc_task_history" -> Some (handle_task_history ~tool_name:name ~start_time:start ctx args)
   | _ -> None
+
+let dispatch ctx ~name ~args =
+  dispatch_with_task_list_projection
+    Tool_capability_projection.External_masc_tasks
+    ctx
+    ~name
+    ~args
+;;
+
+let dispatch_for_keeper ctx ~name ~args =
+  dispatch_with_task_list_projection
+    Tool_capability_projection.Keeper_tasks_list
+    ctx
+    ~name
+    ~args
+;;

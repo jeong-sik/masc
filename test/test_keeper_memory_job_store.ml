@@ -39,7 +39,7 @@ let terminal_receipt
       ?(ended_at = 3.0)
       ?(outcome = Store.Succeeded)
       ?(detail = `Assoc [ "status", `String "ok" ])
-      lease
+      (lease : Store.lease)
   =
   match
     Store.make_terminal_receipt
@@ -53,14 +53,14 @@ let terminal_receipt
     Alcotest.failf "receipt construction failed: %s" (Store.error_to_string error)
 ;;
 
-let stage ~base_path job =
+let stage ~base_path (job : Store.job) =
   match Store.stage_awaiting_turn_commit ~base_path job with
   | Ok admission -> admission
   | Error error ->
     Alcotest.failf "stage failed: %s" (Store.error_to_string error)
 ;;
 
-let activate ~base_path job =
+let activate ~base_path (job : Store.job) =
   match Store.activate ~base_path job with
   | Ok (activation, report) ->
     Alcotest.(check int)
@@ -88,7 +88,7 @@ let check_backlog ~base_path ~keeper_name expected =
     Alcotest.failf "backlog failed: %s" (Store.error_to_string error)
 ;;
 
-let awaiting_path ~base_path job =
+let awaiting_path ~base_path (job : Store.job) =
   Filename.concat
     (Store.For_testing.awaiting_dir
        ~base_path
@@ -96,7 +96,7 @@ let awaiting_path ~base_path job =
     (job.id ^ ".json")
 ;;
 
-let pending_path ~base_path job =
+let pending_path ~base_path (job : Store.job) =
   Filename.concat
     (Store.For_testing.pending_dir
        ~base_path
@@ -147,7 +147,7 @@ let rec json_contains_string needle = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null -> false
 ;;
 
-let operation_path ~base_path job =
+let operation_path ~base_path (job : Store.job) =
   match
     Store.operation_stage_path_for_keepers_dir
       ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)
@@ -159,7 +159,7 @@ let operation_path ~base_path job =
     Alcotest.failf "operation path failed: %s" (Store.error_to_string error)
 ;;
 
-let finish ~base_path receipt =
+let finish ~base_path (receipt : Store.terminal_receipt) =
   match Store.finish ~base_path receipt with
   | Ok report -> report
   | Error error ->

@@ -42,6 +42,11 @@ async function refreshActiveKeeperChatSurface(): Promise<void> {
   refreshActiveKeeperChatHistory()
 }
 
+async function refreshGovernanceSurface(): Promise<void> {
+  const { refreshGovernance } = await import('./components/governance-refresh')
+  await refreshGovernance()
+}
+
 type RefreshTask =
   | 'shell'
   | 'namespaceTruth'
@@ -59,6 +64,7 @@ type RefreshTask =
   | 'operatorWorkspaceDigest'
   | 'fusionRuns'
   | 'activeKeeperChat'
+  | 'governance'
 
 // Monitor data ownership is partitioned by section. Two tiers:
 //   Tier 1 — visible lanes (agents / fleet-health / runtime / observatory)
@@ -74,7 +80,12 @@ const HIDDEN_DIAGNOSTIC_FALLBACK_PLAN: readonly RefreshTask[] = ['namespaceTruth
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
     case 'overview':
-      return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution']
+      // 'fusionRuns' and 'governance' feed the KPI strip + domain cards
+      // (진행 심의 / 열린 승인) that the overview surface renders unconditionally.
+      // Without them here those signals only populate after a Fusion/Approvals
+      // tab visit, so the default landing tab showed 0/empty regardless of the
+      // live fleet state (masc campaign #43).
+      return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution', 'fusionRuns', 'governance']
     case 'keepers':
       // 'activeKeeperChat' re-hydrates the open conversation panel's transcript
       // (guard-respecting no-op when already loaded). It matters on SSE
@@ -186,6 +197,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   operatorWorkspaceDigest: () => { void refreshOperatorWorkspaceDigest({ force: true }) },
   fusionRuns: () => { void refreshFusionRuns() },
   activeKeeperChat: () => { void refreshActiveKeeperChatSurface() },
+  governance: () => { void refreshGovernanceSurface() },
 }
 
 // --- Tab visit counter (localStorage-persisted) ---

@@ -1,38 +1,31 @@
 // MASC Dashboard — Overview (slim home)
 //
-// "What's the party doing today?" in one glance, no scroll.
-// 5 sections, top-to-bottom (V2):
-//   0. Alert Panel     — failing agents and stalled tasks, actionable alerts first
-//   1. (Removed: Highlight moved to Lab)
-//   2. Funnel          — 5 task-count cells (new/active/verify/done/target)
-//   3. Mission party   — one active session (goal, members, progress bar, blocker)
-//   4. Keeper strip    — top three keepers by recent heartbeat
+// "What's the party doing today?" in one glance, no scroll. Rendered sections,
+// top-to-bottom:
+//   - Header       — namespace, keeper count, operator, live clock
+//   - KPI strip    — running / attention / open approvals / top goal /
+//                    active connectors / pending schedule approvals / fusion runs
+//   - Attention    — keepers flagged for operator attention with reason + action
+//   - Telemetry    — deterministic 28-bar trace histogram
+//   - Domain cards — work/approvals/schedule/fusion/board/connectors/fleet summary
 //
-// Keeper-v2 port additions:
-//   - Header surface  — namespace, keeper count, operator, live clock
-//   - KPI strip       — running / attention / context pressure / avg ctx / tasks / traces
-//   - Attention queue — keepers flagged for operator attention with reason + action
-//   - Telemetry bars  — deterministic 28-bar trace histogram
-//   - Keeper fleet    — full keeper grid with status, runtime, context meter
+// Every KPI/card reads its owning domain's projection directly (governance
+// approval queue, gate connectors, scheduled-automation, fusion runs, board
+// total) rather than a parallel derivation — see computeOverviewDigest and the
+// per-panel resources below.
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
-import { tasks, keepers, boardPosts, goals, fusionRuns } from '../../store'
-import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
+import { keepers, boardTotal, goals, fusionRuns } from '../../store'
+import type { Keeper, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type { FusionRunRecord } from '../../api/dashboard'
-import { SYSTEM_ACTOR_NAME } from '../../types/core'
-import type {
-  DashboardMissionResponse,
-  DashboardMissionSessionCard,
-} from '../../types/dashboard-mission'
+import type { KeeperApprovalQueueItem } from '../../types/governance'
 import { useNowSecondsTicker } from '../../lib/now-signal'
-import { keeperDisplayRuntime, keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
-import { isKeeperPaused } from '../../lib/keeper-predicates'
+import { keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
 import { attentionReasonLabel, nextHumanActionLabel } from '../../lib/keeper-attention-labels'
-import { isAgentOffline } from '../../lib/agent-status'
 import { keeperRowLooksRunning } from '../../runtime-counts'
-import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
+import { createAsyncResource, createManagedAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
 import { navigate } from '../../router'
 import type { TabId } from '../../types/sse'
 import {
@@ -44,6 +37,12 @@ import {
 import {
   OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET,
 } from '../../config/constants'
+import { fetchGateConnectors, type GateConnectorsData } from '../../api/gate'
+import { governanceData } from '../governance-signals'
+import { keeperApprovalRiskVisualBand } from '../../lib/governance-risk-level'
+import { toolsData, toolsError } from '../tools/tool-state'
+import { scheduledPendingApprovalCount } from '../tools/scheduled-automation-panel'
+import type { DashboardScheduledAutomation } from '../../api'
 
 // ─── Attention / Keeper v2 helpers ───────────────────────────────────────────
 
@@ -138,56 +137,40 @@ export interface OverviewStats {
   run: number
   att: number
   hot: number
-  avgCtx: number
-  tasks: number
-  traces: number
   total: number
 }
 
-function keeperTraceCount(keeper: Keeper): number {
-  return keeper.total_turns ?? keeper.turn_count ?? keeper.autonomous_turn_count ?? 0
-}
-
-export function keeperRuntimeLabel(keeper: Keeper): string {
-  return keeperDisplayRuntime(keeper)?.value ?? ''
-}
-
-export function computeOverviewStats(keeperList: readonly Keeper[], taskList: readonly Task[]): OverviewStats {
+export function computeOverviewStats(keeperList: readonly Keeper[]): OverviewStats {
   const total = keeperList.length
   const run = keeperList.filter(keeperRowLooksRunning).length
   const att = pickAttentionKeepers(keeperList).length
   const hot = keeperList.filter(k => (k.context_ratio ?? 0) >= 0.85).length
-  const traces = keeperList.reduce((sum, k) => sum + keeperTraceCount(k), 0)
-
-  const keeperNames = new Set(keeperList.map(k => k.name.toLowerCase()))
-  const tasks = taskList.filter(t => t.assignee && keeperNames.has(t.assignee.toLowerCase())).length
-
-  const liveCtx = keeperList.filter(k => keeperRowLooksRunning(k) && typeof k.context_ratio === 'number')
-  const avgCtx = liveCtx.length
-    ? Math.round(liveCtx.reduce((sum, k) => sum + (k.context_ratio ?? 0), 0) / liveCtx.length * 100)
-    : 0
-
-  return { run, att, hot, avgCtx, tasks, traces, total }
+  return { run, att, hot, total }
 }
 
 // ─── Cross-surface digest (overview.jsx:71-92) ───────────────────────────────
 //
-// The prototype reads window.GOALS / APPROVALS / CONNECTORS / FUSION_RUNS etc.
-// from a mock. The live v2 dashboard exposes goals + fusion runs as signals, and
-// surfaces operator-awaiting keepers as the approval queue. Connectors and the
-// scheduled-automation queue have no live store on this surface yet, so their KPI
-// values render as "—" (em dash) rather than inventing data — see CLAUDE.md
-// "Unknown → Permissive Default": absence is shown as unknown, not as 0.
+// Every field reads its owning domain's live projection — the same source its
+// dedicated surface renders from — rather than a parallel derivation:
+//   - openApprovals/approvalsCritical: governanceData.approval_queue (the HITL
+//     queue the Approvals surface itself renders). Earlier this counted
+//     keeper runtime_blocker flags instead, an SSOT-violating projection that
+//     disagreed with the real queue.
+//   - topGoals/topGoalLabel: the `goals` store signal, filtered to active
+//     goals so dropped/done goals cannot occupy the "최우선 목표" slot.
+//   - fusion*: the `fusionRuns` store signal.
 
 export interface OverviewDigest {
-  /** Keepers blocked awaiting an operator decision (the approval queue). */
+  /** Pending HITL approvals — governanceData.approval_queue.length. */
   openApprovals: number
-  /** Whether any awaiting-operator keeper is in a critical (bad) state. */
+  /** True when any pending approval sits in the critical/bad risk band. */
   approvalsCritical: boolean
-  /** Top goals by priority (highest first), up to 3. */
+  /** Top ACTIVE goals by priority (highest first), up to 3. */
   topGoals: Goal[]
-  /** Most urgent goal label for the "최우선 목표" KPI, or null when none. */
+  /** Title of the top-priority active goal, or null when none is active. */
   topGoalLabel: string | null
+  /** Priority of the top-priority active goal (for the KPI's `sub` line). */
+  topGoalPriority: number | null
   /** Fusion runs currently executing. */
   fusionRunning: number
   /** Completed fusion runs (status === 'completed'). */
@@ -206,33 +189,33 @@ function goalPriorityClass(priority: number): 'high' | 'normal' | 'low' {
 }
 
 export function computeOverviewDigest(
-  keeperList: readonly Keeper[],
   goalList: readonly Goal[],
   fusionList: readonly FusionRunRecord[],
+  approvalQueue: readonly KeeperApprovalQueueItem[],
 ): OverviewDigest {
-  const awaiting = keeperList.filter(
-    k => k.runtime_blocker_continue_gate === true || hasOperatorAttentionBlocker(k.runtime_blocker_class),
-  )
-  const approvalsCritical = keeperList.some(
-    k => hasCriticalAttentionBlocker(k.runtime_blocker_class)
-      || k.lifecycle_phase === 'Dead'
-      || k.lifecycle_phase === 'Crashed',
+  const approvalsCritical = approvalQueue.some(
+    item => keeperApprovalRiskVisualBand(item.risk_level) === 'bad',
   )
 
-  // Highest priority first; ties keep input order (stable sort).
-  const topGoals = [...goalList].sort((a, b) => b.priority - a.priority).slice(0, 3)
+  // Active only — dropped/done goals must not occupy the "최우선 목표" slot or
+  // the 작업·목표 domain card's top-3. Highest priority first; ties keep input
+  // order (stable sort).
+  const activeGoals = goalList.filter(g => g.status === 'active')
+  const topGoals = [...activeGoals].sort((a, b) => b.priority - a.priority).slice(0, 3)
   const lead = topGoals[0] ?? null
-  const topGoalLabel = lead ? (lead.due_date ?? `P${lead.priority}`) : null
+  const topGoalLabel = lead ? lead.title : null
+  const topGoalPriority = lead ? lead.priority : null
 
   const fusionRunning = fusionList.filter(r => r.status === 'running').length
   const fusionDone = fusionList.filter(r => r.status === 'completed').length
   const fusionLatest = [...fusionList].sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
 
   return {
-    openApprovals: awaiting.length,
+    openApprovals: approvalQueue.length,
     approvalsCritical,
     topGoals,
     topGoalLabel,
+    topGoalPriority,
     fusionRunning,
     fusionDone,
     fusionTotal: fusionList.length,
@@ -332,315 +315,6 @@ export function buildOverviewTelemetrySnapshot({
   }
 }
 
-// ─── Alert Panel ─────────────────────────────────────────────────────────────
-
-export interface AgentAlert {
-  name: string
-  display: string
-  reason: string
-  severity: 'critical' | 'warn'
-}
-
-export interface TaskAlert {
-  id: string
-  title: string
-  status: string
-  assignee: string | null
-  severity: 'critical' | 'warn'
-  task: Task
-}
-
-/** Derive a list of failing / offline agent alerts from the live agent list. */
-export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
-  return agentList
-    .filter(a => isAgentOffline(a))
-    .map(a => ({
-      name: a.name,
-      display: a.koreanName && a.koreanName !== '' ? a.koreanName : a.name,
-      reason: a.status === 'offline' ? 'Offline' : 'Inactive',
-      severity: 'critical',
-    }))
-}
-
-/** Derive a list of stalled tasks or tasks needing attention. */
-export function deriveTaskAlerts(taskList: readonly Task[], nowMs: number): TaskAlert[] {
-  const STALL_THRESHOLD_MS = 10 * 60 * 1000
-  const alerts: TaskAlert[] = []
-  for (const t of taskList) {
-    if (t.status !== 'awaiting_verification') continue
-    const updated = parseIsoMs(t.updated_at)
-    if (updated !== null && nowMs - updated <= STALL_THRESHOLD_MS) continue
-    alerts.push({
-      id: t.id,
-      title: t.title,
-      status: 'awaiting_verification',
-      assignee: t.assignee ?? null,
-      severity: 'warn',
-      task: t,
-    })
-  }
-  return alerts
-}
-
-export function severityToneClass(severity?: string | null): string {
-  switch ((severity ?? '').toLowerCase()) {
-    case 'critical':
-    case 'high':
-      return 'text-destructive'
-    case 'warn':
-    case 'medium':
-      return 'text-warning'
-    default:
-      return 'text-text-tertiary'
-  }
-}
-
-// ─── Fleet ticker ───────────────────────────────────────────────────────────
-
-export type FleetTickerKind = 'task' | 'message' | 'board' | 'keeper'
-
-export interface FleetTickerEvent {
-  id: string
-  timestamp: string
-  timestampMs: number
-  actor: string
-  label: string
-  text: string
-  kind: FleetTickerKind
-  tone: 'ok' | 'warn' | 'err' | 'info' | 'idle'
-}
-
-function trimTickerText(text: string, max = 96): string {
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  if (normalized.length <= max) return normalized
-  return `${normalized.slice(0, max - 3)}...`
-}
-
-function firstNonEmptyTrimmed(...values: Array<string | null | undefined>): string | null {
-  for (const value of values) {
-    if (typeof value !== 'string') continue
-    const trimmed = value.trim()
-    if (trimmed !== '') return trimmed
-  }
-  return null
-}
-
-function taskTickerTone(status?: Task['status']): FleetTickerEvent['tone'] {
-  switch (status) {
-    case 'done':
-      return 'ok'
-    case 'awaiting_verification':
-      return 'warn'
-    case 'cancelled':
-      return 'err'
-    case 'claimed':
-    case 'in_progress':
-      return 'info'
-    default:
-      return 'idle'
-  }
-}
-
-function keeperTickerTone(status?: string | null): FleetTickerEvent['tone'] {
-  switch ((status ?? '').toLowerCase()) {
-    case 'active':
-    case 'live':
-      return 'ok'
-    case 'busy':
-    case 'executing':
-      return 'info'
-    case 'offline':
-    case 'dead':
-    case 'stopped':
-    case 'unbooted':
-      return 'err'
-    case 'paused':
-    case 'inactive':
-      return 'warn'
-    default:
-      return 'idle'
-  }
-}
-
-function pushTickerEvent(out: FleetTickerEvent[], event: Omit<FleetTickerEvent, 'timestampMs'>) {
-  const timestampMs = parseIsoMs(event.timestamp)
-  if (timestampMs === null) return
-  const text = trimTickerText(event.text)
-  if (text === '') return
-  out.push({ ...event, timestampMs, text })
-}
-
-// Human-readable keeper status, used in the fleet ticker event text.
-function keeperStatusLabel(status?: string | null): string {
-  switch ((status ?? '').toLowerCase()) {
-    case 'active': case 'live': return 'Active'
-    case 'busy': case 'executing': return 'Busy'
-    case 'paused': return 'Paused'
-    case 'offline': return 'Offline'
-    case 'dead': return 'Dead'
-    case 'stopped': return 'Stopped'
-    case 'unbooted': return 'Unbooted'
-    default: return status ?? 'Unknown'
-  }
-}
-
-export function deriveFleetTickerEvents({
-  taskList,
-  messageList,
-  boardPostList,
-  keeperList,
-  max = 6,
-}: {
-  taskList: readonly Task[]
-  messageList: readonly Message[]
-  boardPostList: readonly BoardPost[]
-  keeperList: readonly Keeper[]
-  max?: number
-}): FleetTickerEvent[] {
-  const events: FleetTickerEvent[] = []
-  for (const task of taskList) {
-    const timestamp = task.updated_at ?? task.completed_at ?? task.created_at
-    if (!timestamp) continue
-    pushTickerEvent(events, {
-      id: `task:${task.id}`,
-      timestamp,
-      actor: task.assignee ?? 'unassigned',
-      label: task.status ?? '(unknown status)',
-      text: task.title,
-      kind: 'task',
-      tone: taskTickerTone(task.status),
-    })
-  }
-  for (const message of messageList) {
-    if (!message.timestamp) continue
-    pushTickerEvent(events, {
-      id: `message:${message.id ?? message.seq ?? message.timestamp}`,
-      timestamp: message.timestamp,
-      actor: message.from ?? SYSTEM_ACTOR_NAME,
-      label: message.type ?? '(unknown type)',
-      text: message.content,
-      kind: 'message',
-      tone: 'info',
-    })
-  }
-  for (const post of boardPostList) {
-    pushTickerEvent(events, {
-      id: `board:${post.id}`,
-      timestamp: post.updated_at || post.created_at,
-      actor: firstNonEmptyTrimmed(post.author) ?? 'board',
-      label: post.post_kind ?? '(unknown post_kind)',
-      text: firstNonEmptyTrimmed(post.title, post.content, post.body) ?? '',
-      kind: 'board',
-      tone: post.post_kind === 'system' ? 'warn' : 'info',
-    })
-  }
-  for (const keeper of keeperList) {
-    if (!keeper.last_heartbeat) continue
-    const displayStatus = keeperDisplayStatus(keeper)
-    pushTickerEvent(events, {
-      id: `keeper:${keeper.name}`,
-      timestamp: keeper.last_heartbeat,
-      actor: keeper.koreanName && keeper.koreanName !== '' ? keeper.koreanName : keeper.name,
-      label: 'heartbeat',
-      text: keeperStatusLabel(displayStatus),
-      kind: 'keeper',
-      tone: keeperTickerTone(displayStatus),
-    })
-  }
-  return events
-    .sort((a, b) => b.timestampMs - a.timestampMs)
-    .slice(0, Math.max(0, max))
-}
-
-// ─── Funnel ──────────────────────────────────────────────────────────────────
-
-export interface FunnelCounts {
-  created: number
-  inProgress: number
-  awaiting: number
-  completed: number
-  target: number | null
-}
-
-export function computeFunnelCounts(taskList: readonly Task[], active: DashboardMissionSessionCard | null, nowMs = Date.now()): FunnelCounts {
-  const todayMs = startOfTodayMs(nowMs)
-  let created = 0
-  let inProgress = 0
-  let awaiting = 0
-  let completed = 0
-  for (const t of taskList) {
-    const createdMs = parseIsoMs(t.created_at)
-    if (createdMs !== null && createdMs >= todayMs) created += 1
-    switch (t.status) {
-      case 'claimed':
-      case 'in_progress':
-        inProgress += 1
-        break
-      case 'awaiting_verification':
-        awaiting += 1
-        break
-      case 'done': {
-        const completedMs = parseIsoMs(t.completed_at)
-        if (completedMs !== null && completedMs >= todayMs) completed += 1
-        break
-      }
-    }
-  }
-  const target =
-    typeof active?.required_count === 'number' && active.required_count > 0
-      ? active.required_count
-      : null
-  return { created, inProgress, awaiting, completed, target }
-}
-
-function startOfTodayMs(nowMs: number): number {
-  const d = new Date(nowMs)
-  d.setHours(0, 0, 0, 0)
-  return d.getTime()
-}
-
-function parseIsoMs(iso: string | null | undefined): number | null {
-  if (iso === null || iso === undefined || iso === '') return null
-  const ms = Date.parse(iso)
-  return Number.isFinite(ms) ? ms : null
-}
-
-export function formatTargetRatio(counts: FunnelCounts): string {
-  if (counts.target === null) return String(counts.completed)
-  const pct = Math.min(100, Math.round((counts.completed / counts.target) * 100))
-  return `${counts.completed}/${counts.target} (${pct}%)`
-}
-
-// ─── Mission Party ────────────────────────────────────────────────────────────
-
-export function progressPct(session: DashboardMissionSessionCard | null): number | null {
-  if (!session) return null
-  const req = session.required_count ?? 0
-  if (req <= 0) return null
-  const cur = session.seen_count ?? session.active_count ?? 0
-  return Math.min(100, Math.round((cur / req) * 100))
-}
-
-// ─── Keeper Strip ────────────────────────────────────────────────────────────
-
-export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keeper[] {
-  return [...keeperList]
-    .sort((a, b) => {
-      const tsA = parseIsoMs(a.last_heartbeat) ?? 0
-      const tsB = parseIsoMs(b.last_heartbeat) ?? 0
-      const pausedA = isKeeperPaused(a) ? -1e15 : 0
-      const pausedB = isKeeperPaused(b) ? -1e15 : 0
-      return tsB + pausedB - (tsA + pausedA)
-    })
-    .slice(0, max)
-}
-
-export function pickActiveSession(snap: DashboardMissionResponse | null): DashboardMissionSessionCard | null {
-  if (snap === null) return null
-  const running = snap.sessions.find(s => s.status === 'running' || s.status === 'active' || s.status === 'busy')
-  return running ?? snap.sessions[0] ?? null
-}
-
 // ─── Surface Readiness Summary ───────────────────────────────────────────────
 
 const overviewTelemetryResource: AsyncResource<OverviewTelemetrySnapshot> = createAsyncResource()
@@ -664,6 +338,18 @@ function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
       truncated: telemetry.truncated ?? false,
     })
   })
+}
+
+// ─── Gate connectors (활성 커넥터 KPI + 커넥터 domain card) ───────────────────────
+//
+// Managed (stale-while-revalidate): the previously loaded connector list stays
+// visible while a periodic refetch is in flight, matching the governance/tools
+// resources this surface also reads from.
+
+const overviewConnectorsResource = createManagedAsyncResource<GateConnectorsData>()
+
+function loadOverviewConnectors(): Promise<GateConnectorsData | undefined> {
+  return overviewConnectorsResource.load(signal => fetchGateConnectors(signal))
 }
 
 // ─── Keeper-v2 overview surfaces ─────────────────────────────────────────────
@@ -733,15 +419,25 @@ function OverviewKpi({
 
 // Cross-surface KPI row — overview.jsx:106-114. Seven cells, each a deep link into
 // its surface. Labels and `sub` separators are copied verbatim from the prototype.
-function OverviewKpiStrip({ stats, digest }: { stats: OverviewStats; digest: OverviewDigest }) {
+function OverviewKpiStrip({
+  stats,
+  digest,
+  connectorsData,
+  scheduledPending,
+}: {
+  stats: OverviewStats
+  digest: OverviewDigest
+  connectorsData: GateConnectorsData | null
+  scheduledPending: number
+}) {
   return html`
     <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
       <${OverviewKpi} label="실행 중 keeper" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" onClick=${() => navigate('monitoring')} />
       <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" onClick=${() => navigate('monitoring')} />
       <${OverviewKpi} label="열린 승인" value=${String(digest.openApprovals)} tone=${digest.approvalsCritical ? 'bad' : digest.openApprovals > 0 ? 'warn' : undefined} testId="kpi-approvals" onClick=${() => navigate('approvals')} />
-      <${OverviewKpi} label="최우선 목표" value=${digest.topGoalLabel ?? '—'} tone="volt" testId="kpi-top-goal" onClick=${() => navigate('workspace', { section: 'work' })} />
-      <${OverviewKpi} label="활성 커넥터" value="—" testId="kpi-connectors" onClick=${() => navigate('connectors')} />
-      <${OverviewKpi} label="예약 승인" value="—" testId="kpi-schedule" onClick=${() => navigate('schedule')} />
+      <${OverviewKpi} label="최우선 목표" value=${digest.topGoalLabel ?? '—'} sub=${digest.topGoalPriority !== null ? `P${digest.topGoalPriority}` : undefined} tone="volt" testId="kpi-top-goal" onClick=${() => navigate('workspace', { section: 'work' })} />
+      <${OverviewKpi} label="활성 커넥터" value=${connectorsData ? String(connectorsData.active_count) : '—'} sub=${connectorsData ? ` / ${connectorsData.connectors.length}` : undefined} testId="kpi-connectors" onClick=${() => navigate('connectors')} />
+      <${OverviewKpi} label="예약 승인" value=${String(scheduledPending)} tone=${scheduledPending > 0 ? 'warn' : undefined} testId="kpi-schedule" onClick=${() => navigate('schedule')} />
       <${OverviewKpi} label="진행 심의" value=${String(digest.fusionRunning)} sub=${digest.fusionDone > 0 ? ` · 완료 ${digest.fusionDone}` : undefined} tone=${digest.fusionRunning > 0 ? 'volt' : undefined} testId="kpi-fusion" onClick=${() => navigate('fusion')} />
     </section>
   `
@@ -922,9 +618,19 @@ function DomainCard({
 function OverviewDomainSection({
   stats,
   digest,
+  connectorsData,
+  connectorsError,
+  automation,
+  automationError,
+  scheduledPending,
 }: {
   stats: OverviewStats
   digest: OverviewDigest
+  connectorsData: GateConnectorsData | null
+  connectorsError: string | null
+  automation: DashboardScheduledAutomation | null
+  automationError: string | null
+  scheduledPending: number
 }) {
   return html`
     <h2 class="ov-section-h v2-overview-section-h" data-testid="overview-domains-header">도메인 현황</h2>
@@ -969,10 +675,18 @@ function OverviewDomainSection({
         </div>
       <//>
 
-      <!-- SCHEDULE · overview.jsx:201-215 (no live schedule store yet) -->
+      <!-- SCHEDULE · overview.jsx:201-215 -->
       <${DomainCard} title="예약 · 자동화" linkLabel="예약" nav=${{ tab: 'schedule' }} testId="domain-schedule">
         <div class="ov-mini-list">
-          <div class="ov-mini-empty ov-empty">예약 데이터 미연결</div>
+          ${automation
+            ? html`
+                <div class="ov-mini-row">
+                  <span class="inline-block size-1.5 rounded-full ${scheduledPending > 0 ? 'bg-warning' : 'bg-ok'}"></span>
+                  <span class="ov-mini-txt">${scheduledPending > 0 ? `승인 대기 ${scheduledPending}건` : '승인 대기 없음'}</span>
+                </div>
+                <div class="ov-stat-row"><span class="k">전체 예약</span><span class="v mono">${(automation.requests ?? []).length}</span></div>
+              `
+            : html`<div class="ov-mini-empty ov-empty">${automationError ? `예약 로드 실패: ${automationError}` : '예약 데이터 로드 중'}</div>`}
         </div>
       <//>
 
@@ -1004,13 +718,29 @@ function OverviewDomainSection({
 
       <!-- BOARD · overview.jsx:233-237 -->
       <${DomainCard} title="보드" linkLabel="보드" nav=${{ tab: 'board' }} testId="domain-board">
-        <div class="ov-stat-row"><span class="k">전체 포스트</span><span class="v mono">${boardPosts.value.length}</span></div>
+        <div class="ov-stat-row"><span class="k">전체 포스트</span><span class="v mono">${boardTotal.value !== null ? boardTotal.value : '—'}</span></div>
       <//>
 
-      <!-- CONNECTORS · overview.jsx:240-249 (no live connector store yet) -->
-      <${DomainCard} title="커넥터" linkLabel="커넥터" nav=${{ tab: 'connectors' }} testId="domain-connectors">
+      <!-- CONNECTORS · overview.jsx:240-249 -->
+      <${DomainCard}
+        title="커넥터"
+        count=${connectorsData ? String(connectorsData.active_count) : undefined}
+        tone=${connectorsData ? (connectorsData.active_count > 0 ? 'ok' : 'warn') : undefined}
+        linkLabel="커넥터"
+        nav=${{ tab: 'connectors' }}
+        testId="domain-connectors"
+      >
         <div class="ov-mini-list">
-          <div class="ov-mini-empty ov-empty">커넥터 데이터 미연결</div>
+          ${connectorsData
+            ? connectorsData.connectors.length > 0
+              ? connectorsData.connectors.map(c => html`
+                  <div class="ov-mini-row" key=${c.connector_id}>
+                    <span class="inline-block size-1.5 rounded-full ${c.connected ? 'bg-ok' : 'bg-warning'}"></span>
+                    <span class="ov-mini-txt">${c.display_name}</span>
+                  </div>
+                `)
+              : html`<div class="ov-mini-empty ov-empty">등록된 커넥터 없음</div>`
+            : html`<div class="ov-mini-empty ov-empty">${connectorsError ? `커넥터 로드 실패: ${connectorsError}` : '커넥터 로드 중'}</div>`}
         </div>
       <//>
 
@@ -1039,27 +769,48 @@ export function Overview() {
     }, 60_000)
     return () => window.clearInterval(interval)
   }, [])
-  const taskList = tasks.value
+  // Gate connectors have no global boot-time fetch (unlike governance/tools
+  // below, which app.ts already loads at startup) — this is the only signal
+  // on this surface that needs its own fetch trigger.
+  useEffect(() => {
+    void loadOverviewConnectors()
+    const interval = window.setInterval(() => {
+      void loadOverviewConnectors()
+    }, 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
   const keeperList = keepers.value
   const goalList = goals.value
   const fusionList = fusionRuns.value
-  const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
+  const approvalQueue = governanceData.value?.approval_queue ?? []
+  const stats = useMemo(() => computeOverviewStats(keeperList), [keeperList])
   const digest = useMemo(
-    () => computeOverviewDigest(keeperList, goalList, fusionList),
-    [keeperList, goalList, fusionList],
+    () => computeOverviewDigest(goalList, fusionList, approvalQueue),
+    [goalList, fusionList, approvalQueue],
   )
   const telemetry = overviewTelemetryResource.state.value
+  const connectors = overviewConnectorsResource.state.value
+  const automation = toolsData.value?.scheduled_automation ?? null
+  const scheduledPending = scheduledPendingApprovalCount(automation)
 
   return html`
     <main class="ov v2-overview-surface ss-surface text-text-primary" data-testid="overview-surface">
       <div class="ov-scroll v2-overview-scroll">
         <${OverviewHeader} />
-        <${OverviewKpiStrip} stats=${stats} digest=${digest} />
+        <${OverviewKpiStrip} stats=${stats} digest=${digest} connectorsData=${connectors.data} scheduledPending=${scheduledPending} />
         <div class="ov-grid v2-overview-primary-grid" data-testid="overview-primary-grid">
           <${OverviewAttentionPanel} keeperList=${keeperList} />
           <${OverviewTelemetry} telemetry=${telemetry} />
         </div>
-        <${OverviewDomainSection} stats=${stats} digest=${digest} />
+        <${OverviewDomainSection}
+          stats=${stats}
+          digest=${digest}
+          connectorsData=${connectors.data}
+          connectorsError=${connectors.error}
+          automation=${automation}
+          automationError=${toolsError.value}
+          scheduledPending=${scheduledPending}
+        />
       </div>
     </main>
   `

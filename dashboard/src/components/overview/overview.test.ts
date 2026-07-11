@@ -1,42 +1,58 @@
 import { h } from 'preact'
-import { cleanup, render } from '@testing-library/preact'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, render, waitFor } from '@testing-library/preact'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// Gate connectors have no global boot-time fetch (unlike governance/tools,
+// which app.ts loads at app-mount and this test file never mounts), so
+// Overview's own useEffect calls fetchGateConnectors directly. Mock it here so
+// (a) the blocked-fetch guard in vitest-setup.ts never fires and (b) the
+// "live payload" tests below can control what it resolves to. Default: an
+// empty-but-successful connector list, harmless for every test that does not
+// care about connector content.
+const { mockFetchGateConnectors } = vi.hoisted(() => ({
+  mockFetchGateConnectors: vi.fn().mockResolvedValue({
+    connectors: [],
+    total: 0,
+    active_count: 0,
+    discord_trigger_policy: 'unknown',
+    generated_at: '2026-01-01T00:00:00Z',
+  }),
+}))
+vi.mock('../../api/gate', () => ({
+  fetchGateConnectors: mockFetchGateConnectors,
+}))
+
+// toolsData/toolsError back the 예약 승인 KPI + 예약·자동화 card. The
+// underlying resource in tool-state.ts is not exported (by design — every
+// other consumer reads the computed signal, not the resource), so the module
+// is mocked with a plain mutable `{ value }` stand-in tests can set directly
+// before render, mirroring components/keeper-shared.test.ts's convention.
+const { mockedToolsData } = vi.hoisted(() => ({
+  mockedToolsData: { value: null as unknown },
+}))
+vi.mock('../tools/tool-state', () => ({
+  toolsData: mockedToolsData,
+  toolsError: { value: null },
+}))
+
 import {
-  computeFunnelCounts,
-  formatTargetRatio,
-  pickActiveSession,
-  progressPct,
-  pickActiveKeepers,
-  severityToneClass,
-  deriveAgentAlerts,
-  deriveTaskAlerts,
-  deriveFleetTickerEvents,
   deriveKeeperAttentionReason,
   pickAttentionKeepers,
   computeOverviewStats,
   computeOverviewDigest,
   buildOverviewTelemetrySnapshot,
-  keeperRuntimeLabel,
   OVERVIEW_TELEMETRY_BAR_COUNT,
   OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET,
   OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT,
-  type FunnelCounts,
   Overview,
 } from './overview'
 import type { FusionRunRecord, TelemetryEntry, TelemetrySourceSummary } from '../../api/dashboard'
-import { keepers } from '../../store'
-import type { Goal } from '../../types/core'
-
-// bar-seg ratio helper (mirrors FunnelCard inline logic)
-function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting' | 'completed'): number {
-  const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
-  return total > 0 ? (counts[key] / total) * 100 : 0
-}
-import type { Agent, Task, Keeper, Message, BoardPost } from '../../types/core'
-import type {
-  DashboardMissionResponse,
-  DashboardMissionSessionCard,
-} from '../../types/dashboard-mission'
+import type { DashboardScheduledAutomation, DashboardScheduledAutomationRequest } from '../../api'
+import { keepers, goals, boardTotal } from '../../store'
+import type { Keeper, Goal } from '../../types/core'
+import { governanceResource } from '../governance-signals'
+import type { DashboardGovernanceResponse, KeeperApprovalQueueItem } from '../../types'
+import type { GateConnectorInfo, GateConnectorsData } from '../../api/gate'
 
 const FIXED_NOW = new Date(2026, 3, 18, 10, 0, 0, 0).getTime()
 
@@ -52,469 +68,9 @@ function localIsoAt(
   return d.toISOString()
 }
 
-function makeSession(partial: Partial<DashboardMissionSessionCard>): DashboardMissionSessionCard {
-  return {
-    session_id: 's-1',
-    goal: 'default goal',
-    member_names: [],
-    related_attention_count: 0,
-    member_previews: [],
-    operation_badges: [],
-    keeper_refs: [],
-    ...partial,
-  }
-}
-
-function makeTask(partial: Partial<Task>): Task {
-  return { id: 't-1', title: 't', ...partial }
-}
-
 function makeKeeper(partial: Partial<Keeper>): Keeper {
   return { name: 'k', status: 'active', ...partial }
 }
-
-function makeMessage(partial: Partial<Message>): Message {
-  return { id: 'm-1', content: 'message', ...partial }
-}
-
-function makeBoardPost(partial: Partial<BoardPost>): BoardPost {
-  return {
-    id: 'p-1',
-    author: 'keeper',
-    title: 'post',
-    body: 'body',
-    content: 'content',
-    tags: [],
-    votes: 0,
-    comment_count: 0,
-    created_at: localIsoAt(1),
-    updated_at: localIsoAt(1),
-    ...partial,
-  }
-}
-
-describe('computeFunnelCounts', () => {
-  it('counts today-created tasks regardless of status', () => {
-    const tasks = [
-      makeTask({ id: 'a', created_at: localIsoAt(1), status: 'todo' }),
-      makeTask({ id: 'b', created_at: localIsoAt(9, 59), status: 'in_progress' }),
-      makeTask({ id: 'c', created_at: localIsoAt(23, 59, 59, -1), status: 'todo' }),
-    ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
-    expect(counts.created).toBe(2)
-  })
-
-  it('groups claimed + in_progress as inProgress', () => {
-    const tasks = [
-      makeTask({ id: 'a', status: 'claimed' }),
-      makeTask({ id: 'b', status: 'in_progress' }),
-      makeTask({ id: 'c', status: 'todo' }),
-    ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
-    expect(counts.inProgress).toBe(2)
-  })
-
-  it('separates awaiting_verification from other statuses', () => {
-    const tasks = [
-      makeTask({ id: 'a', status: 'awaiting_verification' }),
-      makeTask({ id: 'b', status: 'done', completed_at: localIsoAt(5) }),
-    ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
-    expect(counts.awaiting).toBe(1)
-    expect(counts.completed).toBe(1)
-  })
-
-  it('counts only today-completed done tasks', () => {
-    const tasks = [
-      makeTask({ id: 'a', status: 'done', completed_at: localIsoAt(5) }),
-      makeTask({ id: 'b', status: 'done', completed_at: localIsoAt(23, 0, 0, -1) }),
-      makeTask({ id: 'c', status: 'done' }),
-    ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
-    expect(counts.completed).toBe(1)
-  })
-
-  it('takes target from active session required_count when positive', () => {
-    const active = makeSession({ required_count: 12 })
-    const counts = computeFunnelCounts([], active, FIXED_NOW)
-    expect(counts.target).toBe(12)
-  })
-
-  it('returns null target when required_count is 0 or missing', () => {
-    expect(computeFunnelCounts([], makeSession({ required_count: 0 }), FIXED_NOW).target).toBeNull()
-    expect(computeFunnelCounts([], makeSession({}), FIXED_NOW).target).toBeNull()
-    expect(computeFunnelCounts([], null, FIXED_NOW).target).toBeNull()
-  })
-
-  it('ignores invalid ISO timestamps', () => {
-    const tasks = [
-      makeTask({ id: 'a', created_at: 'not-a-date', status: 'todo' }),
-      makeTask({ id: 'b', created_at: '', status: 'done', completed_at: 'nope' }),
-    ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
-    expect(counts.created).toBe(0)
-    expect(counts.completed).toBe(0)
-  })
-
-  it('bar-seg ratio sums to ~100% across all funnel stages', () => {
-    const tasks = [
-      makeTask({ id: 'a', created_at: localIsoAt(1), status: 'in_progress' }),
-      makeTask({ id: 'b', created_at: localIsoAt(2), status: 'awaiting_verification' }),
-      makeTask({ id: 'c', created_at: localIsoAt(3), status: 'done', completed_at: localIsoAt(4) }),
-    ]
-    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
-    const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
-    const pcts = [counts.inProgress, counts.awaiting, counts.completed, counts.created]
-      .map(n => total > 0 ? (n / total) * 100 : 0)
-    const sum = pcts.reduce((a, b) => a + b, 0)
-    expect(Math.round(sum)).toBe(100)
-  })
-
-  it('bar-seg ratio returns 0 when funnel is empty', () => {
-    const counts = computeFunnelCounts([], null, FIXED_NOW)
-    expect(segPct(counts, 'created')).toBe(0)
-    expect(segPct(counts, 'completed')).toBe(0)
-  })
-})
-
-describe('formatTargetRatio', () => {
-  const base: FunnelCounts = {
-    created: 0,
-    inProgress: 0,
-    awaiting: 0,
-    completed: 0,
-    target: null,
-  }
-
-  it('returns just the completed count when target is null', () => {
-    expect(formatTargetRatio({ ...base, completed: 3 })).toBe('3')
-  })
-
-  it('formats ratio as n/m (p%)', () => {
-    expect(formatTargetRatio({ ...base, completed: 4, target: 10 })).toBe('4/10 (40%)')
-  })
-
-  it('caps percentage at 100 when completed exceeds target', () => {
-    expect(formatTargetRatio({ ...base, completed: 20, target: 5 })).toBe('20/5 (100%)')
-  })
-})
-
-describe('pickActiveSession', () => {
-  it('returns null for null snapshot', () => {
-    expect(pickActiveSession(null)).toBeNull()
-  })
-
-  it('returns null for empty sessions', () => {
-    const snap = { sessions: [] } as unknown as DashboardMissionResponse
-    expect(pickActiveSession(snap)).toBeNull()
-  })
-
-  it('prefers first session with active/running/busy status', () => {
-    const a = makeSession({ session_id: 'a', status: 'paused' })
-    const b = makeSession({ session_id: 'b', status: 'running' })
-    const c = makeSession({ session_id: 'c', status: 'active' })
-    const snap = { sessions: [a, b, c] } as unknown as DashboardMissionResponse
-    expect(pickActiveSession(snap)?.session_id).toBe('b')
-  })
-
-  it('falls back to first session when none are active', () => {
-    const a = makeSession({ session_id: 'a', status: 'paused' })
-    const b = makeSession({ session_id: 'b', status: 'paused' })
-    const snap = { sessions: [a, b] } as unknown as DashboardMissionResponse
-    expect(pickActiveSession(snap)?.session_id).toBe('a')
-  })
-})
-
-describe('progressPct', () => {
-  it('returns null when no active session', () => {
-    expect(progressPct(null)).toBeNull()
-  })
-
-  it('returns null when required_count is missing or zero', () => {
-    expect(progressPct(makeSession({}))).toBeNull()
-    expect(progressPct(makeSession({ required_count: 0 }))).toBeNull()
-  })
-
-  it('computes seen/required rounded-[var(--r-1)] percentage', () => {
-    expect(progressPct(makeSession({ required_count: 10, seen_count: 3 }))).toBe(30)
-    expect(progressPct(makeSession({ required_count: 4, seen_count: 1 }))).toBe(25)
-  })
-
-  it('falls back to active_count when seen_count is missing', () => {
-    expect(progressPct(makeSession({ required_count: 10, active_count: 4 }))).toBe(40)
-  })
-
-  it('caps percentage at 100', () => {
-    expect(progressPct(makeSession({ required_count: 3, seen_count: 10 }))).toBe(100)
-  })
-})
-
-describe('pickActiveKeepers', () => {
-  it('returns empty when no keepers', () => {
-    expect(pickActiveKeepers([])).toEqual([])
-  })
-
-  it('sorts by latest heartbeat descending', () => {
-    const keepers: Keeper[] = [
-      makeKeeper({ name: 'old', last_heartbeat: '2026-04-18T08:00:00+09:00' }),
-      makeKeeper({ name: 'new', last_heartbeat: '2026-04-18T09:59:00+09:00' }),
-      makeKeeper({ name: 'middle', last_heartbeat: '2026-04-18T09:00:00+09:00' }),
-    ]
-    const picked = pickActiveKeepers(keepers, 3)
-    expect(picked.map(k => k.name)).toEqual(['new', 'middle', 'old'])
-  })
-
-  it('deprioritizes paused keepers even with recent heartbeat', () => {
-    const keepers: Keeper[] = [
-      makeKeeper({
-        name: 'paused-recent',
-        paused: true,
-        last_heartbeat: '2026-04-18T09:59:00+09:00',
-      }),
-      makeKeeper({ name: 'active-older', last_heartbeat: '2026-04-18T08:00:00+09:00' }),
-    ]
-    const picked = pickActiveKeepers(keepers, 2)
-    expect(picked[0]?.name).toBe('active-older')
-  })
-
-  it('deprioritizes phase-paused keepers even when the paused flag is absent', () => {
-    const keepers: Keeper[] = [
-      makeKeeper({
-        name: 'phase-paused-recent',
-        status: 'offline',
-        phase: 'Paused',
-        pipeline_stage: 'paused',
-        last_heartbeat: '2026-04-18T09:59:00+09:00',
-      }),
-      makeKeeper({ name: 'active-older', status: 'busy', last_heartbeat: '2026-04-18T08:00:00+09:00' }),
-    ]
-    const picked = pickActiveKeepers(keepers, 2)
-    expect(picked[0]?.name).toBe('active-older')
-  })
-
-  it('respects max parameter', () => {
-    const keepers: Keeper[] = Array.from({ length: 5 }, (_, i) =>
-      makeKeeper({ name: `k${i}`, last_heartbeat: `2026-04-18T0${i}:00:00+09:00` }),
-    )
-    expect(pickActiveKeepers(keepers, 2)).toHaveLength(2)
-  })
-})
-
-describe('deriveFleetTickerEvents', () => {
-  it('combines recent task, message, board, and keeper events in newest-first order', () => {
-    const events = deriveFleetTickerEvents({
-      taskList: [makeTask({ id: 'task-old', title: 'Old task', updated_at: localIsoAt(1), status: 'in_progress' })],
-      messageList: [makeMessage({ id: 'msg-new', from: 'sangsu', content: 'new message', timestamp: localIsoAt(4) })],
-      boardPostList: [makeBoardPost({ id: 'post-mid', title: 'Board post', updated_at: localIsoAt(3), created_at: localIsoAt(2) })],
-      keeperList: [makeKeeper({ name: 'keeper-mid', last_heartbeat: localIsoAt(2), status: 'active' })],
-    })
-
-    expect(events.map(event => event.id)).toEqual([
-      'message:msg-new',
-      'board:post-mid',
-      'keeper:keeper-mid',
-      'task:task-old',
-    ])
-  })
-
-  it('drops events without valid timestamps or readable text', () => {
-    const events = deriveFleetTickerEvents({
-      taskList: [makeTask({ id: 'bad-task', title: 'Bad', updated_at: 'not-a-date' })],
-      messageList: [makeMessage({ id: 'blank-message', content: '   ', timestamp: localIsoAt(4) })],
-      boardPostList: [makeBoardPost({ id: 'blank-post', title: '', body: '', content: '', updated_at: localIsoAt(3) })],
-      keeperList: [makeKeeper({ name: 'no-heartbeat' })],
-    })
-
-    expect(events).toEqual([])
-  })
-
-  it('uses trimmed board content fallback when title or author is whitespace', () => {
-    const events = deriveFleetTickerEvents({
-      taskList: [],
-      messageList: [],
-      boardPostList: [
-        makeBoardPost({
-          id: 'post-whitespace-title',
-          author: '   ',
-          title: '   ',
-          content: '  usable content  ',
-          body: 'body fallback',
-          updated_at: localIsoAt(3),
-        }),
-      ],
-      keeperList: [],
-    })
-
-    expect(events).toHaveLength(1)
-    expect(events[0]?.id).toBe('board:post-whitespace-title')
-    expect(events[0]?.actor).toBe('board')
-    expect(events[0]?.text).toBe('usable content')
-  })
-
-  it('limits output and maps operational tones', () => {
-    const events = deriveFleetTickerEvents({
-      max: 2,
-      taskList: [
-        makeTask({ id: 'done', title: 'Done task', updated_at: localIsoAt(4), status: 'done' }),
-        makeTask({ id: 'verify', title: 'Verify task', updated_at: localIsoAt(3), status: 'awaiting_verification' }),
-        makeTask({ id: 'cancelled', title: 'Cancelled task', updated_at: localIsoAt(2), status: 'cancelled' }),
-      ],
-      messageList: [],
-      boardPostList: [],
-      keeperList: [],
-    })
-
-    expect(events).toHaveLength(2)
-    expect(events.map(event => event.id)).toEqual(['task:done', 'task:verify'])
-    expect(events.map(event => event.tone)).toEqual(['ok', 'warn'])
-  })
-
-  it('uses keeper pause truth for heartbeat ticker text and tone', () => {
-    const events = deriveFleetTickerEvents({
-      taskList: [],
-      messageList: [],
-      boardPostList: [],
-      keeperList: [
-        makeKeeper({
-          name: 'sangsu',
-          status: 'offline',
-          phase: 'Paused',
-          pipeline_stage: 'paused',
-          last_heartbeat: localIsoAt(4),
-          agent: { exists: true, status: 'busy' },
-        }),
-      ],
-    })
-
-    expect(events).toHaveLength(1)
-    expect(events[0]?.text).toBe('Paused')
-    expect(events[0]?.tone).toBe('warn')
-  })
-})
-
-describe('severityToneClass', () => {
-  it.each<[string | null | undefined, string]>([
-    ['critical', 'text-destructive'],
-    ['HIGH', 'text-destructive'],
-    ['warn', 'text-warning'],
-    ['medium', 'text-warning'],
-    ['info', 'text-text-tertiary'],
-    ['', 'text-text-tertiary'],
-    [null, 'text-text-tertiary'],
-    [undefined, 'text-text-tertiary'],
-  ])('maps severity %s to expected tone', (input, expected) => {
-    expect(severityToneClass(input)).toBe(expected)
-  })
-})
-
-// ─── Alert Panel helpers ──────────────────────────────────────────────────────
-
-function makeAgent(partial: Partial<Agent> = {}): Agent {
-  return { name: 'agent-1', current_task: null, ...partial }
-}
-
-describe('deriveAgentAlerts', () => {
-  it('returns empty array when no agents', () => {
-    expect(deriveAgentAlerts([])).toEqual([])
-  })
-
-  it('returns empty array when all agents are healthy', () => {
-    const agents: Agent[] = [
-      makeAgent({ name: 'a1', status: 'active' }),
-      makeAgent({ name: 'a2', status: 'busy' }),
-      makeAgent({ name: 'a3', status: 'idle' }),
-    ]
-    expect(deriveAgentAlerts(agents)).toHaveLength(0)
-  })
-
-  it('returns critical alert for offline agent', () => {
-    const alerts = deriveAgentAlerts([makeAgent({ name: 'a1', status: 'offline' })])
-    expect(alerts).toHaveLength(1)
-    expect(alerts[0]!.severity).toBe('critical')
-    expect(alerts[0]!.name).toBe('a1')
-    expect(alerts[0]!.reason).toBe('Offline')
-  })
-
-  it('returns critical alert for inactive agent', () => {
-    const alerts = deriveAgentAlerts([makeAgent({ name: 'a1', status: 'inactive' })])
-    expect(alerts).toHaveLength(1)
-    expect(alerts[0]!.severity).toBe('critical')
-    expect(alerts[0]!.reason).toBe('Inactive')
-  })
-
-  it('uses koreanName as display when available', () => {
-    const alerts = deriveAgentAlerts([makeAgent({ name: 'a1', status: 'offline', koreanName: '수호자' })])
-    expect(alerts[0]!.display).toBe('수호자')
-  })
-
-  it('falls back to name when koreanName is empty', () => {
-    const alerts = deriveAgentAlerts([makeAgent({ name: 'a1', status: 'offline', koreanName: '' })])
-    expect(alerts[0]!.display).toBe('a1')
-  })
-
-  it('returns multiple alerts for multiple failing agents', () => {
-    const agents: Agent[] = [
-      makeAgent({ name: 'a1', status: 'offline' }),
-      makeAgent({ name: 'a2', status: 'inactive' }),
-      makeAgent({ name: 'a3', status: 'active' }),
-    ]
-    expect(deriveAgentAlerts(agents)).toHaveLength(2)
-  })
-})
-
-describe('deriveTaskAlerts', () => {
-  const NOW = new Date('2026-04-18T12:00:00Z').getTime()
-  const STALE_UPDATED = new Date('2026-04-18T11:00:00Z').toISOString() // 60 min ago → stale
-  const FRESH_UPDATED = new Date('2026-04-18T11:55:00Z').toISOString() // 5 min ago → not stale
-
-  it('returns empty array when no tasks', () => {
-    expect(deriveTaskAlerts([], NOW)).toEqual([])
-  })
-
-  it('returns empty array when no awaiting_verification tasks', () => {
-    const tasks: Task[] = [makeTask({ status: 'in_progress' }), makeTask({ status: 'done' })]
-    expect(deriveTaskAlerts(tasks, NOW)).toHaveLength(0)
-  })
-
-  it('returns warn alert for stale awaiting_verification task', () => {
-    const tasks: Task[] = [makeTask({ id: 't1', status: 'awaiting_verification', updated_at: STALE_UPDATED })]
-    const alerts = deriveTaskAlerts(tasks, NOW)
-    expect(alerts).toHaveLength(1)
-    expect(alerts[0]!.severity).toBe('warn')
-    expect(alerts[0]!.status).toBe('awaiting_verification')
-  })
-
-  it('does not alert for recently updated awaiting_verification task', () => {
-    const tasks: Task[] = [makeTask({ id: 't1', status: 'awaiting_verification', updated_at: FRESH_UPDATED })]
-    expect(deriveTaskAlerts(tasks, NOW)).toHaveLength(0)
-  })
-
-  it('treats missing updated_at as stale', () => {
-    const tasks: Task[] = [makeTask({ id: 't1', status: 'awaiting_verification' })]
-    const alerts = deriveTaskAlerts(tasks, NOW)
-    expect(alerts).toHaveLength(1)
-  })
-
-  it('treats invalid updated_at as stale', () => {
-    const tasks: Task[] = [
-      makeTask({ id: 't1', status: 'awaiting_verification', updated_at: 'not-a-date' }),
-    ]
-    const alerts = deriveTaskAlerts(tasks, NOW)
-    expect(alerts).toHaveLength(1)
-  })
-
-  it('returns task id and title in alert', () => {
-    const tasks: Task[] = [makeTask({ id: 't99', title: 'Fix bug', status: 'awaiting_verification', updated_at: STALE_UPDATED })]
-    const alerts = deriveTaskAlerts(tasks, NOW)
-    expect(alerts[0]!.id).toBe('t99')
-    expect(alerts[0]!.title).toBe('Fix bug')
-  })
-
-  it('returns assignee in alert when present', () => {
-    const tasks: Task[] = [makeTask({ id: 't1', status: 'awaiting_verification', updated_at: STALE_UPDATED, assignee: 'agent-x' })]
-    expect(deriveTaskAlerts(tasks, NOW)[0]!.assignee).toBe('agent-x')
-  })
-})
 
 describe('deriveKeeperAttentionReason', () => {
   it('returns default warn reason when keeper has no attention signal', () => {
@@ -601,67 +157,23 @@ describe('pickAttentionKeepers', () => {
 
 describe('computeOverviewStats', () => {
   it('returns zeroed stats when empty', () => {
-    expect(computeOverviewStats([], [])).toEqual({
+    expect(computeOverviewStats([])).toEqual({
       run: 0,
       att: 0,
       hot: 0,
-      avgCtx: 0,
-      tasks: 0,
-      traces: 0,
       total: 0,
     })
   })
 
   it('counts running keepers and context pressure', () => {
     const keepers = [
-      makeKeeper({ name: 'a', status: 'active', context_ratio: 0.9, total_turns: 10 }),
-      makeKeeper({ name: 'b', status: 'offline', context_ratio: 0.5, total_turns: 5 }),
+      makeKeeper({ name: 'a', status: 'active', context_ratio: 0.9 }),
+      makeKeeper({ name: 'b', status: 'offline', context_ratio: 0.5 }),
     ]
-    const stats = computeOverviewStats(keepers, [])
+    const stats = computeOverviewStats(keepers)
     expect(stats.run).toBe(1)
     expect(stats.total).toBe(2)
     expect(stats.hot).toBe(1)
-    expect(stats.traces).toBe(15)
-  })
-
-  it('counts tasks assigned to keepers', () => {
-    const keepers = [makeKeeper({ name: 'a' })]
-    const taskList = [
-      makeTask({ id: 't1', assignee: 'a' }),
-      makeTask({ id: 't2', assignee: 'a' }),
-      makeTask({ id: 't3', assignee: 'other' }),
-    ]
-    expect(computeOverviewStats(keepers, taskList).tasks).toBe(2)
-  })
-
-  it('computes average context of running keepers', () => {
-    const keepers = [
-      makeKeeper({ name: 'a', status: 'active', context_ratio: 0.8 }),
-      makeKeeper({ name: 'b', status: 'active', context_ratio: 0.6 }),
-    ]
-    expect(computeOverviewStats(keepers, []).avgCtx).toBe(70)
-  })
-})
-
-describe('keeperRuntimeLabel', () => {
-  it('uses the shared runtime display priority', () => {
-    expect(keeperRuntimeLabel(makeKeeper({
-      runtime_canonical: 'oas.primary',
-      selected_runtime_canonical: 'oas.secondary',
-      runtime_id: 'legacy.runtime',
-    }))).toBe('oas.primary')
-  })
-
-  it('does not expose raw keeper model fields as runtime labels', () => {
-    expect(keeperRuntimeLabel(makeKeeper({
-      active_model_label: 'deepseek-v4-flash',
-      active_model: 'claude-sonnet-4',
-      model: 'fallback',
-    }))).toBe('')
-  })
-
-  it('returns an empty string when no runtime field is present', () => {
-    expect(keeperRuntimeLabel(makeKeeper({}))).toBe('')
   })
 })
 
@@ -825,6 +337,16 @@ function makeFusionRun(partial: Partial<FusionRunRecord>): FusionRunRecord {
   }
 }
 
+function queueItem(overrides: Partial<KeeperApprovalQueueItem> = {}): KeeperApprovalQueueItem {
+  return {
+    id: 'q-1',
+    keeper_name: 'sangsu',
+    tool_name: 'fs_write',
+    risk_level: 'low',
+    ...overrides,
+  }
+}
+
 describe('computeOverviewDigest', () => {
   it('returns zeroed digest with no data', () => {
     const digest = computeOverviewDigest([], [], [])
@@ -832,63 +354,62 @@ describe('computeOverviewDigest', () => {
     expect(digest.approvalsCritical).toBe(false)
     expect(digest.topGoals).toEqual([])
     expect(digest.topGoalLabel).toBeNull()
+    expect(digest.topGoalPriority).toBeNull()
     expect(digest.fusionRunning).toBe(0)
     expect(digest.fusionDone).toBe(0)
     expect(digest.fusionTotal).toBe(0)
     expect(digest.fusionLatest).toBeNull()
   })
 
-  it('counts operator-awaiting keepers as open approvals', () => {
-    const digest = computeOverviewDigest(
-      [
-        makeKeeper({ name: 'gate', runtime_blocker_continue_gate: true }),
-        makeKeeper({ name: 'op', runtime_blocker_class: 'awaiting_operator' }),
-        makeKeeper({ name: 'fine' }),
-      ],
-      [],
-      [],
-    )
+  it('counts the governance approval queue as open approvals', () => {
+    const digest = computeOverviewDigest([], [], [queueItem({ id: 'a' }), queueItem({ id: 'b' })])
     expect(digest.openApprovals).toBe(2)
     expect(digest.approvalsCritical).toBe(false)
   })
 
-  it('flags approvals critical when a keeper is in a bad runtime state', () => {
-    const digest = computeOverviewDigest(
-      [makeKeeper({ name: 'dead', lifecycle_phase: 'Dead', runtime_blocker_class: 'exception' })],
-      [],
-      [],
-    )
+  it('flags approvals critical when any queued item sits in the bad risk band', () => {
+    const digest = computeOverviewDigest([], [], [queueItem({ id: 'a', risk_level: 'critical' })])
     expect(digest.approvalsCritical).toBe(true)
   })
 
-  it('orders top goals by priority and labels the leader by due date', () => {
+  it('orders top ACTIVE goals by priority and labels the leader by title', () => {
     const digest = computeOverviewDigest(
-      [],
       [
         makeGoal({ id: 'low', priority: 2 }),
-        makeGoal({ id: 'lead', priority: 9, due_date: '2026-07-01' }),
+        makeGoal({ id: 'lead', priority: 9, title: '핵심 목표' }),
         makeGoal({ id: 'mid', priority: 5 }),
       ],
       [],
+      [],
     )
     expect(digest.topGoals.map(g => g.id)).toEqual(['lead', 'mid', 'low'])
-    expect(digest.topGoalLabel).toBe('2026-07-01')
+    expect(digest.topGoalLabel).toBe('핵심 목표')
+    expect(digest.topGoalPriority).toBe(9)
   })
 
-  it('falls back to priority label when the leader has no due date', () => {
-    const digest = computeOverviewDigest([], [makeGoal({ id: 'lead', priority: 8, due_date: null })], [])
-    expect(digest.topGoalLabel).toBe('P8')
+  it('excludes dropped/done goals from the top-goal slot even at higher priority', () => {
+    const digest = computeOverviewDigest(
+      [
+        makeGoal({ id: 'dropped-high', priority: 9, status: 'dropped', title: '취소된 목표' }),
+        makeGoal({ id: 'active-lead', priority: 7, status: 'active', title: '활성 목표' }),
+      ],
+      [],
+      [],
+    )
+    expect(digest.topGoals.map(g => g.id)).toEqual(['active-lead'])
+    expect(digest.topGoalLabel).toBe('활성 목표')
+    expect(digest.topGoalPriority).toBe(7)
   })
 
   it('summarizes fusion runs by status and picks the newest as latest', () => {
     const digest = computeOverviewDigest(
-      [],
       [],
       [
         makeFusionRun({ runId: 'older', status: 'completed', startedAt: 100 }),
         makeFusionRun({ runId: 'newest', status: 'running', startedAt: 300 }),
         makeFusionRun({ runId: 'mid', status: 'running', startedAt: 200 }),
       ],
+      [],
     )
     expect(digest.fusionRunning).toBe(2)
     expect(digest.fusionDone).toBe(1)
@@ -1012,5 +533,150 @@ describe('Overview prototype surface', () => {
     } finally {
       keepers.value = previousKeepers
     }
+  })
+})
+
+// ─── KPI/domain card wiring from live payloads (masc campaign #43) ────────────
+//
+// governanceData/goals/boardTotal are real store signals — Overview's own
+// render tree never fetches them (app.ts does, at boot, outside this test),
+// so tests seed the signal directly. Gate connectors are the one signal
+// Overview itself fetches (see loadOverviewConnectors), so that case mocks
+// fetchGateConnectors and drives the real effect via waitFor instead.
+
+function gateConnector(overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo {
+  return {
+    connector_id: 'discord',
+    display_name: 'Discord',
+    connected: true,
+    available: true,
+    ...overrides,
+  } as GateConnectorInfo
+}
+
+function gateConnectorsData(connectors: GateConnectorInfo[]): GateConnectorsData {
+  return {
+    connectors,
+    total: connectors.length,
+    active_count: connectors.filter(c => c.connected).length,
+    discord_trigger_policy: 'mention',
+    generated_at: '2026-07-11T00:00:00Z',
+  }
+}
+
+function scheduledRequest(overrides: Partial<DashboardScheduledAutomationRequest> = {}): DashboardScheduledAutomationRequest {
+  return {
+    schedule_id: 's-1',
+    status: 'pending_approval',
+    risk_class: 'low',
+    approval_required: true,
+    source: 'keeper',
+    ...overrides,
+  }
+}
+
+function scheduledAutomation(requests: DashboardScheduledAutomationRequest[]): DashboardScheduledAutomation {
+  return {
+    request_count: requests.length,
+    request_limit: 100,
+    truncated: false,
+    counts: {},
+    fsm: { state: 'idle', active_count: 0, terminal_count: 0 },
+    requests,
+  }
+}
+
+function governanceResponse(approvalQueue: KeeperApprovalQueueItem[]): DashboardGovernanceResponse {
+  return { approval_queue: approvalQueue }
+}
+
+describe('Overview KPI + domain card wiring (live payloads)', () => {
+  afterEach(() => {
+    cleanup()
+    governanceResource.reset(null)
+    keepers.value = []
+    goals.value = []
+    boardTotal.value = null
+    mockedToolsData.value = null
+    mockFetchGateConnectors.mockClear()
+  })
+
+  it('renders 열린 승인 KPI + 승인 큐 card from governanceData.approval_queue, not keeper blocker flags', () => {
+    governanceResource.state.value = {
+      data: governanceResponse([
+        queueItem({ id: 'a', risk_level: 'low' }),
+        queueItem({ id: 'b', risk_level: 'critical' }),
+      ]),
+      loading: false,
+      error: null,
+    }
+    // A keeper in a critical runtime state must NOT move this KPI any more —
+    // it is no longer a keeper-blocker projection (the bug this PR fixes).
+    keepers.value = [makeKeeper({ name: 'dead', lifecycle_phase: 'Dead', runtime_blocker_class: 'exception' })]
+
+    const { container } = render(h(Overview, null))
+
+    const kpi = container.querySelector('[data-testid="kpi-approvals"] .ov-kpi-v')
+    expect(kpi?.firstChild?.textContent).toBe('2')
+    expect(kpi?.classList.contains('bad')).toBe(true)
+    const card = container.querySelector('[data-testid="domain-approvals"] .ov-dcount')
+    expect(card?.textContent).toBe('2')
+  })
+
+  it('renders 최우선 목표 KPI as the top ACTIVE goal title + priority, excluding dropped goals', () => {
+    goals.value = [
+      makeGoal({ id: 'dropped', priority: 9, status: 'dropped', title: '취소된 목표' }),
+      makeGoal({ id: 'lead', priority: 7, status: 'active', title: '핵심 목표' }),
+    ]
+
+    const { container } = render(h(Overview, null))
+
+    const kpi = container.querySelector('[data-testid="kpi-top-goal"] .ov-kpi-v')
+    expect(kpi?.firstChild?.textContent).toBe('핵심 목표')
+    expect(kpi?.querySelector('small')?.textContent).toBe('P7')
+  })
+
+  it('renders 보드 domain card from the boardTotal store signal, not the client post array length', () => {
+    boardTotal.value = 42
+
+    const { container } = render(h(Overview, null))
+
+    const card = container.querySelector('[data-testid="domain-board"] .ov-stat-row .v')
+    expect(card?.textContent).toBe('42')
+  })
+
+  it('renders 활성 커넥터 KPI + 커넥터 domain card from the live gate connectors payload', async () => {
+    mockFetchGateConnectors.mockResolvedValueOnce(gateConnectorsData([
+      gateConnector({ connector_id: 'discord', display_name: 'Discord', connected: true }),
+      gateConnector({ connector_id: 'slack', display_name: 'Slack', connected: false }),
+    ]))
+
+    const { container } = render(h(Overview, null))
+
+    await waitFor(() => {
+      const kpi = container.querySelector('[data-testid="kpi-connectors"] .ov-kpi-v')
+      expect(kpi?.firstChild?.textContent).toBe('1')
+    })
+    const card = container.querySelector('[data-testid="domain-connectors"]')
+    expect(card?.querySelectorAll('.ov-mini-row')).toHaveLength(2)
+    expect(card?.textContent).toContain('Discord')
+    expect(card?.textContent).toContain('Slack')
+  })
+
+  it('renders 예약 승인 KPI + 예약·자동화 card from the scheduled-automation projection', () => {
+    mockedToolsData.value = {
+      scheduled_automation: scheduledAutomation([
+        scheduledRequest({ schedule_id: 's-1', status: 'pending_approval' }),
+        scheduledRequest({ schedule_id: 's-2', status: 'scheduled' }),
+      ]),
+    }
+
+    const { container } = render(h(Overview, null))
+
+    const kpi = container.querySelector('[data-testid="kpi-schedule"] .ov-kpi-v')
+    expect(kpi?.firstChild?.textContent).toBe('1')
+    const card = container.querySelector('[data-testid="domain-schedule"]')
+    expect(card?.textContent).toContain('승인 대기 1건')
+    expect(card?.textContent).toContain('2')
   })
 })

@@ -46,9 +46,14 @@ vi.mock('./keeper-runtime', () => ({
   refreshActiveKeeperChatHistory: vi.fn(),
 }))
 
+vi.mock('./components/governance-refresh', () => ({
+  refreshGovernance: vi.fn(),
+}))
+
 import { refreshFeatureHealth } from './components/feature-health'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshActiveKeeperChatHistory } from './keeper-runtime'
+import { refreshGovernance } from './components/governance-refresh'
 import { refreshServerConfig } from './components/server-config'
 import { refreshSurfaceReadiness } from './components/surface-readiness-panel'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
@@ -59,11 +64,11 @@ describe('refreshPlanForRoute', () => {
     vi.clearAllMocks()
   })
 
-  it('hydrates overview from project snapshot and mission snapshot', () => {
+  it('hydrates overview from project snapshot, mission snapshot, fusion runs, and governance', () => {
     expect(refreshPlanForRoute({
       tab: 'overview',
       params: {},
-    })).toEqual(['shell', 'namespaceTruth', 'missionSnapshot', 'execution'])
+    })).toEqual(['shell', 'namespaceTruth', 'missionSnapshot', 'execution', 'fusionRuns', 'governance'])
   })
 
   it('hydrates the top-level keepers workspace from live execution state', () => {
@@ -245,6 +250,18 @@ describe('refreshPlanForRoute', () => {
     })
 
     expect(refreshExecution).toHaveBeenCalledWith({ immediate: true })
+  })
+
+  it('refreshes fusion runs and governance on overview navigation', async () => {
+    refreshForRoute({
+      tab: 'overview',
+      params: {},
+    })
+
+    expect(refreshFusionRuns).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect(refreshGovernance).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('uses the scheduler-backed execution refresh path on monitoring navigation', () => {

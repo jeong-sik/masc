@@ -6,3 +6,7 @@
 let switch : Eio.Switch.t option Atomic.t = Atomic.make None
 let set sw = Atomic.set switch (Some sw)
 let get () = Atomic.get switch
+
+module For_testing = struct
+  let clear () = Atomic.set switch None
+end

@@ -1325,6 +1325,7 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
         | Ok path -> Filename.dirname path
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
+      mkdir_p (Filename.dirname records_dir);
       let blocker = open_out records_dir in
       close_out blocker;
       (match
@@ -1432,14 +1433,15 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       (match Shutdown_finalize.run ~config ~entry:None finalized with
        | Ok _ -> ()
        | Error error -> fail (Shutdown_finalize.error_to_string error));
-      (match
-         Masc.Keeper_turn_admission.run_if_free
-           ~base_path:config.base_path
-           ~keeper_name:meta.name
-           (fun () -> ())
-       with
-       | `Ran () -> ()
-       | `Busy _ -> fail "finalized shutdown replay left admission fenced");
+      check
+        bool
+        "finalized shutdown replay releases admission fence"
+        true
+        (Option.is_none
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:meta.name)
+             .snapshot_shutdown_operation_id);
       match Keeper_meta_store.read_meta config meta.name with
       | Ok (Some retained) ->
         check bool "retained Keeper is paused" true retained.paused;
@@ -1690,14 +1692,15 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
         "delivered receipt prevents duplicate lifecycle event"
         0
         (List.length (Agent_sdk.Event_bus.drain completion_subscription));
-      match
-        Masc.Keeper_turn_admission.run_if_free
-          ~base_path:config.base_path
-          ~keeper_name:meta.name
-          (fun () -> ())
-      with
-      | `Ran () -> ()
-      | `Busy _ -> fail "delivered dead completion left admission fenced")
+      check
+        bool
+        "delivered dead completion releases admission fence"
+        true
+        (Option.is_none
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:meta.name)
+             .snapshot_shutdown_operation_id))
 
 let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
   Eio_main.run @@ fun env ->

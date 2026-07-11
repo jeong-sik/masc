@@ -268,7 +268,7 @@ let test_operator_resume_clears_dead_tombstone_latch () =
     { base with
       paused = true
     ; auto_resume_after_sec = Some 1.0
-    ; updated_at = "1970-01-01T00:00:00Z"
+    ; updated_at = "2000-01-01T00:00:00Z"
     }
   in
   check

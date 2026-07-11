@@ -165,6 +165,28 @@ describe('ExecuteOutputDrawer event mapping', () => {
     expect(mounted.querySelector('[data-status-chip-tone="neutral"]')?.textContent).toContain('idle')
   })
 
+  it('collapses and restores the compact execution drawer without starting a stream', async () => {
+    mounted = document.createElement('div')
+    render(h(ExecuteOutputDrawer, {
+      keeperName: 'sangsu',
+      streamEnabled: false,
+      compact: true,
+    }), mounted)
+
+    await waitFor(() => expect(mounted?.textContent).toContain('waiting for an active Execute output task'))
+    const toggle = mounted.querySelector<HTMLButtonElement>('.execute-output-drawer-toggle')
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true')
+    expect(mounted.querySelector('[data-testid="execute-output-terminal"]')).not.toBeNull()
+
+    fireEvent.click(toggle!)
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false')
+    expect(mounted.querySelector('[data-testid="execute-output-terminal"]')).toBeNull()
+
+    fireEvent.click(toggle!)
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true')
+    expect(mounted.querySelector('[data-testid="execute-output-terminal"]')).not.toBeNull()
+  })
+
   it('renders streaming summary chips for stdout, stderr, and dropped bytes', async () => {
     let resolveFetch: (value: Response) => void = () => undefined
     const fetchPromise = new Promise<Response>(resolve => {

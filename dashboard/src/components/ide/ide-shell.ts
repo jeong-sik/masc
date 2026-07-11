@@ -12,7 +12,10 @@ import { getIdeDataWorkspaceStore } from './ide-workspace-singleton'
 import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
-import { IdeAnnotationComposer } from './ide-annotation-composer'
+import {
+  IdeAnnotationComposer,
+  type IdeAnnotationComposerDraft,
+} from './ide-annotation-composer'
 import { IdeConversationRail } from './ide-conversation-rail'
 import { IdeActivityPanel } from './ide-activity-panel'
 import { IdeAnnotationRail } from './ide-annotation-rail'
@@ -62,10 +65,11 @@ import {
   serializeActive,
 } from '../../../design-system/headless-core/layered-overlay'
 import { viewFromRoute } from './ide-view-route'
+import { useIsMobile } from '../../hooks/use-is-mobile'
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
-type IdeRightRailTab = 'context' | 'activity' | 'annotations' | 'cursors'
+type IdeRightRailTab = 'activity' | 'annotations' | 'cursors'
 type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok' | 'warn'
 type IdeConnectionTone = 'ok' | 'warn'
 
@@ -111,11 +115,6 @@ const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
   blame: 'BLAME',
 }
 const IDE_RIGHT_RAIL_TABS: ReadonlyArray<IdeRightRailTabDescriptor> = [
-  {
-    id: 'context',
-    label: 'Work Context',
-    title: 'Keeper work, persistence, memory, and chat scoped to the active IDE context',
-  },
   {
     id: 'activity',
     label: '활동',
@@ -893,6 +892,7 @@ export function IdeShell() {
   // navigation instead of being disposed and refetched. Do NOT dispose on
   // unmount — the store is intentionally shared across all IdeShell mounts.
   const workspaceStore = useMemo(() => getIdeDataWorkspaceStore(), [])
+  const isMobileViewport = useIsMobile()
 
   const annotations = useSubscribedSnapshot(
     workspaceStore.annotations,
@@ -1045,7 +1045,12 @@ export function IdeShell() {
   const findOpen = route.value.params.find === 'open'
   const terminalKeeper = keeperFromRoute()
   const railsCollapsed = route.value.params.rails === 'hidden'
-  const [rightRailTab, setRightRailTab] = useState<IdeRightRailTab>('context')
+  const effectiveRailsCollapsed = railsCollapsed || isMobileViewport
+  const treeCollapsed = route.value.params.tree === 'hidden'
+  const [rightRailTab, setRightRailTab] = useState<IdeRightRailTab>('activity')
+  const [workContextOpen, setWorkContextOpen] = useState(false)
+  const [annotationDraft, setAnnotationDraft] = useState<IdeAnnotationComposerDraft | null>(null)
+  const [annotationSubmitting, setAnnotationSubmitting] = useState(false)
   const [treeWidth, setTreeWidth] = useState<number>(readStoredIdeTreeWidth)
   const statusbar = deriveIdeStatusbarModel({
     activeView,
@@ -1054,7 +1059,7 @@ export function IdeShell() {
     contextFocus,
     findOpen,
     terminalOpen,
-    railsCollapsed,
+    railsCollapsed: effectiveRailsCollapsed,
     reviewFocusActive,
     routeParams: route.value.params,
     repositories,
@@ -1082,6 +1087,7 @@ export function IdeShell() {
       next,
     )
     const nextParams = paramsWithLayers(route.value.params, next, compatibleLayers)
+    delete nextParams.find
     if (next !== 'unified' && focusFromRoute(nextParams.focus) === 'review') {
       delete nextParams.focus
       if (nextParams.layers?.trim().toLowerCase() === EMPTY_LAYER_PARAM) delete nextParams.layers
@@ -1095,6 +1101,17 @@ export function IdeShell() {
 
   const handleRailsToggle = () => {
     navigate('code', paramsWithRails(route.value.params, activeView, !railsCollapsed))
+  }
+
+  const handleTreeToggle = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+    }
+    if (treeCollapsed) delete nextParams.tree
+    else nextParams.tree = 'hidden'
+    navigate('code', nextParams)
   }
 
   const handleTerminalOpen = () => {
@@ -1210,53 +1227,25 @@ export function IdeShell() {
       role="region"
       aria-label="Code IDE shell"
       data-terminal-open=${terminalVisible ? 'true' : 'false'}
-      data-rails-collapsed=${railsCollapsed ? 'true' : 'false'}
+      data-mobile-viewport=${isMobileViewport ? 'true' : 'false'}
+      data-rails-collapsed=${effectiveRailsCollapsed ? 'true' : 'false'}
+      data-tree-collapsed=${treeCollapsed ? 'true' : 'false'}
       data-tree-width=${String(treeWidth)}
     >
       <div class="ide-v2-top">
-        <header
-          class="ide-plane-statusbar"
-          aria-label="IDE operational status"
-          data-testid="ide-statusbar"
-        >
-          <span class="ide-plane-statusbar-title">MASC IDE</span>
-          <span
-            class="chip sm is-warn"
-            data-testid="ide-readiness-notice"
-            title="IDE shell is observational; LSP, overlay, and shell flows are not a verified execution boundary."
-          >experimental</span>
-          <span>·</span>
-          <span
-            class="chip sm is-brass"
-            style=${{ flexShrink: 0 }}
-            data-testid="ide-statusbar-workspace"
-            title=${statusbar.workspaceBasePath
-              ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
-              : undefined}
-          >${statusbar.workspaceLabel}</span>
-          <${IdeRepoOrigin}
-            repositories=${repositories}
-            activeRepositoryId=${activeRepositoryId}
-          />
-          <div
-            class="ide-plane-statusbar-meta"
-            aria-label="IDE operational context"
-          >
-            ${statusbar.chips.map(chip => html`
-              <span
-                key=${chip.id}
-                class=${`chip sm is-${chip.tone}`}
-                title=${chip.title}
-                data-testid=${`ide-statusbar-chip-${chip.id}`}
-              >${chip.label}</span>
-            `)}
-          </div>
-          <${IdePresenceStrip} />
-          <${IdeDashboardConnectionChip}
-            label=${statusbar.connectionLabel}
-            tone=${statusbar.connectionTone}
-          />
-        </header>
+        <button
+          type="button"
+          class="ide-v2-action ide-v2-tree-toggle"
+          aria-pressed=${treeCollapsed ? 'true' : 'false'}
+          aria-label=${treeCollapsed ? '파일 트리 펼치기' : '파일 트리 접기'}
+          title=${treeCollapsed ? '파일 트리 펼치기' : '파일 트리 접기'}
+          data-testid="ide-tree-toggle"
+          onClick=${handleTreeToggle}
+        >${treeCollapsed ? '⊞' : '⊟'}</button>
+        <${IdeRepoOrigin}
+          repositories=${repositories}
+          activeRepositoryId=${activeRepositoryId}
+        />
         <${IdeToolbar}
           activeView=${activeView}
           activeLayers=${activeLayers}
@@ -1266,49 +1255,113 @@ export function IdeShell() {
           onRailsToggle=${handleRailsToggle}
           onTerminalOpen=${handleTerminalOpen}
           onFindOpen=${handleFindOpen}
+          onFindClose=${handleFindClose}
+          findOpen=${findOpen}
+          compact=${true}
         />
+        <span class="spacer" />
+        <details
+          class="ide-v2-operational-status"
+          data-testid="ide-statusbar"
+          aria-label="IDE operational status"
+        >
+          <summary
+            class="chip sm is-warn"
+            data-testid="ide-readiness-notice"
+            title="IDE shell is observational; LSP, overlay, and shell flows are not a verified execution boundary."
+          >
+            <span
+              class="ide-v2-connection-dot"
+              data-state=${statusbar.connectionTone}
+              aria-label=${statusbar.connectionLabel}
+            >●</span>
+            실험 · 미검증
+          </summary>
+          <div
+            class="ide-v2-operational-status-popover"
+            aria-label="IDE operational status"
+          >
+            <span
+              class="chip sm is-brass"
+              data-testid="ide-statusbar-workspace"
+              title=${statusbar.workspaceBasePath
+                ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
+                : undefined}
+            >${statusbar.workspaceLabel}</span>
+            ${statusbar.chips.map(chip => html`
+              <span
+                key=${chip.id}
+                class=${`chip sm is-${chip.tone}`}
+                title=${chip.title}
+                data-testid=${`ide-statusbar-chip-${chip.id}`}
+              >${chip.label}</span>
+            `)}
+            <${IdeDashboardConnectionChip}
+              label=${statusbar.connectionLabel}
+              tone=${statusbar.connectionTone}
+            />
+          </div>
+        </details>
+        <${IdePresenceStrip} compact=${true} />
+        <button
+          type="button"
+          class="ide-v2-action ide-v2-rail-toggle"
+          aria-pressed=${railsCollapsed ? 'true' : 'false'}
+          aria-label=${railsCollapsed ? '활동 레일 펼치기' : '활동 레일 접기'}
+          title=${railsCollapsed ? '활동 레일 펼치기' : '활동 레일 접기'}
+          data-testid="ide-rail-toggle"
+          onClick=${handleRailsToggle}
+        >${railsCollapsed ? '⊢' : '⊣'}</button>
       </div>
-      ${reviewFocusActive
-        ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
-        : html`<${IdeBreadcrumb} />`}
       <div
-        class="ide-plane-grid ide-v2-body ${railsCollapsed ? 'no-rail' : ''}"
+        class="ide-plane-grid ide-v2-body ${treeCollapsed ? 'no-tree' : ''} ${railsCollapsed ? 'no-rail' : ''}"
         role="presentation"
         style=${`--ide-tree-width: ${treeWidth}px;`}
       >
-        <div class="ide-plane-tree ide-v2-tree v2-ide-panel">
-          <${IdeExplorer}
-            fileTreeStore=${workspaceStore.fileTreeStore}
-            workspaceSource=${workspaceStore.workspaceSource}
-            subscribeWorkspaceSource=${workspaceStore.subscribeWorkspaceSource}
-            repositories=${workspaceStore.repositories}
-            activeRepositoryId=${workspaceStore.activeRepositoryId}
-            onRepositoryChange=${workspaceStore.setActiveRepositoryId}
-            onRepositoryScan=${workspaceStore.scanRepositories}
-            subscribeRepositories=${workspaceStore.subscribeRepositories}
-          />
-          <button
-            type="button"
-            class="ide-v2-tree-resize"
-            aria-label="Resize file tree"
-            aria-orientation="vertical"
-            aria-valuemin=${IDE_TREE_WIDTH_MIN}
-            aria-valuemax=${IDE_TREE_WIDTH_MAX}
-            aria-valuenow=${treeWidth}
-            data-testid="ide-tree-resize"
-            onPointerDown=${handleTreeResizePointerDown}
-            onKeyDown=${handleTreeResizeKeyDown}
-          />
-        </div>
+        ${treeCollapsed ? null : html`
+          <div class="ide-plane-tree ide-v2-tree v2-ide-panel">
+            <${IdeExplorer}
+              fileTreeStore=${workspaceStore.fileTreeStore}
+              workspaceSource=${workspaceStore.workspaceSource}
+              subscribeWorkspaceSource=${workspaceStore.subscribeWorkspaceSource}
+              repositories=${workspaceStore.repositories}
+              activeRepositoryId=${workspaceStore.activeRepositoryId}
+              onRepositoryChange=${workspaceStore.setActiveRepositoryId}
+              onRepositoryScan=${workspaceStore.scanRepositories}
+              subscribeRepositories=${workspaceStore.subscribeRepositories}
+            />
+            <button
+              type="button"
+              class="ide-v2-tree-resize"
+              aria-label="Resize file tree"
+              aria-orientation="vertical"
+              aria-valuemin=${IDE_TREE_WIDTH_MIN}
+              aria-valuemax=${IDE_TREE_WIDTH_MAX}
+              aria-valuenow=${treeWidth}
+              data-testid="ide-tree-resize"
+              onPointerDown=${handleTreeResizePointerDown}
+              onKeyDown=${handleTreeResizeKeyDown}
+            />
+          </div>
+        `}
         <div
           class="ide-plane-editor ide-v2-editor v2-ide-panel"
         >
-          <${IdeAnnotationComposer}
-            documentStore=${workspaceStore.documentStore}
-            activeRepositoryId=${workspaceStore.activeRepositoryId}
-            subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
-            refresh=${workspaceStore.refresh}
-          />
+          ${reviewFocusActive
+            ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
+            : html`<${IdeBreadcrumb} />`}
+          <div class="ide-v2-responsive-annotation-composer">
+            <${IdeAnnotationComposer}
+              documentStore=${workspaceStore.documentStore}
+              activeRepositoryId=${workspaceStore.activeRepositoryId}
+              subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
+              refresh=${workspaceStore.refresh}
+              draft=${annotationDraft}
+              onDraftChange=${setAnnotationDraft}
+              submitting=${annotationSubmitting}
+              onSubmittingChange=${setAnnotationSubmitting}
+            />
+          </div>
           <${IdeEditor}
             activeView=${activeView}
             activeLayers=${activeLayers}
@@ -1323,8 +1376,15 @@ export function IdeShell() {
             onAnnotationDelete=${handleAnnotationDelete}
           />
           <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
+          ${terminalVisible
+            ? html`<${ExecuteOutputDrawer}
+                keeperName=${terminalKeeper}
+                streamEnabled=${terminalOpen}
+                compact=${true}
+              />`
+            : null}
         </div>
-        ${railsCollapsed
+        ${effectiveRailsCollapsed
           ? null
           : html`
             <div
@@ -1346,22 +1406,6 @@ export function IdeShell() {
                 `)}
               </div>
               <div class="ide-v2-rail-scroll">
-                ${rightRailTab === 'context' ? html`
-                  <div
-                    class="ide-plane-context-stack"
-                    data-testid="ide-right-context-stack"
-                  >
-                    <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
-                    <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                    <${IdeMemoryPanel} keeperName=${terminalKeeper} repoId=${activeRepositoryId} />
-                  </div>
-                  <div
-                    class="ide-plane-primary-rail"
-                    data-testid="ide-primary-conversation-rail"
-                  >
-                    <${IdeConversationRail} />
-                  </div>
-                ` : null}
                 ${rightRailTab === 'activity' ? html`
                   <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}
@@ -1371,11 +1415,39 @@ export function IdeShell() {
                       annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}
+                      compact=${true}
                     />
+                    <div class="ide-v2-work-context">
+                      <button
+                        type="button"
+                        aria-expanded=${workContextOpen ? 'true' : 'false'}
+                        onClick=${() => setWorkContextOpen(current => !current)}
+                      >Work Context</button>
+                      ${workContextOpen ? html`
+                        <div class="ide-plane-context-stack" data-testid="ide-right-context-stack">
+                          <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
+                          <${IdePersistencePanel} keeperName=${terminalKeeper} />
+                          <${IdeMemoryPanel} keeperName=${terminalKeeper} repoId=${activeRepositoryId} />
+                        </div>
+                        <div class="ide-plane-primary-rail" data-testid="ide-primary-conversation-rail">
+                          <${IdeConversationRail} />
+                        </div>
+                      ` : null}
+                    </div>
                   </div>
                 ` : null}
                 ${rightRailTab === 'annotations' ? html`
                   <div class="ide-plane-annotations" style=${{ minHeight: 0 }}>
+                    <${IdeAnnotationComposer}
+                      documentStore=${workspaceStore.documentStore}
+                      activeRepositoryId=${workspaceStore.activeRepositoryId}
+                      subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
+                      refresh=${workspaceStore.refresh}
+                      draft=${annotationDraft}
+                      onDraftChange=${setAnnotationDraft}
+                      submitting=${annotationSubmitting}
+                      onSubmittingChange=${setAnnotationSubmitting}
+                    />
                     <${IdeAnnotationRail} annotations=${annotations} />
                   </div>
                 ` : null}
@@ -1384,9 +1456,6 @@ export function IdeShell() {
             </div>
           `}
       </div>
-      ${terminalVisible
-        ? html`<${ExecuteOutputDrawer} keeperName=${terminalKeeper} streamEnabled=${terminalOpen} />`
-        : null}
       <${IdeInterject} keeperName=${terminalKeeper} compact=${terminalVisible} />
     </section>
   `

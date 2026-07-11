@@ -31,6 +31,8 @@ interface ExecuteOutputDrawerProps {
   /** Render the persistent IDE drawer without opening a live stream until the
       operator explicitly requests terminal execution for the current route. */
   readonly streamEnabled?: boolean
+  /** Match the keeper-v2 IDE drawer geometry while preserving live output. */
+  readonly compact?: boolean
 }
 
 type ExecuteOutputStatus = 'idle' | 'streaming' | 'closed' | 'error'
@@ -244,12 +246,14 @@ function ExecuteOutputSummaryStrip({
 export function ExecuteOutputDrawer({
   keeperName,
   streamEnabled = true,
+  compact = false,
 }: ExecuteOutputDrawerProps) {
   const keeper = keeperName.trim()
   const [lines, setLines] = useState<OutputLine[]>([])
   const [status, setStatus] = useState<ExecuteOutputStatus>('idle')
   const [taskId, setTaskId] = useState<string | null>(null)
   const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
+  const [expanded, setExpanded] = useState(true)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const terminalLines = useMemo(() => lines.map(toTerminalLine), [lines])
   const summary = useMemo(() => summarizeOutputLines(lines), [lines])
@@ -322,7 +326,7 @@ export function ExecuteOutputDrawer({
 
   return html`
     <aside
-      class="execute-output-drawer v2-ide-panel border-t border-solid border-[var(--color-border-divider)] bg-[var(--color-bg-page)]"
+      class=${`execute-output-drawer v2-ide-panel border-t border-solid border-[var(--color-border-divider)] bg-[var(--color-bg-page)] ${compact ? 'is-compact' : ''} ${expanded ? 'is-expanded' : 'is-collapsed'}`}
       data-testid="execute-output-drawer"
       data-keeper=${keeper}
       aria-label="Execute output drawer"
@@ -330,7 +334,18 @@ export function ExecuteOutputDrawer({
       <div
         class="execute-output-drawer-header v2-ide-toolbar flex min-w-0 flex-wrap items-center gap-2 border-b border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 font-mono text-2xs"
       >
-        <span class="text-[var(--color-fg-secondary)]">TERMINAL</span>
+        ${compact ? html`
+          <button
+            type="button"
+            class="execute-output-drawer-toggle"
+            aria-expanded=${expanded ? 'true' : 'false'}
+            title=${expanded ? '실행 출력 접기' : '실행 출력 펼치기'}
+            onClick=${() => setExpanded(current => !current)}
+          >
+            <span class="execute-output-drawer-chevron" aria-hidden="true">▾</span>
+            <span>실행 출력</span>
+          </button>
+        ` : html`<span class="text-[var(--color-fg-secondary)]">TERMINAL</span>`}
         <span class="text-[var(--color-fg-muted)]">${keeper || 'none'}</span>
         ${taskId
           ? html`<span class="truncate text-[var(--color-fg-disabled)]">${taskId}</span>`
@@ -341,15 +356,17 @@ export function ExecuteOutputDrawer({
           <${ExecuteOutputSummaryStrip} summary=${summary} status=${status} />
         </div>
       </div>
-      <${Terminal}
-        lines=${terminalLines}
-        prompt=${status === 'streaming' ? `${keeper || '(no keeper)'}:$ ` : ''}
-        testId="execute-output-terminal"
-        ariaLabel="Execute output terminal"
-        emptyText="waiting for Execute output"
-        className="h-[260px] overflow-auto bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs leading-relaxed"
-        viewportRef=${viewportRef}
-      />
+      ${expanded ? html`
+        <${Terminal}
+          lines=${terminalLines}
+          prompt=${status === 'streaming' ? `${keeper || '(no keeper)'}:$ ` : ''}
+          testId="execute-output-terminal"
+          ariaLabel="Execute output terminal"
+          emptyText="waiting for Execute output"
+          className="h-[260px] overflow-auto bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs leading-relaxed"
+          viewportRef=${viewportRef}
+        />
+      ` : null}
     </aside>
   `
 }

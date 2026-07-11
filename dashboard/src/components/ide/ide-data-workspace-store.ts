@@ -102,11 +102,19 @@ export interface WorkspaceFetchIssueContext {
 
 type WorkspaceFetchIssueScope = Pick<WorkspaceFetchIssueContext, 'filePath' | 'keeper' | 'repoId'>
 
-function firstFilePath(
-  nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>,
+export function firstObservedChangedFilePath(
+  nodes: ReadonlyArray<{
+    readonly path: string
+    readonly hasChildren: boolean
+    readonly diff: string | null
+  }>,
 ): string | null {
-  const firstFile = nodes.find(node => !node.hasChildren)
-  return firstFile?.path ?? null
+  return nodes.find(node =>
+    !node.hasChildren
+    && node.path.trim().length > 0
+    && node.diff !== null
+    && node.diff.trim().length > 0,
+  )?.path ?? null
 }
 
 export function workspaceTreeIdentity(
@@ -393,7 +401,10 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       repoId,
     })
 
-    // Load file tree (independent of active file — needed to suggest first file)
+    // Load the file tree independently of the active file. When no explicit
+    // operator/route focus exists, the server-ordered changed-file observation
+    // is the only automatic focus contract. Do not infer focus from dot-path
+    // visibility, keeper ownership, or an arbitrary tree leaf.
     fetchWorkspaceTree(2, opts).then(({ nodes, source, basePath }) => {
       if (signal.aborted) return
       clearIssue('tree', { keeper: keeperParam ?? null, repoId })
@@ -422,9 +433,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
         }
       }
 
-      const hasCurrentFile =
-        filePath !== null && nodes.some(node => node.path === filePath && !node.hasChildren)
-      const nextFile = hasCurrentFile ? null : firstFilePath(nodes)
+      const nextFile = filePath === null ? firstObservedChangedFilePath(nodes) : null
       if (nextFile && nextFile !== activeIdeFile.value) {
         activeIdeFile.value = nextFile
       }

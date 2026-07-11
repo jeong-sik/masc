@@ -81,6 +81,9 @@ interface IdeToolbarProps {
   readonly onRailsToggle?: () => void
   readonly onTerminalOpen?: () => void
   readonly onFindOpen?: () => void
+  readonly onFindClose?: () => void
+  readonly findOpen?: boolean
+  readonly compact?: boolean
 }
 
 export type ToolbarContextRouteGroupId = 'code' | 'planning' | 'board' | 'repo' | 'runtime' | 'other'
@@ -120,6 +123,9 @@ export function IdeToolbar({
   onRailsToggle,
   onTerminalOpen,
   onFindOpen,
+  onFindClose,
+  findOpen = false,
+  compact = false,
 }: IdeToolbarProps) {
   const controller = useMemo(() => {
     const next = createLayeredOverlay(IDE_LAYERS)
@@ -191,6 +197,7 @@ export function IdeToolbar({
       data-testid="ide-toolbar"
       class="ide-toolbar v2-ide-toolbar"
       data-has-rails=${onRailsToggle ? 'true' : 'false'}
+      data-compact=${compact ? 'true' : 'false'}
     >
       <div
         class="ide-toolbar-tabs flex min-w-0 gap-1.5 overflow-x-auto pb-0.5"
@@ -202,13 +209,65 @@ export function IdeToolbar({
           <button
             type="button"
             role="tab"
-            aria-selected=${tab.id === activeView ? 'true' : 'false'}
-            tabIndex=${tab.id === activeView ? 0 : -1}
+            aria-selected=${!findOpen && tab.id === activeView ? 'true' : 'false'}
+            tabIndex=${!findOpen && tab.id === activeView ? 0 : -1}
             onClick=${() => onViewChange(tab.id)}
+            data-view=${tab.id}
             class=${`${TOOLBAR_BUTTON_BASE} ${VIEW_TAB_BASE}`}
           >${tab.label}</button>
         `)}
+        ${compact && onFindOpen ? html`
+          <button
+            type="button"
+            role="tab"
+            aria-selected=${findOpen ? 'true' : 'false'}
+            tabIndex=${findOpen ? 0 : -1}
+            onClick=${findOpen && onFindClose ? onFindClose : onFindOpen}
+            data-view="find"
+            class=${`${TOOLBAR_BUTTON_BASE} ${VIEW_TAB_BASE}`}
+          >검색</button>
+        ` : null}
       </div>
+      ${compact ? html`
+        <details class="ide-toolbar-advanced">
+          <summary
+            class="ide-v2-action"
+            aria-label="Advanced IDE controls"
+            title="Advanced IDE controls"
+          >⋯</summary>
+          <div class="ide-toolbar-advanced-popover">
+            <div class="ide-toolbar-advanced-views" aria-label="Advanced view modes">
+              ${VIEW_TABS.filter(tab => tab.id === 'unified' || tab.id === 'blame').map(tab => html`
+                <button
+                  type="button"
+                  aria-pressed=${tab.id === activeView && !findOpen ? 'true' : 'false'}
+                  onClick=${() => onViewChange(tab.id)}
+                  class=${TOOLBAR_BUTTON_BASE}
+                >${tab.label}</button>
+              `)}
+            </div>
+            <${CommandBar}
+              actions=${commandActions}
+              placeholder="Run IDE command..."
+              testId="ide-compact-command-bar"
+              className="min-w-0"
+              inputClassName="h-7 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] outline-none transition-colors placeholder:text-[var(--color-fg-disabled)] focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
+            />
+            <div class="ide-toolbar-advanced-layers" aria-label="Layers (multi-select)">
+              <span>LAYERS</span>
+              ${availableLayers.map(layer => html`
+                <button
+                  type="button"
+                  aria-pressed=${isActive(layer.kind) ? 'true' : 'false'}
+                  onClick=${() => handleLayerToggle(layer.kind)}
+                  title=${layer.description}
+                  class=${TOOLBAR_BUTTON_BASE}
+                >${layer.label}</button>
+              `)}
+            </div>
+          </div>
+        </details>
+      ` : null}
       <div class="ide-toolbar-command-cluster">
         <${CommandBar}
           actions=${commandActions}

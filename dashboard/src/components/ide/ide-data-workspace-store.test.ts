@@ -28,6 +28,7 @@ vi.mock('../../sse-store', () => ({
 import {
   clearWorkspaceFetchIssue,
   createIdeDataWorkspaceStore,
+  firstObservedChangedFilePath,
   replaceWorkspaceFetchIssue,
   retainCurrentWorkspaceFetchIssues,
   sameWorkspaceTreeIdentity,
@@ -72,6 +73,26 @@ function seedWorkspaceApiMocks(): void {
   workspaceApiMocks.fetchGitDiff.mockResolvedValue([])
   ideApiMocks.fetchIdeAnnotations.mockResolvedValue([])
 }
+
+describe('firstObservedChangedFilePath', () => {
+  it('keeps the server-observed hidden changed path ahead of an unchanged visible file', () => {
+    expect(firstObservedChangedFilePath([
+      { path: '.github/workflows/ci.yml', hasChildren: false, diff: '+1' },
+      { path: 'README.md', hasChildren: false, diff: null },
+    ])).toBe('.github/workflows/ci.yml')
+  })
+
+  it('does not turn empty values, keeper ownership, or an arbitrary file into focus', () => {
+    const nodes = [
+      { path: '', hasChildren: false, diff: '+1', keeperId: null },
+      { path: '.github/workflows/ci.yml', hasChildren: false, diff: '', keeperId: 'keeper-a' },
+      { path: 'README.md', hasChildren: false, diff: null, keeperId: 'keeper-b' },
+      { path: 'lib', hasChildren: true, diff: '+2', keeperId: null },
+    ]
+
+    expect(firstObservedChangedFilePath(nodes)).toBeNull()
+  })
+})
 
 describe('selectPreferredIdeRepositoryId', () => {
   // ── Current selection persistence ────────────────────────────

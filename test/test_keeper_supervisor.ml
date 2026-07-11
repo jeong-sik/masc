@@ -1626,8 +1626,8 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
         }
       in
       sweep_and_recover_no_materialize ctx;
-      check (float 0.001) "restart attempt not recorded without admission meta"
-        attempts_before
+      check (float 0.001) "restart attempt recorded after lifecycle admission"
+        (attempts_before +. 1.0)
         (Masc.Otel_metric_store.metric_value_or_zero
            Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
@@ -1685,8 +1685,8 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
         }
       in
       sweep_and_recover_no_materialize ctx;
-      check (float 0.001) "restart attempt metric incremented"
-        (attempts_before +. 1.0)
+      check (float 0.001) "restart attempt not recorded without admission meta"
+        attempts_before
         (Masc.Otel_metric_store.metric_value_or_zero
            Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
@@ -1774,8 +1774,14 @@ let test_restart_denies_persisted_dead_tombstone () =
       | None -> fail "terminal registry entry unexpectedly disappeared"
       | Some entry ->
         check int "restart count unchanged" 0 entry.restart_count;
-        check bool "terminal lane never becomes Running" false
-          (entry.phase = Keeper_state_machine.Running))
+        check bool "terminal registry phase is Dead" true
+          (entry.phase = Keeper_state_machine.Dead);
+        check bool "persisted tombstone meta becomes registry authority" true
+          (match entry.meta.latched_reason with
+           | Some Keeper_latched_reason.Dead_tombstone -> true
+           | Some _ | None -> false);
+        check bool "terminal transition records dead timestamp" true
+          (Option.is_some entry.dead_since_ts))
 
 (* ── Dead-state loud alert (PR-C) ──────────────────────── *)
 

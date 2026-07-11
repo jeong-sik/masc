@@ -237,6 +237,12 @@ module For_testing : sig
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 
+  val restore_canonical_replay_prefix :
+    canonical_prefix:Agent_sdk.Types.message list ->
+    dispatch_prefix:Agent_sdk.Types.message list ->
+    checkpoint_messages:Agent_sdk.Types.message list ->
+    (Agent_sdk.Types.message list, string) result
+
   val resolve_context_window_tokens_after_runtime_selection :
     requested_context_window:int option ->
     final_runtime_context_window:int ->

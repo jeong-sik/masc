@@ -14,12 +14,12 @@ implementation_prs: [15814]
 # RFC-0102 — Pre-turn runtime availability gate
 
 > **Superseded (2026-07-11):** RFC-0206 replaced the legacy health-filtered
-> candidate fail-open decision point with the typed `Runtime` boundary. RFC-0207
-> subsequently introduced per-Keeper ordered runtime lanes, whose candidates are
-> resolved by `Keeper_turn_driver` and checked per attempt by
-> `Keeper_turn_driver_provider_attempt`. It did not restore the helper removed in
-> PR #24186. The design and examples below describe the historical RFC-0102
-> implementation, not the current dispatch path.
+> candidate fail-open decision point with the typed `Runtime` boundary. The
+> current dispatch path resolves candidates in `Keeper_turn_driver` and checks
+> each attempt in `Keeper_turn_driver_provider_attempt`; the follow-up ordered
+> lane design remains documented separately in draft RFC-0207. The design and
+> examples below describe the historical RFC-0102 implementation, not the
+> current dispatch path.
 
 - Related RFCs (layer hand-offs):
   - **RFC-0009** Runtime Trust Phase 2 — *pre-attempt ordering*

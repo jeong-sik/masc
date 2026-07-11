@@ -43,6 +43,14 @@ export async function loadTools() {
   await toolsResource.load(signal => fetchDashboardTools({ signal }))
 }
 
+/** Test-only: set toolsData without a real fetch. toolsResource is a private
+ *  module-level singleton (unlike governanceResource, which is exported), so
+ *  consumers of toolsData (e.g. nav-badges.ts) need this hook to unit-test
+ *  the schedule-badge derivation deterministically. */
+export function _setToolsDataForTests(data: DashboardToolsResponse | null): void {
+  toolsResource.reset(data)
+}
+
 export function hasSurface(item: DashboardToolInventoryItem, surface: string): boolean {
   return (item.surfaces ?? []).includes(surface)
 }

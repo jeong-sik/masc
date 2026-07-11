@@ -7,9 +7,8 @@
 import { html } from 'htm/preact'
 import { useState, useEffect } from 'preact/hooks'
 import { navigate, route } from '../../router'
-import { executionLoaded, keepers, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
+import { executionLoaded, keepers, shellCounts, shellRuntimeResolution } from '../../store'
 import { activeKeeperName } from '../../keeper-state'
-import { governanceData } from '../governance-signals'
 import { toolsData } from '../tools/tool-state'
 import { scheduledPendingApprovalCount } from '../tools/scheduled-automation-panel'
 import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
@@ -26,8 +25,7 @@ import { ConnectionStatus, ErrorCounterBadge, BuildIdentityBadge } from '../dash
 import { AuthStatus } from '../auth-status'
 import { EmergencyStopControl } from '../emergency-stop-control'
 import { TransportBeacon } from '../transport-beacon'
-
-const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead', 'Zombie'])
+import { attentionBreakdown } from '../../nav-badges'
 
 interface AttentionAgg {
   approvals: number
@@ -37,13 +35,18 @@ interface AttentionAgg {
   total: number
 }
 
+// Sourced from nav-badges.ts's shared attentionBreakdown — the nav rail's
+// combined `keepers` badge (needsAttentionKeepers + deadKeepers) and this
+// dropdown's two separate drill-down rows are one derivation, two views.
 function computeAttention(): AttentionAgg {
-  const ks = keepers.value
-  const approvals = governanceData.value?.approval_queue?.length ?? 0
-  const attKeepers = ks.filter((k) => k.needs_attention === true).length
-  const dead = ks.filter((k) => !!k.lifecycle_phase && DEAD_PHASES.has(k.lifecycle_phase)).length
-  const stale = staleKeepers.value.size
-  return { approvals, keepers: attKeepers, dead, stale, total: approvals + attKeepers + dead + stale }
+  const a = attentionBreakdown.value
+  return {
+    approvals: a.approvals,
+    keepers: a.needsAttentionKeepers,
+    dead: a.deadKeepers,
+    stale: a.staleKeepers,
+    total: a.approvals + a.needsAttentionKeepers + a.deadKeepers + a.staleKeepers,
+  }
 }
 
 function AttentionIndicatorV2() {

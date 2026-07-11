@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead, SideRail, summarizeAttentionPreview } from './dashboard-shell'
+import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
@@ -144,38 +144,6 @@ describe('isKeeperDetailDashboardRoute', () => {
       params: { section: 'agents' },
       postId: null,
     })).toBe(false)
-  })
-})
-
-describe('summarizeAttentionPreview', () => {
-  it('includes grounded evidence in attention tooltip lines', () => {
-    expect(summarizeAttentionPreview([
-      {
-        summary: 'Adversarial review failed',
-        kind: 'review_rejected',
-        grounded_verdict: {
-          verdict: 'FAIL',
-          reason: 'bad branch',
-          evidence: [
-            { path: 'lib/foo.ml', line: 12, quote: 'let bad = true' },
-          ],
-        },
-      },
-    ])).toEqual([
-      'Adversarial review failed | lib/foo.ml:12 let bad = true',
-    ])
-  })
-
-  it('falls back to evidence_preview when no grounded verdict exists', () => {
-    expect(summarizeAttentionPreview([
-      {
-        summary: 'Needs inspection',
-        kind: 'runtime_blocked',
-        evidence_preview: ['runtime_blocker_state=blocked'],
-      },
-    ])).toEqual([
-      'Needs inspection | runtime_blocker_state=blocked',
-    ])
   })
 })
 
@@ -1021,69 +989,6 @@ describe('dashboardHealthChips', () => {
     })
     expect(cdal?.detail).toContain('stale=3')
     expect(cdal?.detail).toContain('current_missing_task_scope=5')
-  })
-})
-
-describe('SideRail v2 chrome', () => {
-  let container: HTMLDivElement
-
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    route.value = {
-      tab: 'workspace',
-      params: { section: 'work' },
-      postId: null,
-    }
-  })
-
-  afterEach(() => {
-    render(null, container)
-    container.remove()
-  })
-
-  it('renders v2 structural classes and highlights the active surface', () => {
-    render(h(SideRail, { collapsed: false, onToggle: () => {} }), container)
-
-    expect(container.querySelector('.nav-brand')).not.toBeNull()
-    expect(container.querySelector('.nav-sec')).not.toBeNull()
-    expect(container.querySelector('.nav-link.active')).not.toBeNull()
-    expect(container.querySelector('.nav-link.active')?.textContent).toContain('Work')
-    expect(container.querySelector('.nav-link.active')?.textContent).not.toContain('Settings')
-
-    // Multiple surfaces render sublists (any surface with 2+ sections), so
-    // anchor on the globally-unique active sublink instead of the first list.
-    const sublist = container.querySelector('.nav-sublist')
-    expect(sublist).not.toBeNull()
-    const activeSublink = container.querySelector('.nav-sublink.active')
-    expect(activeSublink).not.toBeNull()
-    expect(activeSublink?.textContent).toContain('Work')
-    expect(container.querySelector('.nav-footer .nav-footer-settings')?.textContent).toContain('Settings')
-  })
-
-  it('moves Settings to the rail footer and highlights it there', () => {
-    route.value = {
-      tab: 'settings',
-      params: {},
-      postId: null,
-    }
-
-    render(h(SideRail, { collapsed: false, onToggle: () => {} }), container)
-
-    expect(container.querySelector('.nav-group .nav-link.active')).toBeNull()
-    const settings = container.querySelector('.nav-footer .nav-footer-settings')
-    expect(settings).not.toBeNull()
-    expect(settings?.className).toContain('active')
-    expect(settings?.textContent).toContain('Settings')
-  })
-
-  it('renders collapsed icon-only links with v2 classes', () => {
-    render(h(SideRail, { collapsed: true, onToggle: () => {} }), container)
-
-    const links = container.querySelectorAll('.nav-link-collapsed')
-    expect(links.length).toBeGreaterThan(0)
-    expect(container.querySelector('.nav-link-collapsed.active')).not.toBeNull()
-    expect(container.querySelector('.nav-footer .nav-footer-settings')).not.toBeNull()
   })
 })
 

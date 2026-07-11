@@ -126,10 +126,6 @@
 /* Fetch error banner (live surface). */
 .ap-error { font-size: var(--fs-12); color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 35%, var(--border-main)); background: color-mix(in oklab, var(--status-bad) 7%, transparent); padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 14px; }
 
-/* Nav-rail count badge / dot for the approvals surface (open-approval count). */
-.ap-nav-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 6px; border-radius: var(--radius-pill); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; line-height: 1; color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 16%, transparent); border: 1px solid color-mix(in oklab, var(--status-bad) 38%, transparent); }
-.ap-nav-dot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--status-bad); box-shadow: 0 0 0 2px var(--bg-panel); }
-
 @media (max-width: 980px) {
   .ap-workspace { grid-template-columns: 1fr; }
   .ap-detail-panel { position: static; }

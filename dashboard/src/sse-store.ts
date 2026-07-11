@@ -265,8 +265,33 @@ const KEEPER_LIFECYCLE_EVENTS = new Set([
   'keeper_phase_changed',
 ])
 
+// Board content events that may carry an @mention of the operator. The
+// nav-rail board badge (nav-badges.ts) derives its count from the `messages`
+// signal, populated by the 'execution' refresh target — but that target is
+// route-gated (routeWantsExecution: keepers / workspace-planning /
+// monitoring journey|agents|cognition / fleet-health-comparison only), so a
+// post landing off those routes would freeze the badge. Set membership is
+// unprefixed; callers normalize via normalizeMascEventType before checking.
+const BOARD_MENTION_REFRESH_EVENTS = new Set([
+  'post_created', 'board_post', 'comment_added', 'board_comment',
+])
+
 function normalizeMascEventType(type: string): string {
   return type.startsWith('masc/') ? type.slice('masc/'.length) : type
+}
+
+// Route-independent (ungated) light execution refresh — mirrors the
+// governance approval-event refresh below (scheduleRefresh called directly,
+// not through scheduleTargetRefresh's routeWantsRefreshTarget gate) so the
+// nav-rail badges that read the execution slice (keepers needs_attention/
+// dead-phase count, workspace awaiting-verification count, board mentions)
+// stay live on every route instead of only where routeWantsExecution already
+// allows a refresh. Debounced under its own key so it never cancels/replaces
+// the route-gated 'execution' refresh scheduled elsewhere in this file — at
+// worst both fire and refreshExecution's own FetchScheduler cooldown/inflight
+// guard (store.ts) coalesces the duplicate call.
+function scheduleNavBadgeExecutionRefresh(): void {
+  scheduleRefresh('nav-badge-execution', () => { void refreshExecution() })
 }
 
 /** Hydrate project-snapshot signals directly from SSE payload — zero HTTP fetch. */
@@ -417,6 +442,15 @@ async function hydrateAfterReconnect(): Promise<void> {
   // the active surface, so an approval that arrived (or resolved) during the
   // gap must be re-fetched on reconnect, not only on the governance surface.
   handleGovernance()
+  // Same reasoning for the nav-rail schedule badge (nav-badges.ts): the
+  // scheduled-automation projection is otherwise only loaded at app boot and
+  // on schedule-surface visits (app.ts), so a pending-approval change during
+  // a disconnect gap would freeze the badge until the next such visit.
+  void import('./components/tools/tool-state')
+    .then(({ loadTools }) => loadTools())
+    .catch(err =>
+      console.warn('[SSE] reconnect scheduled-automation reload failed', err instanceof Error ? err.message : err),
+    )
   // Recover keeper_chat_appended events that fell outside the server replay
   // buffer while disconnected. The live stream cannot re-deliver them, so the
   // open conversation panel must re-fetch its transcript. Route and periodic
@@ -546,6 +580,14 @@ export function routeServerPushEvent(event: SSEEvent): void {
 
   if (KEEPER_LIFECYCLE_EVENTS.has(normalizeMascEventType(routedType))) {
     handleKeeperLifecycle(event)
+    scheduleNavBadgeExecutionRefresh()
+  }
+
+  // board_post/comment_added etc. fall through to here (post_created's own
+  // mention-refresh trigger lives in hydrateServerPushEvent above, since a
+  // 'recent'-sort board short-circuits before reaching this function).
+  if (BOARD_MENTION_REFRESH_EVENTS.has(normalizeMascEventType(routedType))) {
+    scheduleNavBadgeExecutionRefresh()
   }
 
   if (IDE_WORKSPACE_REFRESH_EVENTS.has(normalizeMascEventType(routedType))) {
@@ -649,8 +691,16 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'post_created' && handleBoardPostCreated(event)) {
-    return true
+  if (event.type === 'post_created') {
+    // The board-mentions nav badge cares about every post regardless of the
+    // board surface's own sort-mode/dedup gate below — handleBoardPostCreated
+    // only prepends into the board list for 'recent' sort, and returning
+    // early here (post processed) would otherwise skip
+    // routeServerPushEvent's BOARD_MENTION_REFRESH_EVENTS trigger entirely.
+    scheduleNavBadgeExecutionRefresh()
+    if (handleBoardPostCreated(event)) {
+      return true
+    }
   }
 
   return false

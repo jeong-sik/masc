@@ -291,7 +291,13 @@ describe('setupSSEReaction reconnect hydration', () => {
     cleanup()
   })
 
-  it('does not refresh hidden heavy surfaces for keeper lifecycle events on overview', async () => {
+  it('still fires the route-independent nav-badge refresh for keeper lifecycle events on overview, but not the operator refresh', async () => {
+    // RFC brief #65: keeper-lifecycle events additionally schedule an
+    // UNGATED light refreshExecution() (nav-badges.ts keepers/workspace
+    // badges must not freeze off the keepers/monitoring/workspace-planning
+    // routes) — this is on top of, not instead of, the pre-existing
+    // route-gated `{force:true}` refresh below. Only the operator refresh
+    // stays strictly route-scoped.
     const { sseStore, sse } = await loadSseStore()
     const refreshOperator = vi.fn()
     sseStore.registerOperatorRefresh(refreshOperator)
@@ -307,13 +313,14 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshExecution).not.toHaveBeenCalled()
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).not.toHaveBeenCalledWith({ force: true })
     expect(refreshOperator).not.toHaveBeenCalled()
 
     cleanup()
   })
 
-  it('routes execution SSE refreshes only when the current route needs execution data', async () => {
+  it('routes execution SSE refreshes with both the route-scoped force refresh and the ungated nav-badge refresh', async () => {
     const { sseStore, sse } = await loadSseStore()
     route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
     const cleanup = sseStore.setupSSEReaction()
@@ -327,7 +334,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledTimes(2)
     expect(refreshExecution).toHaveBeenCalledWith({ force: true })
 
     cleanup()
@@ -346,7 +353,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledTimes(2)
     expect(refreshExecution).toHaveBeenCalledWith({ force: true })
 
     cleanup()
@@ -364,7 +371,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledTimes(2)
     expect(refreshExecution).toHaveBeenCalledWith({ force: true })
   })
 
@@ -383,7 +390,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshExecution).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps operator lifecycle refreshes scoped to the command route', async () => {
+  it('keeps the route-scoped force refresh off the command route, but still fires the ungated nav-badge refresh', async () => {
     const { sseStore, sse } = await loadSseStore()
     const refreshOperator = vi.fn()
     sseStore.registerOperatorRefresh(refreshOperator)
@@ -399,7 +406,8 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshOperator).toHaveBeenCalledTimes(1)
-    expect(refreshExecution).not.toHaveBeenCalled()
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).not.toHaveBeenCalledWith({ force: true })
 
     cleanup()
   })

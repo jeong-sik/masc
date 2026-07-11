@@ -21,7 +21,13 @@ type NavEntry = SurfaceEntry | 'sep'
 // Groups mirror the 2026-07 standalone export's rail DOM: 개요 |
 // Keepers · Monitor | 작업 · 승인 · 예약 | 보드 · Fusion · 로그 |
 // IDE · 커넥터 (설정 stays in the footer slot below the spacer).
-const SURFACES: readonly NavEntry[] = [
+//
+// `as const satisfies` (rather than a `: readonly NavEntry[]` annotation)
+// keeps each entry's `tab` field a literal instead of widening it to `TabId`,
+// so RailBadgeTab below is exactly the tabs this rail renders — add a surface
+// here and the nav-badges.ts `satisfies NavBadges` check immediately demands
+// an explicit badge decision for it (0 allowed, but stated).
+const SURFACES = [
   { tab: 'overview', label: '개요', icon: 'grid' },
   'sep',
   { tab: 'keepers', label: 'Keepers', icon: 'users' },
@@ -37,15 +43,25 @@ const SURFACES: readonly NavEntry[] = [
   'sep',
   { tab: 'code', label: 'IDE', icon: 'code' },
   { tab: 'connectors', label: '커넥터', icon: 'plug' },
-]
+] as const satisfies readonly NavEntry[]
 
-export interface NavBadges {
-  readonly approvals?: number
-  readonly schedule?: number
-}
+// Each literal member of the const tuple, minus the 'sep' separators — the
+// precise per-position type (e.g. `{ tab: "connectors"; ... }`), not the
+// widened nominal SurfaceEntry interface. A predicate asserting `is
+// SurfaceEntry` here would fail: SurfaceEntry's `tab: TabId` is broader than
+// any single tuple position's literal tab, so it isn't assignable to the
+// exact union TypeScript infers for `(typeof SURFACES)[number]`.
+type SurfaceTupleEntry = Exclude<(typeof SURFACES)[number], 'sep'>
+
+/** Every tab the rail can show a badge on: the SURFACES entries plus the
+ *  footer-slotted 설정 button. Kept as a closed record (not `Partial`) so
+ *  adding a rail tab is a compile error until nav-badges.ts states its count. */
+export type RailBadgeTab = SurfaceTupleEntry['tab'] | 'settings'
+
+export type NavBadges = Readonly<Record<RailBadgeTab, number>>
 
 const SURFACE_LABEL: Readonly<Record<string, string>> = Object.fromEntries(
-  SURFACES.filter((e): e is SurfaceEntry => e !== 'sep').map((e) => [e.tab, e.label]),
+  SURFACES.filter((e): e is SurfaceTupleEntry => e !== 'sep').map((e) => [e.tab, e.label]),
 )
 
 /** Crumb label for a tab (prototype SURFACE_LABEL); settings + unknowns fall back. */
@@ -57,31 +73,30 @@ export function surfaceLabel(tab: TabId): string {
 // (home / agents / work / approvals) gets first-class tabs; the rest live behind
 // a 더보기 sheet so no tab drops below the 44px hit target (prototype shell.jsx).
 const MOBILE_PRIMARY: readonly TabId[] = ['overview', 'workspace', 'keepers', 'approvals']
-const SURFACE_ENTRIES: readonly SurfaceEntry[] = SURFACES.filter((e): e is SurfaceEntry => e !== 'sep')
+const SURFACE_ENTRIES: readonly SurfaceTupleEntry[] = SURFACES.filter((e): e is SurfaceTupleEntry => e !== 'sep')
 
 export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobile?: boolean }) {
   const active = route.value.tab
-  const badgeFor = (tab: TabId): number | undefined => {
-    if (tab === 'approvals') return badges?.approvals || undefined
-    if (tab === 'schedule') return badges?.schedule || undefined
-    return undefined
-  }
+  // 0/absent both render nothing — `|| undefined` treats the typed record's
+  // explicit zeros (overview/monitoring/fusion/logs/code/settings — see
+  // nav-badges.ts) the same as an omitted `badges` prop (tests, storybook).
+  const badgeFor = (tab: RailBadgeTab): number | undefined => badges?.[tab] || undefined
 
   const [moreOpen, setMoreOpen] = useState(false)
   useEffect(() => { setMoreOpen(false) }, [active])
 
   if (mobile) {
-    const byTab = new Map(SURFACE_ENTRIES.map((e) => [e.tab, e]))
-    const primary = MOBILE_PRIMARY.map((t) => byTab.get(t)).filter((e): e is SurfaceEntry => !!e)
+    const byTab = new Map<TabId, SurfaceTupleEntry>(SURFACE_ENTRIES.map((e) => [e.tab, e]))
+    const primary = MOBILE_PRIMARY.map((t) => byTab.get(t)).filter((e): e is SurfaceTupleEntry => !!e)
     const hidden = SURFACE_ENTRIES.filter((e) => !MOBILE_PRIMARY.includes(e.tab))
     const moreActive = !MOBILE_PRIMARY.includes(active)
     const hiddenBadge = hidden.reduce((n, e) => n + (badgeFor(e.tab) ?? 0), 0)
-    const Tab = (e: SurfaceEntry) => {
+    const Tab = (e: SurfaceTupleEntry) => {
       const badge = badgeFor(e.tab)
       return html`
         <button key=${e.tab} class=${`nav-item ${active === e.tab ? 'on' : ''}`} onClick=${() => navigate(e.tab)} title=${e.label}>
           ${ICONS[e.icon]}<span class="nlbl">${e.label}</span>
-          ${badge ? html`<span class="nav-badge">${badge}</span>` : null}
+          ${badge ? html`<span class="nav-badge">${badge}</span><span class="sr-only">${` (${badge}건)`}</span>` : null}
         </button>
       `
     }
@@ -106,13 +121,14 @@ export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobi
                       <button key=${e.tab} class=${`mnav-tile ${active === e.tab ? 'on' : ''}`} onClick=${() => { navigate(e.tab); setMoreOpen(false) }}>
                         <span class="mnav-ic">${ICONS[e.icon]}</span>
                         <span class="mnav-lbl">${e.label}</span>
-                        ${badge ? html`<span class="nav-badge">${badge}</span>` : null}
+                        ${badge ? html`<span class="nav-badge">${badge}</span><span class="sr-only">${` (${badge}건)`}</span>` : null}
                       </button>
                     `
                   })}
                   <button class=${`mnav-tile ${active === 'settings' ? 'on' : ''}`} onClick=${() => { navigate('settings'); setMoreOpen(false) }}>
                     <span class="mnav-ic">${ICONS.gear}</span>
                     <span class="mnav-lbl">설정</span>
+                    ${badgeFor('settings') ? html`<span class="nav-badge">${badgeFor('settings')}</span>` : null}
                   </button>
                 </div>
               </div>
@@ -141,19 +157,25 @@ export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobi
                   title=${entry.label}
                 >
                   ${ICONS[entry.icon]}<span class="nlbl">${entry.label}</span>
-                  ${badge ? html`<span class="nav-badge">${badge}</span>` : null}
+                  ${badge ? html`<span class="nav-badge">${badge}</span><span class="sr-only">${` (${badge}건)`}</span>` : null}
                 </button>
               `
             })(),
       )}
       <div class="nav-spacer"></div>
-      <button
-        class=${`nav-item ${active === 'settings' ? 'on' : ''}`}
-        title="설정"
-        onClick=${() => navigate('settings')}
-      >
-        ${ICONS.gear}<span class="nlbl">설정</span>
-      </button>
+      ${(() => {
+        const settingsBadge = badgeFor('settings')
+        return html`
+          <button
+            class=${`nav-item ${active === 'settings' ? 'on' : ''}`}
+            title="설정"
+            onClick=${() => navigate('settings')}
+          >
+            ${ICONS.gear}<span class="nlbl">설정</span>
+            ${settingsBadge ? html`<span class="nav-badge">${settingsBadge}</span><span class="sr-only">${` (${settingsBadge}건)`}</span>` : null}
+          </button>
+        `
+      })()}
     </nav>
   `
 }

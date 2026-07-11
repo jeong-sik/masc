@@ -38,7 +38,7 @@ import { startErrorCleanup, stopErrorCleanup } from './components/common/error-n
 import { DashboardStatusTray } from './components/status-tray'
 import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus-mode-toggle'
 import { isPrimaryDashboardSurface } from './config/navigation'
-import { governanceData } from './components/governance-signals'
+import { navBadges, markBoardMentionsSeenNow } from './nav-badges'
 import type { TabId } from './types'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
@@ -65,7 +65,6 @@ import {
 import { TopBarV2 } from './components/v2/top-bar-v2'
 import { NavRailV2 } from './components/v2/nav-rail-v2'
 import { loadTools, toolsData, toolsLoading } from './components/tools/tool-state'
-import { scheduledPendingApprovalCount } from './components/tools/scheduled-automation-panel'
 
 // Sidebar collapsed state persists across reloads (kept for compatibility with
 // downstream consumers / tests). The v2 rail is a fixed 58px icon rail, so this
@@ -191,7 +190,7 @@ export function App() {
     })
 
     // Governance/HITL approvals feed the always-visible nav-rail approvals
-    // badge and topbar attention indicator (see approvalsBadge below), so the
+    // badge and topbar attention indicator (nav-badges.ts navBadges), so the
     // governance resource must refresh globally. Keep boot on the read-only
     // refresh module instead of governance-actions: first paint should not load
     // toast/action write handlers just to count pending approvals.
@@ -247,6 +246,10 @@ export function App() {
       console.warn('[dashboard] subscribeDashboardRoute failed', err)
     })
     refreshCurrentRoute({ recordVisit: true })
+    // Board-mentions nav-rail badge: mark currently-known for-me mentions as
+    // seen when the operator visits the board surface (mirrors the
+    // per-keeper advanceKeeperLastSeen "mark read on visit" pattern).
+    if (route.value.tab === 'board') markBoardMentionsSeenNow()
   }, [route.value.tab, route.value.params.section, route.value.params.view, route.value.params.q])
 
   const dock = useCopilotDock()
@@ -278,9 +281,6 @@ export function App() {
     document.documentElement.setAttribute('data-volt', tweaksVolt.value)
     document.documentElement.setAttribute('data-theme', tweaksTheme.value === 'paper' ? 'paper' : '')
   }, [tweaksVolt.value, tweaksTheme.value])
-
-  const approvalsBadge = governanceData.value?.approval_queue?.length ?? 0
-  const scheduleBadge = scheduledPendingApprovalCount(toolsData.value?.scheduled_automation ?? null)
 
   // Body grid columns. Desktop: nav rail (58px) + single content column. Mobile:
   // a single 1fr column — the nav becomes a fixed bottom tab bar (.v2-nav.is-mnav),
@@ -324,7 +324,7 @@ export function App() {
 
       <div class="v2-stage">
         <div class="v2-body" style=${{ gridTemplateColumns: cols }}>
-          ${compactChromeMode ? null : html`<${NavRailV2} badges=${{ approvals: approvalsBadge, schedule: scheduleBadge }} mobile=${isMobile} />`}
+          ${compactChromeMode ? null : html`<${NavRailV2} badges=${navBadges.value} mobile=${isMobile} />`}
           <main
             id="main-content"
             tabindex=${-1}

@@ -117,19 +117,37 @@ let launch_supervised_fiber_body
           ~run:body
           ~cleanup:(fun _ -> Ok ())
       with
-      | Ok () -> ()
+      | Ok () -> Ok ()
       | Error error ->
+        (* Fork was rejected (parent switch already cancelling, or
+           [claim_start] refused): no keepalive fiber is running. Resolve the
+           registry crash path — [Keeper_lane.fork] already settled the lane
+           exit for [Fork_failed] — publish [Crashed] under the same
+           dedupe guard the launch gate uses, and propagate an error so the
+           caller suppresses the Started/Running lifecycle for a keeper whose
+           lane was never forked (mirrors [prepare_fiber_launch]'s rejection
+           path). *)
         let detail = Keeper_lane.start_error_to_string error in
         Keeper_registry.set_failure_reason
           ~base_path
           meta.name
           (Some (Keeper_registry.Exception detail));
-        ignore
-          (Keeper_registry.resolve_done
-             reg
-             ~source:"supervisor_lane_start_rejected"
-             (`Crashed detail)
-           : Keeper_registry.done_resolve_result)
+        if
+          Keeper_registry.resolve_done
+            reg
+            ~source:"supervisor_lane_start_rejected"
+            (`Crashed detail)
+          |> done_signal_of_registry_result
+          |> should_publish_lifecycle_for_done_signal
+        then
+          publish_phase_lifecycle
+            ~phase:Keeper_state_machine.Crashed
+            meta.name
+            detail
+            ();
+        Error
+          (Keeper_state_machine.Precondition_violation
+             { event = "supervisor_lane_fork"; reason = detail })
     in
     fork_body (fun lane_sw ->
       let ctx = { ctx with sw = lane_sw } in
@@ -597,8 +615,10 @@ let launch_supervised_fiber
          (Keeper_lane.start_error_to_string lane_error));
     Error err
   | Ok _ ->
-    launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg;
-    Ok ()
+    (* Propagate the fork outcome: a rejected [Keeper_lane.fork] returns
+       [Error] here so the caller suppresses the Started/Running lifecycle
+       for a keeper whose lane was never forked. *)
+    launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
 ;;
 
 (* #10993: persona drift visibility.

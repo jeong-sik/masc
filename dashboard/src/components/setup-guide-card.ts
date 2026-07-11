@@ -76,7 +76,7 @@ function ExternalLinkChip({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noopener noreferrer"
-      class="v2-shell-action inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+      class="v2-shell-action v2-mobile-operator-target inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
     >
       ${label}
       <${ExternalLink} size=${10} />
@@ -200,7 +200,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                       />
                       <label
                         for=${`setup-step-${connectorId}-${idx}`}
-                        class=${`min-w-0 flex-1 cursor-pointer ${done ? 'text-[var(--color-fg-disabled)] line-through decoration-[var(--color-fg-disabled)]' : ''}`}
+                        class=${`v2-mobile-operator-target min-w-0 flex-1 cursor-pointer ${done ? 'text-[var(--color-fg-disabled)] line-through decoration-[var(--color-fg-disabled)]' : ''}`}
                       >
                         <span>${step.text}</span>
                         ${step.link

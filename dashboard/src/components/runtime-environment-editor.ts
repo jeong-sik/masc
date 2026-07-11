@@ -1029,7 +1029,7 @@ export function RuntimeEnvironmentEditor({
                   </select>
                 </div>
                 <div class="rt-check-row">
-                  <label class="rt-check">
+                  <label class="rt-check v2-mobile-operator-target">
                     <input
                       type="checkbox"
                       checked=${newModel.toolsSupport}
@@ -1037,7 +1037,7 @@ export function RuntimeEnvironmentEditor({
                       onChange=${(event: Event) => setNewModel({ ...newModel, toolsSupport: (event.currentTarget as HTMLInputElement).checked })}
                     /><span>tools</span>
                   </label>
-                  <label class="rt-check">
+                  <label class="rt-check v2-mobile-operator-target">
                     <input
                       type="checkbox"
                       checked=${newModel.thinkingSupport}
@@ -1045,7 +1045,7 @@ export function RuntimeEnvironmentEditor({
                       onChange=${(event: Event) => setNewModel({ ...newModel, thinkingSupport: (event.currentTarget as HTMLInputElement).checked })}
                     /><span>thinking</span>
                   </label>
-                  <label class="rt-check">
+                  <label class="rt-check v2-mobile-operator-target">
                     <input
                       type="checkbox"
                       checked=${newModel.streaming}

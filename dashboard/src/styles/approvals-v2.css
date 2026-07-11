@@ -213,6 +213,13 @@ button.wka-switch:focus-visible { outline: 2px solid var(--volt-strong); outline
 }
 
 @media (max-width: 720px) {
+  .ap-surface button,
+  .ap-surface summary,
+  .ap-surface input,
+  .ap-surface select {
+    min-width: var(--mobile-touch-target-min);
+    min-height: var(--mobile-touch-target-min);
+  }
   .ap-hist-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ap-history-item { flex-wrap: wrap; }
   .ap-history-at { flex-basis: 100%; }

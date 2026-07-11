@@ -171,6 +171,7 @@ describe('ConnectorConfigForm', () => {
     expect(container.querySelector('.v2-connector-config-form')).not.toBeNull()
     expect(panel?.textContent).toContain('server in-process')
     expect(panel?.textContent).toContain('DISCORD_BOT_TOKEN')
+    expect(panel?.querySelector('a')?.classList.contains('v2-mobile-operator-target')).toBe(true)
     expect(panel?.textContent).not.toContain('Save')
     expect(panel?.textContent).not.toContain('자동 재시작')
   })
@@ -203,6 +204,7 @@ describe('ConnectorConfigForm', () => {
     expect(saveBtn?.disabled).toBe(true)
     // Required field surfaces in the form (label) so operator can see what's missing.
     expect(container.textContent).toContain('TELEGRAM_BOT_TOKEN')
+    expect(container.querySelector('[data-field-hint="TELEGRAM_BOT_TOKEN"] a')?.classList.contains('v2-mobile-operator-target')).toBe(true)
   })
 
   it('Save button POSTs to /api/v1/sidecar/config when required field is filled', async () => {

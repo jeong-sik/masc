@@ -1276,7 +1276,7 @@ function ConnectorLivePanel({
 
       ${connector
         ? html`
-            <div class="mt-4 flex flex-wrap gap-3 text-3xs text-[var(--color-fg-disabled)]">
+            <div class="cn-runtime-paths mt-4 flex flex-wrap gap-3 text-3xs text-[var(--color-fg-disabled)]">
               ${connector.status_path
                 ? html`<span title=${connector.status_path}>runtime ${truncateMiddle(connector.status_path, 50)}</span>`
                 : null}

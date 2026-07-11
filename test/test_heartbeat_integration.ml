@@ -616,7 +616,8 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
         wait_until ~clock:ctx.clock ~timeout_s:1.0 (fun () ->
           match R.get ~base_path:config.base_path keeper_name with
           | Some entry ->
-            Option.is_some (Eio.Promise.peek entry.done_p)
+            entry.phase = KSM.Stopped
+            && Option.is_some (Eio.Promise.peek entry.done_p)
             && R.lane_has_exited entry
           | None -> false)
       in

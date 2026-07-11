@@ -118,6 +118,10 @@ let parse_frontmatter content =
       collect_meta [] rest
   | _ -> ([], content)
 
+let markdown_body content =
+  let _metadata, body = parse_frontmatter content in
+  body
+
 (** Parse a bracketed list value like [a, b, c] into string list. *)
 let parse_list_value s =
   let s = String.trim s in
@@ -237,8 +241,7 @@ let prompt_markdown_path key =
 let read_file_if_exists path =
   if Sys.file_exists path && not (Sys.is_directory path) then
     let content = In_channel.with_open_text path In_channel.input_all in
-    let _meta, body = parse_frontmatter content in
-    Some body
+    Some (markdown_body content)
   else None
 
 (** {1 Registration and Lookup} *)

@@ -591,7 +591,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
   let keeper_name = "direct-lifecycle" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_keepalive.stop_keepalive keeper_name;
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
       cleanup_dir base_dir)
     (fun () ->
       ensure_default_runtime ();
@@ -611,7 +611,9 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       in
       Masc.Keeper_keepalive.start_keepalive ctx meta;
       Eio.Time.sleep ctx.clock 0.05;
-      Masc.Keeper_keepalive.stop_keepalive keeper_name;
+      Masc.Keeper_keepalive.stop_keepalive
+        ~base_path:config.base_path
+        keeper_name;
       let stopped_resolved =
         wait_until ~clock:ctx.clock ~timeout_s:1.0 (fun () ->
           match R.get ~base_path:config.base_path keeper_name with

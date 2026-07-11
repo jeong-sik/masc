@@ -134,13 +134,21 @@ let register () =
   let handler ~name ~args = Some (handle_tool name args) in
   let make_spec (s : Masc_domain.tool_schema) =
     let ro = List.mem s.name tool_spec_read_only in
+    let metadata = Tool_catalog.metadata s.name in
     Tool_spec.create
       ~name:s.name
       ~description:s.description
       ~module_tag:Tool_dispatch.Mod_inline
       ~input_schema:s.input_schema
       ~handler_binding:(Shared handler)
-      ~visibility:(Tool_catalog.metadata s.name).visibility
+      ~visibility:metadata.visibility
+      ~implementation_status:metadata.implementation_status
+      ?canonical_name:metadata.canonical_name
+      ?replacement:metadata.replacement
+      ?reason:metadata.reason
+      ~allow_direct_call_when_hidden:metadata.allow_direct_call_when_hidden
+      ?effect_domain:metadata.effect_domain
+      ?requires_actor_binding:metadata.requires_actor_binding
       ~is_read_only:ro
       ~is_idempotent:ro
       ~is_destructive:(is_destructive_board_tool s.name)

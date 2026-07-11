@@ -638,7 +638,36 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
 ;;
 
 let test_masc_board_registry_has_descriptor_projection () =
+  let post_update_name =
+    Tool_name.Board_name.(to_string Board_post_update)
+  in
+  let expected_post_update = Tool_catalog.metadata post_update_name in
+  Alcotest.(check bool)
+    "post-update precondition is hidden"
+    true
+    (expected_post_update.visibility = Tool_catalog.Hidden);
+  Alcotest.(check bool)
+    "post-update precondition allows direct hidden calls"
+    true
+    expected_post_update.allow_direct_call_when_hidden;
+  Alcotest.(check bool)
+    "post-update precondition explains hidden status"
+    true
+    (Option.is_some expected_post_update.reason);
   Board_tool_dispatch.register ();
+  let actual_post_update = Tool_catalog.metadata post_update_name in
+  Alcotest.(check bool)
+    "post-update visibility preserved"
+    true
+    (actual_post_update.visibility = expected_post_update.visibility);
+  Alcotest.(check bool)
+    "post-update hidden direct-call allowance preserved"
+    expected_post_update.allow_direct_call_when_hidden
+    actual_post_update.allow_direct_call_when_hidden;
+  Alcotest.(check (option string))
+    "post-update hidden reason preserved"
+    expected_post_update.reason
+    actual_post_update.reason;
   let wire_names =
     List.map Tool_name.Board_name.to_string Tool_name.Board_name.all
   in

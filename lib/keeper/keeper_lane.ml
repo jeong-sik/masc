@@ -118,7 +118,11 @@ let fork ~sw t ~run ~cleanup =
            | Eio.Cancel.Cancelled cause -> Cancelled_by_parent cause
            | exn -> Failed exn
          in
-         ignore (resolve_exit_once t outcome cleanup));
+         match resolve_exit_once t outcome cleanup with
+         | true -> ()
+         | false ->
+           (* A concurrent rejected-fork path already settled the same lane. *)
+           ());
        if Atomic.get started
        then Ok ()
        else
@@ -136,7 +140,11 @@ let fork ~sw t ~run ~cleanup =
      with
      | exn ->
        let outcome = Failed exn in
-       ignore (resolve_exit_once t outcome cleanup);
+       (match resolve_exit_once t outcome cleanup with
+        | true -> ()
+        | false ->
+          (* The child won the exact-once settlement race before fork raised. *)
+          ());
        Error (Fork_failed exn))
 ;;
 
@@ -144,6 +152,7 @@ let reject_before_start t ~reason =
   match claim_start t with
   | Error _ as error -> error
   | Ok () ->
-    ignore (resolve_exit_once t (Failed reason) (fun _ -> Ok ()));
-    Ok ()
+    if resolve_exit_once t (Failed reason) (fun _ -> Ok ())
+    then Ok ()
+    else Error Already_exited
 ;;

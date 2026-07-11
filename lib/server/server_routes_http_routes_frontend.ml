@@ -29,7 +29,11 @@ let authority_host_port ~default_port request_authority =
       (Server_request_authority.port request_authority) )
 ;;
 
-let canonical_loopback_location ~default_port ~request_authority request =
+let canonical_loopback_location
+    ~default_port
+    ~request_authority
+    (request : Httpun.Request.t)
+  =
   let host, port = authority_host_port ~default_port request_authority in
   let canonical_host = Transport_read_model.normalize_advertised_host host in
   if String.equal canonical_host host then

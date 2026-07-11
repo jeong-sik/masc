@@ -96,7 +96,6 @@
   test_with_cleanups_on_release
   test_auth_login
   test_dashboard_dev_token_host_gate
-  test_server_request_authority
   test_audit_log
   test_console_sink
   test_governance_anomaly
@@ -760,6 +759,14 @@
   test_board_rest_routes
   test_board_context_inference_resolution)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf))
+
+; Request-authority admission uses Eio fiber-local bindings and therefore owns
+; an explicit executable stanza instead of borrowing the pure synchronous test
+; group above.
+(test
+ (name test_server_request_authority)
+ (modules test_server_request_authority)
+ (libraries alcotest masc_test_deps eio_main))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 

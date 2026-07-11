@@ -108,7 +108,7 @@ function normalizeAdmissionQueue(raw: unknown): AdmissionQueueNormalization {
     || !Number.isSafeInteger(queueDepth)
     || queueDepth < 0
   ) return { value: null, error: 'Admission projection contains invalid counters.' }
-  if (active > maxConcurrent || available > maxConcurrent || active + available !== maxConcurrent) {
+  if (available !== Math.max(0, maxConcurrent - active)) {
     return { value: null, error: 'Admission projection counters are inconsistent.' }
   }
   return {

@@ -23,6 +23,7 @@ import {
   post,
   runOperatorAction,
   fetchWithTimeout,
+  fetchJsonWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
   DEFAULT_POST_TIMEOUT_MS,
 } from './core'
@@ -803,7 +804,7 @@ export async function fetchKeeperChatReceipt(
   keeperName: string,
   receiptId: string,
 ): Promise<KeeperChatReceipt> {
-  const resp = await fetchWithTimeout(
+  const { response: resp, data } = await fetchJsonWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}`,
     { headers: jsonHeaders() },
     DEFAULT_GET_TIMEOUT_MS,
@@ -811,7 +812,7 @@ export async function fetchKeeperChatReceipt(
   if (!resp.ok) {
     throw new Error(`fetchKeeperChatReceipt: HTTP ${resp.status} ${resp.statusText}`)
   }
-  return parseKeeperChatReceipt(await resp.json())
+  return parseKeeperChatReceipt(data)
 }
 
 export async function fetchKeeperChatHistory(
@@ -824,7 +825,7 @@ export async function fetchKeeperChatHistory(
   // keeper-actions.ts) is responsible for surfacing the failure to
   // the operator.  Per-item safeParse drift remains
   // tolerant — only network / HTTP / shape errors throw.
-  const resp = await fetchWithTimeout(
+  const { response: resp, data } = await fetchJsonWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,
     { headers: jsonHeaders() },
     DEFAULT_GET_TIMEOUT_MS,
@@ -832,7 +833,6 @@ export async function fetchKeeperChatHistory(
   if (!resp.ok) {
     throw new Error(`fetchKeeperChatHistory: HTTP ${resp.status} ${resp.statusText}`)
   }
-  const data: unknown = await resp.json()
   if (!Array.isArray(data)) {
     throw new Error('fetchKeeperChatHistory: response is not an array')
   }

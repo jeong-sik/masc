@@ -1219,11 +1219,11 @@ let start_keeper_loops
              in
              let delivery_outcome = Eio.Promise.await delivery in
              match turn_outcome, delivery_outcome with
-             | Some Delivered, Ok () ->
-                 Keeper_chat_consumer.Delivered { outcome_ref = None }
-             | Some Delivered, Error (kind, detail) ->
+             | Some (Delivered { outcome_ref }), Ok () ->
+                 Keeper_chat_consumer.Delivered { outcome_ref }
+             | Some (Delivered { outcome_ref }), Error (kind, detail) ->
                  Keeper_chat_consumer.Failed
-                   { kind; detail; outcome_ref = None }
+                   { kind; detail; outcome_ref }
              | Some (Failed { kind = turn_kind; detail = turn_detail }),
                Error (delivery_kind, delivery_detail) ->
                  Keeper_chat_consumer.Failed

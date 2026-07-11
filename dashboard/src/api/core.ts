@@ -289,11 +289,27 @@ export function extractApiError(err: unknown, fallbackMessage: string): ApiError
   return { message: fallbackMessage, status: null, path: null, timeout: false }
 }
 
-export async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+async function fetchAndConsumeWithTimeout<T>(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+  consume: (response: Response) => Promise<T>,
+): Promise<T> {
   const controller = new AbortController()
   const upstreamSignal = init.signal
-  const abortFromUpstream = () => controller.abort()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let rejectBoundary: (reason: unknown) => void = () => undefined
+  const boundary = new Promise<never>((_resolve, reject) => {
+    rejectBoundary = reject
+  })
+  const abortFromUpstream = () => {
+    controller.abort()
+    rejectBoundary(upstreamSignal?.reason ?? new DOMException('Aborted', 'AbortError'))
+  }
+  const timer = setTimeout(() => {
+    controller.abort()
+    const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
+    rejectBoundary(new ApiRequestError({ method, path, timeout: true, timeoutMs }))
+  }, timeoutMs)
 
   if (upstreamSignal) {
     if (upstreamSignal.aborted) {
@@ -304,11 +320,12 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
   }
 
   try {
-    return await fetch(path, {
+    const request = fetch(path, {
       ...init,
       cache: init.cache ?? 'no-store',
       signal: controller.signal,
-    })
+    }).then(consume)
+    return await Promise.race([request, boundary])
   } catch (err) {
     if (isAbortError(err)) {
       if (upstreamSignal?.aborted) {
@@ -327,6 +344,21 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
     clearTimeout(timer)
     upstreamSignal?.removeEventListener('abort', abortFromUpstream)
   }
+}
+
+export async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  return fetchAndConsumeWithTimeout(path, init, timeoutMs, async response => response)
+}
+
+export async function fetchJsonWithTimeout(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<{ response: Response; data: unknown | null }> {
+  return fetchAndConsumeWithTimeout(path, init, timeoutMs, async response => ({
+    response,
+    data: response.ok ? await response.json() : null,
+  }))
 }
 
 const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([

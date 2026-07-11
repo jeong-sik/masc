@@ -1060,7 +1060,7 @@ and queued_turn_failure_kind =
   | Stream_projection_failed
 
 and queued_turn_outcome =
-  | Delivered
+  | Delivered of { outcome_ref : string option }
   | Failed of
       { kind : queued_turn_failure_kind
       ; detail : string
@@ -1464,7 +1464,14 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                    | Ok () ->
                        Keeper_chat_broadcast.chat_appended
                          ~keeper_name:payload.name ~source:chat_source ?content ();
-                       if queued_turn then Some Delivered else None
+                       if queued_turn
+                       then
+                         Some
+                           (Delivered
+                              { outcome_ref =
+                                  Option.map Ids.Turn_ref.to_string turn_ref
+                              })
+                       else None
                    | Error persist_error ->
                        if queued_turn
                        then
@@ -1536,7 +1543,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                            ; queued_outcome
                            });
                       Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
-                  | Some Delivered | None ->
+                  | Some (Delivered _) | None ->
                       push_worker_event
                         (Stream_terminal
                            { ok = true

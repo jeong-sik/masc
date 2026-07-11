@@ -86,7 +86,7 @@ export function createAnchoredThreadRail(opts: {
 }): AnchoredThreadRailController
 ```
 
-Adapters: `headless-preact/use-anchored-thread-rail.ts`, `headless-solid/use-anchored-thread-rail.ts`.
+Adapter: `headless-preact/use-anchored-thread-rail.ts`.
 
 ## 4. Editor ↔ rail workspace collaboration
 

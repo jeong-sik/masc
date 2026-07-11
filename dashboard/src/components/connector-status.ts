@@ -61,7 +61,7 @@ import { formatTimeAgoEn } from '../lib/format-time'
 import { ErrorState } from './common/feedback-state'
 import { ConnectorOverviewSkeleton } from './connector-overview-skeleton'
 import { lastEvent } from '../sse'
-import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
+import { KpiStripView, type KpiStripViewData } from './kpi-strip-view'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { StatusChip } from './common/status-chip'
@@ -1513,7 +1513,7 @@ function GateAnalyticsSection({
         : html`
             <div>
               <div class="mb-3">
-                <${KpiStripIsland}
+                <${KpiStripView}
                   ariaLabel="connector gate 통계"
                   cols=${4}
                   cells=${[
@@ -1521,7 +1521,7 @@ function GateAnalyticsSection({
                     { variant: 'stacked', label: '성공', value: gate.total_success },
                     { variant: 'stacked', label: '오류', value: gate.total_errors },
                     { variant: 'stacked', label: '중복 제거 키', value: gate.dedup_table_size },
-                  ] satisfies KpiStripIslandData['cells']}
+                  ] satisfies KpiStripViewData['cells']}
                 />
               </div>
 

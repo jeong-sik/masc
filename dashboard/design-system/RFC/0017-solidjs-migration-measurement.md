@@ -2,6 +2,12 @@
 
 Companion document to RFC 0017 (`0017-solidjs-migration.md`). Records the first runtime measurement on the actual island wrapper after PRs #12162 → #12268 migrated 6 callers.
 
+> **Status (2026-07-11): historical / superseded.** PR #24015 removed the Solid
+> runtime and unified the dashboard on Preact. The benchmark source was deleted
+> with that runtime because keeping it live would compare Preact against the same
+> Preact implementation while retaining false Solid labels. The measurements
+> below describe the pre-removal implementation only.
+
 ## Headline finding
 
 **The migration does not improve user-perceived latency on our app.** For every page that uses any migrated caller, mount time is ≈30 ms slower than the Preact original; update time is similarly slower. The performance hypothesis from RFC 0017 §4 (krausest geomean 1.40→1.12) was measured on a 1000-row table benchmark — far from our actual usage where the maximum strip count on any page is roughly 10. Our usage falls entirely in the Preact-wins region.
@@ -10,7 +16,7 @@ Companion document to RFC 0017 (`0017-solidjs-migration.md`). Records the first 
 
 | Item | Value |
 |------|-------|
-| Bench page | `dashboard/design-system/preview/bench-kpi.html` + `bench-kpi.ts` |
+| Bench page | Historical files at commit `817eb5e74786fd166f9d81a4a160e521d6fc37d3` |
 | Runner | `puppeteer` headless Chromium |
 | Measurement | `requestAnimationFrame` poll for `[role="listitem"]` count to reach `count × cells/strip` |
 | Cells per strip | 6 |
@@ -157,7 +163,7 @@ For the RFC 0017 trajectory this means:
 1. **Sync-mount can be promoted to production** as a low-risk improvement: removes the 30 ms regression on every page using a migrated caller, no API change, identical DOM contract.
 2. **Phase 2 / Phase 3 islands stay paused** until the per-cell signal redesign (separate larger RFC) is done. Adding more sync-mount islands at parity gives no win, just larger frame budget consumption with no benefit.
 
-## Recommendations
+## Historical recommendations (superseded by PR #24015)
 
 1. **Do not roll back blindly.** Bundle isolation (9.3 KB amortised after first caller, 0 B per subsequent caller), type safety, and the test-shim infrastructure are all clean wins; reverting them costs more than the latency we'd recover.
 2. **Amend RFC 0017 §4.** The krausest citation does not generalise to our app shape. Replace it with these measured numbers and an explicit note that the migration was not justified by user-perceived latency *unless paired with a per-cell signal API*.
@@ -166,15 +172,8 @@ For the RFC 0017 trajectory this means:
 5. **Per-cell signal API redesign** as a separate, larger RFC if real perf wins are needed. This would change `KpiStripIslandData` from `cells: ReadonlyArray<KpiCellProps>` to `cellSignals: ReadonlyArray<Accessor<KpiCellProps>>`, allowing callers to mutate one cell without recreating the array. Costly: every caller refactors its data flow.
 6. **Keep the current migration as deliberate code organisation.** The Solid island gives us framework-agnostic primitives, a clean migration boundary, and a reusable test pattern (`vi.doMock` shim). Those are the actual wins to report — performance was not, until the sync-mount spike, which now gives us parity.
 
-## Reproduction
+## Historical reproduction source
 
-```bash
-cd ~/me/workspace/yousleepwhen/masc/.worktrees/ds-v2-rfc0017-perf-bench/dashboard
-MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:8935 pnpm dev &
-
-cd /tmp/rfc0017-bench   # or wherever the runner lives
-node run-bench.mjs
-```
-
-The bench page is also reachable interactively at
-`http://localhost:5173/dashboard/design-system/preview/bench-kpi.html`.
+The original benchmark is available in Git history at commit
+`817eb5e74786fd166f9d81a4a160e521d6fc37d3`. It is intentionally absent from
+the current Vite preview surface after the Solid runtime removal.

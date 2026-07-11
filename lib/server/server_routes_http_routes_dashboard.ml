@@ -503,15 +503,42 @@ let add_routes ~sw ~clock router =
        else
          with_public_read (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
-           let raw_result = ensure_dashboard_dev_token base_path in
+           let raw_result =
+             Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token_for_request
+               ~request:req
+               ~base_path
+           in
            begin
              match raw_result with
              | Ok raw ->
                Http.Response.json_value ~request:req
                  (`Assoc [ ("token", `String raw) ]) reqd
-             | Error msg ->
-               Http.Response.json_value ~status:`Internal_server_error
-                 ~request:req (`Assoc [ ("error", `String msg) ]) reqd
+             | Error err ->
+               let status =
+                 match err with
+                 | Server_routes_http_dashboard_dev_token.Request_host_rejected _ ->
+                   `Forbidden
+                 | Server_routes_http_dashboard_dev_token.Token_operation_failed _ ->
+                   `Internal_server_error
+               in
+               let error_code =
+                 Server_routes_http_dashboard_dev_token.request_error_code err
+               in
+               let message =
+                 Server_routes_http_dashboard_dev_token.request_error_to_string err
+               in
+               Log.Auth.error
+                 "dashboard dev-token denied code=%s detail=%s"
+                 error_code
+                 message;
+               Http.Response.json_value
+                 ~status
+                 ~request:req
+                 (`Assoc
+                    [ "error", `String message
+                    ; "error_code", `String error_code
+                    ])
+                 reqd
            end) request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->
        let force = Server_utils.bool_query_param request "force" ~default:false in

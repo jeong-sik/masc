@@ -6,6 +6,32 @@
 
 let dashboard_dev_actor_name = "dashboard"
 
+type request_error =
+  | Request_host_rejected of Server_auth.request_host_rejection
+  | Token_operation_failed of string
+
+let request_error_code = function
+  | Request_host_rejected Server_auth.Missing_request_host ->
+    "dashboard_dev_token_host_missing"
+  | Request_host_rejected Server_auth.Malformed_request_host ->
+    "dashboard_dev_token_host_malformed"
+  | Request_host_rejected (Server_auth.Non_loopback_request_host _) ->
+    "dashboard_dev_token_host_non_loopback"
+  | Token_operation_failed _ -> "dashboard_dev_token_operation_failed"
+;;
+
+let request_error_to_string = function
+  | Request_host_rejected Server_auth.Missing_request_host ->
+    "dashboard dev-token request is missing the Host header"
+  | Request_host_rejected Server_auth.Malformed_request_host ->
+    "dashboard dev-token request has a malformed Host authority"
+  | Request_host_rejected (Server_auth.Non_loopback_request_host host) ->
+    Printf.sprintf
+      "dashboard dev-token request Host %S is not an exact loopback host"
+      host
+  | Token_operation_failed detail -> detail
+;;
+
 let dashboard_dev_token_path base_path =
   Filename.concat
     (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
@@ -78,3 +104,12 @@ let ensure_dashboard_dev_token base_path : (string, string) result =
   | Error msg -> Error msg
   | Ok (Some raw) -> Ok raw
   | Ok None -> mint_dashboard_dev_token base_path
+
+let ensure_dashboard_dev_token_for_request ~request ~base_path =
+  match Server_auth.admit_loopback_request_host request with
+  | Error rejection -> Error (Request_host_rejected rejection)
+  | Ok _ ->
+    Result.map_error
+      (fun detail -> Token_operation_failed detail)
+      (ensure_dashboard_dev_token base_path)
+;;

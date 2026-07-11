@@ -45,7 +45,7 @@
 <body>
 <main>
   <h1>MASC issue root-cause improvement program</h1>
-  <p class="sub">Living report · initial capture 2026-07-11 02:57:15 KST · latest update 2026-07-11 13:40 KST · branch <code>codex/issue-root-cause-20260711</code> · base <code>origin/main@b1f5712856</code> · candidate <code>7f8c7c4524</code> · live runtime <code>cfc19f4375</code></p>
+  <p class="sub">Living report · initial capture 2026-07-11 02:57:15 KST · latest update 2026-07-11 13:40 KST · branch <code>codex/issue-root-cause-20260711</code> · base <code>origin/main@b1f5712856</code> · implementation <code>7f8c7c4524</code> · live runtime <code>cfc19f4375</code></p>
 
   <div class="summary">
     <div class="stat"><strong>285</strong><span>open GitHub issues in the latest live snapshot</span></div>
@@ -153,7 +153,7 @@
     <tr><td>Current source</td><td><span class="status work">IN PROGRESS</span> rebased source main <code>b1f5712856</code>; first axis #24032</td><td>upstream 10 commits와 changed-path 교집합 0; source/runtime truth는 계속 분리</td></tr>
     <tr><td>Runtime</td><td><span class="status work">DEGRADED, RECHECKED</span> 7 fibers, 12 pending, 1 inflight, 5 paused</td><td>현재 실행 binary는 <code>cfc19f4375</code>라 #24032 source 변경 효과를 주장하지 않는다.</td></tr>
     <tr><td>Research HTML</td><td><span class="status ok">COMPLETE</span> 680개 inventory, 20개 primary reference</td><td>HTML의 과거 PR/퍼센트는 사실로 쓰지 않고 current source만 권위로 사용</td></tr>
-    <tr><td>Implementation</td><td><span class="status work">DRAFT PR</span> <a href="https://github.com/jeong-sik/masc/pull/24079">#24079</a> · head <code>7f8c7c4524</code></td><td>독립 <code>Tool_capability_id</code>, exhaustive Board projection, sole Keeper exposure, capability-wide deny, raw bypass fail-close, typed route-miss telemetry</td></tr>
+    <tr><td>Implementation</td><td><span class="status work">DRAFT PR</span> <a href="https://github.com/jeong-sik/masc/pull/24079">#24079</a> · code commit <code>7f8c7c4524</code></td><td>독립 <code>Tool_capability_id</code>, exhaustive Board projection, sole Keeper exposure, capability-wide deny, raw bypass fail-close, typed route-miss telemetry</td></tr>
     <tr><td>CI</td><td><span class="status pending">RUNNING</span> initial 7 checks pending</td><td>PR Sync, Fundamental lint, axis/coverage checks, changed-file ocamlformat, TLA annotation drift. Full Dune/type/link/test 결과가 최종 권위다.</td></tr>
   </table>
 

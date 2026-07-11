@@ -1115,6 +1115,15 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
        | Error (Shutdown_prepare_join.Prepare_persist_failed _) -> ()
        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
        | Ok _ -> fail "shutdown prepare unexpectedly persisted through a file blocker");
+      (* #24135 born-red root: [run_if_free] fail-closes to [Busy (Turn_busy _)]
+         when chat-queue persistence is not configured (keeper_turn_admission.ml
+         guards the autonomous lane against an unknown chat backlog). Production
+         always configures persistence, so the fence rollback there surfaces as
+         [Ran]; the test omitted it and misread the chat-queue guard as a stuck
+         shutdown fence. Configure persistence so [run_if_free] reflects only the
+         shutdown reservation, which the failed prepare rolled back. *)
+      ignore
+        (Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path);
       match
         Masc.Keeper_turn_admission.run_if_free
           ~base_path:config.base_path

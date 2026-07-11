@@ -994,7 +994,11 @@ export function hydrateShellSnapshot(
 export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
   const wantsLight = opts?.light === true
   if (inflightShellRefresh) {
-    if (wantsLight || !inflightShellRefreshLight) return inflightShellRefresh
+    // A forced refresh must observe state established by the caller before
+    // this invocation (notably Settings clearing the browser token). Joining
+    // an older request could otherwise hydrate auth from the pre-clear token
+    // and falsely report that the cleared state was rechecked.
+    if (!opts?.force && (wantsLight || !inflightShellRefreshLight)) return inflightShellRefresh
     await inflightShellRefresh
   }
   if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return true

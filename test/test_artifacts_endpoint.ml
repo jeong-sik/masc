@@ -84,7 +84,7 @@ let test_hit_returns_envelope () =
   with_temp_base_path (fun dir ->
       let store = B.create ~base_path:dir in
       let payload = "the actual blob bytes" in
-      let stored = B.put store ~bytes:payload ~mime:"text/plain" in
+      let stored = B.put_blocking store ~bytes:payload ~mime:"text/plain" in
       match stored with
       | O.Stored { sha256; _ } ->
           let json, status = A.blob_response ~sha256 in

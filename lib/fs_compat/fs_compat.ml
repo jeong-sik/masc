@@ -239,50 +239,36 @@ let save_file (path : string) (content : string) : unit =
        Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
 ;;
 
-let save_file_atomic path content =
+exception Invalid_atomic_target of
+  { path : string
+  ; error : Durable_mutation.Segment.error
+  }
+
+let invalid_atomic_target_report path error =
+  let cause = Invalid_atomic_target { path; error } in
+  { Durable_mutation.progress =
+      Durable_mutation.Not_committed
+        { cause
+        ; backtrace = Printexc.get_callstack 32
+        }
+  ; diagnostics = []
+  }
+;;
+
+let save_file_atomic_with replace path content =
   test_exec_home_guard ~op:"save_file_atomic" path;
   let parent = Filename.dirname path in
   match Durable_mutation.Segment.of_string (Filename.basename path) with
-  | Error _ -> Error (Printf.sprintf "save_file_atomic %s: invalid final segment" path)
-  | Ok name ->
-    let report =
-      Durable_mutation.atomic_replace_blocking
-        ~parent
-        ~name
-        ~perm:0o600
-        content
-    in
-    let diagnostic_suffix =
-      match report.diagnostics with
-      | [] -> ""
-      | diagnostics ->
-        "; diagnostics: "
-        ^ String.concat
-            "; "
-            (List.map Durable_mutation.diagnostic_to_string diagnostics)
-    in
-    (match report.progress, report.diagnostics with
-     | Durable_mutation.Durable (), [] -> Ok ()
-     | Durable_mutation.Durable (), _ ->
-       Error
-         (Printf.sprintf
-            "save_file_atomic %s: durable%s"
-            path
-            diagnostic_suffix)
-     | Durable_mutation.Not_committed { cause; _ }, _ ->
-       Error
-         (Printf.sprintf
-            "save_file_atomic %s: not committed: %s%s"
-            path
-            (Printexc.to_string cause)
-            diagnostic_suffix)
-     | Durable_mutation.Committed_not_durable { cause; _ }, _ ->
-       Error
-         (Printf.sprintf
-            "save_file_atomic %s: committed but not durable: %s%s"
-            path
-            (Printexc.to_string cause)
-            diagnostic_suffix))
+  | Error error -> invalid_atomic_target_report path error
+  | Ok name -> replace ~parent ~name ~perm:0o600 content
+;;
+
+let save_file_atomic_blocking path content =
+  save_file_atomic_with Durable_mutation.atomic_replace_blocking path content
+;;
+
+let save_file_atomic_eio path content =
+  save_file_atomic_with Durable_mutation.atomic_replace_eio path content
 ;;
 
 let is_atomic_orphan_name = Durable_mutation.is_temporary_name

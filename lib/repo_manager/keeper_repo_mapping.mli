@@ -108,10 +108,16 @@ val validate_access :
 (** [validate_access ~keeper_id ~repository_id ~base_path] returns [Ok ()] if
     access is permitted, or [Error msg] otherwise. *)
 
-val save_mapping :
+val save_mapping_blocking :
   base_path:string -> keeper_repo_mapping -> (unit, string) result
-(** [save_mapping ~base_path mapping] saves or updates the mapping for the
-    given keeper, overwriting any existing mapping for that keeper. *)
+(** Blocking save for CLI and non-Eio tests. *)
+
+val save_mapping_eio :
+  base_path:string -> keeper_repo_mapping -> (unit, string) result
+(** Eio-safe counterpart of {!save_mapping_blocking}. Load, lock, write, and
+    cache invalidation run as one cancellation-protected system-thread job.
+    Both entry points update the mapping for the given keeper, overwriting any
+    existing mapping for that keeper. *)
 
 val apply_mapping :
   keeper_id:string -> base_path:string -> repositories:repository list -> repository list

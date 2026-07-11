@@ -186,17 +186,26 @@ let repair_event_file_utf8_once config path =
                   invalid_bytes=%d action=read_only_current_day"
                  path repair.invalid_bytes
              else
-               match Fs_compat.save_file_atomic path repair.text with
-               | Ok () ->
-                   Log.Misc.warn
-                     "[activity_graph] UTF-8 repaired persisted event file path=%s \
-                      invalid_bytes=%d action=rewrite_once"
-                     path repair.invalid_bytes
-               | Error msg ->
+               let report = Fs_compat.save_file_atomic_eio path repair.text in
+               Fs_compat.Durable_mutation.fold_report report
+                 ~not_committed:(fun report ->
                    Log.Misc.warn
                      "[activity_graph] UTF-8 repaired event file in memory path=%s \
-                      invalid_bytes=%d action=rewrite_failed error=%s"
-                     path repair.invalid_bytes msg);
+                      invalid_bytes=%d action=rewrite_not_committed error=%s"
+                     path repair.invalid_bytes
+                     (Fs_compat.Durable_mutation.report_to_string report))
+                 ~committed_not_durable:(fun report ->
+                   Log.Misc.warn
+                     "[activity_graph] UTF-8 repair committed with sync debt path=%s \
+                      invalid_bytes=%d detail=%s"
+                     path repair.invalid_bytes
+                     (Fs_compat.Durable_mutation.report_to_string report))
+                 ~durable:(fun report ->
+                   Log.Misc.warn
+                     "[activity_graph] UTF-8 repaired persisted event file path=%s \
+                      invalid_bytes=%d action=rewrite_once detail=%s"
+                     path repair.invalid_bytes
+                     (Fs_compat.Durable_mutation.report_to_string report)));
             repair.text
           end)
 

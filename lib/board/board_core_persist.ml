@@ -38,6 +38,47 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
+let observe_committed_persist ~where report =
+  match report.Fs_compat.Durable_mutation.diagnostics with
+  | [] -> ()
+  | _ ->
+    Log.BoardLog.warn
+      "persist committed with durability diagnostics (%s): %s"
+      where
+      (Fs_compat.Durable_mutation.report_to_string report)
+;;
+
+let atomic_persist_result ~where report =
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      persist_io_error
+        ~where
+        (Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      Log.BoardLog.warn
+        "persist committed with sync debt (%s): %s"
+        where
+        (Fs_compat.Durable_mutation.report_to_string report);
+      Ok ())
+    ~durable:(fun report ->
+      observe_committed_persist ~where report;
+      Ok ())
+;;
+
+let atomic_persist_observe ~where report =
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      record_persist_error
+        ~where
+        (Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      Log.BoardLog.warn
+        "persist committed with sync debt (%s): %s"
+        where
+        (Fs_compat.Durable_mutation.report_to_string report))
+    ~durable:(fun report -> observe_committed_persist ~where report)
+;;
+
 let create_store () =
   { posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
@@ -429,9 +470,8 @@ let save_posts_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = persist_path () in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg -> persist_io_error ~where:"rewrite_posts" msg
+    Fs_compat.save_file_atomic_eio path content
+    |> atomic_persist_result ~where:"rewrite_posts"
   with
   | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg
 ;;
@@ -450,9 +490,8 @@ let rewrite_comments store =
          Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
          Buffer.add_char buf '\n')
       store.comments;
-    match Fs_compat.save_file_atomic path (Buffer.contents buf) with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_comments" msg
+    Fs_compat.save_file_atomic_eio path (Buffer.contents buf)
+    |> atomic_persist_observe ~where:"rewrite_comments"
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
 ;;
@@ -469,9 +508,8 @@ let save_reactions_jsonl content =
   try
     ensure_masc_dir ();
     let path = reactions_path () in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_reactions" msg
+    Fs_compat.save_file_atomic_eio path content
+    |> atomic_persist_observe ~where:"rewrite_reactions"
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_reactions" msg
 ;;

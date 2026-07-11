@@ -10,6 +10,16 @@ module Keeper_types = Keeper_types
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
+let save_atomic_fixture path content =
+  let report = Fs_compat.save_file_atomic_blocking path content in
+  match report.progress with
+  | Fs_compat.Durable_mutation.Durable () when report.diagnostics = [] -> ()
+  | Fs_compat.Durable_mutation.Durable ()
+  | Fs_compat.Durable_mutation.Committed_not_durable _
+  | Fs_compat.Durable_mutation.Not_committed _ ->
+    Alcotest.fail (Fs_compat.Durable_mutation.report_to_string report)
+;;
+
 let temp_dir () =
   let dir = Filename.temp_file "tool_search_files_via_" "" in
   Unix.unlink dir;
@@ -67,7 +77,7 @@ let setup f =
      once. *)
   let sample = Filename.concat playground "sample.txt" in
   ignore
-    (Fs_compat.save_file_atomic sample
+    (save_atomic_fixture sample
        "alpha via_marker_text\nbeta\ngamma\n");
   f ~config ~meta ~playground ~sample
 

@@ -84,7 +84,7 @@ let write_mapping base_path keeper_id repo_ids =
     Repo_manager_types.make_keeper_repo_mapping ~keeper_id
       ~repository_ids:repo_ids
   in
-  match Keeper_repo_mapping.save_mapping ~base_path mapping with
+  match Keeper_repo_mapping.save_mapping_blocking ~base_path mapping with
   | Ok () -> ()
   | Error e -> Alcotest.fail ("write_mapping failed: " ^ e)
 
@@ -969,7 +969,7 @@ let test_save_mapping_creates_config_dir () =
         Repo_manager_types.make_keeper_repo_mapping ~keeper_id:"keeper-new"
           ~repository_ids:[ "repo-a"; "repo-b" ]
       in
-      match Keeper_repo_mapping.save_mapping ~base_path mapping with
+      match Keeper_repo_mapping.save_mapping_blocking ~base_path mapping with
       | Error e -> Alcotest.fail ("save_mapping failed: " ^ e)
       | Ok () -> (
           match Keeper_repo_mapping.allowed_repositories ~keeper_id:"keeper-new" ~base_path with

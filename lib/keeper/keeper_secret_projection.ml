@@ -556,6 +556,28 @@ let reject_base_keeper_scope_mutation ~keeper_name ~scope =
   else Ok ()
 ;;
 
+let save_secret_atomic path content =
+  let report = Fs_compat.save_file_atomic_eio path content in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      Error (Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      Log.Keeper.warn
+        "keeper secret committed with sync debt path=%s detail=%s"
+        path
+        (Fs_compat.Durable_mutation.report_to_string report);
+      Ok ())
+    ~durable:(fun report ->
+      (match report.diagnostics with
+       | [] -> ()
+       | _ ->
+         Log.Keeper.warn
+           "keeper secret durable with cleanup diagnostics path=%s detail=%s"
+           path
+           (Fs_compat.Durable_mutation.report_to_string report));
+      Ok ())
+;;
+
 let set_env_entry ~base_path ~keeper_name ~scope ~name ~value =
   match reject_base_keeper_scope_mutation ~keeper_name ~scope with
   | Error _ as err -> err
@@ -580,7 +602,7 @@ let set_env_entry ~base_path ~keeper_name ~scope ~name ~value =
               (match validate_env_entry_target path with
                | Error _ as err -> err
                | Ok () ->
-                 (match Fs_compat.save_file_atomic path value with
+                 (match save_secret_atomic path value with
                   | Error _ as err -> err
                   | Ok () ->
                     (try
@@ -766,7 +788,7 @@ let set_file_entry ~base_path ~keeper_name ~scope ~container_path ~value =
                  (match validate_file_entry_target path with
                   | Error _ as err -> err
                   | Ok () ->
-                    (match Fs_compat.save_file_atomic path value with
+                    (match save_secret_atomic path value with
                      | Error _ as err -> err
                      | Ok () ->
                        (try
@@ -914,7 +936,7 @@ let local_git_config_global_path ~base_path ~keeper_name =
 let ensure_local_git_config_global ~path =
   try
     ensure_dir (Filename.dirname path);
-    match Fs_compat.save_file_atomic path git_config_helper_content with
+    match save_secret_atomic path git_config_helper_content with
     | Ok () -> Ok ()
     | Error err -> Error err
   with
@@ -1107,7 +1129,7 @@ let ensure_docker_git_config_global ~base_path ~keeper_name =
   let path = docker_git_config_host_path ~base_path ~keeper_name in
   try
     ensure_dir (Filename.dirname path);
-    match Fs_compat.save_file_atomic path git_config_helper_content with
+    match save_secret_atomic path git_config_helper_content with
     | Ok () -> Ok path
     | Error err -> Error err
   with

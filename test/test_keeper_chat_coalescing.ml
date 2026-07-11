@@ -614,8 +614,64 @@ let test_inflight_lease_requeued_on_restart () =
        | `Leased { messages; _ } ->
          check "the unacknowledged lease is redelivered whole after restart"
            (contents messages = [ "leased-1"; "leased-2" ])
-       | `Empty | `Already_leased _ | `Persist_failed _ ->
+      | `Empty | `Already_leased _ | `Persist_failed _ ->
          check "the redelivered batch is leaseable" false))
+;;
+
+let test_enqueue_sync_debt_is_confirmed_before_receipt () =
+  Printf.printf
+    "Test 17: enqueue confirms parent durability before returning a receipt for sync debt\n%!";
+  let base_path = temp_dir "keeper-chat-queue-confirm-debt" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_chat_queue.For_testing.reset ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "confirm-debt-keeper" in
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      Keeper_chat_queue.For_testing.force_next_sync_debt ();
+      let receipt_id =
+        Keeper_chat_queue.enqueue ~keeper_name
+          (msg ~content:"confirmed" ~ts:1.0 Keeper_chat_queue.Dashboard)
+      in
+      check "confirmed enqueue returns a receipt" (not (String.equal receipt_id ""));
+      check "confirmed enqueue remains queued" (Keeper_chat_queue.length ~keeper_name = 1);
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      check "confirmed enqueue replays after restart"
+        (Keeper_chat_queue.length ~keeper_name = 1))
+;;
+
+let test_enqueue_sync_debt_confirmation_failure_has_no_receipt () =
+  Printf.printf
+    "Test 18: enqueue returns no receipt when sync-debt confirmation fails\n%!";
+  let base_path = temp_dir "keeper-chat-queue-reject-debt" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_chat_queue.For_testing.reset ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "reject-debt-keeper" in
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      Keeper_chat_queue.For_testing.force_next_sync_debt ();
+      Keeper_chat_queue.For_testing.fail_next_durability_confirmation ();
+      let failed_without_receipt =
+        match
+          Keeper_chat_queue.enqueue ~keeper_name
+            (msg ~content:"uncertain" ~ts:1.0 Keeper_chat_queue.Dashboard)
+        with
+        | exception Keeper_chat_queue.Persistence_failed _ -> true
+        | _ -> false
+      in
+      check "failed confirmation does not return a receipt" failed_without_receipt;
+      check "failed enqueue rolls back live memory"
+        (Keeper_chat_queue.length ~keeper_name = 0);
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      check "committed snapshot is conservatively replayed after restart"
+        (Keeper_chat_queue.length ~keeper_name = 1))
 ;;
 
 let () =
@@ -636,6 +692,8 @@ let () =
   test_lease_already_leased_blocks_second_lease ();
   test_ack_nack_unknown_lease ();
   test_inflight_lease_requeued_on_restart ();
+  test_enqueue_sync_debt_is_confirmed_before_receipt ();
+  test_enqueue_sync_debt_confirmation_failure_has_no_receipt ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

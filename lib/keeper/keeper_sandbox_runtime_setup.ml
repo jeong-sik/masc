@@ -448,13 +448,45 @@ let docker_user_identity_mount_args ~host_root ~uid ~gid =
   let group = Printf.sprintf "root:x:0:\nkeeper:x:%d:\n" gid in
   try
     Fs_compat.mkdir_p dir;
-    match Fs_compat.save_file_atomic passwd_path passwd with
-    | Error err -> Error (Printf.sprintf "failed to write docker passwd file: %s" err)
-    | Ok () ->
-      (match Fs_compat.save_file_atomic group_path group with
-       | Error err -> Error (Printf.sprintf "failed to write docker group file: %s" err)
-       | Ok () ->
-         Ok [ "-v"; passwd_path ^ ":/etc/passwd:ro"; "-v"; group_path ^ ":/etc/group:ro" ])
+    let write_identity_file ~label ~path content =
+      let report = Fs_compat.save_file_atomic_eio path content in
+      Fs_compat.Durable_mutation.fold_report report
+        ~not_committed:(fun report ->
+          Error
+            (Printf.sprintf
+               "failed to write docker %s file: %s"
+               label
+               (Fs_compat.Durable_mutation.report_to_string report)))
+        ~committed_not_durable:(fun report ->
+          Log.Keeper.warn
+            "docker %s file committed with sync debt path=%s detail=%s"
+            label
+            path
+            (Fs_compat.Durable_mutation.report_to_string report);
+          Ok ())
+        ~durable:(fun report ->
+          (match report.diagnostics with
+           | [] -> ()
+           | _ ->
+             Log.Keeper.warn
+               "docker %s file durable with cleanup diagnostics path=%s detail=%s"
+               label
+               path
+               (Fs_compat.Durable_mutation.report_to_string report));
+          Ok ())
+    in
+    (match write_identity_file ~label:"passwd" ~path:passwd_path passwd with
+     | Error _ as error -> error
+     | Ok () ->
+       (match write_identity_file ~label:"group" ~path:group_path group with
+        | Error _ as error -> error
+        | Ok () ->
+          Ok
+            [ "-v"
+            ; passwd_path ^ ":/etc/passwd:ro"
+            ; "-v"
+            ; group_path ^ ":/etc/group:ro"
+            ]))
   with
   | Sys_error err | Unix.Unix_error (_, _, err) ->
     Error (Printf.sprintf "failed to prepare docker user identity: %s" err)

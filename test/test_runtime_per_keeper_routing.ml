@@ -373,7 +373,7 @@ let test_assignment_drives_runtime_id_of_meta () =
 let test_runtime_assignment_writer_updates_runtime_toml () =
   with_runtime_file (fun path ->
     (match
-       Runtime.set_runtime_id_for_keeper
+       Runtime.set_runtime_id_for_keeper_blocking
          ~runtime_config_path:path
          ~keeper_name:"routingtest"
          ~runtime_id:"runpod_mtp.qwen"
@@ -589,7 +589,7 @@ let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
     (match
-       Runtime.set_runtime_id_for_keeper
+       Runtime.set_runtime_id_for_keeper_blocking
          ~runtime_config_path:path
          ~keeper_name:"routingtest"
          ~runtime_id:"missing.runtime"
@@ -613,7 +613,7 @@ let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
 
 let test_runtime_assignment_writer_clears_assignment () =
   with_runtime_file (fun path ->
-    (match Runtime.clear_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest" () with
+    (match Runtime.clear_runtime_id_for_keeper_blocking ~runtime_config_path:path ~keeper_name:"routingtest" () with
      | Ok () -> ()
      | Error msg -> Alcotest.failf "clear_runtime_id_for_keeper failed: %s" msg);
     Alcotest.(check bool)
@@ -628,7 +628,7 @@ let test_runtime_assignment_writer_clears_assignment () =
 
 let test_runtime_route_writer_updates_default () =
   with_runtime_file (fun path ->
-    (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+    (match Runtime.set_runtime_default_blocking ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
      | Ok () -> ()
      | Error msg -> Alcotest.failf "set_runtime_default failed: %s" msg);
     Alcotest.(check bool)
@@ -644,7 +644,7 @@ let test_runtime_route_writer_updates_default () =
 let test_runtime_route_writer_rejects_unknown_default_without_write () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
-    (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"missing.runtime" () with
+    (match Runtime.set_runtime_default_blocking ~runtime_config_path:path ~runtime_id:"missing.runtime" () with
      | Ok () -> Alcotest.fail "expected unknown default runtime to fail"
      | Error msg ->
        Alcotest.(check bool)
@@ -663,14 +663,14 @@ let test_runtime_route_writer_rejects_unknown_default_without_write () =
 
 let test_runtime_route_writer_clears_optional_librarian () =
   with_runtime_file (fun path ->
-    (match Runtime.set_runtime_librarian ~runtime_config_path:path ~runtime_id:(Some "openai.gpt") () with
+    (match Runtime.set_runtime_librarian_blocking ~runtime_config_path:path ~runtime_id:(Some "openai.gpt") () with
      | Ok () -> ()
      | Error msg -> Alcotest.failf "set_runtime_librarian failed: %s" msg);
     Alcotest.(check (option string))
       "librarian set"
       (Some "openai.gpt")
       (Runtime.librarian_runtime_id ());
-    (match Runtime.set_runtime_librarian ~runtime_config_path:path ~runtime_id:None () with
+    (match Runtime.set_runtime_librarian_blocking ~runtime_config_path:path ~runtime_id:None () with
      | Ok () -> ()
      | Error msg -> Alcotest.failf "clear runtime librarian failed: %s" msg);
     Alcotest.(check bool)
@@ -686,7 +686,7 @@ let test_runtime_route_writer_clears_optional_librarian () =
 let test_runtime_route_writer_updates_media_failover () =
   with_runtime_file (fun path ->
     (match
-       Runtime.set_runtime_media_failover
+       Runtime.set_runtime_media_failover_blocking
          ~runtime_config_path:path
          ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ]
          ()
@@ -704,7 +704,7 @@ let test_runtime_route_writer_updates_media_failover () =
          (Fs_compat.load_file path)
          "media_failover = [\"openai.gpt\", \"runpod_mtp.qwen\"]");
     (match
-       Runtime.set_runtime_media_failover
+       Runtime.set_runtime_media_failover_blocking
          ~runtime_config_path:path
          ~runtime_ids:[]
          ()
@@ -725,7 +725,7 @@ let test_runtime_route_writer_clears_optional_structured_judge () =
   with_model_catalog_content runtime_structured_judge_model_catalog @@ fun () ->
   with_runtime_file (fun path ->
     (match
-       Runtime.set_runtime_structured_judge
+       Runtime.set_runtime_structured_judge_blocking
          ~runtime_config_path:path
          ~runtime_id:(Some "openai.gpt")
          ()
@@ -737,7 +737,7 @@ let test_runtime_route_writer_clears_optional_structured_judge () =
       (Some "openai.gpt")
       (Runtime.structured_judge_runtime_id ());
     (match
-       Runtime.set_runtime_structured_judge ~runtime_config_path:path ~runtime_id:None ()
+       Runtime.set_runtime_structured_judge_blocking ~runtime_config_path:path ~runtime_id:None ()
      with
      | Ok () -> ()
      | Error msg -> Alcotest.failf "clear runtime structured_judge failed: %s" msg);
@@ -763,7 +763,7 @@ let test_runtime_config_text_loads_runtime_toml () =
 let test_runtime_config_text_save_reloads_runtime_cache () =
   with_runtime_file (fun path ->
     (match
-       Runtime.save_config_text
+       Runtime.save_config_text_blocking
          ~runtime_config_path:path
          runtime_config_openai_default
      with
@@ -783,7 +783,7 @@ let test_runtime_config_text_save_rejects_invalid_without_write () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
     (match
-       Runtime.save_config_text
+       Runtime.save_config_text_blocking
          ~runtime_config_path:path
          "[runtime]\ndefault = \"missing.runtime\"\n"
      with

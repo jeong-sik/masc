@@ -151,7 +151,7 @@ let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
 
 let store_artifact ~dir bytes =
-  Eio_guard.run_in_systhread (fun () -> Store.store ~dir bytes)
+  Store.store_eio ~dir bytes
 
 let load_artifact ~dir handle =
   Eio_guard.run_in_systhread (fun () -> Store.load ~dir handle)

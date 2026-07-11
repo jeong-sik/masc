@@ -276,15 +276,35 @@ let persist_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
             | Error _ as err -> err
             | Ok content -> (
                 Fs_compat.mkdir_p (Filename.dirname path);
-                match Fs_compat.save_file_atomic path content with
-                | Error msg -> Error msg
-                | Ok () ->
+                let report = Fs_compat.save_file_atomic_eio path content in
+                Fs_compat.Durable_mutation.fold_report report
+                  ~not_committed:(fun report ->
+                    Error (Fs_compat.Durable_mutation.report_to_string report))
+                  ~committed_not_durable:(fun report ->
+                    Log.Keeper.warn
+                      "keeper persona runtime committed with sync debt path=%s detail=%s"
+                      path
+                      (Fs_compat.Durable_mutation.report_to_string report);
                     Ok
                       (`Assoc
                         [
                           ("path", `String path);
                           ("created", `Bool true);
-                        ])))
+                        ]))
+                  ~durable:(fun report ->
+                    (match report.diagnostics with
+                     | [] -> ()
+                     | _ ->
+                       Log.Keeper.warn
+                         "keeper persona runtime durable with cleanup diagnostics path=%s detail=%s"
+                         path
+                         (Fs_compat.Durable_mutation.report_to_string report));
+                    Ok
+                      (`Assoc
+                        [
+                          ("path", `String path);
+                          ("created", `Bool true);
+                        ]))))
 
 let resolved_keeper_args_from_persona args :
     ((persona_summary * Yojson.Safe.t), string) result =

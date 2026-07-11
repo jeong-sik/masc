@@ -124,7 +124,7 @@ let allow_repo ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) repo_id =
     (Repo_manager_types.make_keeper_repo_mapping ~keeper_id:meta.name
        ~repository_ids:[ repo_id ])
   in
-  match Keeper_repo_mapping.save_mapping ~base_path:config.Workspace.base_path mapping with
+  match Keeper_repo_mapping.save_mapping_blocking ~base_path:config.Workspace.base_path mapping with
   | Ok () -> ()
   | Error e -> Alcotest.fail ("failed to seed keeper repo mapping: " ^ e)
 ;;

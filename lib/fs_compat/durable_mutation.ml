@@ -91,6 +91,31 @@ let diagnostic_to_string diagnostic =
     (Printexc.to_string diagnostic.cause)
 ;;
 
+let report_to_string report =
+  let progress =
+    match report.progress with
+    | Not_committed { cause; _ } ->
+      Printf.sprintf "not committed: %s" (Printexc.to_string cause)
+    | Committed_not_durable { cause; _ } ->
+      Printf.sprintf "committed but not durable: %s" (Printexc.to_string cause)
+    | Durable _ -> "durable"
+  in
+  match report.diagnostics with
+  | [] -> progress
+  | diagnostics ->
+    Printf.sprintf
+      "%s; diagnostics: %s"
+      progress
+      (String.concat "; " (List.map diagnostic_to_string diagnostics))
+;;
+
+let fold_report report ~not_committed ~committed_not_durable ~durable =
+  match report.progress with
+  | Not_committed _ -> not_committed report
+  | Committed_not_durable _ -> committed_not_durable report
+  | Durable _ -> durable report
+;;
+
 let temporary_prefix = ".atomic_"
 let temporary_suffix = ".tmp"
 
@@ -101,6 +126,47 @@ let is_temporary_name name =
   name_length >= prefix_length + suffix_length
   && String.starts_with name ~prefix:temporary_prefix
   && String.ends_with name ~suffix:temporary_suffix
+;;
+
+type durability_confirmation =
+  | Confirmed
+  | Not_confirmed of
+      { cause : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+
+type durability_confirmation_report =
+  { confirmation : durability_confirmation
+  ; confirmation_diagnostics : diagnostic list
+  }
+
+let confirm_directory_durable_blocking path =
+  match open_parent path with
+  | exception cause ->
+    { confirmation =
+        Not_confirmed { cause; backtrace = Printexc.get_raw_backtrace () }
+    ; confirmation_diagnostics = []
+    }
+  | descriptor ->
+    let confirmation =
+      match Unix.fsync descriptor with
+      | () -> Confirmed
+      | exception cause ->
+        Not_confirmed { cause; backtrace = Printexc.get_raw_backtrace () }
+    in
+    let diagnostics =
+      match Unix.close descriptor with
+      | () -> []
+      | exception cause ->
+        [ diagnostic Parent_close cause (Printexc.get_raw_backtrace ()) ]
+    in
+    { confirmation; confirmation_diagnostics = diagnostics }
+;;
+
+let confirm_directory_durable_eio path =
+  Eio.Cancel.protect (fun () ->
+    Eio_unix.run_in_systhread ~label:"durability-confirmation" (fun () ->
+      confirm_directory_durable_blocking path))
 ;;
 
 let run_state_machine ~prepare ~commit ~publish ~cleanup =
@@ -237,7 +303,7 @@ let atomic_replace_at parent ~name ~perm content =
     ~cleanup:(fun () -> cleanup_temporary parent temp_name owner)
 ;;
 
-let add_parent_close report parent =
+let add_parent_close (report : 'a report) parent =
   match Unix.close parent with
   | () -> report
   | exception cause ->
@@ -273,4 +339,21 @@ let observe observer report =
   | exception cause ->
     Observer_failed
       (diagnostic Observer cause (Printexc.get_raw_backtrace ()))
+;;
+
+let observe_and_retain observer report =
+  match observe observer report with
+  | Observed -> report
+  | Observer_failed observer_diagnostic ->
+    { report with diagnostics = report.diagnostics @ [ observer_diagnostic ] }
+;;
+
+let observe_confirmation_and_retain observer report =
+  match observe observer report with
+  | Observed -> report
+  | Observer_failed observer_diagnostic ->
+    { report with
+      confirmation_diagnostics =
+        report.confirmation_diagnostics @ [ observer_diagnostic ]
+    }
 ;;

@@ -72,7 +72,7 @@ let test_encoded_marker_stays_under_externalization_threshold () =
       let store = B.create ~base_path:dir in
       let threshold = Masc.Tool_bridge.default_externalize_threshold_bytes in
       let payload = String.make (threshold + 1) '"' in
-      let encoded = B.put store ~bytes:payload ~mime:"text/plain" |> O.encode_for_oas in
+      let encoded = B.put_blocking store ~bytes:payload ~mime:"text/plain" |> O.encode_for_oas in
       Alcotest.(check bool)
         "marker stays below default externalization threshold"
         true
@@ -118,7 +118,7 @@ let test_put_returns_stored () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
       let payload = "hello tool output" in
-      match B.put store ~bytes:payload ~mime:"text/plain" with
+      match B.put_blocking store ~bytes:payload ~mime:"text/plain" with
       | O.Stored { sha256; bytes; preview; mime } ->
           Alcotest.(check int) "sha length" 64 (String.length sha256);
           Alcotest.(check int) "bytes" (String.length payload) bytes;
@@ -130,7 +130,7 @@ let test_put_then_fetch () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
       let payload = String.make 5000 'x' in
-      let stored = B.put store ~bytes:payload ~mime:"text/plain" in
+      let stored = B.put_blocking store ~bytes:payload ~mime:"text/plain" in
       match stored with
       | O.Stored { sha256; _ } -> (
           match B.fetch store ~sha256 with
@@ -151,8 +151,8 @@ let test_idempotent_put () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
       let payload = "idempotent payload" in
-      let r1 = B.put store ~bytes:payload ~mime:"text/plain" in
-      let r2 = B.put store ~bytes:payload ~mime:"text/plain" in
+      let r1 = B.put_blocking store ~bytes:payload ~mime:"text/plain" in
+      let r2 = B.put_blocking store ~bytes:payload ~mime:"text/plain" in
       let sha_of = function
         | O.Stored { sha256; _ } -> sha256
         | O.Inline _ -> Alcotest.fail "expected Stored"
@@ -165,7 +165,7 @@ let test_sharding_layout () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
       let payload = "sharding test" in
-      let stored = B.put store ~bytes:payload ~mime:"text/plain" in
+      let stored = B.put_blocking store ~bytes:payload ~mime:"text/plain" in
       match stored with
       | O.Stored { sha256; _ } ->
           let prefix = String.sub sha256 0 2 in
@@ -184,7 +184,7 @@ let test_gc_deletes_unkept () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
       let stored payload =
-        match B.put store ~bytes:payload ~mime:"text/plain" with
+        match B.put_blocking store ~bytes:payload ~mime:"text/plain" with
         | O.Stored { sha256; _ } -> sha256
         | O.Inline _ -> Alcotest.fail "expected Stored"
       in
@@ -203,16 +203,16 @@ let test_gc_deletes_unkept () =
 let test_gc_empty_keep_clears_all () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
-      let _ = B.put store ~bytes:"a" ~mime:"text/plain" in
-      let _ = B.put store ~bytes:"b" ~mime:"text/plain" in
-      let _ = B.put store ~bytes:"c" ~mime:"text/plain" in
+      let _ = B.put_blocking store ~bytes:"a" ~mime:"text/plain" in
+      let _ = B.put_blocking store ~bytes:"b" ~mime:"text/plain" in
+      let _ = B.put_blocking store ~bytes:"c" ~mime:"text/plain" in
       let deleted = B.gc store ~keep_set:[] in
       Alcotest.(check int) "deleted all" 3 deleted;
       Alcotest.(check int) "store empty" 0 (List.length (B.list_all store)))
 
 (* --- Repeated put: documents the atomicity contract --- *)
 
-(* Atomicity is guaranteed at the OS layer by [Fs_compat.save_file_atomic]
+(* Atomicity is guaranteed at the OS layer by the typed Fs_compat durable writer
    (tempfile + rename). Same-content puts always produce same sha256 ->
    same path -> rename is idempotent. We don't need a true concurrency test
    here; serial repetition exercises the same code path. *)
@@ -221,7 +221,7 @@ let test_repeated_put_no_dup () =
       let store = B.create ~base_path:dir in
       let payload = String.make 1024 'z' in
       for _ = 1 to 8 do
-        let _ = B.put store ~bytes:payload ~mime:"text/plain" in
+        let _ = B.put_blocking store ~bytes:payload ~mime:"text/plain" in
         ()
       done;
       Alcotest.(check int)
@@ -244,7 +244,7 @@ let test_put_raises_on_unwritable_store () =
   let store = B.create ~base_path:file in
   let raised =
     try
-      let _ = B.put store ~bytes:(String.make 5000 'x') ~mime:"text/plain" in
+      let _ = B.put_blocking store ~bytes:(String.make 5000 'x') ~mime:"text/plain" in
       false
     with _ -> true
   in

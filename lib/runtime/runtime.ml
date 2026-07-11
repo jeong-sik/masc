@@ -1000,7 +1000,7 @@ let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
-let set_loaded
+let loaded_state_of_materialized
     ?startup_degradation
     ~config_path
     ( runtimes
@@ -1012,19 +1012,24 @@ let set_loaded
     , cross_verifier_id
     , media_failover
     , lanes ) =
+  { default_runtime = Some rt
+  ; runtimes
+  ; keeper_assignments = assignments
+  ; librarian_runtime_id = librarian_id
+  ; structured_judge_runtime_id = structured_judge_id
+  ; hitl_summary_runtime_id = hitl_summary_id
+  ; cross_verifier_runtime_id = cross_verifier_id
+  ; media_failover
+  ; lanes
+  ; config_path = Some config_path
+  ; startup_degradation
+  }
+;;
+
+let set_loaded ?startup_degradation ~config_path loaded =
   Atomic.set loaded_state_ref
-    { default_runtime = Some rt
-    ; runtimes
-    ; keeper_assignments = assignments
-    ; librarian_runtime_id = librarian_id
-    ; structured_judge_runtime_id = structured_judge_id
-    ; hitl_summary_runtime_id = hitl_summary_id
-    ; cross_verifier_runtime_id = cross_verifier_id
-    ; media_failover
-    ; lanes
-    ; config_path = Some config_path
-    ; startup_degradation
-    }
+    (loaded_state_of_materialized ?startup_degradation ~config_path loaded)
+;;
 
 let init_default ~config_path =
   let* loaded = load_list ~config_path in
@@ -1073,11 +1078,25 @@ let init_default_degraded_report ~config_path =
 
 let runtime_state () = Atomic.get loaded_state_ref
 
+let runtime_config_writer_ref :
+    (string -> string -> unit Fs_compat.Durable_mutation.report) Atomic.t =
+  Atomic.make Fs_compat.save_file_atomic_blocking
+;;
+
 module For_testing = struct
   type snapshot = loaded_state
 
   let snapshot () = runtime_state ()
   let restore snapshot = Atomic.set loaded_state_ref snapshot
+
+  let with_config_writer writer f =
+    let previous = Atomic.get runtime_config_writer_ref in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set runtime_config_writer_ref previous)
+      (fun () ->
+         Atomic.set runtime_config_writer_ref writer;
+         f ())
+  ;;
 end
 
 let get_default_runtime () = (runtime_state ()).default_runtime
@@ -1607,7 +1626,7 @@ let runtime_parse_errors_to_string errs =
   |> String.concat "; "
 ;;
 
-let validate_runtime_config_text ~config_path content =
+let prepare_runtime_config_state ~config_path content =
   let* cfg =
     Runtime_toml.parse_string content
     |> Result.map_error (fun errs ->
@@ -1616,30 +1635,121 @@ let validate_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  let* (_
-         : t list
-           * t
-           * (string * string) list
-           * string option
-           * string option
-           * string option
-           * string option
-           * string list
-           * Runtime_lane.t list) =
-    materialize_config ~config_path cfg
+  let* loaded = materialize_config ~config_path cfg in
+  Ok (loaded_state_of_materialized ~config_path loaded)
+;;
+
+let validate_runtime_config_text ~config_path content =
+  prepare_runtime_config_state ~config_path content |> Result.map ignore
+;;
+
+let runtime_config_transaction_locks : (string, Mutex.t) Hashtbl.t =
+  Hashtbl.create 4
+;;
+
+let runtime_config_transaction_locks_mu = Mutex.create ()
+
+let runtime_config_transaction_lock path =
+  Mutex.lock runtime_config_transaction_locks_mu;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock runtime_config_transaction_locks_mu)
+    (fun () ->
+       match Hashtbl.find_opt runtime_config_transaction_locks path with
+       | Some lock -> lock
+       | None ->
+         let lock = Mutex.create () in
+         Hashtbl.add runtime_config_transaction_locks path lock;
+         lock)
+;;
+
+let with_runtime_config_transaction_blocking path f =
+  let lock = runtime_config_transaction_lock path in
+  Mutex.lock lock;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock lock)
+    (fun () ->
+       File_lock_eio.with_lock_blocking (path ^ ".runtime-transaction") f)
+;;
+
+let with_runtime_config_transaction_eio path f =
+  Eio.Cancel.protect (fun () ->
+    Eio_unix.run_in_systhread ~label:"runtime-config-transaction" (fun () ->
+      with_runtime_config_transaction_blocking path f))
+;;
+
+let durable_mutation_diagnostics diagnostics =
+  match diagnostics with
+  | [] -> ""
+  | diagnostics ->
+    Printf.sprintf
+      "; diagnostics=[%s]"
+      (String.concat
+         "; "
+         (List.map
+            Fs_compat.Durable_mutation.diagnostic_to_string
+            diagnostics))
+;;
+
+let commit_prepared_runtime_config_blocking ~path ~content ~prepared =
+  let report = (Atomic.get runtime_config_writer_ref) path content in
+  let report =
+    Fs_compat.Durable_mutation.observe_and_retain
+      (fun report ->
+         match report.progress with
+         | Fs_compat.Durable_mutation.Not_committed _ -> ()
+         | Fs_compat.Durable_mutation.Committed_not_durable { cause; _ } ->
+           Log.Runtime.warn
+             "runtime config committed with parent sync debt path=%s cause=%s%s"
+             path
+             (Printexc.to_string cause)
+             (durable_mutation_diagnostics report.diagnostics)
+         | Fs_compat.Durable_mutation.Durable () ->
+           (match report.diagnostics with
+            | [] -> ()
+            | diagnostics ->
+              Log.Runtime.warn
+                "runtime config committed durably with cleanup diagnostics path=%s%s"
+                path
+                (durable_mutation_diagnostics diagnostics)))
+      report
   in
-  Ok ()
+  match report.progress with
+  | Fs_compat.Durable_mutation.Not_committed { cause; _ } ->
+    Error
+      (Printf.sprintf
+         "runtime config write not committed (%s): %s%s"
+         path
+         (Printexc.to_string cause)
+         (durable_mutation_diagnostics report.diagnostics))
+  | Fs_compat.Durable_mutation.Committed_not_durable { cause; _ } ->
+    Atomic.set loaded_state_ref prepared;
+    Ok ()
+  | Fs_compat.Durable_mutation.Durable () ->
+    Atomic.set loaded_state_ref prepared;
+    Ok ()
 ;;
 
-let save_config_text ?runtime_config_path content =
+let save_config_text_with transaction ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* () = validate_runtime_config_text ~config_path:path content in
-  let* () = Fs_compat.save_file_atomic path content in
-  let* () = init_default ~config_path:path in
-  Ok ()
+  transaction path (fun () ->
+    let* prepared = prepare_runtime_config_state ~config_path:path content in
+    commit_prepared_runtime_config_blocking ~path ~content ~prepared)
 ;;
 
-let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
+let save_config_text_blocking =
+  save_config_text_with with_runtime_config_transaction_blocking
+;;
+
+let save_config_text_eio =
+  save_config_text_with with_runtime_config_transaction_eio
+;;
+
+let set_runtime_id_for_keeper_with
+    transaction
+    ?runtime_config_path
+    ~keeper_name
+    ~runtime_id
+    () =
   let keeper_name = String.trim keeper_name in
   let runtime_id = String.trim runtime_id in
   if String.equal keeper_name ""
@@ -1652,15 +1762,22 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
   then Error "runtime_id must not contain newlines"
   else
     let* path = runtime_config_path_result ?runtime_config_path () in
-    let* content = load_file_result path in
-    let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
-    let* () = validate_runtime_config_text ~config_path:path next in
-    let* () = Fs_compat.save_file_atomic path next in
-    let* () = init_default ~config_path:path in
-    Ok ()
+    transaction path (fun () ->
+      let* content = load_file_result path in
+      let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
+      let* prepared = prepare_runtime_config_state ~config_path:path next in
+      commit_prepared_runtime_config_blocking ~path ~content:next ~prepared)
 ;;
 
-let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
+let set_runtime_id_for_keeper_blocking =
+  set_runtime_id_for_keeper_with with_runtime_config_transaction_blocking
+;;
+
+let set_runtime_id_for_keeper_eio =
+  set_runtime_id_for_keeper_with with_runtime_config_transaction_eio
+;;
+
+let clear_runtime_id_for_keeper_with transaction ?runtime_config_path ~keeper_name () =
   let keeper_name = String.trim keeper_name in
   if String.equal keeper_name ""
   then Error "keeper_name must not be empty"
@@ -1668,15 +1785,22 @@ let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
   then Error "keeper_name must not contain newlines"
   else
     let* path = runtime_config_path_result ?runtime_config_path () in
-    let* content = load_file_result path in
-    let next = remove_runtime_assignment_text content ~keeper_name in
-    let* () = validate_runtime_config_text ~config_path:path next in
-    let* () = Fs_compat.save_file_atomic path next in
-    let* () = init_default ~config_path:path in
-    Ok ()
+    transaction path (fun () ->
+      let* content = load_file_result path in
+      let next = remove_runtime_assignment_text content ~keeper_name in
+      let* prepared = prepare_runtime_config_state ~config_path:path next in
+      commit_prepared_runtime_config_blocking ~path ~content:next ~prepared)
 ;;
 
-let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
+let clear_runtime_id_for_keeper_blocking =
+  clear_runtime_id_for_keeper_with with_runtime_config_transaction_blocking
+;;
+
+let clear_runtime_id_for_keeper_eio =
+  clear_runtime_id_for_keeper_with with_runtime_config_transaction_eio
+;;
+
+let set_runtime_scalar_with transaction ?runtime_config_path ~key ~runtime_id () =
   let key = String.trim key in
   let runtime_id = Option.map String.trim runtime_id in
   if String.equal key ""
@@ -1691,15 +1815,19 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       Error "runtime_id must not contain newlines"
     | _ ->
       let* path = runtime_config_path_result ?runtime_config_path () in
-      let* content = load_file_result path in
-      let next = update_runtime_scalar_text content ~key ~runtime_id in
-      let* () = validate_runtime_config_text ~config_path:path next in
-      let* () = Fs_compat.save_file_atomic path next in
-      let* () = init_default ~config_path:path in
-      Ok ()
+      transaction path (fun () ->
+        let* content = load_file_result path in
+        let next = update_runtime_scalar_text content ~key ~runtime_id in
+        let* prepared = prepare_runtime_config_state ~config_path:path next in
+        commit_prepared_runtime_config_blocking ~path ~content:next ~prepared)
 ;;
 
-let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
+let set_runtime_string_array_with
+    transaction
+    ?runtime_config_path
+    ~key
+    ~runtime_ids
+    () =
   let key = String.trim key in
   let runtime_ids = List.map String.trim runtime_ids in
   if String.equal key ""
@@ -1712,36 +1840,83 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
   then Error "runtime_ids must not contain newlines"
   else (
     let* path = runtime_config_path_result ?runtime_config_path () in
-    let* content = load_file_result path in
-    let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
-    let* () = validate_runtime_config_text ~config_path:path next in
-    let* () = Fs_compat.save_file_atomic path next in
-    let* () = init_default ~config_path:path in
-    Ok ())
+    transaction path (fun () ->
+      let* content = load_file_result path in
+      let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
+      let* prepared = prepare_runtime_config_state ~config_path:path next in
+      commit_prepared_runtime_config_blocking ~path ~content:next ~prepared))
 ;;
 
-let set_runtime_default ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
+let set_runtime_scalar_blocking =
+  set_runtime_scalar_with with_runtime_config_transaction_blocking
 ;;
 
-let set_runtime_librarian ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"librarian" ~runtime_id ()
+let set_runtime_scalar_eio =
+  set_runtime_scalar_with with_runtime_config_transaction_eio
 ;;
 
-let set_runtime_structured_judge ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"structured_judge" ~runtime_id ()
+let set_runtime_string_array_blocking =
+  set_runtime_string_array_with with_runtime_config_transaction_blocking
 ;;
 
-let set_runtime_hitl_summary ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"hitl_summary" ~runtime_id ()
+let set_runtime_string_array_eio =
+  set_runtime_string_array_with with_runtime_config_transaction_eio
 ;;
 
-let set_runtime_cross_verifier ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"cross_verifier" ~runtime_id ()
+let set_runtime_default_blocking ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_blocking
+    ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
 ;;
 
-let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
-  set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
+let set_runtime_default_eio ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_eio
+    ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
+;;
+
+let set_runtime_librarian_blocking ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_blocking ?runtime_config_path ~key:"librarian" ~runtime_id ()
+;;
+
+let set_runtime_librarian_eio ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_eio ?runtime_config_path ~key:"librarian" ~runtime_id ()
+;;
+
+let set_runtime_structured_judge_blocking ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_blocking
+    ?runtime_config_path ~key:"structured_judge" ~runtime_id ()
+;;
+
+let set_runtime_structured_judge_eio ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_eio
+    ?runtime_config_path ~key:"structured_judge" ~runtime_id ()
+;;
+
+let set_runtime_hitl_summary_blocking ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_blocking ?runtime_config_path ~key:"hitl_summary" ~runtime_id ()
+;;
+
+let set_runtime_hitl_summary_eio ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_eio ?runtime_config_path ~key:"hitl_summary" ~runtime_id ()
+;;
+
+let set_runtime_cross_verifier_blocking ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_blocking
+    ?runtime_config_path ~key:"cross_verifier" ~runtime_id ()
+;;
+
+let set_runtime_cross_verifier_eio ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar_eio
+    ?runtime_config_path ~key:"cross_verifier" ~runtime_id ()
+;;
+
+let set_runtime_media_failover_blocking ?runtime_config_path ~runtime_ids () =
+  set_runtime_string_array_blocking
+    ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
+;;
+
+let set_runtime_media_failover_eio ?runtime_config_path ~runtime_ids () =
+  set_runtime_string_array_eio
+    ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
 
 (* RFC-0206 single-binding: the deleted [Runtime_runtime.resolve_*_max_context]

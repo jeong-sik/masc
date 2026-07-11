@@ -10,9 +10,15 @@
     [MASC_TEST_ALLOW_HOME_BASE_PATH=1]. *)
 exception Test_isolation_breach of string
 
-(** Typed descriptor-owned durable mutation core. The path API below is a
-    compatibility adapter until its callers are migrated under #24084. *)
+(** Typed descriptor-owned durable mutation core. *)
 module Durable_mutation : module type of Durable_mutation
+
+exception Invalid_atomic_target of
+  { path : string
+  ; error : Durable_mutation.Segment.error
+  }
+(** Typed cause used in a [Not_committed] report when the path's final segment
+    cannot be represented by {!Durable_mutation.Segment}. *)
 
 (** Set global Eio filesystem. Call at server startup. *)
 val set_fs : Eio.Fs.dir_ty Eio.Path.t -> unit
@@ -38,19 +44,24 @@ val load_file_opt : string -> string option
 (** Save string to file (overwrite). *)
 val save_file : string -> string -> unit
 
-(** Write content to path via temp file + rename.
-    Returns [Error msg] on I/O failure instead of raising. Until #24084 migrates
-    callers, the message names whether the mutation was not committed, committed
-    but not durable, or durable with a descriptor-cleanup diagnostic. Callers
-    must not infer retry safety by matching this text. *)
-val save_file_atomic : string -> string -> (unit, string) Result.t
+(** Write content through the typed descriptor-owned state machine. Callers must
+    exhaustively handle [Not_committed], [Committed_not_durable], and [Durable];
+    only [Not_committed] is retry-safe. This entry point blocks the calling
+    domain and is intended for CLI, tests, or an existing system thread. *)
+val save_file_atomic_blocking :
+  string -> string -> unit Durable_mutation.report
+
+(** Eio-safe counterpart of {!save_file_atomic_blocking}. The complete mutation
+    is cancellation-protected and runs in a system thread. There is no runtime
+    detection or blocking fallback. *)
+val save_file_atomic_eio : string -> string -> unit Durable_mutation.report
 
 (** [true] iff [name] matches the [.atomic_*.tmp] pattern minted by
     {!Durable_mutation}. Exposed for recovery and tests. *)
 val is_atomic_orphan_name : string -> bool
 
 (** #10130: boot-time sweep for [.atomic_*.tmp] orphans left
-    behind when [save_file_atomic]'s with-handler never ran (the
+    behind when the atomic writer's with-handler never ran (the
     owning process was SIGKILL'd after its exclusive temporary entry
     was created).
 
@@ -207,7 +218,7 @@ val close_all_cached_writers : unit -> unit
 
 (** [invalidate_cached_writer path] drops the cached [append_jsonl]
     writer for [path] (a no-op if none is cached). Call it after
-    replacing the inode at [path] with [save_file_atomic]: the cached
+    replacing the inode at [path] with a durable atomic writer: the cached
     [O_APPEND] channel still points at the pre-rename inode, so without
     this a later [append_jsonl] would write to the orphaned file.
     Serialization with concurrent [append_jsonl] calls is handled by the

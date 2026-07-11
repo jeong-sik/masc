@@ -451,7 +451,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         match p.runtime_id_opt with
         | None -> Ok ()
         | Some runtime_id ->
-          Runtime.set_runtime_id_for_keeper
+          Runtime.set_runtime_id_for_keeper_eio
             ~keeper_name:p.name
             ~runtime_id
             ()

@@ -14,9 +14,13 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
 
 let write_file path content =
   let (_ : string) = Masc.Keeper_fs.ensure_dir (Filename.dirname path) in
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> ()
-  | Error msg -> Alcotest.fail msg
+  let report = Fs_compat.save_file_atomic_blocking path content in
+  match report.progress with
+  | Fs_compat.Durable_mutation.Durable () when report.diagnostics = [] -> ()
+  | Fs_compat.Durable_mutation.Durable ()
+  | Fs_compat.Durable_mutation.Committed_not_durable _
+  | Fs_compat.Durable_mutation.Not_committed _ ->
+    Alcotest.fail (Fs_compat.Durable_mutation.report_to_string report)
 ;;
 
 let with_env key value f =

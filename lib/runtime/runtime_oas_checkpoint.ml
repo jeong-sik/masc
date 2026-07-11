@@ -36,10 +36,33 @@ let persist_checkpoint ~dir ~session_id (ckpt : Agent_sdk.Checkpoint.t)
   let path = Filename.concat dir (session_id ^ ".json") in
   try
     Fs_compat.mkdir_p dir;
-    Result.map_error
-      (fun err ->
-         Printf.sprintf "checkpoint persist failed for %s: %s" session_id err)
-      (Fs_compat.save_file_atomic path (Agent_sdk.Checkpoint.to_string ckpt))
+    let report =
+      Fs_compat.save_file_atomic_eio path (Agent_sdk.Checkpoint.to_string ckpt)
+    in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        Error
+          (Printf.sprintf
+             "checkpoint persist failed for %s: %s"
+             session_id
+             (Fs_compat.Durable_mutation.report_to_string report)))
+      ~committed_not_durable:(fun report ->
+        Log.Misc.warn
+          "checkpoint committed with sync debt session_id=%s path=%s detail=%s"
+          session_id
+          path
+          (Fs_compat.Durable_mutation.report_to_string report);
+        Ok ())
+      ~durable:(fun report ->
+        (match report.diagnostics with
+         | [] -> ()
+         | _ ->
+           Log.Misc.warn
+             "checkpoint durable with cleanup diagnostics session_id=%s path=%s detail=%s"
+             session_id
+             path
+             (Fs_compat.Durable_mutation.report_to_string report));
+        Ok ())
   with
   (* CancelledNeverAbsorbed (KeeperOASAdvanced.tla): re-raise [Cancelled]
      before the catch-all so a cancelled checkpoint fiber propagates the

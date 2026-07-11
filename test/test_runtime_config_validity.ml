@@ -1217,6 +1217,8 @@ let with_temp_runtime_toml content f =
   Fun.protect
     ~finally:(fun () ->
        (try Sys.remove path with
+        | _ -> ());
+       (try Sys.remove (path ^ ".runtime-transaction.lock") with
         | _ -> ())
        )
     (fun () -> f path)
@@ -1914,7 +1916,7 @@ let test_structured_judge_runtime_routing () =
     | Error _ -> ());
   let librarian_fallback = base ^ "librarian = \"local.judge\"\n" in
   with_temp_runtime_toml librarian_fallback (fun path ->
-    match Runtime.save_config_text ~runtime_config_path:path librarian_fallback with
+    match Runtime.save_config_text_blocking ~runtime_config_path:path librarian_fallback with
     | Error msg -> failf "save_config_text should load librarian fallback: %s" msg
     | Ok () ->
       check string "structured judge falls back to librarian" "local.judge"
@@ -1922,7 +1924,7 @@ let test_structured_judge_runtime_routing () =
   let explicit_structured_judge = base ^ "structured_judge = \"local.judge\"\n" in
   with_temp_runtime_toml explicit_structured_judge (fun path ->
     match
-      Runtime.save_config_text ~runtime_config_path:path explicit_structured_judge
+      Runtime.save_config_text_blocking ~runtime_config_path:path explicit_structured_judge
     with
     | Error msg -> failf "save_config_text should load structured_judge: %s" msg
     | Ok () ->
@@ -1936,7 +1938,7 @@ let test_structured_judge_runtime_routing () =
   ;
   with_temp_runtime_toml base (fun path ->
     match
-      Runtime.set_runtime_structured_judge
+      Runtime.set_runtime_structured_judge_blocking
         ~runtime_config_path:path
         ~runtime_id:(Some "local.judge")
         ()
@@ -1954,7 +1956,7 @@ let test_structured_judge_runtime_routing () =
            "structured_judge = \"local.judge\""));
   with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
     match
-      Runtime.set_runtime_structured_judge
+      Runtime.set_runtime_structured_judge_blocking
         ~runtime_config_path:path
         ~runtime_id:None
         ()
@@ -2010,7 +2012,7 @@ let test_hitl_summary_runtime_routing () =
     | Error _ -> ());
   let explicit_hitl_summary = base ^ "hitl_summary = \"local.summary\"\n" in
   with_temp_runtime_toml explicit_hitl_summary (fun path ->
-    match Runtime.save_config_text ~runtime_config_path:path explicit_hitl_summary with
+    match Runtime.save_config_text_blocking ~runtime_config_path:path explicit_hitl_summary with
     | Error msg -> failf "save_config_text should load hitl_summary: %s" msg
     | Ok () ->
       check
@@ -2022,7 +2024,7 @@ let test_hitl_summary_runtime_routing () =
         (Runtime.runtime_id_for_hitl_summary ()));
   with_temp_runtime_toml base (fun path ->
     match
-      Runtime.set_runtime_hitl_summary
+      Runtime.set_runtime_hitl_summary_blocking
         ~runtime_config_path:path
         ~runtime_id:(Some "local.summary")
         ()
@@ -2040,7 +2042,7 @@ let test_hitl_summary_runtime_routing () =
            "hitl_summary = \"local.summary\""));
   with_temp_runtime_toml (base ^ "hitl_summary = \"local.summary\"\n") (fun path ->
     match
-      Runtime.set_runtime_hitl_summary ~runtime_config_path:path ~runtime_id:None ()
+      Runtime.set_runtime_hitl_summary_blocking ~runtime_config_path:path ~runtime_id:None ()
     with
     | Error msg -> failf "clear hitl_summary should validate: %s" msg
     | Ok () ->
@@ -2079,12 +2081,207 @@ let test_save_config_text_refreshes_cross_verifier_runtime () =
      cross_verifier = \"local.libr\"\n"
   in
   with_temp_runtime_toml content (fun path ->
-    match Runtime.save_config_text ~runtime_config_path:path content with
+    match Runtime.save_config_text_blocking ~runtime_config_path:path content with
     | Error msg -> failf "save_config_text should validate and reload: %s" msg
     | Ok () ->
       check (option string) "saved cross_verifier runtime id"
         (Some "local.libr")
         (Runtime.cross_verifier_runtime_id ()))
+
+let runtime_parity_config ?cross_verifier () =
+  "[providers.local]\n\
+   display-name = \"Local\"\n\
+   protocol = \"ollama-http\"\n\
+   endpoint = \"http://localhost:11434\"\n\
+   \n\
+   [models.chat]\n\
+   api-name = \"chat\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.libr]\n\
+   api-name = \"libr\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.libr.capabilities]\n\
+   supports-response-format-json = true\n\
+   \n\
+   [local.chat]\n\
+   \n\
+   [local.libr]\n\
+   \n\
+   [runtime]\n\
+   default = \"local.chat\"\n"
+  ^
+  match cross_verifier with
+  | None -> ""
+  | Some runtime_id -> Printf.sprintf "cross_verifier = %S\n" runtime_id
+;;
+
+let test_runtime_committed_not_durable_publishes_prepared_snapshot () =
+  let initial = runtime_parity_config () in
+  let next = runtime_parity_config ~cross_verifier:"local.libr" () in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_temp_runtime_toml initial (fun path ->
+         (match Runtime.init_default ~config_path:path with
+          | Error msg -> failf "initial runtime config failed: %s" msg
+          | Ok () -> ());
+         let writer path content =
+           let report = Fs_compat.save_file_atomic_blocking path content in
+           match report.progress with
+           | Fs_compat.Durable_mutation.Durable () ->
+             { report with
+               progress =
+                 Fs_compat.Durable_mutation.Committed_not_durable
+                   { value = ()
+                   ; cause = Failure "injected parent fsync failure"
+                   ; backtrace = Printexc.get_callstack 8
+                   }
+             }
+           | Fs_compat.Durable_mutation.Not_committed _
+           | Fs_compat.Durable_mutation.Committed_not_durable _ ->
+             fail (Fs_compat.Durable_mutation.report_to_string report)
+         in
+         Runtime.For_testing.with_config_writer writer (fun () ->
+           match Runtime.save_config_text_blocking ~runtime_config_path:path next with
+           | Error msg -> failf "committed write must stay successful: %s" msg
+           | Ok () -> ());
+         check
+           (option string)
+           "committed snapshot published"
+           (Some "local.libr")
+           (Runtime.cross_verifier_runtime_id ());
+         check bool "committed bytes persisted" true
+           (String_util.contains_substring
+              (Fs_compat.load_file path)
+              "cross_verifier = \"local.libr\"")))
+;;
+
+let test_runtime_not_committed_preserves_disk_and_snapshot () =
+  let initial = runtime_parity_config () in
+  let next = runtime_parity_config ~cross_verifier:"local.libr" () in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_temp_runtime_toml initial (fun path ->
+         (match Runtime.init_default ~config_path:path with
+          | Error msg -> failf "initial runtime config failed: %s" msg
+          | Ok () -> ());
+         let writer _path _content =
+           { Fs_compat.Durable_mutation.progress =
+               Fs_compat.Durable_mutation.Not_committed
+                 { cause = Failure "injected prepare failure"
+                 ; backtrace = Printexc.get_callstack 8
+                 }
+           ; diagnostics = []
+           }
+         in
+         Runtime.For_testing.with_config_writer writer (fun () ->
+           match Runtime.save_config_text_blocking ~runtime_config_path:path next with
+           | Ok () -> fail "not-committed write must fail"
+           | Error _ -> ());
+         check (option string) "old snapshot preserved" None
+           (Runtime.cross_verifier_runtime_id ());
+         check bool "old bytes preserved" false
+           (String_util.contains_substring
+              (Fs_compat.load_file path)
+              "cross_verifier")))
+;;
+
+let test_runtime_config_transaction_prevents_lost_update () =
+  let initial = runtime_parity_config () in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_temp_runtime_toml initial (fun path ->
+         (match Runtime.init_default ~config_path:path with
+          | Error msg -> failf "initial runtime config failed: %s" msg
+          | Ok () -> ());
+         let coordination_mu = Mutex.create () in
+         let coordination_cv = Condition.create () in
+         let first_writer_entered = ref false in
+         let release_first_writer = ref false in
+         let writer_calls = ref 0 in
+         let writer path content =
+           Mutex.lock coordination_mu;
+           incr writer_calls;
+           let call_number = !writer_calls in
+           if call_number = 1
+           then (
+             first_writer_entered := true;
+             Condition.broadcast coordination_cv;
+             while not !release_first_writer do
+               Condition.wait coordination_cv coordination_mu
+             done);
+           Mutex.unlock coordination_mu;
+           Fs_compat.save_file_atomic_blocking path content
+         in
+         let result_a = ref None in
+         let result_b = ref None in
+         Runtime.For_testing.with_config_writer writer (fun () ->
+           let thread_a =
+             Thread.create
+               (fun () ->
+                  result_a :=
+                    Some
+                      (Runtime.set_runtime_id_for_keeper_blocking
+                         ~runtime_config_path:path
+                         ~keeper_name:"keeper-a"
+                         ~runtime_id:"local.chat"
+                         ()))
+               ()
+           in
+           Mutex.lock coordination_mu;
+           while not !first_writer_entered do
+             Condition.wait coordination_cv coordination_mu
+           done;
+           Mutex.unlock coordination_mu;
+           let thread_b =
+             Thread.create
+               (fun () ->
+                  result_b :=
+                    Some
+                      (Runtime.set_runtime_id_for_keeper_blocking
+                         ~runtime_config_path:path
+                         ~keeper_name:"keeper-b"
+                         ~runtime_id:"local.libr"
+                         ()))
+               ()
+           in
+           Thread.delay 0.05;
+           Mutex.lock coordination_mu;
+           release_first_writer := true;
+           Condition.broadcast coordination_cv;
+           Mutex.unlock coordination_mu;
+           Thread.join thread_a;
+           Thread.join thread_b);
+         let check_result label = function
+           | Some (Ok ()) -> ()
+           | Some (Error msg) -> failf "%s failed: %s" label msg
+           | None -> failf "%s did not finish" label
+         in
+         check_result "keeper-a mutation" !result_a;
+         check_result "keeper-b mutation" !result_b;
+         let persisted = Fs_compat.load_file path in
+         check bool "keeper-a assignment persisted" true
+           (String_util.contains_substring persisted "\"keeper-a\" = \"local.chat\"");
+         check bool "keeper-b assignment persisted" true
+           (String_util.contains_substring persisted "\"keeper-b\" = \"local.libr\"");
+         check
+           (option string)
+           "keeper-a assignment published"
+           (Some "local.chat")
+           (Runtime.runtime_id_for_keeper "keeper-a");
+         check
+           (option string)
+           "keeper-b assignment published"
+           (Some "local.libr")
+           (Runtime.runtime_id_for_keeper "keeper-b")))
+;;
 
 let test_deprecated_capability_notice_warns_once_per_process () =
   (* runtime.toml is re-parsed on every keeper boot; a per-parse deprecation
@@ -2354,6 +2551,15 @@ let () =
           test_case
             "save_config_text validates and refreshes cross_verifier runtime"
             `Quick test_save_config_text_refreshes_cross_verifier_runtime;
+          test_case
+            "committed sync debt publishes prepared runtime snapshot"
+            `Quick test_runtime_committed_not_durable_publishes_prepared_snapshot;
+          test_case
+            "not-committed runtime write preserves disk and snapshot"
+            `Quick test_runtime_not_committed_preserves_disk_and_snapshot;
+          test_case
+            "runtime config transaction prevents concurrent lost updates"
+            `Quick test_runtime_config_transaction_prevents_lost_update;
           test_case
             "lifecycle TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_lifecycle_keys;

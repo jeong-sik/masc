@@ -413,7 +413,29 @@ let save_request base_path req =
     Fs_compat.mkdir_p dir;
     let json = request_to_yojson req in
     let path = request_path base_path req.id in
-    let* () = Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) in
+    let report =
+      Fs_compat.save_file_atomic_eio path (Yojson.Safe.pretty_to_string json)
+    in
+    let* () =
+      Fs_compat.Durable_mutation.fold_report report
+        ~not_committed:(fun report ->
+          Error (Fs_compat.Durable_mutation.report_to_string report))
+        ~committed_not_durable:(fun report ->
+          Log.Misc.warn
+            "verification request committed with sync debt path=%s detail=%s"
+            path
+            (Fs_compat.Durable_mutation.report_to_string report);
+          Ok ())
+        ~durable:(fun report ->
+          (match report.diagnostics with
+           | [] -> ()
+           | _ ->
+             Log.Misc.warn
+               "verification request durable with cleanup diagnostics path=%s detail=%s"
+               path
+               (Fs_compat.Durable_mutation.report_to_string report));
+          Ok ())
+    in
     invalidate_list_requests_cache ();
     Ok req.id
   with

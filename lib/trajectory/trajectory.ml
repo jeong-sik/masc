@@ -751,8 +751,28 @@ let persist_aggregate_snapshot ~(masc_root : string) ~(keeper_name : string)
   let dir = trajectories_dir masc_root keeper_name in
   Fs_compat.mkdir_p dir;
   let path = aggregate_snapshot_path masc_root keeper_name in
-  Fs_compat.save_file_atomic path
-    (Yojson.Safe.to_string (tool_affinity_aggregate_to_json agg))
+  let report =
+    Fs_compat.save_file_atomic_eio path
+      (Yojson.Safe.to_string (tool_affinity_aggregate_to_json agg))
+  in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      Error (Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      Log.Misc.warn
+        "trajectory aggregate committed with sync debt path=%s detail=%s"
+        path
+        (Fs_compat.Durable_mutation.report_to_string report);
+      Ok ())
+    ~durable:(fun report ->
+      (match report.diagnostics with
+       | [] -> ()
+       | _ ->
+         Log.Misc.warn
+           "trajectory aggregate durable with cleanup diagnostics path=%s detail=%s"
+           path
+           (Fs_compat.Durable_mutation.report_to_string report));
+      Ok ())
 
 (* ── In-memory aggregation ── *)
 

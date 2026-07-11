@@ -135,9 +135,27 @@ let persist ~base_path =
           registry_tbl [])
     in
     let json = `Assoc overrides in
-    (match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
-     | Ok () -> ()
-     | Error msg -> Log.Config.error "Runtime_params.persist atomic: %s" msg)
+    let report =
+      Fs_compat.save_file_atomic_eio path (Yojson.Safe.pretty_to_string json)
+    in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        Log.Config.error
+          "Runtime_params.persist not committed: %s"
+          (Fs_compat.Durable_mutation.report_to_string report))
+      ~committed_not_durable:(fun report ->
+        Log.Config.warn
+          "Runtime_params.persist committed with sync debt path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report))
+      ~durable:(fun report ->
+        match report.diagnostics with
+        | [] -> ()
+        | _ ->
+          Log.Config.warn
+            "Runtime_params.persist durable with cleanup diagnostics path=%s detail=%s"
+            path
+            (Fs_compat.Durable_mutation.report_to_string report))
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Config.error "Runtime_params.persist: %s" (Printexc.to_string exn)
 

@@ -3,7 +3,7 @@
     Exercises the data flow across all the PRs in this series in one
     test, against real disk + real module boundaries:
 
-      [Tool_blob_store.put]   <- PR 1 (foundation)
+      [Tool_blob_store.put_blocking]   <- PR 1 (foundation)
         \u2193 sha256 + blob marker
       [Tool_output.encode_for_oas]   <- PR 1 (encoder)
         \u2193 marker string
@@ -66,7 +66,9 @@ let test_full_flow_externalize_hydrate_serve () =
          module the bridge would use). *)
       let store = B.create ~base_path:dir in
       let payload = String.make 5_000 'x' in
-      let stored_marker_value = B.put store ~bytes:payload ~mime:"text/plain" in
+      let stored_marker_value =
+        B.put_blocking store ~bytes:payload ~mime:"text/plain"
+      in
 
       (* Step 2: Verify the file landed in the sharded location. *)
       let sha256 =
@@ -151,7 +153,7 @@ let test_recency_budget_holds_across_modules () =
   with_temp_base_path (fun dir ->
       let store = B.create ~base_path:dir in
       let stored payload =
-        let v = B.put store ~bytes:payload ~mime:"text/plain" in
+        let v = B.put_blocking store ~bytes:payload ~mime:"text/plain" in
         O.encode_for_oas v
       in
       let m1 = stored "ancient one" in

@@ -143,7 +143,7 @@ let store_image meta bytes =
   let store_dir =
     Vt.vision_store_dir ~keeper_name:meta.Masc.Keeper_meta_contract.name
   in
-  match Store.store ~dir:store_dir bytes with
+  match Store.store_blocking ~dir:store_dir bytes with
   | Ok handle -> Store.to_string handle
   | Error msg -> failwith msg
 
@@ -1146,11 +1146,12 @@ let () =
     test_non_retryable_provider_error_stops_without_trying_next_runtime ();
     test_accept_rejected_is_policy_rejection_without_failover ();
     test_eager_eviction_reason_preserves_typed_outcome ());
-  test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
-  test_delegate_eviction_rejects_invalid_media_type_before_store ();
-  test_delegate_eviction_rejects_oversize_before_store ();
-  test_delegate_eviction_bad_base64_surfaces_redacted_text_error ();
-  test_delegate_eviction_rejects_non_base64_source_before_store ();
-  test_non_delegate_eviction_preserves_inline_image ();
-  test_evicted_history_has_no_image_modality ();
+  Vi.For_testing.with_store_artifact Store.store_blocking (fun () ->
+    test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
+    test_delegate_eviction_rejects_invalid_media_type_before_store ();
+    test_delegate_eviction_rejects_oversize_before_store ();
+    test_delegate_eviction_bad_base64_surfaces_redacted_text_error ();
+    test_delegate_eviction_rejects_non_base64_source_before_store ();
+    test_non_delegate_eviction_preserves_inline_image ();
+    test_evicted_history_has_no_image_modality ());
   print_endline "test_keeper_vision_tool: all assertions passed"

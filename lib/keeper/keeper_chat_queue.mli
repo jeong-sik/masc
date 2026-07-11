@@ -49,6 +49,9 @@ type lease = {
   messages : queued_message list;
 }
 
+exception Persistence_failed of string
+(** Raised when an enqueue mutation cannot be acknowledged as durable. *)
+
 (** [continuation_channel_of_message_source source] converts queued chat
     provenance into the RFC-0320 continuation-channel type. Dashboard queue
     sources may supply [dashboard_thread_id] from the local AG-UI thread; when
@@ -79,7 +82,9 @@ val persistence_configured : unit -> bool
     queue.  Creates the queue lazily if it does not yet exist. Returns a
     freshly minted [receipt_id] correlation token for this specific message
     (not persisted, not required to be unique across process restarts) so a
-    caller such as the dashboard busy-ack can echo it back to the sender. *)
+    caller such as the dashboard busy-ack can echo it back to the sender.
+    Raises [Persistence_failed] instead of returning a receipt when the
+    snapshot cannot be confirmed durable. *)
 val enqueue : keeper_name:string -> queued_message -> string
 
 (** [dequeue keeper_name] removes and returns the head message, or
@@ -182,4 +187,6 @@ val all_keeper_names : unit -> string list
 module For_testing : sig
   val reset : unit -> unit
   val fail_next_persist : unit -> unit
+  val force_next_sync_debt : unit -> unit
+  val fail_next_durability_confirmation : unit -> unit
 end

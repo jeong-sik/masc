@@ -278,11 +278,27 @@ let save_excuse_patterns (patterns : (string * string) list) : (unit, string) re
     in
     let json = `List json_items in
     let content = Yojson.Safe.pretty_to_string json in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () ->
-      cached_patterns := Some patterns;
-      Ok ()
-    | Error msg -> Error msg
+    let report = Fs_compat.save_file_atomic_eio path content in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        Error (Fs_compat.Durable_mutation.report_to_string report))
+      ~committed_not_durable:(fun report ->
+        Log.Misc.warn
+          "anti-rationalization patterns committed with sync debt path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report);
+        cached_patterns := Some patterns;
+        Ok ())
+      ~durable:(fun report ->
+        (match report.diagnostics with
+         | [] -> ()
+         | _ ->
+           Log.Misc.warn
+             "anti-rationalization patterns durable with cleanup diagnostics path=%s detail=%s"
+             path
+             (Fs_compat.Durable_mutation.report_to_string report));
+        cached_patterns := Some patterns;
+        Ok ())
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

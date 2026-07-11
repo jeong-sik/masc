@@ -2237,6 +2237,7 @@ let test_no_unclaimed_tasks_stop_signal () =
       true (str_contains result "ACTION: Stop task-checking"))
 
 let () =
+  Eio_main.run @@ fun _env ->
   Eio_guard.enable ();
   Random.init 42;
   Alcotest.run "Workspace" [

@@ -94,11 +94,19 @@ let maybe_externalize ?(mime = "text/plain") (msg : string) : string =
       | None -> msg
       | Some store ->
           (try
-             let stored = Tool_blob_store.put store ~bytes:msg ~mime in
+             let stored = Tool_blob_store.put_eio store ~bytes:msg ~mime in
              Tool_output.encode_for_oas stored
-           with
+          with
           | Eio.Cancel.Cancelled _ as e -> raise e
-          | _ -> msg)
+          | Tool_blob_store.Committed_not_durable detail
+          | Tool_blob_store.Durable_with_diagnostics detail ->
+            Log.Keeper.warn "tool blob externalization debt: %s" detail;
+            msg
+          | exn ->
+            Log.Keeper.warn
+              "tool blob externalization not committed: %s"
+              (Printexc.to_string exn);
+            msg)
 
 let success_result_preserves_full_content tr =
   match Tool_name.of_string (Tool_result.tool_name tr) with

@@ -28,6 +28,8 @@
   digestif
   yojson
   otoml
+  eio
+  eio.unix
   unix)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

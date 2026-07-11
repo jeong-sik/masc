@@ -427,6 +427,7 @@ let test_correction_pipeline_log_preserves_detail_fields () =
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "Warn_root_causes"
     [
       ( "allowlist_tool_access_filter",

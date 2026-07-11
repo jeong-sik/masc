@@ -135,7 +135,7 @@ let seed_single_playground_repo ~config ~(meta : Keeper_meta_contract.keeper_met
     (Repo_manager_types.make_keeper_repo_mapping ~keeper_id:meta.name
        ~repository_ids:[ "masc" ])
   in
-  (match Keeper_repo_mapping.save_mapping ~base_path:config.Workspace.base_path mapping with
+  (match Keeper_repo_mapping.save_mapping_blocking ~base_path:config.Workspace.base_path mapping with
    | Ok () -> ()
    | Error msg -> Alcotest.failf "seed keeper repo mapping: %s" msg);
   repo

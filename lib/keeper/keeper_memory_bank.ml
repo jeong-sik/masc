@@ -421,7 +421,25 @@ let write_memory_bank_rows_unlocked
       |> String.concat "\n"
     in
     let content = if content <> "" then content ^ "\n" else content in
-    Fs_compat.save_file_atomic path content
+    let report = Fs_compat.save_file_atomic_eio path content in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        Error (Fs_compat.Durable_mutation.report_to_string report))
+      ~committed_not_durable:(fun report ->
+        Log.Keeper.warn
+          "memory bank rewrite committed with sync debt path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report);
+        Ok ())
+      ~durable:(fun report ->
+        (match report.diagnostics with
+         | [] -> ()
+         | _ ->
+           Log.Keeper.warn
+             "memory bank rewrite durable with cleanup diagnostics path=%s detail=%s"
+             path
+             (Fs_compat.Durable_mutation.report_to_string report));
+        Ok ())
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "failed to rewrite memory bank: %s" (Printexc.to_string exn))
 

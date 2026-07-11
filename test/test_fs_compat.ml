@@ -79,9 +79,13 @@ let test_save_file_atomic_leaves_no_tmp_on_success () =
   with_tmp_dir
   @@ fun base ->
   let target = Filename.concat base "out.json" in
-  (match Fs_compat.save_file_atomic target {|{"ok":true}|} with
-   | Ok () -> ()
-   | Error msg -> fail msg);
+  let report = Fs_compat.save_file_atomic_eio target {|{"ok":true}|} in
+  (match report.progress with
+   | Fs_compat.Durable_mutation.Durable () when report.diagnostics = [] -> ()
+   | Fs_compat.Durable_mutation.Durable ()
+   | Fs_compat.Durable_mutation.Committed_not_durable _
+   | Fs_compat.Durable_mutation.Not_committed _ ->
+     fail (Fs_compat.Durable_mutation.report_to_string report));
   check bool "target exists" true (Sys.file_exists target);
   check string "content matches" {|{"ok":true}|} (Fs_compat.load_file target);
   let leftover_tmps =
@@ -98,10 +102,32 @@ let test_save_file_atomic_overwrites_existing () =
   @@ fun base ->
   let target = Filename.concat base "out.json" in
   Fs_compat.save_file target "old";
-  (match Fs_compat.save_file_atomic target "new" with
-   | Ok () -> ()
-   | Error msg -> fail msg);
+  let report = Fs_compat.save_file_atomic_eio target "new" in
+  (match report.progress with
+   | Fs_compat.Durable_mutation.Durable () when report.diagnostics = [] -> ()
+   | Fs_compat.Durable_mutation.Durable ()
+   | Fs_compat.Durable_mutation.Committed_not_durable _
+   | Fs_compat.Durable_mutation.Not_committed _ ->
+     fail (Fs_compat.Durable_mutation.report_to_string report));
   check string "overwrite succeeded" "new" (Fs_compat.load_file target)
+;;
+
+let test_save_file_atomic_rejects_invalid_final_segment () =
+  let path = Filename.concat (Filename.get_temp_dir_name ()) ".." in
+  let report = Fs_compat.save_file_atomic_eio path "not-written" in
+  match report.progress with
+  | Fs_compat.Durable_mutation.Not_committed
+      { cause =
+          Fs_compat.Invalid_atomic_target
+            { error = Fs_compat.Durable_mutation.Segment.Dot_dot; _ }
+      ; _
+      } ->
+    check (list string) "no cleanup diagnostics" []
+      (List.map Fs_compat.Durable_mutation.diagnostic_to_string report.diagnostics)
+  | Fs_compat.Durable_mutation.Not_committed _
+  | Fs_compat.Durable_mutation.Committed_not_durable _
+  | Fs_compat.Durable_mutation.Durable () ->
+    fail (Fs_compat.Durable_mutation.report_to_string report)
 ;;
 
 let with_redirected_stderr (f : unit -> 'a) : 'a * string =
@@ -323,6 +349,10 @@ let () =
             "overwrites existing target"
             `Quick
             test_save_file_atomic_overwrites_existing
+        ; test_case
+            "invalid final segment is typed not-committed"
+            `Quick
+            test_save_file_atomic_rejects_invalid_final_segment
         ] )
     ; ( "load_jsonl_diagnostics"
       , [ test_case

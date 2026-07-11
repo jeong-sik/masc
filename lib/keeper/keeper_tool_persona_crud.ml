@@ -53,16 +53,30 @@ let write_profile persona_name json =
   let dir = Filename.concat (personas_dir ()) persona_name in
   let path = Filename.concat dir "profile.json" in
   (try Fs_compat.mkdir_p dir with _ -> ());
-  let tmp = path ^ ".tmp" in
   let content = Yojson.Safe.to_string ~std:true json in
-  match Fs_compat.save_file_atomic tmp content with
-  | Error msg -> Error ("Failed to write " ^ path ^ ": " ^ msg)
-  | Ok () ->
-      (try
-         Fs_compat.rename tmp path;
-         Ok (ok_assoc [("persona_name", `String persona_name); ("path", `String path)])
-       with exn ->
-         Error ("Failed to rename tmp file: " ^ Printexc.to_string exn))
+  let report = Fs_compat.save_file_atomic_eio path content in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      Error
+        ("Failed to write "
+         ^ path
+         ^ ": "
+         ^ Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      Log.Keeper.warn
+        "persona profile committed with sync debt path=%s detail=%s"
+        path
+        (Fs_compat.Durable_mutation.report_to_string report);
+      Ok (ok_assoc [("persona_name", `String persona_name); ("path", `String path)]))
+    ~durable:(fun report ->
+      (match report.diagnostics with
+       | [] -> ()
+       | _ ->
+         Log.Keeper.warn
+           "persona profile durable with cleanup diagnostics path=%s detail=%s"
+           path
+           (Fs_compat.Durable_mutation.report_to_string report));
+      Ok (ok_assoc [("persona_name", `String persona_name); ("path", `String path)]))
 
 let validate_create_args args =
   let persona_name = get_string_opt args "persona_name" in

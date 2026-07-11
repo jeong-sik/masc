@@ -32,21 +32,21 @@ let mentions ~needle s =
 let test_round_trip () =
   let dir = temp_dir () in
   let bytes = "\x89PNG\r\n\x1a\n\x00\xffbinary\x00\x00bytes\xfe" in
-  let h = ok (S.store ~dir bytes) in
+  let h = ok (S.store_blocking ~dir bytes) in
   assert (String.equal (ok (S.load ~dir h)) bytes)
 
 (* content-addressed: identical bytes -> identical handle. *)
 let test_content_addressed () =
   let dir = temp_dir () in
-  let h1 = ok (S.store ~dir "abc") in
-  let h2 = ok (S.store ~dir "abc") in
+  let h1 = ok (S.store_blocking ~dir "abc") in
+  let h2 = ok (S.store_blocking ~dir "abc") in
   assert (String.equal (S.to_string h1) (S.to_string h2))
 
 (* distinct bytes -> distinct handles. *)
 let test_distinct () =
   let dir = temp_dir () in
-  let h1 = ok (S.store ~dir "abc") in
-  let h2 = ok (S.store ~dir "abd") in
+  let h1 = ok (S.store_blocking ~dir "abc") in
+  let h2 = ok (S.store_blocking ~dir "abd") in
   assert (not (String.equal (S.to_string h1) (S.to_string h2)))
 
 (* the handle survives a string round-trip (what a checkpoint persists) and the
@@ -54,7 +54,7 @@ let test_distinct () =
 let test_persisted_handle_reload () =
   let dir = temp_dir () in
   let bytes = "durable-across-checkpoint" in
-  let h = ok (S.store ~dir bytes) in
+  let h = ok (S.store_blocking ~dir bytes) in
   let persisted = S.to_string h in
   let rewrapped = S.of_string persisted in
   assert (String.equal (ok (S.load ~dir rewrapped)) bytes)
@@ -70,7 +70,7 @@ let test_missing_is_error () =
 (* a tampered file (bytes no longer hash to the handle) is rejected on read. *)
 let test_corruption_detected () =
   let dir = temp_dir () in
-  let h = ok (S.store ~dir "original") in
+  let h = ok (S.store_blocking ~dir "original") in
   let path = Filename.concat dir (S.to_string h) in
   let oc = open_out_bin path in
   output_string oc "tampered-content";
@@ -88,7 +88,7 @@ let test_corruption_detected () =
    the filesystem. *)
 let test_malformed_handle_rejected () =
   let dir = temp_dir () in
-  ignore (ok (S.store ~dir "seed so dir exists"));
+  ignore (ok (S.store_blocking ~dir "seed so dir exists"));
   List.iter
     (fun bad ->
       match S.load ~dir (S.of_string bad) with

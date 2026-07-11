@@ -137,6 +137,7 @@ let test_corrupt_rules_file_reports_read_drop () =
 ;;
 
 let () =
+  Eio_main.run @@ fun _env ->
   run
     "Keeper_approval_queue_rules"
     [ ( "persisted rules"

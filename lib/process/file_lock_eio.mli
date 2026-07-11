@@ -66,10 +66,19 @@ val acquire_flock_fd :
   string ->
   Unix.file_descr
 
-(** [release_flock_fd fd] unlocks (best-effort) and closes [fd]. *)
-val release_flock_fd : Unix.file_descr -> unit
+(** [release_flock_fd_blocking fd] unlocks (best-effort) and closes [fd] on
+    the calling thread. *)
+val release_flock_fd_blocking : Unix.file_descr -> unit
+
+(** Eio-safe counterpart of {!release_flock_fd_blocking}. *)
+val release_flock_fd_eio : Unix.file_descr -> unit
 
 (** {1 High-level scoped locking} *)
+
+(** [with_lock_blocking path f] runs [f] while holding an OS-level flock on
+    [path ^ ".lock"]. It blocks the calling thread; callers that also need
+    same-process cross-domain exclusion must compose their own shared mutex. *)
+val with_lock_blocking : string -> (unit -> 'a) -> 'a
 
 (** [with_mutex path f] runs [f] while holding the cooperative
     per-[path] Eio.Mutex only. Use for in-memory backends that need

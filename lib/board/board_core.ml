@@ -735,9 +735,8 @@ let save_sub_boards_jsonl content =
   try
     ensure_masc_dir ();
     let path = sub_boards_path () in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+    Fs_compat.save_file_atomic_eio path content
+    |> atomic_persist_observe ~where:"rewrite_sub_boards"
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
 ;;

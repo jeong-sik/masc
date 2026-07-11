@@ -177,9 +177,13 @@ let test_skill_candidate_json_and_draft_are_candidate_only () =
 let read_file = Fs_compat.load_file
 
 let write_file_or_fail path content =
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> ()
-  | Error msg -> fail msg
+  let report = Fs_compat.save_file_atomic_blocking path content in
+  match report.progress with
+  | Fs_compat.Durable_mutation.Durable () when report.diagnostics = [] -> ()
+  | Fs_compat.Durable_mutation.Durable ()
+  | Fs_compat.Durable_mutation.Committed_not_durable _
+  | Fs_compat.Durable_mutation.Not_committed _ ->
+    fail (Fs_compat.Durable_mutation.report_to_string report)
 ;;
 
 let with_env name value f =
@@ -703,14 +707,17 @@ let test_load_procedures_strict_rejects_schema_mismatch () =
 let test_rewrite_procedures_returns_error_on_bad_path () =
   (* Use a path that is a file, not a directory, so the atomic write fails. *)
   let marker = Filename.temp_file "proc-bad-path-" ".tmp" in
-  let base_path = marker ^ "_not_a_dir" in
   let p = procedure ~id:"bad-path" () in
-  match P.rewrite_procedures ~base_path ~agent_name:"keeper" [ p ] with
-  | Ok () -> fail "expected rewrite to fail on bad path"
-  | Error _ -> check bool "rewrite failed" true true
+  Fun.protect
+    ~finally:(fun () -> Sys.remove marker)
+    (fun () ->
+       match P.rewrite_procedures ~base_path:marker ~agent_name:"keeper" [ p ] with
+       | Ok () -> fail "expected rewrite to fail on bad path"
+       | Error _ -> check bool "rewrite failed" true true)
 ;;
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "procedural_memory"
     [
       ( "crystallization",

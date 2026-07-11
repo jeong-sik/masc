@@ -20,11 +20,11 @@ let with_temp_path f =
       cleanup_if_exists path)
     (fun () -> f path)
 
-let test_with_lock_without_eio () =
+let test_with_lock_blocking () =
   with_temp_path @@ fun path ->
   let calls = ref 0 in
   let result =
-    File_lock_eio.with_lock path (fun () ->
+    File_lock_eio.with_lock_blocking path (fun () ->
         incr calls;
         "ok")
   in
@@ -41,7 +41,7 @@ let test_acquire_flock_retry_without_eio () =
       ~max_attempts:1 ~caller:"test_file_lock_eio" ()
   in
   Fun.protect
-    ~finally:(fun () -> File_lock_eio.release_flock_fd fd)
+    ~finally:(fun () -> File_lock_eio.release_flock_fd_blocking fd)
     (fun () ->
       check bool "lock file created" true (Sys.file_exists lock_path))
 
@@ -64,7 +64,7 @@ let () =
     [
       ( "locks",
         [
-          test_case "works without Eio context" `Quick test_with_lock_without_eio;
+          test_case "explicit blocking boundary" `Quick test_with_lock_blocking;
           test_case "acquire_flock_retry works without Eio context" `Quick
             test_acquire_flock_retry_without_eio;
           test_case "works inside Eio context" `Quick test_with_lock_inside_eio;

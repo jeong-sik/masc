@@ -468,6 +468,7 @@ let test_attribution_of_request_derives_origin () =
       | None -> Alcotest.fail "expected Some attribution")
 
 let () =
+  Eio_main.run @@ fun _env ->
   Alcotest.run "Verification" [
     "criterion", [
       Alcotest.test_case "roundtrip" `Quick test_criterion_roundtrip;

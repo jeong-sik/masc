@@ -40,22 +40,46 @@ let rec mkdir_p p =
 
 let ensure_parent_dir path = mkdir_p (Filename.dirname path)
 
-let put t ~bytes ~mime =
+exception Committed_not_durable of string
+exception Durable_with_diagnostics of string
+
+let put_with writer t ~bytes ~mime =
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
   let path = shard_path t sha256 in
   if not (Fs_compat.file_exists path) then begin
     ensure_parent_dir path;
     (* Propagate a failed write instead of swallowing it. Returning [Stored]
-       after [save_file_atomic] failed produced a blob marker for bytes that
+       after an atomic write failed produced a blob marker for bytes that
        were never persisted, so the keeper permanently lost the full tool
        output (only the preview survived). The sole caller,
        [Tool_bridge.maybe_externalize], already catches storage failures and
        falls back to the inline bytes (its docstring promises exactly this);
        raising here is what activates that fallback. *)
-    match Fs_compat.save_file_atomic path bytes with
-    | Ok () -> ()
-    | Error msg ->
-        raise (Sys_error (Printf.sprintf "tool_blob_store.put: %s" msg))
+    let report = writer path bytes in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        raise
+          (Sys_error
+             (Printf.sprintf
+                "tool_blob_store.put: %s"
+                (Fs_compat.Durable_mutation.report_to_string report))))
+      ~committed_not_durable:(fun report ->
+        raise
+          (Committed_not_durable
+             (Printf.sprintf
+                "tool blob committed with sync debt path=%s detail=%s"
+                path
+                (Fs_compat.Durable_mutation.report_to_string report))))
+      ~durable:(fun report ->
+        match report.diagnostics with
+        | [] -> ()
+        | _ ->
+          raise
+            (Durable_with_diagnostics
+               (Printf.sprintf
+                  "tool blob durable with cleanup diagnostics path=%s detail=%s"
+                  path
+                  (Fs_compat.Durable_mutation.report_to_string report))))
   end;
   Tool_output.Stored {
     sha256;
@@ -63,6 +87,14 @@ let put t ~bytes ~mime =
     preview = make_preview bytes;
     mime;
   }
+
+let put_blocking = put_with Fs_compat.save_file_atomic_blocking
+
+let put_eio t ~bytes ~mime =
+  Eio.Cancel.protect (fun () ->
+    Eio_unix.run_in_systhread ~label:"tool-blob-store" (fun () ->
+      put_blocking t ~bytes ~mime))
+;;
 
 let fetch t ~sha256 =
   let path = shard_path t sha256 in

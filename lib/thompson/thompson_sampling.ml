@@ -409,11 +409,26 @@ let save_stats () =
       snapshot;
     let content = Buffer.contents buf in
     let count = List.length snapshot in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () ->
-        Log.Metrics.debug "thompson sampling saved stats for %d agents" count
-    | Error msg ->
-        Log.Thompson.error "Error saving stats: %s" msg
+    let report = Fs_compat.save_file_atomic_eio path content in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        Log.Thompson.error
+          "Error saving stats: %s"
+          (Fs_compat.Durable_mutation.report_to_string report))
+      ~committed_not_durable:(fun report ->
+        Log.Thompson.warn
+          "thompson stats committed with sync debt path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report))
+      ~durable:(fun report ->
+        (match report.diagnostics with
+         | [] -> ()
+         | _ ->
+           Log.Thompson.warn
+             "thompson stats durable with cleanup diagnostics path=%s detail=%s"
+             path
+             (Fs_compat.Durable_mutation.report_to_string report));
+        Log.Metrics.debug "thompson sampling saved stats for %d agents" count)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->

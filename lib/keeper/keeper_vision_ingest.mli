@@ -40,9 +40,9 @@ val evict_blocks
   -> Agent_sdk.Types.content_block list
 (** Site 1. Evict every [Image] in the list when [policy = Mm_delegate]; return
     the list unchanged otherwise. Images are fail-closed before store on
-    base64 payload, size, and media type. [Eager] consults the
-    fiber-local Eio context for one bounded sub-call; with none present (tests)
-    it falls back to an unread placeholder, so eviction still holds. *)
+    base64 payload, size, and media type. The delegate path requires an Eio
+    context for durable storage. [Eager] then consults the fiber-local Eio
+    context for one bounded sub-call. *)
 
 val evict_message
   :  mode:mode
@@ -53,3 +53,13 @@ val evict_message
 (** Site 2. Same transform applied to a message's content blocks at the
     checkpoint write boundary. Use [Store_only] here — checkpoint writes must
     not block the turn fiber on a provider call. *)
+
+module For_testing : sig
+  val with_store_artifact :
+    (dir:string ->
+     string ->
+     (Multimodal.Vision_artifact_store.handle, string) result) ->
+    (unit -> 'a) ->
+    'a
+  (** Scope an explicit blocking/failure-injection store for non-Eio tests. *)
+end

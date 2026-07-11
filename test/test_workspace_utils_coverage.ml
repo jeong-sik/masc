@@ -638,6 +638,7 @@ let test_memory_backend_fallback_keys_by_backend_base_path () =
    ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "Workspace_utils Coverage" [
     "parse_gitdir_to_main_root", [
       test_case "worktree" `Quick test_parse_gitdir_worktree;

@@ -18,6 +18,59 @@ type history_migration_stats =
   ; malformed_lines : int
   }
 
+type history_migration_stage =
+  | Internal_history
+  | Main_history
+
+type history_migration_error =
+  | History_write_not_committed of
+      { stage : history_migration_stage
+      ; path : string
+      ; report : unit Fs_compat.Durable_mutation.report
+      }
+  | History_write_committed_not_durable of
+      { stage : history_migration_stage
+      ; path : string
+      ; report : unit Fs_compat.Durable_mutation.report
+      }
+  | History_directory_durability_not_confirmed of
+      { stage : history_migration_stage
+      ; path : string
+      ; report : Fs_compat.Durable_mutation.durability_confirmation_report
+      }
+
+let history_migration_stage_to_string = function
+  | Internal_history -> "internal_history"
+  | Main_history -> "main_history"
+;;
+
+let history_migration_error_to_string = function
+  | History_write_not_committed { stage; path; report } ->
+    Printf.sprintf
+      "history migration %s write not committed path=%s: %s"
+      (history_migration_stage_to_string stage)
+      path
+      (Fs_compat.Durable_mutation.report_to_string report)
+  | History_write_committed_not_durable { stage; path; report } ->
+    Printf.sprintf
+      "history migration %s write committed but not durable path=%s: %s"
+      (history_migration_stage_to_string stage)
+      path
+      (Fs_compat.Durable_mutation.report_to_string report)
+  | History_directory_durability_not_confirmed { stage; path; report } ->
+    let detail =
+      match report.confirmation with
+      | Fs_compat.Durable_mutation.Not_confirmed { cause; _ } ->
+        Printexc.to_string cause
+      | Fs_compat.Durable_mutation.Confirmed -> "unexpected confirmed state"
+    in
+    Printf.sprintf
+      "history migration %s directory durability not confirmed path=%s: %s"
+      (history_migration_stage_to_string stage)
+      path
+      detail
+;;
+
 let empty_history_migration_stats =
   { moved_lines = 0; dropped_lines = 0; kept_lines = 0; malformed_lines = 0 }
 
@@ -88,23 +141,31 @@ let dedupe_preserve_order (lines : string list) : string list =
   in
   go StringSet.empty [] lines
 
-let migrate_session_history_logs ~(session_dir : string) :
-    history_migration_stats =
+let migrate_session_history_logs_with
+  ?(confirm_parent_durable =
+    Fs_compat.Durable_mutation.confirm_directory_durable_blocking)
+  writer
+  ~(session_dir : string)
+  =
   let main_path = Filename.concat session_dir "history.jsonl" in
   let internal_path = Filename.concat session_dir "history.internal.jsonl" in
   if (not (Fs_compat.file_exists main_path))
      && not (Fs_compat.file_exists internal_path)
-  then empty_history_migration_stats
+  then Ok empty_history_migration_stats
   else
+    let main_content =
+      if Fs_compat.file_exists main_path then Fs_compat.load_file main_path else ""
+    in
     let main_lines =
-      if Fs_compat.file_exists main_path
-      then split_jsonl_lines (Fs_compat.load_file main_path)
-      else []
+      split_jsonl_lines main_content
+    in
+    let existing_internal_content =
+      if Fs_compat.file_exists internal_path
+      then Fs_compat.load_file internal_path
+      else ""
     in
     let existing_internal =
-      if Fs_compat.file_exists internal_path
-      then split_jsonl_lines (Fs_compat.load_file internal_path)
-      else []
+      split_jsonl_lines existing_internal_content
     in
     let kept_rev, moved_rev, dropped_main, malformed_main =
       List.fold_left
@@ -138,55 +199,134 @@ let migrate_session_history_logs ~(session_dir : string) :
     let malformed_lines = malformed_main + malformed_internal in
     if moved_lines = [] && total_dropped = 0
     then
-      { moved_lines = 0
-      ; dropped_lines = 0
-      ; kept_lines = List.length kept_lines
-      ; malformed_lines
-      }
+      Ok
+        { moved_lines = 0
+        ; dropped_lines = 0
+        ; kept_lines = List.length kept_lines
+        ; malformed_lines
+        }
     else (
       let merged_internal =
         dedupe_preserve_order (sanitized_internal @ moved_lines)
       in
-      (match Fs_compat.save_file_atomic main_path (render_jsonl_lines kept_lines) with
-       | Ok () -> ()
-       | Error detail ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string CheckpointFailures)
-             ~labels:
-               [ ( "operation"
-                 , Keeper_checkpoint_failure_operation.(to_label Migrate_main_history)
-                 )
-               ]
-             ();
-           Log.Keeper.error
-             "migrate_session_history_logs: save main history failed for %s: %s"
-             main_path
-             detail);
-      (match
-         Fs_compat.save_file_atomic
-           internal_path
-           (render_jsonl_lines merged_internal)
-       with
-       | Ok () -> ()
-       | Error detail ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string CheckpointFailures)
-             ~labels:
-               [ ( "operation"
-                 , Keeper_checkpoint_failure_operation.(
-                     to_label Migrate_internal_history)
-                 )
-               ]
-             ();
-           Log.Keeper.error
-             "migrate_session_history_logs: save internal history failed for %s: %s"
-             internal_path
-             detail);
-      { moved_lines = List.length moved_lines
-      ; dropped_lines = total_dropped
-      ; kept_lines = List.length kept_lines
-      ; malformed_lines
-      })
+      let save_history ~stage ~path ~content ~operation =
+        let report = writer path content in
+        let report =
+          Fs_compat.Durable_mutation.observe_and_retain
+            (fun report ->
+               match report.progress with
+               | Fs_compat.Durable_mutation.Not_committed _ ->
+                 Otel_metric_store.inc_counter
+                   Keeper_metrics.(to_string CheckpointFailures)
+                   ~labels:
+                     [ ( "operation"
+                       , Keeper_checkpoint_failure_operation.(to_label operation)
+                       )
+                     ]
+                   ();
+                 Log.Keeper.error
+                   "migrate_session_history_logs: save not committed for %s: %s"
+                   path
+                   (Fs_compat.Durable_mutation.report_to_string report)
+               | Fs_compat.Durable_mutation.Committed_not_durable _ ->
+                 Log.Keeper.warn
+                   "migrate_session_history_logs: committed with sync debt path=%s detail=%s"
+                   path
+                   (Fs_compat.Durable_mutation.report_to_string report)
+               | Fs_compat.Durable_mutation.Durable () ->
+                 (match report.diagnostics with
+                  | [] -> ()
+                  | _ ->
+                    Log.Keeper.warn
+                      "migrate_session_history_logs: durable with cleanup diagnostics path=%s detail=%s"
+                      path
+                      (Fs_compat.Durable_mutation.report_to_string report)))
+            report
+        in
+        Fs_compat.Durable_mutation.fold_report report
+          ~not_committed:(fun report ->
+            Error (History_write_not_committed { stage; path; report }))
+          ~committed_not_durable:(fun report ->
+            Error (History_write_committed_not_durable { stage; path; report }))
+          ~durable:(fun _report -> Ok ())
+      in
+      let confirm_history_parent ~stage ~path =
+        let report = confirm_parent_durable (Filename.dirname path) in
+        let report =
+          Fs_compat.Durable_mutation.observe_confirmation_and_retain
+            (fun report ->
+               match report.confirmation_diagnostics with
+               | [] -> ()
+               | diagnostics ->
+                 Log.Keeper.warn
+                   "migrate_session_history_logs: directory durability confirmation has diagnostics path=%s detail=%s"
+                   path
+                   (String.concat
+                      "; "
+                      (List.map
+                         Fs_compat.Durable_mutation.diagnostic_to_string
+                         diagnostics)))
+            report
+        in
+        match report.confirmation with
+        | Fs_compat.Durable_mutation.Not_confirmed _ ->
+          Error
+            (History_directory_durability_not_confirmed
+               { stage; path; report })
+        | Fs_compat.Durable_mutation.Confirmed -> Ok ()
+      in
+      let next_internal_content = render_jsonl_lines merged_internal in
+      let internal_result =
+        if String.equal next_internal_content existing_internal_content
+        then
+          if moved_lines = []
+          then Ok ()
+          else confirm_history_parent ~stage:Internal_history ~path:internal_path
+        else
+          save_history
+            ~stage:Internal_history
+            ~path:internal_path
+            ~content:next_internal_content
+            ~operation:Keeper_checkpoint_failure_operation.Migrate_internal_history
+      in
+      match internal_result with
+      | Error _ as error -> error
+      | Ok () ->
+        let next_main_content = render_jsonl_lines kept_lines in
+        let main_result =
+          if String.equal next_main_content main_content
+          then Ok ()
+          else
+            save_history
+              ~stage:Main_history
+              ~path:main_path
+              ~content:next_main_content
+              ~operation:Keeper_checkpoint_failure_operation.Migrate_main_history
+        in
+        (match main_result with
+         | Error _ as error -> error
+         | Ok () ->
+           Ok
+             { moved_lines = List.length moved_lines
+             ; dropped_lines = total_dropped
+             ; kept_lines = List.length kept_lines
+             ; malformed_lines
+             }))
+;;
+
+let migrate_session_history_logs_blocking =
+  migrate_session_history_logs_with Fs_compat.save_file_atomic_blocking
+;;
+
+let migrate_session_history_logs_eio ~session_dir =
+  Eio.Cancel.protect (fun () ->
+    Eio_unix.run_in_systhread ~label:"keeper-history-migration" (fun () ->
+      migrate_session_history_logs_blocking ~session_dir))
+;;
+
+module For_testing = struct
+  let migrate_session_history_logs_with = migrate_session_history_logs_with
+end
 
 let history_path_for_source ~(session_dir : string) ~(source : string option) :
     string =

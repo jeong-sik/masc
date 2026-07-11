@@ -172,30 +172,51 @@ let record_handoff_artifacts
       ~parent ~child ~parent_trace_id ~trigger_reason ~context_ratio
   in
   ignore (Keeper_fs.ensure_dir (Filename.dirname manifest_path));
-  match
-    Fs_compat.save_file_atomic manifest_path (Yojson.Safe.pretty_to_string manifest)
-  with
-  | Ok () ->
-      (try
-         Keeper_types_support.append_jsonl_line index_path index_entry
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string GenerationLineageFailures)
-             ~labels:[("keeper", child.name); ("site", Keeper_generation_lineage_failure_site.(to_label Index_append))]
-             ();
-           Log.Keeper.warn ~keeper_name:child.name
-             "failed to append generation index %s: %s"
-             index_path (Printexc.to_string exn))
-  | Error err ->
+  let append_index () =
+    try Keeper_types_support.append_jsonl_line index_path index_entry with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string GenerationLineageFailures)
+        ~labels:
+          [ ("keeper", child.name)
+          ; ("site", Keeper_generation_lineage_failure_site.(to_label Index_append))
+          ]
+        ();
+      Log.Keeper.warn ~keeper_name:child.name
+        "failed to append generation index %s: %s"
+        index_path (Printexc.to_string exn)
+  in
+  let report =
+    Fs_compat.save_file_atomic_eio
+      manifest_path
+      (Yojson.Safe.pretty_to_string manifest)
+  in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GenerationLineageFailures)
         ~labels:[("keeper", child.name); ("site", Keeper_generation_lineage_failure_site.(to_label Manifest_save))]
         ();
       Log.Keeper.warn ~keeper_name:child.name
         "failed to save generation manifest %s: %s"
-        manifest_path err
+        manifest_path
+        (Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      Log.Keeper.warn ~keeper_name:child.name
+        "generation manifest committed with sync debt path=%s detail=%s"
+        manifest_path
+        (Fs_compat.Durable_mutation.report_to_string report);
+      append_index ())
+    ~durable:(fun report ->
+      (match report.diagnostics with
+       | [] -> ()
+       | _ ->
+         Log.Keeper.warn ~keeper_name:child.name
+           "generation manifest durable with cleanup diagnostics path=%s detail=%s"
+           manifest_path
+           (Fs_compat.Durable_mutation.report_to_string report));
+      append_index ())
 
 let load_json_file_opt path =
   if not (Fs_compat.file_exists path) then None

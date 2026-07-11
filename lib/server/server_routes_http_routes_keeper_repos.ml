@@ -125,7 +125,7 @@ let handle_save_mapping state keeper_id req reqd =
           match mapping_of_json keeper_id json with
           | Error msg -> response `Bad_request msg
           | Ok mapping -> (
-              match Keeper_repo_mapping.save_mapping ~base_path mapping with
+              match Keeper_repo_mapping.save_mapping_eio ~base_path mapping with
               | Error msg -> response `Bad_request msg
               | Ok () ->
                   Http.Response.json_value ~request:req

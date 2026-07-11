@@ -26,6 +26,10 @@ val flusher_schedule_dropped_count : unit -> int
 
 val persist_error_count : unit -> int
 val record_persist_error : where:string -> string -> unit
+val atomic_persist_observe :
+  where:string -> unit Fs_compat.Durable_mutation.report -> unit
+(** Exhaustively records all typed mutation outcomes. A committed sync debt is
+    observable but remains success, preventing duplicate rewrites. *)
 
 val create_store : unit -> store
 val reset_comment_rate_tracker : unit -> unit

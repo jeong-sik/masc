@@ -25,6 +25,16 @@ open Repo_manager_types
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
+let save_atomic_fixture path content =
+  let report = Fs_compat.save_file_atomic_blocking path content in
+  match report.progress with
+  | Fs_compat.Durable_mutation.Durable () when report.diagnostics = [] -> ()
+  | Fs_compat.Durable_mutation.Durable ()
+  | Fs_compat.Durable_mutation.Committed_not_durable _
+  | Fs_compat.Durable_mutation.Not_committed _ ->
+    Alcotest.fail (Fs_compat.Durable_mutation.report_to_string report)
+;;
+
 let with_env key value f =
   let prior = try Some (Sys.getenv key) with Not_found -> None in
   Unix.putenv key value;
@@ -219,10 +229,10 @@ let json_list_contains_string json field value =
 let write_malformed_repositories ~base =
   let path = Filename.concat base ".masc/config/repositories.toml" in
   ensure_dir (Filename.dirname path);
-  ignore (Fs_compat.save_file_atomic path "[repository.demo\n")
+  save_atomic_fixture path "[repository.demo\n"
 
 let write_executable path content =
-  ignore (Fs_compat.save_file_atomic path content);
+  save_atomic_fixture path content;
   Unix.chmod path 0o755
 
 let normalize_realpath path =
@@ -336,7 +346,7 @@ let outside_in_root ~base name =
   let dir = Filename.concat base "outside_playground" in
   ensure_dir dir;
   let p = Filename.concat dir name in
-  ignore (Fs_compat.save_file_atomic p (name ^ " content"));
+  save_atomic_fixture p (name ^ " content");
   p
 
 let blocked_by_symmetric_sandbox raw =
@@ -396,7 +406,7 @@ let test_docker_keeper_blocks_rg_outside () =
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
   ignore
-    (Fs_compat.save_file_atomic
+    (save_atomic_fixture
        (Filename.concat outside_dir "leak.txt")
        "secret-token");
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
@@ -424,7 +434,7 @@ let test_local_keeper_rg_file_path_uses_parent_workdir () =
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (
     let file_path = Filename.concat playground "demo.ml" in
-    ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
+    save_atomic_fixture file_path "let run_named = true\n";
     let raw =
       Keeper_tool_command_runtime.handle_tool_search_files
         ~turn_sandbox_factory:None
@@ -463,7 +473,7 @@ let test_local_keeper_rg_invalid_type_surfaces_stderr () =
   if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
   else (
     let file_path = Filename.concat playground "demo.ml" in
-    ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
+    save_atomic_fixture file_path "let run_named = true\n";
     let raw =
       Keeper_tool_command_runtime.handle_tool_search_files
         ~turn_sandbox_factory:None
@@ -506,7 +516,7 @@ let test_grep_unregistered_visible_repo_is_readable () =
     ensure_dir (Filename.concat repo_root ".git");
     ensure_dir (Filename.concat repo_root "lib");
     ignore
-      (Fs_compat.save_file_atomic
+      (save_atomic_fixture
          (Filename.concat repo_root "lib/demo.ml")
          "let visible_unregistered_repo = true\n");
     let raw =
@@ -537,7 +547,7 @@ let test_grep_registered_alias_repo_path_is_allowed () =
     ensure_dir (Filename.concat repo_root ".git");
     ensure_dir (Filename.concat repo_root "lib");
     ignore
-      (Fs_compat.save_file_atomic
+      (save_atomic_fixture
          (Filename.concat repo_root "lib/demo.ml")
          "let alias_registered_path = true\n");
     let raw =
@@ -651,7 +661,7 @@ let test_docker_keeper_blocks_second_rg_outside () =
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
   ignore
-    (Fs_compat.save_file_atomic
+    (save_atomic_fixture
        (Filename.concat outside_dir "leak.txt")
        "secret-token");
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
@@ -677,7 +687,7 @@ let test_docker_keeper_allows_inside_playground () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let demo = Filename.concat playground "demo.txt" in
-  ignore (Fs_compat.save_file_atomic demo "hello inside playground");
+  save_atomic_fixture demo "hello inside playground";
   let raw =
     Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String "demo.txt") ])
@@ -782,7 +792,7 @@ let test_docker_container_file_path_maps_to_host_worktree () =
       "repos/masc/.worktrees/task-186/lib/keeper/keeper_tool_policy.ml"
   in
   ensure_dir (Filename.dirname host_file);
-  ignore (Fs_compat.save_file_atomic host_file "let touched = true\n");
+  save_atomic_fixture host_file "let touched = true\n";
   let container_file =
     Filename.concat
       (Keeper_sandbox.container_root meta.name)
@@ -899,7 +909,7 @@ let test_read_unregistered_clone_surfaces_repository_hitl () =
     save_repositories base [ registered ];
     let repo_root = Filename.concat playground "repos/masc-mcp" in
     init_git_repo repo_root registered.url;
-    ignore (Fs_compat.save_file_atomic (Filename.concat repo_root "README.md") "Repository\n");
+    save_atomic_fixture (Filename.concat repo_root "README.md") "Repository\n";
     let raw =
       Keeper_tool_filesystem_runtime.handle_read_file
         ~turn_sandbox_factory:None

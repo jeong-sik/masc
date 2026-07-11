@@ -202,9 +202,27 @@ let save ~path entries =
   | Ok json ->
       let content = Yojson.Safe.pretty_to_string json ^ "\n" in
       (try
-         match Fs_compat.save_file_atomic path content with
-         | Ok () -> Ok ()
-         | Error message -> Error (Write_failed message)
+         let report = Fs_compat.save_file_atomic_eio path content in
+         Fs_compat.Durable_mutation.fold_report report
+           ~not_committed:(fun report ->
+             Error
+               (Write_failed
+                  (Fs_compat.Durable_mutation.report_to_string report)))
+           ~committed_not_durable:(fun report ->
+             Log.Misc.warn
+               "prompt overrides committed with sync debt path=%s detail=%s"
+               path
+               (Fs_compat.Durable_mutation.report_to_string report);
+             Ok ())
+           ~durable:(fun report ->
+             (match report.diagnostics with
+              | [] -> ()
+              | _ ->
+                Log.Misc.warn
+                  "prompt overrides durable with cleanup diagnostics path=%s detail=%s"
+                  path
+                  (Fs_compat.Durable_mutation.report_to_string report));
+             Ok ())
        with
        | Sys_error message -> Error (Write_failed message)
        | Unix.Unix_error (error, operation, argument) ->

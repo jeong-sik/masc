@@ -72,17 +72,18 @@ let clear_dir_cache () : unit =
 (* ================================================================ *)
 
 (** Atomically save [content] to [path].
-    Delegates to {!Fs_compat.save_file_atomic} (Eio-aware, re-raises
-    [Eio.Cancel.Cancelled]).  Ensures the parent directory exists first.
+    Delegates to {!Fs_compat.save_file_atomic_eio}. Ensures the parent
+    directory exists first.
 
     Returns [(unit, string) result] for explicit error handling. *)
 let save_atomic (path : string) (content : string) : (unit, string) result =
   try
     let dir = Filename.dirname path in
     ignore (ensure_dir dir);
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg ->
+    let report = Fs_compat.save_file_atomic_eio path content in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        let msg = Fs_compat.Durable_mutation.report_to_string report in
         Keeper_fd_pressure.note_if_fd_exhaustion
           ~site:"filesystem_runtime.save_atomic"
           msg;
@@ -94,7 +95,22 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
           ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_failed))]
           ();
         Log.Keeper.warn "filesystem_runtime: save_atomic failed path=%s error=%s" path msg;
-        Error msg
+        Error msg)
+      ~committed_not_durable:(fun report ->
+        Log.Keeper.warn
+          "filesystem_runtime: save_atomic committed with sync debt path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report);
+        Ok ())
+      ~durable:(fun report ->
+        (match report.diagnostics with
+         | [] -> ()
+         | _ ->
+           Log.Keeper.warn
+             "filesystem_runtime: save_atomic durable with cleanup diagnostics path=%s detail=%s"
+             path
+             (Fs_compat.Durable_mutation.report_to_string report));
+        Ok ())
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

@@ -149,7 +149,7 @@ let write_repositories base_path repos =
 
 let write_mapping base_path keeper_id repo_ids =
   let mapping = make_keeper_repo_mapping ~keeper_id ~repository_ids:repo_ids in
-  match Keeper_repo_mapping.save_mapping ~base_path mapping with
+  match Keeper_repo_mapping.save_mapping_blocking ~base_path mapping with
   | Ok () -> ()
   | Error detail -> Alcotest.fail ("save_mapping failed: " ^ detail)
 ;;

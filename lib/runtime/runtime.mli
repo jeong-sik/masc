@@ -165,6 +165,13 @@ module For_testing : sig
 
   val snapshot : unit -> snapshot
   val restore : snapshot -> unit
+
+  val with_config_writer :
+    (string -> string -> unit Fs_compat.Durable_mutation.report) ->
+    (unit -> 'a) ->
+    'a
+  (** Test-only failure-injection seam. The supplied blocking writer is scoped
+      to [f] and restored even when [f] raises. *)
 end
 
 val get_default_runtime : unit -> t option
@@ -377,63 +384,73 @@ val load_config_text :
   ?runtime_config_path:string -> unit -> ((string * string), string) result
 (** Load the raw runtime.toml source text. Returns [(path, source_text)]. *)
 
-val save_config_text :
+val save_config_text_blocking :
   ?runtime_config_path:string -> string -> (unit, string) result
-(** Validate and atomically persist raw runtime.toml source text, then refresh
-    the in-process runtime cache. *)
+(** Blocking runtime.toml transaction for CLI and non-Eio tests. Validation,
+    disk commit, and in-memory publication are serialized per config path. Both
+    committed mutation states publish the prepared immutable snapshot;
+    [Not_committed] preserves the previous snapshot. *)
 
-val set_runtime_id_for_keeper :
+val save_config_text_eio :
+  ?runtime_config_path:string -> string -> (unit, string) result
+(** Eio-safe counterpart of {!save_config_text_blocking}. The entire transaction
+    runs cancellation-protected in a system thread. *)
+
+val set_runtime_id_for_keeper_blocking :
   ?runtime_config_path:string ->
   keeper_name:string ->
   runtime_id:string ->
   unit ->
   (unit, string) result
-(** Persist [keeper_name] -> [runtime_id] in
-    [\[runtime.assignments\]] (runtime.toml SSOT), validate the resulting
-    runtime config, atomically write it, and refresh the in-process runtime
-    assignment cache. *)
 
-val clear_runtime_id_for_keeper :
+val set_runtime_id_for_keeper_eio :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  runtime_id:string ->
+  unit ->
+  (unit, string) result
+
+val clear_runtime_id_for_keeper_blocking :
   ?runtime_config_path:string -> keeper_name:string -> unit -> (unit, string) result
-(** Remove [keeper_name] from [\[runtime.assignments\]], validate the resulting
-    runtime config, atomically write it, and refresh the in-process runtime
-    assignment cache. *)
 
-val set_runtime_default :
+val clear_runtime_id_for_keeper_eio :
+  ?runtime_config_path:string -> keeper_name:string -> unit -> (unit, string) result
+
+val set_runtime_default_blocking :
   ?runtime_config_path:string -> runtime_id:string -> unit -> (unit, string) result
-(** Persist [\[runtime\]].default through the runtime.toml SSOT writer,
-    validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. *)
 
-val set_runtime_librarian :
+val set_runtime_default_eio :
+  ?runtime_config_path:string -> runtime_id:string -> unit -> (unit, string) result
+
+val set_runtime_librarian_blocking :
   ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
-(** Persist or clear [\[runtime\]].librarian through the runtime.toml SSOT
-    writer, validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. *)
 
-val set_runtime_structured_judge :
+val set_runtime_librarian_eio :
   ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
-(** Persist or clear [\[runtime\]].structured_judge through the runtime.toml
-    SSOT writer, validate the resulting config, atomically write it, and refresh
-    the in-process runtime cache. *)
 
-val set_runtime_hitl_summary :
+val set_runtime_structured_judge_blocking :
   ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
-(** Persist or clear [\[runtime\]].hitl_summary through the runtime.toml SSOT
-    writer, validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. *)
 
-val set_runtime_cross_verifier :
+val set_runtime_structured_judge_eio :
   ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
-(** Persist or clear [\[runtime\]].cross_verifier through the runtime.toml SSOT
-    writer, validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. *)
 
-val set_runtime_media_failover :
+val set_runtime_hitl_summary_blocking :
+  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
+
+val set_runtime_hitl_summary_eio :
+  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
+
+val set_runtime_cross_verifier_blocking :
+  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
+
+val set_runtime_cross_verifier_eio :
+  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
+
+val set_runtime_media_failover_blocking :
   ?runtime_config_path:string -> runtime_ids:string list -> unit -> (unit, string) result
-(** Persist [\[runtime\]].media_failover through the runtime.toml SSOT writer,
-    validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. The list order is preserved. *)
+
+val set_runtime_media_failover_eio :
+  ?runtime_config_path:string -> runtime_ids:string list -> unit -> (unit, string) result
 
 val default_max_context : unit -> int
 (** Effective context-window budget of the default runtime's model (RFC-0206

@@ -101,6 +101,7 @@ let test_no_writeback_when_not_legacy () =
     mtime_before mtime_after
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "anti_rationalization_excuse_patterns_writeback"
     [
       ( "migration-writeback",

@@ -23,9 +23,29 @@ let component ~display_id ~identity_key =
 
 let write_file path content =
   Fs_compat.mkdir_p (Filename.dirname path);
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> Ok ()
-  | Error msg -> Error (Printf.sprintf "%s: %s" path msg)
+  let report = Fs_compat.save_file_atomic_eio path content in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      Error
+        (Printf.sprintf
+           "%s: %s"
+           path
+           (Fs_compat.Durable_mutation.report_to_string report)))
+    ~committed_not_durable:(fun report ->
+      Log.Misc.warn
+        "review artifact committed with sync debt path=%s detail=%s"
+        path
+        (Fs_compat.Durable_mutation.report_to_string report);
+      Ok ())
+    ~durable:(fun report ->
+      (match report.diagnostics with
+       | [] -> ()
+       | _ ->
+         Log.Misc.warn
+           "review artifact durable with cleanup diagnostics path=%s detail=%s"
+           path
+           (Fs_compat.Durable_mutation.report_to_string report));
+      Ok ())
 ;;
 
 let append_index index_path event =

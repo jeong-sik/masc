@@ -177,7 +177,25 @@ let json_to_pretty_utf8 json =
 let write_json_local path json =
   mkdir_p (Filename.dirname path);
   let content = json_to_pretty_utf8 json in
-  Fs_compat.save_file_atomic path content
+  let report = Fs_compat.save_file_atomic_eio path content in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      Error (Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      Log.Misc.warn
+        "workspace JSON committed with sync debt path=%s detail=%s"
+        path
+        (Fs_compat.Durable_mutation.report_to_string report);
+      Ok ())
+    ~durable:(fun report ->
+      (match report.diagnostics with
+       | [] -> ()
+       | _ ->
+         Log.Misc.warn
+           "workspace JSON durable with cleanup diagnostics path=%s detail=%s"
+           path
+           (Fs_compat.Durable_mutation.report_to_string report));
+      Ok ())
 
 (* Root-scoped JSON helpers for shared root metadata. *)
 let read_json_root config path =

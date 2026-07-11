@@ -226,10 +226,26 @@ let compact_replay_log path runs =
     |> String.concat ""
   in
   try
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg ->
-      Log.Misc.warn "fusion_run_registry: replay compaction failed for %s: %s" path msg
+    let report = Fs_compat.save_file_atomic_eio path content in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        Log.Misc.warn
+          "fusion_run_registry: replay compaction not committed for %s: %s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report))
+      ~committed_not_durable:(fun report ->
+        Log.Misc.warn
+          "fusion_run_registry: replay compaction committed with sync debt for %s: %s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report))
+      ~durable:(fun report ->
+        match report.diagnostics with
+        | [] -> ()
+        | _ ->
+          Log.Misc.warn
+            "fusion_run_registry: replay compaction durable with cleanup diagnostics for %s: %s"
+            path
+            (Fs_compat.Durable_mutation.report_to_string report))
   with
   | exn ->
     Log.Misc.warn

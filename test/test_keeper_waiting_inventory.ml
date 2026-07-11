@@ -446,9 +446,15 @@ let test_live_turn_keeper_is_busy_without_waiting_rows () =
 
 let save_text path text =
   Fs_compat.mkdir_p (Filename.dirname path);
-  match Fs_compat.save_file_atomic path text with
-  | Ok () -> ()
-  | Error err -> fail ("save_file_atomic failed: " ^ err)
+  let report = Fs_compat.save_file_atomic_blocking path text in
+  match report.progress with
+  | Fs_compat.Durable_mutation.Durable () when report.diagnostics = [] -> ()
+  | Fs_compat.Durable_mutation.Durable ()
+  | Fs_compat.Durable_mutation.Committed_not_durable _
+  | Fs_compat.Durable_mutation.Not_committed _ ->
+    fail
+      ("save_file_atomic failed: "
+       ^ Fs_compat.Durable_mutation.report_to_string report)
 ;;
 
 let pending_confirm_fixture ?(target_type = "goal") ?target_id ()

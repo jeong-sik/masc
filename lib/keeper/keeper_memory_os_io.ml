@@ -170,14 +170,29 @@ let with_out_channel oc ~f =
    does not currently reach the keepers dir, so a SIGKILL between write and rename
    still leaves an uncollected [.atomic_*.tmp] here — a pre-existing gap (the old
    hand-rolled temp was not swept either), tracked separately, not worsened here.
-   The Memory OS write contract raises on failure (unit return), so map [Error] to
-   [Atomic_write_failed]; the temp is already cleaned up by [save_file_atomic], and
-   [Eio.Cancel.Cancelled] is re-raised by it (RFC-0143), never swallowed. *)
+   The Memory OS write contract raises only for [Not_committed]. A committed
+   parent-sync debt is observable but must not trigger a duplicate write. *)
 let write_file_atomically path content =
   ensure_dir (Filename.dirname path);
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> ()
-  | Error msg -> raise (Atomic_write_failed msg)
+  let report = Fs_compat.save_file_atomic_eio path content in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      raise
+        (Atomic_write_failed
+           (Fs_compat.Durable_mutation.report_to_string report)))
+    ~committed_not_durable:(fun report ->
+      Log.Keeper.warn
+        "memory-os file committed with sync debt path=%s detail=%s"
+        path
+        (Fs_compat.Durable_mutation.report_to_string report))
+    ~durable:(fun report ->
+      match report.diagnostics with
+      | [] -> ()
+      | _ ->
+        Log.Keeper.warn
+          "memory-os file durable with cleanup diagnostics path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report))
 ;;
 
 let generation_counter_path ~keeper_id ~trace_id =

@@ -128,6 +128,7 @@ let test_append_and_read_recent_audit () =
     (List.nth recent 1 |> U.member "action" |> U.to_string)
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "channel_gate_binding_store"
     [
       ( "bindings",

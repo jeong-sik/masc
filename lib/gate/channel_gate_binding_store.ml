@@ -134,9 +134,24 @@ let save_bindings store (bindings : binding list) =
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
   let content = Yojson.Safe.pretty_to_string normalized ^ "\n" in
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> ()
-  | Error msg -> raise (Sys_error msg)
+  let report = Fs_compat.save_file_atomic_eio path content in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      raise
+        (Sys_error (Fs_compat.Durable_mutation.report_to_string report)))
+    ~committed_not_durable:(fun report ->
+      Log.Misc.warn
+        "channel gate bindings committed with sync debt path=%s detail=%s"
+        path
+        (Fs_compat.Durable_mutation.report_to_string report))
+    ~durable:(fun report ->
+      match report.diagnostics with
+      | [] -> ()
+      | _ ->
+        Log.Misc.warn
+          "channel gate bindings durable with cleanup diagnostics path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report))
 
 let guild_id_items store event =
   match store.guild_id_field with

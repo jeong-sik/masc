@@ -54,7 +54,7 @@ let with_temperature_runtime f =
       try Sys.remove path with
       | Sys_error _ -> ())
     (fun () ->
-      match Runtime.save_config_text ~runtime_config_path:path temperature_runtime_toml with
+      match Runtime.save_config_text_blocking ~runtime_config_path:path temperature_runtime_toml with
       | Error detail -> Alcotest.failf "runtime config should load: %s" detail
       | Ok () ->
         (match Runtime.get_runtime_by_id temperature_runtime_id with

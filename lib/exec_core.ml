@@ -567,11 +567,28 @@ let persist_artifact_if_needed ~base_path ~keeper_name ~cmd ~output =
         dir
         (Printf.sprintf "%d-%s.txt" (int_of_float (now *. 1000.0)) digest_prefix)
     in
-    match Fs_compat.save_file_atomic path output with
-    | Ok () -> Some { path; bytes = String.length output; storage = Filesystem }
-    | Error err ->
-      Log.Backend.warn "exec artifact persist failed: %s" err;
-      None)
+    let report = Fs_compat.save_file_atomic_eio path output in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        Log.Backend.warn
+          "exec artifact persist not committed: %s"
+          (Fs_compat.Durable_mutation.report_to_string report);
+        None)
+      ~committed_not_durable:(fun report ->
+        Log.Backend.warn
+          "exec artifact committed with sync debt path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report);
+        Some { path; bytes = String.length output; storage = Filesystem })
+      ~durable:(fun report ->
+        (match report.diagnostics with
+         | [] -> ()
+         | _ ->
+           Log.Backend.warn
+             "exec artifact durable with cleanup diagnostics path=%s detail=%s"
+             path
+             (Fs_compat.Durable_mutation.report_to_string report));
+        Some { path; bytes = String.length output; storage = Filesystem }))
 ;;
 
 let string_of_artifact_storage = function

@@ -11,6 +11,29 @@ type history_migration_stats =
   ; malformed_lines : int
   }
 
+type history_migration_stage =
+  | Internal_history
+  | Main_history
+
+type history_migration_error =
+  | History_write_not_committed of
+      { stage : history_migration_stage
+      ; path : string
+      ; report : unit Fs_compat.Durable_mutation.report
+      }
+  | History_write_committed_not_durable of
+      { stage : history_migration_stage
+      ; path : string
+      ; report : unit Fs_compat.Durable_mutation.report
+      }
+  | History_directory_durability_not_confirmed of
+      { stage : history_migration_stage
+      ; path : string
+      ; report : Fs_compat.Durable_mutation.durability_confirmation_report
+      }
+
+val history_migration_error_to_string : history_migration_error -> string
+
 val empty_history_migration_stats : history_migration_stats
 
 val split_jsonl_lines : string -> string list
@@ -32,7 +55,20 @@ val render_jsonl_lines : string list -> string
 
 val dedupe_preserve_order : string list -> string list
 
-val migrate_session_history_logs : session_dir:string -> history_migration_stats
+val migrate_session_history_logs_blocking :
+  session_dir:string -> (history_migration_stats, history_migration_error) result
+
+val migrate_session_history_logs_eio :
+  session_dir:string -> (history_migration_stats, history_migration_error) result
+
+module For_testing : sig
+  val migrate_session_history_logs_with :
+    ?confirm_parent_durable:
+      (string -> Fs_compat.Durable_mutation.durability_confirmation_report) ->
+    (string -> string -> unit Fs_compat.Durable_mutation.report) ->
+    session_dir:string ->
+    (history_migration_stats, history_migration_error) result
+end
 
 val history_path_for_source : session_dir:string -> source:string option -> string
 

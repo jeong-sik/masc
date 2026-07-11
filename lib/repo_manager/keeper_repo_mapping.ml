@@ -433,7 +433,7 @@ let validate_access ~keeper_id ~repository_id ~base_path =
   | Access_allowed -> Ok ()
   | Access_denied denial -> Error (access_denial_to_string denial)
 
-let save_all ~base_path mappings =
+let save_all_with writer ~base_path mappings =
   let path = mappings_toml_path base_path in
   let table =
     List.map
@@ -444,13 +444,31 @@ let save_all ~base_path mappings =
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
   let content = Otoml.Printer.to_string toml in
-  match Fs_compat.save_file_atomic path content with
-  | Ok () ->
+  let report = writer path content in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      Result.Error (Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      Log.Misc.warn
+        "keeper repo mapping committed with sync debt path=%s detail=%s"
+        path
+        (Fs_compat.Durable_mutation.report_to_string report);
       invalidate_load_all_cache ~base_path;
-      Ok ()
-  | Error msg -> Error msg
+      Result.Ok ())
+    ~durable:(fun report ->
+      (match report.diagnostics with
+       | [] -> ()
+       | _ ->
+         Log.Misc.warn
+           "keeper repo mapping durable with cleanup diagnostics path=%s detail=%s"
+           path
+           (Fs_compat.Durable_mutation.report_to_string report));
+      invalidate_load_all_cache ~base_path;
+      Result.Ok ())
 
-let save_mapping ~base_path mapping =
+let save_all_blocking = save_all_with Fs_compat.save_file_atomic_blocking
+
+let save_mapping_with lock save_all ~base_path mapping : (unit, string) result =
   let mapping =
     make_keeper_repo_mapping ~keeper_id:mapping.keeper_id
       ~repository_ids:mapping.repository_ids
@@ -458,7 +476,7 @@ let save_mapping ~base_path mapping =
   let path = mappings_toml_path base_path in
   try
     Fs_compat.mkdir_p (Filename.dirname path);
-    File_lock_eio.with_lock path (fun () ->
+    lock path (fun () ->
       let* mappings = load_all ~base_path in
       let filtered =
         List.filter
@@ -469,11 +487,21 @@ let save_mapping ~base_path mapping =
       save_all ~base_path (mapping :: filtered))
   with
   | File_lock_eio.Flock_timeout { path; attempts; _ } ->
-      Error
+      Result.Error
         (Printf.sprintf
            "timed out acquiring keeper repo mapping lock %s after %d attempts"
            path attempts)
-  | Sys_error msg -> Error msg
+  | Sys_error msg -> Result.Error msg
+
+let save_mapping_blocking =
+  save_mapping_with File_lock_eio.with_lock_blocking save_all_blocking
+;;
+
+let save_mapping_eio ~base_path mapping =
+  Eio.Cancel.protect (fun () ->
+    Eio_unix.run_in_systhread ~label:"keeper-repo-mapping" (fun () ->
+      save_mapping_blocking ~base_path mapping))
+;;
 
 let apply_mapping ~keeper_id ~base_path ~repositories =
   match lookup_mapping ~base_path ~keeper_id with

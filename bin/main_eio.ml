@@ -842,7 +842,7 @@ let runtime_default_id =
 let runtime_default_set_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match
-    Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
+    Runtime.set_runtime_default_blocking ~runtime_config_path ~runtime_id ()
   with
   | Ok () ->
       Printf.printf "set [runtime].default = \"%s\" in %s\n" runtime_id

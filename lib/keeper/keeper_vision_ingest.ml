@@ -7,6 +7,8 @@ type mode =
   | Eager
   | Store_only
 
+let store_artifact_ref = Atomic.make Keeper_vision_tool.store_artifact
+
 (* SSOT placeholder formats. The handle always lets the keeper re-read the
    pixels via the analyze_image tool; the eager [read] text carries the meaning
    so most follow-up turns answer without any further vision call. *)
@@ -146,7 +148,9 @@ let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_sdk.Types.conten
                 (image_store_failed_placeholder ~reason:"unsupported image media type")
             | Ok media_type ->
               (match
-                 Keeper_vision_tool.store_artifact ~dir:(store_dir ~keeper_name) bytes
+                 (Atomic.get store_artifact_ref)
+                   ~dir:(store_dir ~keeper_name)
+                   bytes
                with
                | Error _ ->
                  record_eviction ~mode ~result:"error" ~reason:"store_failed";
@@ -216,3 +220,14 @@ let evict_message ~mode ~policy ~keeper_name (message : Agent_sdk.Types.message)
     }
   else message
 ;;
+
+module For_testing = struct
+  let with_store_artifact store f =
+    let previous = Atomic.get store_artifact_ref in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set store_artifact_ref previous)
+      (fun () ->
+         Atomic.set store_artifact_ref store;
+         f ())
+  ;;
+end

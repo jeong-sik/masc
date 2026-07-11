@@ -111,6 +111,42 @@ let test_observer_cancellation_propagates () =
     fail "observer swallowed Eio cancellation"
 ;;
 
+let test_observer_failure_is_retained_as_diagnostic () =
+  let report =
+    Mutation.For_testing.run_state_machine
+      ~prepare:ignore
+      ~commit:ignore
+      ~publish:ignore
+      ~cleanup:(fun () -> [])
+  in
+  let report = Mutation.observe_and_retain (fun _ -> raise Exit) report in
+  check_progress `Durable report;
+  match report.Mutation.diagnostics with
+  | [ diagnostic ] ->
+    check bool "observer diagnostic retained" true
+      (diagnostic.Mutation.stage = Mutation.Observer)
+  | diagnostics ->
+    failf "expected one observer diagnostic, got %d" (List.length diagnostics)
+;;
+
+let test_confirmation_observer_failure_is_retained_as_diagnostic () =
+  let report =
+    { Mutation.confirmation = Mutation.Confirmed; confirmation_diagnostics = [] }
+  in
+  let report =
+    Mutation.observe_confirmation_and_retain (fun _ -> raise Exit) report
+  in
+  check bool "confirmation retained" true
+    (report.Mutation.confirmation = Mutation.Confirmed);
+  match report.Mutation.confirmation_diagnostics with
+  | [ diagnostic ] ->
+    check bool "confirmation observer diagnostic retained" true
+      (diagnostic.Mutation.stage = Mutation.Observer)
+  | diagnostics ->
+    failf "expected one confirmation observer diagnostic, got %d"
+      (List.length diagnostics)
+;;
+
 let with_temp_dir f =
   let path =
     Filename.concat
@@ -159,6 +195,27 @@ let test_real_blocking_replace () =
     check_progress `Durable second;
     check string "replacement visible" "second" (read_file path);
     check int "no temporary residue" 1 (Array.length (Sys.readdir parent)))
+;;
+
+let test_directory_durability_confirmation () =
+  with_temp_dir (fun parent ->
+    let report = Mutation.confirm_directory_durable_blocking parent in
+    (match report.confirmation with
+     | Mutation.Confirmed -> ()
+    | Mutation.Not_confirmed _ -> fail "existing directory was not confirmed");
+    check (list string) "no close diagnostics" []
+      (List.map
+         Mutation.diagnostic_to_string
+         report.confirmation_diagnostics))
+;;
+
+let test_missing_directory_durability_not_confirmed () =
+  with_temp_dir (fun parent ->
+    let missing = Filename.concat parent "missing" in
+    let report = Mutation.confirm_directory_durable_blocking missing in
+    match report.confirmation with
+    | Mutation.Not_confirmed _ -> ()
+    | Mutation.Confirmed -> fail "missing directory was confirmed")
 ;;
 
 let test_parent_symlink_is_rejected () =
@@ -214,6 +271,14 @@ let test_eio_boundary_returns_report () =
     check_progress `Durable report)
 ;;
 
+let test_confirmation_eio_boundary_returns_report () =
+  with_temp_dir (fun parent ->
+    Eio_main.run @@ fun _env ->
+    let report = Mutation.confirm_directory_durable_eio parent in
+    check bool "directory durability confirmed" true
+      (report.Mutation.confirmation = Mutation.Confirmed))
+;;
+
 let () =
   run
     "durable-mutation-state-machine"
@@ -239,7 +304,23 @@ let () =
             "observer cancellation propagates"
             `Quick
             test_observer_cancellation_propagates
+        ; test_case
+            "observer failure is retained"
+            `Quick
+            test_observer_failure_is_retained_as_diagnostic
+        ; test_case
+            "confirmation observer failure is retained"
+            `Quick
+            test_confirmation_observer_failure_is_retained_as_diagnostic
         ; test_case "blocking replace" `Quick test_real_blocking_replace
+        ; test_case
+            "directory durability confirmation"
+            `Quick
+            test_directory_durability_confirmation
+        ; test_case
+            "missing directory is not confirmed"
+            `Quick
+            test_missing_directory_durability_not_confirmed
         ; test_case
             "parent symlink rejected"
             `Quick
@@ -249,5 +330,9 @@ let () =
             `Quick
             test_final_symlink_is_replaced_not_followed
         ; test_case "Eio boundary" `Quick test_eio_boundary_returns_report
+        ; test_case
+            "confirmation Eio boundary"
+            `Quick
+            test_confirmation_eio_boundary_returns_report
         ] )
     ]

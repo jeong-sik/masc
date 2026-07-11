@@ -23,7 +23,7 @@ let is_canonical (h : handle) : bool =
 
 let path_of ~dir (h : handle) = Filename.concat dir h
 
-let store ~dir (raw : string) : (handle, string) result =
+let store_with writer ~dir (raw : string) : (handle, string) result =
   let h = hash raw in
   (* [Fs_compat.mkdir_p] returns unit and raises on failure (EACCES, ENOSPC, a
      parent path component that is a regular file, test-isolation breach). Honor
@@ -45,9 +45,37 @@ let store ~dir (raw : string) : (handle, string) result =
   with
   | Error _ as e -> e
   | Ok () ->
-    (match Fs_compat.save_file_atomic (path_of ~dir h) raw with
-     | Ok () -> Ok h
-     | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg))
+    let path = path_of ~dir h in
+    let report = writer path raw in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        Error
+          (Printf.sprintf
+             "Vision_artifact_store.store: %s"
+             (Fs_compat.Durable_mutation.report_to_string report)))
+      ~committed_not_durable:(fun report ->
+        Log.Misc.warn
+          "vision artifact committed with sync debt path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report);
+        Ok h)
+      ~durable:(fun report ->
+        (match report.diagnostics with
+         | [] -> ()
+         | _ ->
+           Log.Misc.warn
+             "vision artifact durable with cleanup diagnostics path=%s detail=%s"
+             path
+             (Fs_compat.Durable_mutation.report_to_string report));
+        Ok h)
+
+let store_blocking = store_with Fs_compat.save_file_atomic_blocking
+
+let store_eio ~dir raw =
+  Eio.Cancel.protect (fun () ->
+    Eio_unix.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+      store_blocking ~dir raw))
+;;
 
 let load ~dir (h : handle) : (string, string) result =
   if not (is_canonical h) then

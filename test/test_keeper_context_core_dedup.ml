@@ -261,6 +261,249 @@ let test_legacy_thinking_type_is_not_promoted_to_signature () =
       Alcotest.(check string) "content" "signed" content
   | _ -> Alcotest.fail "expected legacy thinking block"
 
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Sys.rmdir path)
+    else Sys.remove path
+;;
+
+let with_temp_dir f =
+  let path = Filename.temp_dir "keeper-history-migration-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> f path)
+;;
+
+let keep_history_line =
+  {|{"role":"user","content_blocks":[]}|}
+;;
+
+let moved_history_line =
+  {|{"role":"assistant","source":"internal_assistant","content_blocks":[]}|}
+;;
+
+let write_migration_fixture session_dir =
+  let main_path = Filename.concat session_dir "history.jsonl" in
+  Fs_compat.save_file
+    main_path
+    (String.concat "\n" [ keep_history_line; moved_history_line ] ^ "\n");
+  main_path, Filename.concat session_dir "history.internal.jsonl"
+;;
+
+let not_committed_report detail =
+  { Fs_compat.Durable_mutation.progress =
+      Fs_compat.Durable_mutation.Not_committed
+        { cause = Failure detail
+        ; backtrace = Printexc.get_callstack 8
+        }
+  ; diagnostics = []
+  }
+;;
+
+let committed_not_durable_report detail =
+  { Fs_compat.Durable_mutation.progress =
+      Fs_compat.Durable_mutation.Committed_not_durable
+        { value = ()
+        ; cause = Failure detail
+        ; backtrace = Printexc.get_callstack 8
+        }
+  ; diagnostics = []
+  }
+;;
+
+let durability_not_confirmed_report detail =
+  { Fs_compat.Durable_mutation.confirmation =
+      Fs_compat.Durable_mutation.Not_confirmed
+        { cause = Failure detail
+        ; backtrace = Printexc.get_callstack 8
+        }
+  ; confirmation_diagnostics = []
+  }
+;;
+
+let test_history_migration_internal_failure_preserves_main () =
+  with_temp_dir (fun session_dir ->
+    let main_path, internal_path = write_migration_fixture session_dir in
+    let original_main = Fs_compat.load_file main_path in
+    let result =
+      C.For_testing.migrate_session_history_logs_with
+        (fun _path _content -> not_committed_report "injected internal failure")
+        ~session_dir
+    in
+    (match result with
+     | Error
+         (C.History_write_not_committed
+            { stage = C.Internal_history; _ }) -> ()
+     | Error error ->
+       Alcotest.failf
+         "wrong migration error: %s"
+         (C.history_migration_error_to_string error)
+     | Ok _ -> Alcotest.fail "internal write failure was reported as success");
+    Alcotest.(check string)
+      "main history remains authoritative"
+      original_main
+      (Fs_compat.load_file main_path);
+    Alcotest.(check bool)
+      "internal history was not created"
+      false
+      (Fs_compat.file_exists internal_path))
+;;
+
+let test_history_migration_main_failure_retries_without_internal_rewrite () =
+  with_temp_dir (fun session_dir ->
+    let main_path, internal_path = write_migration_fixture session_dir in
+    let original_main = Fs_compat.load_file main_path in
+    let first_attempt_calls = ref 0 in
+    let fail_second_write path content =
+      incr first_attempt_calls;
+      if !first_attempt_calls = 2
+      then not_committed_report "injected main failure"
+      else Fs_compat.save_file_atomic_blocking path content
+    in
+    (match
+       C.For_testing.migrate_session_history_logs_with
+         fail_second_write
+         ~session_dir
+     with
+     | Error
+         (C.History_write_not_committed
+            { stage = C.Main_history; _ }) -> ()
+     | Error error ->
+       Alcotest.failf
+         "wrong migration error: %s"
+         (C.history_migration_error_to_string error)
+     | Ok _ -> Alcotest.fail "main write failure was reported as success");
+    Alcotest.(check string)
+      "failed main write preserves source lines"
+      original_main
+      (Fs_compat.load_file main_path);
+    Alcotest.(check bool)
+      "internal copy committed before main removal"
+      true
+      (String.equal
+         (Fs_compat.load_file internal_path)
+         (moved_history_line ^ "\n"));
+    let retry_calls = ref 0 in
+    let counting_writer path content =
+      incr retry_calls;
+      Fs_compat.save_file_atomic_blocking path content
+    in
+    let stats =
+      match
+        C.For_testing.migrate_session_history_logs_with
+          counting_writer
+          ~session_dir
+      with
+      | Ok stats -> stats
+      | Error error ->
+        Alcotest.fail
+          ("retry failed: " ^ C.history_migration_error_to_string error)
+    in
+    Alcotest.(check int)
+      "retry skips already-committed internal overwrite"
+      1
+      !retry_calls;
+    Alcotest.(check int) "one line moved" 1 stats.moved_lines;
+    Alcotest.(check string)
+      "main keeps only public history"
+      (keep_history_line ^ "\n")
+      (Fs_compat.load_file main_path);
+    Alcotest.(check string)
+      "internal line remains exactly once"
+      (moved_history_line ^ "\n")
+         (Fs_compat.load_file internal_path))
+;;
+
+let test_history_migration_internal_sync_debt_blocks_main_advance () =
+  with_temp_dir (fun session_dir ->
+    let main_path, internal_path = write_migration_fixture session_dir in
+    let original_main = Fs_compat.load_file main_path in
+    let first_attempt_calls = ref 0 in
+    let commit_internal_with_sync_debt path content =
+      incr first_attempt_calls;
+      if not (String.equal path internal_path)
+      then Alcotest.fail "main rewrite advanced past internal sync debt";
+      let committed = Fs_compat.save_file_atomic_blocking path content in
+      (match committed.progress with
+       | Fs_compat.Durable_mutation.Durable _ -> ()
+       | _ -> Alcotest.fail "fixture internal write did not commit durably");
+      committed_not_durable_report "injected internal parent-sync failure"
+    in
+    (match
+       C.For_testing.migrate_session_history_logs_with
+         commit_internal_with_sync_debt
+         ~session_dir
+     with
+     | Error
+         (C.History_write_committed_not_durable
+            { stage = C.Internal_history; _ }) -> ()
+     | Error error ->
+       Alcotest.failf
+         "wrong migration error: %s"
+         (C.history_migration_error_to_string error)
+     | Ok _ -> Alcotest.fail "internal sync debt was reported as success");
+    Alcotest.(check int) "only internal phase ran" 1 !first_attempt_calls;
+    Alcotest.(check string)
+      "main history remains authoritative until internal is durable"
+      original_main
+      (Fs_compat.load_file main_path);
+    Alcotest.(check string)
+      "committed internal copy is available for retry"
+      (moved_history_line ^ "\n")
+      (Fs_compat.load_file internal_path);
+    let unexpected_writer_calls = ref 0 in
+    (match
+       C.For_testing.migrate_session_history_logs_with
+         ~confirm_parent_durable:(fun _ ->
+           durability_not_confirmed_report "injected retry sync failure")
+         (fun _ _ ->
+           incr unexpected_writer_calls;
+           not_committed_report "unexpected writer call")
+         ~session_dir
+     with
+     | Error
+         (C.History_directory_durability_not_confirmed
+            { stage = C.Internal_history; _ }) -> ()
+     | Error error ->
+       Alcotest.failf
+         "wrong confirmation error: %s"
+         (C.history_migration_error_to_string error)
+     | Ok _ -> Alcotest.fail "failed durability confirmation advanced migration");
+    Alcotest.(check int)
+      "failed confirmation does not rewrite either history"
+      0
+      !unexpected_writer_calls;
+    Alcotest.(check string)
+      "failed confirmation still preserves main"
+      original_main
+      (Fs_compat.load_file main_path);
+    let retry_calls = ref 0 in
+    let counting_writer path content =
+      incr retry_calls;
+      Fs_compat.save_file_atomic_blocking path content
+    in
+    (match
+       C.For_testing.migrate_session_history_logs_with
+         counting_writer
+         ~session_dir
+     with
+     | Ok stats -> Alcotest.(check int) "one line moved on retry" 1 stats.moved_lines
+     | Error error ->
+       Alcotest.fail
+         ("retry failed: " ^ C.history_migration_error_to_string error));
+    Alcotest.(check int)
+      "retry skips the already-committed internal copy"
+      1
+      !retry_calls;
+    Alcotest.(check string)
+      "retry rewrites main only after internal equality proof"
+      (keep_history_line ^ "\n")
+      (Fs_compat.load_file main_path))
+;;
+
 let () =
   Alcotest.run "keeper_context_core_dedup"
     [
@@ -303,5 +546,19 @@ let () =
             test_tool_result_large_json_elided;
           Alcotest.test_case "no content no json" `Quick
             test_tool_result_no_content_no_json;
+        ] );
+      ( "history_migration",
+        [ Alcotest.test_case
+            "internal failure preserves main"
+            `Quick
+            test_history_migration_internal_failure_preserves_main
+        ; Alcotest.test_case
+            "main failure retry skips internal rewrite"
+            `Quick
+            test_history_migration_main_failure_retries_without_internal_rewrite
+        ; Alcotest.test_case
+            "internal sync debt blocks main advance"
+            `Quick
+            test_history_migration_internal_sync_debt_blocks_main_advance
         ] );
     ]

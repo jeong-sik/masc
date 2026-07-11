@@ -6,6 +6,6 @@
  ; RFC-0071 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))
- (libraries shared_types unix yojson fs_compat digestif eio)
+ (libraries shared_types unix yojson fs_compat digestif eio eio.unix masc_log)
  (preprocess
   (pps ppx_tla)))

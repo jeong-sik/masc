@@ -618,7 +618,7 @@ let add_routes ~sw ~clock router =
                   audit trail (actor + path + size) on top of the CanAdmin gate.
                   The config body is deliberately excluded: runtime.toml can carry
                   provider secrets (RFC-0132 redaction). *)
-               (match Runtime_config_file.save_config_text source_text with
+               (match Runtime_config_file.save_config_text_eio source_text with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:Runtime_config_raw_save ~text:source_text
@@ -637,7 +637,7 @@ let add_routes ~sw ~clock router =
              | Error msg ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
              | Ok (Runtime_route_runtime_id (Runtime_default, Some runtime_id)) ->
-               (match Runtime_config_file.set_runtime_default ~runtime_id () with
+               (match Runtime_config_file.set_runtime_default_eio ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
@@ -652,7 +652,7 @@ let add_routes ~sw ~clock router =
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "default runtime_id required"
              | Ok (Runtime_route_runtime_id (Runtime_librarian, runtime_id)) ->
-               (match Runtime_config_file.set_runtime_librarian ~runtime_id () with
+               (match Runtime_config_file.set_runtime_librarian_eio ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:(Runtime_config_routing (Runtime_librarian, runtime_id))
@@ -664,7 +664,7 @@ let add_routes ~sw ~clock router =
                     ~operation:(Runtime_config_routing (Runtime_librarian, runtime_id))
                     req reqd)
              | Ok (Runtime_route_runtime_id (Runtime_structured_judge, runtime_id)) ->
-               (match Runtime_config_file.set_runtime_structured_judge ~runtime_id () with
+               (match Runtime_config_file.set_runtime_structured_judge_eio ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:
@@ -678,7 +678,7 @@ let add_routes ~sw ~clock router =
                       (Runtime_config_routing (Runtime_structured_judge, runtime_id))
                     req reqd)
              | Ok (Runtime_route_runtime_id (Runtime_hitl_summary, runtime_id)) ->
-               (match Runtime_config_file.set_runtime_hitl_summary ~runtime_id () with
+               (match Runtime_config_file.set_runtime_hitl_summary_eio ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:
@@ -692,7 +692,7 @@ let add_routes ~sw ~clock router =
                       (Runtime_config_routing (Runtime_hitl_summary, runtime_id))
                     req reqd)
              | Ok (Runtime_route_runtime_id (Runtime_cross_verifier, runtime_id)) ->
-               (match Runtime_config_file.set_runtime_cross_verifier ~runtime_id () with
+               (match Runtime_config_file.set_runtime_cross_verifier_eio ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:
@@ -709,7 +709,7 @@ let add_routes ~sw ~clock router =
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "media_failover runtime_ids required"
              | Ok (Runtime_route_runtime_ids (Runtime_media_failover, runtime_ids)) ->
-               (match Runtime_config_file.set_runtime_media_failover ~runtime_ids () with
+               (match Runtime_config_file.set_runtime_media_failover_eio ~runtime_ids () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:
@@ -738,7 +738,7 @@ let add_routes ~sw ~clock router =
                respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
              | Ok (keeper_name, Some runtime_id) ->
                (match
-                  Runtime_config_file.set_runtime_id_for_keeper
+                  Runtime_config_file.set_runtime_id_for_keeper_eio
                     ~keeper_name
                     ~runtime_id
                     ()
@@ -754,7 +754,7 @@ let add_routes ~sw ~clock router =
                     ~operation:(Runtime_config_assignment (keeper_name, Some runtime_id))
                     req reqd)
              | Ok (keeper_name, None) ->
-               (match Runtime_config_file.clear_runtime_id_for_keeper ~keeper_name () with
+               (match Runtime_config_file.clear_runtime_id_for_keeper_eio ~keeper_name () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:(Runtime_config_assignment (keeper_name, None))

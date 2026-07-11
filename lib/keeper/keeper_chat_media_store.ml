@@ -228,9 +228,25 @@ let persist_result ~base_dir ~media_type ~data =
         | Some _ -> Ok (token, url)
         | None ->
             let path = Filename.concat dir (token ^ "." ^ ext) in
-            (match Fs_compat.save_file_atomic path data with
-             | Ok () -> Ok (token, url)
-             | Error msg -> Error msg)
+            let report = Fs_compat.save_file_atomic_eio path data in
+            Fs_compat.Durable_mutation.fold_report report
+              ~not_committed:(fun report ->
+                Error (Fs_compat.Durable_mutation.report_to_string report))
+              ~committed_not_durable:(fun report ->
+                Log.Keeper.warn
+                  "chat media committed with sync debt path=%s detail=%s"
+                  path
+                  (Fs_compat.Durable_mutation.report_to_string report);
+                Ok (token, url))
+              ~durable:(fun report ->
+                (match report.diagnostics with
+                 | [] -> ()
+                 | _ ->
+                   Log.Keeper.warn
+                     "chat media durable with cleanup diagnostics path=%s detail=%s"
+                     path
+                     (Fs_compat.Durable_mutation.report_to_string report));
+                Ok (token, url))
       with
       | exn ->
           Error

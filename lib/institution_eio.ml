@@ -885,9 +885,26 @@ let cap_episodes_jsonl ?(max_lines = episodes_jsonl_default_cap) () : int =
           buf;
         Buffer.contents out
       in
-      match Fs_compat.save_file_atomic path content with
-      | Ok () -> total - max_lines
-      | Error msg ->
-        Log.Institution.warn "JSONL episode cap failed: %s" msg;
-        0)))
+      let report = Fs_compat.save_file_atomic_eio path content in
+      Fs_compat.Durable_mutation.fold_report report
+        ~not_committed:(fun report ->
+          Log.Institution.warn
+            "JSONL episode cap not committed: %s"
+            (Fs_compat.Durable_mutation.report_to_string report);
+          0)
+        ~committed_not_durable:(fun report ->
+          Log.Institution.warn
+            "JSONL episode cap committed with sync debt path=%s detail=%s"
+            path
+            (Fs_compat.Durable_mutation.report_to_string report);
+          total - max_lines)
+        ~durable:(fun report ->
+          (match report.diagnostics with
+           | [] -> ()
+           | _ ->
+             Log.Institution.warn
+               "JSONL episode cap durable with cleanup diagnostics path=%s detail=%s"
+               path
+               (Fs_compat.Durable_mutation.report_to_string report));
+          total - max_lines))))
 ;;

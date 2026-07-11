@@ -123,7 +123,7 @@ val create_session : session_id:string -> base_dir:string -> session_context
 
 (** {1 History migration} *)
 
-(** Stats returned by [migrate_session_history_logs]. *)
+(** Stats returned by the history migration entry points. *)
 type history_migration_stats =
   { moved_lines : int
   ; dropped_lines : int
@@ -131,16 +131,54 @@ type history_migration_stats =
   ; malformed_lines : int
   }
 
+type history_migration_stage =
+  | Internal_history
+  | Main_history
+
+type history_migration_error =
+  | History_write_not_committed of
+      { stage : history_migration_stage
+      ; path : string
+      ; report : unit Fs_compat.Durable_mutation.report
+      }
+  | History_write_committed_not_durable of
+      { stage : history_migration_stage
+      ; path : string
+      ; report : unit Fs_compat.Durable_mutation.report
+      }
+  | History_directory_durability_not_confirmed of
+      { stage : history_migration_stage
+      ; path : string
+      ; report : Fs_compat.Durable_mutation.durability_confirmation_report
+      }
+
+val history_migration_error_to_string : history_migration_error -> string
+
 (** [true] iff [text] looks like a Current World State system
     context block (used to drop legacy world-state echoes from
     history.jsonl). *)
 val has_world_state_signature : string -> bool
 
 (** Move every internal-history entry from [history.jsonl] to
-    [history.internal.jsonl], drop world-state echoes, and dedupe
-    the merged internal log. *)
-val migrate_session_history_logs :
-  session_dir:string -> history_migration_stats
+    [history.internal.jsonl], drop world-state echoes, and dedupe the merged
+    internal log. The internal file commits first; a retry after a main-file
+    failure confirms the parent-directory durability of an already-identical
+    internal write before advancing, so moved lines are never lost or
+    duplicated. *)
+val migrate_session_history_logs_blocking :
+  session_dir:string -> (history_migration_stats, history_migration_error) result
+
+val migrate_session_history_logs_eio :
+  session_dir:string -> (history_migration_stats, history_migration_error) result
+
+module For_testing : sig
+  val migrate_session_history_logs_with :
+    ?confirm_parent_durable:
+      (string -> Fs_compat.Durable_mutation.durability_confirmation_report) ->
+    (string -> string -> unit Fs_compat.Durable_mutation.report) ->
+    session_dir:string ->
+    (history_migration_stats, history_migration_error) result
+end
 
 (** {1 JSONL persistence} *)
 

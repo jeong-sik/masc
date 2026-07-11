@@ -27,6 +27,16 @@ module Json = Yojson.Safe.Util
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
+let save_atomic_fixture path content =
+  let report = Fs_compat.save_file_atomic_blocking path content in
+  match report.progress with
+  | Fs_compat.Durable_mutation.Durable () when report.diagnostics = [] -> ()
+  | Fs_compat.Durable_mutation.Durable ()
+  | Fs_compat.Durable_mutation.Committed_not_durable _
+  | Fs_compat.Durable_mutation.Not_committed _ ->
+    Alcotest.fail (Fs_compat.Durable_mutation.report_to_string report)
+;;
+
 let resolve_sandbox_root_git_cwd_string ~config ~meta ~cwd ~cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Masc_exec.Parsed.Parsed ir ->
@@ -401,7 +411,7 @@ let assert_docker_route_fires ~config ~meta ~playground =
   let rel_path = Filename.concat rel_dir "demo.txt" in
   let host_path = Filename.concat playground rel_path in
   ensure_dir (Filename.dirname host_path);
-  ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
+  save_atomic_fixture host_path "alpha\nbeta\ngamma\n";
   let cases =
     [
       ( "rg",
@@ -436,7 +446,7 @@ let test_cat_legacy_keeper_skips_docker () =
   @@ fun ~config ~meta ~playground ->
   let host_path = Filename.concat playground "mind/x" in
   ensure_dir (Filename.dirname host_path);
-  ignore (Fs_compat.save_file_atomic host_path "matrix");
+  save_atomic_fixture host_path "matrix";
   let raw =
     Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
@@ -550,7 +560,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
   @@ fun ~config ~meta ~playground ->
   let host_path = Filename.concat playground "mind/demo.txt" in
   ensure_dir (Filename.dirname host_path);
-  ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
+  save_atomic_fixture host_path "alpha\nbeta\ngamma\n";
   let raw =
     Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:
@@ -2092,7 +2102,7 @@ let test_execute_rg_no_match_remains_successful_in_docker_route () =
   in
   ensure_git_repo (Filename.dirname lib);
   ensure_dir lib;
-  ignore (Fs_compat.save_file_atomic (Filename.concat lib "sample.ml") "alpha\n");
+  save_atomic_fixture (Filename.concat lib "sample.ml") "alpha\n";
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->

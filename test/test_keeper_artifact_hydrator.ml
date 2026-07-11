@@ -33,7 +33,7 @@ let with_temp_dir f =
   match r with Ok v -> v | Error e -> raise e
 
 let store_a_blob store payload =
-  match B.put store ~bytes:payload ~mime:"text/plain" with
+  match B.put_blocking store ~bytes:payload ~mime:"text/plain" with
   | O.Stored { sha256; bytes; preview; mime } ->
       let marker =
         O.encode_for_oas

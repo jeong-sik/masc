@@ -772,7 +772,7 @@
 (test
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
- (libraries masc_test_deps))
+ (libraries masc_test_deps threads))
 
 (test
  (name test_keeper_structured_output_coverage)
@@ -1360,7 +1360,7 @@
   test_board_core_payload
   test_board_attachment_meta
   test_board_moderation)
- (libraries masc_test_deps masc.tool_orchestration bigstringaf)
+ (libraries masc_test_deps masc.tool_orchestration bigstringaf eio_main)
  (deps ../bin/main_eio.exe))
 
 (test
@@ -2793,3 +2793,8 @@
   (source_tree ../bin)))
 
 (include stanzas/test_durable_mutation_state_machine.inc)
+
+(test
+ (name test_durable_domain_eio_boundaries)
+ (modules test_durable_domain_eio_boundaries)
+ (libraries alcotest eio_main masc_test_deps))

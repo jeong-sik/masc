@@ -50,7 +50,7 @@ let inflight_snapshot_filename = "event-queue-inflight.json"
 
 (* [Fs_compat.mkdir_p] raises (Sys_error / Unix_error) on ENOSPC/EROFS/ENOTDIR
    instead of returning a result, so route it through the same [(unit, string)
-   result] channel as [save_file_atomic]. This keeps [save_json_atomic] total:
+   result] channel as the typed atomic writer. This keeps [save_json_atomic] total:
    it never raises for a disk failure, so the enclosing [with_write_lock]
    critical section returns normally and the shared mutex is not poisoned.
    [Eio.Cancel.Cancelled] is re-raised so cancellation is not flattened into a
@@ -63,10 +63,30 @@ let save_json_atomic path json =
   with
   | Error _ as err -> err
   | Ok () ->
-    json
-    |> Safe_ops.sanitize_json_utf8
-    |> Yojson.Safe.pretty_to_string
-    |> Fs_compat.save_file_atomic path
+    let content =
+      json
+      |> Safe_ops.sanitize_json_utf8
+      |> Yojson.Safe.pretty_to_string
+    in
+    let report = Fs_compat.save_file_atomic_eio path content in
+    Fs_compat.Durable_mutation.fold_report report
+      ~not_committed:(fun report ->
+        Error (Fs_compat.Durable_mutation.report_to_string report))
+      ~committed_not_durable:(fun report ->
+        Log.Keeper.warn
+          "event queue snapshot committed with sync debt path=%s detail=%s"
+          path
+          (Fs_compat.Durable_mutation.report_to_string report);
+        Ok ())
+      ~durable:(fun report ->
+        (match report.diagnostics with
+         | [] -> ()
+         | _ ->
+           Log.Keeper.warn
+             "event queue snapshot durable with cleanup diagnostics path=%s detail=%s"
+             path
+             (Fs_compat.Durable_mutation.report_to_string report));
+        Ok ())
 
 let snapshot_path ~base_path ~keeper_name =
   if valid_keeper_name keeper_name

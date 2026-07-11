@@ -93,7 +93,7 @@ let write_mapping base_path keeper_id repo_ids =
     Repo_manager_types.make_keeper_repo_mapping ~keeper_id
       ~repository_ids:repo_ids
   in
-  match Keeper_repo_mapping.save_mapping ~base_path mapping with
+  match Keeper_repo_mapping.save_mapping_blocking ~base_path mapping with
   | Ok () -> ()
   | Error msg -> fail ("write_mapping failed: " ^ msg)
 

@@ -242,7 +242,27 @@ let save_rules_unlocked ~base_path rules : (unit, string) result =
   let path = rules_path ~base_path () in
   Fs_compat.mkdir_p (Filename.dirname path);
   let json = `List (List.map approval_rule_to_yojson rules) in
-  Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json)
+  let report =
+    Fs_compat.save_file_atomic_eio path (Yojson.Safe.pretty_to_string json)
+  in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      Error (Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      Log.Keeper.warn
+        "approval rules committed with sync debt path=%s detail=%s"
+        path
+        (Fs_compat.Durable_mutation.report_to_string report);
+      Ok ())
+    ~durable:(fun report ->
+      (match report.diagnostics with
+       | [] -> ()
+       | _ ->
+         Log.Keeper.warn
+           "approval rules durable with cleanup diagnostics path=%s detail=%s"
+           path
+           (Fs_compat.Durable_mutation.report_to_string report));
+      Ok ())
 ;;
 
 let list_rules ~base_path () =

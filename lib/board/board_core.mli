@@ -50,6 +50,8 @@ end
     swallowed during JSONL append / rotate; consumed by the
     operator dashboard for at-a-glance health. *)
 val persist_error_count : unit -> int
+val atomic_persist_observe :
+  where:string -> unit Fs_compat.Durable_mutation.report -> unit
 
 (** Record and log a board persistence failure. *)
 val record_persist_error : where:string -> string -> unit

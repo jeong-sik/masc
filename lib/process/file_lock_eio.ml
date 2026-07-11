@@ -131,7 +131,9 @@ let get_entry path =
 let release_entry entry =
   ignore (Atomic.fetch_and_add entry.active (-1))
 
-let run_blocking_lock_op f = Eio_guard.run_in_systhread f
+let run_blocking_lock_op f =
+  Eio_unix.run_in_systhread ~label:"file-lock" f
+;;
 
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.
     This is the blocking variant for callers that already run in a systhread
@@ -220,10 +222,34 @@ let acquire_flock_fd ?clock lock_path =
     ~mode:[ Unix.O_CREAT; Unix.O_WRONLY ] ~perm:0o644
     ~caller:"File_lock_eio" ()
 
-let release_flock_fd fd =
-  run_blocking_lock_op (fun () ->
-      (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
-      Unix.close fd)
+let release_flock_fd_blocking fd =
+  (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
+  Unix.close fd
+;;
+
+let release_flock_fd_eio fd =
+  run_blocking_lock_op (fun () -> release_flock_fd_blocking fd)
+;;
+
+let ensure_lock_parent lock_path =
+  let dir = Filename.dirname lock_path in
+  if not (Sys.file_exists dir) then
+    try Unix.mkdir dir 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+;;
+
+let with_lock_blocking path f =
+  let lock_path = path ^ ".lock" in
+  ensure_lock_parent lock_path;
+  let fd =
+    acquire_flock_retry ~lock_path
+      ~mode:[ Unix.O_CREAT; Unix.O_WRONLY ] ~perm:0o644
+      ~caller:"File_lock_eio.blocking" ()
+  in
+  Common.protect ~module_name:"file_lock_eio" ~finally_label:"blocking_finalizer"
+    ~finally:(fun () -> release_flock_fd_blocking fd)
+    f
+;;
 
 (** Run [f] while holding only the cooperative per-path mutex.
     Use this for in-memory backends that need single-process fiber
@@ -241,12 +267,10 @@ let with_mutex path f =
 let with_lock ?clock path f =
   let run_with_flock () =
     let lock_path = path ^ ".lock" in
-    let dir = Filename.dirname lock_path in
-    if not (Sys.file_exists dir) then
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    ensure_lock_parent lock_path;
     let fd = acquire_flock_fd ?clock lock_path in
     Common.protect ~module_name:"file_lock_eio" ~finally_label:"finalizer"
-      ~finally:(fun () -> release_flock_fd fd)
+      ~finally:(fun () -> release_flock_fd_eio fd)
       f
   in
   with_mutex path (fun () -> run_with_flock ())

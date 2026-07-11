@@ -67,6 +67,8 @@ let schema = "keeper_chat_queue.v1"
 let persistence_file = "chat-queue.json"
 let persistence_base_path : string option Atomic.t = Atomic.make None
 let fail_next_persist_for_testing = Atomic.make false
+let force_next_sync_debt_for_testing = Atomic.make false
+let fail_next_durability_confirmation_for_testing = Atomic.make false
 let lease_counter = Atomic.make 0
 let receipt_counter = Atomic.make 0
 
@@ -269,10 +271,93 @@ let entry_state_of_yojson json =
 
 let save_json_atomic path json =
   Fs_compat.mkdir_p (Filename.dirname path);
-  json
-  |> Safe_ops.sanitize_json_utf8
-  |> Yojson.Safe.pretty_to_string
-  |> Fs_compat.save_file_atomic path
+  let content =
+    json
+    |> Safe_ops.sanitize_json_utf8
+    |> Yojson.Safe.pretty_to_string
+  in
+  let report = Fs_compat.save_file_atomic_eio path content in
+  let report =
+    if Atomic.exchange force_next_sync_debt_for_testing false
+    then
+      match report.progress with
+      | Fs_compat.Durable_mutation.Durable value ->
+        { report with
+          progress =
+            Fs_compat.Durable_mutation.Committed_not_durable
+              { value
+              ; cause = Failure "injected chat queue parent-sync debt"
+              ; backtrace = Printexc.get_callstack 8
+              }
+        }
+      | Fs_compat.Durable_mutation.Not_committed _
+      | Fs_compat.Durable_mutation.Committed_not_durable _ ->
+        report
+    else report
+  in
+  let report =
+    Fs_compat.Durable_mutation.observe_and_retain
+      (fun report ->
+         match report.progress with
+         | Fs_compat.Durable_mutation.Not_committed _ -> ()
+         | Fs_compat.Durable_mutation.Committed_not_durable _ ->
+           Log.Keeper.warn
+             "chat queue snapshot committed with sync debt path=%s detail=%s"
+             path
+             (Fs_compat.Durable_mutation.report_to_string report)
+         | Fs_compat.Durable_mutation.Durable () ->
+           (match report.diagnostics with
+            | [] -> ()
+            | _ ->
+              Log.Keeper.warn
+                "chat queue snapshot durable with cleanup diagnostics path=%s detail=%s"
+                path
+                (Fs_compat.Durable_mutation.report_to_string report)))
+      report
+  in
+  Fs_compat.Durable_mutation.fold_report report
+    ~not_committed:(fun report ->
+      Error (Fs_compat.Durable_mutation.report_to_string report))
+    ~committed_not_durable:(fun report ->
+      let confirmation =
+        if Atomic.exchange fail_next_durability_confirmation_for_testing false
+        then
+          { Fs_compat.Durable_mutation.confirmation =
+              Fs_compat.Durable_mutation.Not_confirmed
+                { cause = Failure "injected chat queue durability confirmation failure"
+                ; backtrace = Printexc.get_callstack 8
+                }
+          ; confirmation_diagnostics = []
+          }
+        else
+          Fs_compat.Durable_mutation.confirm_directory_durable_eio
+            (Filename.dirname path)
+      in
+      let confirmation =
+        Fs_compat.Durable_mutation.observe_confirmation_and_retain
+          (fun report ->
+             match report.confirmation_diagnostics with
+             | [] -> ()
+             | diagnostics ->
+               Log.Keeper.warn
+                 "chat queue parent durability confirmation has diagnostics path=%s detail=%s"
+                 path
+                 (String.concat
+                    "; "
+                    (List.map
+                       Fs_compat.Durable_mutation.diagnostic_to_string
+                       diagnostics)))
+          confirmation
+      in
+      match confirmation.confirmation with
+      | Fs_compat.Durable_mutation.Confirmed -> Ok ()
+      | Fs_compat.Durable_mutation.Not_confirmed { cause; _ } ->
+        Error
+          (Printf.sprintf
+             "%s; parent durability confirmation failed: %s"
+             (Fs_compat.Durable_mutation.report_to_string report)
+             (Printexc.to_string cause)))
+    ~durable:(fun _report -> Ok ())
 
 let load_snapshot ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name with
@@ -697,8 +782,15 @@ let configure_persistence ~base_path =
 module For_testing = struct
   let reset () =
     Atomic.set fail_next_persist_for_testing false;
+    Atomic.set force_next_sync_debt_for_testing false;
+    Atomic.set fail_next_durability_confirmation_for_testing false;
     Atomic.set persistence_base_path None;
     Eio.Mutex.use_rw ~protect:true registry_mutex (fun () -> Hashtbl.clear registry)
 
   let fail_next_persist () = Atomic.set fail_next_persist_for_testing true
+  let force_next_sync_debt () = Atomic.set force_next_sync_debt_for_testing true
+
+  let fail_next_durability_confirmation () =
+    Atomic.set fail_next_durability_confirmation_for_testing true
+  ;;
 end

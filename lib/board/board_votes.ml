@@ -97,9 +97,8 @@ let save_vote_log_jsonl content =
   try
     ensure_masc_dir ();
     let path = vote_log_path () in
-    (match Fs_compat.save_file_atomic path content with
-     | Ok () -> ()
-     | Error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg)
+    Fs_compat.save_file_atomic_eio path content
+    |> atomic_persist_observe ~where:"rewrite_vote_log"
   with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg
 
 let rewrite_vote_log store =
@@ -637,9 +636,8 @@ let reactions_jsonl_snapshot store =
 let save_jsonl_snapshot ~where ~path content =
   try
     ensure_masc_dir ();
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where msg
+    Fs_compat.save_file_atomic_eio path content
+    |> atomic_persist_observe ~where
   with Sys_error msg -> record_persist_error ~where msg
 
 let delete_post store ~post_id : (unit, board_error) Result.t =

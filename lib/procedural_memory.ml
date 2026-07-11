@@ -151,17 +151,37 @@ let save_procedure ?base_path ~agent_name (p : procedure) =
     Fs_compat.append_jsonl path (to_json p))
 
 let rewrite_procedures ?base_path ~agent_name (procs : procedure list) =
-  with_procedures_lock ?base_path ~agent_name (fun () ->
-    let path = procedures_path ?base_path ~agent_name () in
-    let content =
-      procs
-      |> List.map (fun p -> Yojson.Safe.to_string (to_json p))
-      |> String.concat "\n"
-      |> fun s -> if s = "" then "" else s ^ "\n"
-    in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg -> Error msg)
+  try
+    with_procedures_lock ?base_path ~agent_name (fun () ->
+      let path = procedures_path ?base_path ~agent_name () in
+      let content =
+        procs
+        |> List.map (fun p -> Yojson.Safe.to_string (to_json p))
+        |> String.concat "\n"
+        |> fun s -> if s = "" then "" else s ^ "\n"
+      in
+      let report = Fs_compat.save_file_atomic_eio path content in
+      Fs_compat.Durable_mutation.fold_report report
+        ~not_committed:(fun report ->
+          Error (Fs_compat.Durable_mutation.report_to_string report))
+        ~committed_not_durable:(fun report ->
+          Log.Misc.warn
+            "procedural memory rewrite committed with sync debt path=%s detail=%s"
+            path
+            (Fs_compat.Durable_mutation.report_to_string report);
+          Ok ())
+        ~durable:(fun report ->
+          (match report.diagnostics with
+           | [] -> ()
+           | _ ->
+             Log.Misc.warn
+               "procedural memory rewrite durable with cleanup diagnostics path=%s detail=%s"
+               path
+               (Fs_compat.Durable_mutation.report_to_string report));
+          Ok ()))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
 
 (** Minimum evidence count required for crystallization.
     Configurable via MASC_PROC_MIN_EVIDENCE (default: 3).

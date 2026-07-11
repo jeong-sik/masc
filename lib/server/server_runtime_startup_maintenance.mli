@@ -9,3 +9,5 @@ val startup_migrate_retired_keeper_meta_keys : Mcp_server.server_state -> unit
 
 val startup_migrate_keeper_histories :
   Mcp_server.server_state -> unit
+(** Runs the typed history migration. Failures escape to the lazy-task runner,
+    which records the task as failed instead of logging and marking success. *)

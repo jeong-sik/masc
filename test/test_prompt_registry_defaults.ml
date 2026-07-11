@@ -133,6 +133,7 @@ let override_restore_failure_count () =
     ()
 
 let () =
+  Eio_main.run @@ fun _env ->
   let open Alcotest in
   run "Prompt_registry_defaults"
     [

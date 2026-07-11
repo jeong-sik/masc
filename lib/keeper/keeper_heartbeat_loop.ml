@@ -1571,9 +1571,9 @@ let run_heartbeat_loop
         let t_turn_end = Time_compat.now () in
         let t_recurring_start = t_turn_end in
         (* Recurring task dispatch (#3190) *)
-        let _recurring_dispatched =
+        let _recurring_dispatch_count =
           if lifecycle_blocked
-          then false
+          then 0
           else dispatch_recurring_keepalive ~ctx ~meta_after_proactive ~now_ts
         in
         let t_recurring_end = Time_compat.now () in

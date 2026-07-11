@@ -900,6 +900,36 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
         (* Telemetry feedback refresh loop removed in #6814:
          behavioral_stats no longer consumed by build_prompt. *)
+        (* Lane cleanup is declared outside [run] because [Keeper_lane.fork]
+           invokes it only after the run scope and all child fibers join. *)
+        let cleanup_tracking _outcome =
+          try
+            Keeper_registry.cleanup_tracking
+              ~base_path:ctx.config.base_path
+              live_meta.name;
+            Ok ()
+          with
+          | Eio.Cancel.Cancelled _ as exn -> Error (Printexc.to_string exn)
+          | e ->
+            let detail = Printexc.to_string e in
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string CleanupTrackingFailures)
+              ~labels:[ "keeper", live_meta.name; "site", "heartbeat_finally" ]
+              ();
+            Log.Keeper.emit
+              Log.Warn
+              ~category:Log.Heartbeat
+              ~details:
+                (`Assoc
+                  [ "keeper", `String live_meta.name
+                  ; "error", `String detail
+                  ])
+              (Printf.sprintf
+                 "%s: cleanup_tracking in heartbeat finally raised: %s"
+                 live_meta.name
+                 detail);
+            Error detail
+        in
         publish_keeper_started ~live_meta;
         (match
            Keeper_lane.fork
@@ -941,41 +971,6 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
               ; _
               } -> record_crash reason
           | _ -> record_stopped "normal exit"
-        in
-        (* Cancel-safe finally (#9747 iter 2): [cleanup_tracking] touches
-         registry state that can raise transiently during shutdown.
-         Stdlib [Fun.protect] would wrap that as [Fun.Finally_raised],
-         masking the body's Cancelled / Keeper_fiber_crash. Swallow
-         Cancelled (the outer one is in flight) and log non-cancel
-         exceptions instead of propagating them. Mirrors
-         keeper_agent_run.ml and keeper_unified_turn.ml:990. *)
-        let cleanup_tracking _outcome =
-          try
-            Keeper_registry.cleanup_tracking
-              ~base_path:ctx.config.base_path
-              live_meta.name;
-            Ok ()
-          with
-          | Eio.Cancel.Cancelled _ as exn -> Error (Printexc.to_string exn)
-          | e ->
-            let detail = Printexc.to_string e in
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string CleanupTrackingFailures)
-              ~labels:[ "keeper", live_meta.name; "site", "heartbeat_finally" ]
-              ();
-            Log.Keeper.emit
-              Log.Warn
-              ~category:Log.Heartbeat
-              ~details:
-                (`Assoc
-                  [ "keeper", `String live_meta.name
-                  ; "error", `String detail
-                  ])
-              (Printf.sprintf
-                 "%s: cleanup_tracking in heartbeat finally raised: %s"
-                 live_meta.name
-                 detail);
-            Error detail
         in
         (try
            run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup;

@@ -13,8 +13,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#if !defined(O_CLOEXEC) || !defined(O_DIRECTORY) || !defined(O_NOFOLLOW)
-#error "descriptor-anchored filesystem requires O_CLOEXEC, O_DIRECTORY, and O_NOFOLLOW"
+#if !defined(O_CLOEXEC) || !defined(O_DIRECTORY) || !defined(O_NOFOLLOW) || !defined(O_NOCTTY)
+#error "descriptor-anchored filesystem requires O_CLOEXEC, O_DIRECTORY, O_NOFOLLOW, and O_NOCTTY"
 #endif
 
 #if !defined(AT_SYMLINK_NOFOLLOW)
@@ -88,12 +88,21 @@ CAMLprim value masc_anchored_open_write(value directory, value name)
   CAMLparam1(name);
   char *copied_name;
   int fd;
+  struct stat metadata;
+  int stat_result;
 
   caml_unix_check_path(name, "anchored_open_write");
   copied_name = caml_stat_strdup(String_val(name));
   caml_enter_blocking_section();
-  fd = openat(anchored_fd(directory), copied_name,
-              O_WRONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+  stat_result = fstatat(anchored_fd(directory), copied_name, &metadata,
+                        AT_SYMLINK_NOFOLLOW);
+  if (stat_result == 0 && !S_ISREG(metadata.st_mode)) {
+    errno = S_ISLNK(metadata.st_mode) ? ELOOP : EINVAL;
+    fd = -1;
+  } else {
+    fd = openat(anchored_fd(directory), copied_name,
+                O_WRONLY | O_NONBLOCK | O_NOCTTY | O_NOFOLLOW | O_CLOEXEC);
+  }
   caml_leave_blocking_section();
   stat_free_preserving_errno(copied_name);
   if (fd == -1) uerror("anchored_open_write", name);
@@ -240,6 +249,36 @@ CAMLprim value masc_anchored_stat(value directory, value name)
   result = caml_alloc(1, 0);
   Store_field(result, 0, tuple);
   CAMLreturn(result);
+}
+
+CAMLprim value masc_anchored_fstat(value descriptor)
+{
+  CAMLparam0();
+  CAMLlocal2(tuple, number);
+  struct stat metadata;
+  int stat_result;
+  int kind = 3;
+
+  caml_enter_blocking_section();
+  stat_result = fstat(anchored_fd(descriptor), &metadata);
+  caml_leave_blocking_section();
+  if (stat_result == -1) uerror("anchored_fstat", Nothing);
+
+  if (S_ISREG(metadata.st_mode)) kind = 0;
+  else if (S_ISDIR(metadata.st_mode)) kind = 1;
+  else if (S_ISLNK(metadata.st_mode)) kind = 2;
+
+  tuple = caml_alloc(5, 0);
+  Store_field(tuple, 0, Val_int(kind));
+  number = caml_copy_int64((int64_t) metadata.st_size);
+  Store_field(tuple, 1, number);
+  number = caml_copy_int64((int64_t) metadata.st_dev);
+  Store_field(tuple, 2, number);
+  number = caml_copy_int64((int64_t) metadata.st_ino);
+  Store_field(tuple, 3, number);
+  number = caml_copy_int64((int64_t) metadata.st_nlink);
+  Store_field(tuple, 4, number);
+  CAMLreturn(tuple);
 }
 
 CAMLprim value masc_anchored_fdopendir(value descriptor)

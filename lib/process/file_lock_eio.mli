@@ -29,6 +29,12 @@ val stale_lock_seconds : float
 
 exception Flock_timeout of { caller : string; path : string; attempts : int }
 
+exception Lock_file_cleanup_failed of
+  { primary : exn
+  ; primary_backtrace : Printexc.raw_backtrace
+  ; close_error : exn
+  }
+
 (** Non-blocking [F_TLOCK] with retry. On success returns the open
     file descriptor holding the lock. On timeout closes the fd and
     raises {!Flock_timeout}. [clock] is accepted but ignored in this
@@ -71,17 +77,6 @@ val release_flock_fd : Unix.file_descr -> unit
 
 (** {1 High-level scoped locking} *)
 
-module Key : sig
-  type t
-
-  val directory_entry :
-    directory_device:int64 -> directory_inode:int64 -> entry:string -> t
-  (** Same-process lock identity for one entry in an already-open directory.
-      It is independent of the path spelling used to reach that directory. *)
-
-  val equal : t -> t -> bool
-end
-
 (** [with_mutex path f] runs [f] while holding the cooperative
     per-[path] Eio.Mutex only. Use for in-memory backends that need
     single-process fiber serialisation but have no filesystem
@@ -100,15 +95,18 @@ val with_lock :
 
 val with_lock_file :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> key:Key.t
   -> path:string
-  -> with_file:((Unix.file_descr -> 'a) -> 'a)
+  -> open_file:(unit -> 'resource)
+  -> descriptor:('resource -> Unix.file_descr)
+  -> identity:('resource -> int64 * int64)
+  -> close_file:('resource -> unit)
   -> (unit -> 'a)
   -> 'a
-(** Descriptor-relative counterpart of {!with_lock}. [with_file] opens the lock
-    artifact without path re-resolution, keeps its descriptor open for the
-    supplied callback, and closes it before returning. [key] provides canonical
-    same-process serialization; [path] is diagnostic only. *)
+(** Descriptor-relative counterpart of {!with_lock}. The caller provides a
+    blocking-only [open_file]/[close_file] pair; opening and close run in a
+    system thread under Eio. Same-process serialization is derived from the
+    opened regular file's actual [(device, inode)], so path and hard-link aliases
+    cannot select different cooperative mutexes. [path] is diagnostic only. *)
 
 (** {1 Observability hook} *)
 

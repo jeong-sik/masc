@@ -364,19 +364,22 @@ let task_operation_status (task : Masc_domain.task) =
   (* RFC-0323 G-6: awaiting verification is the normal completion lane,
      not a pause — the operation is still moving (verifier's turn). *)
   | Masc_domain.AwaitingVerification _ -> Some "active"
-  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
+  | Masc_domain.Done _ | Masc_domain.Cancelled _
+  | Masc_domain.OperatorBlocked _ -> None
 
 let task_operation_severity (task : Masc_domain.task) =
   match task.task_status with
   (* RFC-0323 G-6: verification pending is not a warning tone. *)
   | Masc_domain.AwaitingVerification _ -> Tone_ok
   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Tone_ok
-  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> Tone_ok
+  | Masc_domain.Done _ | Masc_domain.Cancelled _
+  | Masc_domain.OperatorBlocked _ -> Tone_ok
 
 let task_operation_updated_at (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Done { completed_at; _ } -> completed_at
   | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Masc_domain.OperatorBlocked { blocked_at; _ } -> blocked_at
   | Masc_domain.InProgress { started_at; _ } -> started_at
   | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
   | Masc_domain.Claimed { claimed_at; _ } -> claimed_at

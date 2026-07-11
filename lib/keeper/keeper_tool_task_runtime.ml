@@ -593,7 +593,8 @@ let handle_keeper_task_tool
          match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
          | Some { task_status = Masc_domain.InProgress _; _ } -> false
          | Some { task_status = Masc_domain.Done _ | Masc_domain.Cancelled _
-                 | Masc_domain.AwaitingVerification _; _ } -> false
+                 | Masc_domain.AwaitingVerification _ | Masc_domain.OperatorBlocked _
+                 ; _ } -> false
          | _ -> true
        in
        if needs_start then begin

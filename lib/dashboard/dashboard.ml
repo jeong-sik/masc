@@ -136,7 +136,8 @@ let split_tasks (tasks : Masc_domain.task list) =
     List.filter (fun task ->
       match task.Masc_domain.task_status with
       | Masc_domain.InProgress _ | Masc_domain.Claimed _ | Masc_domain.AwaitingVerification _ -> true
-      | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false
+      | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _
+      | Masc_domain.OperatorBlocked _ -> false
     ) tasks
   in
   let pending = List.filter (fun task -> (=) task.Masc_domain.task_status Masc_domain.Todo) tasks in
@@ -152,7 +153,8 @@ let task_lines (tasks : Masc_domain.task list) =
         | Masc_domain.InProgress { assignee; _ } -> assignee
         | Masc_domain.Claimed { assignee; _ } -> assignee
         | Masc_domain.AwaitingVerification { assignee; _ } -> assignee
-        | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> "?"
+        | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _
+        | Masc_domain.OperatorBlocked _ -> "?"
       in
       Printf.sprintf "[P%d] %s (@%s)" task.priority task.title assignee
     ) active)
@@ -478,7 +480,8 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
       match t.task_status with
       | Masc_domain.Claimed _ -> true (* claimed but not in-progress = potentially blocked *)
       | Masc_domain.Todo | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
-      | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false
+      | Masc_domain.Done _ | Masc_domain.Cancelled _
+      | Masc_domain.OperatorBlocked _ -> false
     ) all_tasks
   in
   (* Agent counts by group *)

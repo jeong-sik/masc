@@ -513,6 +513,7 @@ let task_updated_at (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Done { completed_at; _ } -> completed_at
   | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Masc_domain.OperatorBlocked { blocked_at; _ } -> blocked_at
   | Masc_domain.InProgress { started_at; _ } -> started_at
   | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
   | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
@@ -526,7 +527,8 @@ let task_completed_at (task : Masc_domain.task) =
   | Masc_domain.Todo
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
-  | Masc_domain.AwaitingVerification _ -> None
+  | Masc_domain.AwaitingVerification _
+  | Masc_domain.OperatorBlocked _ -> None
 ;;
 
 let task_execution_links_json (task : Masc_domain.task) =
@@ -836,6 +838,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           (match Masc_domain.parse_iso8601_opt cancelled_at with
            | Some ts -> ts >= recent_cutoff
            | None -> false)
+        | Masc_domain.OperatorBlocked _ -> false
         | _ -> false)
       |> take 20
     in

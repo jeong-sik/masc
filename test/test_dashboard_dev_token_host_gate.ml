@@ -9,11 +9,25 @@ let authority_exn raw =
       `GET
       "/api/v1/dashboard/dev-token"
   in
-  match Server_request_authority.classify_http1_request request with
+  let trust_policy =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:"attacker.example"
+        ~bind_port:8935
+        ~explicit_base_url:None
+    with
+    | Ok policy -> policy
+    | Error error ->
+      fail (Server_request_authority.trust_policy_error_to_string error)
+  in
+  match
+    Server_request_authority.classify_http1_request ~trust_policy request
+  with
   | Server_request_authority.Single authority -> authority
   | ( Server_request_authority.Missing
     | Server_request_authority.Multiple
-    | Server_request_authority.Malformed ) ->
+    | Server_request_authority.Malformed
+    | Server_request_authority.Untrusted ) ->
     failf "expected valid authority %S" raw
 ;;
 

@@ -240,21 +240,35 @@ let test_websocket_discovery_retains_same_origin_wss_diagnostic () =
       check string "primary ws_url uses same-origin wss" "wss://example.com/root/ws"
         Yojson.Safe.Util.(json |> member "ws_url" |> to_string)))
 
-let test_advertised_base_url_uses_forwarded_proto_without_internal_port () =
+let test_advertised_base_url_uses_typed_trusted_scheme () =
   let headers =
     Httpun.Headers.of_list
-      [ "host", "masc.example.com"; "x-forwarded-proto", "https" ]
+      [ "host", "masc.example.com"; "x-forwarded-proto", "http" ]
   in
   let request = Httpun.Request.create ~headers `GET "/ws" in
   let request_authority =
-    match Server_request_authority.classify_http1_request request with
+    let trust_policy =
+      match
+        Server_request_authority.make_trust_policy
+          ~bind_host:"0.0.0.0"
+          ~bind_port:8935
+          ~explicit_base_url:(Some "https://masc.example.com")
+      with
+      | Ok policy -> policy
+      | Error error ->
+        fail (Server_request_authority.trust_policy_error_to_string error)
+    in
+    match
+      Server_request_authority.classify_http1_request ~trust_policy request
+    with
     | Server_request_authority.Single authority -> authority
     | ( Server_request_authority.Missing
       | Server_request_authority.Multiple
-      | Server_request_authority.Malformed ) ->
+      | Server_request_authority.Malformed
+      | Server_request_authority.Untrusted ) ->
       fail "expected valid authority"
   in
-  check string "forwarded https base" "https://masc.example.com"
+  check string "trusted HTTPS base" "https://masc.example.com"
     (Server_routes_http_runtime.advertised_base_url
        ~request_authority
        request)
@@ -314,8 +328,8 @@ let () =
              test_websocket_discovery_waits_for_same_origin_dispatcher;
            test_case "websocket HTTPS diagnostic URL" `Quick
              test_websocket_discovery_retains_same_origin_wss_diagnostic;
-           test_case "forwarded base URL" `Quick
-             test_advertised_base_url_uses_forwarded_proto_without_internal_port;
+           test_case "typed trusted base URL" `Quick
+             test_advertised_base_url_uses_typed_trusted_scheme;
          ] );
       ( "env",
         [

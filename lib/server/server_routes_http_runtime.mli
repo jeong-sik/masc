@@ -78,10 +78,9 @@ val advertised_base_url :
   Httpun.Request.t ->
   string
 (** [advertised_base_url ~request_authority request] returns the
-    browser-visible HTTP(S) base URL.  It derives the authority from the typed
-    request-entry value and the scheme from
-    [X-Forwarded-Proto] / [Forwarded: proto=...] when present, falling back to
-    local [http]. *)
+    browser-visible HTTP(S) base URL.  Both scheme and authority come from the
+    typed trusted request-entry value; untrusted forwarded headers are not
+    scheme inputs. *)
 
 (** {1 Discovery / status JSON} *)
 

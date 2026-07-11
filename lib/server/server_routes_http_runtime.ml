@@ -97,57 +97,15 @@ let advertised_host_port ~request_authority =
   in
   (host, port)
 
-let normalize_forwarded_proto raw =
-  let value =
-    raw
-    |> String.trim
-    |> String.lowercase_ascii
-    |> fun value ->
-    let len = String.length value in
-    if len >= 2 && value.[0] = '"' && value.[len - 1] = '"'
-    then String.sub value 1 (len - 2)
-    else value
-  in
-  match value with
-  | "http" | "https" -> Some value
-  | _ -> None
-
-let first_forwarded_proto raw =
-  raw
-  |> String.split_on_char ','
-  |> List.find_map (fun element ->
-       element
-       |> String.split_on_char ';'
-       |> List.find_map (fun part ->
-            match String.split_on_char '=' (String.trim part) with
-            | [ key; value ] when String.equal (String.lowercase_ascii (String.trim key)) "proto" ->
-              normalize_forwarded_proto value
-            | _ -> None))
-
-let advertised_scheme request =
-  let headers = request.Httpun.Request.headers in
-  match Httpun.Headers.get headers "x-forwarded-proto" with
-  | Some raw -> (
-      match
-        raw
-        |> String.split_on_char ','
-        |> List.find_map normalize_forwarded_proto
-      with
-      | Some scheme -> scheme
-      | None -> (
-          match Httpun.Headers.get headers "forwarded" with
-          | Some raw -> Option.value ~default:"http" (first_forwarded_proto raw)
-          | None -> "http"))
-  | None -> (
-      match Httpun.Headers.get headers "forwarded" with
-      | Some raw -> Option.value ~default:"http" (first_forwarded_proto raw)
-      | None -> "http")
-
-let advertised_base_url ~request_authority request =
+let advertised_base_url ~request_authority _request =
   let _host, _port, authority =
     advertised_host_port_authority ~request_authority
   in
-  Printf.sprintf "%s://%s" (advertised_scheme request) authority
+  Printf.sprintf
+    "%s://%s"
+    (Server_request_authority.scheme request_authority
+     |> Server_request_authority.scheme_to_string)
+    authority
 
 let websocket_discovery_json ~request_authority request =
   let host, _port = advertised_host_port ~request_authority in

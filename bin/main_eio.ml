@@ -338,7 +338,7 @@ let respond_request_authority_bad_request ~error_code ~message reqd =
 ;;
 
 (** Extended router to handle OPTIONS *)
-let make_extended_handler routes =
+let make_extended_handler ~trust_policy routes =
   fun client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     (* Gluten upgrade capability — only available here at the connection
@@ -347,7 +347,9 @@ let make_extended_handler routes =
        RFC-0281. *)
     let upgrade = gluten_reqd.Gluten.Reqd.upgrade in
     let request = Httpun.Reqd.request reqd in
-    match Server_request_authority.classify_http1_request request with
+    match
+      Server_request_authority.classify_http1_request ~trust_policy request
+    with
     | Server_request_authority.Missing ->
       respond_request_authority_bad_request
         ~error_code:"request_authority_missing"
@@ -363,10 +365,28 @@ let make_extended_handler routes =
         ~error_code:"request_authority_malformed"
         ~message:"request Host authority is malformed"
         reqd
+    | Server_request_authority.Untrusted ->
+      respond_request_authority_bad_request
+        ~error_code:"request_authority_untrusted"
+        ~message:"request Host is not a configured server identity"
+        reqd
     | Server_request_authority.Single request_authority ->
-      Server_request_authority.with_current request_authority (fun () ->
+      (match classify_request_origin ~request_authority request with
+       | Multiple_origins ->
+         respond_request_authority_bad_request
+           ~error_code:"request_origin_multiple"
+           ~message:"request contains more than one Origin field"
+           reqd
+       | Malformed_origin ->
+         respond_request_authority_bad_request
+           ~error_code:"request_origin_malformed"
+           ~message:"request Origin is not one complete HTTP(S) serialized origin"
+           reqd
+       | Missing_origin | Single_origin _ ->
+         Server_request_authority.with_current request_authority (fun () ->
         (* Authority admission precedes rate limiting, auth, and routing so no
-           credential I/O or URL projection can observe ambiguous Host input. *)
+           credential I/O or URL projection can observe an untrusted Host or
+           an ambiguous/malformed Origin field set. *)
         let path = Http.Request.path request in
         if try_rate_limit_block ~path ~client_addr ~request reqd
         then ()
@@ -401,7 +421,7 @@ let make_extended_handler routes =
                log_late_response_failure
                  ~context:"main_eio request handler"
                  failure_msg
-             | None -> try_internal_error_response reqd msg))
+             | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
 let run_server ~sw ~env ~host ~port ~base_path =

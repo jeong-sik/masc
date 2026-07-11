@@ -1,19 +1,77 @@
-type authority =
+type scheme =
+  | Http
+  | Https
+
+type trust_class =
+  | Configured_bind
+  | Explicit_trusted_host
+
+type host_port =
   { host : string
   ; port : int option
   }
 
+type authority =
+  { host : string
+  ; port : int option
+  ; scheme : scheme
+  ; trust_class : trust_class
+  }
+
+type request_context = authority
+
+type trusted_identity =
+  { authority : host_port
+  ; scheme : scheme
+  }
+
+type trust_policy =
+  { configured_bind : trusted_identity
+  ; explicit_trusted_host : trusted_identity option
+  }
+
+type trust_policy_error =
+  | Malformed_bind_authority
+  | Malformed_explicit_base_url
+
 type classification =
   | Missing
-  | Single of authority
+  | Single of request_context
   | Multiple
   | Malformed
+  | Untrusted
 
 type h2_classification =
   | H2_authority of classification
   | Unsupported_asterisk_form_options
 
 exception Unbound_request_authority
+
+type serialized_origin =
+  { authority : host_port
+  ; scheme : scheme
+  }
+
+let scheme_to_string = function
+  | Http -> "http"
+  | Https -> "https"
+;;
+
+let scheme_of_string raw =
+  if not (String.equal raw (String.trim raw))
+  then None
+  else
+    match String.lowercase_ascii raw with
+    | "http" -> Some Http
+    | "https" -> Some Https
+    | _ -> None
+;;
+
+let trust_policy_error_to_string = function
+  | Malformed_bind_authority -> "configured HTTP bind authority is malformed"
+  | Malformed_explicit_base_url ->
+    "configured HTTP base URL is not a valid HTTP(S) trusted identity"
+;;
 
 let ascii_is_digit c = c >= '0' && c <= '9'
 
@@ -114,30 +172,34 @@ let parse_h2 raw =
   if String.equal raw (String.trim raw) then parse raw else None
 ;;
 
-let classify_values ~multiple values =
-  match values with
-  | [] -> Missing
-  | [ raw ] -> Option.fold ~none:Malformed ~some:(fun value -> Single value) (parse raw)
-  | _ -> multiple
+let rendered_host host =
+  match Ipaddr.V6.of_string host with
+  | Ok _ -> "[" ^ host ^ "]"
+  | Error _ -> host
 ;;
 
-let classify_http1_request request =
-  classify_values
-    ~multiple:Multiple
-    (Httpun.Headers.get_multi request.Httpun.Request.headers "host")
+let host_port_of_parts ~host ~port =
+  let suffix = Option.fold ~none:"" ~some:(Printf.sprintf ":%d") port in
+  parse_h2 (rendered_host host ^ suffix)
 ;;
 
-let default_port_for_scheme scheme =
-  match String.lowercase_ascii scheme with
-  | "http" -> Some 80
-  | "https" -> Some 443
-  | _ -> None
+let default_port_for_scheme = function
+  | Http -> Some 80
+  | Https -> Some 443
 ;;
 
-let effective_port ~scheme authority =
-  match authority.port with
+let effective_port_value ~scheme port =
+  match port with
   | Some _ as explicit -> explicit
   | None -> default_port_for_scheme scheme
+;;
+
+let effective_port ~scheme (authority : authority) =
+  effective_port_value ~scheme authority.port
+;;
+
+let effective_host_port ~scheme (authority : host_port) =
+  effective_port_value ~scheme authority.port
 ;;
 
 let equivalent_for_scheme ~scheme left right =
@@ -147,11 +209,175 @@ let equivalent_for_scheme ~scheme left right =
        (effective_port ~scheme right)
 ;;
 
-let classify_h2_request request =
+let host_port_equivalent_for_scheme ~scheme (left : host_port)
+    (right : host_port) =
+  String.equal left.host right.host
+  && Option.equal Int.equal
+       (effective_host_port ~scheme left)
+       (effective_host_port ~scheme right)
+;;
+
+let trusted_host_port_matches ~scheme (trusted : host_port)
+    (candidate : host_port) =
+  Option.equal Int.equal
+    (effective_host_port ~scheme trusted)
+    (effective_host_port ~scheme candidate)
+  && (String.equal trusted.host candidate.host
+      || (Masc_network_defaults.is_loopback_host trusted.host
+          && Masc_network_defaults.is_loopback_host candidate.host))
+;;
+
+let host_is_unspecified host =
+  match Ipaddr.of_string host with
+  | Ok (Ipaddr.V4 address) -> Ipaddr.V4.compare address Ipaddr.V4.any = 0
+  | Ok (Ipaddr.V6 address) -> Ipaddr.V6.compare address Ipaddr.V6.unspecified = 0
+  | Error _ -> false
+;;
+
+let configured_bind_matches configured request_authority =
+  let same_port =
+    Option.equal Int.equal
+      (effective_host_port ~scheme:Http configured.authority)
+      (effective_host_port ~scheme:Http request_authority)
+  in
+  not (host_is_unspecified configured.authority.host)
+  && same_port
+  && (String.equal configured.authority.host request_authority.host
+      || (Masc_network_defaults.is_loopback_host configured.authority.host
+          && Masc_network_defaults.is_loopback_host request_authority.host))
+;;
+
+let explicit_identity_of_base_url raw =
+  if not (String.equal raw (String.trim raw))
+  then None
+  else
+    let uri = Uri.of_string raw in
+    match
+      Option.bind (Uri.scheme uri) scheme_of_string,
+      Uri.userinfo uri,
+      Uri.host uri,
+      Uri.fragment uri,
+      Uri.query uri
+    with
+    | Some scheme, None, Some host, None, [] ->
+      Option.map
+        (fun authority -> ({ authority; scheme } : trusted_identity))
+        (host_port_of_parts ~host ~port:(Uri.port uri))
+    | Some _, None, Some _, None, _ :: _
+    | Some _, None, Some _, Some _, _
+    | Some _, Some _, _, _, _
+    | Some _, None, None, _, _
+    | None, _, _, _, _ ->
+      None
+;;
+
+let make_trust_policy ~bind_host ~bind_port ~explicit_base_url =
+  match host_port_of_parts ~host:bind_host ~port:(Some bind_port) with
+  | None -> Error Malformed_bind_authority
+  | Some bind_authority ->
+    let configured_bind = { authority = bind_authority; scheme = Http } in
+    (match explicit_base_url with
+     | None -> Ok { configured_bind; explicit_trusted_host = None }
+     | Some raw ->
+       (match explicit_identity_of_base_url raw with
+        | None -> Error Malformed_explicit_base_url
+        | Some explicit_trusted_host ->
+          Ok
+            { configured_bind
+            ; explicit_trusted_host = Some explicit_trusted_host
+            }))
+;;
+
+let admit_authority ~trust_policy ~wire_scheme parsed =
+  let explicit_match () =
+    match trust_policy.explicit_trusted_host with
+    | Some trusted
+      when trusted.scheme = wire_scheme
+           && trusted_host_port_matches
+                ~scheme:wire_scheme
+                trusted.authority
+                parsed ->
+      Some
+        { host = parsed.host
+        ; port = parsed.port
+        ; scheme = wire_scheme
+        ; trust_class = Explicit_trusted_host
+        }
+    | Some _ | None -> None
+  in
+  let configured_match () =
+    if wire_scheme = Http
+       && configured_bind_matches trust_policy.configured_bind parsed
+    then
+      Some
+        { host = parsed.host
+        ; port = parsed.port
+        ; scheme = Http
+        ; trust_class = Configured_bind
+        }
+    else None
+  in
+  match wire_scheme with
+  | Https -> explicit_match ()
+  | Http ->
+    (match configured_match () with
+     | Some _ as admitted -> admitted
+     | None -> explicit_match ())
+;;
+
+let admit_http1_authority ~trust_policy parsed =
+  match trust_policy.explicit_trusted_host with
+  | Some trusted
+    when trusted.scheme = Https
+         && trusted_host_port_matches
+              ~scheme:Https
+              trusted.authority
+              parsed ->
+    Some
+      { host = parsed.host
+      ; port = parsed.port
+      ; scheme = Https
+      ; trust_class = Explicit_trusted_host
+      }
+  | Some _ | None ->
+    (match admit_authority ~trust_policy ~wire_scheme:Http parsed with
+     | Some _ as admitted -> admitted
+     | None ->
+       (match trust_policy.explicit_trusted_host with
+        | Some trusted
+          when trusted_host_port_matches
+                 ~scheme:trusted.scheme
+                 trusted.authority
+                 parsed ->
+          Some
+            { host = parsed.host
+            ; port = parsed.port
+            ; scheme = trusted.scheme
+            ; trust_class = Explicit_trusted_host
+            }
+        | Some _ | None -> None))
+;;
+
+let classify_http1_request ~trust_policy request =
+  match Httpun.Headers.get_multi request.Httpun.Request.headers "host" with
+  | [] -> Missing
+  | [ raw ] ->
+    (match parse raw with
+     | None -> Malformed
+     | Some parsed ->
+       Option.fold
+         ~none:Untrusted
+         ~some:(fun admitted -> Single admitted)
+         (admit_http1_authority ~trust_policy parsed))
+  | _ -> Multiple
+;;
+
+let classify_h2_request ~trust_policy request =
   let authorities = H2.Headers.get_multi request.H2.Request.headers ":authority" in
   let hosts = H2.Headers.get_multi request.H2.Request.headers "host" in
-  match authorities with
-  | []
+  match scheme_of_string request.H2.Request.scheme, authorities with
+  | None, _ -> H2_authority Malformed
+  | Some _, []
     when request.H2.Request.meth = `OPTIONS
          && String.equal request.H2.Request.target "*" ->
     (match hosts with
@@ -161,57 +387,101 @@ let classify_h2_request request =
         | Some _ -> Unsupported_asterisk_form_options
         | None -> H2_authority Malformed)
      | _ -> H2_authority Malformed)
-  | [] ->
+  | Some _, [] ->
     H2_authority
       (match hosts with
        | [] | [ _ ] -> Missing
        | _ -> Malformed)
-  | [ raw_authority ] ->
+  | Some scheme, [ raw_authority ] ->
     let classification =
       match parse_h2 raw_authority with
       | None -> Malformed
-      | Some authority ->
-        (match hosts with
-         | [] -> Single authority
+      | Some parsed ->
+        let host_cross_check =
+          match hosts with
+          | [] -> true
          | [ raw_host ] ->
            (match parse_h2 raw_host with
-            | Some host
-              when equivalent_for_scheme
-                     ~scheme:request.H2.Request.scheme
-                     authority
-                     host ->
-              Single authority
-            | Some _ | None -> Malformed)
-         | _ -> Malformed)
+            | Some host ->
+              host_port_equivalent_for_scheme ~scheme parsed host
+            | None -> false)
+          | _ -> false
+        in
+        if not host_cross_check
+        then Malformed
+        else
+          Option.fold
+            ~none:Untrusted
+            ~some:(fun admitted -> Single admitted)
+            (admit_authority ~trust_policy ~wire_scheme:scheme parsed)
     in
     H2_authority classification
-  | _ -> H2_authority Malformed
+  | Some _, _ -> H2_authority Malformed
 ;;
 
 let host authority = authority.host
 let port authority = authority.port
-
-let rendered_host authority =
-  match Ipaddr.V6.of_string authority.host with
-  | Ok _ -> "[" ^ authority.host ^ "]"
-  | Error _ -> authority.host
-;;
+let scheme (authority : authority) = authority.scheme
+let trust_class authority = authority.trust_class
 
 let rendered authority =
   match authority.port with
-  | None -> rendered_host authority
-  | Some port -> Printf.sprintf "%s:%d" (rendered_host authority) port
+  | None -> rendered_host authority.host
+  | Some port -> Printf.sprintf "%s:%d" (rendered_host authority.host) port
 ;;
 
 let of_host_port ~host ~port =
-  let raw_host =
-    match Ipaddr.V6.of_string host with
-    | Ok _ -> "[" ^ host ^ "]"
-    | Error _ -> host
-  in
-  match parse (Printf.sprintf "%s:%d" raw_host port) with
-  | Some authority -> Ok authority
+  match host_port_of_parts ~host ~port:(Some port) with
+  | Some authority ->
+    Ok
+      { host = authority.host
+      ; port = authority.port
+      ; scheme = Http
+      ; trust_class = Configured_bind
+      }
   | None -> Error `Malformed
+;;
+
+let parse_serialized_origin raw =
+  if String.equal raw "" || not (String.equal raw (String.trim raw))
+  then Error `Malformed
+  else
+    match String.index_opt raw ':' with
+    | None | Some 0 -> Error `Malformed
+    | Some scheme_end ->
+      let scheme_raw = String.sub raw 0 scheme_end in
+      let authority_start = scheme_end + 3 in
+      if authority_start > String.length raw
+         || scheme_end + 2 >= String.length raw
+         || not (Char.equal raw.[scheme_end + 1] '/')
+         || not (Char.equal raw.[scheme_end + 2] '/')
+      then Error `Malformed
+      else
+        let authority_raw =
+          String.sub raw authority_start (String.length raw - authority_start)
+        in
+        (match scheme_of_string scheme_raw, parse_h2 authority_raw with
+         | Some scheme, Some authority -> Ok { authority; scheme }
+         | Some _, None | None, _ -> Error `Malformed)
+;;
+
+let serialized_origin_host origin = origin.authority.host
+let serialized_origin_scheme origin = origin.scheme
+
+let serialized_origin_equal left right =
+  left.scheme = right.scheme
+  && host_port_equivalent_for_scheme
+       ~scheme:left.scheme
+       left.authority
+       right.authority
+;;
+
+let serialized_origin_matches_authority origin authority =
+  origin.scheme = authority.scheme
+  && String.equal origin.authority.host authority.host
+  && Option.equal Int.equal
+       (effective_host_port ~scheme:origin.scheme origin.authority)
+       (effective_port ~scheme:authority.scheme authority)
 ;;
 
 let current_key : authority Eio.Fiber.key = Eio.Fiber.create_key ()

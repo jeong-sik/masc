@@ -12,6 +12,7 @@ val make_error_handler :
   unit
 
 val make_request_handler :
+  trust_policy:Server_request_authority.trust_policy ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   server_start_time:float ->

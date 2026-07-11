@@ -740,10 +740,32 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     loop ());
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
+  let explicit_base_url =
+    match Env_config_core.masc_http_base_url_result () with
+    | Ok base_url -> Some base_url
+    | Error message -> raise (Env_config_core.Config_error message)
+  in
+  let request_trust_policy =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:config.host
+        ~bind_port:config.port
+        ~explicit_base_url
+    with
+    | Ok policy -> policy
+    | Error error ->
+      raise
+        (Env_config_core.Config_error
+           (Server_request_authority.trust_policy_error_to_string error))
+  in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
-  let request_handler = make_request_handler routes in
+  let request_handler = make_request_handler ~trust_policy:request_trust_policy routes in
   let h2_request_handler =
-    make_h2_request_handler ~sw ~clock ~server_start_time
+    make_h2_request_handler
+      ~trust_policy:request_trust_policy
+      ~sw
+      ~clock
+      ~server_start_time
   in
   let h2_error_handler = make_h2_error_handler () in
   let http_mode =

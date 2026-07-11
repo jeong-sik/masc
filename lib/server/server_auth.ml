@@ -453,20 +453,121 @@ let host_port_scheme_of_origin origin =
       origin (Printexc.to_string exn);
     None
 
+type request_host_rejection =
+  | Missing_request_host
+  | Malformed_request_host
+  | Non_loopback_request_host of string
+
+type admitted_request_host =
+  { host : string
+  ; port : int option
+  }
+
+let ascii_is_digit c = c >= '0' && c <= '9'
+
+let ascii_is_hex_digit c =
+  ascii_is_digit c
+  || (c >= 'a' && c <= 'f')
+  || (c >= 'A' && c <= 'F')
+;;
+
+let reg_name_char_is_allowed c =
+  ascii_is_digit c
+  || (c >= 'a' && c <= 'z')
+  || (c >= 'A' && c <= 'Z')
+  || String.contains "-._~!$&'()*+,;=" c
+;;
+
+let reg_name_is_valid host =
+  let length = String.length host in
+  let rec consume index =
+    if index = length
+    then true
+    else if Char.equal host.[index] '%'
+    then
+      index + 2 < length
+      && ascii_is_hex_digit host.[index + 1]
+      && ascii_is_hex_digit host.[index + 2]
+      && consume (index + 3)
+    else reg_name_char_is_allowed host.[index] && consume (index + 1)
+  in
+  length > 0 && consume 0
+;;
+
+let parse_request_host_port_suffix suffix =
+  if String.equal suffix ""
+  then Ok None
+  else if not (Char.equal suffix.[0] ':')
+  then Error ()
+  else
+    let raw_port = String.sub suffix 1 (String.length suffix - 1) in
+    if String.equal raw_port "" || not (String.for_all ascii_is_digit raw_port)
+    then Error ()
+    else
+      match int_of_string_opt raw_port with
+      | Some port when port <= 65_535 -> Ok (Some port)
+      | Some _ | None -> Error ()
+;;
+
+let parse_request_host_header raw =
+  let authority = String.trim raw in
+  if String.equal authority ""
+  then None
+  else if Char.equal authority.[0] '['
+  then
+    match String.index_opt authority ']' with
+    | None | Some 1 -> None
+    | Some closing_bracket ->
+      let host = String.sub authority 1 (closing_bracket - 1) in
+      let suffix_start = closing_bracket + 1 in
+      let suffix =
+        String.sub authority suffix_start (String.length authority - suffix_start)
+      in
+      (match Ipaddr.V6.of_string host, parse_request_host_port_suffix suffix with
+       | Ok _, Ok port -> Some { host = String.lowercase_ascii host; port }
+       | Error _, _ | _, Error () -> None)
+  else
+    let colon_count =
+      String.fold_left
+        (fun count char -> if Char.equal char ':' then count + 1 else count)
+        0
+        authority
+    in
+    if colon_count > 1
+    then None
+    else
+      let host, suffix =
+        match String.index_opt authority ':' with
+        | None -> authority, ""
+        | Some separator ->
+          ( String.sub authority 0 separator
+          , String.sub authority separator (String.length authority - separator) )
+      in
+      if not (reg_name_is_valid host)
+      then None
+      else
+        match parse_request_host_port_suffix suffix with
+        | Ok port -> Some { host = String.lowercase_ascii host; port }
+        | Error () -> None
+;;
+
+let admit_loopback_request_host request =
+  match Httpun.Headers.get request.Httpun.Request.headers "host" with
+  | None -> Error Missing_request_host
+  | Some raw ->
+    (match parse_request_host_header raw with
+     | None -> Error Malformed_request_host
+     | Some ({ host; _ } as admitted) when is_loopback_host host -> Ok admitted
+     | Some { host; _ } -> Error (Non_loopback_request_host host))
+;;
+
 let host_port_of_request request =
   match Httpun.Headers.get request.Httpun.Request.headers "host" with
   | None -> None
-  | Some host_header -> (
-      try
-        let uri = Uri.of_string ("http://" ^ host_header) in
-        match Uri.host uri with
-        | None -> None
-        | Some host ->
-            Some (String.trim host |> String.lowercase_ascii, Uri.port uri)
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Log.Auth.debug "host_port_of_request: parse failed for %S: %s"
-          host_header (Printexc.to_string exn);
-        None)
+  | Some host_header ->
+    Option.map
+      (fun { host; port } -> host, port)
+      (parse_request_host_header host_header)
 
 (* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
    can be toggled without restarting the server process. *)

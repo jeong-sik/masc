@@ -95,6 +95,7 @@
   test_operator_control_judgment
   test_with_cleanups_on_release
   test_auth_login
+  test_dashboard_dev_token_host_gate
   test_audit_log
   test_console_sink
   test_governance_anomaly
@@ -459,6 +460,7 @@
   test_operator_control_support
   test_with_cleanups_on_release
   test_auth_login
+  test_dashboard_dev_token_host_gate
   test_audit_log
   test_console_sink
   test_governance_anomaly

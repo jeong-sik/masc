@@ -58,4 +58,12 @@ describe('keeper-v2 IDE responsive contract', () => {
     expect(declarations(`${MOBILE_SHELL} .ide-v2-tree-toggle`).display).toBe('none')
     expect(declarations(`${MOBILE_SHELL} .ide-v2-rail-toggle`).display).toBe('none')
   })
+
+  it('keeps the advanced toolbar popover inside the mobile viewport', () => {
+    const popover = declarations(`${MOBILE_SHELL} .ide-toolbar-advanced-popover`)
+    expect(popover.position).toBe('fixed')
+    expect(popover.left).toBe('12px')
+    expect(popover.right).toBe('12px')
+    expect(popover.width).toBe('auto')
+  })
 })

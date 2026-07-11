@@ -6,6 +6,107 @@
   --fus-muted: var(--color-fg-muted);
 }
 
+/* The standalone Fusion route is a full-height master/detail workspace. The
+   selected run already owns its own KPI strip, so a second page header and
+   aggregate KPI band only displaced the master list and duplicated evidence.
+   Keep refresh/source truth in the list toolbar and let the split consume the
+   complete route height. */
+.v2-app .dashboard-main-scroll:has(.v2-fusion-surface) {
+  overflow: hidden;
+}
+
+.v2-app .v2-surface:has(.v2-fusion-surface),
+.v2-app .v2-surface:has(.v2-fusion-surface) > .animate-in {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.v2-fusion-surface {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.v2-fusion-surface .fus-body {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.v2-fusion-surface .fus-reality-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-width: 0;
+  border-bottom: 1px solid var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--text-mid);
+  font-size: var(--fs-10);
+  line-height: 1.35;
+  padding: 6px 12px;
+}
+
+.v2-fusion-surface .fus-reality-notice strong {
+  flex: none;
+  color: var(--warn-fg);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.v2-fusion-surface .fus-reality-notice span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Fusion's dense master list uses a 20px identity sigil. Scope this size so
+   the 8x8 art stays legible without making each history row card-height. */
+.v2-fusion-surface .fus-list .pixel-avatar--sm {
+  width: 20px;
+  height: 20px;
+}
+
+.v2-fusion-surface .fus-list-truth {
+  flex: none;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-pill);
+  color: var(--warn-fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  line-height: 1;
+  padding: 3px 6px;
+}
+
+.v2-fusion-surface .fus-list-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-mid);
+  cursor: pointer;
+}
+
+.v2-fusion-surface .fus-list-refresh:hover {
+  border-color: var(--border-highlight);
+  color: var(--text-bright);
+}
+
+.v2-fusion-surface .fus-list-refresh:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .v2-fusion-surface .fus-scroll {
   display: flex;
   flex-direction: column;
@@ -828,6 +929,26 @@ button.fus-reconcile-row:hover {
   .v2-fusion-surface .fus-reconcile-summary {
     overflow-wrap: anywhere;
     white-space: normal;
+  }
+
+  .v2-fusion-surface .fus-list-refresh {
+    width: 32px;
+  }
+
+  .v2-fusion-surface .fus-run-id-row h1,
+  .v2-fusion-surface .fus-dec-badge,
+  .v2-fusion-surface .fus-pipe-node {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .v2-fusion-surface .fus-run-by {
+    flex-wrap: wrap;
+  }
+
+  .v2-fusion-surface .fus-run-by .spacer {
+    display: none;
   }
 }
 

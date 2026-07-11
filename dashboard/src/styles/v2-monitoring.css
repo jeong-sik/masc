@@ -33,6 +33,129 @@
   padding: 14px 14px;
 }
 
+/* Fleet is a route-sized operator workspace, not a card inside Monitor. The
+   .fl-* component already owns the standalone header, roster, aside, and foot;
+   neutralize the legacy monitoring-card wrapper so those tracks can align. */
+.v2-monitoring-surface.fl-shell {
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-deep);
+  padding: 0;
+  overflow: hidden;
+}
+
+.v2-monitoring-surface.fl-shell .fl-health {
+  justify-content: flex-start;
+}
+
+.v2-monitoring-surface.fl-shell .fl-body {
+  min-height: 0;
+}
+
+.v2-monitoring-surface.fl-shell .fl-main,
+.v2-monitoring-surface.fl-shell .fl-aside {
+  border-radius: 0;
+}
+
+.v2-monitoring-surface.fl-shell .fl-create {
+  flex: none;
+  border: 1px solid var(--volt-dim);
+  border-radius: var(--radius-sm);
+  background: var(--volt-wash);
+  color: var(--volt-strong);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-12);
+  padding: 7px 12px;
+}
+
+.v2-monitoring-surface.fl-shell .fl-create:hover {
+  border-color: var(--volt);
+  color: var(--text-bright);
+}
+
+.v2-monitoring-surface.fl-shell .fl-fallback {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  border-bottom: 1px solid var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--text-mid);
+  font-size: var(--fs-11);
+  padding: 7px 22px;
+}
+
+.v2-monitoring-surface.fl-shell .fl-fallback.error {
+  border-color: var(--bad-30);
+  background: var(--bad-10);
+}
+
+.v2-monitoring-surface.fl-shell .fl-capacity {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) repeat(3, minmax(94px, 0.7fr)) minmax(160px, 1fr);
+  flex: none;
+  min-height: 68px;
+  border-bottom: 1px solid var(--border-main);
+  background: color-mix(in oklab, var(--bg-panel) 88%, var(--volt) 12%);
+  padding: 10px 22px;
+}
+
+.v2-monitoring-surface.fl-shell .fl-capacity-lead,
+.v2-monitoring-surface.fl-shell .fl-capacity-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  border-right: 1px solid var(--border-soft);
+  padding: 0 16px;
+}
+
+.v2-monitoring-surface.fl-shell .fl-capacity-lead {
+  padding-left: 0;
+}
+
+.v2-monitoring-surface.fl-shell .fl-capacity-cell:last-child {
+  border-right: 0;
+}
+
+.v2-monitoring-surface.fl-shell .fl-capacity-cell span {
+  color: var(--text-dim);
+  font-size: var(--fs-10);
+  letter-spacing: 0.1em;
+}
+
+.v2-monitoring-surface.fl-shell .fl-capacity strong {
+  overflow: hidden;
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v2-monitoring-surface.fl-shell .fl-capacity-cell.warn strong {
+  color: var(--status-warn);
+}
+
+@media (max-width: 900px) {
+  .v2-monitoring-surface.fl-shell .fl-capacity {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .v2-monitoring-surface.fl-shell .fl-capacity-lead {
+    display: none;
+  }
+
+  .v2-monitoring-surface.fl-shell .fl-capacity-cell.owner {
+    border-right: 0;
+  }
+}
+
 .v2-monitoring-surface .fl-top {
   display: flex;
   align-items: flex-start;

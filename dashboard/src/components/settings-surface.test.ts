@@ -29,9 +29,10 @@ import { tweaksDensity } from './tweaks-panel'
 import { notificationDeliveryError, notifyRules } from '../notifications'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
-import { dashboardLoading, shellConfigResolution, shellRuntimeResolution } from '../store'
+import { dashboardLoading, shellAuthSummary, shellConfigResolution, shellRuntimeResolution } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
+import { setStoredToken } from '../api/core'
 
 const apiMock = vi.hoisted(() => ({
   fetchDashboardConfig: vi.fn(),
@@ -440,6 +441,7 @@ describe('SettingsSurface', () => {
       keepers: { path: '/workspace/.masc/keepers', exists: true, source: 'derived' },
       personas: { path: '/workspace/.masc/personas', exists: true, source: 'derived' },
     }
+    shellAuthSummary.value = null
     localStorage.clear()
     tweaksDensity.value = 'spacious'
     notifyRules.value = {
@@ -459,6 +461,7 @@ describe('SettingsSurface', () => {
     navigate.mockClear()
     shellConfigResolution.value = null
     shellRuntimeResolution.value = null
+    shellAuthSummary.value = null
     resetDevTokenBootstrap()
     sessionStorage.clear()
     localStorage.clear()
@@ -478,7 +481,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-nav-mcp"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-notify"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-logs"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="settings-nav-account"]')).toBeNull()
+    expect(container.querySelector('[data-testid="settings-nav-account"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-policy"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-gate"]')).toBeNull()
   })
@@ -494,7 +497,7 @@ describe('SettingsSurface', () => {
     render(html`<${SettingsSurface} />`, container)
 
     const title = () => container.querySelector('[data-testid="settings-section-title"]') as HTMLElement
-    expect(title().textContent).toBe('런타임')
+    expect(title().textContent).toBe('계정')
 
     const pathsNav = container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement
     await fireEvent.click(pathsNav)
@@ -507,7 +510,7 @@ describe('SettingsSurface', () => {
     await fireEvent.click(runtimeNav)
 
     expect(title().textContent).toBe('런타임')
-    expect(navigate).toHaveBeenLastCalledWith('settings', {})
+    expect(navigate).toHaveBeenLastCalledWith('settings', { section: 'runtime' })
   })
 
   it('selects a valid section from the dashboard route', () => {
@@ -629,20 +632,20 @@ describe('SettingsSurface', () => {
     }
   })
 
-  it('falls invalid settings sections back to runtime without a fake subsection', () => {
-    expect(normalizeSettingsSection('not-real')).toBe('runtime')
+  it('falls invalid settings sections back to the live account subsection', () => {
+    expect(normalizeSettingsSection('not-real')).toBe('account')
     route.value = { tab: 'settings', params: { section: 'not-real' }, postId: null }
 
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임')
-    expect(container.querySelector('[data-testid="settings-nav-runtime"]')?.getAttribute('data-active')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('계정')
+    expect(container.querySelector('[data-testid="settings-nav-account"]')?.getAttribute('data-active')).toBe('true')
   })
 
   it('syncs when the dashboard route section changes while mounted', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임')
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('계정')
 
     route.value = { tab: 'settings', params: { section: 'logs' }, postId: null }
 
@@ -651,20 +654,45 @@ describe('SettingsSurface', () => {
     })
   })
 
-  it('does not render removed fake-only settings sections', async () => {
+  it('renders the live auth-backed account section without fake policy controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml + provider catalog')
-    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('live')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live auth + browser token')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('mixed')
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.textContent).not.toContain('Save changes')
     expect(container.textContent).not.toContain('Reissue')
     expect(container.textContent).not.toContain('Log out')
-    expect(container.querySelector('[data-testid="settings-nav-account"]')).toBeNull()
+    expect(container.querySelector('[data-testid="settings-nav-account"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="settings-account-live"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-policy"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-sandbox"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-gate"]')).toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-ide"]')).toBeNull()
+  })
+
+  it('renders token presence and source without re-projecting the bearer secret into the DOM', () => {
+    const secret = 'masc-secret-that-must-not-enter-dom'
+    setStoredToken(secret, { source: 'manual', scope: 'admin' })
+    shellAuthSummary.value = {
+      enabled: true,
+      require_token: true,
+      token_present: true,
+      token_valid: true,
+      token_agent: 'dashboard',
+      effective_agent: 'dashboard',
+      effective_role: 'admin',
+      can_keeper_msg: true,
+    }
+
+    render(html`<${SettingsSurface} />`, container)
+
+    const presence = container.querySelector('[data-testid="settings-account-token-presence"]')
+    expect(presence?.textContent).toContain('브라우저에 저장됨')
+    expect(presence?.textContent).toContain('source:manual')
+    expect(presence?.textContent).toContain('scope:admin')
+    expect(container.querySelector('input[aria-label="Dashboard API token"]')).toBeNull()
+    expect(container.innerHTML).not.toContain(secret)
   })
 
   it('MCP server page shows resolved endpoint, inventory, and runs a real status check', async () => {

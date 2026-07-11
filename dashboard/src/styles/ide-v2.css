@@ -1211,6 +1211,16 @@
   display: none;
 }
 
+.ide-plane-shell[data-mobile-viewport="true"] .ide-toolbar-advanced-popover {
+  position: fixed;
+  top: max(54px, env(safe-area-inset-top));
+  right: 12px;
+  left: 12px;
+  width: auto;
+  max-height: calc(100dvh - 130px);
+  overflow: auto;
+}
+
 .ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body,
 .ide-plane-shell[data-mobile-viewport="true"] .ide-v2-body.ide-plane-grid {
   grid-template-columns: minmax(0, 1fr) !important;

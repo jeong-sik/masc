@@ -474,6 +474,40 @@ describe('Work', () => {
       expect(screen.getByText('Linked job')).toBeTruthy()
     })
 
+    it('keeps every live backlog task in a scrollable region without a numeric preview policy', () => {
+      tasks.value = Array.from({ length: 8 }, (_, index) => ({
+        id: `U-${index + 1}`,
+        title: `Backlog task ${index + 1}`,
+        status: 'todo' as const,
+      }))
+
+      render(html`<${Work} />`)
+
+      const backlog = screen.getByTestId('work-backlog')
+      const list = backlog.querySelector('.wk-backlog-list')
+      expect(list?.getAttribute('aria-label')).toBe('클레임 가능 백로그 목록')
+      expect(backlog.querySelectorAll('.wk-task-claim')).toHaveLength(8)
+      expect(backlog.querySelector('.wk-backlog-toggle')).toBeNull()
+      expect(screen.getByText('Backlog task 8')).toBeTruthy()
+    })
+
+    it('virtualizes a large backlog while preserving the full live count', () => {
+      tasks.value = Array.from({ length: 100 }, (_, index) => ({
+        id: `U-${index + 1}`,
+        title: `Backlog task ${index + 1}`,
+        status: 'todo' as const,
+      }))
+
+      render(html`<${Work} />`)
+
+      const backlog = screen.getByTestId('work-backlog')
+      expect(backlog.querySelector('.wk-backlog-h')?.textContent).toContain('100')
+      expect(backlog.querySelector('.virtual-list-spacer')).not.toBeNull()
+      expect(backlog.querySelectorAll('.wk-task-claim').length).toBeGreaterThan(0)
+      expect(backlog.querySelectorAll('.wk-task-claim').length).toBeLessThan(100)
+      expect(backlog.textContent).toContain('Backlog task 1')
+    })
+
     it('expands inline task detail for gate evidence and handoff context', () => {
       goals.value = [
         { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

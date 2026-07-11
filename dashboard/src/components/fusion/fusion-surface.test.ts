@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
@@ -15,6 +17,14 @@ import {
 } from '../../store'
 import type { FusionJudgeNode } from '../../lib/fusion-meta'
 import { FusionJudgesStrip, FusionSurface } from './fusion-surface'
+
+describe('Fusion mobile overflow contract', () => {
+  it('wraps backend-owned identifiers and keeps the list refresh compact', () => {
+    const css = readFileSync(resolve(__dirname, '../../styles/fusion-v2.css'), 'utf8')
+    expect(css).toMatch(/\.v2-fusion-surface \.fus-list-refresh\s*\{\s*width:\s*32px;/)
+    expect(css).toMatch(/\.v2-fusion-surface \.fus-run-id-row h1,[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?white-space:\s*normal;/)
+  })
+})
 
 // Mock only the refresh side effects; keep the real signals (fusionBoardLoading /
 // fusionRunsLoading) via ...actual so the component reads live state. The manual
@@ -135,9 +145,12 @@ describe('FusionSurface', () => {
     render(html`<${FusionSurface} />`, container)
 
     expect(container.querySelector('[data-testid="fusion-surface"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="fusion-reality-notice"]')?.textContent)
+    const realityNotice = container.querySelector('[data-testid="fusion-reality-notice"]')
+    expect(realityNotice?.classList.contains('sr-only')).toBe(false)
+    expect(realityNotice?.getAttribute('role')).toBe('status')
+    expect(realityNotice?.textContent)
       .toContain('부분 지원')
-    expect(container.querySelector('[data-testid="fusion-reality-notice"]')?.textContent)
+    expect(realityNotice?.textContent)
       .toContain('fail-closed')
     expect(container.textContent).toContain('fus-1')
     expect(container.textContent).toContain('Which deploy path should we take?')
@@ -746,6 +759,64 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('1 진행')
   })
 
+  it('defaults to board-backed evidence when a newer registry-only run is also present', () => {
+    fusionRuns.value = [{
+      runId: 'fus-running',
+      keeper: 'sangsu',
+      preset: 'balanced',
+      startedAt: 1_790_000_000,
+      status: 'running',
+    }]
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-evidence',
+        created_at: '2026-01-01T00:00:00Z',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-evidence',
+          question: 'Which evidence is actionable?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Board-backed detail.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Use the evidence pane.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="fusion-registry-row"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="fusion-detail"]')?.textContent).toContain('fus-evidence')
+    expect(container.querySelector('[data-testid="fusion-registry-detail"]')).toBeNull()
+  })
+
+  it('does not bypass paging when the default board-backed run follows many registry rows', () => {
+    fusionRuns.value = Array.from({ length: 100 }, (_, index) => ({
+      runId: `registry-${index}`,
+      keeper: 'sangsu',
+      preset: 'balanced',
+      startedAt: 1_900_000_000 - index,
+      status: 'running' as const,
+    }))
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-evidence',
+        created_at: '2026-01-01T00:00:00Z',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-evidence',
+          question: 'Which evidence is actionable?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Board-backed detail.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Use the evidence pane.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelectorAll('.fus-run-row')).toHaveLength(30)
+    expect(container.querySelector('[data-testid="fusion-detail"]')?.textContent).toContain('fus-evidence')
+    expect(container.querySelector('[data-testid="fusion-list-more"]')?.textContent).toContain('71개 남음')
+  })
+
   it('renders preset from registry when board meta does not carry it', () => {
     fusionRuns.value = [
       {
@@ -1080,6 +1151,28 @@ describe('FusionSurface', () => {
       el => el.textContent,
     )
     expect(ids).toEqual(['fus-new', 'fus-old'])
+  })
+
+  it('keeps one newest-first axis instead of heuristically pinning running rows', () => {
+    fusionBoardPosts.value = [
+      minimalFusionPost('fus-new-complete', '2026-06-19T05:00:00Z', '2026-06-19T05:01:00Z'),
+    ]
+    fusionRuns.value = [
+      {
+        runId: 'fus-old-running',
+        keeper: 'sangsu',
+        preset: 'balanced',
+        startedAt: Date.parse('2026-06-19T01:00:00Z') / 1000,
+        status: 'running',
+      },
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const ids = Array.from(container.querySelectorAll('.fus-run-id')).map(
+      element => element.textContent,
+    )
+    expect(ids).toEqual(['fus-new-complete', 'fus-old-running'])
   })
 
   it('pages the master list and reveals more rows on demand (#34)', async () => {

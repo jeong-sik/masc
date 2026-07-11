@@ -1276,7 +1276,15 @@ export function LogViewer() {
         ` : null}
 
         <div class="v2-logs-support">
-          ${renderLogSummary(summary)}
+          <details class="v2-logs-diagnostics" data-testid="logs-signal-summary">
+            <summary>
+              <span>Signal summary</span>
+              <span class="mono">error ${summary.errors} · warn ${summary.warnings}</span>
+            </summary>
+            <div class="v2-logs-diagnostics-body">
+              ${renderLogSummary(summary)}
+            </div>
+          </details>
           ${providerDiagnostics
             ? html`
               <details class="v2-logs-diagnostics" data-testid="logs-provider-diagnostics">

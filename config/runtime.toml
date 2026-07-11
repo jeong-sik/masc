@@ -1179,6 +1179,11 @@ timeout_s = 300.0
 # 같은 모델이 다른 lens로 반복 등장해도 Duplicate_judge가 아니다 (quorum 주석과
 # 동일 계약). judge/meta 경로는 provider-native structured output을 요구하므로
 # 심판 런타임은 전부 supports-structured-output=true 선언 모델만 쓴다.
+# 비용/지연: LLM 호출 12회(panel 3 + 1차 심판 6 + stage meta 2 + 최종 meta 1).
+# 실행은 4단 순차 파이프라인(panel → 1차 심판 병렬 → stage meta 병렬 → 최종
+# meta, fusion_orchestrator run_staged_judge_of_judges)이라 각 단의
+# timeout(300s)이 누적된다 — 동시성 캡이 각 단을 한 웨이브로 소화할 때 최악
+# ~20분. 빠른 종합이 필요하면 단이 짧은 quorum/judge_of_judges 계열을 쓴다.
 # 키퍼 사용: masc_fusion preset="council" topology="staged_judge_of_judges"
 # (judge_of_judges topology도 동일 preset으로 사용 가능 — 6 lens 병렬 후 meta).
 [fusion.presets.council]

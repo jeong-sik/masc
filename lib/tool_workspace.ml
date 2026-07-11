@@ -229,6 +229,7 @@ let todo_task_has_completed_deliverable_conflict (ctx : context) (task : Masc_do
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
   | Masc_domain.AwaitingVerification _
+  | Masc_domain.OperatorBlocked _
   | Masc_domain.Done _
   | Masc_domain.Cancelled _ -> false
 ;;
@@ -420,6 +421,13 @@ let status_summary_string (ctx : context) =
          | Masc_domain.Done _ ->
            active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt + 1, cancelled_cnt
          | Masc_domain.AwaitingVerification _ ->
+           ( task :: active
+           , todo_cnt
+           , claimed_cnt
+           , in_progress_cnt + 1
+           , done_cnt
+           , cancelled_cnt )
+         | Masc_domain.OperatorBlocked _ ->
            ( task :: active
            , todo_cnt
            , claimed_cnt

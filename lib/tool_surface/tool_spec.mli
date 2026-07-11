@@ -48,6 +48,7 @@ type t = {
   title : string option;
   effect_domain : Tool_catalog.effect_domain option;
   requires_actor_binding : bool option;
+  required_permission : Masc_domain.permission option;
 }
 
 (** {1 Builder} *)
@@ -71,6 +72,7 @@ val create :
   ?title:string ->
   ?effect_domain:Tool_catalog.effect_domain ->
   ?requires_actor_binding:bool ->
+  ?required_permission:Masc_domain.permission ->
   unit -> t
 (** Build a tool spec. The first five arguments are required (compile error
     if omitted). All optional arguments default to fail-closed values:

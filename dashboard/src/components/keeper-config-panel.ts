@@ -1862,6 +1862,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         deny,
       })
       applyKeeperConfigUpdate(keeperName, updated)
+      // Mirror saveRuntimeConfig: refresh shell + execution surfaces so the
+      // dashboard reflects the persisted tool policy without a manual reload.
+      void refreshKeeperRuntimeStatus().catch(err => {
+        const message = err instanceof Error ? err.message : '런타임 상태 새로고침 실패'
+        showToast(message, 'warning')
+      })
       toolAccessDraftText.value = null
       denylistDraftText.value = null
       showToast('도구 정책 저장 완료', 'success')
@@ -1898,6 +1904,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
       applyKeeperConfigUpdate(keeperName, updated)
+      // Mirror saveRuntimeConfig: refresh shell + execution surfaces so the
+      // dashboard reflects the persisted prompt without a manual reload.
+      void refreshKeeperRuntimeStatus().catch(err => {
+        const message = err instanceof Error ? err.message : '런타임 상태 새로고침 실패'
+        showToast(message, 'warning')
+      })
       editMode.value = false
       editDraft.value = null
       lastSavedAt.value = new Date().toISOString()

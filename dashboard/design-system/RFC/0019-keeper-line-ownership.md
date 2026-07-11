@@ -35,7 +35,7 @@ Without RFC 0019 every consumer (editor blame strip, refactor attribution, audit
 ```ts
 // src/components/ide/keeper-line-ownership-store.ts
 
-import type { Accessor } from 'solid-js'
+import type { ReadonlySignal } from '@preact/signals'
 
 export interface KeeperEdit {
   readonly file_path: string
@@ -54,20 +54,21 @@ export interface LineOwnership {
 }
 
 export interface KeeperLineOwnershipStore {
-  readonly ownership: Accessor<ReadonlyMap<number, LineOwnership>>
+  readonly ownership: ReadonlySignal<ReadonlyMap<number, LineOwnership>>
   readonly eventsForLine: (line: number) => ReadonlyArray<KeeperEdit>
-  readonly knownKeepers: Accessor<ReadonlyArray<string>>
+  readonly knownKeepers: ReadonlySignal<ReadonlyArray<string>>
   readonly ingest: (event: KeeperEdit) => void
   readonly reset: (filePath: string) => void
   readonly dispose: () => void
 }
 
 export function createKeeperLineOwnership(
-  filePath: Accessor<string>,
+  filePath: ReadonlySignal<string>,
 ): KeeperLineOwnershipStore
 ```
 
-The store is signal-based (`@preact/signals` for the Preact half; `solid-js` `createSignal` for the Solid half — both are surface adapters over the same accumulator). The accumulator itself is framework-agnostic and lives in `headless-core/keeper-line-ownership.ts`.
+The store uses `@preact/signals`; its accumulator remains framework-agnostic in
+`headless-core/keeper-line-ownership.ts`.
 
 ## 4. Hue assignment
 
@@ -89,7 +90,7 @@ The 12-slot palette is `--color-keeper-1-glow` … `--color-keeper-12-glow` (sem
 
 ## 6. Migration & rollout
 
-- Phase A (this RFC): land the headless accumulator + Solid adapter + 1 unit test.
+- Phase A (this RFC): land the headless accumulator + Preact adapter + 1 unit test.
 - Phase B (PR-5): wire the editor blame strip to the store.
 - Phase C: extend the store with an audit-export selector for the audit ledger (separate RFC).
 

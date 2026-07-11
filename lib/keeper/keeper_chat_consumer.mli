@@ -12,10 +12,11 @@
 (** A typed outcome from the whole queued-turn delivery boundary. Connector
     adapters must be joined before returning [Delivered]; a persisted failure,
     missing connector, or outbound error returns [Failed]. [Delivered]'s
-    [outcome_ref] is required and must be a canonical [Ids.Turn_ref] string;
-    the consumer fails closed as [Internal_error] if that invariant is broken. *)
+    [outcome_ref] is a required [Ids.Turn_ref.t], so absent and raw-string
+    success evidence is not representable at the write boundary; the queue
+    validates its canonical wire form before persistence. *)
 type turn_outcome =
-  | Delivered of { outcome_ref : string }
+  | Delivered of { outcome_ref : Ids.Turn_ref.t }
   | Failed of
       { kind : Keeper_chat_queue.failure_kind
       ; detail : string

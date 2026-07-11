@@ -388,7 +388,10 @@ let keeper_chat_consumer_outcome ~turn_outcome ~delivery_outcome =
   | Some (Server_routes_http_keeper_stream.Delivered { outcome_ref }),
     Error (kind, detail) ->
     Keeper_chat_consumer.Failed
-      { kind; detail; outcome_ref = Some outcome_ref }
+      { kind
+      ; detail
+      ; outcome_ref = Some (Ids.Turn_ref.to_string outcome_ref)
+      }
   | Some
       (Server_routes_http_keeper_stream.Failed
          { kind = Server_routes_http_keeper_stream.Turn_cancelled
@@ -696,10 +699,10 @@ let start_keeper_chat_queue
             match
               process_single_turn ~connector_user_line_recorded_upstream
                 ~queued_turn:true ~queued_user_messages
-                ~queued_assistant_context ~state ~clock ~sw ~auth_token:None
+                ~queued_assistant_context ~state ~clock ~auth_token:None
                 ~thread_id ~continuation_channel ~closed
                 ~client_disconnects:None ~payload ~run_id ~message_id
-                ~agent_name ~events
+                ~agent_name ~submitted_by:agent_name ~events
             with
             | outcome -> outcome
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

@@ -26,6 +26,8 @@ let check name cond =
 let contains ~affix text = Astring.String.is_infix ~affix text
 
 let keeper_name = "busy-connector-keeper"
+let turn_ref trace_id absolute_turn =
+  Ids.Turn_ref.make ~trace_id ~absolute_turn
 
 (* Hold the keeper's admission slot busy in a forked fiber (the proven pattern
    from test_keeper_turn_admission): the body resolves [started] then blocks on
@@ -189,7 +191,9 @@ let test_busy_discord_enqueues () =
                   ~lease_id:lease.lease_id
                   ~outcome:
                     (Keeper_chat_queue.Mark_delivered
-                       { completed_at = Time_compat.now (); outcome_ref = None })
+                       { completed_at = Time_compat.now ()
+                       ; outcome_ref = turn_ref "busy-connector" 1
+                       })
               with
               | `Finalized receipt_ids ->
                   check "finalize records the delivered receipt"

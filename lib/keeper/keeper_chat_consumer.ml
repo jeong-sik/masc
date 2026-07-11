@@ -7,7 +7,7 @@ let poll_interval_sec =
   | None -> 1.0
 
 type turn_outcome =
-  | Delivered of { outcome_ref : string }
+  | Delivered of { outcome_ref : Ids.Turn_ref.t }
   | Failed of
       { kind : Keeper_chat_queue.failure_kind
       ; detail : string
@@ -212,17 +212,8 @@ let canonical_failure_detail detail =
   else detail
 
 let finalization_of_delivered ~clock ~outcome_ref =
-  match canonical_turn_ref_string outcome_ref with
-  | Some outcome_ref ->
-    Keeper_chat_queue.Mark_delivered
-      { completed_at = Eio.Time.now clock; outcome_ref = Some outcome_ref }
-  | None ->
-    Keeper_chat_queue.Mark_failed
-      { completed_at = Eio.Time.now clock
-      ; kind = Keeper_chat_queue.Internal_error
-      ; detail = "queued turn claimed delivery with an invalid turn_ref"
-      ; outcome_ref = None
-      }
+  Keeper_chat_queue.Mark_delivered
+    { completed_at = Eio.Time.now clock; outcome_ref }
 
 let finalization_of_failed ~clock ~kind ~detail ~outcome_ref =
   let outcome_ref, invalid_outcome_ref =

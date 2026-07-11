@@ -12,6 +12,9 @@ let check name condition =
     Printf.printf "  ✗ %s\n%!" name
   end
 
+let turn_ref trace_id absolute_turn =
+  Ids.Turn_ref.make ~trace_id ~absolute_turn
+
 let temp_dir prefix = Filename.temp_dir prefix ""
 
 let rec rm_rf path =
@@ -193,7 +196,7 @@ let test_durable_receipt_lifecycle () =
      Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
        ~outcome:
          (Keeper_chat_queue.Mark_delivered
-            { completed_at = 3.0; outcome_ref = Some "chat-row-1" })
+            { completed_at = 3.0; outcome_ref = turn_ref "chat-row" 1 })
    with
    | `Finalized receipt_ids ->
      check
@@ -204,7 +207,7 @@ let test_durable_receipt_lifecycle () =
   check "terminal receipt leaves active queue" (terminal.pending = [] && terminal.inflight = []);
   check "terminal receipt remains queryable" (terminal_ids terminal.terminal = [ receipt_id ]);
   (match terminal.terminal with
-   | [ { state = Delivered { outcome_ref = Some "chat-row-1"; _ }; _ } ] ->
+   | [ { state = Delivered { outcome_ref = Some "chat-row#1"; _ }; _ } ] ->
      check "delivered outcome ref is durable" true
    | _ -> check "delivered outcome ref is durable" false);
   (match
@@ -309,7 +312,8 @@ let test_source_boundaries_preserve_fifo_runs () =
     ignore
       (Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
          ~outcome:
-           (Mark_delivered { completed_at = 4.0; outcome_ref = None }))
+           (Mark_delivered
+              { completed_at = 4.0; outcome_ref = turn_ref "source-run" 1 }))
   in
   take [ "dashboard-1"; "dashboard-2" ];
   take [ "discord" ];
@@ -381,7 +385,9 @@ let test_persist_failures_roll_back () =
   Keeper_chat_queue.For_testing.fail_next_persist ();
   (match
      Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
-       ~outcome:(Mark_delivered { completed_at = 5.0; outcome_ref = None })
+       ~outcome:
+         (Mark_delivered
+            { completed_at = 5.0; outcome_ref = turn_ref "rollback" 1 })
    with
    | `Error (Persist_failed _) -> check "failed finalize is typed" true
    | `Finalized _ | `Unknown_lease | `Error _ -> check "failed finalize is typed" false);
@@ -974,7 +980,9 @@ let test_post_commit_observer_is_central_and_unlocked () =
   let second = lease_exn ~keeper_name in
   ignore
     (Keeper_chat_queue.finalize ~keeper_name ~lease_id:second.lease_id
-       ~outcome:(Mark_delivered { completed_at = 6.0; outcome_ref = None }));
+       ~outcome:
+         (Mark_delivered
+            { completed_at = 6.0; outcome_ref = turn_ref "observer" 1 }));
   check
     "observer sees enqueue, lease, nack, lease, finalize exactly once"
     (List.rev !revisions = [ 1L; 2L; 3L; 4L; 5L ])

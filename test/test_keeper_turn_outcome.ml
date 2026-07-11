@@ -232,8 +232,9 @@ let test_queued_delivery_requires_exact_turn_ref () =
     |> Stream.For_testing.queued_delivery_outcome_of_turn_ref
   with
   | Stream.Delivered { outcome_ref } ->
-      check string "valid turn_ref is preserved exactly"
-        "trace-queued#42" outcome_ref
+      check turn_ref_t "valid turn_ref is preserved exactly"
+        (Ids.Turn_ref.make ~trace_id:"trace-queued" ~absolute_turn:42)
+        outcome_ref
   | Stream.Failed _ | Stream.Deferred _ ->
     fail "valid turn_ref must produce Delivered"
 

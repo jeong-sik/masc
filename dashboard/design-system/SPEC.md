@@ -191,6 +191,11 @@ bonsai의 timeline view 전용. dashboard에서 timeline 도입 시 동일 vocab
 area가 줄어들면 안 되므로 `--row-h-tall`이나 `--ctrl-h-*`를 대신 사용하지 않는다.
 `--sp-8`은 v2 skin의 compact spacing scale과 이름이 겹쳐 live cascade에서 `20px`로
 재정의되므로 backing raw로 사용하지 않는다.
+Mobile scope의 runtime SSOT는 `DEFAULT_MOBILE_BREAKPOINT`가 부여하는
+`.v2-app[data-mobile="1"]`이다. surface별 `max-width: 640px` 같은 phone-only
+breakpoint는 이 contract를 대신할 수 없다. button/input/select/summary 같은
+일반 control은 이 runtime scope에서 공통 contract를 상속하고, 독립 anchor나
+label wrapper는 semantic class로 명시한다.
 컴포넌트는 보이는 control에 `min-width`/`min-height`로 적용하고, 작은 checkbox처럼
 실제 input이 더 작아야 하는 경우에는 클릭 가능한 `label` wrapper의 `width`/`height`에
 적용한다. button이 아닌 wrapper도 touch target이면 `touch-action: manipulation`을

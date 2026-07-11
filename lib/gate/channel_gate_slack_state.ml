@@ -147,7 +147,7 @@ let status_json ?(audit_limit = 10) () =
   let configured_binding_json = List.map binding_json configured_bindings in
   `Assoc
     [ ("channel", `String channel)
-    ; ("capabilities", `List [ `String "runtime_status"; `String "bindings"; `String "audit" ])
+    ; ("capabilities", Channel_gate_connector_capability.all_json)
     ; ("available", `Bool available)
     ; ("connected", `Bool connected)
     ; ("stale", `Bool stale)

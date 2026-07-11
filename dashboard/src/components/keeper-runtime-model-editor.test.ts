@@ -9,6 +9,7 @@ const refs = vi.hoisted(() => ({
   config: null as unknown,
   status: 'loaded' as string,
   providers: vi.fn(),
+  resolved: vi.fn(),
   load: vi.fn(),
   // Spy for the deep-link tab focus. The card is read-only; it no longer writes
   // runtime_id — it only opens the config modal pre-focused on the 런타임 tab.
@@ -21,6 +22,7 @@ const refs = vi.hoisted(() => ({
 vi.mock('../api/dashboard', () => ({
   patchKeeperConfig: vi.fn(),
   fetchRuntimeProviders: refs.providers,
+  fetchRuntimeResolved: refs.resolved,
   fetchKeeperConfig: vi.fn(),
   fetchDashboardGoalsTree: vi.fn(),
 }))
@@ -42,6 +44,8 @@ vi.mock('./keeper-config-panel', async () => {
 vi.mock('./common/toast', () => ({ showToast: vi.fn() }))
 
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
+import { resetRuntimeResolved } from '../lib/runtime-resolved-resource'
+import type { RuntimeResolvedResponse } from '../api/dashboard'
 import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 
 async function flush() {
@@ -269,6 +273,22 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
   }
 }
 
+// Minimal RuntimeResolvedResponse fixture — only [assignments] drives the
+// badge under test here; the other fields are exercised by
+// runtime-resolved.ts's own schema tests.
+function makeRuntimeResolved(
+  overrides: Partial<RuntimeResolvedResponse> = {},
+): RuntimeResolvedResponse {
+  return {
+    config_path: '/cfg/runtime.toml',
+    default_runtime: null,
+    runtimes: [],
+    lanes: [],
+    assignments: [],
+    ...overrides,
+  }
+}
+
 describe('KeeperRuntimeModelEditor (read-only card)', () => {
   let container: HTMLDivElement
 
@@ -285,6 +305,9 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
         makeRuntimeProvider('b.two', 'Provider B', 'model-b'),
       ],
     })
+    refs.resolved.mockReset()
+    refs.resolved.mockResolvedValue(makeRuntimeResolved())
+    resetRuntimeResolved()
     refs.load.mockReset()
     refs.focusTab.mockReset()
   })
@@ -293,6 +316,7 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     render(null, container)
     container.remove()
     resetRuntimeCatalog()
+    resetRuntimeResolved()
   })
 
   it('renders the current runtime + catalog summary read-only, with no editable <select>', async () => {
@@ -441,5 +465,59 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     render(html`<${KeeperRuntimeModelEditor} keeperName="loading-keeper" />`, container)
     await flush()
     expect(container.textContent).toContain('불러오는 중')
+  })
+
+  // The settings→routing "Keeper assignments" panel used to be the only place
+  // showing whether a keeper's runtime came from an explicit
+  // [runtime.assignments] entry or the [runtime].default rider. Deleting that
+  // panel must not lose the fact — this card now surfaces it via
+  // GET /api/v1/runtime/resolved (assignments), read-only.
+  it('shows an explicit assignment_source badge for a keeper with a [runtime.assignments] entry', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    refs.resolved.mockResolvedValue(makeRuntimeResolved({
+      assignments: [
+        { keeper: 'explicit-keeper', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'a.one' } },
+      ],
+    }))
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="explicit-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    const badge = container.querySelector('[data-testid="keeper-runtime-assignment-source"]')
+    expect(badge?.textContent?.trim()).toBe('explicit')
+  })
+
+  it('shows a default assignment_source badge for a keeper riding [runtime].default with no explicit entry', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    refs.resolved.mockResolvedValue(makeRuntimeResolved({
+      assignments: [
+        { keeper: 'default-rider', assignment_source: 'default', resolved: { kind: 'single_runtime', id: 'a.one' } },
+      ],
+    }))
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="default-rider" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    const badge = container.querySelector('[data-testid="keeper-runtime-assignment-source"]')
+    expect(badge?.textContent?.trim()).toBe('default')
+  })
+
+  it('renders no assignment_source badge when the resolved endpoint has no entry for this keeper', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    refs.resolved.mockResolvedValue(makeRuntimeResolved({ assignments: [] }))
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="unlisted-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    expect(container.querySelector('[data-testid="keeper-runtime-assignment-source"]')).toBeNull()
   })
 })

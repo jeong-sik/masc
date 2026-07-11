@@ -17,7 +17,6 @@ type resolved =
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; keeper_assignments : (string * string) list
   ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
   ; hitl_summary_runtime_id : string option

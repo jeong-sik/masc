@@ -166,7 +166,6 @@ function makeRuntimeDefaults(
       { id: 'rt-c', provider: 'P', model: 'm3', max_context: 128000, is_default: false },
     ],
     model_routing: {
-      keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
       librarian_runtime_id: null,
       structured_judge_runtime_id: null,
       hitl_summary_runtime_id: null,
@@ -1250,11 +1249,10 @@ describe('SettingsSurface', () => {
     expect(container.querySelectorAll('[data-testid="runtime-catalog-card"]').length).toBe(0)
   })
 
-  it('routing section shows resolved model routing controls and keeper assignments', async () => {
+  it('routing section shows resolved model routing controls', async () => {
     stubRuntimeDefaults(
       makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: 'rt-b',
           structured_judge_runtime_id: 'rt-c',
           hitl_summary_runtime_id: 'rt-a',
@@ -1263,13 +1261,7 @@ describe('SettingsSurface', () => {
         },
       }),
     )
-    stubRuntimeResolved(
-      makeRuntimeResolved({
-        assignments: [
-          { keeper: 'analyst', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'rt-b' } },
-        ],
-      }),
-    )
+    stubRuntimeResolved(makeRuntimeResolved())
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
@@ -1290,10 +1282,6 @@ describe('SettingsSurface', () => {
         .toBe('rt-a')
       expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
-      const assignments = Array.from(
-        container.querySelectorAll('[data-testid="routing-assignment"]'),
-      ).map(n => n.textContent)
-      expect(assignments).toEqual(['rt-b'])
     })
   })
 
@@ -1303,7 +1291,6 @@ describe('SettingsSurface', () => {
       .mockResolvedValueOnce(makeRuntimeDefaults())
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: 'rt-b',
           structured_judge_runtime_id: null,
           hitl_summary_runtime_id: null,
@@ -1339,7 +1326,6 @@ describe('SettingsSurface', () => {
       .mockResolvedValueOnce(makeRuntimeDefaults())
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           hitl_summary_runtime_id: 'rt-c',
@@ -1424,7 +1410,6 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeDefaults
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           hitl_summary_runtime_id: null,
@@ -1434,7 +1419,6 @@ describe('SettingsSurface', () => {
       }))
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           hitl_summary_runtime_id: null,
@@ -1467,42 +1451,13 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeResolved.mockRejectedValue(new Error('resolved runtime unavailable'))
     render(html`<${SettingsSurface} />`, container)
 
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="routing-assignments-error"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-resolved-error"]')).not.toBeNull()
     })
-    expect(container.querySelector('[data-testid="routing-assignments-empty"]')).toBeNull()
-    expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
-    expect(container.querySelector('[data-testid="runtime-resolved-error"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="runtime-default-model"]')?.textContent).toBe('—')
     expect(container.querySelector('[data-testid="runtime-default-context"]')?.textContent).toBe('ctx 미수집')
-  })
-
-  it('routing section shows a keeper riding [runtime].default with no explicit assignment (bug #14)', async () => {
-    stubRuntimeResolved(
-      makeRuntimeResolved({
-        assignments: [
-          { keeper: 'analyst', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'rt-b' } },
-          { keeper: 'unassigned-keeper', assignment_source: 'default', resolved: { kind: 'single_runtime', id: 'rt-a' } },
-        ],
-      }),
-    )
-    render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
-
-    await waitFor(() => {
-      const sources = Array.from(
-        container.querySelectorAll('[data-testid="routing-assignment-source"]'),
-      ).map(n => n.textContent)
-      expect(sources).toEqual(['explicit', 'default'])
-      const targets = Array.from(
-        container.querySelectorAll('[data-testid="routing-assignment"]'),
-      ).map(n => n.textContent)
-      expect(targets).toEqual(['rt-b', 'rt-a'])
-    })
   })
 
   it('renders prompt settings from the live prompt registry instead of prototype placeholders', async () => {

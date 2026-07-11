@@ -401,7 +401,6 @@
   min-width: 0;
 }
 
-.settings-runtime-routing,
 .set-route-summary {
   display: grid;
   gap: 8px;
@@ -416,8 +415,7 @@
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
-.set-route-summary > span,
-.set-routing-row {
+.set-route-summary > span {
   align-items: center;
   background: var(--bg-card);
   border: 1px solid var(--border-soft);
@@ -426,15 +424,6 @@
   gap: 8px;
   min-width: 0;
   padding: 8px 10px;
-}
-
-.set-routing-row {
-  justify-content: space-between;
-}
-
-.set-routing-arrow {
-  color: var(--text-dim);
-  flex: none;
 }
 
 .set-runtime-route-select {

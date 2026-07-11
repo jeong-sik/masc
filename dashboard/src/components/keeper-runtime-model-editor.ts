@@ -34,6 +34,10 @@ import {
   runtimeCatalogState,
 } from '../lib/runtime-catalog-resource'
 import {
+  loadRuntimeResolved,
+  runtimeResolvedState,
+} from '../lib/runtime-resolved-resource'
+import {
   runtimeCatalogDeclaredSpec,
   runtimeCatalogEffectiveCapabilities,
   runtimeCatalogParameterPolicy,
@@ -158,6 +162,26 @@ function EditorHeader() {
   `
 }
 
+// assignment_source distinguishes an explicit [runtime.assignments] entry from
+// a keeper riding [runtime].default with no entry of its own — the one fact
+// the deleted settings→routing fleet panel showed that this per-keeper card
+// did not. Sourced from GET /api/v1/runtime/resolved (read-only; no new write
+// path, no string matching — the resolved endpoint already types this as a
+// closed 'explicit' | 'default' union).
+function AssignmentSourceBadge({ source }: { source: 'explicit' | 'default' }) {
+  const tone = source === 'explicit'
+    ? 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
+    : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'
+  return html`
+    <span
+      class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${tone}"
+      data-testid="keeper-runtime-assignment-source"
+    >
+      ${source}
+    </span>
+  `
+}
+
 export function KeeperRuntimeModelEditor({
   keeperName,
   onOpenRuntimeConfig,
@@ -190,6 +214,16 @@ export function KeeperRuntimeModelEditor({
   const catalog = catalogState.status === 'loaded' ? catalogState.data : []
   const runtimeEntry = findRuntimeCatalogEntry(catalog, current)
 
+  loadRuntimeResolved()
+  const resolvedState = runtimeResolvedState.value
+  const assignment =
+    resolvedState.status === 'loaded'
+      ? (resolvedState.data.assignments.find(a => a.keeper === keeperName) ?? null)
+      : null
+  const assignmentBadge = assignment
+    ? html`<${AssignmentSourceBadge} source=${assignment.assignment_source} />`
+    : null
+
   const canonicalRow =
     canonical && canonical !== current
       ? html`<div class="text-2xs text-[var(--color-fg-muted)]">정규화: ${canonical}</div>`
@@ -205,7 +239,10 @@ export function KeeperRuntimeModelEditor({
     return html`
       <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--color-border-default)]/60 bg-[var(--color-bg-surface)]/35 px-4 py-3">
         <${EditorHeader} />
-        <div class="text-sm font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</div>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="text-sm font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</div>
+          ${assignmentBadge}
+        </div>
         ${canonicalRow}
         ${summary}
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-status-warn)]">
@@ -222,7 +259,10 @@ export function KeeperRuntimeModelEditor({
   return html`
     <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-4 py-3">
       <${EditorHeader} />
-      <div class="text-2xs text-[var(--color-fg-muted)]">현재 <span class="font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</span></div>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="text-2xs text-[var(--color-fg-muted)]">현재 <span class="font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</span></div>
+        ${assignmentBadge}
+      </div>
       ${canonicalRow}
       ${summary}
       ${onOpenRuntimeConfig

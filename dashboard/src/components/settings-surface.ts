@@ -1258,13 +1258,7 @@ export function SettingsSurface() {
   const runtimeCatalogEntries = runtimeProviders?.providers ?? []
   const runtimeConfigPath = runtimeResolved?.config_path ?? null
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
-  // bug #14: the full keeper fleet joined against [runtime.assignments],
-  // including keepers riding [runtime].default with no explicit entry
-  // (assignment_source: "explicit" | "default") — not an assignments-only
-  // listing.
-  const keeperAssignments = runtimeResolved?.assignments ?? []
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
-  const keeperAssignmentCount = keeperAssignments.length
   const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
   const structuredJudgeRuntime = runtimeDefaults?.model_routing.structured_judge_runtime_id ?? null
   const hitlSummaryRuntime = runtimeDefaults?.model_routing.hitl_summary_runtime_id ?? null
@@ -1428,10 +1422,6 @@ export function SettingsSurface() {
                       <span class="v mono">${runtimeCatalogEntries.length}</span>
                       <span class="k">catalog entries</span>
                     </div>
-                    <div class="set-rt-launch-stat">
-                      <span class="v mono">${keeperAssignmentCount}</span>
-                      <span class="k">keeper assignments</span>
-                    </div>
                   </div>
                   ${runtimeSelectOptions.length > 0
                     ? html`
@@ -1569,29 +1559,6 @@ export function SettingsSurface() {
                       : runtimeRoutingMessage
                         ? html`<div class=${runtimeRoutingStatus === 'error' ? 'set-err' : 'set-ok'} data-testid="runtime-routing-message">${runtimeRoutingMessage}</div>`
                         : null}
-                  </div>
-                </div>
-
-                <div class="settings-runtime-section" data-runtime-section="assignments" data-testid="runtime-assignments-section">
-                  <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
-                  ${runtimeResolvedStatus === 'loading'
-                    ? html`<div class="set-hint" data-testid="routing-assignments-loading">resolved assignments 불러오는 중...</div>`
-                    : runtimeResolvedStatus === 'error'
-                      ? html`<div class="set-hint" data-testid="routing-assignments-error">resolved assignments를 불러오지 못했습니다.</div>`
-                      : keeperAssignments.length === 0
-                        ? html`<div class="set-hint" data-testid="routing-assignments-empty">등록된 keeper assignment가 없습니다.</div>`
-                        : html`<div class="settings-runtime-routing" data-testid="routing-assignments-list">
-                      ${keeperAssignments.map(a => html`
-                        <div class="set-routing-row" key=${a.keeper}>
-                          <span class="mono">${a.keeper}</span>
-                          <span class="set-hint" data-testid="routing-assignment-source">${a.assignment_source}</span>
-                          <span class="set-routing-arrow">→</span>
-                          <span class="mono" data-testid="routing-assignment">${a.resolved.id ?? '—'}</span>
-                        </div>
-                      `)}
-                    </div>`}
-                  <div class="set-hint" style=${{ marginTop: '8px' }}>
-                    키퍼별 고정 배정(<span class="mono">[runtime.assignments]</span>) 편집은 런타임 관리에서.
                   </div>
                 </div>
               </div>

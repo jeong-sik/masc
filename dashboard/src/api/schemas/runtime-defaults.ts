@@ -29,13 +29,7 @@ const RuntimeEntrySchema = object({
   is_default: boolean(),
 })
 
-const KeeperAssignmentSchema = object({
-  keeper: string(),
-  runtime_id: string(),
-})
-
 const ModelRoutingSchema = object({
-  keeper_assignments: array(KeeperAssignmentSchema),
   librarian_runtime_id: nullable(string()),
   structured_judge_runtime_id: nullable(string()),
   hitl_summary_runtime_id: optional(nullable(string())),
@@ -56,7 +50,6 @@ const RuntimeDefaultsResponseSchema = object({
 })
 
 export type RuntimeEntry = InferOutput<typeof RuntimeEntrySchema>
-export type KeeperAssignment = InferOutput<typeof KeeperAssignmentSchema>
 export type ModelRouting = InferOutput<typeof ModelRoutingSchema>
 export type RuntimeDefaultsResponse = InferOutput<typeof RuntimeDefaultsResponseSchema>
 

@@ -17,6 +17,9 @@ module Receipt_id = struct
   type t = string
 
   let prefix = "chatq_"
+  (* Random UUID bits are an opaque durable identity salt. They are persisted
+     before acceptance and never choose lifecycle policy or control flow. *)
+  (* NDT-OK: identity entropy only; never a lifecycle decision input. *)
   let rng = Random.State.make_self_init ()
   let rng_mutex = Stdlib.Mutex.create ()
 

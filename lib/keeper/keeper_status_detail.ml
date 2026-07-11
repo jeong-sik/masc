@@ -256,9 +256,14 @@ let observe_chat_queue ~keeper_name =
 
 let chat_queue_load_error_fingerprint
     (error : Keeper_chat_queue.snapshot_load_error) =
+  let path =
+    match error.path with
+    | Some path -> path
+    | None -> "<no-path>"
+  in
   String.concat ":"
     [ Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind
-    ; Option.value error.path ~default:""
+    ; path
     ; error.message
     ]
 

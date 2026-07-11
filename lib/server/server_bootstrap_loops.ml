@@ -1133,9 +1133,14 @@ let start_keeper_loops
          let queue_report = Keeper_chat_queue.configure_persistence ~base_path in
          List.iter
            (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
+              let keeper_label =
+                match keeper_name with
+                | Some keeper_name -> keeper_name
+                | None -> "<registry>"
+              in
               Log.Keeper.error
                 "keeper_chat_queue: snapshot unavailable keeper=%s: %s"
-                (Option.value keeper_name ~default:"<registry>")
+                keeper_label
                 error.Keeper_chat_queue.message)
            queue_report.load_errors;
          Keeper_chat_consumer.start ~sw ~clock
@@ -1312,7 +1317,7 @@ let start_keeper_loops
                    Keeper_chat_events.publish events
                      (Keeper_chat_events.Event_error
                         { message = Printexc.to_string exn });
-                   ignore (Eio.Promise.await delivery);
+                   let _delivery_outcome = Eio.Promise.await delivery in
                    raise exn
              in
              let delivery_outcome = Eio.Promise.await delivery in

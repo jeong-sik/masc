@@ -49,15 +49,41 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> In_channel.input_all ic)
 
-let assert_contains ~label haystack needle =
+(* Collapse every run of ASCII whitespace to a single space so anchor
+   phrases match regardless of ocamlformat line-wrapping. The guard still
+   requires the phrase to be present; only intra-phrase line breaks are
+   tolerated. Introduced after #24148 re-indented make_extended_handler's
+   catch-all, wrapping the "Re-raise cancellation ..." comment across two
+   lines and breaking the single-line M2 substring. *)
+let normalize_ws s =
+  let buf = Buffer.create (String.length s) in
+  let pending_space = ref false in
+  String.iter
+    (fun c ->
+      match c with
+      | ' ' | '\t' | '\n' | '\r' -> pending_space := true
+      | _ ->
+          if !pending_space && Buffer.length buf > 0 then Buffer.add_char buf ' ';
+          pending_space := false;
+          Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+
+let substring_present ~haystack ~needle =
+  let haystack = normalize_ws haystack in
+  let needle = normalize_ws needle in
   let n = String.length needle in
   let h = String.length haystack in
   let rec scan i =
-    if i + n > h then false
+    if n = 0 then true
+    else if i + n > h then false
     else if String.sub haystack i n = needle then true
     else scan (i + 1)
   in
-  if not (scan 0) then
+  scan 0
+
+let assert_contains ~label haystack needle =
+  if not (substring_present ~haystack ~needle) then
     failwith
       (Printf.sprintf
          "[%s] expected source to contain %S — reqd invalid state \
@@ -65,14 +91,7 @@ let assert_contains ~label haystack needle =
          label needle)
 
 let assert_not_contains ~label haystack needle =
-  let n = String.length needle in
-  let h = String.length haystack in
-  let rec scan i =
-    if i + n > h then false
-    else if String.sub haystack i n = needle then true
-    else scan (i + 1)
-  in
-  if scan 0 then
+  if substring_present ~haystack ~needle then
     failwith
       (Printf.sprintf "[%s] source must not contain fail-open marker %S" label needle)
 

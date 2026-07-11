@@ -13,6 +13,38 @@ type decision =
    RFC-0311 §5 typed rejection reasons are a later phase. *)
 let rule_id_evidence_incomplete = "cdal_evidence_incomplete"
 
+(* Gate 0: Require evidence_refs for all code task completions.
+   Code task completions (PRs, commits, file changes) must include at least
+   one validated evidence_ref. Non-code completions (coordination, routing,
+   status updates) do not require evidence_refs. *)
+let rule_id_gate_0_code_completion = "gate_0_code_completion_requires_evidence"
+
+let reason_gate_0_code_completion =
+  "Code task completion requires at least one trusted evidence reference. \
+   Attach an existing base-path artifact file, a commit hash that exists in \
+   the local git repo, or a trace/turn/receipt ref under the .masc artifact store."
+
+(* Gate 0: detect whether a task completion involves code changes.
+   Returns true for PRs, commits, file edits; false for routing, coordination,
+   status updates. Heuristic: check task_opt fields and notes keywords. *)
+let is_code_task_completion ~task_opt ~notes =
+  let has_code_keywords =
+    let keywords = [ "PR #"; "commit"; "merge"; "pushed"; "file change"; "diff" ] in
+    List.exists (fun kw ->
+      try Str.search_forward (Str.regexp_string (String.lowercase_ascii kw)) (String.lowercase_ascii notes) 0 >= 0
+      with Not_found -> false
+    ) keywords
+  in
+  match task_opt with
+  | None -> has_code_keywords
+  | Some t ->
+    (* If task has a contract with code-related fields, treat as code completion *)
+    let has_contract_code = match t.contract with
+      | None -> false
+      | Some _ -> has_code_keywords
+    in
+    has_code_keywords || has_contract_code
+
 (* Payload token naming the one thing every rejected completion is missing: a
    trusted, reviewer-inspectable reference on handoff_context.evidence_refs.
    Tests assert this literal in the reject payload. *)
@@ -270,14 +302,15 @@ let decide ~base_path ~task_id ~task_opt ~notes ~handoff_context () =
         task_id (String.length (String.trim notes)) handoff_refs_count;
       Pass
     end
-    else begin
+    else if is_code_task_completion ~task_opt ~notes
+    then begin
       Log.Task.warn
         "task_completion_gate REJECT task=%s notes_len=%d handoff_refs=%d rule=%s"
         task_id (String.length (String.trim notes)) handoff_refs_count
-        rule_id_evidence_incomplete;
+        rule_id_gate_0_code_completion;
       Reject
-        { reason = reason_evidence_incomplete
-        ; rule_id = rule_id_evidence_incomplete
+        { reason = reason_gate_0_code_completion
+        ; rule_id = rule_id_gate_0_code_completion
         ; hint = hint_evidence_incomplete
         ; payload_json =
             reject_payload ~task_id

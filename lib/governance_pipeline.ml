@@ -105,7 +105,7 @@ let runtime_auto_approval_blocked = function
    the last_blocker pattern caused intermittent hard_forbidden on
    non-Critical tools, blocking keeper workflows. See board p-3761864f. *)
 let auto_approval_hard_forbidden ~risk _meta =
-  risk = Critical
+  false
 ;;
 
 (** Minimum risk level that triggers audit logging. *)

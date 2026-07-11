@@ -2047,11 +2047,45 @@ export function SchDetail({
               queueEvidence=${request.keeper_queue_evidence ?? null}
               reactionEvidence=${request.keeper_reaction_evidence ?? null}
             />
+            <${SchExecutionHistory}
+              executions=${request.executions ?? []}
+              limitReached=${request.execution_history_limit_reached ?? false}
+            />
           </div>
 
           <${SchDetailActions} request=${request} onResolved=${onResolved} onClose=${onClose} />
         </div>
       </div>
+    </div>
+  `
+}
+
+/** Execution history beyond the latest attempt (feature-map gap #48: the
+ *  store keeps every execution record but only last_execution projected, so
+ *  repeated failures/successes had no dashboard trail). Row [0] duplicates
+ *  the SchExecution block above, so the list starts at the second-newest. */
+function SchExecutionHistory({
+  executions,
+  limitReached,
+}: {
+  executions: DashboardScheduledAutomationExecution[]
+  limitReached: boolean
+}) {
+  const history = executions.slice(1)
+  if (history.length === 0) return null
+  return html`
+    <div class="sch-kvs" data-schedule-execution-history>
+      ${history.map(row => html`
+        <div class="sch-kv" data-execution-history-row=${row.execution_id}>
+          <span class="k mono">${formatDateTimeKo(row.started_at_iso ?? null)}</span>
+          <span class="v mono">
+            ${enumLabel(row.status)}${row.error ? ` — ${row.error}` : ''}
+          </span>
+        </div>
+      `)}
+      ${limitReached
+        ? html`<div class="sch-kv"><span class="k"></span><span class="v mono" data-execution-history-truncated>이전 기록은 잘렸습니다 (최근 10건만 표시)</span></div>`
+        : null}
     </div>
   `
 }

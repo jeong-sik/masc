@@ -3049,11 +3049,19 @@ let schedule_signal_rows_and_errors config limit =
     ([], [])
 ;;
 
+(* Bounded per-schedule execution history for the detail drawer (feature-map
+   gap #48: execution records were durable in Schedule_store but only the
+   single [last_execution] projected, so "the schedule ran — what happened?"
+   had no dashboard answer beyond the latest attempt). Newest first; the
+   limit keeps the projection payload bounded like the other list caps here. *)
+let schedule_execution_history_limit = 10
+
 let schedule_request_dashboard_json
   ~now
   ~config
   ~state
   ?last_execution
+  ?(executions = [])
   (request : Schedule_domain.schedule_request)
   =
   let next_due_at =
@@ -3132,6 +3140,9 @@ let schedule_request_dashboard_json
       , match last_execution with
         | None -> `Null
         | Some execution -> execution_record_dashboard_json execution )
+    ; "executions", `List (List.map execution_record_dashboard_json executions)
+    ; ( "execution_history_limit_reached"
+      , `Bool (List.length executions >= schedule_execution_history_limit) )
     ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_execution
     ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_execution
     ; ( "keeper_reaction_evidence"
@@ -3418,7 +3429,14 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                        Schedule_store.last_execution_for_schedule state
                          ~schedule_id:request.Schedule_domain.schedule_id
                      in
-                     schedule_request_dashboard_json ~now ~config ~state ?last_execution request)
+                     let executions =
+                       Schedule_store.executions_for_schedule state
+                         ~schedule_id:request.Schedule_domain.schedule_id
+                       |> List.filteri (fun i _ ->
+                         i < schedule_execution_history_limit)
+                     in
+                     schedule_request_dashboard_json ~now ~config ~state ?last_execution
+                       ~executions request)
                   request_rows) )
          ])
 ;;

@@ -219,6 +219,10 @@ export interface DashboardScheduledAutomationRequest {
   requires_separate_human_grant?: boolean
   approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
+  /** Bounded execution history, newest first (schedule_execution_history_limit
+   *  rows); last_execution is executions[0] when both are present. */
+  executions?: DashboardScheduledAutomationExecution[]
+  execution_history_limit_reached?: boolean
   dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
   keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null
   keeper_reaction_evidence?: DashboardScheduledAutomationKeeperReactionEvidence | null

@@ -65,7 +65,7 @@ let dedupe_tool_search_schemas schemas =
 ;;
 
 let default_tool_search_schemas () =
-  descriptor_model_tool_schemas () |> dedupe_tool_search_schemas
+  all_keeper_model_tool_schemas () |> dedupe_tool_search_schemas
 ;;
 
 let score_tool_schema terms (schema : Masc_domain.tool_schema) =

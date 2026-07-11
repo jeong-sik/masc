@@ -39,6 +39,18 @@ let () = ignore Masc.Keeper_tool_surface.schemas
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
 
+let required_public_descriptor name =
+  match Descriptor.find_public name with
+  | Some descriptor -> descriptor
+  | None -> Alcotest.failf "missing public descriptor: %s" name
+;;
+
+let required_internal_descriptor name =
+  match Descriptor.descriptors_for_internal name with
+  | descriptor :: _ -> descriptor
+  | [] -> Alcotest.failf "missing internal descriptor: %s" name
+;;
+
 (* RFC-0190 — Descriptor as Visibility/Metadata SSOT.
 
    [Tool_catalog_surfaces.public_mcp_surface_tools] is the operator-facing
@@ -445,18 +457,6 @@ let test_internal_name_snake_case () =
 let test_registry_not_empty () =
   if all_descriptors () = []
   then Alcotest.failf "Keeper_tool_descriptor.all_descriptors () returned []"
-
-let required_public_descriptor name =
-  match Descriptor.find_public name with
-  | Some descriptor -> descriptor
-  | None -> Alcotest.failf "missing public descriptor: %s" name
-;;
-
-let required_internal_descriptor name =
-  match Descriptor.descriptors_for_internal name with
-  | descriptor :: _ -> descriptor
-  | [] -> Alcotest.failf "missing internal descriptor: %s" name
-;;
 
 let schema_property_description schema name =
   let open Yojson.Safe.Util in

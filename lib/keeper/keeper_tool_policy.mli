@@ -112,6 +112,11 @@ val keeper_tool_search_scope : keeper_meta -> string list
 
 (** {1 Tool Schema Assembly} *)
 
+(** Complete descriptor-projected Keeper model schema inventory before
+    per-Keeper candidate and deny filtering. No shard or injected-schema
+    fallback is admitted. *)
+val all_keeper_model_tool_schemas : unit -> Masc_domain.tool_schema list
+
 (** Descriptor-projected universe model schemas for Agent.run(). No shard or
     injected-schema fallback is admitted. *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list

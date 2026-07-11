@@ -455,7 +455,7 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
     a named alias for call-site clarity at the search-index boundary. *)
 let keeper_tool_search_scope = keeper_universe_tool_names
 
-let descriptor_model_tool_schemas () =
+let all_keeper_model_tool_schemas () =
   Keeper_tool_descriptor.model_visible_descriptors ()
   |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
     Keeper_tool_descriptor.keeper_model_names descriptor
@@ -471,7 +471,7 @@ let descriptor_model_tool_schemas () =
     remain handler/schema inputs, but never act as a permissive exposure
     fallback when a descriptor is absent. *)
 let all_keeper_schemas () : Masc_domain.tool_schema list =
-  descriptor_model_tool_schemas ()
+  all_keeper_model_tool_schemas ()
 
 (** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup
     instead of List.mem (O(n) per schema). *)
@@ -559,7 +559,7 @@ let required_hints_of_schema (schema : Yojson.Safe.t) : string =
     Returns [Some first_sentence] + optional enum/required hints if found, [None] otherwise.
     Non-descriptor schemas cannot re-enter the model prompt through hints. *)
 let tool_hint_of (name : string) : string option =
-  let all_schemas = descriptor_model_tool_schemas () in
+  let all_schemas = all_keeper_model_tool_schemas () in
   match List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) all_schemas with
   | Some s ->
     let base = first_sentence s.description in

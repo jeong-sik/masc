@@ -112,6 +112,17 @@ export function setKeeperRedirect(fn: (agentName: string) => boolean): void {
   _keeperRedirect = fn
 }
 
+/** Open the workspace-agent profile without attempting a keeper redirect.
+ *
+ * Callers use this when they already resolved the typed keeper relation and
+ * found none. Keeping this entry point separate prevents display-name shapes
+ * such as `keeper-*-agent` or generated nicknames from changing the selected
+ * entity through the legacy name resolver. */
+export function openAgentProfile(agentName: string): void {
+  selectedAgentName.value = agentName
+  void refreshAgentDetail()
+}
+
 export function openAgentDetail(agentName: string): void {
   if (_keeperRedirect && _keeperRedirect(agentName)) return
   const keeper = findKeeper(agentName)
@@ -127,8 +138,7 @@ export function openAgentDetail(agentName: string): void {
       })
     return
   }
-  selectedAgentName.value = agentName
-  void refreshAgentDetail()
+  openAgentProfile(agentName)
 }
 
 export function closeAgentDetail(): void {

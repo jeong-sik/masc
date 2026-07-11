@@ -4,7 +4,13 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentRoster, countRuntimeKinds, rosterBlockerDisplay, rosterStateNote } from './agent-roster'
+import {
+  AgentRoster,
+  countRuntimeKinds,
+  fleetRuntimeEvidence,
+  rosterBlockerDisplay,
+  rosterStateNote,
+} from './agent-roster'
 import type { Agent, Keeper } from '../types'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import {
@@ -64,6 +70,24 @@ async function flushUi(): Promise<void> {
   await act(async () => {
     await Promise.resolve()
   })
+}
+
+function cssMediaBlock(css: string, query: string): string {
+  const marker = `@media ${query}`
+  const markerIndex = css.indexOf(marker)
+  if (markerIndex < 0) throw new Error(`Missing CSS media query: ${query}`)
+
+  const openingBrace = css.indexOf('{', markerIndex + marker.length)
+  if (openingBrace < 0) throw new Error(`Missing opening brace for CSS media query: ${query}`)
+
+  let depth = 0
+  for (let index = openingBrace; index < css.length; index += 1) {
+    if (css[index] === '{') depth += 1
+    if (css[index] === '}') depth -= 1
+    if (depth === 0) return css.slice(markerIndex, index + 1)
+  }
+
+  throw new Error(`Missing closing brace for CSS media query: ${query}`)
 }
 
 describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
@@ -429,7 +453,7 @@ describe('countRuntimeKinds', () => {
     })
   })
 
-  it('classifies generated keeper nicknames as the canonical keeper when names match', () => {
+  it('does not infer keeper ownership from generated nickname or wrapper shapes', () => {
     const result = countRuntimeKinds(
       [
         makeAgent({
@@ -451,13 +475,13 @@ describe('countRuntimeKinds', () => {
     )
 
     expect(result).toEqual({
-      agents: 0,
+      agents: 1,
       keepers: 1,
       pausedKeepers: 0,
       transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
-      totalRuntimes: 1,
+      totalRuntimes: 2,
     })
   })
 
@@ -667,6 +691,21 @@ describe('countRuntimeKinds', () => {
   })
 })
 
+describe('fleetRuntimeEvidence', () => {
+  it('labels keeper runtime metadata as assigned rather than live', () => {
+    expect(fleetRuntimeEvidence({
+      name: 'sangsu',
+      status: 'active',
+      runtime_canonical: 'oas.primary',
+    } as Keeper)).toEqual({ source: 'assigned', value: 'oas.primary' })
+  })
+
+  it('returns an explicit unknown source when no assignment is projected', () => {
+    expect(fleetRuntimeEvidence({ name: 'sangsu', status: 'active' } as Keeper))
+      .toEqual({ source: 'unknown', value: null })
+  })
+})
+
 describe('AgentRoster live-only cards', () => {
   let container: HTMLDivElement
 
@@ -770,7 +809,7 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('old blocker that should stay out of the roster')
   })
 
-  it('labels workspace agents, keeper fibers, configured keepers, and task owners as separate surfaces', async () => {
+  it('does not render the internal namespace-separation disclaimer strip', async () => {
     agents.value = [
       makeAgent({
         name: 'dashboard',
@@ -794,10 +833,155 @@ describe('AgentRoster live-only cards', () => {
     await flushUi()
 
     const text = container.textContent ?? ''
-    expect(text).toContain('workspace agents ≠ keeper fibers')
-    expect(text).toContain('configured keeper ≠ running fiber')
-    expect(text).toContain('task owner ≠ live agent')
+    // the three developer-notes chips are gone outright ...
+    expect(text).not.toContain('workspace agents ≠ keeper fibers')
+    expect(text).not.toContain('configured keeper ≠ running fiber')
+    expect(text).not.toContain('task owner ≠ live agent')
+    // ... and so is the redundant "항목 N개 표시" count chip (already
+    // covered by the fl-health pills and the fl-foot ticks below).
+    expect(text).not.toMatch(/항목 \d+개 표시/)
+    // the real, data-backed health pills stay.
+    expect(container.querySelector('.fl-health')).not.toBeNull()
     expect(text).toContain('runtime rows')
+  })
+
+  it('uses the explicit agent_name relation while showing only the keeper display name', async () => {
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        keeper_id: 'sangsu',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    expect(row.querySelector('.fl-name b')?.textContent).toBe('sangsu')
+    // Fleet no longer exposes an inferred alias or keeper-id subtitle.
+    expect(row.querySelector('.fl-ns')).toBeNull()
+    expect(container.querySelector('.fl-as-name')?.textContent).toBe('sangsu')
+    expect(container.textContent).not.toContain('keeper-sangsu-agent')
+  })
+
+  it('keeps an untyped generated-style agent on the agent-profile detail path', async () => {
+    agents.value = [makeAgent({ name: 'taskmaster-proud-bear', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'taskmaster',
+        agent_name: 'keeper-taskmaster-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="agent-only" />`, container)
+    })
+    await flushUi()
+
+    const detailButton = container.querySelector('.fl-open-chat') as HTMLButtonElement
+    expect(detailButton.dataset.detailKind).toBe('agent-profile')
+    expect(detailButton.dataset.detailTarget).toBe('taskmaster-proud-bear')
+    expect(container.querySelector('.fl-as-name')?.textContent).toBe('taskmaster-proud-bear')
+  })
+
+  it('keeps equal display names selectable across agent and keeper namespaces', async () => {
+    agents.value = [makeAgent({ name: 'shared-name', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'shared-name',
+        keeper_id: 'keeper-uuid-shared',
+        agent_name: 'keeper-shared-name-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const rows = container.querySelectorAll('[data-testid="keeper-operations-row"]')
+    expect(rows).toHaveLength(2)
+    expect((rows[0] as HTMLElement).dataset.rosterKey).toBe('agent-name:shared-name')
+    expect((rows[1] as HTMLElement).dataset.rosterKey).toBe('keeper-id:keeper-uuid-shared')
+    expect(rows[0]?.getAttribute('aria-label')).toBe('shared-name agent 선택')
+    expect(rows[1]?.getAttribute('aria-label')).toBe('shared-name keeper 선택')
+
+    await act(async () => {
+      ;(rows[1] as HTMLElement).click()
+    })
+
+    expect((rows[0] as HTMLElement).getAttribute('aria-pressed')).toBe('false')
+    expect((rows[1] as HTMLElement).getAttribute('aria-pressed')).toBe('true')
+    expect((container.querySelector('.fl-open-chat') as HTMLElement).dataset.detailKind).toBe('keeper')
+  })
+
+  it('renders the runtime column in the fleet list row (previously only visible in the aside)', async () => {
+    agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'nick0cave',
+        agent_name: 'keeper-nick0cave-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        runtime_canonical: 'claude',
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    expect(container.querySelector('.fl-rhead')?.textContent).toContain('런타임 · 출처')
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const runtimeCell = row.querySelector('.fl-runtime') as HTMLElement
+    expect(runtimeCell.dataset.runtimeSource).toBe('assigned')
+    expect(runtimeCell.querySelector('.fl-runtime-source')?.textContent).toBe('할당')
+    expect(runtimeCell.querySelector('.fl-runtime-value')?.textContent).toBe('claude')
+  })
+
+  it('renders an explicit unknown runtime source when no assignment is projected', async () => {
+    agents.value = [makeAgent({ name: 'keeper-albini-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'albini',
+        agent_name: 'keeper-albini-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const runtimeCell = row.querySelector('.fl-runtime') as HTMLElement
+    expect(runtimeCell.dataset.runtimeSource).toBe('unknown')
+    expect(runtimeCell.classList.contains('unknown')).toBe(true)
+    expect(runtimeCell.textContent).toBe('미확인')
+    expect(runtimeCell.querySelector('.fl-runtime-value')).toBeNull()
   })
 
   it('treats keeper-only rows as first-class runtime rows when agent registry is empty', async () => {
@@ -1507,7 +1691,7 @@ describe('AgentRoster live-only cards', () => {
     expect((row.querySelector('.fl-ns') as HTMLElement).textContent).not.toContain('sangsu-uuid-77')
   })
 
-  it('keeps the keeper id namespace line when no local sandbox profile is present', async () => {
+  it('keeps a distinct projected keeper id without inferring an agent alias', async () => {
     agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
     keepers.value = [
       {
@@ -1529,12 +1713,25 @@ describe('AgentRoster live-only cards', () => {
 
     const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
     expect(row.querySelector('.fl-sandbox')).toBeNull()
-    expect(row.querySelector('.fl-ns')?.textContent).toContain('sangsu-uuid-77')
+    expect(row.querySelector('.fl-ns')?.textContent).toContain('keeper-id · sangsu-uuid-77')
+    expect(container.querySelector('.fl-as-kr')?.textContent).toContain('keeper-id · sangsu-uuid-77')
+    expect(row.textContent).not.toContain('keeper-sangsu-agent')
   })
 
-  it('vendors the fleet responsive column-shedding and attention-list styles', () => {
+  it('keeps runtime provenance and actions in the 800px and 1024px layout', () => {
     const css = readFileSync(resolve(__dirname, '../styles/keeper-v2/fleet.css'), 'utf8')
+    const query = '(max-width: 1100px) and (min-width: 721px)'
+    const responsiveBlock = cssMediaBlock(css, query)
+
+    for (const width of [800, 1024]) {
+      expect(width).toBeGreaterThanOrEqual(721)
+      expect(width).toBeLessThanOrEqual(1100)
+    }
+
     expect(css).toContain('@media (max-width: 1320px) and (min-width: 1101px)')
+    expect(responsiveBlock).toContain('--fl-cols: minmax(168px, 1.3fr) minmax(150px, 1fr) minmax(104px, 0.8fr) 160px')
+    expect(responsiveBlock).toContain('.fl-row .fl-ctx, .fl-row .fl-tool { display: none; }')
+    expect(responsiveBlock).not.toContain('.fl-row .fl-runtime')
     expect(css).toContain('@media (max-width: 720px)')
     expect(css).toContain('.fl-attn-list')
     expect(css).toContain('.fl-attn-item[data-sev="bad"]')

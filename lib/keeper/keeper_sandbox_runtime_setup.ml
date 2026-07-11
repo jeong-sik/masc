@@ -307,15 +307,48 @@ let docker_masc_runtime_env_args ~container_root =
   |> List.concat_map (fun (key, value) -> [ "--env"; key ^ "=" ^ value ])
 ;;
 
+(* Container identity env keys owned by [docker_user_env_args]. *)
+let sandbox_env_key_home = "HOME"
+let sandbox_env_key_user = "USER"
+let sandbox_env_key_logname = "LOGNAME"
+let sandbox_env_key_shell = "SHELL"
+
+(* Env keys the docker exec boundary itself owns: container identity
+   ([docker_user_env_args]) plus the mounted config projection
+   ([docker_config_env_args]). Keeper-supplied Shell IR env entries must
+   not shadow these — [docker exec] resolves duplicate [--env] flags
+   last-wins, so a collision would silently override a sandbox
+   invariant. Shell IR dispatch rejects colliding keys with a typed
+   error instead (see [Keeper_sandbox_shell_ir_target]). The builders
+   below consume the same constants, so this list cannot drift from
+   what is actually injected. *)
+let docker_sandbox_reserved_env_keys =
+  [ sandbox_env_key_home
+  ; sandbox_env_key_user
+  ; sandbox_env_key_logname
+  ; sandbox_env_key_shell
+  ; Env_config_core.base_path_env_key
+  ; Env_config_core.base_path_input_env_key
+  ; Env_config_core.config_dir_env_key
+  ]
+;;
+
+(* Keeper-supplied env entries ("K=V", already resolved by the Shell IR
+   dispatch) as [docker exec] argv flags. Callers must reject entries
+   whose key is in [docker_sandbox_reserved_env_keys] first. *)
+let docker_keeper_env_args entries =
+  List.concat_map (fun entry -> [ "--env"; entry ]) entries
+;;
+
 let docker_user_env_args () =
   [ "--env"
-  ; "HOME=/tmp"
+  ; sandbox_env_key_home ^ "=/tmp"
   ; "--env"
-  ; "USER=keeper"
+  ; sandbox_env_key_user ^ "=keeper"
   ; "--env"
-  ; "LOGNAME=keeper"
+  ; sandbox_env_key_logname ^ "=keeper"
   ; "--env"
-  ; "SHELL=/bin/sh"
+  ; sandbox_env_key_shell ^ "=/bin/sh"
   ]
 ;;
 
@@ -421,11 +454,11 @@ let docker_config_env_args ~base_path ~container_root =
     let container_config_root = docker_config_container_root ~container_root in
     let container_base_path = container_masc_runtime_base ~container_root in
     [ "--env"
-    ; "MASC_BASE_PATH=" ^ container_base_path
+    ; Env_config_core.base_path_env_key ^ "=" ^ container_base_path
     ; "--env"
-    ; "MASC_BASE_PATH_INPUT=" ^ container_base_path
+    ; Env_config_core.base_path_input_env_key ^ "=" ^ container_base_path
     ; "--env"
-    ; "MASC_CONFIG_DIR=" ^ container_config_root
+    ; Env_config_core.config_dir_env_key ^ "=" ^ container_config_root
     ]
 ;;
 

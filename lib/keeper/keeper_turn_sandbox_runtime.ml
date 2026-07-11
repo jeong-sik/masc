@@ -871,11 +871,31 @@ let ensure_started ?(validate_running = false) (t : t) ~timeout_sec =
   | Not_started -> start_container t ~timeout_sec
 ;;
 
+let rewrite_command_argv (t : t) command_argv =
+  List.map
+    (fun arg ->
+      let rewritten =
+        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+          ~host_root:t.host_root
+          ~container_root:t.container_root
+          arg
+      in
+      if String.equal t.raw_host_root t.host_root
+      then rewritten
+      else
+        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+          ~host_root:t.raw_host_root
+          ~container_root:t.container_root
+          rewritten)
+    command_argv
+;;
+
 let run_exec_with_status_split_once
       ?(validate_cached_container = false)
       ?(stdin_content : string option)
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?(env = [||])
       (t : t)
       ~timeout_sec
       ~(cwd : string)
@@ -885,23 +905,14 @@ let run_exec_with_status_split_once
   | Error _ as err -> err
   | Ok container_name ->
     let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-    let command_argv =
-      List.map
-        (fun arg ->
-           let rewritten =
-             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-               ~host_root:t.host_root
-               ~container_root:t.container_root
-               arg
-           in
-           if String.equal t.raw_host_root t.host_root
-           then rewritten
-           else
-             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-               ~host_root:t.raw_host_root
-               ~container_root:t.container_root
-               rewritten)
-        command_argv
+    let command_argv = rewrite_command_argv t command_argv in
+    (* Keeper env entries get the same host-root rewriting as argv:
+       values may carry playground paths that only resolve inside the
+       container. Reserved-key collisions are rejected upstream in
+       [Keeper_sandbox_shell_ir_target] before this point. *)
+    let keeper_env_args =
+      Keeper_sandbox_runtime.docker_keeper_env_args
+        (rewrite_command_argv t (Array.to_list env))
     in
     let argv =
       Keeper_sandbox_runtime.docker_command_argv ()
@@ -909,6 +920,7 @@ let run_exec_with_status_split_once
       @ Keeper_sandbox_runtime.docker_sandbox_env_args
           ~base_path:t.config.base_path
           ~container_root:t.container_root
+      @ keeper_env_args
       @ (match stdin_content with
          | Some _ -> [ "-i" ]
          | None -> [])
@@ -946,6 +958,7 @@ let run_exec_with_status_split
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?env
       ~timeout_sec
       (t : t)
       ~(cwd : string)
@@ -960,6 +973,7 @@ let run_exec_with_status_split
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?env
       t
       ~timeout_sec
       ~cwd
@@ -974,6 +988,7 @@ let run_exec_with_status_split
          ?stdin_content
          ?on_stdout_chunk
          ?on_stderr_chunk
+         ?env
          t
          ~timeout_sec
          ~cwd
@@ -1011,33 +1026,18 @@ let run_exec_with_status
 type exec_pipeline_stage = {
   command_argv : string list;
   cwd : string option;
+  env : string list;
 }
 
-let rewrite_command_argv (t : t) command_argv =
-  List.map
-    (fun arg ->
-      let rewritten =
-        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-          ~host_root:t.host_root
-          ~container_root:t.container_root
-          arg
-      in
-      if String.equal t.raw_host_root t.host_root
-      then rewritten
-      else
-        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-          ~host_root:t.raw_host_root
-          ~container_root:t.container_root
-          rewritten)
-    command_argv
-;;
-
-let docker_exec_pipeline_argv (t : t) ~container_name ~container_cwd command_argv =
+let docker_exec_pipeline_argv (t : t) ~container_name ~container_cwd ~env command_argv =
   Keeper_sandbox_runtime.docker_command_argv ()
   @ [ "exec"; "-i"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
   @ Keeper_sandbox_runtime.docker_sandbox_env_args
       ~base_path:t.config.base_path
       ~container_root:t.container_root
+  (* Same host-root rewriting as argv; reserved-key collisions are
+     rejected upstream in [Keeper_sandbox_shell_ir_target]. *)
+  @ Keeper_sandbox_runtime.docker_keeper_env_args (rewrite_command_argv t env)
   @ (container_name :: rewrite_command_argv t command_argv)
 ;;
 
@@ -1055,10 +1055,12 @@ let run_exec_pipeline_with_status_once
   | Ok container_name ->
     let process_stages =
       List.map
-        (fun { command_argv; cwd = stage_cwd } ->
+        (fun { command_argv; cwd = stage_cwd; env } ->
           let cwd = Option.value stage_cwd ~default:cwd in
           let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-          let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
+          let argv =
+            docker_exec_pipeline_argv t ~container_name ~container_cwd ~env command_argv
+          in
           { Process_eio.argv
           ; env = Some (Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
           ; cwd = Some (Config_dir_resolver.current_working_dir ())

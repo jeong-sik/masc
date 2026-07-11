@@ -607,7 +607,6 @@ end
 let has_typed_execute_input_key = Keeper_tool_execute_input.has_typed_execute_input_key
 let assoc_upsert = Keeper_tool_execute_input.assoc_upsert
 let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_text
-let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
 
 let typed_validation_deterministic_retry_fields
@@ -818,27 +817,24 @@ let handle_tool_execute_typed
           match sandbox_profile with
           | Local -> local_dispatch_sandbox ()
           | Docker ->
-            if typed_input_has_env input
-            then
-              Error
-                (Keeper_sandbox_shell_ir_target.target_error
-                   "typed Shell IR Docker dispatch does not support env yet")
-            else (
-              match docker_local_fallback_target ~meta with
-              | Some (target, fields) when in_playground ->
-                (match target with
-                 | Masc_exec.Sandbox_target.Host ->
-                   local_dispatch_sandbox ~extra_fields:fields ()
-                 | Docker _ -> Ok (target, fields, None))
-              | Some _ | None ->
-                docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
-                |> Result.map (fun target ->
-                  ( target
-                  , [ "requested_sandbox", `String "docker"
-                    ; "via", `String "docker"
-                    ; "sandbox_profile", `String "docker"
-                    ]
-                  , None )))
+            (* Typed env entries flow into [docker exec --env] flags via
+               [Keeper_sandbox_shell_ir_target]; sandbox-reserved keys are
+               rejected there with a typed error. *)
+            (match docker_local_fallback_target ~meta with
+             | Some (target, fields) when in_playground ->
+               (match target with
+                | Masc_exec.Sandbox_target.Host ->
+                  local_dispatch_sandbox ~extra_fields:fields ()
+                | Docker _ -> Ok (target, fields, None))
+             | Some _ | None ->
+               docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
+               |> Result.map (fun target ->
+                 ( target
+                 , [ "requested_sandbox", `String "docker"
+                   ; "via", `String "docker"
+                   ; "sandbox_profile", `String "docker"
+                   ]
+                 , None )))
         in
         (match dispatch_sandbox with
          | Error ({ message; fields } : Keeper_sandbox_shell_ir_target.target_error) ->

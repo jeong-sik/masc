@@ -55,6 +55,34 @@ let image_preflight_target_error (failure : Keeper_sandbox_runtime.classified_er
    stall) are the same domain — the sandbox's own. *)
 let internal_sandbox_timeout_sec = 30.0
 
+let env_entry_key entry =
+  match String.index_opt entry '=' with
+  | None -> entry
+  | Some idx -> String.sub entry 0 idx
+;;
+
+(* Keeper env entries must not shadow keys the docker exec boundary
+   itself injects ([docker exec] resolves duplicate [--env] flags
+   last-wins). Rejecting with the key name keeps the failure
+   self-explanatory instead of silently dropping either side. *)
+let reserved_env_collision env =
+  Array.find_opt
+    (fun entry ->
+      List.mem
+        (env_entry_key entry)
+        Keeper_sandbox_runtime.docker_sandbox_reserved_env_keys)
+    env
+  |> Option.map env_entry_key
+;;
+
+let reserved_env_error key =
+  ( Unix.WEXITED 1
+  , ""
+  , Printf.sprintf
+      "typed Shell IR Docker dispatch rejects env key %s: the sandbox exec boundary owns it"
+      key )
+;;
+
 let docker_target ~turn_sandbox_factory ~meta ~cwd =
   let default_cwd = cwd in
   let stage_cwd_or_default = function
@@ -81,31 +109,31 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
      | Error failure -> Error (image_preflight_target_error failure)
      | Ok () ->
       let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd:stage_cwd =
-        if Array.length env > 0 then
-          (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
-        else
+        match reserved_env_collision env with
+        | Some key -> reserved_env_error key
+        | None ->
           let cwd = stage_cwd_or_default stage_cwd in
-          match
-            Keeper_turn_sandbox_runtime.run_exec_with_status_split
-              ?stdin_content
-              ?on_stdout_chunk
-              ?on_stderr_chunk
-              ~timeout_sec
-              runtime
-              ~cwd
-              ~command_argv:argv
+          (match
+             Keeper_turn_sandbox_runtime.run_exec_with_status_split
+               ?stdin_content
+               ?on_stdout_chunk
+               ?on_stderr_chunk
+               ~env
+               ~timeout_sec
+               runtime
+               ~cwd
+               ~command_argv:argv
            with
            | Ok result -> result
-           | Error err -> Unix.WEXITED 1, "", err
+           | Error err -> Unix.WEXITED 1, "", err)
        in
       let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk ~stages =
         match
-          List.find_opt
-            (fun stage -> Array.length stage.Masc_exec.Sandbox_target.env > 0)
-             stages
+          List.find_map
+            (fun stage -> reserved_env_collision stage.Masc_exec.Sandbox_target.env)
+            stages
          with
-         | Some _ ->
-           (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
+         | Some key -> reserved_env_error key
          | None ->
            let stages =
              List.map
@@ -113,6 +141,7 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd =
                   { Keeper_turn_sandbox_runtime.command_argv =
                       stage.Masc_exec.Sandbox_target.argv
                   ; cwd = stage.cwd
+                  ; env = Array.to_list stage.env
                   })
                stages
            in

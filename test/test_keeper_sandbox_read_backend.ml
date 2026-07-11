@@ -1848,8 +1848,9 @@ let test_streaming_pipeline_forwards_timeout_to_split_exec () =
        ~stages:
          [ { Keeper_turn_sandbox_runtime.command_argv = [ "slow-timeout" ]
            ; cwd = None
+           ; env = []
            }
-         ; { command_argv = [ "slow-timeout" ]; cwd = None }
+         ; { command_argv = [ "slow-timeout" ]; cwd = None; env = [] }
          ]
    with
    | Error msg -> Alcotest.failf "expected pipeline timeout result, got %s" msg

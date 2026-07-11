@@ -262,6 +262,18 @@ val docker_sandbox_env_args
   -> container_root:string
   -> string list
 
+(** Env keys the docker exec boundary itself owns (container identity plus
+    config projection). Keeper-supplied Shell IR env entries whose key is in
+    this list are rejected with a typed error before dispatch: [docker exec]
+    resolves duplicate [--env] flags last-wins, so a collision would silently
+    override a sandbox invariant. *)
+val docker_sandbox_reserved_env_keys : string list
+
+(** Keeper-supplied env entries ("K=V", already resolved by the Shell IR
+    dispatch) as [docker exec] argv flags. Callers must reject entries whose
+    key is in [docker_sandbox_reserved_env_keys] first. *)
+val docker_keeper_env_args : string list -> string list
+
 (** Docker [-v ...] argv fragment that supplies passwd/group entries for
     the numeric host uid/gid used inside the keeper container. *)
 val docker_user_identity_mount_args

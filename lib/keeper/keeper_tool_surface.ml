@@ -150,7 +150,11 @@ let handle_keeper_sandbox_status ctx args : tool_result =
              | Ok None when List.mem name configured_names -> (
                  match load_or_materialize_boot_meta ctx name with
                  | Ok { meta; _ } -> (
-                     match Keeper_meta_contract.effective_meta_result meta with
+                     match
+                       Keeper_meta_contract.effective_meta_result
+                         ~base_path:ctx.config.base_path
+                         meta
+                     with
                      | Ok effective_meta -> Some (Sandbox_status_meta effective_meta)
                      | Error msg ->
                          Log.Keeper.warn

@@ -1527,43 +1527,35 @@ let test_seed_of_thinking_support_gate_contract () =
     (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
 ;;
 
-(* ---- masc#24067 / oas#2517: the keeper lane must not synthesize a request
-   [max_tokens] value. [Runtime_inference.resolve_max_tokens] — which sized a
-   reasoning turn from the model's declared OAS output ceiling, and otherwise
-   fell back to a flat keeper default — is deleted: BOTH arms invented a
-   request value the model catalog ceiling was never meant to supply. MASC
-   keeps that ceiling observable but does not reinterpret it as a request;
-   OAS owns envelope-specific validation and clamp policy.
-   [Keeper_run_context.resolve_max_tokens_for_runtime] replaces it
-   with a two-source-only contract: an explicit caller [?max_tokens] argument,
-   or a per-keeper [MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS] profile override
-   (exercised separately in test_keeper_toml.ml's oas_env tests). Absent both,
-   [None] — no [max_tokens] field goes on the OAS request, regardless of
-   whether the runtime is a reasoning model with a declared catalog ceiling. ---- *)
-
-let test_resolve_max_tokens_for_runtime_no_override_is_none () =
-  with_runtime_thinking (fun () ->
-    Alcotest.(check (option int))
-      "unconfigured keeper + no caller override sends no max_tokens, even for \
-       a reasoning runtime with a declared catalog ceiling"
-      None
-      (Keeper_run_context.resolve_max_tokens_for_runtime
-         ~keeper_name:"masc24067-unconfigured-keeper"
-         ~runtime_id:"ollama_cloud.thinkdefault"
-         ()))
-;;
-
-let test_resolve_max_tokens_for_runtime_caller_override_is_some () =
-  with_runtime_thinking (fun () ->
-    Alcotest.(check (option int))
-      "explicit caller max_tokens argument passes through as Some, unchanged \
-       by the target runtime's catalog ceiling"
-      (Some 4096)
-      (Keeper_run_context.resolve_max_tokens_for_runtime
-         ~keeper_name:"masc24067-unconfigured-keeper"
-         ~runtime_id:"ollama_cloud.thinkdefault"
-         ~max_tokens:4096
-         ()))
+let test_resolve_turn_max_tokens_precedence () =
+  let profile_defaults =
+    { Keeper_types_profile.empty_keeper_profile_defaults with
+      oas_env =
+        [ Keeper_types_profile.keeper_unified_max_tokens_oas_env_key, "4096" ]
+    }
+  in
+  Alcotest.(check (option int))
+    "profile supplies turn-start output-token intent"
+    (Some 4096)
+    (Keeper_run_context.resolve_turn_max_tokens
+       ~keeper_name:"max-token-snapshot"
+       ~profile_defaults
+       ());
+  Alcotest.(check (option int))
+    "explicit caller value wins over profile"
+    (Some 2048)
+    (Keeper_run_context.resolve_turn_max_tokens
+       ~keeper_name:"max-token-snapshot"
+       ~profile_defaults
+       ~max_tokens:2048
+       ());
+  Alcotest.(check (option int))
+    "absence remains None"
+    None
+    (Keeper_run_context.resolve_turn_max_tokens
+       ~keeper_name:"max-token-snapshot"
+       ~profile_defaults:Keeper_types_profile.empty_keeper_profile_defaults
+       ())
 ;;
 
 let test_max_output_tokens_accessor_projects_catalog () =
@@ -1925,15 +1917,11 @@ let () =
             `Quick
             test_seed_of_thinking_support_gate_contract
         ] )
-    ; ( "reasoning max_tokens resolution"
+    ; ( "runtime token capacity projection"
       , [ Alcotest.test_case
-            "no override configured -> None (masc#24067 / oas#2517)"
+            "turn-start max_tokens precedence"
             `Quick
-            test_resolve_max_tokens_for_runtime_no_override_is_none
-        ; Alcotest.test_case
-            "explicit caller override -> Some (masc#24067 / oas#2517)"
-            `Quick
-            test_resolve_max_tokens_for_runtime_caller_override_is_some
+            test_resolve_turn_max_tokens_precedence
         ; Alcotest.test_case
             "max_output_tokens_of_runtime_id projects catalog ceiling"
             `Quick

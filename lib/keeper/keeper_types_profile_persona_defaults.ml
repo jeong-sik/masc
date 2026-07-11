@@ -76,8 +76,3 @@ let load_from_dirs ~persona_dirs ~name : keeper_profile_defaults =
   with
   | None -> empty_keeper_profile_defaults
   | Some path -> load_from_path ~name path
-
-let load ~name : keeper_profile_defaults =
-  match Keeper_types_profile_persona.persona_profile_path_opt name with
-  | None -> empty_keeper_profile_defaults
-  | Some path -> load_from_path ~name path

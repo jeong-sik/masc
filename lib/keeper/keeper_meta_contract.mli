@@ -388,7 +388,8 @@ type keeper_meta = {
     status-facing reads. Persisted runtime JSON intentionally omits
     TOML-owned fields such as [sandbox_profile], [network_mode], and
     [tool_access]. *)
-val effective_meta_result : keeper_meta -> (keeper_meta, string) result
+val effective_meta_result :
+  base_path:string -> keeper_meta -> (keeper_meta, string) result
 
 (** Pure variant for callers that already loaded profile defaults. *)
 val effective_meta_of_profile_defaults :

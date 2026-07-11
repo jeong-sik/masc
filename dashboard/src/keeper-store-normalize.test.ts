@@ -1038,3 +1038,66 @@ describe('approval_state.pending_first — worktree approval blocker surfacing',
     })
   })
 })
+
+describe('keeper profile config error boundary', () => {
+  it('normalizes the closed config error schema without losing path or action', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'broken',
+        status: 'blocked',
+        needs_attention: true,
+        config_error: {
+          keeper: 'broken',
+          keeper_path: '/workspace/.masc/config/keepers/broken.toml',
+          failing_path: '/workspace/.masc/config/keepers/base.toml',
+          kind: 'parse_error',
+          detail: 'expected table header',
+          terminal_reason: 'config_invalid',
+          blocking: true,
+          operator_action_required: true,
+          next_action: 'fix_keeper_toml_config',
+        },
+      },
+    ])
+
+    expect(keeper?.config_error).toEqual({
+      keeper: 'broken',
+      keeper_path: '/workspace/.masc/config/keepers/broken.toml',
+      failing_path: '/workspace/.masc/config/keepers/base.toml',
+      kind: 'parse_error',
+      reported_kind: null,
+      detail: 'expected table header',
+      terminal_reason: 'config_invalid',
+      blocking: true,
+      operator_action_required: true,
+      next_action: 'fix_keeper_toml_config',
+    })
+  })
+
+  it('retains unknown config error kinds as a fail-closed schema-drift value', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'broken',
+        status: 'blocked',
+        config_error: {
+          keeper: 'broken',
+          keeper_path: '/broken.toml',
+          failing_path: '/broken.toml',
+          kind: 'guessed_error',
+          detail: 'unknown',
+          terminal_reason: 'config_invalid',
+          blocking: true,
+          operator_action_required: true,
+          next_action: 'fix_keeper_toml_config',
+        },
+      },
+    ])
+
+    expect(keeper?.config_error).toMatchObject({
+      kind: 'unknown',
+      reported_kind: 'guessed_error',
+      blocking: true,
+      operator_action_required: true,
+    })
+  })
+})

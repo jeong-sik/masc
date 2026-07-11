@@ -29,7 +29,7 @@ let effective_keepalive_meta
      | Some entry -> entry.meta
      | None -> fallback)
   in
-  match Keeper_meta_contract.effective_meta_result selected with
+  match Keeper_meta_contract.effective_meta_result ~base_path selected with
   | Ok effective -> effective
   | Error msg ->
     Log.Keeper.warn

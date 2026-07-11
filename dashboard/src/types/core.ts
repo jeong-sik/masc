@@ -1175,6 +1175,26 @@ export const KEEPER_AUTOBOOT_EXCLUSION_REASONS = [
 export type KeeperAutobootExclusionReason =
   typeof KEEPER_AUTOBOOT_EXCLUSION_REASONS[number]
 
+export type KeeperProfileConfigErrorKind =
+  | 'read_error'
+  | 'parse_error'
+  | 'profile_error'
+  | 'invalid_name'
+  | 'unknown'
+
+export interface KeeperProfileConfigError {
+  keeper: string
+  keeper_path: string
+  failing_path: string
+  kind: KeeperProfileConfigErrorKind
+  reported_kind?: string | null
+  detail: string
+  terminal_reason: 'config_invalid'
+  blocking: true
+  operator_action_required: true
+  next_action: 'fix_keeper_toml_config'
+}
+
 export interface Keeper {
   name: string
   keeper_id?: string | null
@@ -1221,6 +1241,7 @@ export interface Keeper {
   needs_attention?: boolean | null
   attention_reason?: string | null
   next_human_action?: string | null
+  config_error?: KeeperProfileConfigError | null
   active_goal_ids?: string[]
   goal?: string | null
   sandbox_profile?: 'local' | 'docker' | null

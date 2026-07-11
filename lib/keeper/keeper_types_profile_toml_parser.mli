@@ -203,6 +203,7 @@ val current_unknown_keeper_toml_warning_keys : unit -> string list
 val take_warning_keys : int -> 'a list -> 'a list
 val normalize_unknown_keeper_toml_keys : String.t list -> String.t list
 val warn_unknown_keeper_toml_keys_once : path:string -> String.t list -> bool
+val warn_unknown_keeper_toml_key_names : path:string -> String.t list -> unit
 val warn_unknown_keeper_toml_keys :
   path:string -> Keeper_toml_loader.toml_doc -> unit
 val merge_string_list : base:'a list -> 'a list -> 'a list

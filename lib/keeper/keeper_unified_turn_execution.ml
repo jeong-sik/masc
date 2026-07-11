@@ -188,6 +188,7 @@ let run (ctx : ctx)
                Keeper_agent_run.run_turn
                  ~config
                  ~meta:run_meta
+                 ~profile_defaults
                  ?hitl_delivery_channel
                  ?hitl_approval_grant
                  ~turn_ctx_cell

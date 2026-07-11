@@ -8,5 +8,3 @@ val load_from_dirs :
   persona_dirs:string list ->
   name:string ->
   Keeper_types_profile_defaults.keeper_profile_defaults
-
-val load : name:string -> Keeper_types_profile_defaults.keeper_profile_defaults

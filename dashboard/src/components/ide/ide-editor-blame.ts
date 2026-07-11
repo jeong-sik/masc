@@ -1,20 +1,21 @@
 import { html } from 'htm/preact'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
+import { assertExhaustive } from '../../lib/exhaustive'
 import { KeeperBadge } from '../keeper-badge'
 import type { LineOwnership } from './keeper-line-ownership-store'
 
-const IDE_LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'runtime', 'keeper-trace', 'explode'] as const
+// 'tools' / 'approve' / 'runtime' / 'explode' were removed (masc#24069 #49):
+// layerSummary() returned hardcoded literals ('0 anchored' / '0 approval' /
+// '0 hits') with no backing data source, and 'explode' had no render branch
+// anywhere despite its toolbar tooltip promising a per-keeper ghost view.
+const IDE_LAYER_ORDER = ['time', 'parallel', 'notes', 'keeper-trace'] as const
 export type IdeLayerKind = (typeof IDE_LAYER_ORDER)[number]
 
 const LAYER_LABEL: Record<IdeLayerKind, string> = {
   time: 'Time',
   parallel: 'Parallel',
-  tools: 'Tools',
-  approve: 'Approve',
   notes: 'Notes',
-  runtime: 'Runtime',
   'keeper-trace': 'Trace',
-  explode: 'EXPLODE',
 }
 
 export function editorGridRows(hasLayerSummary: boolean, findOpen: boolean): string {
@@ -93,8 +94,8 @@ export function LayerOverlaySummary(
             padding: '1px var(--sp-2)',
             border: '1px solid var(--color-border-default)',
             borderRadius: 'var(--r-2)',
-            background: kind === 'explode' ? 'var(--color-bg-muted)' : 'var(--color-bg-elevated)',
-            color: kind === 'explode' ? 'var(--color-accent-fg)' : 'var(--color-fg-secondary)',
+            background: 'var(--color-bg-elevated)',
+            color: 'var(--color-fg-secondary)',
             whiteSpace: 'nowrap',
           }}
         >
@@ -139,13 +140,11 @@ function layerLabel(kind: IdeLayerKind): string {
 }
 
 function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: ReadonlyArray<string>, annotationCount: number = 0): string {
-  if (kind === 'time') return latestEdit === null ? 'no edits' : `latest ${formatTime(latestEdit)}`
-  if (kind === 'parallel') return `${keepers.length} keepers`
-  if (kind === 'tools') return '0 anchored'
-  if (kind === 'approve') return '0 approval'
-  if (kind === 'notes') return annotationCount === 1 ? '1 note' : `${annotationCount} notes`
-  if (kind === 'runtime') return '0 hits'
-  if (kind === 'keeper-trace') return 'stitched trace'
-  if (kind === 'explode') return 'exclusive ghost view'
-  return ''
+  switch (kind) {
+    case 'time': return latestEdit === null ? 'no edits' : `latest ${formatTime(latestEdit)}`
+    case 'parallel': return `${keepers.length} keepers`
+    case 'notes': return annotationCount === 1 ? '1 note' : `${annotationCount} notes`
+    case 'keeper-trace': return 'stitched trace'
+    default: return assertExhaustive(kind, 'IdeLayerKind')
+  }
 }

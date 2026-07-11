@@ -392,20 +392,12 @@
 .ide-v2-rail-tabs {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 10px 10px 0;
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.ide-v2-surface .ide-v2-rail-tabs.ide-rail-tabs {
-  display: flex;
-  flex: none;
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: flex-end;
-  height: auto;
-  min-height: 0;
+  gap: 2px;
+  padding: 10px 10px 0;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .ide-v2-rail-tab {
@@ -422,7 +414,7 @@
   border-bottom: 2px solid transparent;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .ide-v2-rail-tab.on {
@@ -432,11 +424,6 @@
 
 .ide-v2-rail-tab[aria-selected="true"] {
   color: var(--volt-strong);
-}
-
-.ide-v2-surface .ide-v2-rail-tabs.ide-rail-tabs > .ide-v2-rail-tab {
-  flex: 1 1 0;
-  height: auto;
 }
 
 .ide-v2-rail-scroll {

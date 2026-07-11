@@ -42,7 +42,7 @@ describe('IdeMemoryPanel', () => {
   })
 
   it('renders v2 IDE marker classes for the panel, rows, and action button', async () => {
-    render(h(IdeMemoryPanel, { keeperName: 'sangsu' }), container)
+    render(h(IdeMemoryPanel, { keeperName: 'sangsu', repoId: 'masc' }), container)
 
     await waitFor(() => {
       expect(container.querySelector('.ide-memory-panel.v2-ide-panel')).not.toBeNull()
@@ -84,5 +84,33 @@ describe('IdeMemoryPanel', () => {
     expect(String(url)).toContain('keeper_id=sangsu')
     expect(String(url)).toContain('canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git')
     expect(String(url)).not.toContain('repo_id=')
+  })
+
+  it('renders an explicit no-repo-selected state and never calls the API without a scope', async () => {
+    render(h(IdeMemoryPanel, { keeperName: 'sangsu' }), container)
+
+    await waitFor(() => {
+      const notice = container.querySelector('[data-testid="ide-memory-panel-no-scope"]')
+      expect(notice?.textContent).toBe('저장소를 선택하면 메모리를 조회합니다')
+    })
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(container.querySelector('.ide-memory-panel__error')).toBeNull()
+  })
+
+  it('shows the typed API error message instead of a bare status code', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'repo_index_unavailable', message: 'Repository index is rebuilding' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    render(h(IdeMemoryPanel, { keeperName: 'sangsu', repoId: 'masc' }), container)
+
+    await waitFor(() => {
+      const errorNode = container.querySelector('[data-testid="ide-memory-panel-error"]')
+      expect(errorNode?.textContent).toContain('Repository index is rebuilding')
+    })
+    expect(container.querySelector('[data-testid="ide-memory-panel-error"]')?.textContent).not.toBe('HTTP 503')
   })
 })

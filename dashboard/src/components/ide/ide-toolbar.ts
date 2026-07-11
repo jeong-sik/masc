@@ -35,24 +35,42 @@ const TOOLBAR_BUTTON_BASE =
 
 const VIEW_TAB_BASE = 'ide-v2-view'
 
+// 'tools' / 'approve' / 'runtime' / 'explode' were removed (masc#24069 #49):
+// they rendered as toggleable chips but had no backing data source or render
+// branch — see ide-editor-blame.ts's IDE_LAYER_ORDER comment for detail. The
+// 'keeper-trace' entry's `conflictsWith: ['runtime']` (RFC-0028 §10) is
+// dropped with 'runtime': there is nothing left for it to conflict with.
 export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'time', label: 'Time', description: '변경 timestamp gradient' },
   { kind: 'parallel', label: 'Parallel', description: '동시 keeper 작업 표시' },
-  { kind: 'tools', label: 'Tools', description: 'MCP tool 호출' },
-  { kind: 'approve', label: 'Approve', description: 'APPROVE thread 마커' },
   { kind: 'notes', label: 'Notes', description: 'NOTE/SUGGEST 마커' },
-  { kind: 'runtime', label: 'Runtime', description: 'provider/model/cost/latency gutter chip' },
   {
     kind: 'keeper-trace',
     label: 'Trace',
     description: '3-source stitched gutter chip (anchored-thread / runtime-hop / decision-log)',
-    conflictsWith: ['runtime'],
   },
-  { kind: 'explode', label: 'EXPLODE', description: 'per-keeper ghost copies', mutuallyExclusive: true },
 ]
 
 export const IDE_LAYER_LABELS = new Map(IDE_LAYERS.map(layer => [layer.kind, layer.label]))
-export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'approve', 'notes'] as const
+export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'notes'] as const
+
+// 'time' / 'parallel' read per-line git-blame ownership data
+// (ide-data-workspace-store.ts fetchGitBlame) that is only populated when
+// the editor is showing the BLAME view. Toggling either in another view
+// previously activated a layer with no data to render — a silent no-op.
+// Gated here so the toolbar disables the affordance instead.
+const VIEW_GATED_LAYER_KINDS: ReadonlySet<string> = new Set(['time', 'parallel'])
+
+export function layerAvailableInView(kind: string, view: ViewTab): boolean {
+  return !VIEW_GATED_LAYER_KINDS.has(kind) || view === 'blame'
+}
+
+export function availableLayersForView(
+  layers: ReadonlySet<string>,
+  view: ViewTab,
+): ReadonlySet<string> {
+  return new Set(Array.from(layers).filter(kind => layerAvailableInView(kind, view)))
+}
 
 interface IdeToolbarProps {
   readonly activeView: ViewTab
@@ -110,6 +128,7 @@ export function IdeToolbar({
   }, [])
   const { active, isActive } = useLayeredOverlay(controller)
   const [contextFocus, setContextFocus] = useState(ideContextFocus.value)
+  const availableLayers = IDE_LAYERS.filter(layer => layerAvailableInView(layer.kind, activeView))
 
   useEffect(() => {
     controller.setActive(activeLayers)
@@ -132,7 +151,7 @@ export function IdeToolbar({
       keywords: `${tab.id} ${tab.label} editor mode`,
       handler: () => onViewChange(tab.id),
     })),
-    ...IDE_LAYERS.map(layer => ({
+    ...availableLayers.map(layer => ({
       id: `layer-${layer.kind}`,
       title: `${isActive(layer.kind) ? 'Hide' : 'Show'} ${layer.label} layer`,
       keywords: `toggle ${layer.kind} ${layer.description}`,
@@ -237,7 +256,7 @@ export function IdeToolbar({
         class="ide-toolbar-layers flex min-w-0 items-center gap-1.5 overflow-x-auto pb-0.5 font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"
       >
         <span class="shrink-0">LAYERS</span>
-        ${IDE_LAYERS.map(layer => html`
+        ${availableLayers.map(layer => html`
           <button
             type="button"
             aria-pressed=${isActive(layer.kind) ? 'true' : 'false'}
@@ -253,15 +272,13 @@ export function IdeToolbar({
                 : 'var(--color-fg-secondary)',
               border: '1px solid',
               borderColor: isActive(layer.kind)
-                ? layer.mutuallyExclusive
-                  ? 'var(--color-status-warn)'
-                  : 'var(--color-accent-fg)'
+                ? 'var(--color-accent-fg)'
                 : 'var(--color-border-default)',
             }}
           >${layer.label}</button>
         `)}
-        ${active.size > 0
-          ? html`<span class="shrink-0 text-[var(--color-fg-disabled)]">${active.size} active</span>`
+        ${availableLayers.some(layer => active.has(layer.kind))
+          ? html`<span class="shrink-0 text-[var(--color-fg-disabled)]">${availableLayers.filter(layer => active.has(layer.kind)).length} active</span>`
           : null}
       </div>
     </div>

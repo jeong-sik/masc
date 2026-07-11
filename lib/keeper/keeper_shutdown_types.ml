@@ -56,6 +56,7 @@ type failure_stage =
   | Turn_join
   | Lane_join
   | Record_update
+  | Unhandled_worker
   | Task_settlement
   | Pending_confirm_cleanup
   | Meta_update
@@ -145,6 +146,7 @@ let failure_stage_to_string = function
   | Turn_join -> "turn_join"
   | Lane_join -> "lane_join"
   | Record_update -> "record_update"
+  | Unhandled_worker -> "unhandled_worker"
   | Task_settlement -> "task_settlement"
   | Pending_confirm_cleanup -> "pending_confirm_cleanup"
   | Meta_update -> "meta_update"
@@ -161,6 +163,7 @@ let failure_stage_of_string = function
   | "turn_join" -> Ok Turn_join
   | "lane_join" -> Ok Lane_join
   | "record_update" -> Ok Record_update
+  | "unhandled_worker" -> Ok Unhandled_worker
   | "task_settlement" -> Ok Task_settlement
   | "pending_confirm_cleanup" -> Ok Pending_confirm_cleanup
   | "meta_update" -> Ok Meta_update

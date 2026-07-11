@@ -551,7 +551,7 @@ let replace ~config ~expected_revision operation =
            (Operation_id.to_string operation.operation_id)))
 ;;
 
-let persist_blocked_latest ~config ~identity ~failure ~updated_at =
+let persist_blocked_latest ~config ~identity ~failure ~now =
   let operation_path = path ~config identity.operation_id in
   with_operation_lock ~access:Write operation_path (fun () ->
     match load_unlocked ~config identity.operation_id with
@@ -567,7 +567,7 @@ let persist_blocked_latest ~config ~identity ~failure ~updated_at =
            { existing with
              revision = existing.revision + 1
            ; phase = Blocked failure
-           ; updated_at
+           ; updated_at = now ()
            }
          in
          Keeper_fs.save_json_atomic operation_path (to_json blocked)

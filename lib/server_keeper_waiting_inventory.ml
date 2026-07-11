@@ -250,11 +250,13 @@ let chat_queue_source_json = function
       ; "channel_id", `String channel_id
       ; "user_id", `String user_id
       ]
-  | Keeper_chat_queue.Slack { channel; user_id } ->
+  | Keeper_chat_queue.Slack { channel_id; user_id; team_id; thread_ts; _ } ->
     `Assoc
       [ "kind", `String "slack"
-      ; "channel", `String channel
+      ; "channel_id", `String channel_id
       ; "user_id", `String user_id
+      ; "team_id", Json_util.string_opt_to_json team_id
+      ; "thread_ts", Json_util.string_opt_to_json thread_ts
       ]
 ;;
 

@@ -1,5 +1,4 @@
 // bar-shared.ts — SSOT for Bar types, constants, and pure helpers.
-// Imported by both Preact (`bar.ts`) and Solid (`bar.solid.tsx`) builds.
 
 export type BarKind = 'default' | 'ok' | 'warn' | 'err'
 

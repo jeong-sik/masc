@@ -423,7 +423,7 @@ let release_legacy_inflight stimuli state =
          let remaining = List.filter (fun stimulus -> not (should_release stimulus)) lease.stimuli in
          match remaining with
          | [] -> None
-         | _ -> Some { lease with stimuli = remaining })
+         | _ :: _ -> Some { lease with stimuli = remaining })
       state.leases
   in
   { state with leases }

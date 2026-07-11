@@ -667,121 +667,140 @@ let age_seconds_json ~now = function
   | Some timestamp -> `Float (Float.max 0.0 (now -. timestamp))
 ;;
 
-let keeper_summary_json ~now ~base_path keeper_name =
-  let snapshot = load_snapshot_pair_with_errors ~base_path ~keeper_name in
-  let pending_count = Keeper_event_queue.length snapshot.pending in
-  let inflight_count = Keeper_event_queue.length snapshot.inflight in
-  let pending_oldest = queue_oldest_arrived_at snapshot.pending in
-  let inflight_oldest = queue_oldest_arrived_at snapshot.inflight in
-  let oldest = min_float_opt pending_oldest inflight_oldest in
-  let state = load_state_result ~base_path ~keeper_name in
-  let outbox_count, unprojected_outbox_count =
-    match state with
-    | Error _ -> 0, 0
-    | Ok state ->
-      let outbox = State.transition_outbox state in
-      ( List.length outbox
-      , List.fold_left
+type keeper_summary =
+  { keeper_name : string
+  ; pending_count : int
+  ; inflight_count : int
+  ; pending_oldest : float option
+  ; inflight_oldest : float option
+  ; oldest : float option
+  ; outbox_count : int
+  ; unprojected_outbox_count : int
+  ; counts_complete : bool
+  ; read_errors : string list
+  }
+
+let keeper_summary ~base_path keeper_name =
+  match load_state_result ~base_path ~keeper_name with
+  | Ok state ->
+    let pending = State.pending state in
+    let inflight = inflight_queue state in
+    let pending_oldest = queue_oldest_arrived_at pending in
+    let inflight_oldest = queue_oldest_arrived_at inflight in
+    let outbox = State.transition_outbox state in
+    { keeper_name
+    ; pending_count = Keeper_event_queue.length pending
+    ; inflight_count = Keeper_event_queue.length inflight
+    ; pending_oldest
+    ; inflight_oldest
+    ; oldest = min_float_opt pending_oldest inflight_oldest
+    ; outbox_count = List.length outbox
+    ; unprojected_outbox_count =
+        List.fold_left
           (fun count (entry : outbox_entry) ->
              if entry.projected_to_reaction_ledger then count else count + 1)
           0
-          outbox )
-  in
-  let read_errors = List.map (fun error -> error.message) snapshot.read_errors in
+          outbox
+    ; counts_complete = true
+    ; read_errors = []
+    }
+  | Error message ->
+    let read_errors =
+      diagnose_snapshot_read_error ~base_path ~keeper_name message
+      |> List.map (fun error -> error.message)
+    in
+    { keeper_name
+    ; pending_count = 0
+    ; inflight_count = 0
+    ; pending_oldest = None
+    ; inflight_oldest = None
+    ; oldest = None
+    ; outbox_count = 0
+    ; unprojected_outbox_count = 0
+    ; counts_complete = false
+    ; read_errors
+    }
+;;
+
+let keeper_summary_json ~now (summary : keeper_summary) =
   `Assoc
-    [ "keeper_name", `String keeper_name
-    ; "pending_count", `Int pending_count
-    ; "inflight_count", `Int inflight_count
-    ; "total_count", `Int (pending_count + inflight_count)
-    ; "oldest_arrived_at_unix", json_of_float_opt oldest
-    ; "oldest_age_seconds", age_seconds_json ~now oldest
-    ; "pending_oldest_arrived_at_unix", json_of_float_opt pending_oldest
-    ; "pending_oldest_age_seconds", age_seconds_json ~now pending_oldest
-    ; "inflight_oldest_arrived_at_unix", json_of_float_opt inflight_oldest
-    ; "inflight_oldest_age_seconds", age_seconds_json ~now inflight_oldest
-    ; "transition_outbox_count", `Int outbox_count
-    ; "unprojected_transition_outbox_count", `Int unprojected_outbox_count
-    ; "read_errors", `List (List.map (fun message -> `String message) read_errors)
+    [ "keeper_name", `String summary.keeper_name
+    ; "pending_count", `Int summary.pending_count
+    ; "inflight_count", `Int summary.inflight_count
+    ; "total_count", `Int (summary.pending_count + summary.inflight_count)
+    ; "oldest_arrived_at_unix", json_of_float_opt summary.oldest
+    ; "oldest_age_seconds", age_seconds_json ~now summary.oldest
+    ; "pending_oldest_arrived_at_unix", json_of_float_opt summary.pending_oldest
+    ; "pending_oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
+    ; "inflight_oldest_arrived_at_unix", json_of_float_opt summary.inflight_oldest
+    ; "inflight_oldest_age_seconds", age_seconds_json ~now summary.inflight_oldest
+    ; "transition_outbox_count", `Int summary.outbox_count
+    ; "unprojected_transition_outbox_count", `Int summary.unprojected_outbox_count
+    ; "counts_complete", `Bool summary.counts_complete
+    ; "read_errors", `List (List.map (fun message -> `String message) summary.read_errors)
     ]
 ;;
 
-let int_field name = function
-  | `Assoc fields ->
-    (match List.assoc_opt name fields with
-     | Some (`Int value) -> value
-     | _ -> 0)
-  | _ -> 0
+let compact_pending_count_json ~now (summary : keeper_summary) =
+  `Assoc
+    [ "keeper_name", `String summary.keeper_name
+    ; "pending_count", `Int summary.pending_count
+    ; "oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
+    ]
 ;;
 
-let float_option_field name = function
-  | `Assoc fields ->
-    (match List.assoc_opt name fields with
-     | Some (`Float value) -> Some value
-     | Some (`Int value) -> Some (float_of_int value)
-     | _ -> None)
-  | _ -> None
-;;
-
-let list_field_json name = function
-  | `Assoc fields ->
-    (match List.assoc_opt name fields with
-     | Some (`List values) -> values
-     | _ -> [])
-  | _ -> []
+let compact_inflight_count_json ~now (summary : keeper_summary) =
+  `Assoc
+    [ "keeper_name", `String summary.keeper_name
+    ; "inflight_count", `Int summary.inflight_count
+    ; "oldest_age_seconds", age_seconds_json ~now summary.inflight_oldest
+    ]
 ;;
 
 let fleet_summary_json ~now ~base_path =
   let discovery = discover_keeper_names_with_snapshots ~base_path in
-  let keepers =
-    List.map (keeper_summary_json ~now ~base_path) discovery.keeper_names
-  in
+  let summaries = List.map (keeper_summary ~base_path) discovery.keeper_names in
   let pending_count =
-    List.fold_left (fun total json -> total + int_field "pending_count" json) 0 keepers
+    List.fold_left
+      (fun total (summary : keeper_summary) -> total + summary.pending_count)
+      0
+      summaries
   in
   let inflight_count =
-    List.fold_left (fun total json -> total + int_field "inflight_count" json) 0 keepers
+    List.fold_left
+      (fun total (summary : keeper_summary) -> total + summary.inflight_count)
+      0
+      summaries
   in
   let outbox_count =
     List.fold_left
-      (fun total json -> total + int_field "transition_outbox_count" json)
+      (fun total (summary : keeper_summary) -> total + summary.outbox_count)
       0
-      keepers
+      summaries
   in
   let unprojected_outbox_count =
     List.fold_left
-      (fun total json -> total + int_field "unprojected_transition_outbox_count" json)
+      (fun total (summary : keeper_summary) ->
+         total + summary.unprojected_outbox_count)
       0
-      keepers
+      summaries
   in
   let oldest =
     List.fold_left
-      (fun oldest json ->
-         min_float_opt oldest (float_option_field "oldest_arrived_at_unix" json))
+      (fun oldest (summary : keeper_summary) -> min_float_opt oldest summary.oldest)
       None
-      keepers
+      summaries
   in
   let read_errors =
     (match discovery.read_error with None -> [] | Some error -> [ `String error ])
-    @ List.concat_map (list_field_json "read_errors") keepers
+    @ List.concat_map
+        (fun (summary : keeper_summary) ->
+           List.map (fun error -> `String error) summary.read_errors)
+        summaries
   in
-  let keepers_with field =
-    List.filter (fun json -> int_field field json > 0) keepers
-  in
-  let compact_count field json =
-    match json with
-    | `Assoc fields ->
-      let keeper_name = Option.value ~default:`Null (List.assoc_opt "keeper_name" fields) in
-      let count = Option.value ~default:(`Int 0) (List.assoc_opt field fields) in
-      let oldest_age =
-        let age_field =
-          if String.equal field "pending_count"
-          then "pending_oldest_age_seconds"
-          else "inflight_oldest_age_seconds"
-        in
-        Option.value ~default:`Null (List.assoc_opt age_field fields)
-      in
-      `Assoc [ "keeper_name", keeper_name; field, count; "oldest_age_seconds", oldest_age ]
-    | _ -> `Assoc []
+  let counts_complete =
+    discovery.read_error = None
+    && List.for_all (fun (summary : keeper_summary) -> summary.counts_complete) summaries
   in
   let projection_base_path =
     match Owner_lock.canonical_base_path base_path with
@@ -802,14 +821,21 @@ let fleet_summary_json ~now ~base_path =
     ; "total_count", `Int (pending_count + inflight_count)
     ; "transition_outbox_count", `Int outbox_count
     ; "unprojected_transition_outbox_count", `Int unprojected_outbox_count
+    ; "counts_complete", `Bool counts_complete
     ; "oldest_arrived_at_unix", json_of_float_opt oldest
     ; "oldest_age_seconds", age_seconds_json ~now oldest
     ; ( "pending_by_keeper"
-      , `List (List.map (compact_count "pending_count") (keepers_with "pending_count")) )
+      , `List
+          (summaries
+           |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
+           |> List.map (compact_pending_count_json ~now)) )
     ; ( "inflight_by_keeper"
-      , `List (List.map (compact_count "inflight_count") (keepers_with "inflight_count")) )
+      , `List
+          (summaries
+           |> List.filter (fun (summary : keeper_summary) -> summary.inflight_count > 0)
+           |> List.map (compact_inflight_count_json ~now)) )
     ; "read_error_count", `Int (List.length read_errors)
     ; "read_errors", `List read_errors
-    ; "keepers", `List keepers
+    ; "keepers", `List (List.map (keeper_summary_json ~now) summaries)
     ]
 ;;

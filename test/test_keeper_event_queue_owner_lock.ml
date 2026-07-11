@@ -66,6 +66,12 @@ let int_field name json =
   | _ -> Alcotest.failf "expected int field %S" name
 ;;
 
+let bool_field name json =
+  match json_field name json with
+  | Some (`Bool value) -> value
+  | _ -> Alcotest.failf "expected bool field %S" name
+;;
+
 let list_field name json =
   match json_field name json with
   | Some (`List values) -> values
@@ -324,6 +330,10 @@ let test_fleet_summary_serializes_with_owner_commit () =
            Atomic.set release true;
            let json = Eio.Promise.await summary in
            let keeper = keeper_summary keeper_name json in
+           Alcotest.(check bool)
+             "summary count projection is complete"
+             true
+             (bool_field "counts_complete" keeper);
            Alcotest.(check int)
              "summary pending count comes from completed pair"
              0

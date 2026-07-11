@@ -225,10 +225,13 @@ let parse_workspace_judgment ~config ~generated_at ~generated_at_unix ~model_use
           generated_at_unix +. float_of_int (workspace_ttl_sec ())
         in
         (!record_operator_judgment_ref) config ~surface:"command.namespace"
-             ~target_type_str:"workspace" ~target_id:None ~summary
+             ~target_type_str:Operator_action_constants.workspace_target_type
+             ~target_id:None ~summary
              ~confidence ?model_name:None
              ?recommended_action:
-               (build_recommended_action ~actor:keeper_name ~target_type:"workspace"
+               (build_recommended_action
+                  ~actor:keeper_name
+                  ~target_type:Operator_action_constants.workspace_target_type
                   ~target_id:None (Option.value ~default:`Null (Json_util.assoc_member_opt member_recommended_action json)))
              ~evidence_refs:(parse_string_list json "evidence_refs")
              ~disagreement_with_truth:

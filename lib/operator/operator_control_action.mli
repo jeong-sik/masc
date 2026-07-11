@@ -133,9 +133,10 @@ val preview_of_action : action_request -> Yojson.Safe.t
     ]} *)
 
 val validate_target_type :
-  string -> action_request -> (unit, string) result
+  Operator_action_constants.target_type -> action_request -> (unit, string) result
 (** [validate_target_type expected r] returns [Ok ()] iff
-    [r.target_type = expected]; otherwise
+    [r.target_type] decodes to [expected] through the operator target-type
+    SSOT; otherwise
     [Error "invalid target_type for <action_type> (expected
     <expected>)"]. *)
 

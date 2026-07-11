@@ -219,11 +219,14 @@ let preview_of_action (request : action_request) =
   `Assoc (base @ [ ("payload", `Assoc payload_fields) ])
 
 let validate_target_type expected request =
-  if String.equal request.target_type expected then Ok ()
-  else
+  match Operator_action_constants.target_type_of_string request.target_type with
+  | Some actual when actual = expected -> Ok ()
+  | Some _ | None ->
     Error
-      (Printf.sprintf "invalid target_type for %s (expected %s)"
-         request.action_type expected)
+      (Printf.sprintf
+         "invalid target_type for %s (expected %s)"
+         request.action_type
+         (Operator_action_constants.target_type_to_string expected))
 
 let require_target_id request =
   match request.target_id with

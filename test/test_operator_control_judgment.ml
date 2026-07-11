@@ -169,10 +169,6 @@ let test_operator_judgment_rejects_retired_target_type_aliases () =
     "namespace no longer parses"
     true
     (Option.is_none (Operator_judgment.target_type_of_string "namespace"));
-  Alcotest.(check bool)
-    "namespace no longer parses"
-    true
-    (Option.is_none (Operator_judgment.target_type_of_string "namespace"));
   Alcotest.(check (result string string))
     "digest rejects namespace"
     (Error Operator_action_constants.workspace_target_type_error)

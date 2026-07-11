@@ -49,7 +49,7 @@ let recent_tool_host_failures ~now () =
                     severity =
                       operator_severity_of_failure_envelope envelope.severity;
                     summary = envelope.summary;
-                    target_type = "workspace";
+                    target_type = Operator_action_constants.workspace_target_type;
                     target_id = None;
                     actor = None;
                     evidence =
@@ -79,7 +79,7 @@ let build_workspace_attention_items config =
           summary =
             Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
               (List.length pending_confirms);
-          target_type = "workspace";
+          target_type = Operator_action_constants.workspace_target_type;
           target_id = None;
           actor = None;
           evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
@@ -183,7 +183,7 @@ let external_attention_projection item =
       kind = external_attention_kind item;
       severity;
       summary = external_attention_summary item;
-      target_type = "keeper";
+      target_type = Operator_action_constants.keeper_target_type;
       target_id = Some item.keeper_name;
       actor = Some item.keeper_name;
       evidence = external_attention_evidence item;
@@ -192,7 +192,7 @@ let external_attention_projection item =
   let recommended_action =
     {
       action_type = "keeper_probe";
-      target_type = "keeper";
+      target_type = Operator_action_constants.keeper_target_type;
       target_id = Some item.keeper_name;
       severity;
       reason = "Inspect pending external attention";
@@ -242,7 +242,7 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
         severity;
         summary =
           keeper_attention_summary ~meta ~reason ~runtime_blocker_summary;
-        target_type = "keeper";
+        target_type = Operator_action_constants.keeper_target_type;
         target_id = Some meta.name;
         actor = Some meta.agent_name;
         evidence;
@@ -256,7 +256,7 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
     let recommended_action =
       {
         action_type = "keeper_probe";
-        target_type = "keeper";
+        target_type = Operator_action_constants.keeper_target_type;
         target_id = Some meta.name;
         severity;
         reason = action_reason;
@@ -322,7 +322,8 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
       (`Assoc
         [
           ("trace_id", `String (trace_id "opsd"));
-          ("target_type", `String "workspace");
+          ( "target_type"
+          , `String Operator_action_constants.workspace_target_type );
           ("target_id", `Null);
           ("health", `String "ok");
           ("judgment_owner", `String "fallback_read_model");
@@ -346,8 +347,8 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
     let workspace_state_json = workspace_state_json config in
-    match target_type with
-    | "workspace" ->
+    match Operator_action_constants.target_type_of_string target_type with
+    | Some Operator_action_constants.Workspace ->
         let confirm_scope = pending_confirm_scope ?actor config in
         let keeper_attention, keeper_recommendations =
           keeper_attention_projection_items config |> List.split
@@ -365,7 +366,10 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           summary_of_recommendations ~actor:actor_name recommended_actions
         in
         let active_guidance =
-          active_guidance_fields ~config ~actor:actor_name ~target_type:"workspace"
+          active_guidance_fields
+            ~config
+            ~actor:actor_name
+            ~target_type:Operator_action_constants.workspace_target_type
             ~target_id:None ~fallback_recommendations:recommended_actions
             ~fallback_summary:fallback_recommendation_summary
         in
@@ -376,7 +380,8 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           (`Assoc
             ([
               ("trace_id", `String (trace_id "opsd"));
-              ("target_type", `String "workspace");
+              ( "target_type"
+              , `String Operator_action_constants.workspace_target_type );
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
               ("operator_judge_runtime", operator_judge_runtime_json config);
@@ -392,4 +397,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
             ]
             @ [ ("recent_reviews", recent_reviews) ]
             @ active_guidance))
-    | _ -> Error "unsupported target_type"
+    | Some Operator_action_constants.Keeper
+    | Some Operator_action_constants.Goal
+    | None -> Error "unsupported target_type"

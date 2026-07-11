@@ -840,6 +840,22 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
 ;;
 
 let test_masc_board_registry_has_descriptor_projection () =
+  let expected_resource_writes =
+    let open Tool_name.Board_name in
+    [ Board_post
+    ; Board_post_update
+    ; Board_comment
+    ; Board_vote
+    ; Board_comment_vote
+    ; Board_reaction
+    ; Board_curation_submit
+    ; Board_delete
+    ; Board_cleanup
+    ; Board_sub_board_create
+    ; Board_sub_board_update
+    ; Board_sub_board_delete
+    ]
+  in
   let wire_names =
     List.map Tool_name.Board_name.to_string Tool_name.Board_name.all
   in
@@ -918,8 +934,12 @@ let test_masc_board_registry_has_descriptor_projection () =
            true
            (descriptor.policy.visibility = expected_visibility);
          let expected_readonly =
-           not (Tool_name.Board_name.is_resource_write board_name)
+           not (List.mem board_name expected_resource_writes)
          in
+         Alcotest.(check bool)
+           (schema.name ^ " typed resource classification follows Board contract")
+           (not expected_readonly)
+           (Tool_name.Board_name.is_resource_write board_name);
          Alcotest.(check (option bool))
            (schema.name ^ " descriptor readonly follows typed resource projection")
            (Some expected_readonly)

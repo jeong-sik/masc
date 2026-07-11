@@ -111,16 +111,10 @@ let handle_tool name args : Tool_result.result =
 ;;
 
 let tool_spec_read_only =
-  [ "masc_board_list"
-  ; "masc_board_sub_board_list"
-  ; "masc_board_sub_board_get"
-  ; "masc_board_post_get"
-  ; "masc_board_stats"
-  ; "masc_board_search"
-  ; "masc_board_profile"
-  ; "masc_board_hearths"
-  ; "masc_board_curation_read"
-  ]
+  Tool_name.Board_name.all
+  |> List.filter (fun board_name ->
+    not (Tool_name.Board_name.is_resource_write board_name))
+  |> List.map Tool_name.Board_name.to_string
 ;;
 
 let destructive_board_tool_names =

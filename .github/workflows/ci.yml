@@ -670,19 +670,16 @@ jobs:
 
       - name: Build
         id: build_step
+        env:
+          # Group 1 links hundreds of native test executables against the full
+          # masc_test_deps graph. Serializing this build bounds concurrent
+          # native-link disk pressure without changing the test backend or
+          # dropping native Domain/C-stub coverage.
+          DUNE_JOBS: "1"
         # NO continue-on-error: dune build is deterministic and must hard-fail.
         # Test execution steps below are also required: any failing test suite
         # now fails the Build and Test job and blocks merge via the CI Gate.
         # See: PR #11721 followup, memory feedback_admin_merge_can_bypass_build_ci.md.
-        #
-        # DUNE_JOBS is intentionally NOT pinned on this step: @default @check
-        # only COMPILES (it never runs tests), so it cannot hit the Eio fiber
-        # scheduling flakes that motivate DUNE_JOBS=1 on the test-running steps
-        # below (issue #2957). Serial compile measured ~42min at DUNE_JOBS=1
-        # (this step, run 29081003730); dune's default (per-core) parallelism
-        # removes that serialization. Compile output is deterministic
-        # regardless of job count, so parallel compile carries no correctness
-        # risk. Test-execution steps keep their own DUNE_JOBS=1.
         run: |
           set -euo pipefail
 

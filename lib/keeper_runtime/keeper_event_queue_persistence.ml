@@ -4,46 +4,24 @@
     module mirrors the post-CAS queue snapshot to disk so a keeper restart can
     replay pending stimuli instead of resetting to [Keeper_event_queue.empty].
 
-    Reads and writes over the pending/inflight snapshot pair are serialized with
-    an Eio mutex in runtime fibers. Setup/tests that reach this module without
-    an Eio context fall back to a Stdlib mutex. *)
+    Reads and writes over one keeper's pending/inflight snapshot pair are
+    serialized by [Keeper_event_queue_owner_lock]. Distinct keeper owners do
+    not share an I/O lock, while Eio and non-Eio callers for the same canonical
+    [(base_path, keeper_name)] identity use one cross-context mutex. *)
 
-let eio_write_mu = Eio.Mutex.create ()
-let fallback_write_mu = Stdlib.Mutex.create ()
+module Owner_lock = Keeper_event_queue_owner_lock
 
-(* [eio_write_mu] is process-global, so a poisoned mutex blocks durable
-   event-queue snapshots for EVERY keeper for the lifetime of the process
-   (audit 2026-06-29). [Eio.Mutex.use_rw] poisons the mutex permanently if the
-   critical section raises, so the failure must never cross the [use_rw]
-   boundary: a non-cancellation exception is captured inside the critical
-   section and re-raised — with its original backtrace — only after the lock is
-   released, leaving the mutex usable for the next keeper. [Eio.Cancel.Cancelled]
-   is re-raised in place so cancellation/shutdown is honoured and never swallowed
-   (CancelledNeverAbsorbed). The external contract is unchanged: [with_write_lock]
-   still returns [f ()] or re-raises its exception. *)
-let with_write_lock : type a. (unit -> a) -> a =
- fun f ->
-  let guarded () =
-    match f () with
-    | v -> Ok v
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-    | exception exn -> Error (exn, Printexc.get_raw_backtrace ())
-  in
-  let outcome =
-    match Eio_context.get_switch_opt () with
-    | Some _ -> Eio.Mutex.use_rw ~protect:true eio_write_mu guarded
-    | None -> Stdlib.Mutex.protect fallback_write_mu guarded
-  in
-  match outcome with
-  | Ok v -> v
-  | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
+let owner_error_to_string = Owner_lock.resolve_error_to_string
 
-let valid_keeper_name name =
-  let valid_char = function
-    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-' -> true
-    | _ -> false
-  in
-  (not (String.equal name "")) && String.for_all valid_char name
+let keeper_name_of_owner owner =
+  Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
+;;
+
+let resolve_owner ~base_path ~keeper_name =
+  match Owner_lock.resolve ~base_path ~keeper_name with
+  | Ok owner -> Ok owner
+  | Error error -> Error (owner_error_to_string error)
+;;
 
 let snapshot_filename = "event-queue.json"
 let inflight_snapshot_filename = "event-queue-inflight.json"
@@ -51,8 +29,8 @@ let inflight_snapshot_filename = "event-queue-inflight.json"
 (* [Fs_compat.mkdir_p] raises (Sys_error / Unix_error) on ENOSPC/EROFS/ENOTDIR
    instead of returning a result, so route it through the same [(unit, string)
    result] channel as [save_file_atomic]. This keeps [save_json_atomic] total:
-   it never raises for a disk failure, so the enclosing [with_write_lock]
-   critical section returns normally and the shared mutex is not poisoned.
+   it never raises for a disk failure, so the enclosing owner-lock critical
+   section returns normally.
    [Eio.Cancel.Cancelled] is re-raised so cancellation is not flattened into a
    string error. *)
 let save_json_atomic path json =
@@ -68,23 +46,19 @@ let save_json_atomic path json =
     |> Yojson.Safe.pretty_to_string
     |> Fs_compat.save_file_atomic path
 
-let snapshot_path ~base_path ~keeper_name =
-  if valid_keeper_name keeper_name
-  then
-    Ok
-      (Filename.concat
-         (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-         snapshot_filename)
-  else Error (Printf.sprintf "invalid keeper name for event queue snapshot: %s" keeper_name)
+let keeper_runtime_dir_of_owner owner =
+  Filename.concat
+    (Common.keepers_runtime_dir_of_base ~base_path:(Owner_lock.base_path owner))
+    (keeper_name_of_owner owner)
+;;
 
-let inflight_path ~base_path ~keeper_name =
-  if valid_keeper_name keeper_name
-  then
-    Ok
-      (Filename.concat
-         (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-         inflight_snapshot_filename)
-  else Error (Printf.sprintf "invalid keeper name for event queue inflight: %s" keeper_name)
+let snapshot_path_of_owner owner =
+  Filename.concat (keeper_runtime_dir_of_owner owner) snapshot_filename
+;;
+
+let inflight_path_of_owner owner =
+  Filename.concat (keeper_runtime_dir_of_owner owner) inflight_snapshot_filename
+;;
 
 type dir_state =
   | Missing
@@ -113,49 +87,60 @@ type snapshot_discovery =
   }
 
 let discover_keeper_names_with_snapshots ~base_path =
-  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-  match dir_state keepers_dir with
-  | Error msg -> { keeper_names = []; read_error = Some msg }
-  | Ok Missing -> { keeper_names = []; read_error = None }
-  | Ok Not_directory ->
-    { keeper_names = []
-    ; read_error = Some (Printf.sprintf "keepers runtime path is not a directory: %s" keepers_dir)
-    }
-  | Ok Directory ->
-    (match Safe_ops.list_dir_safe keepers_dir with
+  match Owner_lock.canonical_base_path base_path with
+  | Error error ->
+    { keeper_names = []; read_error = Some (owner_error_to_string error) }
+  | Ok base_path ->
+    let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+    (match dir_state keepers_dir with
      | Error msg -> { keeper_names = []; read_error = Some msg }
-     | Ok entries ->
-       let names, errors =
-         List.fold_left
-           (fun (names, errors) name ->
-              let keeper_dir = Filename.concat keepers_dir name in
-              match dir_state keeper_dir with
-              | Error msg -> names, msg :: errors
-              | Ok Missing | Ok Not_directory -> names, errors
-              | Ok Directory ->
-                let pending_path = Filename.concat keeper_dir snapshot_filename in
-                let inflight_path = Filename.concat keeper_dir inflight_snapshot_filename in
-                (match file_exists_safe pending_path, file_exists_safe inflight_path with
-                 | Error msg, _ | _, Error msg -> names, msg :: errors
-                 | Ok false, Ok false -> names, errors
-                 | Ok true, _ | _, Ok true ->
-                   if valid_keeper_name name
-                   then name :: names, errors
-                   else
-                     ( names
-                     , Printf.sprintf
-                         "invalid keeper name with durable event queue snapshot: %s"
-                         name
-                       :: errors )))
-           ([], [])
-           entries
-       in
-       { keeper_names = List.sort_uniq String.compare names
+     | Ok Missing -> { keeper_names = []; read_error = None }
+     | Ok Not_directory ->
+       { keeper_names = []
        ; read_error =
-           (match List.rev errors with
-            | [] -> None
-            | errors -> Some (String.concat "; " errors))
-       })
+           Some
+             (Printf.sprintf
+                "keepers runtime path is not a directory: %s"
+                keepers_dir)
+       }
+     | Ok Directory ->
+       (match Safe_ops.list_dir_safe keepers_dir with
+        | Error msg -> { keeper_names = []; read_error = Some msg }
+        | Ok entries ->
+          let names, errors =
+            List.fold_left
+              (fun (names, errors) name ->
+                 let keeper_dir = Filename.concat keepers_dir name in
+                 match dir_state keeper_dir with
+                 | Error msg -> names, msg :: errors
+                 | Ok Missing | Ok Not_directory -> names, errors
+                 | Ok Directory ->
+                   let pending_path = Filename.concat keeper_dir snapshot_filename in
+                   let inflight_path =
+                     Filename.concat keeper_dir inflight_snapshot_filename
+                   in
+                   (match file_exists_safe pending_path, file_exists_safe inflight_path with
+                    | Error msg, _ | _, Error msg -> names, msg :: errors
+                    | Ok false, Ok false -> names, errors
+                    | Ok true, _ | _, Ok true ->
+                      (match Keeper_id.Keeper_name.of_string name with
+                       | Ok keeper_name ->
+                         Keeper_id.Keeper_name.to_string keeper_name :: names, errors
+                       | Error reason ->
+                         ( names
+                         , Printf.sprintf
+                             "invalid keeper name with durable event queue snapshot: %s"
+                             reason
+                           :: errors ))))
+              ([], [])
+              entries
+          in
+          { keeper_names = List.sort_uniq String.compare names
+          ; read_error =
+              (match List.rev errors with
+               | [] -> None
+               | errors -> Some (String.concat "; " errors))
+          }))
 
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
@@ -287,47 +272,62 @@ let empty_snapshot_pair_with_errors =
   }
 ;;
 
-let load_snapshot_pair_unlocked ~log_restore ~base_path ~keeper_name =
-  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
-  | Error msg, _ | _, Error msg ->
-    Log.Keeper.warn "event_queue_snapshot: %s" msg;
-    empty_snapshot_pair
-  | Ok pending_path, Ok inflight_path ->
-    let pending = load_from_path ~log_restore ~keeper_name pending_path in
-    let inflight = load_from_path ~log_restore ~keeper_name inflight_path in
-    { pending; inflight }
+let load_snapshot_pair_unlocked ~log_restore owner =
+  let keeper_name = keeper_name_of_owner owner in
+  let pending =
+    load_from_path ~log_restore ~keeper_name (snapshot_path_of_owner owner)
+  in
+  let inflight =
+    load_from_path ~log_restore ~keeper_name (inflight_path_of_owner owner)
+  in
+  { pending; inflight }
 ;;
 
-let load_snapshot_pair_with_errors_unlocked ~base_path ~keeper_name =
-  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
-  | Error msg, _ | _, Error msg ->
-    Log.Keeper.warn "event_queue_snapshot: %s" msg;
-    { empty_snapshot_pair_with_errors with
-      read_errors = [ { kind = Invalid_path; path = None; message = msg } ]
-    }
-  | Ok pending_path, Ok inflight_path ->
-    let pending, pending_errors = load_from_path_with_errors ~keeper_name pending_path in
-    let inflight, inflight_errors = load_from_path_with_errors ~keeper_name inflight_path in
-    { pending; inflight; read_errors = pending_errors @ inflight_errors }
+let load_snapshot_pair_with_errors_unlocked owner =
+  let keeper_name = keeper_name_of_owner owner in
+  let pending, pending_errors =
+    load_from_path_with_errors ~keeper_name (snapshot_path_of_owner owner)
+  in
+  let inflight, inflight_errors =
+    load_from_path_with_errors ~keeper_name (inflight_path_of_owner owner)
+  in
+  { pending; inflight; read_errors = pending_errors @ inflight_errors }
 ;;
 
-let load_unlocked ~base_path ~keeper_name =
+let load_unlocked owner =
   (* The live hydration path: announce the restore once. *)
-  let pair = load_snapshot_pair_unlocked ~log_restore:true ~base_path ~keeper_name in
+  let pair = load_snapshot_pair_unlocked ~log_restore:true owner in
   prepend_missing pair.pending (Keeper_event_queue.to_list pair.inflight)
 ;;
 
 let load_snapshot_pair ~base_path ~keeper_name =
-  with_write_lock (fun () ->
-    load_snapshot_pair_unlocked ~log_restore:false ~base_path ~keeper_name)
+  match resolve_owner ~base_path ~keeper_name with
+  | Error msg ->
+    Log.Keeper.warn "event_queue_snapshot: %s" msg;
+    empty_snapshot_pair
+  | Ok owner ->
+    Owner_lock.with_lock owner (fun () ->
+      load_snapshot_pair_unlocked ~log_restore:false owner)
 ;;
 
 let load_snapshot_pair_with_errors ~base_path ~keeper_name =
-  with_write_lock (fun () -> load_snapshot_pair_with_errors_unlocked ~base_path ~keeper_name)
+  match resolve_owner ~base_path ~keeper_name with
+  | Error msg ->
+    Log.Keeper.warn "event_queue_snapshot: %s" msg;
+    { empty_snapshot_pair_with_errors with
+      read_errors = [ { kind = Invalid_path; path = None; message = msg } ]
+    }
+  | Ok owner ->
+    Owner_lock.with_lock owner (fun () ->
+      load_snapshot_pair_with_errors_unlocked owner)
 ;;
 
 let load ~base_path ~keeper_name =
-  with_write_lock (fun () -> load_unlocked ~base_path ~keeper_name)
+  match resolve_owner ~base_path ~keeper_name with
+  | Error msg ->
+    Log.Keeper.warn "event_queue_snapshot: %s" msg;
+    Keeper_event_queue.empty
+  | Ok owner -> Owner_lock.with_lock owner (fun () -> load_unlocked owner)
 
 let queue_oldest_arrived_at queue =
   queue
@@ -370,15 +370,28 @@ let read_queue_for_summary ~keeper_name path =
               keeper_name
               msg))
 
-type queue_summary = {
-  queue : Keeper_event_queue.t;
-  read_error : string option;
-}
+type queue_summary =
+  { queue : Keeper_event_queue.t
+  ; read_error : string option
+  }
 
 let queue_summary ~keeper_name path =
   match read_queue_for_summary ~keeper_name path with
   | Ok queue -> { queue; read_error = None }
   | Error msg -> { queue = Keeper_event_queue.empty; read_error = Some msg }
+
+let snapshot_read_error_to_string (error : snapshot_read_error) =
+  let location =
+    match error.path with
+    | None -> ""
+    | Some path -> " path=" ^ path
+  in
+  Printf.sprintf
+    "%s%s: %s"
+    (snapshot_read_error_kind_to_string error.kind)
+    location
+    error.message
+;;
 
 type keeper_queue_summary = {
   keeper_name : string;
@@ -395,8 +408,8 @@ let keeper_oldest_arrived_at summary =
   min_float_opt summary.pending_oldest_arrived_at summary.inflight_oldest_arrived_at
 
 let keeper_queue_summary ~base_path ~keeper_name =
-  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
-  | Error msg, _ | _, Error msg ->
+  match resolve_owner ~base_path ~keeper_name with
+  | Error msg ->
     { keeper_name
     ; pending_count = 0
     ; inflight_count = 0
@@ -404,17 +417,21 @@ let keeper_queue_summary ~base_path ~keeper_name =
     ; inflight_oldest_arrived_at = None
     ; read_errors = [ msg ]
     }
-  | Ok pending_path, Ok inflight_path ->
-    let pending = queue_summary ~keeper_name pending_path in
-    let inflight = queue_summary ~keeper_name inflight_path in
-    { keeper_name
-    ; pending_count = Keeper_event_queue.length pending.queue
-    ; inflight_count = Keeper_event_queue.length inflight.queue
-    ; pending_oldest_arrived_at = queue_oldest_arrived_at pending.queue
-    ; inflight_oldest_arrived_at = queue_oldest_arrived_at inflight.queue
-    ; read_errors =
-        List.filter_map (fun value -> value) [ pending.read_error; inflight.read_error ]
-    }
+  | Ok owner ->
+    Owner_lock.with_lock owner (fun () ->
+      let keeper_name = keeper_name_of_owner owner in
+      let pending = queue_summary ~keeper_name (snapshot_path_of_owner owner) in
+      let inflight = queue_summary ~keeper_name (inflight_path_of_owner owner) in
+      { keeper_name
+      ; pending_count = Keeper_event_queue.length pending.queue
+      ; inflight_count = Keeper_event_queue.length inflight.queue
+      ; pending_oldest_arrived_at = queue_oldest_arrived_at pending.queue
+      ; inflight_oldest_arrived_at = queue_oldest_arrived_at inflight.queue
+      ; read_errors =
+          List.filter_map
+            (fun value -> value)
+            [ pending.read_error; inflight.read_error ]
+      })
 
 let keeper_queue_summary_json ~now summary =
   let oldest_arrived_at = keeper_oldest_arrived_at summary in
@@ -449,8 +466,19 @@ let queue_count_by_keeper_json ~now kind summary =
     ]
 
 let fleet_summary_json ~now ~base_path =
-  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-  let discovery = discover_keeper_names_with_snapshots ~base_path in
+  let projection_base_path, discovery =
+    match Owner_lock.canonical_base_path base_path with
+    | Ok canonical ->
+      canonical, discover_keeper_names_with_snapshots ~base_path:canonical
+    | Error error ->
+      ( base_path
+      , { keeper_names = []
+        ; read_error = Some (owner_error_to_string error)
+        } )
+  in
+  let keepers_dir =
+    Common.keepers_runtime_dir_of_base ~base_path:projection_base_path
+  in
   let keeper_names = discovery.keeper_names in
   let scan_errors =
     match discovery.read_error with
@@ -486,7 +514,7 @@ let fleet_summary_json ~now ~base_path =
     [ "schema", `String "masc.keeper_event_queue.fleet_summary.v1"
     ; "status", `String (if read_error_count = 0 then "ok" else "degraded")
     ; "operator_action_required", `Bool (read_error_count > 0)
-    ; "base_path", `String base_path
+    ; "base_path", `String projection_base_path
     ; "keepers_runtime_dir", `String keepers_dir
     ; "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", `List (List.map (fun name -> `String name) keeper_names)
@@ -527,11 +555,14 @@ let persist_to_path ~keeper_name path queue =
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
 
 let persist ~base_path ~keeper_name queue =
-  match snapshot_path ~base_path ~keeper_name with
+  match resolve_owner ~base_path ~keeper_name with
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
-  | Ok path ->
+  | Ok owner ->
+    let keeper_name = keeper_name_of_owner owner in
+    let path = snapshot_path_of_owner owner in
     (try
-       with_write_lock (fun () -> persist_to_path ~keeper_name path queue)
+       Owner_lock.with_lock owner (fun () ->
+         persist_to_path ~keeper_name path queue)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -542,11 +573,14 @@ let persist ~base_path ~keeper_name queue =
          (Printexc.to_string exn))
 
 let persist_snapshot ~base_path ~keeper_name snapshot =
-  match snapshot_path ~base_path ~keeper_name with
+  match resolve_owner ~base_path ~keeper_name with
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
-  | Ok path ->
+  | Ok owner ->
+    let keeper_name = keeper_name_of_owner owner in
+    let path = snapshot_path_of_owner owner in
     (try
-       with_write_lock (fun () -> persist_to_path ~keeper_name path (snapshot ()))
+       Owner_lock.with_lock owner (fun () ->
+         persist_to_path ~keeper_name path (snapshot ()))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -556,24 +590,14 @@ let persist_snapshot ~base_path ~keeper_name snapshot =
          path
          (Printexc.to_string exn))
 
-let snapshot_read_error_to_string (error : snapshot_read_error) =
-  let location =
-    match error.path with
-    | None -> ""
-    | Some path -> " path=" ^ path
-  in
-  Printf.sprintf
-    "%s%s: %s"
-    (snapshot_read_error_kind_to_string error.kind)
-    location
-    error.message
-
 let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name f =
-  match snapshot_path ~base_path ~keeper_name with
+  match resolve_owner ~base_path ~keeper_name with
   | Error msg -> Error msg
-  | Ok path ->
+  | Ok owner ->
+    let keeper_name = keeper_name_of_owner owner in
+    let path = snapshot_path_of_owner owner in
     (try
-       with_write_lock (fun () ->
+       Owner_lock.with_lock owner (fun () ->
          let cur, read_errors = load_from_path_with_errors ~keeper_name path in
          match read_errors with
          | _ :: _ ->
@@ -623,11 +647,13 @@ let record_inflight ~base_path ~keeper_name stimuli =
   match stimuli with
   | [] -> ()
   | _ -> (
-  match inflight_path ~base_path ~keeper_name with
+  match resolve_owner ~base_path ~keeper_name with
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
-  | Ok path ->
+  | Ok owner ->
+    let keeper_name = keeper_name_of_owner owner in
+    let path = inflight_path_of_owner owner in
     (try
-       with_write_lock (fun () ->
+       Owner_lock.with_lock owner (fun () ->
          let cur = load_from_path ~keeper_name path in
          persist_to_path ~keeper_name path (append_missing cur stimuli))
      with
@@ -647,11 +673,13 @@ let ack_inflight ~base_path ~keeper_name stimuli =
   match stimuli with
   | [] -> ()
   | _ -> (
-  match inflight_path ~base_path ~keeper_name with
+  match resolve_owner ~base_path ~keeper_name with
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
-  | Ok path ->
+  | Ok owner ->
+    let keeper_name = keeper_name_of_owner owner in
+    let path = inflight_path_of_owner owner in
     (try
-       with_write_lock (fun () ->
+       Owner_lock.with_lock owner (fun () ->
          let cur = load_from_path ~keeper_name path in
          persist_to_path ~keeper_name path (remove_stimuli cur stimuli))
      with
@@ -670,11 +698,14 @@ let ack_consumed ~base_path ~keeper_name stimuli =
   match stimuli with
   | [] -> Ok ()
   | _ -> (
-  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
-  | Error msg, _ | _, Error msg -> Error msg
-  | Ok pending_path, Ok inflight_path ->
+  match resolve_owner ~base_path ~keeper_name with
+  | Error msg -> Error msg
+  | Ok owner ->
+    let keeper_name = keeper_name_of_owner owner in
+    let pending_path = snapshot_path_of_owner owner in
+    let inflight_path = inflight_path_of_owner owner in
     (try
-       with_write_lock (fun () ->
+       Owner_lock.with_lock owner (fun () ->
          let pending = load_from_path ~keeper_name pending_path in
          let inflight = load_from_path ~keeper_name inflight_path in
          let pending' = remove_stimuli pending stimuli in
@@ -694,11 +725,14 @@ let ack_consumed ~base_path ~keeper_name stimuli =
             (Printexc.to_string exn))))
 
 let drop_by_post_id ~base_path ~keeper_name ~post_id =
-  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
-  | Error msg, _ | _, Error msg -> Error msg
-  | Ok pending_path, Ok inflight_path ->
+  match resolve_owner ~base_path ~keeper_name with
+  | Error msg -> Error msg
+  | Ok owner ->
+    let keeper_name = keeper_name_of_owner owner in
+    let pending_path = snapshot_path_of_owner owner in
+    let inflight_path = inflight_path_of_owner owner in
     (try
-       with_write_lock (fun () ->
+       Owner_lock.with_lock owner (fun () ->
          let pending = load_from_path ~keeper_name pending_path in
          let inflight = load_from_path ~keeper_name inflight_path in
          let removed, pending', inflight' =

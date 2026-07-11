@@ -186,7 +186,7 @@ Tip: Look for status='todo' tasks to claim.";
       ("properties", `Assoc [
         ("status", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional status filter: todo|claimed|in_progress|awaiting_verification|done|cancelled");
+          ("description", `String "Optional status filter: todo|claimed|in_progress|awaiting_verification|done|cancelled|operator_blocked");
         ]);
         ("include_done", `Assoc [
           ("type", `String "boolean");

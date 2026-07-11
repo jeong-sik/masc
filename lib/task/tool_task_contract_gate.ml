@@ -56,6 +56,8 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
               task_id assignee)))
     | Masc_domain.Cancelled { cancelled_by; _ } ->
       Some
+    | Masc_domain.OperatorBlocked { blocked_by; _ } ->
+      Some
         (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
               "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"

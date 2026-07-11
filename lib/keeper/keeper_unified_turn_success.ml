@@ -189,6 +189,18 @@ type terminal_outcome =
   | Terminal_checkpoint
   | Terminal_failed_completion_contract of { reason_code : string }
 
+type failure_judgment_delivery =
+  | Queue_successor
+  | Handled_in_turn
+
+type handle_result =
+  | Completed of Keeper_meta_contract.keeper_meta
+  | Failed_completion_contract of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; failure_judgment : Keeper_event_queue.failure_judgment
+      ; judgment_delivery : failure_judgment_delivery
+      }
+
 let completion_contract_attention_reason_code result =
   match result with
   | Keeper_execution_receipt.Contract_passive_only ->
@@ -753,24 +765,24 @@ let record_completion_contract_attention_failure
     ~agent_name:updated_meta.name
     ~reason:(Keeper_types_profile.short_preview detail);
   let count = Keeper_registry.get_turn_failures ~base_path updated_meta.name in
+  let fj : Keeper_event_queue.failure_judgment =
+    { fj_runtime_id = runtime_id
+    ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
+    ; fj_detail = detail
+    }
+  in
   if Keeper_pacing_shadow.pacing_enforced ()
   then (
     (* Return the typed successor to the owning heartbeat lease transaction.
        Enqueueing here would commit the successor separately from acknowledging
        the stimulus that caused this turn. *)
-    let fj : Keeper_event_queue.failure_judgment =
-      { fj_runtime_id = runtime_id
-      ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
-      ; fj_detail = detail
-      }
-    in
     Log.Keeper.warn
       "%s: completion contract attention (streak=%d, reason=%s) escalated as \
        an atomic judgment successor (RFC-0313 W3)"
       updated_meta.name
       count
       reason_code;
-    updated_meta, Some fj)
+    updated_meta, fj, Queue_successor)
   else (
     let pause_threshold = Runtime.pause_threshold () in
     let turn_fail_streak_threshold =
@@ -811,7 +823,7 @@ let record_completion_contract_attention_failure
           count
           turn_fail_streak_threshold
           reason_code;
-        paused_meta, None
+        paused_meta, fj, Handled_in_turn
       | Error sync_err ->
         Log.Keeper.error
           "%s: completion contract attention auto-pause sync failed: %s \
@@ -825,8 +837,8 @@ let record_completion_contract_attention_failure
             ; "site", "completion_contract_attention_auto_pause"
             ]
           ();
-        pause_meta, None)
-    else updated_meta, None)
+        pause_meta, fj, Handled_in_turn)
+    else updated_meta, fj, Handled_in_turn)
 ;;
 
 let emit_terminal_fsm
@@ -845,7 +857,7 @@ let emit_terminal_fsm
     Keeper_turn_fsm.Completing;
   match terminal_outcome with
   | Terminal_failed_completion_contract { reason_code } ->
-    let updated_meta =
+    let updated_meta, failure_judgment, judgment_delivery =
       record_completion_contract_attention_failure
         ~config
         ~updated_meta
@@ -858,7 +870,8 @@ let emit_terminal_fsm
       ~prev:Keeper_turn_fsm.Completing
       (Keeper_turn_fsm.Failed
          (Keeper_turn_fsm.Failure_completion_contract_violation { reason_code }));
-    updated_meta
+    Failed_completion_contract
+      { meta = updated_meta; failure_judgment; judgment_delivery }
   | Terminal_done | Terminal_checkpoint ->
     reset_turn_failures_for_stop_reason ~config ~updated_meta result;
     Keeper_turn_fsm.emit_transition
@@ -866,13 +879,8 @@ let emit_terminal_fsm
       ~turn_id:keeper_turn_id
       ~prev:Keeper_turn_fsm.Completing
       Keeper_turn_fsm.Done;
-    updated_meta, None
+    Completed updated_meta
 ;;
-
-type handle_result =
-  { meta : Keeper_meta_contract.keeper_meta
-  ; failure_judgment : Keeper_event_queue.failure_judgment option
-  }
 
 let handle
       ~config
@@ -1009,8 +1017,7 @@ let handle
      computed before side effects, so metrics, decision records, activity graph,
      meta writes, health/failure accounting, and FSM emission cannot disagree
      on whether this turn completed or failed its completion contract. *)
-  let meta, failure_judgment =
-    emit_terminal_fsm
+  emit_terminal_fsm
     ~config
     ~meta
     ~keeper_turn_id
@@ -1018,6 +1025,4 @@ let handle
     ~runtime_id:final_execution.runtime_id
     ~terminal_outcome
     result
-  in
-  { meta; failure_judgment }
 ;;

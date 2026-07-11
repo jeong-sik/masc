@@ -196,10 +196,19 @@ val record_streaming_cancelled_observation
   -> unit
   -> unit
 
+type source_lease_disposition =
+  | Follow_failure_route
+  | Acknowledge_after_in_turn_handling
+(** A failed turn normally follows its typed retry/rotate/escalate route.
+    [Acknowledge_after_in_turn_handling] consumes only the source stimulus when
+    the configured in-turn policy already handled the terminal failure; the
+    cycle remains failed for receipts, counters, and heartbeat freshness. *)
+
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
+  ; source_lease_disposition : source_lease_disposition
   }
 (** Exact execution identity and typed disposition route for a failed turn.
     The heartbeat queue settles from this value; it must not reconstruct a

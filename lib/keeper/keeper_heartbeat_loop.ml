@@ -317,23 +317,27 @@ let settlement_of_failure ~settled_at ~lease failure =
       ; successor = None
       }
   else
-    match failure.Keeper_unified_turn.route with
-    | Keeper_runtime_failure_route.Retry_after_pacing _ ->
-      Keeper_registry_event_queue.Requeue
-        Keeper_registry_event_queue.Retry_after_pacing
-    | Keeper_runtime_failure_route.Rotate_now _ ->
-      Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
-    | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
-      Keeper_registry_event_queue.Escalate
-        { reason = Keeper_registry_event_queue.Failure_judgment_requested
-        ; successor =
-            Some
-              (failure_judgment_successor
-                 ~arrived_at:settled_at
-                 failure
-                 judgment
-                 detail)
-        }
+    match failure.Keeper_unified_turn.source_lease_disposition with
+    | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
+      Keeper_registry_event_queue.Ack
+    | Keeper_unified_turn.Follow_failure_route ->
+      (match failure.Keeper_unified_turn.route with
+       | Keeper_runtime_failure_route.Retry_after_pacing _ ->
+         Keeper_registry_event_queue.Requeue
+           Keeper_registry_event_queue.Retry_after_pacing
+       | Keeper_runtime_failure_route.Rotate_now _ ->
+         Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
+       | Keeper_runtime_failure_route.Escalate_judgment { judgment; detail } ->
+         Keeper_registry_event_queue.Escalate
+           { reason = Keeper_registry_event_queue.Failure_judgment_requested
+           ; successor =
+               Some
+                 (failure_judgment_successor
+                    ~arrived_at:settled_at
+                    failure
+                    judgment
+                    detail)
+           })
 ;;
 
 let settlement_of_cycle_outcome ~settled_at ~stop_requested ~lease = function

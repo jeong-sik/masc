@@ -20,10 +20,15 @@ include Keeper_unified_turn_types
 
 include Keeper_unified_turn_phase_plan
 
+type source_lease_disposition =
+  | Follow_failure_route
+  | Acknowledge_after_in_turn_handling
+
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
+  ; source_lease_disposition : source_lease_disposition
   }
 
 let run_keeper_cycle
@@ -973,7 +978,10 @@ dominant source of the observed CAS race exhaustion after
                      same durable event-queue transaction. *)
                   let failure_route = Keeper_runtime_failure_route.route_of_error err in
                   exact_failure_execution :=
-                    Some (final_execution.runtime_id, failure_route);
+                    Some
+                      ( final_execution.runtime_id
+                      , failure_route
+                      , Follow_failure_route );
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string FailureRoute)
                     ~labels:
@@ -1045,29 +1053,43 @@ dominant source of the observed CAS race exhaustion after
                       ~keeper_turn_id
                       result
                   in
-                  (match success.failure_judgment with
-                   | Some judgment ->
+                  (match success with
+                   | Keeper_unified_turn_success.Failed_completion_contract
+                       { failure_judgment = judgment
+                       ; judgment_delivery
+                       ; _
+                       } ->
                      let route =
                        Keeper_runtime_failure_route.Escalate_judgment
                          { judgment = judgment.fj_judgment
                          ; detail = judgment.fj_detail
                          }
                      in
+                     let source_lease_disposition =
+                       match judgment_delivery with
+                       | Keeper_unified_turn_success.Queue_successor ->
+                         Follow_failure_route
+                       | Keeper_unified_turn_success.Handled_in_turn ->
+                         Acknowledge_after_in_turn_handling
+                     in
                      exact_failure_execution :=
-                       Some (final_execution.runtime_id, route);
+                       Some
+                         ( final_execution.runtime_id
+                         , route
+                         , source_lease_disposition );
                      let error =
                        Keeper_internal_error.sdk_error_of_masc_internal_error
                          (Keeper_internal_error.Internal_contract_rejected
                             { reason = judgment.fj_detail })
                      in
                      Error error, turn_state
-                   | None ->
+                   | Keeper_unified_turn_success.Completed updated_meta ->
                      (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)
                      let turn_state =
                        { turn_state with cycle_completed = true }
                      in
                      post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
-                     Ok success.meta, turn_state))))))
+                     Ok updated_meta, turn_state))))))
   in
   let append_phase_gate_decision_for_gate turn_plan turn_state =
     Keeper_unified_turn_manifest.append_phase_gate_decision
@@ -1089,11 +1111,13 @@ dominant source of the observed CAS race exhaustion after
   in
   let failure_of_error error =
     match !exact_failure_execution with
-    | Some (runtime_id, route) -> { error; runtime_id; route }
+    | Some (runtime_id, route, source_lease_disposition) ->
+      { error; runtime_id; route; source_lease_disposition }
     | None ->
       { error
       ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
       ; route = Keeper_runtime_failure_route.route_of_error error
+      ; source_lease_disposition = Follow_failure_route
       }
   in
   match phase_gate_outcome with

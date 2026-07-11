@@ -84,6 +84,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper_hooks_oas_types/keeper_hooks_oas_types.mli` - hook-observation
 - `lib/keeper/keeper_hooks_oas.ml` - hook-observation
 - `lib/keeper/keeper_hooks_oas.mli` - hook-observation
+- `lib/keeper/keeper_tool_activity.ml` - hook-observation
+- `lib/keeper/keeper_tool_activity.mli` - hook-observation
 - `lib/keeper/keeper_sandbox_containment.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_containment.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_control.ml` - sandbox-runtime

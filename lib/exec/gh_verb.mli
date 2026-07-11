@@ -38,6 +38,7 @@ type gh_family =
   | Cache
   | Project
   | Api
+  | Graphql
   | Other of string
       (** A top-level gh area not recognized by this closed set. Carries the
           raw token so callers can report it. Adding a new known family is a

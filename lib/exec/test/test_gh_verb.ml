@@ -36,6 +36,7 @@ let test_classify_family_action () =
   check "pr view 123" Gh_verb.Pr (Some "view");
   check "discussion comment 42 --body B" Gh_verb.Discussion (Some "comment");
   check "api graphql -f q=x" Gh_verb.Api (Some "graphql");
+  check "graphql -f q=x" Gh_verb.Graphql None;
   check "repo" Gh_verb.Repo None;
   check "frobnicate now" (Gh_verb.Other "frobnicate") (Some "now");
   (* Known limitation pinned: a leading value-taking global flag mis-locates
@@ -61,6 +62,7 @@ let test_of_fields () =
   check ~subcommand:"repo" ~action:(Some "create") Gh_verb.Repo;
   check ~subcommand:"discussion" ~action:(Some "comment") Gh_verb.Discussion;
   check ~subcommand:"api" ~action:(Some "graphql") Gh_verb.Api;
+  check ~subcommand:"graphql" ~action:None Gh_verb.Graphql;
   check ~subcommand:"frobnicate" ~action:None (Gh_verb.Other "frobnicate")
 ;;
 
@@ -71,7 +73,7 @@ let test_family_token_round_trip () =
     [ Gh_verb.Pr; Gh_verb.Issue; Gh_verb.Repo; Gh_verb.Discussion
     ; Gh_verb.Release; Gh_verb.Secret; Gh_verb.Ssh_key; Gh_verb.Workflow
     ; Gh_verb.Auth; Gh_verb.Gist; Gh_verb.Ruleset; Gh_verb.Label
-    ; Gh_verb.Run; Gh_verb.Cache; Gh_verb.Project; Gh_verb.Api ]
+    ; Gh_verb.Run; Gh_verb.Cache; Gh_verb.Project; Gh_verb.Api; Gh_verb.Graphql ]
   in
   List.iter
     (fun fam ->

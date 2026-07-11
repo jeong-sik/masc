@@ -60,7 +60,8 @@ let creates_durable_remote_surface (v : Gh_verb.t) : bool =
   | ( ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Release | Gh_verb.Secret
       | Gh_verb.Ssh_key | Gh_verb.Workflow | Gh_verb.Auth | Gh_verb.Gist
       | Gh_verb.Ruleset | Gh_verb.Label | Gh_verb.Run | Gh_verb.Cache
-      | Gh_verb.Project | Gh_verb.Api | Gh_verb.Other _ )
+      | Gh_verb.Project | Gh_verb.Api | Gh_verb.Graphql
+      | Gh_verb.Other _ )
     , _ ) ->
     false
 ;;
@@ -107,7 +108,11 @@ let disposition_of_words (words : string list) (v : Gh_verb.t) : disposition =
   match v.Gh_verb.family with
   | Gh_verb.Api when Shell_ir_risk.gh_api_graphql_creates_durable_remote words ->
     Requires_approval
-  | Gh_verb.Api | Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
+  | Gh_verb.Graphql
+    when Shell_ir_risk.gh_api_graphql_creates_durable_remote words ->
+    Requires_approval
+  | Gh_verb.Api | Gh_verb.Graphql | Gh_verb.Pr | Gh_verb.Issue
+  | Gh_verb.Repo | Gh_verb.Discussion
   | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
   | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label | Gh_verb.Run
   | Gh_verb.Cache | Gh_verb.Project | Gh_verb.Other _ ->
@@ -589,10 +594,12 @@ let is_graphql_api (v : Gh_verb.t) : bool =
   match v.Gh_verb.family, v.Gh_verb.action with
   | Gh_verb.Api, Some action -> String.equal (String.lowercase_ascii action) "graphql"
   | Gh_verb.Api, None -> false
+  | Gh_verb.Graphql, _ -> true
   | ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
     | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
     | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
-    | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project | Gh_verb.Other _ )
+    | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project
+    | Gh_verb.Other _ )
     , _ -> false
 ;;
 
@@ -728,10 +735,12 @@ let graphql_query_body_is_opaque (args : Shell_ir.arg list) : bool =
 let is_rest_api (v : Gh_verb.t) : bool =
   match v.Gh_verb.family with
   | Gh_verb.Api -> not (is_graphql_api v)
+  | Gh_verb.Graphql -> false
   | Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
   | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
   | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
-  | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project | Gh_verb.Other _ -> false
+  | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project
+  | Gh_verb.Other _ -> false
 ;;
 
 let is_method_flag = function

@@ -18,6 +18,7 @@ type gh_family =
   | Cache
   | Project
   | Api
+  | Graphql
   | Other of string
 
 type t =
@@ -42,13 +43,15 @@ let family_token : gh_family -> string = function
   | Cache -> "cache"
   | Project -> "project"
   | Api -> "api"
+  | Graphql -> "graphql"
   | Other s -> s
 ;;
 
 let string_of_family = function
   | Other s -> "other:" ^ s
   | ( Pr | Issue | Repo | Discussion | Release | Secret | Ssh_key | Workflow
-    | Auth | Gist | Ruleset | Label | Run | Cache | Project | Api ) as fam ->
+    | Auth | Gist | Ruleset | Label | Run | Cache | Project | Api
+    | Graphql ) as fam ->
     family_token fam
 ;;
 
@@ -73,6 +76,7 @@ let family_of_token (token : string) : gh_family =
   | "cache" -> Cache
   | "project" -> Project
   | "api" -> Api
+  | "graphql" -> Graphql
   | other -> Other other
 ;;
 

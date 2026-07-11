@@ -672,11 +672,13 @@ type gh_verb_class =
 let classify_gh_verb (v : Gh_verb.t) : gh_verb_class =
   match v.Gh_verb.family with
   | Gh_verb.Api -> Gh_string_borne
+  | Gh_verb.Graphql -> Gh_string_borne
   | Gh_verb.Other _ -> Gh_unrecognized_family
   | ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
     | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key | Gh_verb.Workflow
     | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset | Gh_verb.Label
     | Gh_verb.Run | Gh_verb.Cache | Gh_verb.Project ) as fam ->
+    (* Graphql is handled below as Gh_string_borne, like Api. *)
     (match v.Gh_verb.action with
      | None -> Gh_read (* bare family: a read *)
      | Some action ->
@@ -1223,7 +1225,7 @@ let repo_hosting_cli_floor_risk (words : string list) (simple : Shell_ir.simple)
     | Shell_ir_typed.W (Shell_ir_typed_types.Gh { subcommand; action; _ }) -> (
       let v = Gh_verb.of_fields ~subcommand ~action in
       match v.Gh_verb.family, v.Gh_verb.action with
-      | (Gh_verb.Api | Gh_verb.Other _), _ | _, None -> R0_Read
+      | (Gh_verb.Api | Gh_verb.Graphql | Gh_verb.Other _), _ | _, None -> R0_Read
       | ( ( Gh_verb.Pr | Gh_verb.Issue | Gh_verb.Repo | Gh_verb.Discussion
           | Gh_verb.Release | Gh_verb.Secret | Gh_verb.Ssh_key
           | Gh_verb.Workflow | Gh_verb.Auth | Gh_verb.Gist | Gh_verb.Ruleset

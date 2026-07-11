@@ -191,6 +191,39 @@ let () =
       assert (Tool_control.dispatch ctx ~name:"masc_tool_disable" ~args = None))
 
 let () =
+  test "control_schema_projection_registers_without_front_door_exposure" (fun () ->
+      let raw_names =
+        List.map
+          (fun (schema : Masc_domain.tool_schema) -> schema.name)
+          Config.raw_all_tool_schemas
+      in
+      let public_names = Config.all_tool_names () in
+      List.iter
+        (fun operation ->
+           let schema = Tool_schemas_misc.control_schema operation in
+           (match Tool_dispatch.lookup_tag schema.name with
+            | Some Tool_dispatch.Mod_control -> ()
+            | Some _ ->
+              Alcotest.failf "%s registered with the wrong module tag" schema.name
+            | None -> Alcotest.failf "%s is not registered" schema.name);
+           (match Tool_dispatch.lookup_schema schema.name with
+            | Some registered ->
+              Alcotest.(check bool)
+                (schema.name ^ " registration keeps canonical input schema")
+                true
+                (Yojson.Safe.equal schema.input_schema registered)
+            | None -> Alcotest.failf "%s has no registered input schema" schema.name);
+           Alcotest.(check bool)
+             (schema.name ^ " stays out of Config.raw_all_tool_schemas")
+             false
+             (List.mem schema.name raw_names);
+           Alcotest.(check bool)
+             (schema.name ^ " stays out of Config.all_tool_names")
+             false
+             (List.mem schema.name public_names))
+        Tool_schemas_misc.control_operations)
+
+let () =
   test "get_string_present" (fun () ->
       let args = `Assoc [ ("key", `String "value") ] in
       assert (Tool_args.get_string args "key" "default" = "value"))

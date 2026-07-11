@@ -250,8 +250,17 @@ let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error err
   | Ok meta ->
-      let timeout_sec = Stdlib.Float.min 30.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 10.0)) in
-      let ttl_sec = Stdlib.Float.min 86_400.0 (Stdlib.Float.max 1.0 (get_float args "ttl_sec" 1800.0)) in
+      let module Contract = Keeper_sandbox_control_contract in
+      let timeout_sec =
+        Contract.clamp
+          Contract.operation_timeout_sec
+          (get_float args "timeout_sec" Contract.operation_timeout_sec.default)
+      in
+      let ttl_sec =
+        Contract.clamp
+          Contract.managed_ttl_sec
+          (get_float args "ttl_sec" Contract.managed_ttl_sec.default)
+      in
       let network_mode_raw =
         String.trim
           (get_string args "network_mode"
@@ -281,7 +290,12 @@ let handle_keeper_sandbox_start ctx args : tool_result =
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
-  let timeout_sec = Stdlib.Float.min 30.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 10.0)) in
+  let module Contract = Keeper_sandbox_control_contract in
+  let timeout_sec =
+    Contract.clamp
+      Contract.operation_timeout_sec
+      (get_float args "timeout_sec" Contract.operation_timeout_sec.default)
+  in
   let prune_stale = get_bool args "prune_stale" false in
   let container_kind_raw =
     get_string args "container_kind" Keeper_sandbox_control.managed_kind

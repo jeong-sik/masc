@@ -163,6 +163,28 @@ let absolute_path path =
 let absolute_path_from ~cwd path =
   if Filename.is_relative path then Filename.concat cwd path else path
 
+type canonical_base_path_error =
+  | Empty_after_normalization
+  | Could_not_derive_absolute of { input : string }
+
+let canonical_base_path_error_to_string = function
+  | Empty_after_normalization -> "path is empty after normalization"
+  | Could_not_derive_absolute { input } ->
+    Printf.sprintf "could not derive an absolute path from %S" input
+;;
+
+let canonical_base_path raw =
+  let normalized = Env_config_core.normalize_masc_base_path_input raw in
+  if String.equal normalized ""
+  then Error Empty_after_normalization
+  else
+    let absolute = absolute_path_from ~cwd:(current_working_dir ()) normalized in
+    let canonical = Env_config_core.normalize_masc_base_path_input absolute in
+    if String.equal canonical "" || Filename.is_relative canonical
+    then Error (Could_not_derive_absolute { input = raw })
+    else Ok canonical
+;;
+
 let source_to_string = function
   | Env -> "env"
   | Local_masc -> "local_masc"

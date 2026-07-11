@@ -439,6 +439,9 @@ type done_resolution = [ `Stopped | `Crashed of string ]
 
 type registry_entry = {
   base_path : string;
+      (** Canonical workspace identity from
+          {!Config_dir_resolver.canonical_base_path}; byte-equal to the
+          BasePath segment embedded by {!registry_key}. *)
   name : string;
   meta : keeper_meta;
   phase : Keeper_state_machine.phase;
@@ -610,9 +613,15 @@ val resolve_done :
 
 val lane_has_exited : registry_entry -> bool
 
-(** Internal: keeper registry key composition (base_path ^ \\x1f ^ name).
-    Exposed via mli so keeper_registry.ml's state functions can use it
-    after the intra-library split; not intended for external callers. *)
+(** Internal: canonicalize a caller-provided BasePath through the shared
+    {!Config_dir_resolver.canonical_base_path} identity. Invalid paths raise
+    [Invalid_argument]; registry APIs require a valid workspace identity. *)
+val canonical_base_path_exn : string -> string
+
+(** Internal: keeper registry key composition
+    (canonical_base_path ^ \\x1f ^ name). Exposed via mli so
+    keeper_registry.ml's state functions can use it after the intra-library
+    split; not intended for external callers. *)
 val registry_key : base_path:string -> string -> string
 
 (** Internal: inverse of [registry_key]. Returns the [base_path] and

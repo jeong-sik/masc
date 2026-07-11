@@ -13,6 +13,7 @@ open Keeper_memory
 open Keeper_execution
 open Keeper_keepalive_signal
 module Observations = Keeper_heartbeat_loop_observations
+module Cycle = Keeper_heartbeat_loop_cycle
 
 (* Presence/identity sync extracted to
    [Keeper_heartbeat_loop_presence] (godfile decomp). *)
@@ -142,7 +143,7 @@ let provider_timeout_metric_outcome =
 ;;
 
 (** Run keeper cycle with holder diagnostics. *)
-let run_keeper_cycle = Keeper_heartbeat_loop_cycle.run_keeper_cycle
+let run_keeper_cycle = Cycle.run_keeper_cycle
 
 (* T6 audit: outcome of one keepalive cycle evaluation.
 
@@ -540,7 +541,7 @@ let run_keepalive_unified_turn
                    !consumed_stimuli)
             else Keeper_registry.Proactive_tick
           in
-          let meta_after_cycle =
+          let cycle_outcome =
             run_keeper_cycle
               ?event_bus
               ?hitl_resolution
@@ -553,8 +554,10 @@ let run_keepalive_unified_turn
               ~wake
               ()
           in
-          consumed_stimuli_turn_completed := true;
-          meta_after_cycle)
+          (match cycle_outcome with
+           | Cycle.Completed _ -> consumed_stimuli_turn_completed := true
+           | Cycle.Failed _ | Cycle.Busy _ -> ());
+          Cycle.meta cycle_outcome)
         else meta_after_triage
       in
       (* The caller has already admitted intake before this dequeue. Downstream

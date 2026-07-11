@@ -39,6 +39,21 @@ open Keeper_types_profile
 module In_turn_pulse = Keeper_heartbeat_loop_in_turn_pulse
 module Observations = Keeper_heartbeat_loop_observations
 
+type cycle_outcome =
+  | Completed of keeper_meta
+  | Failed of
+      { meta : keeper_meta
+      ; error : Agent_sdk.Error.sdk_error
+      }
+  | Busy of
+      { meta : keeper_meta
+      ; block : Keeper_turn_admission.autonomous_block
+      }
+
+let meta = function
+  | Completed meta | Failed { meta; _ } | Busy { meta; _ } -> meta
+;;
+
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
    turn slot ([Keeper_turn_admission]). The post-failure meta re-reads stay
    inside the slot for the same reason as the chat lane: a concurrent turn
@@ -103,35 +118,38 @@ let run_keeper_cycle_admitted
         "%s: provider_timeout observed; preserving original turn \
          failure without Provider_timeout_loop latch"
         keeper_name);
-    (match read_effective_meta ctx.config meta_after_triage.name with
-     | Ok (Some latest) -> latest
-     | Ok None ->
-       Log.Keeper.error
-         "keeper:%s read_effective_meta returned None after turn failure, using stale meta"
-         meta_after_triage.name;
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string MetaReadFailures)
-         ~labels:
-           [ "keeper", meta_after_triage.name; "site", "none_after_failure" ]
-         ();
-       meta_after_triage
-     | Error e ->
-       Log.Keeper.error
-         "keeper:%s read_effective_meta failed after turn failure (%s), using stale meta"
-         meta_after_triage.name
-         e;
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string MetaReadFailures)
-         ~labels:
-           [ "keeper", meta_after_triage.name; "site", "error_after_failure" ]
-         ();
-       meta_after_triage)
+    let meta =
+      match read_effective_meta ctx.config meta_after_triage.name with
+      | Ok (Some latest) -> latest
+      | Ok None ->
+        Log.Keeper.error
+          "keeper:%s read_effective_meta returned None after turn failure, using stale meta"
+          meta_after_triage.name;
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string MetaReadFailures)
+          ~labels:
+            [ "keeper", meta_after_triage.name; "site", "none_after_failure" ]
+          ();
+        meta_after_triage
+      | Error e ->
+        Log.Keeper.error
+          "keeper:%s read_effective_meta failed after turn failure (%s), using stale meta"
+          meta_after_triage.name
+          e;
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string MetaReadFailures)
+          ~labels:
+            [ "keeper", meta_after_triage.name; "site", "error_after_failure" ]
+          ();
+        meta_after_triage
+    in
+    Failed { meta; error = err }
   | Ok updated ->
     Keeper_turn_holders.reset_budget_exhaustion ~keeper_name:meta_after_triage.name;
     Observations.clear_provider_timeout_failure_reason
       ~base_path:ctx.config.base_path
       ~keeper_name:meta_after_triage.name;
-    updated
+    Completed updated
 ;;
 
 let run_keeper_cycle
@@ -161,14 +179,14 @@ let run_keeper_cycle
          ?event_bus
          ?hitl_resolution)
   with
-  | `Ran updated -> updated
-  | `Busy (Keeper_turn_admission.Shutdown_requested operation_id) ->
+  | `Ran outcome -> outcome
+  | `Busy ((Keeper_turn_admission.Shutdown_requested operation_id) as block) ->
     Log.Keeper.info
       "%s: autonomous turn admission closed by shutdown operation %s"
       meta_after_triage.name
       (Keeper_shutdown_types.Operation_id.to_string operation_id);
-    meta_after_triage
-  | `Busy (Keeper_turn_admission.Turn_busy in_flight) ->
+    Busy { meta = meta_after_triage; block }
+  | `Busy ((Keeper_turn_admission.Turn_busy in_flight) as block) ->
     (* Another lane holds this keeper's turn slot (RFC-0225 §3.1): skip the
        cycle and return the pre-cycle meta unchanged. The next heartbeat
        retries naturally — same shape as the pre-existing skip decisions. *)
@@ -186,5 +204,5 @@ let run_keeper_cycle
       "%s: turn slot busy (%s); skipping autonomous cycle until next heartbeat"
       meta_after_triage.name
       holder;
-    meta_after_triage
+    Busy { meta = meta_after_triage; block }
 ;;

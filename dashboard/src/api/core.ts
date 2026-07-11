@@ -289,12 +289,51 @@ export function extractApiError(err: unknown, fallbackMessage: string): ApiError
   return { message: fallbackMessage, status: null, path: null, timeout: false }
 }
 
-async function fetchAndConsumeWithTimeout<T>(
+export async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const upstreamSignal = init.signal
+  const abortFromUpstream = () => controller.abort()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) {
+      controller.abort()
+    } else {
+      upstreamSignal.addEventListener('abort', abortFromUpstream, { once: true })
+    }
+  }
+
+  try {
+    return await fetch(path, {
+      ...init,
+      cache: init.cache ?? 'no-store',
+      signal: controller.signal,
+    })
+  } catch (err) {
+    if (isAbortError(err)) {
+      if (upstreamSignal?.aborted) {
+        throw err
+      }
+      const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
+      throw new ApiRequestError({
+        method,
+        path,
+        timeout: true,
+        timeoutMs,
+      })
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+    upstreamSignal?.removeEventListener('abort', abortFromUpstream)
+  }
+}
+
+export async function fetchJsonWithTimeout(
   path: string,
   init: RequestInit,
   timeoutMs: number,
-  consume: (response: Response) => Promise<T>,
-): Promise<T> {
+): Promise<{ response: Response; data: unknown | null }> {
   const controller = new AbortController()
   const upstreamSignal = init.signal
   let rejectBoundary: (reason: unknown) => void = () => undefined
@@ -320,45 +359,29 @@ async function fetchAndConsumeWithTimeout<T>(
   }
 
   try {
-    const request = fetch(path, {
-      ...init,
-      cache: init.cache ?? 'no-store',
-      signal: controller.signal,
-    }).then(consume)
+    const request = (async () => {
+      const response = await fetch(path, {
+        ...init,
+        cache: init.cache ?? 'no-store',
+        signal: controller.signal,
+      })
+      return {
+        response,
+        data: response.ok ? await response.json() : null,
+      }
+    })()
     return await Promise.race([request, boundary])
   } catch (err) {
     if (isAbortError(err)) {
-      if (upstreamSignal?.aborted) {
-        throw err
-      }
+      if (upstreamSignal?.aborted) throw err
       const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
-      throw new ApiRequestError({
-        method,
-        path,
-        timeout: true,
-        timeoutMs,
-      })
+      throw new ApiRequestError({ method, path, timeout: true, timeoutMs })
     }
     throw err
   } finally {
     clearTimeout(timer)
     upstreamSignal?.removeEventListener('abort', abortFromUpstream)
   }
-}
-
-export async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  return fetchAndConsumeWithTimeout(path, init, timeoutMs, async response => response)
-}
-
-export async function fetchJsonWithTimeout(
-  path: string,
-  init: RequestInit,
-  timeoutMs: number,
-): Promise<{ response: Response; data: unknown | null }> {
-  return fetchAndConsumeWithTimeout(path, init, timeoutMs, async response => ({
-    response,
-    data: response.ok ? await response.json() : null,
-  }))
 }
 
 const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([

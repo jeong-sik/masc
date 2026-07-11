@@ -27,9 +27,11 @@ let submit_error_to_string = function
     Printf.sprintf "Keeper shutdown worker fork failed: %s" (Printexc.to_string exn)
 ;;
 
-let operation_requires_fence operation =
+let operation_requires_fence (operation : Keeper_shutdown_types.t) =
   match operation.phase with
-  | Finalized _ -> false
+  | Finalized { completion = Completion_pending _; _ } -> true
+  | Finalized
+      { completion = (Completion_not_requested | Completion_delivered _); _ } -> false
   | Prepared
   | Joined_idle
   | Finalizing_tasks _
@@ -162,7 +164,8 @@ let finalize_if_ready ~config ~entry operation =
   match operation.phase with
   | Joined_idle
   | Finalizing_tasks _
-  | Cleanup_ready _ ->
+  | Cleanup_ready _
+  | Finalized _ ->
     (match Keeper_shutdown_finalize.run ~config ~entry:(Some entry) operation with
      | Ok finalized ->
        Log.Keeper.info
@@ -177,7 +180,6 @@ let finalize_if_ready ~config ~entry operation =
          (Keeper_shutdown_finalize.error_to_string error))
   | Prepared
   | Reconciliation_required _
-  | Finalized _
   | Blocked _ -> ()
 ;;
 
@@ -194,9 +196,9 @@ let run_worker ~config ~entry operation =
          (Keeper_shutdown_prepare_join.error_to_string error))
   | Joined_idle
   | Finalizing_tasks _
-  | Cleanup_ready _ -> finalize_if_ready ~config ~entry operation
+  | Cleanup_ready _
+  | Finalized _ -> finalize_if_ready ~config ~entry operation
   | Reconciliation_required _
-  | Finalized _
   | Blocked _ -> ()
 ;;
 
@@ -305,12 +307,12 @@ let recover_operation ~config operation =
     (match recovered.phase with
      | Joined_idle
      | Finalizing_tasks _
-     | Cleanup_ready _ ->
+     | Cleanup_ready _
+     | Finalized _ ->
        Keeper_shutdown_finalize.run ~config ~entry:None recovered
        |> Result.map_error Keeper_shutdown_finalize.error_to_string
      | Prepared
      | Reconciliation_required _
-     | Finalized _
      | Blocked _ -> Ok recovered)
 ;;
 

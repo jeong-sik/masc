@@ -37,7 +37,7 @@ type t =
   | Dead_tombstone
       (** The supervisor reaped a dead keeper and left [paused = true] on
           disk as a tombstone (see
-          [Keeper_supervisor_cleanup_tombstone]). Carries no payload:
+          [Keeper_shutdown_finalize]). Carries no payload:
           the fact that the paused meta is a dead-keeper tombstone — not
           an operator pause or a runtime latch — is the whole
           observability signal. *)

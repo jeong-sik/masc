@@ -28,8 +28,20 @@ module Operation_id = struct
   let equal = String.equal
 end
 
+type meta_disposition =
+  | Retain_operator_pause
+  | Retain_dead_tombstone
+  | Remove_meta
+
+type completion_action = Dead_tombstone_reaped
+
+type completion_receipt =
+  | Completion_not_requested
+  | Completion_pending of completion_action
+  | Completion_delivered of completion_action
+
 type cleanup_intent =
-  { remove_meta : bool
+  { meta_disposition : meta_disposition
   ; remove_session : bool
   }
 
@@ -94,6 +106,7 @@ type finalization_evidence =
   ; meta_removed : bool
   ; session_removed : bool
   ; registry_unregistered : bool
+  ; completion : completion_receipt
   }
 
 type phase =
@@ -124,7 +137,127 @@ type t =
   ; updated_at : string
   }
 
-let schema_version = 2
+type invariant_error =
+  | Schema_version_mismatch of
+      { expected_schema_version : int
+      ; actual_schema_version : int
+      }
+  | Finalized_meta_removed_mismatch of
+      { expected_meta_removed : bool
+      ; actual_meta_removed : bool
+      }
+  | Finalized_session_removed_mismatch of
+      { expected_session_removed : bool
+      ; actual_session_removed : bool
+      }
+  | Finalized_completion_mismatch of meta_disposition * completion_receipt
+
+let schema_version = 3
+
+let meta_disposition_to_string = function
+  | Retain_operator_pause -> "retain_operator_pause"
+  | Retain_dead_tombstone -> "retain_dead_tombstone"
+  | Remove_meta -> "remove_meta"
+;;
+
+let meta_disposition_of_string = function
+  | "retain_operator_pause" -> Ok Retain_operator_pause
+  | "retain_dead_tombstone" -> Ok Retain_dead_tombstone
+  | "remove_meta" -> Ok Remove_meta
+  | value -> Error (Printf.sprintf "unknown Keeper shutdown meta disposition: %S" value)
+;;
+
+let completion_action_to_string = function
+  | Dead_tombstone_reaped -> "dead_tombstone_reaped"
+;;
+
+let completion_action_of_string = function
+  | "dead_tombstone_reaped" -> Ok Dead_tombstone_reaped
+  | value -> Error (Printf.sprintf "unknown Keeper shutdown completion action: %S" value)
+;;
+
+let completion_receipt_kind = function
+  | Completion_not_requested -> "not_requested"
+  | Completion_pending _ -> "pending"
+  | Completion_delivered _ -> "delivered"
+;;
+
+let invariant_error_to_string = function
+  | Schema_version_mismatch
+      { expected_schema_version; actual_schema_version } ->
+    Printf.sprintf
+      "shutdown schema version mismatch: expected %d, actual %d"
+      expected_schema_version
+      actual_schema_version
+  | Finalized_meta_removed_mismatch
+      { expected_meta_removed; actual_meta_removed } ->
+    Printf.sprintf
+      "shutdown finalized meta evidence mismatch: expected removed=%b, actual=%b"
+      expected_meta_removed
+      actual_meta_removed
+  | Finalized_session_removed_mismatch
+      { expected_session_removed; actual_session_removed } ->
+    Printf.sprintf
+      "shutdown finalized session evidence mismatch: expected removed=%b, actual=%b"
+      expected_session_removed
+      actual_session_removed
+  | Finalized_completion_mismatch (meta_disposition, completion) ->
+    Printf.sprintf
+      "shutdown finalized completion mismatch: meta_disposition=%s, completion=%s"
+      (meta_disposition_to_string meta_disposition)
+      (completion_receipt_kind completion)
+;;
+
+let validate operation =
+  if not (Int.equal operation.schema_version schema_version)
+  then
+    Error
+      (Schema_version_mismatch
+         { expected_schema_version = schema_version
+         ; actual_schema_version = operation.schema_version
+         })
+  else
+    match operation.phase with
+    | Finalized evidence ->
+      let expected_meta_removed =
+        match operation.cleanup_intent.meta_disposition with
+        | Remove_meta -> true
+        | Retain_operator_pause
+        | Retain_dead_tombstone -> false
+      in
+      if not (Bool.equal evidence.meta_removed expected_meta_removed)
+      then
+        Error
+          (Finalized_meta_removed_mismatch
+             { expected_meta_removed
+             ; actual_meta_removed = evidence.meta_removed
+             })
+      else if
+        not
+          (Bool.equal
+             evidence.session_removed
+             operation.cleanup_intent.remove_session)
+      then
+        Error
+          (Finalized_session_removed_mismatch
+             { expected_session_removed = operation.cleanup_intent.remove_session
+             ; actual_session_removed = evidence.session_removed
+             })
+      else
+        (match operation.cleanup_intent.meta_disposition, evidence.completion with
+         | Retain_dead_tombstone,
+           (Completion_pending Dead_tombstone_reaped
+           | Completion_delivered Dead_tombstone_reaped)
+         | (Retain_operator_pause | Remove_meta), Completion_not_requested -> Ok ()
+         | meta_disposition, completion ->
+           Error (Finalized_completion_mismatch (meta_disposition, completion)))
+    | Prepared
+    | Joined_idle
+    | Finalizing_tasks _
+    | Cleanup_ready _
+    | Reconciliation_required _
+    | Blocked _ -> Ok ()
+;;
 
 let admission_lane_to_string = function
   | Autonomous -> "autonomous"

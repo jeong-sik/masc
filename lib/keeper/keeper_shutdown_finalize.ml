@@ -4,6 +4,7 @@ type error =
   | Store_error of Keeper_shutdown_store.error
   | Unsupported_phase
   | Finalization_blocked of Keeper_shutdown_types.t
+  | Completion_failed of Keeper_shutdown_types.t * string
 
 let error_to_string = function
   | Store_error error -> Keeper_shutdown_store.error_to_string error
@@ -12,6 +13,11 @@ let error_to_string = function
     Printf.sprintf
       "Keeper shutdown finalization blocked in operation %s"
       (Operation_id.to_string operation.operation_id)
+  | Completion_failed (operation, detail) ->
+    Printf.sprintf
+      "Keeper shutdown completion delivery failed in operation %s: %s"
+      (Operation_id.to_string operation.operation_id)
+      detail
 ;;
 
 let remove_pending_confirms_by_target_callback
@@ -28,6 +34,19 @@ let remove_pending_confirms_by_target_callback
 let register_remove_pending_confirms_by_target fn =
   Atomic.set remove_pending_confirms_by_target_callback fn
 ;;
+
+let completion_handler
+    : (Workspace.config ->
+       Keeper_shutdown_types.t ->
+       Keeper_shutdown_types.completion_action ->
+       (unit, string) result)
+        Atomic.t
+  =
+  Atomic.make (fun _config _operation _action ->
+    Error "shutdown completion handler is not registered")
+;;
+
+let register_completion_handler handler = Atomic.set completion_handler handler
 
 let replace ~config operation =
   let next = { operation with revision = operation.revision + 1 } in
@@ -293,6 +312,24 @@ let paused_meta (meta : Keeper_meta_contract.keeper_meta) =
   }
 ;;
 
+let dead_tombstone_meta (meta : Keeper_meta_contract.keeper_meta) =
+  { meta with
+    current_task_id = None
+  ; paused = true
+  ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+  ; auto_resume_after_sec = None
+  ; updated_at = Masc_domain.now_iso ()
+  ; runtime = { meta.runtime with last_blocker = None }
+  }
+;;
+
+let final_meta_update cleanup_intent =
+  match cleanup_intent.meta_disposition with
+  | Retain_operator_pause
+  | Remove_meta -> paused_meta
+  | Retain_dead_tombstone -> dead_tombstone_meta
+;;
+
 let update_registry_meta_exact operation entry retained =
   match entry with
   | None -> Ok ()
@@ -323,7 +360,7 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
       ~name:operation.keeper_name
       ~trace_id:operation.trace_id
       ~generation:operation.generation
-      paused_meta
+      (final_meta_update operation.cleanup_intent)
   with
   | Error error ->
     block
@@ -387,8 +424,8 @@ let rec remove_tree path =
 ;;
 
 let remove_meta_file ~config operation =
-  if operation.cleanup_intent.remove_meta
-  then
+  match operation.cleanup_intent.meta_disposition with
+  | Remove_meta ->
     match
       Keeper_meta_store.remove_meta_if_identity
         config
@@ -398,7 +435,8 @@ let remove_meta_file ~config operation =
     with
     | Ok () | Error Keeper_meta_store.Remove_identity_missing -> Ok ()
     | Error error -> Error (Keeper_meta_store.identity_remove_error_to_string error)
-  else Ok ()
+  | Retain_operator_pause
+  | Retain_dead_tombstone -> Ok ()
 ;;
 
 let remove_session_dir ~config operation =
@@ -442,6 +480,40 @@ let release_finalized_admission ~(config : Workspace.config) operation =
     Ok operation
 ;;
 
+let invoke_completion_handler ~config operation action =
+  try Atomic.get completion_handler config operation action with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let deliver_finalized_completion ~config operation =
+  match operation.phase with
+  | Finalized { completion = Completion_not_requested; _ }
+  | Finalized { completion = Completion_delivered _; _ } ->
+    release_finalized_admission ~config operation
+  | Finalized ({ completion = Completion_pending action; _ } as evidence) ->
+    (match invoke_completion_handler ~config operation action with
+     | Error detail -> Error (Completion_failed (operation, detail))
+     | Ok () ->
+       let delivered =
+         { operation with
+           phase =
+             Finalized
+               { evidence with completion = Completion_delivered action }
+         ; updated_at = Masc_domain.now_iso ()
+         }
+       in
+       (match replace ~config delivered with
+        | Error _ as error -> error
+        | Ok persisted -> release_finalized_admission ~config persisted))
+  | Prepared
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Blocked _ -> Error Unsupported_phase
+;;
+
 let complete_cleanup ~config ~entry operation cleanup =
   match unregister_exact operation entry with
   | Error detail -> block ~config operation Registry_unregister detail
@@ -452,13 +524,26 @@ let complete_cleanup ~config ~entry operation cleanup =
        (match remove_meta_file ~config operation with
         | Error detail -> block ~config operation Meta_remove detail
         | Ok () ->
-          if operation.cleanup_intent.remove_meta
+          if registry_unregistered
           then Keeper_tool_emission_hook.drop_keeper_accumulator operation.keeper_name;
+          let meta_removed =
+            match operation.cleanup_intent.meta_disposition with
+            | Remove_meta -> true
+            | Retain_operator_pause
+            | Retain_dead_tombstone -> false
+          in
+          let completion =
+            match operation.cleanup_intent.meta_disposition with
+            | Retain_dead_tombstone -> Completion_pending Dead_tombstone_reaped
+            | Retain_operator_pause
+            | Remove_meta -> Completion_not_requested
+          in
           let evidence =
             { cleanup
-            ; meta_removed = operation.cleanup_intent.remove_meta
+            ; meta_removed
             ; session_removed = operation.cleanup_intent.remove_session
             ; registry_unregistered
+            ; completion
             }
           in
           let finalized =
@@ -470,7 +555,7 @@ let complete_cleanup ~config ~entry operation cleanup =
           (match replace ~config finalized with
            | Error _ as error -> error
            | Ok persisted_finalized ->
-             release_finalized_admission ~config persisted_finalized)))
+             deliver_finalized_completion ~config persisted_finalized)))
 ;;
 
 let run ~config ~entry operation =
@@ -504,7 +589,7 @@ let run ~config ~entry operation =
               | Cleanup_ready cleanup -> complete_cleanup ~config ~entry ready cleanup
               | _ -> Error Unsupported_phase))))
   | Cleanup_ready cleanup -> complete_cleanup ~config ~entry operation cleanup
-  | Finalized _ -> release_finalized_admission ~config operation
+  | Finalized _ -> deliver_finalized_completion ~config operation
   | Prepared
   | Reconciliation_required _
   | Blocked _ -> Error Unsupported_phase
@@ -512,6 +597,7 @@ let run ~config ~entry operation =
 
 module For_testing = struct
   let paused_meta = paused_meta
+  let dead_tombstone_meta = dead_tombstone_meta
 
   let remove_pending_confirms_by_target ~config ~target_type ~target_id =
     Atomic.get remove_pending_confirms_by_target_callback config ~target_type ~target_id
@@ -520,6 +606,11 @@ module For_testing = struct
   let reset_remove_pending_confirms_by_target () =
     Atomic.set remove_pending_confirms_by_target_callback
       (fun _config ~target_type:_ ~target_id:_ ->
-        Error "pending-confirm cleanup implementation is not registered")
+      Error "pending-confirm cleanup implementation is not registered")
+  ;;
+
+  let reset_completion_handler () =
+    Atomic.set completion_handler (fun _config _operation _action ->
+      Error "shutdown completion handler is not registered")
   ;;
 end

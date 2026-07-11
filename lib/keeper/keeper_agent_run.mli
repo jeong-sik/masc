@@ -137,9 +137,10 @@ val per_provider_timeout_for_turn
     @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence
-    @param max_tokens Explicit output-token request override. [None] (the
-           default) sends no [max_tokens] field on the request — masc#24067 /
-           oas#2517: the keeper lane never synthesizes one
+    @param max_tokens Explicit caller output-token override. When omitted, the
+           turn-start profile snapshot may provide the validated keeper OAS
+           override; absent both, no [max_tokens] field is sent. The keeper lane
+           never synthesizes a model-derived value (masc#24067 / oas#2517)
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
     @param tool_overlay Optional mutable tool overlay for dynamic tools

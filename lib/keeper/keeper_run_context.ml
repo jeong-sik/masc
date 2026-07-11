@@ -78,15 +78,9 @@ let max_tokens_override ~keeper_name profile_defaults =
     ~keeper_name
     profile_defaults.oas_env
 
-let resolve_max_tokens_for_runtime_with_profile ~keeper_name ~profile_defaults
-    ~runtime_id:(_ : string) ?max_tokens ()
-  =
+let resolve_turn_max_tokens ~keeper_name ~profile_defaults ?max_tokens () =
   match max_tokens with
-  (* Explicit caller override passes through unchanged; the OAS provider
-     serializer owns validation/clamp against the catalog ceiling
-     (oas#2517). The former [cap_max_tokens_to_runtime_ceiling] here was an
-     identity stub. *)
-  | Some _ as override -> override
+  | Some _ as caller_override -> caller_override
   | None -> max_tokens_override ~keeper_name profile_defaults
 
 let prepare_run_context
@@ -125,11 +119,13 @@ let prepare_run_context
       ~fallback:fallback_temperature
   in
   let max_tokens =
-    resolve_max_tokens_for_runtime_with_profile
+    (* Freeze caller/profile intent exactly once for this turn. Every runtime
+       candidate receives this immutable value; OAS owns provider-envelope
+       validation and catalog-ceiling clamp policy (oas#2517). *)
+    resolve_turn_max_tokens
       ~keeper_name:meta.name
       ~profile_defaults
       ?max_tokens
-      ~runtime_id
       ()
   in
   (* 0b. Create context injector for temporal awareness *)

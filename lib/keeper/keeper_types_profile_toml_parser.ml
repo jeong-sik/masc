@@ -129,9 +129,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     Result.bind result (fun () -> runtime_assignment_result)
   in
   let result =
-    Result.bind result (fun () -> tool_access_defaults_result)
-  in
-  let result =
     Result.bind result (fun () -> validate_unified_max_tokens_toml_value doc)
   in
   let result =
@@ -139,6 +136,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       Result.map
         (fun _ -> ())
         (parse_unified_max_tokens_override_of_oas_env oas_env))
+  in
+  (* [tool_access_defaults_result] must remain the final bind: its successful
+     payload is consumed by the record-building [Result.map] below. *)
+  let result =
+    Result.bind result (fun () -> tool_access_defaults_result)
   in
   Result.map
     (fun tool_access ->

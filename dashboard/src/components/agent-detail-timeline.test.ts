@@ -1,5 +1,10 @@
+// @vitest-environment jsdom
+
 import { describe, it, expect } from 'vitest'
-import { timelineEventLabel } from './agent-detail-timeline'
+import { html } from 'htm/preact'
+import { render } from 'preact'
+import { timelineEventLabel, ToolCallEventRow } from './agent-detail-timeline'
+import type { AgentTimelineEvent } from '../api'
 
 describe('timelineEventLabel', () => {
   it('returns Korean label for joined', () => {
@@ -25,6 +30,37 @@ describe('timelineEventLabel', () => {
     expect(timelineEventLabel('unknown')).toBe('unknown')
     expect(timelineEventLabel('')).toBe('')
     expect(timelineEventLabel('custom_event')).toBe('custom_event')
+  })
+})
+
+describe('ToolCallEventRow source badge', () => {
+  const toolCallEvent = (detail: Record<string, unknown>): AgentTimelineEvent => ({
+    ts: '',
+    type: 'tool_call',
+    detail,
+  })
+
+  const renderRow = (evt: AgentTimelineEvent): HTMLElement => {
+    const host = document.createElement('div')
+    render(html`<${ToolCallEventRow} evt=${evt} idx=${0} />`, host)
+    return host
+  }
+
+  it('marks keeper in-turn executions (keeper.tool_exec producer)', () => {
+    const host = renderRow(
+      toolCallEvent({ tool_name: 'masc_status', success: true, source: 'keeper_in_turn' }),
+    )
+    const badge = host.querySelector('[data-tool-source="keeper_in_turn"]')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toBe('턴 내')
+  })
+
+  it('renders no source badge when the source is absent (external tool.called)', () => {
+    const host = renderRow(
+      toolCallEvent({ tool_name: 'external_tool', success: true, source: null }),
+    )
+    expect(host.querySelector('[data-tool-source]')).toBeNull()
+    expect(host.textContent).toContain('external_tool')
   })
 })
 

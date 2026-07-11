@@ -281,6 +281,58 @@ let test_turn_completed_keeps_newest () =
         ~payload_of:(fun s -> `Assoc [ ("model_used", `String s) ]);
       check_keeps_newest ~label:"turn_completed" config)
 
+(* keeper.tool_exec producer -> read model (#23540): keeper in-turn tool
+   executions were invisible to the timeline because only the external MCP
+   path emitted [tool.called]; these tests drive the new producer through the
+   same end-to-end read path. *)
+
+let emit_keeper_tool_exec config ~keeper_name ~tool_name ~success =
+  Lib.Keeper_tool_activity.emit_tool_exec ~config
+    ~agent_name:("keeper-" ^ keeper_name ^ "-agent")
+    ~keeper_name ~tool_name ~success ~duration_ms:42 ~outcome:"progress"
+    ~provider:"in_process" ~turn_id:"turn-1" ()
+
+let tool_call_events_of json =
+  events_list json
+  |> List.filter (fun e -> String.equal (ev_type e) "tool_call")
+
+let test_keeper_tool_exec_surfaces_in_timeline () =
+  with_config (fun config ->
+      emit_keeper_tool_exec config ~keeper_name:"testkeeper"
+        ~tool_name:"masc_status" ~success:true;
+      let json = build config ~agent_name:"testkeeper" in
+      check int "keeper in-turn execution counts as a tool call" 1
+        (summary_int json "tool_calls");
+      match tool_call_events_of json with
+      | [ e ] ->
+        check string "tool name projected" "masc_status"
+          (ev_detail_str e "tool_name");
+        check string "source distinguishes the keeper producer"
+          "keeper_in_turn" (ev_detail_str e "source")
+      | events -> failf "expected one tool_call event, got %d" (List.length events))
+
+let test_tool_call_sources_merge () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"tool.called"
+           ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
+           ~subject:(Activity_graph.entity ~kind:"tool" "external_tool")
+           ~payload:(`Assoc [ ("tool_name", `String "external_tool") ])
+           ());
+      emit_keeper_tool_exec config ~keeper_name:"testkeeper"
+        ~tool_name:"masc_status" ~success:true;
+      let json = build config ~agent_name:"testkeeper" in
+      check int "external and keeper tool events both count" 2
+        (summary_int json "tool_calls"))
+
+let test_keeper_tool_exec_excludes_other_keeper () =
+  with_config (fun config ->
+      emit_keeper_tool_exec config ~keeper_name:"otherkeeper"
+        ~tool_name:"masc_status" ~success:true;
+      let json = build config ~agent_name:"testkeeper" in
+      check int "other keeper's execution is excluded" 0
+        (summary_int json "tool_calls"))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -309,5 +361,14 @@ let () =
           test_case "tool_call keeps newest" `Quick test_tool_call_keeps_newest;
           test_case "turn_completed keeps newest" `Quick
             test_turn_completed_keeps_newest;
+        ] );
+      ( "keeper-tool-exec-source",
+        [
+          test_case "keeper in-turn execution surfaces" `Quick
+            test_keeper_tool_exec_surfaces_in_timeline;
+          test_case "external and keeper sources merge" `Quick
+            test_tool_call_sources_merge;
+          test_case "other keeper's execution excluded" `Quick
+            test_keeper_tool_exec_excludes_other_keeper;
         ] );
     ]

@@ -290,7 +290,22 @@ let assemble_hooks
              ; output_text
              ; tool_name
              ; success
-             }))
+             };
+           (* #23540: keeper in-turn tool executions never reached the
+              activity log ([tool.called] is emitted only by the external MCP
+              path), so the agent timeline reported tool_calls = 0 for any
+              keeper working through its own turn. *)
+           Keeper_tool_activity.emit_tool_exec
+             ~config
+             ~agent_name:acc.meta.Keeper_meta_contract.agent_name
+             ~keeper_name:acc.meta.name
+             ~tool_name
+             ~success
+             ~duration_ms:(int_of_float (Float.round duration_ms))
+             ~outcome:typed_outcome_str
+             ~provider
+             ~turn_id
+             ()))
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard
         ()
     in

@@ -94,6 +94,7 @@ let dashboard_retention_json =
         `List
           [
             `String "tool.called";
+            `String "keeper.tool_exec";
             `String "keeper.contract_verdict";
             `String "keeper.friction";
             `String "keeper.turn_completed";
@@ -290,7 +291,11 @@ let take_last n xs =
       in
       skip (len - n) xs
 
-(* Collect tool call events from Activity Graph *)
+(* Collect tool call events from Activity Graph. Two producers feed this
+   source: the external MCP dispatch path ([tool.called]) and the keeper
+   in-turn execution hook ([keeper.tool_exec], #23540 — without it a keeper
+   working through its own turn reported tool_calls = 0). Both share the
+   tool_name/success/duration_ms payload contract projected below. *)
 let tool_call_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   (* `list_events` limits globally before we filter by actor, so fetch a
@@ -302,7 +307,7 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
   in
   let all_events =
     Activity_graph.list_events config
-      ~kinds:["tool.called"] ~after_seq:0 ~limit:scan_limit ()
+      ~kinds:["tool.called"; "keeper.tool_exec"] ~after_seq:0 ~limit:scan_limit ()
   in
   all_events
   |> List.filter (activity_event_matches_agent ~agent_name)
@@ -318,6 +323,7 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
          Safe_ops.json_int ~default:0 "duration_ms" e.payload
        in
        let error_str = Safe_ops.json_string_opt "error" e.payload in
+       let source_str = Safe_ops.json_string_opt "source" e.payload in
        Some
          {
            ts;
@@ -330,6 +336,7 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
                  ("success", `Bool success);
                  ("duration_ms", `Int duration_ms);
                  ("error", Json_util.string_opt_to_json error_str);
+                 ("source", Json_util.string_opt_to_json source_str);
                ];
          })
   |> take_last limit

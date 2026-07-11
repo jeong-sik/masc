@@ -57,7 +57,7 @@ let semantic_multiplier = function
   | "keeper.autonomy_started" | "keeper.autonomy_completed" -> 1.5
   | "operation.paused" | "operation.stopped" -> 0.5
   | "keeper.turn_completed" -> 0.4
-  | "tool.called" -> 0.3
+  | "tool.called" | "keeper.tool_exec" -> 0.3
   | _ -> 1.0
 
 let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
@@ -332,7 +332,7 @@ let reduce_event ~nodes ~edges (value : event) =
   | "keeper.autonomy_completed" -> set_actor_status Active
   | "keeper.guardrail" -> set_actor_status Guardrail
   | "keeper.compaction" -> set_actor_status Compacting
-  | "tool.called" ->
+  | "tool.called" | "keeper.tool_exec" ->
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"calls_tool" ~active:false

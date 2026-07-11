@@ -11,9 +11,11 @@ vi.mock('../api/dashboard', () => ({
 
 import {
   reloadRuntimeCatalog,
+  resolveRuntimeCatalogEntry,
   resetRuntimeCatalog,
   runtimeCatalogState,
 } from './runtime-catalog-resource'
+import { failed, idle, loaded, loading } from './async-state'
 
 function provider(runtimeId: string): DashboardRuntimeProviderSnapshot {
   return {
@@ -50,6 +52,22 @@ describe('runtime catalog resource', () => {
     expect(runtimeCatalogState.value).toEqual({
       status: 'error',
       message: 'catalog unavailable',
+    })
+  })
+
+  it('keeps loading, error, missing, and ready entry states distinct', () => {
+    const entry = provider('rt-a')
+
+    expect(resolveRuntimeCatalogEntry(idle, 'rt-a')).toEqual({ status: 'loading' })
+    expect(resolveRuntimeCatalogEntry(loading, 'rt-a')).toEqual({ status: 'loading' })
+    expect(resolveRuntimeCatalogEntry(failed('catalog unavailable'), 'rt-a')).toEqual({
+      status: 'error',
+      message: 'catalog unavailable',
+    })
+    expect(resolveRuntimeCatalogEntry(loaded([]), 'rt-a')).toEqual({ status: 'missing' })
+    expect(resolveRuntimeCatalogEntry(loaded([entry]), 'rt-a')).toEqual({
+      status: 'ready',
+      entry,
     })
   })
 })

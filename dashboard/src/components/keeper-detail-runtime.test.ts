@@ -66,7 +66,7 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
     effective_capabilities: {
       source: 'oas-provider-config-model',
       accepted_reasoning_efforts: null,
-      thinking_control_format: 'responses.reasoning',
+      thinking_control_format: 'reasoning-effort',
       supports_multimodal_inputs: true,
       supports_image_input: true,
       supports_audio_input: true,
@@ -106,7 +106,7 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
         match_prefixes: ['model-'],
         capabilities: {
           source: 'runtime.toml',
-          thinking_control_format: 'responses.reasoning',
+          thinking_control_format: 'reasoning-effort',
           supports_multimodal_inputs: true,
           supports_image_input: true,
           supports_audio_input: true,

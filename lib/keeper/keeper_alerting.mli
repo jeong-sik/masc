@@ -1,8 +1,12 @@
-(** Keeper_alerting — alert fanout, signal scoring, skill routing, and
-    path safety checks for keeper execution.
+(** Keeper_alerting — skill routing and path safety checks for keeper
+    execution.
 
     Includes {!Keeper_skill_routing} and {!Keeper_alerting_path} via
     [include] for backward-compatible access by downstream modules.
+
+    The alert fanout layer (board/Slack/Slack-DM/GitHub senders,
+    retry+dedup machinery) was removed here — see the .ml header
+    comment and masc issue #54.
 
     @since v2.200.0 *)
 
@@ -32,57 +36,6 @@ val merge_usage :
   Agent_sdk.Types.api_usage ->
   Agent_sdk.Types.api_usage ->
   Agent_sdk.Types.api_usage
-
-(** {1 Alert Retry Logic} *)
-
-(** Check whether an error message indicates a retryable condition
-    (timeout, 429, 502-504, connection errors, etc.). *)
-val alert_retryable_error : string -> bool
-
-(** Compute retry delay in seconds with exponential backoff. *)
-val alert_retry_delay_seconds : int -> float
-
-type alert_send_result =
-  | Alert_sent of string option
-  | Alert_failed of string option
-
-type alert_channel_result = {
-  channel : string;
-  attempted : bool;
-  success : bool;
-  attempts : int;
-  detail : string option;
-}
-
-(** Run a single alert channel with retry logic. *)
-val run_alert_channel_with_retry :
-  _ context ->
-  channel:string ->
-  enabled:bool ->
-  send_once:(unit -> alert_send_result) ->
-  alert_channel_result
-
-(** {1 Alert Deduplication} *)
-
-(** Time window (seconds) for suppressing duplicate alerts. *)
-val alert_dedup_window_sec : float
-
-(** Check if an alert was already emitted within the dedup window.
-    Records the alert if not deduplicated. *)
-val is_alert_deduplicated :
-  keeper_name:string -> reasons:string list -> bool
-
-(** {1 Slack API Helpers} *)
-
-val slack_alert_token : unit -> string option
-
-val slack_api_post_json :
-  token:string ->
-  endpoint:string ->
-  payload:Yojson.Safe.t ->
-  (Yojson.Safe.t, string) result
-
-val slack_ok_or_error : Yojson.Safe.t -> (unit, string) result
 
 (** {1 Included: Keeper_skill_routing} *)
 
@@ -133,4 +86,3 @@ val extract_user_messages : working_context -> string list
 (** {1 Re-exported Utilities} *)
 
 val keeper_model_tools : Masc_domain.tool_schema list
-val split_csv_nonempty : string -> string list

@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
 vi.mock('../../api/board', () => ({
-  fetchBoardReactions: vi.fn().mockResolvedValue([]),
+  fetchBoardReactionState: vi.fn().mockResolvedValue({
+    summaries: [],
+    supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
+  }),
   toggleReaction: vi.fn(),
 }))
 
@@ -12,7 +15,7 @@ vi.mock('../common/toast', () => ({
   showToast: vi.fn(),
 }))
 
-import { fetchBoardReactions, toggleReaction } from '../../api/board'
+import { fetchBoardReactionState, toggleReaction } from '../../api/board'
 import { lastEvent } from '../../sse'
 import { showToast } from '../common/toast'
 import { ReactionBar } from './reaction-bar'
@@ -24,13 +27,15 @@ afterEach(() => {
 })
 
 describe('ReactionBar', () => {
-  it('renders the eight standard board reactions', () => {
+  it('renders the reaction catalog returned by the server', async () => {
     render(h(ReactionBar, { targetType: 'post', targetId: 'post-1' }))
 
-    for (const emoji of ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥']) {
-      expect(screen.getByRole('button', { name: `${emoji} 리액션 0개` })).toBeInTheDocument()
-    }
-    expect(screen.getByRole('status')).toHaveTextContent('')
+    await waitFor(() => {
+      for (const emoji of ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥']) {
+        expect(screen.getByRole('button', { name: `${emoji} 리액션 0개` })).toBeInTheDocument()
+      }
+      expect(screen.getByRole('status')).toHaveTextContent('')
+    })
   })
 
   it('uses embedded initial summaries without an initial fetch', async () => {
@@ -44,28 +49,32 @@ describe('ReactionBar', () => {
         has_reacted: true,
         recent_user_ids: ['agent-a'],
       }],
+      supportedEmojis: ['👏'],
     }))
 
     expect(screen.getByRole('button', { name: '👏 리액션 5개' })).toHaveAttribute('aria-pressed', 'true')
     await Promise.resolve()
-    expect(fetchBoardReactions).not.toHaveBeenCalled()
+    expect(fetchBoardReactionState).not.toHaveBeenCalled()
   })
 
   it('refreshes summaries only when a matching reaction_changed event arrives', async () => {
-    vi.mocked(fetchBoardReactions)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{
-        emoji: '🔥',
-        count: 3,
-        reacted: false,
-        has_reacted: false,
-        recent_user_ids: ['agent-a', 'agent-b'],
-      }])
+    vi.mocked(fetchBoardReactionState)
+      .mockResolvedValueOnce({ summaries: [], supportedEmojis: ['🔥'] })
+      .mockResolvedValueOnce({
+        summaries: [{
+          emoji: '🔥',
+          count: 3,
+          reacted: false,
+          has_reacted: false,
+          recent_user_ids: ['agent-a', 'agent-b'],
+        }],
+        supportedEmojis: ['🔥'],
+      })
 
     render(h(ReactionBar, { targetType: 'post', targetId: 'post-1' }))
 
     await waitFor(() => {
-      expect(fetchBoardReactions).toHaveBeenCalledTimes(1)
+      expect(fetchBoardReactionState).toHaveBeenCalledTimes(1)
     })
 
     lastEvent.value = {
@@ -77,7 +86,7 @@ describe('ReactionBar', () => {
       reacted: true,
     }
     await Promise.resolve()
-    expect(fetchBoardReactions).toHaveBeenCalledTimes(1)
+    expect(fetchBoardReactionState).toHaveBeenCalledTimes(1)
 
     lastEvent.value = {
       type: 'reaction_changed',
@@ -89,13 +98,13 @@ describe('ReactionBar', () => {
     }
 
     await waitFor(() => {
-      expect(fetchBoardReactions).toHaveBeenCalledTimes(2)
+      expect(fetchBoardReactionState).toHaveBeenCalledTimes(2)
       expect(screen.getByRole('button', { name: '🔥 리액션 3개' })).toBeInTheDocument()
     })
   })
 
   it('clears the live status before retrying reaction summary refreshes', async () => {
-    vi.mocked(fetchBoardReactions).mockRejectedValueOnce(new Error('offline'))
+    vi.mocked(fetchBoardReactionState).mockRejectedValueOnce(new Error('offline'))
 
     render(h(ReactionBar, { targetType: 'post', targetId: 'post-1' }))
 
@@ -103,8 +112,8 @@ describe('ReactionBar', () => {
       expect(screen.getByRole('status')).toHaveTextContent('리액션 요약을 불러오지 못했습니다')
     })
 
-    let resolveRefresh: (value: []) => void = () => {}
-    vi.mocked(fetchBoardReactions).mockImplementationOnce(() => new Promise(resolve => {
+    let resolveRefresh: (value: { summaries: []; supportedEmojis: string[] }) => void = () => {}
+    vi.mocked(fetchBoardReactionState).mockImplementationOnce(() => new Promise(resolve => {
       resolveRefresh = resolve
     }))
 
@@ -118,10 +127,43 @@ describe('ReactionBar', () => {
     }
 
     await waitFor(() => {
-      expect(fetchBoardReactions).toHaveBeenCalledTimes(2)
-      expect(screen.getByRole('status')).toHaveTextContent('')
+      expect(fetchBoardReactionState).toHaveBeenCalledTimes(2)
+      expect(screen.getByRole('status')).toHaveTextContent('리액션 종류를 불러오는 중입니다')
     })
-    resolveRefresh([])
+    resolveRefresh({ summaries: [], supportedEmojis: ['🔥'] })
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(/^$/)
+    })
+  })
+
+  it('applies a successful click result to the visible reaction state', async () => {
+    vi.mocked(toggleReaction).mockResolvedValueOnce({
+      target_type: 'post',
+      target_id: 'post-1',
+      user_id: 'dashboard-reviewer',
+      emoji: '👍',
+      reacted: true,
+      summary: [{
+        emoji: '👍',
+        count: 1,
+        reacted: true,
+        has_reacted: true,
+        recent_user_ids: ['dashboard-reviewer'],
+      }],
+    })
+
+    render(h(ReactionBar, {
+      targetType: 'post',
+      targetId: 'post-1',
+      initialSummaries: [],
+      supportedEmojis: ['👍'],
+    }))
+
+    fireEvent.click(screen.getByRole('button', { name: '👍 리액션 0개' }))
+
+    const reacted = await screen.findByRole('button', { name: '👍 리액션 1개' })
+    expect(reacted).toHaveAttribute('aria-pressed', 'true')
+    expect(toggleReaction).toHaveBeenCalledWith('post', 'post-1', '👍')
   })
 
   it('announces and toasts failed reaction toggles', async () => {
@@ -129,7 +171,7 @@ describe('ReactionBar', () => {
 
     render(h(ReactionBar, { targetType: 'post', targetId: 'post-1' }))
 
-    const reaction = screen.getByRole('button', { name: '👍 리액션 0개' })
+    const reaction = await screen.findByRole('button', { name: '👍 리액션 0개' })
     fireEvent.click(reaction)
 
     await waitFor(() => {

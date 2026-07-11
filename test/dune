@@ -26,6 +26,13 @@
 ; Group 1: Pure synchronous tests
 
 (tests
+ ; These 700+ tests all link the full [masc_test_deps] graph. Native-linking
+ ; every binary under [@check] exhausted 39 GiB of free runner storage even
+ ; with hardlink-backed Dune caching (CI run 29138102889). Bytecode still
+ ; compiles every test module and is the executable consumed by [@runtest];
+ ; production libraries/binaries remain native-checked by [@default],
+ ; [@install], and the OCaml canary jobs.
+ (modes byte)
  (names
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
@@ -89,6 +96,7 @@
   test_fd_accountant
   test_fd_accountant_state
   test_host_fd_pressure_poller
+  test_operator_control_actions
   test_operator_control_snapshot_state
   test_operator_control_snapshot
   test_operator_control_judgment
@@ -194,6 +202,8 @@
   test_dashboard_harness_health
   test_keeper_timing
   test_keeper_token_count
+  test_keeper_behavior_trace
+  test_keeper_noop_backoff
   test_keeper_chat_store
   test_keeper_chat_blocks
   test_keeper_chat_media_store
@@ -337,6 +347,7 @@
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
+  test_start_masc_mcp_script
   test_tool_prefilter
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
@@ -447,6 +458,8 @@
   test_fd_accountant
   test_fd_accountant_state
   test_host_fd_pressure_poller
+  test_operator_control_actions
+  test_operator_control_confirm
   test_operator_control_snapshot_state
   test_operator_control_snapshot
   test_operator_control_judgment
@@ -553,6 +566,8 @@
   test_dashboard_harness_health
   test_keeper_timing
   test_keeper_token_count
+  test_keeper_behavior_trace
+  test_keeper_noop_backoff
   test_keeper_chat_store
   test_keeper_chat_blocks
   test_keeper_chat_media_store
@@ -699,6 +714,7 @@
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
+  test_start_masc_mcp_script
   test_tool_prefilter
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
@@ -1786,6 +1802,8 @@
 ; To add a new test: create test/stanzas/test_name.inc and
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
+
+(include stanzas/test_activity_feed.inc)
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
 

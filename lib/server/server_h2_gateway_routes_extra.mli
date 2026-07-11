@@ -35,7 +35,8 @@ val dispatch :
     - [GET /api/v1/board/curation] — latest AI curation snapshot
       ([{snapshot: null}] when no snapshot has been submitted yet).
     - [GET /api/v1/board/<post_id>] — single post with
-      configurable [format] query param (defaults to [nested]).
+      configurable [format] query param (defaults to [nested]); unsupported
+      values return [400 Bad Request].
     - [GET /api/v1/board/sub-boards] — sub-board list.
     - [POST /api/v1/board/sub-boards] — create sub-board (auth required).
       Body: [{ slug, name, description, access? }].

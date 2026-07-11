@@ -69,8 +69,8 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
           supports_extended_thinking: true,
           supports_reasoning_budget: true,
           accepted_reasoning_efforts: ['low', 'medium', 'high'],
-          thinking_control_format: 'qwen_xml',
-          preserve_thinking_control_format: 'qwen_xml',
+          thinking_control_format: 'chat-template-kwargs',
+          preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
           reasoning_output_format: 'reasoning_content',
           reasoning_streaming_format: { kind: 'delta_field', field: 'reasoning_content' },
           reasoning_replay_override: 'provider_policy',
@@ -115,7 +115,7 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
             max_thinking_budget: 4096,
             match_prefixes: ['Qwen/'],
             capabilities: {
-              thinking_control_format: 'qwen_xml',
+              thinking_control_format: 'chat-template-kwargs',
               max_output_tokens: 8192,
               supports_response_format_json: true,
               supports_structured_output: true,
@@ -273,7 +273,7 @@ describe('RuntimeHealthSnapshot', () => {
     expect(container.textContent).toContain('default runtime spec')
     expect(container.textContent).toContain('source:provider_config')
     expect(container.textContent).toContain('input:multimodal,image,audio')
-    expect(container.textContent).toContain('wire:qwen_xml')
+    expect(container.textContent).toContain('wire:chat-template-kwargs')
     expect(container.textContent).toContain('policy')
     expect(container.textContent).toContain('provider details')
     expect(container.textContent).toContain('runtime.toml')

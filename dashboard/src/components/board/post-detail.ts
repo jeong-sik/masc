@@ -322,7 +322,13 @@ function CommentItem({
           >${expanded ? '접기' : '더 보기...'}<//>
         ` : null}
         <div class="mt-2">
-          <${ReactionBar} targetType="comment" targetId=${comment.id} compact initialSummaries=${comment.reactions} />
+          <${ReactionBar}
+            targetType="comment"
+            targetId=${comment.id}
+            compact
+            initialSummaries=${comment.reactions}
+            supportedEmojis=${comment.supported_reaction_emojis}
+          />
         </div>
         ${isReplying ? html`
           <div class="mt-2">
@@ -690,7 +696,12 @@ export function PostDetail({ post }: { post: BoardPost }) {
             >▼ 비추천<//>
           </div>
 
-          <${ReactionBar} targetType="post" targetId=${post.id} initialSummaries=${post.reactions} />
+          <${ReactionBar}
+            targetType="post"
+            targetId=${post.id}
+            initialSummaries=${post.reactions}
+            supportedEmojis=${post.supported_reaction_emojis}
+          />
         </div>
       <//>
 

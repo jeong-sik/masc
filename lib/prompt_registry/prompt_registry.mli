@@ -110,6 +110,13 @@ type persisted_mutation_error =
   | Validation_error of string
   | Persistence_error of string
 
+(** {1 Markdown parsing} *)
+
+val markdown_body : string -> string
+(** Return the body of a markdown asset after removing one leading YAML-style
+    frontmatter block. Content without frontmatter is returned unchanged. *)
+
+
 (** {1 Markdown directory} *)
 
 val set_markdown_dir : string -> unit

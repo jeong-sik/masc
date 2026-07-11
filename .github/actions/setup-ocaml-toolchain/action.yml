@@ -10,6 +10,10 @@ inputs:
     description: Whether to enable dune cache
     required: false
     default: "true"
+  dune-cache-save:
+    description: Whether this job is the authoritative main-branch Dune cache writer
+    required: false
+    default: "false"
   cache-prefix:
     description: Prefix for the dune cache key
     required: false
@@ -39,21 +43,29 @@ runs:
     # The opam cache above only restores the toolchain/switch; every dune
     # build of masc itself still started cold (~50 min Build and Test).
     # Cache dune's content-addressed artifact store so an unchanged module
-    # graph rebuilds incrementally. Keyed by job and run id so each job publishes
-    # a new immutable cache with its newest artifacts (a stable key would freeze
-    # the first upload forever). [github.job] is part of both the primary key
-    # and restore namespace: Health/Lint/Build run in parallel and produce
-    # different artifact subsets, while GitHub cache entries are immutable
-    # after the first successful save. A shared run-id key would let the fastest, usually
-    # smallest job permanently win that run's save race.
-    - name: Cache dune build artifacts (Linux)
-      if: runner.os == 'Linux' && inputs.dune-cache == 'true'
+    # graph rebuilds incrementally. Pull requests and non-authoritative jobs are
+    # restore-only: PR caches are ref-scoped and cannot warm other PRs, while
+    # partial Health/Lint artifacts must not race the full Build cache. Exactly
+    # one authoritative job per cache-prefix opts into the main-branch writer.
+    # The run id gives each main publication an immutable key; restore picks the
+    # newest cache in that trusted lineage.
+    - name: Restore dune build artifacts (Linux)
+      if: runner.os == 'Linux' && inputs.dune-cache == 'true' && (inputs.dune-cache-save != 'true' || github.event_name != 'push' || github.ref != 'refs/heads/main')
+      uses: actions/cache/restore@v5
+      with:
+        path: ~/.cache/dune
+        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.run_id }}
+        restore-keys: |
+          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
+
+    - name: Cache dune build artifacts (Linux authoritative main writer)
+      if: runner.os == 'Linux' && inputs.dune-cache == 'true' && inputs.dune-cache-save == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: actions/cache@v5
       with:
         path: ~/.cache/dune
-        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.job }}-${{ github.run_id }}
+        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.run_id }}
         restore-keys: |
-          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.job }}-
+          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
 
     # Storage mode is hardlink, not copy. `copy` keeps every artifact twice:
     # once in _build and once in ~/.cache/dune. On ubuntu-latest that
@@ -91,9 +103,6 @@ runs:
         set -euo pipefail
 
         case "${OCAML_COMPILER_INPUT}" in
-          5.5|5.5.x)
-            compiler_pkg="ocaml-base-compiler.5.5.0"
-            ;;
           5.5|5.5.x)
             compiler_pkg="ocaml-base-compiler.5.5.0"
             ;;

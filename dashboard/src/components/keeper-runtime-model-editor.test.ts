@@ -42,6 +42,7 @@ vi.mock('./keeper-config-panel', async () => {
 vi.mock('./common/toast', () => ({ showToast: vi.fn() }))
 
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
+import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 
 async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -272,6 +273,7 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
+    resetRuntimeCatalog()
     container = document.createElement('div')
     document.body.appendChild(container)
     refs.config = null
@@ -290,6 +292,7 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
+    resetRuntimeCatalog()
   })
 
   it('renders the current runtime + catalog summary read-only, with no editable <select>', async () => {
@@ -313,6 +316,67 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     expect(container.textContent).toContain('claude')
     expect(container.textContent).toContain('caps:declared')
     expect(container.textContent).toContain('api:chat-completions')
+  })
+
+  it('sources the reasoning-budget pill from effective_capabilities, not the top-level snapshot field', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    const base = makeRuntimeProvider('a.one', 'Provider A', 'claude')
+    refs.providers.mockReset()
+    refs.providers.mockResolvedValue({
+      providers: [
+        {
+          ...base,
+          // Top-level field says "off" — this is the runtime.toml-mirrored,
+          // wire-inert value. If the pill still read it, this test would fail.
+          supports_reasoning_budget: false,
+          effective_capabilities: {
+            ...base.effective_capabilities,
+            supports_reasoning_budget: true,
+          },
+        },
+        makeRuntimeProvider('b.two', 'Provider B', 'model-b'),
+      ],
+    })
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="editable-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    const pill = Array.from(container.querySelectorAll('span')).find(node =>
+      node.textContent?.trim().startsWith('reasoning-budget'),
+    )
+    expect(pill?.textContent).toContain('reasoning-budget on')
+  })
+
+  it('renders a missing effective capability as unknown instead of off', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    const base = makeRuntimeProvider('a.one', 'Provider A', 'claude')
+    refs.providers.mockReset()
+    refs.providers.mockResolvedValue({
+      providers: [
+        {
+          ...base,
+          supports_reasoning_budget: false,
+          effective_capabilities: null,
+        },
+      ],
+    })
+
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="unknown-capability-keeper" />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    const pill = Array.from(container.querySelectorAll('span')).find(node =>
+      node.textContent?.trim().startsWith('reasoning-budget'),
+    )
+    expect(pill?.getAttribute('data-capability-state')).toBe('unknown')
+    expect(pill?.textContent).toContain('reasoning-budget unknown')
+    expect(pill?.textContent).not.toContain('reasoning-budget off')
   })
 
   it('deep-links to the 설정 런타임 tab: focuses runtime then invokes onOpenRuntimeConfig', async () => {

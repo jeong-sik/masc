@@ -6,7 +6,10 @@ import { axe } from 'jest-axe'
 import '@testing-library/jest-dom'
 
 vi.mock('../../api/board', () => ({
-  fetchBoardReactions: vi.fn().mockResolvedValue([]),
+  fetchBoardReactionState: vi.fn().mockResolvedValue({
+    summaries: [],
+    supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
+  }),
   toggleReaction: vi.fn(),
 }))
 
@@ -34,6 +37,7 @@ describe('ReactionBar a11y', () => {
         has_reacted: true,
         recent_user_ids: ['agent-a'],
       }],
+      supportedEmojis: ['🔥'],
     }))
 
     expect(await axe(container)).toHaveNoViolations()
@@ -46,6 +50,7 @@ describe('ReactionBar a11y', () => {
       targetType: 'post',
       targetId: 'post-1',
       initialSummaries: [],
+      supportedEmojis: ['👍'],
     }))
 
     fireEvent.click(screen.getByRole('button', { name: '👍 리액션 0개' }))

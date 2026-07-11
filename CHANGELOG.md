@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Removed
+- Removed the unused permissive `Activity_feed` JSON decoder surface; the live activity API remains encode-only and its filesystem aggregation, ordering, limit, and agent-filter contracts now have dedicated regression coverage (#23960).
+
 ### Fixed
 - Prompt overrides now persist in a schema-versioned envelope bound to the SHA256 revision of each prompt body and template-variable contract. Legacy or malformed files and contract-drifted entries fail closed with observable fallback, writes use atomic replacement, and dashboard set/clear mutations commit to memory only after persistence succeeds.
 

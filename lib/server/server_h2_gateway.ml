@@ -140,6 +140,15 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
              | Error () -> ())
         | Error err -> h2_respond_auth_error h2_reqd err)
     in
+    let h2_respond_board_reaction_result h2_reqd = function
+      | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+      | Error error ->
+        h2_respond_json_value
+          h2_reqd
+          (Server_board_reaction_http.error_json error)
+          ~status:(Server_board_reaction_http.error_status error :> H2.Status.t)
+          ~extra_headers:cors
+    in
     let session_id_opt = get_session_id_any httpun_request in
     let h2_respond_dashboard_index () =
       let index_path = dashboard_index_path () in
@@ -874,6 +883,50 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `POST, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
           h2_respond_removed_surface h2_reqd ~surface:"command_plane" ~extra_headers:cors
+
+      | `GET, "/api/v1/board/reactions/catalog" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value
+              h2_reqd
+              (Server_board_reaction_http.catalog_json ())
+              ~extra_headers:cors)
+
+      | `GET, "/api/v1/board/reactions" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanReadState
+            (fun _state actor ->
+               let actor = Server_utils.board_actor_author_for_write actor in
+               let result =
+                 Result.bind
+                   (Server_board_reaction_http.target_of_strings
+                      ~target_type:
+                        (Server_utils.query_param httpun_request "target_type")
+                      ~target_id:
+                        (Server_utils.query_param httpun_request "target_id"))
+                   (Server_board_reaction_http.list_json ~actor)
+               in
+               h2_respond_board_reaction_result h2_reqd result)
+
+      | `POST, "/api/v1/board/reactions" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanVote
+            (fun _state actor ->
+               let actor = Server_utils.board_actor_author_for_write actor in
+               h2_read_body h2_reqd (fun body ->
+                 let parsed =
+                   match Yojson.Safe.from_string body with
+                   | json -> Server_board_reaction_http.toggle_request_of_json json
+                   | exception Yojson.Json_error message ->
+                     Error (Server_board_reaction_http.malformed_json message)
+                 in
+                 let result =
+                   Result.bind
+                     parsed
+                     (Server_board_reaction_http.toggle_json ~actor)
+                 in
+                 h2_respond_board_reaction_result h2_reqd result))
 
       (* ═══════════════════════════════════════════════════════════════════════
          Delegated route groups

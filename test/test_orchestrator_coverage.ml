@@ -109,6 +109,36 @@ let test_make_orchestrator_prompt_mentions_broadcast () =
       let _ = Str.search_forward (Str.regexp "masc_broadcast") prompt 0 in true
     with Not_found -> false)
 
+let test_runtime_and_embedded_fallback_share_asset () =
+  let asset_path =
+    Masc_test_deps.source_path "config/prompts/system.orchestrator.md"
+  in
+  let canonical_body =
+    Masc_test_deps.read_file asset_path |> Prompt_registry.markdown_body
+  in
+  let runtime_prompts_dir = Filename.dirname asset_path in
+  let missing_prompts_dir = Filename.temp_file "masc-orchestrator-prompts-" "" in
+  Sys.remove missing_prompts_dir;
+  Fun.protect
+    ~finally:Prompt_registry.clear
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir runtime_prompts_dir;
+      let runtime_prompt = Orchestrator.make_orchestrator_prompt ~port:8935 in
+      check string "runtime prompt resolves from markdown" "file"
+        (Prompt_registry.prompt_source "system.orchestrator");
+      check string "runtime prompt is the canonical asset body" canonical_body
+        runtime_prompt;
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir missing_prompts_dir;
+      let embedded_fallback = Orchestrator.make_orchestrator_prompt ~port:8935 in
+      check string "missing runtime file uses embedded asset" "missing"
+        (Prompt_registry.prompt_source "system.orchestrator");
+      check string "embedded fallback is the canonical asset body" canonical_body
+        embedded_fallback;
+      check string "runtime and embedded prompt bodies are identical" runtime_prompt
+        embedded_fallback)
+
 (* ============================================================
    Config Field Bounds Tests
    ============================================================ *)
@@ -236,6 +266,8 @@ let () =
         test_make_orchestrator_prompt_contains_transition_claim_path;
       test_case "contains done" `Quick test_make_orchestrator_prompt_contains_done;
       test_case "mentions broadcast" `Quick test_make_orchestrator_prompt_mentions_broadcast;
+      test_case "runtime and embedded fallback share asset" `Quick
+        test_runtime_and_embedded_fallback_share_asset;
     ];
     "config_bounds", [
       test_case "reasonable interval" `Quick test_config_reasonable_interval;

@@ -214,7 +214,13 @@ let board_reactions_lookup rows =
 let board_reaction_fields = function
   | None -> []
   | Some summaries ->
-      [ ("reactions", `List (List.map Board.reaction_summary_to_yojson summaries)) ]
+      [ ("reactions", `List (List.map Board.reaction_summary_to_yojson summaries))
+      ; ( "supported_reaction_emojis"
+        , `List
+            (List.map
+               (fun emoji -> `String emoji)
+               Board.board_reaction_emojis) )
+      ]
 
 let board_moderation_fields ~include_moderation ~target_kind ~target_id =
   if not include_moderation then []

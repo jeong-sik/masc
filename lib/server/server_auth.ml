@@ -68,16 +68,27 @@ let bearer_token_from_header value =
   then Some (String.sub value prefix_len (String.length value - prefix_len))
   else None
 
+let authorization_header_name = "authorization"
+let internal_token_header_name = "x-masc-internal-token"
+
 let auth_token_from_request request =
   match
     Option.bind
-      (Httpun.Headers.get request.Httpun.Request.headers "authorization")
+      (Httpun.Headers.get request.Httpun.Request.headers authorization_header_name)
       bearer_token_from_header
   with
   | Some _ as token -> token
   | None ->
       trim_opt
-        (Httpun.Headers.get request.Httpun.Request.headers "x-masc-internal-token")
+        (Httpun.Headers.get request.Httpun.Request.headers internal_token_header_name)
+
+let request_carries_auth_credential request =
+  match
+    ( Httpun.Headers.get request.Httpun.Request.headers authorization_header_name
+    , Httpun.Headers.get request.Httpun.Request.headers internal_token_header_name )
+  with
+  | None, None -> false
+  | None, Some _ | Some _, None | Some _, Some _ -> true
 
 let observer_sse_query_token_from_request request =
   let path = Http_server_eio.Request.path request in
@@ -916,6 +927,16 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
                   { agent = cred.agent_name
                   ; action = Masc_domain.show_permission permission
                   }))
+
+let authorize_optional_token_bound_permission_request
+    ~base_path
+    ~permission
+    request =
+  if request_carries_auth_credential request
+  then
+    authorize_token_bound_permission_request ~base_path ~permission request
+    |> Result.map Option.some
+  else Ok None
 
 let is_dashboard_bootstrap_path path =
   String.starts_with ~prefix:"/api/v1/dashboard/" path

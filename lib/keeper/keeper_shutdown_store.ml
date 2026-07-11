@@ -16,7 +16,49 @@ let error_to_string = function
     Printf.sprintf "shutdown operation identity mismatch: %s" detail
 ;;
 
-let store_mutex = Eio.Mutex.create ()
+type operation_lock =
+  { mutex : Eio.Mutex.t
+  ; mutable users : int
+  }
+
+let operation_locks : (string, operation_lock) Hashtbl.t = Hashtbl.create 16
+let operation_locks_mutex = Stdlib.Mutex.create ()
+
+type lock_access =
+  | Read
+  | Write
+
+let acquire_operation_lock key =
+  Stdlib.Mutex.protect operation_locks_mutex (fun () ->
+    match Hashtbl.find_opt operation_locks key with
+    | Some lock ->
+      lock.users <- lock.users + 1;
+      lock
+    | None ->
+      let lock = { mutex = Eio.Mutex.create (); users = 1 } in
+      Hashtbl.add operation_locks key lock;
+      lock)
+;;
+
+let release_operation_lock key lock =
+  Stdlib.Mutex.protect operation_locks_mutex (fun () ->
+    lock.users <- lock.users - 1;
+    if lock.users = 0
+    then
+      match Hashtbl.find_opt operation_locks key with
+      | Some current when current == lock -> Hashtbl.remove operation_locks key
+      | Some _ | None -> ())
+;;
+
+let with_operation_lock ~access key f =
+  let lock = acquire_operation_lock key in
+  Fun.protect
+    ~finally:(fun () -> release_operation_lock key lock)
+    (fun () ->
+       match access with
+       | Write -> Eio.Mutex.use_rw ~protect:true lock.mutex f
+       | Read -> Eio.Mutex.use_ro lock.mutex f)
+;;
 
 let records_dir (config : Workspace.config) =
   Filename.concat (Workspace.keepers_runtime_dir config) ".shutdown-operations"
@@ -391,8 +433,8 @@ let load_unlocked ~config operation_id =
 ;;
 
 let persist_new ~config operation =
-  Eio.Mutex.use_rw ~protect:true store_mutex (fun () ->
-    let operation_path = path ~config operation.operation_id in
+  let operation_path = path ~config operation.operation_id in
+  with_operation_lock ~access:Write operation_path (fun () ->
     if Fs_compat.file_exists operation_path
     then Error (Already_exists operation_path)
     else
@@ -409,11 +451,12 @@ let same_identity left right =
 ;;
 
 let replace ~config operation =
-  Eio.Mutex.use_rw ~protect:true store_mutex (fun () ->
+  let operation_path = path ~config operation.operation_id in
+  with_operation_lock ~access:Write operation_path (fun () ->
     match load_unlocked ~config operation.operation_id with
     | Error _ as error -> error
     | Ok existing when same_identity existing operation ->
-      Keeper_fs.save_json_atomic (path ~config operation.operation_id) (to_json operation)
+      Keeper_fs.save_json_atomic operation_path (to_json operation)
       |> Result.map_error (fun detail -> Io_error detail)
     | Ok _ ->
       Error
@@ -422,42 +465,43 @@ let replace ~config operation =
 ;;
 
 let load ~config operation_id =
-  Eio.Mutex.use_ro store_mutex (fun () -> load_unlocked ~config operation_id)
+  let operation_path = path ~config operation_id in
+  with_operation_lock ~access:Read operation_path (fun () ->
+    load_unlocked ~config operation_id)
 ;;
 
 let list_for_keeper ~config ~keeper_name =
-  Eio.Mutex.use_ro store_mutex (fun () ->
-    let dir = records_dir config in
-    if not (Fs_compat.file_exists dir)
-    then Ok []
-    else
-      try
-        Sys.readdir dir
-        |> Array.to_list
-        |> List.sort String.compare
-        |> List.fold_left
-             (fun result filename ->
-                let* operations = result in
-                if not (Filename.check_suffix filename ".json")
-                then
-                  Error
-                    (Decode_error
-                       (Printf.sprintf
-                          "unexpected shutdown store entry: %s"
-                          filename))
-                else
-                  let raw_id = Filename.chop_suffix filename ".json" in
-                  let* operation_id =
-                    Operation_id.of_string raw_id
-                    |> Result.map_error (fun e -> Decode_error e)
-                  in
-                  let* operation = load_unlocked ~config operation_id in
-                  if String.equal operation.keeper_name keeper_name
-                  then Ok (operation :: operations)
-                  else Ok operations)
-             (Ok [])
-        |> Result.map List.rev
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Io_error (Printexc.to_string exn)))
+  let dir = records_dir config in
+  if not (Fs_compat.file_exists dir)
+  then Ok []
+  else
+    try
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.fold_left
+           (fun result filename ->
+              let* operations = result in
+              if not (Filename.check_suffix filename ".json")
+              then
+                Error
+                  (Decode_error
+                     (Printf.sprintf
+                        "unexpected shutdown store entry: %s"
+                        filename))
+              else
+                let raw_id = Filename.chop_suffix filename ".json" in
+                let* operation_id =
+                  Operation_id.of_string raw_id
+                  |> Result.map_error (fun e -> Decode_error e)
+                in
+                let* operation = load ~config operation_id in
+                if String.equal operation.keeper_name keeper_name
+                then Ok (operation :: operations)
+                else Ok operations)
+           (Ok [])
+      |> Result.map List.rev
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Io_error (Printexc.to_string exn))
 ;;

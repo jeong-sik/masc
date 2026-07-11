@@ -1,5 +1,7 @@
 (** Atomic persistence for Keeper shutdown operations under the configured
-    MASC base path. *)
+    MASC base path. Reads and writes are serialized per operation path; an
+    unrelated Keeper operation never holds the same lock across filesystem
+    I/O. *)
 
 type error =
   | Already_exists of string

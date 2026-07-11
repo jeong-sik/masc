@@ -1005,6 +1005,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         in
         let terminalize_lane = function
           | Keeper_lane.Completed -> record_completed_lane ()
+          | Keeper_lane.Shutdown_requested -> record_stopped "shutdown requested"
           | Keeper_lane.Cancelled_by_parent _ ->
             if Atomic.get stop || Shutdown.is_shutting_down_global ()
             then record_stopped "cancelled during shutdown"

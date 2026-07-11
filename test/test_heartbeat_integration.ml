@@ -823,7 +823,9 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
       let name = "shutdown-idle-lane" in
       let entry = R.register ~base_path:config.base_path name (make_meta name) in
       let never_p, _never_r = Eio.Promise.create () in
@@ -833,9 +835,15 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
            entry.lane
            ~run:(fun _lane_sw -> Eio.Promise.await never_p)
            ~cleanup:(fun _outcome ->
-             ignore (R.dispatch_event ~base_path:config.base_path name KSM.Stop_requested);
-             ignore (R.dispatch_event ~base_path:config.base_path name KSM.Drain_complete);
-             ignore (R.resolve_done entry ~source:"shutdown_test_lane_cleanup" `Stopped);
+             (match R.dispatch_event_exact entry KSM.Stop_requested with
+              | Ok _ -> ()
+              | Error error -> fail (KSM.transition_error_to_string error));
+             (match R.dispatch_event_exact entry KSM.Drain_complete with
+              | Ok _ -> ()
+              | Error error -> fail (KSM.transition_error_to_string error));
+             (match R.resolve_done entry ~source:"shutdown_test_lane_cleanup" `Stopped with
+              | R.Done_resolved _ -> ()
+              | R.Done_already_resolved _ -> fail "test lane terminal resolved twice");
              Ok ())
        with
        | Ok () -> ()
@@ -863,14 +871,62 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
         "shutdown operation records lane join evidence"
         true
         (Option.is_some operation.join_evidence);
-      (match Keeper_turn_admission.run_if_free ~base_path:config.base_path ~keeper_name:name (fun () -> ()) with
-       | `Busy (Keeper_turn_admission.Shutdown_requested operation_id) ->
+      (match
+         Masc.Keeper_turn_admission.run_if_free
+           ~base_path:config.base_path
+           ~keeper_name:name
+           (fun () -> ())
+       with
+       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested operation_id) ->
          check bool
            "shutdown admission fence retains operation identity"
            true
            (Shutdown_types.Operation_id.equal operation.operation_id operation_id)
-       | `Busy (Keeper_turn_admission.Turn_busy _) | `Ran () ->
+       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
          fail "shutdown admission fence reopened before finalization"))
+
+let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-prepare-rollback" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let name = "shutdown-prepare-rollback-lane" in
+      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let probe_operation_id = Shutdown_types.Operation_id.generate () in
+      let records_dir =
+        Filename.dirname (Shutdown_store.path ~config probe_operation_id)
+      in
+      let blocker = open_out records_dir in
+      close_out blocker;
+      (match
+         Shutdown_prepare_join.run
+           ~config
+           ~entry
+           ~request:
+             { actor = "operator"
+             ; cleanup_intent = { remove_meta = false; remove_session = false }
+             }
+       with
+       | Error (Shutdown_prepare_join.Prepare_persist_failed _) -> ()
+       | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+       | Ok _ -> fail "shutdown prepare unexpectedly persisted through a file blocker");
+      match
+        Masc.Keeper_turn_admission.run_if_free
+          ~base_path:config.base_path
+          ~keeper_name:name
+          (fun () -> ())
+      with
+      | `Ran () -> ()
+      | `Busy _ -> fail "failed shutdown prepare left the keeper admission fence closed")
 
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
@@ -1295,6 +1351,8 @@ let () =
         test_keeper_shutdown_store_round_trip_and_identity_guard;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
+      test_case "shutdown prepare failure rolls back admission fence" `Quick
+        test_keeper_shutdown_prepare_failure_rolls_back_fence;
       test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick

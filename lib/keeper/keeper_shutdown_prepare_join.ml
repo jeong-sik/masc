@@ -52,7 +52,9 @@ let admission_lane = function
 ;;
 
 let active_turn_of_snapshots reservation current =
-  let observation = current.Keeper_registry.current_turn_observation in
+  let observation : Keeper_registry.turn_observation option =
+    current.Keeper_registry.current_turn_observation
+  in
   match reservation.Keeper_turn_admission.in_flight, observation with
   | None, None -> No_inflight_turn
   | in_flight, observation ->
@@ -128,19 +130,21 @@ let run ~config ~(entry : Keeper_registry.registry_entry) ~request =
   | Keeper_turn_admission.Shutdown_already_reserved reservation ->
     Error (Existing_operation reservation.operation_id)
   | Keeper_turn_admission.Shutdown_reserved reservation ->
+    let durable_prepare_committed = Atomic.make false in
+    Fun.protect
+      ~finally:(fun () ->
+        if not (Atomic.get durable_prepare_committed)
+        then rollback_reservation ~config ~entry operation_id)
+      (fun () ->
     (match current_entry ~config entry with
-     | Error error ->
-       rollback_reservation ~config ~entry operation_id;
-       Error error
+     | Error error -> Error error
      | Ok current ->
        (match
           Keeper_current_task_reconcile.owned_active_tasks_for_meta_strict
             ~config
             ~meta:current.meta
         with
-        | Error detail ->
-          rollback_reservation ~config ~entry:current operation_id;
-          Error (Task_discovery_failed detail)
+        | Error detail -> Error (Task_discovery_failed detail)
         | Ok owned_tasks ->
           let now = Masc_domain.now_iso () in
           let turn_disposition = active_turn_of_snapshots reservation current in
@@ -164,9 +168,16 @@ let run ~config ~(entry : Keeper_registry.registry_entry) ~request =
             ; updated_at = now
             }
           in
-          (match Keeper_shutdown_store.persist_new ~config operation with
+          let persist_result =
+            Eio.Cancel.protect (fun () ->
+              match Keeper_shutdown_store.persist_new ~config operation with
+              | Ok () as committed ->
+                Atomic.set durable_prepare_committed true;
+                committed
+              | Error _ as error -> error)
+          in
+          (match persist_result with
            | Error store_error ->
-             rollback_reservation ~config ~entry:current operation_id;
              Error (Prepare_persist_failed store_error)
            | Ok () ->
              Keeper_keepalive.request_entry_stop current;
@@ -225,5 +236,5 @@ let run ~config ~(entry : Keeper_registry.registry_entry) ~request =
                     | None ->
                       (match Keeper_shutdown_store.replace ~config joined with
                        | Ok () -> Ok joined
-                       | Error error -> Error (Join_record_update_failed error))))))))
+                       | Error error -> Error (Join_record_update_failed error)))))))))
 ;;

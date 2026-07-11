@@ -94,10 +94,12 @@ function setupMcpSessionMocks(sessionId: string) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 /** Find a fetchWithTimeout call by matching the JSON body's "method" field. */
@@ -186,6 +188,51 @@ describe('mcpHeaders auth integration', () => {
     await callMcpTool('masc_status', {})
 
     expect(callsByMethod('initialize')).toHaveLength(2)
+    const latestToolCall = callsByMethod('tools/call').at(-1)
+    expect((latestToolCall?.[1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-token-b')
+  }, 60_000)
+
+  it('does not replay a delayed unknown-session response after the token changes', async () => {
+    let tokenRevision = 0
+    currentStoredTokenRevision.mockImplementation(() => tokenRevision)
+    setupMcpSessionMocks('sess-token-a')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    const finishOldErrorBody = deferred<void>()
+    apiRequestErrorFromResponse.mockImplementationOnce(async (_method, _path, res) => {
+      await finishOldErrorBody.promise
+      return new Error(`POST /mcp: ${res.status} stale transport session`)
+    })
+    fetchWithTimeout.mockResolvedValueOnce(new Response('{}', {
+      status: 404,
+      statusText: 'Not Found',
+      headers: { 'Mcp-Session-Id': 'sess-uninitialized-replacement' },
+    }))
+    const oldCall = callMcpTool('masc_status', {})
+    await vi.waitFor(() => {
+      expect(callsByMethod('tools/call')).toHaveLength(2)
+    })
+
+    tokenRevision = 1
+    setupMcpSessionMocks('sess-token-b')
+    await callMcpTool('masc_status', {})
+
+    finishOldErrorBody.resolve(undefined)
+    await expect(oldCall).rejects.toThrow('MCP authentication changed during request')
+
+    expect(callsByMethod('initialize')).toHaveLength(2)
+    expect(callsByMethod('tools/call')).toHaveLength(3)
+
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response('data: {"result":{"content":[{"type":"text","text":"still-b"}]}}\n', { status: 200 }),
+    )
+    await callMcpTool('masc_status', {})
+
+    expect(callsByMethod('initialize')).toHaveLength(2)
+    expect(callsByMethod('tools/call')).toHaveLength(4)
     const latestToolCall = callsByMethod('tools/call').at(-1)
     expect((latestToolCall?.[1].headers as Record<string, string>)['Mcp-Session-Id'])
       .toBe('sess-token-b')
@@ -502,6 +549,44 @@ describe('callMcpTool', () => {
     )
   })
 
+  it('attributes a delayed failure to the binding that sent the request', async () => {
+    let tokenRevision = 0
+    currentStoredTokenRevision.mockImplementation(() => tokenRevision)
+    const delayedOldFailure = deferred<Response>()
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-telemetry-a' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockImplementationOnce(() => delayedOldFailure.promise)
+
+    const { callMcpTool } = await import('./mcp')
+    const oldCall = callMcpTool('masc_keeper_msg', { name: 'sangsu', message: 'old' })
+    const oldFailure = expect(oldCall).rejects.toThrow('POST /mcp: timeout after 30000ms')
+    await vi.waitFor(() => {
+      expect(callsByMethod('tools/call')).toHaveLength(1)
+    })
+
+    tokenRevision = 1
+    setupMcpSessionMocks('sess-telemetry-b')
+    await callMcpTool('masc_status', {})
+
+    delayedOldFailure.reject(new Error('POST /mcp: timeout after 30000ms'))
+    await oldFailure
+
+    expect(reportToolHostFailure).toHaveBeenCalledTimes(1)
+    expect(reportToolHostFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool_name: 'masc_keeper_msg',
+        phase: 'tools/call',
+        session_id: 'sess-telemetry-a',
+      }),
+    )
+  }, 60_000)
+
   it('does not retry implicit actor mismatches', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(
@@ -563,7 +648,7 @@ describe('callMcpTool', () => {
             jsonrpc: '2.0',
             error: {
               code: -32600,
-              message: 'Unknown Mcp-Session-Id. Re-initialize to obtain a fresh session.',
+              message: 'transport session is no longer available',
             },
             id: null,
           }),
@@ -646,6 +731,29 @@ describe('callMcpTool', () => {
       'POST /mcp initialize: 500',
     )
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed when the initialized notification returns non-2xx', async () => {
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-notification-failed' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('Internal Server Error', {
+          status: 500,
+          statusText: 'Internal Server Error',
+        }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_status', {})).rejects.toThrow(
+      'POST /mcp notifications/initialized: 500',
+    )
+    expect(callsByMethod('tools/call')).toHaveLength(0)
   })
 
   it('blocks subsequent calls after initialize returns 403', async () => {

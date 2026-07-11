@@ -41,8 +41,10 @@ import { tweaksDensity, type Density } from './tweaks-panel'
 import {
   NOTIFY_EVENT_KINDS,
   NOTIFY_EVENT_LABELS,
+  notificationDeliveryError,
   notificationPermission,
   notifyRules,
+  refreshNotificationPermission,
   requestNotificationPermission,
   setNotifyRuleEnabled,
   type NotifyEventKind,
@@ -752,7 +754,21 @@ function ThresholdTruthRow({
 // does above for display/density.
 function NotifyPermissionRow() {
   const permission = notificationPermission.value
+  const deliveryError = notificationDeliveryError.value
   const handleEnable = () => { void requestNotificationPermission() }
+  useEffect(() => {
+    const refresh = () => { refreshNotificationPermission() }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [])
   return html`
     <${SetRow} label="Browser notifications" hint="This browser's Notification permission — requested only when you click Enable">
       <div class="set-truth-value" data-testid="notify-permission-state">
@@ -768,6 +784,9 @@ function NotifyPermissionRow() {
           : null}
         ${permission === 'granted'
           ? html`<span class="set-truth-source">Enabled</span>`
+          : null}
+        ${deliveryError
+          ? html`<span class="set-truth-source text-[var(--color-status-danger)]" data-testid="notify-delivery-error">${deliveryError}</span>`
           : null}
       </div>
     <//>

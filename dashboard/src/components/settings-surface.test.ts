@@ -26,7 +26,7 @@ import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route } from '../router'
 import { connected } from '../sse'
 import { tweaksDensity } from './tweaks-panel'
-import { notifyRules } from '../notifications'
+import { notificationDeliveryError, notifyRules } from '../notifications'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
 import { dashboardLoading, shellConfigResolution, shellRuntimeResolution } from '../store'
@@ -449,6 +449,7 @@ describe('SettingsSurface', () => {
       'approval:pending': true,
       'oas:agent_failed': true,
     }
+    notificationDeliveryError.value = null
     window.location.hash = '#settings'
     route.value = { tab: 'settings', params: {}, postId: null }
   })
@@ -821,6 +822,18 @@ describe('SettingsSurface', () => {
     await waitFor(() => {
       const stored = JSON.parse(localStorage.getItem('dashboard:notify:rules-v1') ?? '{}')
       expect(stored.keeper_guardrail).toBe(false)
+    })
+  })
+
+  it('notify page exposes the latest browser delivery failure', async () => {
+    notificationDeliveryError.value = 'notification constructor failed'
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="notify-delivery-error"]')?.textContent)
+        .toContain('notification constructor failed')
     })
   })
 

@@ -82,6 +82,21 @@ describe('notify rules (persisted, per-event-kind opt-in)', () => {
     expect(second.isNotifyRuleEnabled('oas:agent_failed')).toBe(false)
     expect(second.isNotifyRuleEnabled('keeper_guardrail')).toBe(true)
   })
+
+  it('decodes each stored rule as a boolean and defaults invalid fields', async () => {
+    localStorage.setItem('dashboard:notify:rules-v1', JSON.stringify({
+      keeper_guardrail: false,
+      keeper_handoff: 'false',
+      'approval:pending': 0,
+      'oas:agent_failed': true,
+      unknown_kind: false,
+    }))
+    const notif = await loadNotifications()
+    expect(notif.isNotifyRuleEnabled('keeper_guardrail')).toBe(false)
+    expect(notif.isNotifyRuleEnabled('keeper_handoff')).toBe(true)
+    expect(notif.isNotifyRuleEnabled('approval:pending')).toBe(true)
+    expect(notif.isNotifyRuleEnabled('oas:agent_failed')).toBe(true)
+  })
 })
 
 describe('notification permission lifecycle', () => {
@@ -126,6 +141,7 @@ describe('notification permission lifecycle', () => {
     const result = await notif.requestNotificationPermission()
     expect(result).toBe('denied')
     expect(notif.notificationPermission.value).toBe('denied')
+    expect(notif.notificationDeliveryError.value).toContain('blocked by permissions policy')
   })
 
   it('refreshNotificationPermission re-reads the live browser value', async () => {
@@ -238,6 +254,36 @@ describe('event -> notification delivery (exhaustive over NotifyEventKind)', () 
 
     sse.lastEvent.value = baseEvent({ type: 'keeper_guardrail', name: 'atlas', reason: 'oom' })
     expect(MockNotification.instances).toHaveLength(0)
+    unsub()
+  })
+
+  it('re-reads permission at delivery time after browser-side revocation', async () => {
+    const notif = await loadGrantedWithAllRulesOn()
+    const unsub = notif.initNotificationDelivery()
+    const sse = await import('./sse')
+
+    MockNotification.permission = 'denied'
+    sse.lastEvent.value = baseEvent({ type: 'keeper_guardrail', name: 'atlas', reason: 'oom' })
+
+    expect(MockNotification.instances).toHaveLength(0)
+    expect(notif.notificationPermission.value).toBe('denied')
+    unsub()
+  })
+
+  it('surfaces constructor failures through observable delivery state', async () => {
+    class ThrowingNotification {
+      static permission: NotificationPermission = 'granted'
+      static requestPermission = vi.fn(async () => ThrowingNotification.permission)
+      constructor() { throw new Error('notification constructor failed') }
+    }
+    vi.stubGlobal('Notification', ThrowingNotification)
+    const notif = await loadNotifications()
+    const unsub = notif.initNotificationDelivery()
+    const sse = await import('./sse')
+
+    sse.lastEvent.value = baseEvent({ type: 'approval:pending' })
+
+    expect(notif.notificationDeliveryError.value).toContain('notification constructor failed')
     unsub()
   })
 

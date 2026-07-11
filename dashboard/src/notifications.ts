@@ -20,6 +20,7 @@ import { lastEvent, normalizeSSEDispatchType } from './sse'
 import { parseOasPayload } from './schemas/sse-event-payload'
 import { persistentSignal } from './lib/persistent-signal'
 import { assertExhaustive } from './lib/exhaustive'
+import { errorToString } from './lib/format-string'
 import type { SSEEvent } from './types'
 
 /** Closed subset of SSEEventType this module knows how to notify on. Adding
@@ -76,6 +77,7 @@ function currentBrowserPermission(): NotificationPermissionState {
  *  'granted' here would lie to the UI after the user revokes it from
  *  browser chrome (no event fires for that; re-read on demand instead). */
 export const notificationPermission = signal<NotificationPermissionState>(currentBrowserPermission())
+export const notificationDeliveryError = signal<string | null>(null)
 
 /** Refresh the signal from the live browser state. Call when the Notify
  *  panel mounts so a permission change made outside the tab (browser
@@ -95,10 +97,12 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   try {
     const result = await window.Notification.requestPermission()
     notificationPermission.value = result as NotificationPermissionState
-  } catch {
+    notificationDeliveryError.value = null
+  } catch (error) {
     // Some engines throw instead of resolving 'denied' when the call is
     // rejected outright (e.g. blocked by a site permission policy).
     notificationPermission.value = 'denied'
+    notificationDeliveryError.value = errorToString(error)
   }
   return notificationPermission.value
 }
@@ -114,9 +118,36 @@ const DEFAULT_NOTIFY_RULES: Record<NotifyEventKind, boolean> = {
   'oas:agent_failed': true,
 }
 
+function decodeNotifyRules(raw: string): Record<NotifyEventKind, boolean> {
+  const parsed: unknown = JSON.parse(raw)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new TypeError('notification rules must be an object')
+  }
+  const record = parsed as Record<string, unknown>
+  return {
+    keeper_guardrail:
+      typeof record.keeper_guardrail === 'boolean'
+        ? record.keeper_guardrail
+        : DEFAULT_NOTIFY_RULES.keeper_guardrail,
+    keeper_handoff:
+      typeof record.keeper_handoff === 'boolean'
+        ? record.keeper_handoff
+        : DEFAULT_NOTIFY_RULES.keeper_handoff,
+    'approval:pending':
+      typeof record['approval:pending'] === 'boolean'
+        ? record['approval:pending']
+        : DEFAULT_NOTIFY_RULES['approval:pending'],
+    'oas:agent_failed':
+      typeof record['oas:agent_failed'] === 'boolean'
+        ? record['oas:agent_failed']
+        : DEFAULT_NOTIFY_RULES['oas:agent_failed'],
+  }
+}
+
 export const notifyRules = persistentSignal<Record<NotifyEventKind, boolean>>({
   key: NOTIFY_RULES_STORAGE_KEY,
   defaultValue: DEFAULT_NOTIFY_RULES,
+  deserialize: decodeNotifyRules,
 })
 
 export function isNotifyRuleEnabled(kind: NotifyEventKind): boolean {
@@ -190,13 +221,16 @@ function describeNotifyEvent(kind: NotifyEventKind, event: SSEEvent): NotifyCont
 
 function deliverBrowserNotification(kind: NotifyEventKind, event: SSEEvent): void {
   if (!notificationApiAvailable()) return
-  if (notificationPermission.value !== 'granted') return
+  if (refreshNotificationPermission() !== 'granted') return
   if (!isNotifyRuleEnabled(kind)) return
   const { title, body, identity } = describeNotifyEvent(kind, event)
   try {
     void new window.Notification(title, { body, tag: `${kind}:${identity}` })
+    notificationDeliveryError.value = null
   } catch (err) {
-    console.warn('[notifications] failed to show browser notification', err instanceof Error ? err.message : err)
+    const detail = errorToString(err)
+    notificationDeliveryError.value = detail
+    console.warn('[notifications] failed to show browser notification', detail)
   }
 }
 

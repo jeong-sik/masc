@@ -595,14 +595,9 @@ let list_unlocked ~config =
               let* operations = result in
               if not (Filename.check_suffix filename ".json")
               then
-                (* Not a shutdown record: skip rather than failing the whole
-                   listing. The expected case is an [.atomic_*.tmp] orphan left
-                   by [Fs_compat.save_file_atomic] when a crash lands between
-                   temp-create and rename ([Fs_compat.is_atomic_orphan_name]
-                   names that shape); a single such artifact must not make
-                   [list_for_keeper] return [Decode_error] for every operation.
-                   Corrupt [.json] records below still fail closed. *)
-                Ok operations
+                Error
+                  (Decode_error
+                     (Printf.sprintf "unexpected shutdown store entry: %s" filename))
               else
                 let raw_id = Filename.chop_suffix filename ".json" in
                 let* operation_id =

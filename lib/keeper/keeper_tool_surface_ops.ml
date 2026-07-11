@@ -804,6 +804,18 @@ let keeper_msg_queue_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_msg_queue ctx args : tool_result =
   keeper_msg_queue_body ~config:ctx.config args
 
+let complete_keeper_msg_stream_result ~name result =
+  if not (tool_result_success result) then result
+  else begin
+    let body = tool_result_body result in
+    invalidate_keeper_list_cache ();
+    invalidate_status_cache name;
+    let json = json_of_body body in
+    tool_result_ok
+      (Yojson.Safe.pretty_to_string
+         (annotate_keeper_json ~runtime_class:"keeper" json))
+  end
+
 let handle_keeper_msg_stream
       ?on_text_delta
       ?on_event
@@ -828,21 +840,63 @@ let handle_keeper_msg_stream
         ctx
         resolved_args
     in
-    if not (tool_result_success result) then
-      Ok result
-    else begin
-      let body = tool_result_body result in
-      invalidate_keeper_list_cache ();
-      invalidate_status_cache name;
-      let json = json_of_body body in
-      Ok
-        (tool_result_ok
-           (Yojson.Safe.pretty_to_string
-              (annotate_keeper_json ~runtime_class:"keeper" json)))
-    end
+    Ok (complete_keeper_msg_stream_result ~name result)
   with
   | Ok result -> result
   | Error err -> tool_result_error err
+
+let handle_keeper_msg_stream_if_free
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      args
+  =
+  match resolve_keeper_name ctx args with
+  | Error err ->
+    let raw_name = String.trim (get_string args "name" "") in
+    if not (Keeper_config.validate_name raw_name)
+    then `Ran (tool_result_error err)
+    else
+      (* A connector message already accepted for a live/raw Keeper identity
+         must remain queueable even if metadata resolution is temporarily
+         unavailable. This is a failure-path observation only: successfully
+         resolved requests still use the post-lock queue recheck in
+         [run_chat_if_free] as the authoritative admission boundary. *)
+      let slot =
+        Keeper_turn_admission.snapshot_for
+          ~base_path:ctx.config.base_path
+          ~keeper_name:raw_name
+      in
+      let queue_busy =
+        match Keeper_chat_queue.has_active_receipts ~keeper_name:raw_name with
+        | Ok active -> active
+        | Error _ -> true
+      in
+      if Option.is_some slot.snapshot_in_flight
+         || slot.snapshot_waiting > 0
+         || queue_busy
+      then
+        `Busy
+          { Keeper_turn_admission.waiting = slot.snapshot_waiting
+          ; in_flight = slot.snapshot_in_flight
+          }
+      else `Ran (tool_result_error err)
+  | Ok name ->
+    let resolved_args = with_keeper_name args name in
+    let event_bus = Keeper_event_bus.get () in
+    (match
+       Turn.handle_keeper_msg_if_free
+         ?on_text_delta
+         ?on_event
+         ?event_bus
+         ?continuation_channel
+         ctx
+         resolved_args
+     with
+     | `Busy rejection -> `Busy rejection
+     | `Ran result ->
+       `Ran (complete_keeper_msg_stream_result ~name result))
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in

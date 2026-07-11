@@ -284,14 +284,35 @@ let run_chat_if_free ~base_path ~keeper_name f =
       }
   | None when waiting_count slot > 0 -> `Busy (rejection_snapshot slot)
   | None when Eio.Mutex.try_lock slot.turn_mu ->
-    (match run_locked slot ~lane:Chat f with
-     | `Ran value -> `Ran value
-     | `Shutdown_requested operation_id ->
-       `Busy
-         { waiting = waiting_count slot
-         ; in_flight = peek_info slot
-         ; shutdown_operation_id = Some operation_id
-         })
+    let active_receipts =
+      try Keeper_chat_queue.has_active_receipts ~keeper_name with
+      | exn ->
+        Eio.Mutex.unlock slot.turn_mu;
+        raise exn
+    in
+    (* The outer route's queue peek is only a fast path. Recheck after the
+       turn slot is acquired so a receipt committed or leased between that
+       peek and admission cannot be overtaken. The queue entry lock makes a
+       commit already in progress finish before this read returns; a commit
+       that starts after the read is ordered after this admitted turn. The
+       waiter recheck closes the equivalent increment-before-lock window for
+       [run_serialized]. Queue read errors fail closed and are surfaced by the
+       caller's durable-enqueue path. *)
+    if waiting_count slot > 0
+       || match active_receipts with Ok active -> active | Error _ -> true
+    then (
+      let rejection = rejection_snapshot slot in
+      Eio.Mutex.unlock slot.turn_mu;
+      `Busy rejection)
+    else
+      (match run_locked slot ~lane:Chat f with
+       | `Ran value -> `Ran value
+       | `Shutdown_requested operation_id ->
+         `Busy
+           { waiting = waiting_count slot
+           ; in_flight = peek_info slot
+           ; shutdown_operation_id = Some operation_id
+           })
   | None -> `Busy (rejection_snapshot slot)
 ;;
 

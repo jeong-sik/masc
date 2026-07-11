@@ -1323,10 +1323,11 @@ let start_keeper_loops
              let delivery_outcome = Eio.Promise.await delivery in
              match turn_outcome, delivery_outcome with
              | Some (Delivered { outcome_ref }), Ok () ->
-                 Keeper_chat_consumer.Delivered { outcome_ref }
+                 Keeper_chat_consumer.Delivered
+                   { outcome_ref = Some outcome_ref }
              | Some (Delivered { outcome_ref }), Error (kind, detail) ->
                  Keeper_chat_consumer.Failed
-                   { kind; detail; outcome_ref }
+                   { kind; detail; outcome_ref = Some outcome_ref }
              | Some (Failed { kind = turn_kind; detail = turn_detail }),
                Error (delivery_kind, delivery_detail) ->
                  Keeper_chat_consumer.Failed
@@ -1347,6 +1348,7 @@ let start_keeper_loops
                    | No_visible_reply
                    | Continuation_checkpoint_without_reply ->
                        Keeper_chat_queue.No_visible_reply
+                   | Missing_turn_ref -> Keeper_chat_queue.Internal_error
                    | Transcript_persist_failed ->
                        Keeper_chat_queue.Transcript_persist_failed
                    | Stream_projection_failed ->

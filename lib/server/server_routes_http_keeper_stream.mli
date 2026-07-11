@@ -163,11 +163,12 @@ type queued_turn_failure_kind =
   | Turn_cancelled
   | No_visible_reply
   | Continuation_checkpoint_without_reply
+  | Missing_turn_ref
   | Transcript_persist_failed
   | Stream_projection_failed
 
 type queued_turn_outcome =
-  | Delivered of { outcome_ref : string option }
+  | Delivered of { outcome_ref : string }
   | Failed of
       { kind : queued_turn_failure_kind
       ; detail : string
@@ -254,6 +255,8 @@ module For_testing : sig
   val extract_visible_reply : string -> Yojson.Safe.t option * string
   val direct_reply_terminal_error :
     ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option
+  val queued_delivery_outcome_of_turn_ref :
+    Ids.Turn_ref.t option -> queued_turn_outcome
   val visible_reply_with_stream_fallback :
     streamed_text:string -> string -> string
   val redacted_visible_reply_with_stream_fallback :

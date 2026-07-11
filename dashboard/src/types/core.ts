@@ -806,6 +806,7 @@ export interface KeeperConversationDetails {
   queueInflightCount?: number | null
   queueState?: KeeperQueueReceiptLifecycle | null
   queueFailureKind?: KeeperQueueReceiptFailureKind | null
+  queueCorrelationError?: 'missing_outcome_ref' | null
   rawPayload?: unknown
 }
 

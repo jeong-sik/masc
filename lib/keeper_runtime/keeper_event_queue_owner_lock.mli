@@ -17,9 +17,9 @@ type t
 val resolve_error_to_string : resolve_error -> string
 
 val canonical_base_path : string -> (string, resolve_error) result
-(** Normalize through {!Env_config_core.normalize_masc_base_path_input}, then
-    anchor relative inputs at {!Config_dir_resolver.current_working_dir}.  The
-    returned path is absolute and lexically canonical. *)
+(** Resolve through the shared {!Config_dir_resolver.canonical_base_path}
+    identity used by Keeper registry keys. The returned path is absolute and
+    lexically canonical. *)
 
 val resolve :
   base_path:string -> keeper_name:string -> (t, resolve_error) result

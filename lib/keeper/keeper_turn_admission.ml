@@ -105,6 +105,7 @@ let slots : (string, slot) Hashtbl.t = Hashtbl.create 16
 let slots_mu = Stdlib.Mutex.create ()
 
 let slot_for ~base_path ~keeper_name =
+  let base_path = Keeper_registry_types.canonical_base_path_exn base_path in
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   Stdlib.Mutex.protect slots_mu (fun () ->
     match Hashtbl.find_opt slots key with
@@ -394,6 +395,7 @@ let snapshot_for ~base_path ~keeper_name =
 ;;
 
 let live_keeper_names ~base_path =
+  let base_path = Keeper_registry_types.canonical_base_path_exn base_path in
   Stdlib.Mutex.protect slots_mu (fun () ->
     Hashtbl.fold
       (fun _key slot acc ->

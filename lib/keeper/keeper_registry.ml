@@ -320,6 +320,7 @@ let count_running ?base_path () =
   match base_path with
   | None -> Atomic.get running_count_atomic
   | Some expected ->
+    let expected = canonical_base_path_exn expected in
     StringMap.fold
       (fun _k v acc ->
          if String.equal expected v.base_path && v.phase = Running then acc + 1 else acc)
@@ -435,6 +436,7 @@ let wakeup_running ~base_path name =
 ;;
 
 let wakeup_all ?base_path () =
+  let base_path = Option.map canonical_base_path_exn base_path in
   StringMap.iter
     (fun _k entry ->
        match base_path with

@@ -220,6 +220,13 @@ describe('KeeperWorkspaceChat', () => {
       search.click()
     })
     expect(container.querySelector('[data-testid="kw-conversation-panel"]')?.getAttribute('data-toolbar-open')).toBe('true')
+    await act(async () => {
+      ;(container.querySelector('[data-testid="kw-chat-command-menu-toggle"]') as HTMLButtonElement).click()
+    })
+    const activeSearch = container.querySelector('[data-testid="kw-chat-command-search"]')
+    expect(activeSearch?.getAttribute('role')).toBe('menuitemcheckbox')
+    expect(activeSearch?.getAttribute('aria-checked')).toBe('true')
+    expect(activeSearch?.classList.contains('active')).toBe(true)
   })
 
   it('keeps utility commands usable while a lifecycle command is pending', async () => {

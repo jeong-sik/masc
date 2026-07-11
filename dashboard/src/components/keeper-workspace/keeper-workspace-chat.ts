@@ -228,8 +228,9 @@ function WorkspaceCommandButtons({
       <button
         key=${command.id}
         type="button"
-        role="menuitem"
-        class=${`kw-chat-command-item${command.danger ? ' danger' : ''}`}
+        role=${command.active === undefined ? 'menuitem' : 'menuitemcheckbox'}
+        aria-checked=${command.active === undefined ? undefined : command.active ? 'true' : 'false'}
+        class=${`kw-chat-command-item${command.danger ? ' danger' : ''}${command.active ? ' active' : ''}`}
         disabled=${isLifecycleWorkspaceCommand(command) && busyAction !== null}
         onClick=${() => { void run(command) }}
         data-testid=${`kw-chat-command-${command.id}`}

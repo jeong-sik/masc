@@ -680,6 +680,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   color: var(--color-fg-primary);
   background: var(--color-bg-surface);
 }
+.kw-chat-command-item.active {
+  color: var(--color-accent-fg);
+  background: var(--color-accent-bg-subtle);
+}
 .kw-act {
   font-size: var(--fs-12); font-weight: var(--fw-med); letter-spacing: 0.02em;
   padding: 8px 12px; border-radius: var(--r-1); cursor: pointer;

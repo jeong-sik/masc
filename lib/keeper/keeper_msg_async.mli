@@ -68,14 +68,17 @@ type worker_abort_reason =
 
 (** [submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~f ~keeper_name] forks
     a background daemon fiber on [sw] that runs [f] and stores the result.
-    Returns the fresh [request_id] synchronously. When [clock] is provided,
-    the worker records a terminal timeout error if [f] does not return before
-    the deadline: [timeout_sec] when explicitly supplied, otherwise the
-    runtime-resolved keeper turn timeout. Cancellation of [sw] interrupts the
-    worker and records a terminal [Cancelled] state before stopping, so
-    pollers do not observe an indefinite [Running] request. [Lost] is
-    reserved for persisted non-terminal requests recovered without a live
-    worker.
+    Returns the fresh [request_id] synchronously. The async request has no
+    implicit outer deadline: keeper/OAS turn policy owns execution deadlines
+    and finalization, so this wrapper must not cancel a live multi-turn run a
+    second time. When [timeout_sec] is explicitly supplied together with
+    [clock], the caller-requested deadline is enforced and recorded as a
+    terminal timeout. Supplying [timeout_sec] without [clock], or a non-
+    positive/non-finite value, raises [Invalid_argument] before the request is
+    accepted. Cancellation of [sw] interrupts the worker and records a
+    terminal [Cancelled] state before stopping, so pollers do not observe an
+    indefinite [Running] request. [Lost] is reserved for persisted non-
+    terminal requests recovered without a live worker.
 
     [on_worker_aborted], when supplied, is invoked exactly once whenever [f]
     is cut off by a timeout or cancellation before it completes on its own —
@@ -138,5 +141,5 @@ module For_testing : sig
   val gc_stale_disk : base_path:string -> int
   val recover_lost_disk_records : base_path:string -> int
   val active_switch_count : unit -> int
-  val effective_timeout_sec : ?timeout_sec:float -> unit -> float
+  val effective_timeout_sec : ?timeout_sec:float -> unit -> float option
 end

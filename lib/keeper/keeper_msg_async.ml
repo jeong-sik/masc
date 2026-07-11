@@ -73,8 +73,10 @@ let max_age_sec = Masc_time_constants.hour
 
 let effective_timeout_sec ?timeout_sec () =
   match timeout_sec with
-  | Some timeout_sec -> timeout_sec
-  | None -> Keeper_runtime_resolved.turn_timeout_sec ()
+  | None -> None
+  | Some timeout_sec when Float.is_finite timeout_sec && timeout_sec > 0.0 ->
+    Some timeout_sec
+  | Some _ -> invalid_arg "keeper_msg timeout_sec must be a positive finite number"
 ;;
 
 let request_dir ~base_path =
@@ -475,6 +477,14 @@ let timeout_done_status ~request_id ~keeper_name ~timeout_sec =
 
 let submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~base_path
     ~(f : unit -> tool_result) ~keeper_name () : string =
+  let worker_timeout : (float * ((unit -> tool_result) -> tool_result)) option =
+    match effective_timeout_sec ?timeout_sec (), clock with
+    | None, (Some _ | None) -> None
+    | Some timeout_sec, Some clock ->
+      Some (timeout_sec, Eio.Time.with_timeout_exn clock timeout_sec)
+    | Some _, None ->
+      invalid_arg "keeper_msg explicit timeout_sec requires an Eio clock"
+  in
   gc_stale ();
   ignore (gc_stale_disk ~base_path);
   let request_id = generate_request_id ~keeper_name in
@@ -491,7 +501,6 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~base_path
   persist_entry entry;
   Eio.Fiber.fork_daemon ~sw (fun () ->
     set_status_protected ~preserve_terminal:true request_id Running;
-    let worker_timeout_sec = effective_timeout_sec ?timeout_sec () in
     (* [f] owns any terminal signal it emits on its own side channels while
        it runs (e.g. push_worker_event in server_routes_http_keeper_stream's
        process_single_turn). Every catch arm below fires exactly when [f] was
@@ -515,9 +524,9 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~sw ~base_path
             raise exn)
     in
     let run_worker_with_timeout () =
-      match clock with
-      | Some clock ->
-        (try Eio.Time.with_timeout_exn clock worker_timeout_sec f with
+      match worker_timeout with
+      | Some (worker_timeout_sec, run_with_timeout) ->
+        (try run_with_timeout f with
          | Eio.Time.Timeout ->
            let status =
              timeout_done_status ~request_id ~keeper_name ~timeout_sec:worker_timeout_sec

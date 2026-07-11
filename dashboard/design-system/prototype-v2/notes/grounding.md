@@ -40,4 +40,4 @@ mention-inbox, composer-v2, message-workspace-timeline.
 - binding_summary {binding_source, runtime_bindings_count, configured_bindings_count}; names {guild_names, channel_names}.
 
 ## Repo stack
-dashboard = Preact + htm + lucide-preact + Tailwind tokens (--color-bg-page/surface/elevated, --color-border-default/strong, --color-fg-*, text-ok). Tests everywhere (vitest). Solid components too (bar.solid.tsx).
+dashboard = Preact + htm + lucide-preact + Tailwind tokens (--color-bg-page/surface/elevated, --color-border-default/strong, --color-fg-*, text-ok). Tests everywhere (vitest).

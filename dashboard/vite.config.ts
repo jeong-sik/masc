@@ -1,6 +1,5 @@
 import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
 import preact from '@preact/preset-vite'
-import solid from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
 import { visualizer } from 'rollup-plugin-visualizer'
 
@@ -121,18 +120,6 @@ export default defineConfig(({ command }) => {
   return {
     plugins: [
       tailwindcss(),
-      // SolidJS plugin must run before Preact's so it claims its files
-      // first. The `include` regex restricts Solid's JSX transform to
-      // headless-solid/ adapters and preview/solid-* pages — the rest of
-      // the app (src/, headless-preact/, all other previews) stays Preact.
-      // PoC scope per RFC 0017.
-      solid({
-        include: [
-          /design-system\/headless-solid\//,
-          /design-system\/preview\/solid-.*/,
-          /src\/components\/.*\.solid(\.test)?\.(ts|tsx)$/,
-        ],
-      }),
       preact(),
       ...reportPlugins,
       dashboardModulePreloadContractPlugin(),
@@ -179,9 +166,6 @@ export default defineConfig(({ command }) => {
             }
             if (chunkByPackage(normalizedId, ['preact', 'htm', '@preact/signals', '@preact/signals-core'])) {
               return 'vendor'
-            }
-            if (chunkByPackage(normalizedId, ['solid-js'])) {
-              return 'solid'
             }
             return undefined
           },

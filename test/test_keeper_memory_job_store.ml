@@ -602,7 +602,7 @@ let test_discovery_isolates_malformed_keeper () =
       Filename.concat
         (Filename.concat
            (Common.keepers_runtime_dir_of_base ~base_path)
-           "bad.name")
+           "bad name")
         "memory-jobs"
     in
     Fs_compat.mkdir_p malformed;
@@ -643,6 +643,31 @@ let test_discovery_isolates_malformed_keeper () =
         Alcotest.failf
           "symlink discovery failed: %s"
           (Store.error_to_string error)))
+;;
+
+let test_dotted_keeper_name_uses_typed_store_boundary () =
+  with_temp_dir "memory-job-dotted-keeper" (fun base_path ->
+    let keeper_name = "dot.name" in
+    let job = make_job ~keeper_name ~trace_id:"trace.dot" 1 in
+    ignore (stage ~base_path job);
+    ignore (activate ~base_path job);
+    let lease =
+      match (claim ~base_path ~keeper_name ~now:2.0).leases with
+      | [ lease ] -> lease
+      | _ -> Alcotest.fail "expected one dotted-keeper lease"
+    in
+    let receipt = terminal_receipt lease in
+    (match Store.finish ~base_path receipt with
+     | Ok { cleanup_errors = [] } -> ()
+     | Ok report ->
+       Alcotest.failf
+         "dotted-keeper finish left cleanup debt: %d"
+         (List.length report.cleanup_errors)
+     | Error error ->
+       Alcotest.failf
+         "dotted-keeper finish failed: %s"
+         (Store.error_to_string error));
+    check_backlog ~base_path ~keeper_name 0)
 ;;
 
 let test_typed_boundaries_reject_invalid_values () =
@@ -828,6 +853,10 @@ let () =
             "typed boundaries reject invalid values"
             `Quick
             test_typed_boundaries_reject_invalid_values
+        ; Alcotest.test_case
+            "dotted keeper name follows portable SSOT"
+            `Quick
+            test_dotted_keeper_name_uses_typed_store_boundary
         ; Alcotest.test_case
             "receipt identity omits payload"
             `Quick

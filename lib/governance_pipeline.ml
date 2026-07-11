@@ -101,8 +101,11 @@ let runtime_auto_approval_blocked = function
     - Soft forbidden = the tool name or op string trips
       [destructive_tool_or_op] (a substring filter on "shell"/"git"
       plus a small list of bash/git ops). *)
-let auto_approval_hard_forbidden ~risk meta =
-  risk = Critical || runtime_auto_approval_blocked meta
+(* PR-E simplification: removed runtime_auto_approval_blocked —
+   the last_blocker pattern caused intermittent hard_forbidden on
+   non-Critical tools, blocking keeper workflows. See board p-3761864f. *)
+let auto_approval_hard_forbidden ~risk _meta =
+  risk = Critical
 ;;
 
 (** Minimum risk level that triggers audit logging. *)

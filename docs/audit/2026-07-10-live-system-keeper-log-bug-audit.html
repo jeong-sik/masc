@@ -40,12 +40,12 @@
 <body>
 <main>
   <h1>MASC live System/Keeper log adversarial audit</h1>
-  <p class="sub">Capture: 2026-07-10 10:24:43 KST / 2026-07-10T01:24:43Z · Latest recheck: 2026-07-11 14:46 KST · Runtime root: <code>&lt;base_path&gt;/.masc</code> · Source window: 2026-07-07 through latest recheck</p>
+  <p class="sub">Capture: 2026-07-10 10:24:43 KST / 2026-07-10T01:24:43Z · Latest recheck: 2026-07-11 15:11 KST · Runtime root: <code>&lt;base_path&gt;/.masc</code> · Source window: 2026-07-07 through latest recheck</p>
 
   <div class="summary">
     <div class="stat"><strong>degraded</strong><span>health overall status</span></div>
-    <div class="stat"><strong>15</strong><span>latest durable queue: 14 pending, 1 inflight</span></div>
-    <div class="stat"><strong>4 / 6</strong><span>healthy / executable reaction capacity</span></div>
+    <div class="stat"><strong>16</strong><span>latest durable queue: 16 pending, 0 inflight</span></div>
+    <div class="stat"><strong>5 / 6</strong><span>healthy / executable reaction capacity</span></div>
     <div class="stat"><strong>8</strong><span>Kimi HTTP 403 calls misclassified as invalid request</span></div>
     <div class="stat"><strong>5</strong><span>post-success checkpoint prefix failures</span></div>
     <div class="stat"><strong>20,616</strong><span>sidecar event rows warned and skipped by manifest scan</span></div>
@@ -66,6 +66,11 @@
   </table>
   <p>이 snapshot 직후 dashboard actor가 여러 Keeper를 shutdown했다. 로그에는 <code>running → draining → stopped</code> 완료 뒤 다시 <code>operator_pause</code>를 dispatch해 typed terminal-state rejection을 만드는 순서와, 이미 unregister된 Keeper의 in-flight turn이 뒤늦게 완료되며 event를 offline registry에 dispatch하는 경합이 함께 보인다. 이는 fleet-wide stop이 아니라 lane lifecycle/ownership 결함이다.</p>
   <p><strong>[근거]</strong> live <code>/health?full=1</code>, <code>lsof -nP -iTCP:8935 -sTCP:LISTEN</code>, System Log 2026-07-11 14:42–14:46 KST, read-only 확인, 신뢰도 High.</p>
+
+  <h3>15:11 KST recheck — new main build, blockers remain</h3>
+  <p>런타임은 commit <code>8ff49008d2</code>, version <code>0.20.1</code>로 재시작돼 uptime 926초였지만 이번 감사의 Draft PR들은 아직 미병합·미배포다. health는 계속 <code>overall_status=degraded</code>와 operator action required를 보고한다. healthy running은 5, recovering은 <code>sangsu</code> 1, executable은 6이며, <code>albini</code>가 active <code>task-2185</code> owner지만 executable fiber가 없는 blocker는 그대로다.</p>
+  <p>durable queue는 pending 16, inflight 0, read errors 0으로 변했다. <code>verifier</code> 9개 중 oldest 107,620초, <code>garnet</code> 4개 oldest 75,604초, <code>rondo</code> 1개 74,515초이며 <code>ramarama</code>/<code>sangsu</code> failure judgment도 각각 1개다. 이전 snapshot보다 total backlog가 1개 증가했으므로 새 build 배포만으로 drain됐다고 볼 수 없다.</p>
+  <p><strong>[근거]</strong> live <code>/health?full=1</code>, 2026-07-11 15:11 KST read-only 확인, 신뢰도 High.</p>
 
   <h2>라이브 상태 — initial snapshot</h2>
   <table>

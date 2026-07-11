@@ -124,30 +124,17 @@ let emit_wire_capture_response_suppressed_metrics ~keeper_name reasons =
     reasons
 ;;
 
-let rec messages_prefix_equal expected actual =
-  match expected, actual with
-  | [], _ -> true
-  | expected_msg :: expected_rest, actual_msg :: actual_rest ->
-    expected_msg = actual_msg && messages_prefix_equal expected_rest actual_rest
-  | _ :: _, [] -> false
-;;
-
-let rec drop_prefix prefix messages =
-  match prefix, messages with
-  | [], rest -> rest
-  | _ :: prefix_rest, _ :: message_rest -> drop_prefix prefix_rest message_rest
-  | _ :: _, [] -> []
-;;
-
 let prune_current_turn_replay
       ~(history_messages : Agent_sdk.Types.message list)
       ~(pre_turn_working_context : Yojson.Safe.t option)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
-  if
-    messages_prefix_equal history_messages checkpoint.Agent_sdk.Checkpoint.messages
-    && List.length checkpoint.Agent_sdk.Checkpoint.messages > List.length history_messages
-  then
+  match
+    Keeper_replay_prefix.split
+      ~prefix:history_messages
+      checkpoint.Agent_sdk.Checkpoint.messages
+  with
+  | Ok (_current_turn_message :: _) ->
     let messages =
       Keeper_context_core.repair_broken_tool_call_pairs history_messages
     in
@@ -156,7 +143,7 @@ let prune_current_turn_replay
         Agent_sdk.Checkpoint.messages
       ; working_context = pre_turn_working_context
       }
-  else None
+  | Ok [] | Error _ -> None
 ;;
 
 let canonical_success_replay_checkpoint
@@ -165,12 +152,13 @@ let canonical_success_replay_checkpoint
       ~(response_text : string)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
-  if messages_prefix_equal history_messages checkpoint.Agent_sdk.Checkpoint.messages
-  then
-    let dropped_current_turn_replay =
-      List.length checkpoint.Agent_sdk.Checkpoint.messages
-      > List.length history_messages
-    in
+  match
+    Keeper_replay_prefix.split
+      ~prefix:history_messages
+      checkpoint.Agent_sdk.Checkpoint.messages
+  with
+  | Ok current_suffix ->
+    let dropped_current_turn_replay = current_suffix <> [] in
     let checkpoint =
       if String.trim response_text = ""
       then
@@ -181,9 +169,6 @@ let canonical_success_replay_checkpoint
         }
       else
         let messages =
-          let current_suffix =
-            drop_prefix history_messages checkpoint.Agent_sdk.Checkpoint.messages
-          in
           if
             List.exists
               (fun (msg : Agent_sdk.Types.message) ->
@@ -211,7 +196,7 @@ let canonical_success_replay_checkpoint
       , if dropped_current_turn_replay
         then Some Canonical_success_replay
         else None )
-  else
+  | Error _ ->
     Error
       "refusing to save checkpoint: canonical replay persistence requires \
        checkpoint messages to match pre-turn history prefix"

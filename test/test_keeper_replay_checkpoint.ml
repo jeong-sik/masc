@@ -5,6 +5,7 @@
 
 module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
 module Receipt = Masc.Keeper_execution_receipt
+module Replay_prefix = Masc.Keeper_replay_prefix
 
 let message role content =
   Agent_sdk.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
@@ -60,6 +61,20 @@ let has_content predicate messages =
   List.exists
     (fun (msg : Agent_sdk.Types.message) -> List.exists predicate msg.content)
     messages
+;;
+
+let rec remove_tree path =
+  if Sys.is_directory path
+  then (
+    Sys.readdir path
+    |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+    Unix.rmdir path)
+  else Unix.unlink path
+;;
+
+let with_temp_dir f =
+  let dir = Filename.temp_dir "keeper-replay-projection-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
 ;;
 
 let test_patch_last_assistant_preserves_typed_reasoning () =
@@ -250,6 +265,65 @@ let test_empty_success_drops_current_turn_replay () =
     (prune_reason_to_string reason)
 ;;
 
+let test_media_degraded_projection_persists_canonical_checkpoint () =
+  let open Agent_sdk.Types in
+  let canonical_history =
+    [ message User
+        [ Text "canonical history"
+        ; image_block ~media_type:"image/png" ~data:"canonical-image" ()
+        ]
+    ]
+  in
+  let dispatch_history = [ message User [ Text "canonical history" ] ] in
+  let current_assistant = message Assistant [ Text "completed" ] in
+  let projection =
+    Replay_prefix.media_degraded
+      ~canonical_prefix:canonical_history
+      ~dispatch_prefix:dispatch_history
+  in
+  let restored_checkpoint =
+    match
+      Replay_prefix.restore_checkpoint
+        projection
+        (checkpoint ~working_context:None (dispatch_history @ [ current_assistant ]))
+    with
+    | Ok checkpoint -> checkpoint
+    | Error error -> Alcotest.fail (Replay_prefix.restore_error_to_string error)
+  in
+  let checkpoint_for_save, _reason =
+    Finalize.checkpoint_for_replay_persistence
+      ~history_messages:canonical_history
+      ~pre_turn_working_context:None
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~session_id:"media-projection-session"
+      ~response_text:"completed"
+      restored_checkpoint
+    |> expect_ok
+  in
+  with_temp_dir (fun session_dir ->
+    Masc.Keeper_checkpoint_store.For_testing.reset_stale_write_guard ();
+    (match
+       Masc.Keeper_checkpoint_store.save_oas_classified
+         ~session_dir
+         checkpoint_for_save
+     with
+     | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()
+     | Ok (Masc.Keeper_checkpoint_store.Stale_noop _) ->
+       Alcotest.fail "fresh projected checkpoint was classified as stale"
+     | Error detail -> Alcotest.fail ("projected checkpoint save failed: " ^ detail));
+    match
+      Masc.Keeper_checkpoint_store.load_oas
+        ~session_dir
+        ~session_id:"media-projection-session"
+    with
+    | Error _ -> Alcotest.fail "persisted projected checkpoint could not be loaded"
+    | Ok persisted ->
+      Alcotest.(check bool)
+        "durable checkpoint keeps canonical media and current assistant suffix"
+        true
+        (persisted.messages = canonical_history @ [ current_assistant ]))
+;;
+
 let () =
   Alcotest.run
     "keeper replay checkpoint"
@@ -278,6 +352,10 @@ let () =
             "empty success drops current turn"
             `Quick
             test_empty_success_drops_current_turn_replay
+        ; Alcotest.test_case
+            "media-degraded projection persists canonical checkpoint"
+            `Quick
+            test_media_degraded_projection_persists_canonical_checkpoint
         ] )
     ]
 ;;

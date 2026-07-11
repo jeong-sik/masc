@@ -377,12 +377,13 @@ let test_media_degrade_restores_canonical_replay_prefix () =
     }
   in
   match
-    Masc.Keeper_turn_driver.For_testing.restore_canonical_replay_prefix
-      ~canonical_prefix:canonical_history
-      ~dispatch_prefix:dispatch_history
-      ~checkpoint_messages:(dispatch_history @ [ assistant ])
+    Masc.Keeper_replay_prefix.restore_messages
+      (Masc.Keeper_replay_prefix.media_degraded
+         ~canonical_prefix:canonical_history
+         ~dispatch_prefix:dispatch_history)
+      (dispatch_history @ [ assistant ])
   with
-  | Error error -> fail error
+  | Error error -> fail (Masc.Keeper_replay_prefix.restore_error_to_string error)
   | Ok restored ->
     check int "canonical history plus current suffix" 2 (List.length restored);
     check bool "original media history is restored" true (List.hd restored = List.hd canonical_history);
@@ -395,10 +396,11 @@ let test_media_degrade_rejects_checkpoint_prefix_drift () =
     [ message_with_blocks [ Agent_sdk.Types.Text "unrelated" ] ]
   in
   match
-    Masc.Keeper_turn_driver.For_testing.restore_canonical_replay_prefix
-      ~canonical_prefix:canonical_history
-      ~dispatch_prefix:dispatch_history
-      ~checkpoint_messages:unrelated_checkpoint
+    Masc.Keeper_replay_prefix.restore_messages
+      (Masc.Keeper_replay_prefix.media_degraded
+         ~canonical_prefix:canonical_history
+         ~dispatch_prefix:dispatch_history)
+      unrelated_checkpoint
   with
   | Error _ -> ()
   | Ok _ -> fail "expected dispatch-prefix drift to fail closed"
@@ -420,12 +422,13 @@ let test_media_degrade_preserves_already_canonical_checkpoint () =
     canonical_history @ [ message_with_blocks [ Agent_sdk.Types.Text "suffix" ] ]
   in
   match
-    Masc.Keeper_turn_driver.For_testing.restore_canonical_replay_prefix
-      ~canonical_prefix:canonical_history
-      ~dispatch_prefix:dispatch_history
-      ~checkpoint_messages
+    Masc.Keeper_replay_prefix.restore_messages
+      (Masc.Keeper_replay_prefix.media_degraded
+         ~canonical_prefix:canonical_history
+         ~dispatch_prefix:dispatch_history)
+      checkpoint_messages
   with
-  | Error error -> fail error
+  | Error error -> fail (Masc.Keeper_replay_prefix.restore_error_to_string error)
   | Ok restored ->
     check
       bool

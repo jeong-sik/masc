@@ -171,6 +171,21 @@ type attempt_inference_policy =
   }
 
 module For_testing : sig
+  type provider_attempt_outcomes
+
+  val project_provider_attempt_result :
+    replay_prefix_projection:Keeper_replay_prefix.projection ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result ->
+    provider_attempt_outcomes
+
+  val provider_result :
+    provider_attempt_outcomes ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+  val turn_result :
+    provider_attempt_outcomes ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
   val checkpoint_after_attempt :
     ?agent_ref:Agent_sdk.Agent.t option ref ->
     Agent_sdk.Agent.t option ->
@@ -236,12 +251,6 @@ module For_testing : sig
 
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
-
-  val restore_canonical_replay_prefix :
-    canonical_prefix:Agent_sdk.Types.message list ->
-    dispatch_prefix:Agent_sdk.Types.message list ->
-    checkpoint_messages:Agent_sdk.Types.message list ->
-    (Agent_sdk.Types.message list, string) result
 
   val resolve_context_window_tokens_after_runtime_selection :
     requested_context_window:int option ->

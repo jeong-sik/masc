@@ -266,13 +266,6 @@ let last_tool_progress_context_of_messages messages =
       }
 ;;
 
-let rec drop_matching_prefix ~prefix messages =
-  match prefix, messages with
-  | [], rest -> rest
-  | p :: ps, m :: ms when p = m -> drop_matching_prefix ~prefix:ps ms
-  | _ :: _, _ -> messages
-;;
-
 let accept_rejection_context_of_run_result
       ?(initial_messages = [])
       (run_result : Runtime_agent.run_result)
@@ -280,9 +273,17 @@ let accept_rejection_context_of_run_result
   match run_result.checkpoint with
   | None -> None
   | Some checkpoint ->
-    checkpoint.Agent_sdk.Checkpoint.messages
-    |> drop_matching_prefix ~prefix:initial_messages
-    |> last_tool_progress_context_of_messages
+    let messages = checkpoint.Agent_sdk.Checkpoint.messages in
+    let attempt_messages =
+      match Keeper_replay_prefix.split ~prefix:initial_messages messages with
+      | Ok suffix -> suffix
+      | Error _prefix_mismatch ->
+        (* A rejected provider may return a resumed checkpoint whose carrier
+           does not share this attempt's initial prefix.  Preserve the complete
+           typed trace for rejection diagnostics; never drop by list length. *)
+        messages
+    in
+    last_tool_progress_context_of_messages attempt_messages
 ;;
 
 let format_last_tool_progress_context = function

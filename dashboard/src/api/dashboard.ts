@@ -219,6 +219,8 @@ export type {
   DashboardScheduledAutomationPayloadSupport,
   DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
   DashboardScheduledAutomation,
+  DashboardKeeperWaitingSource,
+  DashboardKeeperWaitingState,
   DashboardKeeperWaitingRow,
   DashboardKeeperWaitingKeeper,
   DashboardKeeperWaitingInventory,

@@ -196,17 +196,28 @@ let run_if_free ~base_path ~keeper_name f =
      lock-only, non-suspending peek and is the SSOT signal that closes the
      gap: the autonomous lane cooperates on the same backlog the consumer
      drains, so the consumer's [in_flight = None] window opens
-     deterministically instead of racing the next autonomous cycle. *)
+     deterministically instead of racing the next autonomous cycle. A leased
+     receipt remains active until its terminal decision commits, so the
+     autonomous lane must also yield during the short lease-to-admission and
+     admission-to-finalization windows. *)
   match peek_shutdown slot with
   | Some operation_id -> `Busy (Shutdown_requested operation_id)
   | None when waiting_count slot > 0 -> `Busy (Turn_busy (peek_info slot))
-  | None when Keeper_chat_queue.length ~keeper_name > 0 ->
+  | None when not (Keeper_chat_queue.persistence_configured ()) ->
     `Busy (Turn_busy (peek_info slot))
-  | None when Eio.Mutex.try_lock slot.turn_mu ->
-    (match run_locked slot ~lane:Autonomous f with
-     | `Ran value -> `Ran value
-     | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id))
-  | None -> `Busy (Turn_busy (peek_info slot))
+  | None ->
+    let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+    if
+      snapshot.load_errors <> []
+      || snapshot.pending <> []
+      || snapshot.inflight <> []
+    then `Busy (Turn_busy (peek_info slot))
+    else if Eio.Mutex.try_lock slot.turn_mu
+    then
+      match run_locked slot ~lane:Autonomous f with
+      | `Ran value -> `Ran value
+      | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id)
+    else `Busy (Turn_busy (peek_info slot))
 ;;
 
 let run_serialized ~base_path ~keeper_name f =

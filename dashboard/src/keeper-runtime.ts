@@ -28,5 +28,6 @@ export {
   sendKeeperThreadMessage,
   isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
+  reconcileKeeperChatReceipts,
   recoverKeeperRuntime,
 } from './keeper-actions'

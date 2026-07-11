@@ -194,12 +194,12 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
     request.request_id
     in_flight_text
 
-(* ACK text for the RFC-connector-deferred-reply-via-chat-queue chat-queue deferral path. Unlike
-   [busy_ack_reply_text], there is no [Keeper_msg_async] request envelope: the
-   message was enqueued onto [Keeper_chat_queue], so the durable handle is the
-   queue position, not a poll request_id. The reply is delivered later by the
-   serial consumer through the connector's outbound adapter. *)
-let busy_ack_reply_text_queued ~in_flight ~keeper_name =
+(* ACK text for the RFC-connector-deferred-reply-via-chat-queue chat-queue deferral path. The
+   message was durably enqueued onto [Keeper_chat_queue], so its receipt id is
+   the correlation handle instead of a [Keeper_msg_async] poll request id. The
+   reply is delivered later by the serial consumer through the connector's
+   outbound adapter. *)
+let busy_ack_reply_text_queued ~in_flight ~keeper_name ~receipt_id =
   let in_flight_text =
     match in_flight with
     | None -> ""
@@ -210,9 +210,32 @@ let busy_ack_reply_text_queued ~in_flight ~keeper_name =
   in
   Printf.sprintf
     "%s is busy; your message is queued and will be answered once the current \
-     turn finishes.%s"
-    keeper_name
+     turn finishes (receipt_id=%s).%s"
+    keeper_name receipt_id
     in_flight_text
+
+let chat_queue_message_request ~channel ~channel_user_id ~keeper_name ~metadata
+    (receipt : Keeper_chat_queue.enqueue_receipt) =
+  let receipt_id =
+    Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id
+  in
+  { Gate_protocol.request_id = receipt_id
+  ; destination_type = "keeper"
+  ; destination_id = keeper_name
+  ; channel
+  ; actor_id = non_empty_opt channel_user_id
+  ; status = Gate_protocol.Queued
+  ; modalities = [ "text" ]
+  ; transport = non_empty_opt channel
+  ; metadata =
+      [ "status_source", "keeper_chat_queue"
+      ; "receipt_id", receipt_id
+      ; "queue_revision", Int64.to_string receipt.revision
+      ; "pending_count", string_of_int receipt.pending_count
+      ; "inflight_count", string_of_int receipt.inflight_count
+      ]
+      @ metadata
+  }
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
@@ -583,22 +606,22 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
                 connector message routed there is answered into the dashboard
                 transcript only and never reaches the channel — the RFC-connector-deferred-reply-via-chat-queue
                 root cause. *)
-             (* [receipt_id] is not surfaced on this path — unlike the
-                dashboard busy-ack (RFC-connector-deferred-reply-via-chat-queue), the connector reply
-                has no request envelope to carry a correlation token in (see
-                [`Queued_to_chat_lane]'s comment below) — the queue position
-                is the only durable handle a connector gets today. *)
-             (* fire-and-forget: receipt_id has no consumer on this path. *)
-             ignore (Keeper_chat_queue.enqueue ~keeper_name
-               { Keeper_chat_queue.content = String.trim content
-               ; user_blocks = []
-               ; attachments = []
-               ; timestamp = Eio.Time.now clock
-               ; source }
-               : string);
-             Keeper_chat_broadcast.queue_changed ~keeper_name
-               ~depth:(Keeper_chat_queue.length ~keeper_name) ();
-             `Queued_to_chat_lane info
+             (match
+                Keeper_chat_queue.enqueue ~keeper_name
+                  { Keeper_chat_queue.content = String.trim content
+                  ; user_blocks = []
+                  ; attachments = []
+                  ; timestamp = Eio.Time.now clock
+                  ; source
+                  }
+              with
+              | Ok receipt -> `Queued_to_chat_lane (info, receipt)
+              | Error error ->
+                Log.Server.error
+                  "channel gate durable chat enqueue failed (keeper=%s, lane=%s): %s"
+                  keeper_name lane
+                  (Keeper_chat_queue.mutation_error_to_string error);
+                `Chat_queue_error error)
          | `Async_poll ->
              `Async_ack
                ( info
@@ -665,25 +688,42 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
           }
       in
       Gate_protocol.Reply { content = reply; structured; stats; message_request }
-  | `Queued_to_chat_lane in_flight ->
+  | `Queued_to_chat_lane (in_flight, receipt) ->
       (* RFC-connector-deferred-reply-via-chat-queue: the message was enqueued onto [Keeper_chat_queue]; the
          connector gets a busy ACK now and the deferred reply later via the
-         serial consumer's outbound adapter. There is no [Keeper_msg_async]
-         request envelope, so [message_request] is [None] — the queue position is
-         the durable handle, not a poll request_id. *)
+         serial consumer's outbound adapter. The existing [message_request]
+         envelope carries the durable receipt id and queue revision so the
+         connector can correlate that later delivery. *)
       let duration_ms =
         Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
         |> Int64.div 1_000_000L
         |> Int64.to_int
       in
+      let message_request =
+        chat_queue_message_request ~channel ~channel_user_id ~keeper_name
+          ~metadata receipt
+      in
       let reply =
-        redact_text (busy_ack_reply_text_queued ~in_flight:(Some in_flight) ~keeper_name)
+        redact_text
+          (busy_ack_reply_text_queued ~in_flight:(Some in_flight) ~keeper_name
+             ~receipt_id:message_request.request_id)
       in
       let stats =
         Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
       in
       Gate_protocol.Reply
-        { content = reply; structured = None; stats; message_request = None }
+        { content = reply
+        ; structured = None
+        ; stats
+        ; message_request = Some message_request
+        }
+  | `Chat_queue_error error ->
+      Gate_protocol.Keeper_error_result
+        (redact_text
+           (Printf.sprintf
+              "%s is busy; your message was not queued because the durable chat queue rejected it: %s"
+              keeper_name
+              (Keeper_chat_queue.mutation_error_to_string error)))
   | `Streaming (Some result) when Tool_result.is_success result ->
       let body = Tool_result.message result in
       let duration_ms =

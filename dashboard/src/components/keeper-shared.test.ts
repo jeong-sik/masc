@@ -27,6 +27,7 @@ vi.mock('../keeper-actions', () => ({
   hydrateKeeperChatHistory: vi.fn(async () => undefined),
   loadFullKeeperHistory: vi.fn(async () => null),
   probeKeeperRuntime: vi.fn(),
+  reconcileKeeperChatReceipts: vi.fn(async () => undefined),
   recoverKeeperRuntime: vi.fn(),
   resumePendingKeeperChatRequests: vi.fn(async () => undefined),
   sendKeeperThreadMessage: vi.fn(async () => null),
@@ -867,7 +868,7 @@ describe('KeeperConversationPanel', () => {
     expect(container.textContent).toContain('Snapshot says the keeper heartbeat is stale.')
   })
 
-  it('shows a busy chip when the keeper waiting inventory reports busy', async () => {
+  it('shows an explicit running-turn state when the keeper waiting inventory reports busy', async () => {
     mockedToolsData.value = {
       keeper_waiting_inventory: {
         keepers: [
@@ -880,7 +881,69 @@ describe('KeeperConversationPanel', () => {
       container,
     )
     await waitFor(() => {
-      expect(container.textContent).toContain('busy')
+      expect(container.textContent).toContain('Keeper 턴 실행 중')
+      expect(container.textContent).toContain('다른 턴 실행 중')
+    })
+  })
+
+  it('separates durable server pending/inflight counts from browser-local drafts', async () => {
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [
+          {
+            keeper_name: 'sangsu',
+            state: 'busy',
+            waiting_on: [],
+            waiting_count: 3,
+            sources: {
+              chat_queue_pending: 2,
+              chat_queue_inflight: 1,
+            },
+            next_action: 'keeper_chat_consumer_drain',
+          },
+        ],
+      },
+    }
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
+      expect(status?.getAttribute('data-server-chat-queue-pending')).toBe('2')
+      expect(status?.getAttribute('data-server-chat-queue-inflight')).toBe('1')
+      expect(status?.textContent).toContain('서버 대기 2')
+      expect(status?.textContent).toContain('처리 중 1')
+      expect(container.textContent).not.toContain('브라우저 초안 · 서버 미접수')
+    })
+  })
+
+  it('surfaces a server queue snapshot read failure instead of showing an empty queue', async () => {
+    mockedToolsData.value = {
+      keeper_waiting_inventory: {
+        keepers: [
+          {
+            keeper_name: 'sangsu',
+            state: 'waiting',
+            waiting_on: [],
+            waiting_count: 1,
+            sources: { read_error: 1 },
+            next_action: 'repair_keeper_chat_queue_snapshot',
+          },
+        ],
+      },
+    }
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
+      expect(status?.getAttribute('data-server-chat-queue-read-errors')).toBe('1')
+      expect(status?.textContent).toContain('대기열 조회 실패 1')
+      expect(status?.textContent).toContain('repair_keeper_chat_queue_snapshot')
     })
   })
 
@@ -897,7 +960,7 @@ describe('KeeperConversationPanel', () => {
       container,
     )
     await waitFor(() => {
-      expect(container.textContent).toContain('busy')
+      expect(container.textContent).toContain('Keeper 턴 실행 중')
     })
 
     const interruptButton = Array.from(container.querySelectorAll('button'))

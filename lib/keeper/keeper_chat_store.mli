@@ -206,6 +206,28 @@ type chat_message = {
     the assistant line is (default [Utterance]); the failed-request
     persistence path passes [Transport_failure]. Failures are logged but
     never raised except for {!Eio.Cancel.Cancelled}. *)
+(** [append_turn_result] is {!append_turn} with an explicit persistence
+    result. Queue consumers use it so a durable delivery receipt cannot become
+    [Delivered] after the transcript write actually failed. *)
+val append_turn_result :
+  base_dir:string ->
+  keeper_name:string ->
+  user_content:string ->
+  user_attachments:attachment list ->
+  ?tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  ?assistant_kind:Row_kind.t ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
+  assistant_content:string ->
+  unit ->
+  (unit, string) result
+
 val append_turn :
   base_dir:string ->
   keeper_name:string ->

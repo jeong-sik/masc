@@ -108,8 +108,8 @@ val run_if_free
 
     Also returns [`Busy] without attempting the lock when a chat request is
     already parked on this slot ([chat_waiting] is true), or when a busy
-    connector/dashboard message is deferred in [Keeper_chat_queue] for this
-    keeper ([Keeper_chat_queue.length] > 0). Eio.Mutex hands a released slot
+    connector/dashboard receipt is active in [Keeper_chat_queue] for this
+    keeper (pending or inflight). Eio.Mutex hands a released slot
     directly to the next parked waiter, so a new autonomous cycle would not
     overtake a queued chat regardless; these pre-checks make the yield
     explicit and keep a heartbeat-scheduled cycle from competing for a slot
@@ -118,7 +118,8 @@ val run_if_free
     back-to-back autonomous turn could otherwise busy-ACK a connector
     forever: the autonomous lane yields on the same backlog the consumer
     drains, so the consumer's [in_flight = None] window opens
-    deterministically. *)
+    deterministically. Queue persistence/read errors fail closed rather than
+    being mistaken for an empty queue. *)
 
 val chat_waiting : base_path:string -> keeper_name:string -> bool
 (** [true] when at least one chat request is parked on this keeper's slot

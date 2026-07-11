@@ -14,21 +14,28 @@
 val min_edit_interval_s : float
 (** Minimum seconds between PATCH edits (default 1.0). *)
 
+type error = Discord_rest_client.error
+
+val pp_error : Format.formatter -> error -> unit
+
 val send_message :
-  token:string -> channel_id:string -> content:string -> unit
+  token:string -> channel_id:string -> content:string -> (unit, error) result
 (** [send_message ~token ~channel_id ~content] posts to Discord.
-    Errors are logged as warnings but never raised.
+    Errors are logged as warnings and returned to the caller.
     Content exceeding Discord's 2000-character limit is split into
-    multiple messages. *)
+    multiple messages. All chunks are attempted; the first failure is
+    returned after the remaining chunks have been attempted. *)
 
 val adapter_loop :
   token:string ->
   channel_id:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   ?base_url:string ->
+  ?on_send_result:((unit, error) result -> unit) ->
   unit ->
   unit
-(** [adapter_loop ~token ~channel_id ~events ?base_url ()] subscribes to the
+(** [adapter_loop ~token ~channel_id ~events ?base_url ?on_send_result ()]
+    subscribes to the
     event stream and delivers text to Discord in real time:
     - [Text_delta] (first stable segment): POST creates the message,
       stores its id.
@@ -49,6 +56,13 @@ val adapter_loop :
     configured {!Env_config_core.masc_http_base_url} is used.
 
     Falls back to a single POST if no deltas arrive before [Run_finished].
+
+    [on_send_result] is invoked exactly once when the turn terminates through
+    [Run_finished] or [Event_error]. The result reports whether the primary
+    final text/error reply was actually delivered: the final PATCH plus every
+    overflow POST must succeed. Streaming previews, tool embeds, and other rich
+    side messages do not produce terminal callback invocations. The callback
+    defaults to a no-op.
 
     The loop exits after one turn; the caller must restart it for
     subsequent turns. *)
@@ -72,4 +86,20 @@ module For_testing : sig
       the text message already carries the reply. Image/link/audio/fusion
       cards use existing channel-native projection paths; code and Mermaid
       are rendered into embeds for richer Discord delivery. *)
+
+  val adapter_loop :
+    token:string ->
+    channel_id:string ->
+    events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+    post_message:(content:string -> (string, error) result) ->
+    edit_message:(message_id:string -> content:string -> (unit, error) result) ->
+    send_message:(content:string -> (unit, error) result) ->
+    ?base_url:string ->
+    ?on_send_result:((unit, error) result -> unit) ->
+    unit ->
+    unit
+  (** Test seam for the text-delivery transport. Production uses
+      {!Discord_rest_client}; tests can inject exact POST/PATCH outcomes while
+      exercising the real event-loop state machine. Rich side-message helpers
+      remain production-backed and should not be emitted by transport tests. *)
 end

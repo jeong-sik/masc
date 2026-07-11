@@ -185,15 +185,25 @@ let modalities_for_request payload =
 type dashboard_deferred_chat =
   { in_flight : Keeper_turn_admission.in_flight_info option
   ; chat_waiting : bool
-  ; queue_length : int
+  ; pending_count : int
+  ; inflight_count : int
   ; receipt_id : string
   ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
+  ; queue_revision : int64
   }
 
 let dashboard_busy_queue_state ~base_path ~keeper_name =
   let in_flight = Keeper_turn_admission.in_flight ~base_path ~keeper_name in
   let chat_waiting = Keeper_turn_admission.chat_waiting ~base_path ~keeper_name in
-  let queue_waiting = Keeper_chat_queue.length ~keeper_name > 0 in
+  let queue_waiting =
+    if not (Keeper_chat_queue.persistence_configured ())
+    then true
+    else
+      let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+      snapshot.load_errors <> []
+      || snapshot.pending <> []
+      || snapshot.inflight <> []
+  in
   match in_flight, chat_waiting, queue_waiting with
   | None, false, false -> None
   | None, false, true -> Some (None, false)
@@ -205,21 +215,33 @@ let dashboard_deferred_ack_text ~keeper_name deferred =
   match deferred.shutdown_operation_id with
   | Some operation_id ->
     Printf.sprintf
-      "%s is stopping under operation %s; your message is queued for the next active lane."
+      "%s is stopping under operation %s; your message was durably accepted \
+       (receipt_id=%s, pending_count=%d, inflight_count=%d) for the next active \
+       lane. The Dashboard will track it through Pending, Inflight, and a \
+       terminal Delivered or Failed state."
       keeper_name
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
+      deferred.receipt_id
+      deferred.pending_count
+      deferred.inflight_count
   | None ->
     Printf.sprintf
-      "%s is busy; your message is queued and will be answered after the current \
-       turn finishes."
+      "%s is busy; your message was durably accepted (receipt_id=%s, \
+       pending_count=%d, inflight_count=%d). The Dashboard will track it through \
+       Pending, Inflight, and a terminal Delivered or Failed state."
       keeper_name
+      deferred.receipt_id
+      deferred.pending_count
+      deferred.inflight_count
 
 let dashboard_deferred_chat_to_json ~keeper_name
     ({ in_flight
      ; chat_waiting
-     ; queue_length
+     ; pending_count
+     ; inflight_count
      ; receipt_id
      ; shutdown_operation_id
+     ; queue_revision
      } : dashboard_deferred_chat) =
   let in_flight_fields =
     match in_flight with
@@ -235,9 +257,11 @@ let dashboard_deferred_chat_to_json ~keeper_name
     ([ ("keeper_name", `String keeper_name)
      ; ("status", `String "queued")
      ; ("queue", `String "keeper_chat_queue")
-     ; ("queue_length", `Int queue_length)
+     ; ("pending_count", `Int pending_count)
+     ; ("inflight_count", `Int inflight_count)
      ; ("chat_waiting", `Bool chat_waiting)
      ; ("receipt_id", `String receipt_id)
+     ; ("queue_revision", `Intlit (Int64.to_string queue_revision))
      ; ( "shutdown_operation_id"
        , match shutdown_operation_id with
          | None -> `Null
@@ -253,7 +277,7 @@ let enqueue_dashboard_payload
       ~chat_waiting
       ~shutdown_operation_id
   =
-  let receipt_id =
+  match
     Keeper_chat_queue.enqueue ~keeper_name:payload.name
       { Keeper_chat_queue.content = payload.message
       ; user_blocks = payload.user_blocks
@@ -261,10 +285,18 @@ let enqueue_dashboard_payload
       ; timestamp = Eio.Time.now clock
       ; source = Keeper_chat_queue.Dashboard
       }
-  in
-  let queue_length = Keeper_chat_queue.length ~keeper_name:payload.name in
-  Keeper_chat_broadcast.queue_changed ~keeper_name:payload.name ~depth:queue_length ();
-  { in_flight; chat_waiting; queue_length; receipt_id; shutdown_operation_id }
+  with
+  | Error error -> Error (Keeper_chat_queue.mutation_error_to_string error)
+  | Ok receipt ->
+      Ok
+        { in_flight
+        ; chat_waiting
+        ; pending_count = receipt.pending_count
+        ; inflight_count = receipt.inflight_count
+        ; receipt_id = Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id
+        ; queue_revision = receipt.revision
+        ; shutdown_operation_id
+        }
 
 let dashboard_deferred_chat_of_rejection ~clock payload
      ({ Keeper_turn_admission.waiting
@@ -285,13 +317,16 @@ let defer_dashboard_payload_if_busy ~base_path ~clock payload =
   match dashboard_busy_queue_state ~base_path ~keeper_name:payload.name with
   | None -> `Not_busy
   | Some (in_flight, chat_waiting) ->
-      `Queued
-        (enqueue_dashboard_payload
+      (match
+         enqueue_dashboard_payload
            ~clock
            payload
            ~in_flight
            ~chat_waiting
-           ~shutdown_operation_id:None)
+           ~shutdown_operation_id:None
+       with
+       | Ok queued -> `Queued queued
+       | Error message -> `Queue_error message)
 
 let keeper_chat_request_prefixes =
   [
@@ -1065,7 +1100,34 @@ type keeper_stream_worker_event =
       { ok : bool
       ; status : string
       ; body : string
+      ; queued_outcome : queued_turn_outcome option
       }
+
+and queued_turn_failure_kind =
+  | Turn_failed
+  | Turn_timed_out
+  | Turn_cancelled
+  | No_visible_reply
+  | Continuation_checkpoint_without_reply
+  | Transcript_persist_failed
+  | Stream_projection_failed
+
+and queued_turn_outcome =
+  | Delivered
+  | Failed of
+      { kind : queued_turn_failure_kind
+      ; detail : string
+      }
+
+let queued_turn_failure_kind_to_string = function
+  | Turn_failed -> "turn_failed"
+  | Turn_timed_out -> "turn_timed_out"
+  | Turn_cancelled -> "turn_cancelled"
+  | No_visible_reply -> "no_visible_reply"
+  | Continuation_checkpoint_without_reply ->
+      "continuation_checkpoint_without_reply"
+  | Transcript_persist_failed -> "transcript_persist_failed"
+  | Stream_projection_failed -> "stream_projection_failed"
 
 type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 
@@ -1222,16 +1284,17 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
          [append_turn] would double-record that user line, so persist an
          assistant-only durable failure marker instead — the failure survives a
          restart and stays joined to the already-pending user line. *)
-    (if connector_user_line_recorded_upstream then
-       Keeper_chat_store.append_assistant_message
+    let persisted =
+      if connector_user_line_recorded_upstream then
+       Keeper_chat_store.append_assistant_message_result
          ~base_dir:base_path
          ~keeper_name:payload.name
          ~content:(persisted_error_reply err)
          ~surface:chat_surface
          ~stream_lifecycle:errored_stream_lifecycle
          ()
-     else
-       Keeper_chat_store.append_turn
+      else
+       Keeper_chat_store.append_turn_result
          ~base_dir:base_path
          ~keeper_name:payload.name
          ~user_content:payload.message
@@ -1241,15 +1304,22 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
          ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
          ~assistant_content:(persisted_error_reply err)
          ~stream_lifecycle:errored_stream_lifecycle
-         ());
-    Keeper_chat_broadcast.chat_appended
-      ~keeper_name:payload.name ~source:chat_source
-      ~content:(persisted_error_reply err)
-      ()
+         ()
+    in
+    (match persisted with
+     | Ok () ->
+         Keeper_chat_broadcast.chat_appended
+           ~keeper_name:payload.name ~source:chat_source
+           ~content:(persisted_error_reply err)
+           ()
+     | Error _ -> ());
+    persisted
   in
   let timeout_sec = Option.map float_of_int payload.timeout_sec in
   let dashboard_direct_stream =
-    (not connector_user_line_recorded_upstream) && not (has_external_speaker payload)
+    (not queued_turn)
+    && (not connector_user_line_recorded_upstream)
+    && not (has_external_speaker payload)
   in
   (* masc#23924: [f] below pushes its own [Stream_terminal] once it reaches a
      completion arm, but a timeout/cancellation cuts [f] off before any of
@@ -1259,20 +1329,35 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
      sites (never inside the cancelled [f]) so this turn still gets exactly
      one terminal event via the same serialized [push_worker_event]. *)
   let on_worker_aborted (reason : Keeper_msg_async.worker_abort_reason) =
-    let status, body =
+    let status, body, failure_kind =
       match reason with
       | Keeper_msg_async.Timeout { timeout_sec } ->
           ( "timeout"
           , Printf.sprintf
               "keeper_msg request exceeded timeout_sec=%.3f before completion"
-              timeout_sec )
+              timeout_sec
+          , Turn_timed_out )
       | Keeper_msg_async.Worker_cancelled { cancelled_by; reason } ->
           let cancelled_by =
             Keeper_msg_async.worker_cancel_source_to_string cancelled_by
           in
-          "cancelled", Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
+          ( "cancelled"
+          , Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
+          , Turn_cancelled )
     in
-    push_worker_event (Stream_terminal { ok = false; status; body })
+    let queued_outcome =
+      if not queued_turn then None
+      else
+        match persist_failure_reply body with
+        | Ok () -> Some (Failed { kind = failure_kind; detail = body })
+        | Error persist_error ->
+            Some
+              (Failed
+                 { kind = Transcript_persist_failed
+                 ; detail = persist_error
+                 })
+    in
+    push_worker_event (Stream_terminal { ok = false; status; body; queued_outcome })
   in
   let request_id =
     Keeper_msg_async.submit ?timeout_sec ~clock ~sw ~on_worker_aborted
@@ -1292,11 +1377,13 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               with
               | `Ran result -> Ok (`Ran result)
               | `Busy rejection ->
-                  let queued =
-                    dashboard_deferred_chat_of_rejection ~clock payload rejection
-                  in
-                  push_worker_event (Stream_dashboard_queued queued);
-                  Ok (`Queued queued)
+                  (match
+                     dashboard_deferred_chat_of_rejection ~clock payload rejection
+                   with
+                   | Ok queued ->
+                       push_worker_event (Stream_dashboard_queued queued);
+                       Ok (`Queued queued)
+                   | Error message -> Error message)
             else
               Ok
                 (`Ran
@@ -1378,14 +1465,31 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  visible_reply
              with
              | Some err ->
-                 persist_failure_reply err;
+                 let queued_outcome =
+                   if not queued_turn then None
+                   else
+                     match persist_failure_reply err with
+                     | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
+                     | Error persist_error ->
+                         Some
+                           (Failed
+                              { kind = Transcript_persist_failed
+                              ; detail = persist_error
+                              })
+                 in
+                 if not queued_turn then ignore (persist_failure_reply err : (unit, string) result);
                  push_worker_event
-                   (Stream_terminal { ok = false; status = "error"; body = err });
+                   (Stream_terminal
+                      { ok = false
+                      ; status = "error"
+                      ; body = err
+                      ; queued_outcome
+                      });
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
              | None ->
                  let persist_assistant_reply ~assistant_content =
                    if connector_user_line_recorded_upstream then
-                     Keeper_chat_store.append_assistant_message
+                     Keeper_chat_store.append_assistant_message_result
                        ~base_dir:base_path
                        ~keeper_name:payload.name
                        ~content:assistant_content
@@ -1395,7 +1499,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                        ~stream_lifecycle:completed_stream_lifecycle
                        ()
                    else
-                     Keeper_chat_store.append_turn
+                     Keeper_chat_store.append_turn_result
                        ~base_dir:base_path
                        ~keeper_name:payload.name
                        ~user_content:payload.message
@@ -1408,53 +1512,127 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                        ~stream_lifecycle:completed_stream_lifecycle
                        ()
                  in
-                 let broadcast_chat_appended ?content () =
-                   Keeper_chat_broadcast.chat_appended
-                     ~keeper_name:payload.name ~source:chat_source ?content ()
+                 let delivered_after_persist ?content persisted =
+                   match persisted with
+                   | Ok () ->
+                       Keeper_chat_broadcast.chat_appended
+                         ~keeper_name:payload.name ~source:chat_source ?content ();
+                       if queued_turn then Some Delivered else None
+                   | Error persist_error ->
+                       if queued_turn
+                       then
+                         Some
+                           (Failed
+                              { kind = Transcript_persist_failed
+                              ; detail = persist_error
+                              })
+                       else None
                  in
-                 (match
-                    ( Keeper_turn_outcome.of_reply_payload payload_json_opt,
-                      String_util.trim_to_option visible_reply )
-                  with
-                 | Keeper_turn_outcome.Continuation_checkpoint, _ ->
-                     persist_user_message_only ()
-                 | Keeper_turn_outcome.No_visible_reply, _
-                 | Keeper_turn_outcome.Visible_reply, None ->
-                     if has_visible_blocks then (
-                       persist_assistant_reply ~assistant_content:"";
-                       broadcast_chat_appended ())
-                     else if queued_turn then
-                       (* RFC-connector-deferred-reply-via-chat-queue: a queued message was already
-                          dequeued off [Keeper_chat_queue] before this turn ran,
-                          so [persist_user_message_only]'s "the keeper answers on
-                          its next turn" contract does not hold here — there is
-                          no next turn this message rides along with. Record a
-                          typed failure row instead of leaving the queued
-                          message permanently unanswered. The interactive HTTP
-                          stream ([queued_turn = false]) keeps the original
-                          behaviour: that user line is still live in the
-                          conversation and legitimately may be answered later. *)
-                       persist_failure_reply
-                         "no visible reply was produced for this queued message"
-                     else persist_user_message_only ()
-                 | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
-                     (* RFC-connector-deferred-reply-via-chat-queue §3.4: gate-recorded connector message → the user
-                        line is already persisted at the gate inbound boundary,
-                        so pair the reply by appending the assistant line only
-                        (mirrors [append_direct_chat_pair_if_reply]'s connector
-                        arm). The dashboard route records the full pair. *)
-                     persist_assistant_reply ~assistant_content:visible_reply;
-                     broadcast_chat_appended ~content:visible_reply ());
-                 push_worker_event
-                   (Stream_terminal { ok = true; status = "done"; body });
-                 Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body)
+                 let turn_outcome =
+                   Keeper_turn_outcome.of_reply_payload payload_json_opt
+                 in
+                 let queued_outcome =
+                   match turn_outcome, String_util.trim_to_option visible_reply with
+                   | Keeper_turn_outcome.Continuation_checkpoint, _ when queued_turn ->
+                       let detail =
+                         "queued turn ended with a continuation checkpoint and no delivered reply"
+                       in
+                       (match persist_failure_reply detail with
+                        | Ok () ->
+                            Some
+                              (Failed
+                                 { kind = Continuation_checkpoint_without_reply
+                                 ; detail
+                                 })
+                        | Error persist_error ->
+                            Some
+                              (Failed
+                                 { kind = Transcript_persist_failed
+                                 ; detail = persist_error
+                                 }))
+                   | Keeper_turn_outcome.Continuation_checkpoint, _ ->
+                       persist_user_message_only ();
+                       None
+                   | Keeper_turn_outcome.No_visible_reply, _
+                   | Keeper_turn_outcome.Visible_reply, None ->
+                       if has_visible_blocks
+                       then
+                         persist_assistant_reply ~assistant_content:""
+                         |> delivered_after_persist
+                       else if queued_turn
+                       then
+                         let detail =
+                           "no visible reply was produced for this queued message"
+                         in
+                         (match persist_failure_reply detail with
+                          | Ok () -> Some (Failed { kind = No_visible_reply; detail })
+                          | Error persist_error ->
+                              Some
+                                (Failed
+                                   { kind = Transcript_persist_failed
+                                   ; detail = persist_error
+                                   }))
+                       else (
+                         persist_user_message_only ();
+                         None)
+                   | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
+                       persist_assistant_reply ~assistant_content:visible_reply
+                       |> delivered_after_persist ~content:visible_reply
+                 in
+                 (match queued_outcome with
+                  | Some (Failed { detail; _ }) ->
+                      push_worker_event
+                        (Stream_terminal
+                           { ok = false
+                           ; status = "error"
+                           ; body = detail
+                           ; queued_outcome
+                           });
+                      Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
+                  | Some Delivered | None ->
+                      push_worker_event
+                        (Stream_terminal
+                           { ok = true
+                           ; status = "done"
+                           ; body
+                           ; queued_outcome
+                           });
+                      Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body))
         | Ok (`Ran (false, err)) ->
-            persist_failure_reply err;
-            push_worker_event (Stream_terminal { ok = false; status = "error"; body = err });
+            let persisted = persist_failure_reply err in
+            let queued_outcome =
+              if not queued_turn then None
+              else
+                match persisted with
+                | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
+                | Error persist_error ->
+                    Some
+                      (Failed
+                         { kind = Transcript_persist_failed
+                         ; detail = persist_error
+                         })
+            in
+            push_worker_event
+              (Stream_terminal
+                 { ok = false; status = "error"; body = err; queued_outcome });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
         | Error err ->
-            persist_failure_reply err;
-            push_worker_event (Stream_terminal { ok = false; status = "error"; body = err });
+            let persisted = persist_failure_reply err in
+            let queued_outcome =
+              if not queued_turn then None
+              else
+                match persisted with
+                | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
+                | Error persist_error ->
+                    Some
+                      (Failed
+                         { kind = Transcript_persist_failed
+                         ; detail = persist_error
+                         })
+            in
+            push_worker_event
+              (Stream_terminal
+                 { ok = false; status = "error"; body = err; queued_outcome });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
       ()
   in
@@ -1524,9 +1702,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
   in
   let rec consume_worker_events bridge_state =
-    if Atomic.get client_disconnected then ()
+    if Atomic.get client_disconnected then None
     else match Eio.Stream.take worker_events with
-    | Stream_client_disconnected -> ()
+    | Stream_client_disconnected -> None
     | Stream_event evt ->
         let translated =
           translate_oas_stream_event ~redact_text
@@ -1548,18 +1726,26 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                value = dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
              });
         Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Run_finished { run_id })
-    | Stream_terminal { ok = false; status = "cancelled"; body = message } ->
+        Keeper_chat_events.publish events (Run_finished { run_id });
+        None
+    | Stream_terminal
+        { ok = false
+        ; status = "cancelled"
+        ; body = message
+        ; queued_outcome
+        } ->
         let message = redact_text message in
         publish_terminal ~status:"cancelled" ~ok:false ~message ();
         Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Run_finished { run_id })
-    | Stream_terminal { ok = false; status; body = err } ->
+        Keeper_chat_events.publish events (Run_finished { run_id });
+        queued_outcome
+    | Stream_terminal { ok = false; status; body = err; queued_outcome } ->
         let err = redact_text err in
         publish_terminal ~status ~ok:false ~message:err ();
         Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Event_error { message = err })
-    | Stream_terminal { ok = true; body; _ } -> (
+        Keeper_chat_events.publish events (Event_error { message = err });
+        queued_outcome
+    | Stream_terminal { ok = true; body; queued_outcome; _ } -> (
         try
           let payload_json_opt, visible_reply = extract_visible_reply body in
           let visible_reply =
@@ -1610,7 +1796,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  });
           publish_terminal ~status:"done" ~ok:true ();
           Keeper_chat_events.publish events Text_message_end;
-          Keeper_chat_events.publish events (Run_finished { run_id })
+          Keeper_chat_events.publish events (Run_finished { run_id });
+          queued_outcome
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
@@ -1618,72 +1805,18 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             publish_terminal ~status:"error" ~ok:false ~message ();
             Keeper_chat_events.publish events Text_message_end;
             Keeper_chat_events.publish events
-              (Event_error { message }))
+              (Event_error { message });
+            if queued_turn
+            then Some (Failed { kind = Stream_projection_failed; detail = message })
+            else None)
   in
   match consume_worker_events empty_keeper_stream_bridge_state with
-  | () -> signal_stream_projection_done ()
+  | outcome ->
+      signal_stream_projection_done ();
+      outcome
   | exception exn ->
       signal_stream_projection_done ();
       raise exn
-
-(* Failure-lifecycle shape for a turn that never reached a normal terminal
-   event — mirrors the [errored_stream_lifecycle] local binding inside
-   [process_single_turn] (Run_error in place of Run_finished). Small enough,
-   and different enough in scope (this fires with no live event stream to
-   have derived it from), that duplicating the 4-element list here reads
-   clearer than threading it out as a shared value. *)
-let stalled_stream_lifecycle =
-  [ Keeper_chat_store.Run_started
-  ; Keeper_chat_store.Text_message_start
-  ; Keeper_chat_store.Text_message_end
-  ; Keeper_chat_store.Run_error
-  ]
-
-(* [Keeper_chat_consumer]'s dispatch watchdog calls this — via
-   [Server_bootstrap_loops]'s [on_stalled] wiring — when a queued turn's
-   [handle_turn] (== [process_single_turn]) never reaches a terminal
-   outcome within [dispatch_deadline_sec]. That happens when the turn's own
-   [Keeper_msg_async.submit] cancels the in-flight work on ITS internal
-   timeout: the cancelled fiber never reaches the [persist_assistant_reply]/
-   [persist_failure_reply] calls inside [process_single_turn], so nothing is
-   ever durably recorded for the message — L1/L2 of the busy-queue root
-   cause. This mirrors [persist_failure_reply]'s dashboard/connector split
-   without a live [payload]/closure to call into (the turn's own closures
-   died with the cancelled fiber), so [payload] and
-   [connector_user_line_recorded_upstream] are passed in directly instead. *)
-let persist_queued_turn_stalled ~base_path ~connector_user_line_recorded_upstream ~payload =
-  let chat_surface = chat_surface_of_request payload in
-  let chat_source = Surface_ref.lane_label chat_surface in
-  let chat_speaker = chat_speaker_of_request payload in
-  let content =
-    persisted_error_reply
-      "queued turn did not complete within the dispatch watchdog deadline"
-  in
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ChatTransportFailures)
-    ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
-    ();
-  (if connector_user_line_recorded_upstream then
-     Keeper_chat_store.append_assistant_message
-       ~base_dir:base_path
-       ~keeper_name:payload.name
-       ~content
-       ~surface:chat_surface
-       ~stream_lifecycle:stalled_stream_lifecycle
-       ()
-   else
-     Keeper_chat_store.append_turn
-       ~base_dir:base_path
-       ~keeper_name:payload.name
-       ~user_content:payload.message
-       ~user_attachments:payload.attachments
-       ~surface:chat_surface
-       ~speaker:chat_speaker
-       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
-       ~assistant_content:content
-       ~stream_lifecycle:stalled_stream_lifecycle
-       ());
-  Keeper_chat_broadcast.chat_appended ~keeper_name:payload.name ~source:chat_source ~content ()
 
 let keeper_chat_stream_headers origin =
   Httpun.Headers.of_list
@@ -2004,13 +2137,15 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            let run_now () =
              (* Dashboard stream route: no gate inbound boundary recorded this
                 user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
-	             process_single_turn ~connector_user_line_recorded_upstream:false
-	               ~queued_turn:false
-	               ~state ~clock ~sw
-	               ~auth_token:(auth_token_from_request request)
-	               ~thread_id ~continuation_channel ~closed
-	               ~client_disconnects:(Some (stream_sw, client_disconnects))
-	               ~payload ~run_id ~message_id ~agent_name ~events;
+             ignore
+               (process_single_turn ~connector_user_line_recorded_upstream:false
+                  ~queued_turn:false
+                  ~state ~clock ~sw
+                  ~auth_token:(auth_token_from_request request)
+                  ~thread_id ~continuation_channel ~closed
+                  ~client_disconnects:(Some (stream_sw, client_disconnects))
+                  ~payload ~run_id ~message_id ~agent_name ~events
+                : queued_turn_outcome option);
              wait_for_adapter_finished ()
            in
            if has_external_speaker payload then run_now ()
@@ -2024,8 +2159,8 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
              | `Not_busy -> run_now ()
              | `Queued queued ->
                  Log.Keeper.info
-                   "keeper_stream: deferred busy dashboard message keeper=%s queue_length=%d"
-                   payload.name queued.queue_length;
+                   "keeper_stream: deferred busy dashboard message keeper=%s pending_count=%d inflight_count=%d"
+                   payload.name queued.pending_count queued.inflight_count;
                  Keeper_chat_events.publish events
                    (Run_started { run_id; thread_id });
                  Keeper_chat_events.publish events
@@ -2078,7 +2213,8 @@ module For_testing = struct
   let defer_dashboard_payload_if_busy ~base_path ~clock payload =
     match defer_dashboard_payload_if_busy ~base_path ~clock payload with
     | `Not_busy -> `Not_busy
-    | `Queued queued -> `Queued queued.queue_length
+    | `Queued queued -> `Queued queued.pending_count
+    | `Queue_error message -> `Queue_error message
 
   let extract_visible_reply = extract_visible_reply
   let direct_reply_terminal_error = direct_reply_terminal_error

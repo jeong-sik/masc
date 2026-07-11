@@ -245,10 +245,84 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
   |> Digest.string
   |> Digest.to_hex
 
-let hash_status_args _config resolved_name (meta : keeper_meta) args =
+type chat_queue_status_observation =
+  | Chat_queue_snapshot of Keeper_chat_queue.diagnostic_snapshot
+  | Chat_queue_unavailable of string
+
+let observe_chat_queue ~keeper_name =
+  if Eio_guard.is_ready ()
+  then Chat_queue_snapshot (Keeper_chat_queue.snapshot ~keeper_name)
+  else Chat_queue_unavailable "eio_guard_not_ready"
+
+let chat_queue_load_error_fingerprint
+    (error : Keeper_chat_queue.snapshot_load_error) =
+  String.concat ":"
+    [ Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind
+    ; Option.value error.path ~default:""
+    ; error.message
+    ]
+
+let chat_queue_observation_fingerprint observation =
+  let persistence =
+    string_of_bool (Keeper_chat_queue.persistence_configured ())
+  in
+  match observation with
+  | Chat_queue_unavailable reason ->
+    String.concat ":" [ persistence; "unavailable"; reason ]
+  | Chat_queue_snapshot snapshot ->
+    String.concat ":"
+      [ persistence
+      ; Int64.to_string snapshot.revision
+      ; string_of_int (List.length snapshot.pending)
+      ; string_of_int (List.length snapshot.inflight)
+      ; snapshot.load_errors
+        |> List.map chat_queue_load_error_fingerprint
+        |> String.concat ","
+      ]
+
+let chat_queue_load_error_to_json
+    (error : Keeper_chat_queue.snapshot_load_error) =
+  `Assoc
+    [ ( "kind"
+      , `String
+          (Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind) )
+    ; "path", Json_util.string_opt_to_json error.path
+    ; "message", `String error.message
+    ]
+
+let chat_queue_status_to_json observation =
+  let durable_replay_enabled =
+    Keeper_chat_queue.persistence_configured ()
+  in
+  match observation with
+  | Chat_queue_unavailable reason ->
+    `Assoc
+      [ "pending_messages", `Null
+      ; "inflight_messages", `Null
+      ; "revision", `Null
+      ; "load_errors", `Null
+      ; "snapshot_available", `Bool false
+      ; "read_error", `String reason
+      ; "durable_replay_enabled", `Bool durable_replay_enabled
+      ]
+  | Chat_queue_snapshot snapshot ->
+    `Assoc
+      [ "pending_messages", `Int (List.length snapshot.pending)
+      ; "inflight_messages", `Int (List.length snapshot.inflight)
+      ; "revision", `Intlit (Int64.to_string snapshot.revision)
+      ; ( "load_errors"
+        , `List (List.map chat_queue_load_error_to_json snapshot.load_errors) )
+      ; "snapshot_available", `Bool true
+      ; "read_error", `Null
+      ; "durable_replay_enabled", `Bool durable_replay_enabled
+      ]
+
+let hash_status_args _config resolved_name (meta : keeper_meta)
+    ~chat_queue_fingerprint args =
   let parts = [
     resolved_name;
     effective_meta_overlay_hash meta;
+    chat_queue_fingerprint;
     (* Keeper_manual_reconcile.cache_key removed with reconcile system. *)
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);
@@ -275,7 +349,13 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
   | Error err -> tool_result_error err
   | Ok (name, m) ->
       let cache_key = status_cache_key ~base_path:config.base_path ~name in
-      let args_hash = hash_status_args config name m args in
+      let chat_queue_observation = observe_chat_queue ~keeper_name:m.name in
+      let args_hash =
+        hash_status_args config name m
+          ~chat_queue_fingerprint:
+            (chat_queue_observation_fingerprint chat_queue_observation)
+          args
+      in
       (* Cache hit: same updated_at + same args/effective-meta hash → return cached response.
          The read is taken under [cache_mu] so it cannot interleave with
          an eviction from [invalidate_status_cache_{for,all}]. *)
@@ -767,24 +847,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            | other -> other
          in
          let chat_queue =
-           (* [Keeper_chat_queue.length] reads behind a raw [Eio.Mutex], which
-              performs effects and raises [Effect.Unhandled] when no Eio scheduler
-              is running.  Production dispatch runs under [Eio_main.run] with
-              [Eio_guard.enable ()] (bin/main_eio.ml, bin/main_stdio_eio.ml,
-              bin/masc_worker_run.ml), so the depth is read there.  Pre-Eio /
-              non-Eio init paths (and unit tests that do not enable the guard)
-              report [`Null] instead of probing the scheduler via a side-effecting
-              [Eio.Fiber.yield] + [Effect.Unhandled] catch. *)
-           let pending_messages =
-             if Eio_guard.is_ready ()
-             then `Int (Keeper_chat_queue.length ~keeper_name:m.name)
-             else `Null
-           in
-           `Assoc
-             [
-               ("pending_messages", pending_messages);
-               ("durable_replay_enabled", `Bool (Keeper_chat_queue.persistence_configured ()));
-             ]
+           chat_queue_status_to_json chat_queue_observation
          in
 
          let json = `Assoc ([

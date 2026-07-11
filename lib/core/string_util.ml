@@ -307,6 +307,22 @@ let trim_nonempty value =
   let v = String.trim value in
   if v = "" then None else Some v
 
+(* Normalize an operator-facing mention target: trim whitespace, strip any
+   leading '@' characters (targets are sometimes configured pre-prefixed,
+   e.g. "@albini", or even doubly so), lowercase for case-insensitive
+   matching. [None] for a target that normalizes to empty — an all-'@'/
+   whitespace target has no representable identity (parse, don't validate:
+   a target stored with its '@' intact used to build a never-matching
+   "@@name" search needle downstream). *)
+let normalize_mention_target value =
+  let trimmed = String.trim value in
+  let len = String.length trimmed in
+  let rec skip_at i = if i < len && trimmed.[i] = '@' then skip_at (i + 1) else i in
+  let start = skip_at 0 in
+  let stripped = String.sub trimmed start (len - start) in
+  let normalized = String.lowercase_ascii stripped in
+  if normalized = "" then None else Some normalized
+
 let trim_to_option value =
   let v = String.trim value in
   if v = "" then None else Some v

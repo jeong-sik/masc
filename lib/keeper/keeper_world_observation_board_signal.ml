@@ -89,6 +89,24 @@ let text (signal : Board_dispatch.board_signal) =
        ])
 ;;
 
+(* [Keeper_lane_mentions] is the RFC-0230/0232 boundary mention parser
+   already proven for keeper chat lanes (whitespace-token + edge-trim,
+   minted through {!Keeper_identity.Keeper_id.of_string} so keeper-shaped
+   forms canonicalize to the same id as the bare name; ["@alicex"] and
+   ["email@alice.com"] provably do not mention ["alice"] —
+   test_keeper_mention_scope pins this). Reusing it here instead of a
+   parallel board-local tokenizer keeps one mention grammar for the whole
+   keeper stack rather than growing a fourth (dashboard already carried
+   three independent FE regexes before this same sweep consolidated them
+   into [mention-utils.ts]).
+
+   [Keeper_lane_mentions.target_ids_of]/[Keeper_identity.Keeper_id.of_string]
+   do not strip a leading '@' from a target string — only
+   {!String_util.normalize_mention_target} does that (RFC-0334 W3 census,
+   issue #23837: a target stored pre-prefixed with '@' must not desync from
+   the '@'-free names extracted from post text). Normalize here too, not
+   only at {!Keeper_turn_up_args.resolve_mention_targets}'s write boundary,
+   so keepers whose on-disk meta predates that normalization still match. *)
 let match_signal
       ~(meta : keeper_meta)
       ~(signal : Board_dispatch.board_signal)
@@ -101,12 +119,19 @@ let match_signal
     let targets =
       if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
     in
-    let haystack = String.lowercase_ascii (text signal) in
+    let normalized_targets =
+      targets |> List.filter_map String_util.normalize_mention_target
+    in
+    let mentioned_ids =
+      Keeper_lane_mentions.mention_ids_of_content (text signal)
+    in
     let matched_targets =
-      targets
+      normalized_targets
       |> List.filter (fun target ->
-        let needle = "@" ^ String.lowercase_ascii (String.trim target) in
-        needle <> "@" && String_util.contains_substring haystack needle)
+        match Keeper_identity.Keeper_id.of_string target with
+        | None -> false
+        | Some target_id ->
+          List.exists (Keeper_identity.Keeper_id.equal target_id) mentioned_ids)
     in
     if matched_targets <> []
     then { explicit_mention = true; matched_targets; score = 100 }

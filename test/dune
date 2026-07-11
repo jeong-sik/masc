@@ -54,6 +54,7 @@
   test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_board_signal_match
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate
@@ -416,6 +417,7 @@
   test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_board_signal_match
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate

@@ -125,6 +125,16 @@ val trim_nonempty : string -> string option
 (** [trim_nonempty s] trims whitespace and returns [Some s] if non-empty,
     [None] otherwise. SSOT for the per-module [trim_nonempty] helpers. *)
 
+val normalize_mention_target : string -> string option
+(** [normalize_mention_target target] trims whitespace, strips any leading
+    ['@'] characters, and lowercases the result for case-insensitive
+    matching. [None] when the target normalizes to empty. SSOT for
+    normalizing keeper board-mention targets at both write time
+    ([Keeper_turn_up_args.resolve_mention_targets]) and read time
+    ([Keeper_world_observation_board_signal.match_signal]) so a target
+    stored pre-prefixed with ['@'] cannot desync from the '@'-free names
+    the board-signal matcher extracts from post text. *)
+
 val trim_to_option : string -> string option
 (** [trim_to_option s] is an alias for [trim_nonempty]. Both are identical;
     [trim_to_option] is kept for migration compatibility. *)

@@ -612,6 +612,42 @@ let board_signal_wake_keeper
     Ok ())
 ;;
 
+(** Routing outcome for a single board-signal candidate, given its phase and
+    whether an explicit mention is entitled to auto-resume a paused keeper.
+    Every (phase, wake_reason) pair reaching {!board_signal_wake_lane} comes
+    through {!board_signal_entry_is_wakeup_candidate}'s Running/Paused
+    filter; other phases are defensively [Excluded].
+
+    RFC-0334 W1: a deterministic address ([Explicit_mention]) is never
+    dropped — a paused keeper without operator-granted auto-resume still
+    gets the stimulus in its mailbox ([Mailbox_only]) for whenever it next
+    resumes, instead of the stimulus vanishing with no wake and no queue
+    entry. Non-explicit followups (thread-reply / reaction) on a paused
+    keeper stay [Excluded]: pause is an operator opt-out from implicit wake,
+    not from addressed mentions. *)
+type board_signal_wake_lane =
+  | Immediate of Board_wake.wake_reason
+  | Mailbox_only of Board_wake.wake_reason
+  | Excluded
+
+let board_signal_wake_lane
+      ~(phase : Keeper_state_machine.phase)
+      ~(auto_resume_allowed : bool)
+      (wake_reason : Board_wake.wake_reason option)
+  : board_signal_wake_lane
+  =
+  match phase, wake_reason with
+  | Keeper_state_machine.Paused, Some Board_wake.Explicit_mention
+    when auto_resume_allowed ->
+    Immediate Board_wake.Explicit_mention
+  | Keeper_state_machine.Paused, Some Board_wake.Explicit_mention ->
+    Mailbox_only Board_wake.Explicit_mention
+  | Keeper_state_machine.Paused, _ -> Excluded
+  | Keeper_state_machine.Running, Some reason -> Immediate reason
+  | Keeper_state_machine.Running, None -> Excluded
+  | _, _ -> Excluded
+;;
+
 let wakeup_relevant_keeper_for_board_signal
       ~(config : Workspace.config)
       (signal : Board_dispatch.board_signal)
@@ -626,50 +662,73 @@ let wakeup_relevant_keeper_for_board_signal
     | Board_dispatch.Board_comment_added -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
   in
+  (* Visibility for the REPO_WAKE_UP audit finding: a [None] wake_reason
+     means the candidate keeper had no explicit mention match and (for
+     comments) no external reply after its own comment. Without this
+     counter, operators cannot distinguish between a board post that
+     legitimately had no deterministic addressee and one that was silently
+     dropped by a keeper whose mention_targets configuration is too narrow.
+     Fires for every phase the fan-out considers (Running and Paused) — a
+     paused keeper's non-match used to be invisible even though the
+     candidate scan already looked at it. *)
+  let no_wake_counter ~(phase : Keeper_state_machine.phase) (meta : keeper_meta) =
+    let phase_label =
+      match phase with
+      | Keeper_state_machine.Running -> "running"
+      | Keeper_state_machine.Paused -> "paused"
+      | _ -> "other"
+    in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string BoardSignalNoWakeTotal)
+      ~labels:[
+        ("keeper", meta.name);
+        ("kind", signal_kind_label);
+        ("phase", phase_label);
+      ]
+      ();
+    record_board_attention_candidate ~config ~signal_kind_label ~meta signal
+  in
   (* Yield meter: scanning all running keepers' meta files is CPU-bound
      when many keepers share a domain.  Yield every ~1000 iterations. *)
   let board_ym = Eio_guard.create_yield_meter () in
-  let candidates =
+  let candidates, mailbox_only =
     registry_entries
-    |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-      let result =
-        match read_meta config entry.name with
-        | Ok (Some meta) ->
-          let wake_reason =
-            Keeper_world_observation.board_signal_wake_reason
-              ~meta
-              ~signal
-          in
-          (* Visibility for the REPO_WAKE_UP audit finding: a [None]
-             wake_reason means the running keeper had no explicit mention
-             match and (for comments) no external reply after its own comment.
-             Without this counter, operators cannot distinguish between a
-             board post that legitimately had no deterministic addressee and
-             one that was silently dropped by a keeper whose mention_targets
-             configuration is too narrow. *)
-          (match wake_reason, entry.phase with
-           | None, Keeper_state_machine.Running ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string BoardSignalNoWakeTotal)
-               ~labels:[
-                 ("keeper", meta.name);
-                 ("kind", signal_kind_label);
-               ]
-               ();
-             record_board_attention_candidate ~config ~signal_kind_label ~meta signal
-           | None, _ | Some _, _ -> ());
-          (match entry.phase, wake_reason with
-           | Keeper_state_machine.Paused, Some Board_wake.Explicit_mention
-             when paused_meta_allows_board_auto_resume meta ->
-             Some (meta, wake_reason)
-           | Keeper_state_machine.Paused, _ -> None
-           | Keeper_state_machine.Running, _ -> Some (meta, wake_reason)
-           | _ -> None)
-        | _ -> None
-      in
-      Eio_guard.yield_step board_ym;
-      result)
+    |> List.fold_left
+         (fun (candidates_acc, mailbox_acc) (entry : Keeper_registry.registry_entry) ->
+           let candidates_acc, mailbox_acc =
+             match read_effective_meta config entry.name with
+             | Ok (Some meta) ->
+               (* RFC-0334 W3 unify-to-EFFECTIVE (census: issue #23837): read
+                  the profile/persona-overlaid meta, not the raw disk record,
+                  so a persona's [mention_targets] overlay is visible to the
+                  fan-out. The raw read silently made alias/persona mentions
+                  unmatchable. *)
+               let wake_reason =
+                 Keeper_world_observation.board_signal_wake_reason
+                   ~meta
+                   ~signal
+               in
+               (match wake_reason, entry.phase with
+                | None, (Keeper_state_machine.Running | Keeper_state_machine.Paused) ->
+                  no_wake_counter ~phase:entry.phase meta
+                | None, _ | Some _, _ -> ());
+               (match
+                  board_signal_wake_lane
+                    ~phase:entry.phase
+                    ~auto_resume_allowed:(paused_meta_allows_board_auto_resume meta)
+                    wake_reason
+                with
+                | Immediate reason -> (meta, Some reason) :: candidates_acc, mailbox_acc
+                | Mailbox_only reason -> candidates_acc, (meta, reason) :: mailbox_acc
+                | Excluded -> candidates_acc, mailbox_acc)
+             | _ -> candidates_acc, mailbox_acc
+           in
+           Eio_guard.yield_step board_ym;
+           candidates_acc, mailbox_acc)
+         ([], [])
   in
+  let candidates = List.rev candidates in
+  let mailbox_only = List.rev mailbox_only in
   let wake_meta (meta : keeper_meta) reason =
     if
       board_reactive_wakeup_allowed
@@ -692,6 +751,24 @@ let wakeup_relevant_keeper_for_board_signal
           (Board_wake.wake_reason_label reason)
           signal.post_id
           err)
+    else (
+      (* The 60s content-fingerprint debounce ([board_reactive_wakeup_allowed])
+         guards *wakes*, not *delivery* — see the [deferred] loop below for
+         the identical shape. Before this branch existed, a re-posted
+         identical mention within the debounce window vanished entirely:
+         no wake, no mailbox entry, no log line. Queue identity-dedup
+         already collapses genuine repeats on this path, so enqueueing here
+         unconditionally is safe. *)
+      let stimulus = board_signal_stimulus ~reason signal in
+      Keeper_registry_event_queue.enqueue
+        ~base_path:config.base_path
+        meta.name
+        stimulus;
+      Log.Keeper.info
+        "board signal wakeup deferred to mailbox: keeper=%s reason=%s post=%s cause=debounce"
+        meta.name
+        (Board_wake.wake_reason_label reason)
+        signal.post_id)
   in
   let selected, deferred = select_board_wakeup_candidates candidates in
   let yield_meter = Eio_guard.create_yield_meter ~interval:1 () in
@@ -713,6 +790,22 @@ let wakeup_relevant_keeper_for_board_signal
            ~base_path:config.base_path
            meta.name
            stimulus;
+         Eio_guard.yield_step yield_meter);
+  (* Paused keepers whose operator-granted auto-resume is disallowed still
+     get an explicit mention's stimulus in their mailbox: pause suppresses
+     the wake, not the address. They see it whenever they next resume. *)
+  mailbox_only
+  |> List.iter (fun (meta, reason) ->
+         let stimulus = board_signal_stimulus ~reason signal in
+         Keeper_registry_event_queue.enqueue
+           ~base_path:config.base_path
+           meta.name
+           stimulus;
+         Log.Keeper.info
+           "board signal wakeup deferred to mailbox: keeper=%s reason=%s post=%s cause=paused_no_auto_resume"
+           meta.name
+           (Board_wake.wake_reason_label reason)
+           signal.post_id;
          Eio_guard.yield_step yield_meter);
   let deferred_count = List.length deferred in
   if deferred_count > 0 then begin

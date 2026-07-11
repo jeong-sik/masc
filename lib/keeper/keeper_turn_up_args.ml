@@ -281,14 +281,19 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       instructions_opt;
     }
 
-(** Resolve mention targets with dedup and filtering. *)
+(** Resolve mention targets with dedup and filtering. Normalizes each target
+    (strip leading '@', lowercase, reject empty after stripping) so a target
+    configured as "@name" cannot desync from the '@'-free name the
+    board-signal matcher extracts from post text (RFC-0334 W3 census, issue
+    #23837: a stored leading '@' produced a never-matching "@@name" search
+    needle downstream before this normalization existed). *)
 let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
   let raw =
     match mention_targets_opt with
     | Some targets -> targets
     | None -> if fallback_targets <> [] then fallback_targets else [ name ]
   in
-  raw |> List.filter_map String_util.trim_nonempty |> dedupe_keep_order
+  raw |> List.filter_map String_util.normalize_mention_target |> dedupe_keep_order
 
 let resolve_sandbox_profile ~fallback =
   fallback

@@ -192,6 +192,31 @@ val select_board_wakeup_candidates :
   ('a * Keeper_world_observation_board_signal.wake_reason) list
   * ('a * Keeper_world_observation_board_signal.wake_reason) list
 
+(** Routing outcome for a single board-signal candidate. [Immediate] wakes
+    now; [Mailbox_only] enqueues the stimulus without waking (a paused
+    keeper whose operator-granted auto-resume is disallowed, addressed by
+    an explicit mention); [Excluded] does neither. Exposed for testing. *)
+type board_signal_wake_lane =
+  | Immediate of Keeper_world_observation_board_signal.wake_reason
+  | Mailbox_only of Keeper_world_observation_board_signal.wake_reason
+  | Excluded
+
+(** [board_signal_wake_lane ~phase ~auto_resume_allowed wake_reason] routes
+    a candidate given its phase and whether an explicit mention is entitled
+    to auto-resume it. RFC-0334 W1: a deterministic address
+    ([Explicit_mention]) is never [Excluded] outright — a paused keeper
+    without auto-resume still gets [Mailbox_only] rather than a silent
+    drop. Non-explicit followups on a paused keeper stay [Excluded]: pause
+    is an operator opt-out from implicit wake, not from addressed
+    mentions. Defensively [Excluded] for phases other than Running/Paused
+    (unreachable given {!board_signal_entry_is_wakeup_candidate}'s
+    pre-filter, but total over all 13 phases). *)
+val board_signal_wake_lane :
+  phase:Keeper_state_machine.phase
+  -> auto_resume_allowed:bool
+  -> Keeper_world_observation_board_signal.wake_reason option
+  -> board_signal_wake_lane
+
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.board_signal -> unit
 

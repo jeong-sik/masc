@@ -18,9 +18,11 @@ import { VerificationRequestsPanel } from './verification-requests-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
+import { TimeAgo } from './common/time-ago'
 import { openTaskDetail } from './goals/task-detail-state'
 import { GoalCreateForm } from './goals/goal-create-form'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
+import { sortByPriority, sortByTimeDesc } from './goals/goal-helpers'
 import { claimTask as claimTaskAction } from '../api/actions'
 import { showToast } from './common/toast'
 import { errorToString } from '../lib/format-string'
@@ -37,52 +39,178 @@ function isWorkSection(v: string | undefined): v is WorkSection {
 }
 
 // ── Task state mapping ──────────────────────────────────────────────────────
-
-// Bucket = progress-aggregation axis (done/wip/verify/blocked/todo).
-// cls    = the prototype's CSS modifier on .wk-task-dot/.wk-task-state.
+//
+// TASK_STATUS_META is the one closed map every status-derived surface reads:
+// TaskRow / KanbanCard pill label+tooltip, the kanban column header+order, the
+// StatusLegend, and the per-goal task list sort (sortTasksByStatus below).
+// Previously this was two hand-kept lists (jobStateForTask's switch and the
+// KANBAN_COLUMNS tuple) that carried the same label/cls per status and could
+// drift out of sync; a missing status here is now a `Record<TaskStatusKey, ...>`
+// compile error instead of a silent fallback in one of the two call sites.
+//
+// `bucket` = progress-aggregation axis (done/wip/verify/blocked/todo).
+// `cls`    = the prototype's CSS modifier on .wk-task-dot/.wk-task-state/.wk-kcol-dot.
 // They differ on purpose: `claimed`, `blocked`, `paused`, and `unknown`
 // preserve protocol truth instead of folding into broader progress states.
+//
+// `order` is the deliberate, documented axis for both the kanban column
+// sequence and sortTasksByStatus: active/actionable states first (todo →
+// claimed → in_progress → awaiting_verification), states that need operator
+// attention but are not routine progress next (blocked → paused → unknown —
+// this is the "sinks to the bottom" placement, now with a `description` on
+// each so an operator can see *why* rather than just noticing the position),
+// terminal states that need no further action last (done → cancelled).
 type JobBucket = 'done' | 'wip' | 'verify' | 'blocked' | 'todo'
 type JobStateCls = 'done' | 'wip' | 'verify' | 'claimed' | 'cancelled' | 'todo' | 'blocked' | 'paused' | 'unknown'
+type TaskStatusKey = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'blocked' | 'paused' | 'unknown' | 'done' | 'cancelled'
+
+interface TaskStatusMeta {
+  /** Full label — TaskRow's `.wk-task-state` pill and KanbanCard tooltip.
+   *  Has room to be descriptive ("일시정지", "상태 미확인"). */
+  readonly label: string
+  /** Compact label for the fixed-width kanban column header. Deliberately
+   *  distinct from `label` where the column is a *collection* concept rather
+   *  than a per-task descriptor (`todo`'s column is "백로그" — the backlog —
+   *  while a single such task's own state pill reads "대기" — waiting) or
+   *  where the full label would not fit ("일시정지" → "정지", "검증 대기" →
+   *  "검증", "상태 미확인" → "미확인"). Falls back to `label` when the two
+   *  coincide, so most rows only need to write the string once. */
+  readonly columnLabel: string
+  /** One-line semantic explanation — rendered as a tooltip on every status
+   *  pill and as the row text in StatusLegend. This is what tells an operator
+   *  what "정지" or "미확인" actually means, instead of just a colored dot. */
+  readonly description: string
+  readonly bucket: JobBucket
+  readonly cls: JobStateCls
+  readonly order: number
+}
+
+const TASK_STATUS_META: Readonly<Record<TaskStatusKey, TaskStatusMeta>> = {
+  todo: {
+    label: '대기', columnLabel: '백로그', description: '아직 claim되지 않은 백로그 task',
+    bucket: 'todo', cls: 'todo', order: 0,
+  },
+  claimed: {
+    label: '클레임', columnLabel: '클레임', description: 'keeper가 claim했지만 아직 실행을 시작하지 않음',
+    bucket: 'wip', cls: 'claimed', order: 1,
+  },
+  in_progress: {
+    label: '진행 중', columnLabel: '진행', description: 'keeper가 실행 중',
+    bucket: 'wip', cls: 'wip', order: 2,
+  },
+  awaiting_verification: {
+    label: '검증 대기', columnLabel: '검증', description: '완료가 제출되어 다른 keeper/사용자의 검증 승인을 기다리는 중',
+    bucket: 'verify', cls: 'verify', order: 3,
+  },
+  blocked: {
+    label: '차단', columnLabel: '차단', description: '외부 의존성이나 장애로 진행 불가 — handoff 사유를 확인해야 함',
+    bucket: 'blocked', cls: 'blocked', order: 4,
+  },
+  paused: {
+    label: '일시정지', columnLabel: '정지', description: '운영자가 의도적으로 보류함 (장애 상태 아님)',
+    bucket: 'blocked', cls: 'paused', order: 5,
+  },
+  unknown: {
+    label: '상태 미확인', columnLabel: '미확인', description: '서버가 인식하지 못한 status 값 — 원본 값은 status_raw에 보존됨',
+    bucket: 'blocked', cls: 'unknown', order: 6,
+  },
+  done: {
+    label: '완료', columnLabel: '완료', description: 'gate 증거 검증을 통과하고 완료 처리됨',
+    bucket: 'done', cls: 'done', order: 7,
+  },
+  cancelled: {
+    label: '취소', columnLabel: '취소', description: '작업이 취소됨 — handoff_context에 사유가 기록됨',
+    bucket: 'blocked', cls: 'cancelled', order: 8,
+  },
+} as const
+
+// Status keys ranked by TASK_STATUS_META.order — the single derivation point
+// for both KANBAN_COLUMNS and StatusLegend, so the two can never disagree on
+// sequence (previously KANBAN_COLUMNS hard-coded its own copy of this order).
+const TASK_STATUS_ORDER: ReadonlyArray<TaskStatusKey> =
+  (Object.keys(TASK_STATUS_META) as TaskStatusKey[])
+    .sort((a, b) => TASK_STATUS_META[a].order - TASK_STATUS_META[b].order)
+
+// Task['status'] is optional on the wire; every status-driven helper below
+// normalizes through this so "no status" and "todo" are never two different
+// code paths.
+function taskStatusKey(task: Pick<Task, 'status'>): TaskStatusKey {
+  return task.status ?? 'todo'
+}
 
 // ── Kanban view columns ─────────────────────────────────────────────────────
-// Closed tuple — cancelled is excluded by design (it has its own aside panel).
-// Each entry: [task.status value, Korean column label, CSS modifier cls].
-// The cls values come directly from JobStateCls so KanbanCard can reuse the
-// same .wk-kcard.<cls> and .wk-kcol-dot.<cls> rules without extra mapping.
-type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'blocked' | 'paused' | 'unknown' | 'done'
+// Derived from TASK_STATUS_ORDER — cancelled is excluded by design (it has
+// its own aside panel, not a kanban column).
+type KanbanStatus = Exclude<TaskStatusKey, 'cancelled'>
 type KanbanColumn = readonly [status: KanbanStatus, label: string, cls: JobStateCls]
 
-const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
-  ['todo',                  '백로그', 'todo'],
-  ['claimed',               '클레임', 'claimed'],
-  ['in_progress',           '진행',   'wip'],
-  ['awaiting_verification', '검증',   'verify'],
-  ['blocked',               '차단',   'blocked'],
-  ['paused',                '정지',   'paused'],
-  ['unknown',               '미확인', 'unknown'],
-  ['done',                  '완료',   'done'],
-] as const
+const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = TASK_STATUS_ORDER
+  .filter((status): status is KanbanStatus => status !== 'cancelled')
+  .map(status => [status, TASK_STATUS_META[status].columnLabel, TASK_STATUS_META[status].cls] as const)
 
 interface JobState {
   label: string
+  description: string
   bucket: JobBucket
   cls: JobStateCls
 }
 
 function jobStateForTask(task: Task): JobState {
-  switch (task.status) {
-    case 'done': return { label: '완료', bucket: 'done', cls: 'done' }
-    case 'in_progress': return { label: '진행 중', bucket: 'wip', cls: 'wip' }
-    case 'claimed': return { label: '클레임', bucket: 'wip', cls: 'claimed' }
-    case 'awaiting_verification': return { label: '검증 대기', bucket: 'verify', cls: 'verify' }
-    case 'blocked': return { label: '차단', bucket: 'blocked', cls: 'blocked' }
-    case 'paused': return { label: '일시정지', bucket: 'blocked', cls: 'paused' }
-    case 'unknown': return { label: '상태 미확인', bucket: 'blocked', cls: 'unknown' }
-    case 'cancelled': return { label: '취소', bucket: 'blocked', cls: 'cancelled' }
-    case 'todo':
-    default: return { label: '대기', bucket: 'todo', cls: 'todo' }
-  }
+  const meta = TASK_STATUS_META[taskStatusKey(task)]
+  return { label: meta.label, description: meta.description, bucket: meta.bucket, cls: meta.cls }
+}
+
+// Deliberate ordering for a goal's task list (GoalCard) and other flat task
+// views: TASK_STATUS_META.order first (see rationale above — active work
+// ahead of attention-needed states ahead of terminal states), then priority
+// (lower number = more urgent), then most-recently-updated first. Previously
+// goalTasks rendered in whatever order the store returned them — an
+// incidental ordering, not a deliberate one.
+function sortTasksByStatus(a: Task, b: Task): number {
+  return TASK_STATUS_META[taskStatusKey(a)].order - TASK_STATUS_META[taskStatusKey(b)].order
+    || sortByPriority(a, b)
+    || sortByTimeDesc(a, b)
+}
+
+// ── Status legend ───────────────────────────────────────────────────────────
+// Renders every TASK_STATUS_META entry (dot + label + description) behind a
+// disclosure toggle. Hover tooltips (title=) on the pills answer "what does
+// this mean" for a mouse user already looking at one task; this answers the
+// same question up front, all statuses at once, for touch/keyboard users and
+// anyone scanning before they've clicked into a task.
+function StatusLegend() {
+  const [open, setOpen] = useState(false)
+  return html`
+    <section class="wk-status-legend" aria-label="task 상태 설명">
+      <button
+        type="button"
+        class="wk-status-legend-toggle"
+        data-testid="status-legend-toggle"
+        aria-expanded=${open}
+        onClick=${() => setOpen(o => !o)}
+      >
+        상태 설명 <span aria-hidden="true">${open ? '▾' : '▸'}</span>
+      </button>
+      ${open ? html`
+        <dl class="wk-status-legend-body" data-testid="status-legend-body">
+          ${TASK_STATUS_ORDER.map(status => {
+            const meta = TASK_STATUS_META[status]
+            return html`
+              <div key=${status} class="wk-status-legend-row">
+                <dt>
+                  <span class=${`wk-kcol-dot ${meta.cls}`} aria-hidden="true"></span>${meta.label}
+                  ${meta.columnLabel !== meta.label
+                    ? html`<span class="wk-status-legend-abbrev mono">칸반: ${meta.columnLabel}</span>`
+                    : null}
+                </dt>
+                <dd>${meta.description}</dd>
+              </div>
+            `
+          })}
+        </dl>
+      ` : null}
+    </section>
+  `
 }
 
 function blockerNoteForTask(task: Task): string | null {
@@ -634,7 +762,7 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
           ${hasDetail ? html`<span class="wk-task-chev">${open ? '\u25BE' : '\u25B8'}</span>` : null}
         </span>
         <span class="wk-spacer"></span>
-        <span class=${`wk-task-state ${state.cls}`}>${state.label}</span>
+        <span class=${`wk-task-state ${state.cls}`} title=${state.description}>${state.label}</span>
         ${task.assignee
           ? html`
             <button
@@ -827,25 +955,35 @@ function isGoalFlagged(goal: Goal): boolean {
 }
 
 // WorkAside derived data shapes — immutable, computed from signals.
+//
+// `timestamp`/`completedAt` and `actor` are provenance: when did this happen,
+// and who is/was responsible. They are `null` (never invented) whenever the
+// source Task/Goal record has no value for that field — WkaEntryMeta renders
+// nothing for a null field rather than a synthetic placeholder.
 interface WkaFlaggedGoal {
   readonly id: string
   readonly cls: WkaFlagCls
   readonly lbl: string
   readonly title: string
   readonly reason: string | null | undefined
+  readonly timestamp: string | null
 }
 
 interface WkaApprovalGoal {
   readonly id: string
   readonly title: string
   readonly verifiers: ReadonlyArray<string>
+  readonly timestamp: string | null
 }
 
 interface WkaVerifyTask {
   readonly id: string
   readonly title: string
   readonly goalId: string
+  readonly goalTitle: string
   readonly open: number // unsatisfied gates
+  readonly timestamp: string | null
+  readonly actor: string | null
 }
 
 interface WkaBlockerTask {
@@ -853,6 +991,9 @@ interface WkaBlockerTask {
   readonly title: string
   readonly blocker: string
   readonly goalId: string
+  readonly goalTitle: string
+  readonly timestamp: string | null
+  readonly actor: string | null
 }
 
 interface WkaBacklogTask {
@@ -867,6 +1008,9 @@ interface WkaRecentTask {
   readonly id: string
   readonly title: string
   readonly goalId: string
+  readonly goalTitle: string
+  readonly completedAt: string | null
+  readonly actor: string | null
 }
 
 interface WkaCounts {
@@ -966,6 +1110,7 @@ function KanbanCard({
       data-testid="kanban-card"
       data-kanban-task-id=${task.id}
       aria-label=${`${task.title} 상세 열기`}
+      title=${state.description}
       onClick=${() => openTaskDetail(task)}
       onKeyDown=${(e: KeyboardEvent) => {
         // Kanban cards have no inline expansion (unlike TaskRow); Enter/Space
@@ -1047,7 +1192,7 @@ function KanbanView({
             <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
               <div class="wk-kcol-h">
                 <span class=${`wk-kcol-dot ${cls}`} aria-hidden="true"></span>
-                <span class="wk-kcol-title">${label}</span>
+                <span class="wk-kcol-title" title=${TASK_STATUS_META[status].description}>${label}</span>
                 <span class="wk-kcol-n mono">${col.length}</span>
               </div>
               <div class="wk-kcol-body">
@@ -1070,10 +1215,64 @@ function KanbanView({
   `
 }
 
+// Provenance row (timestamp + actor) shared by every WorkAside entry type.
+// Renders nothing for a field that is null — never invents a placeholder for
+// data the payload didn't carry.
+function WkaEntryMeta({ timestamp, actor }: { timestamp: string | null; actor: string | null }) {
+  if (!timestamp && !actor) return null
+  return html`
+    <span class="wka-meta">
+      ${actor ? html`
+        <span class="wka-meta-actor mono">
+          <${KeeperBadge} id=${actor} size="sm" variant="sigil" />${actor}
+        </span>
+      ` : null}
+      ${timestamp ? html`<${TimeAgo} timestamp=${timestamp} mode="relative" class="wka-meta-time" />` : null}
+    </span>
+  `
+}
+
+// Every WorkAside list section renders at most this many entries before
+// falling back to a "+N개 더" disclosure, so an unbounded backlog of flagged
+// goals / todo items / done tasks can never dump an endless wall of rows.
+const WKA_SECTION_VISIBLE_MAX = 8
+
+function capSection<T>(items: ReadonlyArray<T>, max: number = WKA_SECTION_VISIBLE_MAX): { visible: ReadonlyArray<T>; hiddenCount: number } {
+  if (items.length <= max) return { visible: items, hiddenCount: 0 }
+  return { visible: items.slice(0, max), hiddenCount: items.length - max }
+}
+
+function WkaMoreDisclosure({ hiddenCount, testId }: { hiddenCount: number; testId: string }) {
+  if (hiddenCount <= 0) return null
+  return html`<div class="wka-more mono" data-testid=${testId}>+${hiddenCount}개 더</div>`
+}
+
 function WorkAside({
   flagged, approvals, verifyTasks, blockers, backlog, recent, counts, onJump,
 }: WorkAsideProps) {
   const needTotal = approvals.length + verifyTasks.length + blockers.length + backlog.length
+
+  // "해야 할 일" combines 3 per-item kinds (approvals/verify/blockers) plus the
+  // backlog aggregate row. Cap the per-item kinds against one shared budget —
+  // in list order (approvals, then verify, then blockers) — so the section as
+  // a whole never renders more than WKA_SECTION_VISIBLE_MAX rows, regardless
+  // of which kind is the one that grew large. The header badge above still
+  // shows the true `needTotal`, so the count is never hidden, only the rows.
+  let todoBudget = WKA_SECTION_VISIBLE_MAX
+  const takeUpToBudget = <T,>(items: ReadonlyArray<T>): ReadonlyArray<T> => {
+    if (todoBudget <= 0) return []
+    const slice = items.slice(0, todoBudget)
+    todoBudget -= slice.length
+    return slice
+  }
+  const visibleApprovals = takeUpToBudget(approvals)
+  const visibleVerifyTasks = takeUpToBudget(verifyTasks)
+  const visibleBlockers = takeUpToBudget(blockers)
+  const todoHiddenCount = (approvals.length + verifyTasks.length + blockers.length)
+    - (visibleApprovals.length + visibleVerifyTasks.length + visibleBlockers.length)
+
+  const flaggedCapped = capSection(flagged)
+  const recentCapped = capSection(recent)
 
   const [collapsed, setCollapsed] = useState<boolean>(readStoredAsideCollapsed)
   const [w, setW] = useState<number>(readStoredAsideW)
@@ -1217,7 +1416,7 @@ function WorkAside({
             ? html`<div class="wka-calm mono" data-testid="wka-flagged-calm">주의 목표 없음 · 정상 순환</div>`
             : html`
               <div class="wka-list" data-testid="wka-flagged-list">
-                ${flagged.map(g => html`
+                ${flaggedCapped.visible.map(g => html`
                   <button
                     key=${g.id}
                     type="button"
@@ -1228,8 +1427,10 @@ function WorkAside({
                     <span class=${`wka-flag-tag ${g.cls}`}>${g.lbl}</span>
                     <span class="wka-flag-title">${g.title}</span>
                     ${g.reason ? html`<span class="wka-flag-reason">${g.reason}</span>` : null}
+                    <${WkaEntryMeta} timestamp=${g.timestamp} actor=${null} />
                   </button>
                 `)}
+                <${WkaMoreDisclosure} hiddenCount=${flaggedCapped.hiddenCount} testId="wka-flagged-more" />
               </div>
             `}
         </section>
@@ -1240,7 +1441,7 @@ function WorkAside({
             ${needTotal > 0 ? html`<span class="wka-h-n">${needTotal}</span>` : null}
           </div>
           <div class="wka-list" data-testid="wka-todo-list">
-            ${approvals.map(g => html`
+            ${visibleApprovals.map(g => html`
               <button
                 key=${g.id}
                 type="button"
@@ -1253,9 +1454,10 @@ function WorkAside({
                 ${g.verifiers.length > 0
                   ? html`<span class="wka-todo-m mono">${g.verifiers.join(' · ')}</span>`
                   : null}
+                <${WkaEntryMeta} timestamp=${g.timestamp} actor=${null} />
               </button>
             `)}
-            ${verifyTasks.map(t => html`
+            ${visibleVerifyTasks.map(t => html`
               <button
                 key=${t.id}
                 type="button"
@@ -1265,10 +1467,12 @@ function WorkAside({
               >
                 <span class="wka-todo-k">게이트</span>
                 <span class="wka-todo-t">${t.title}</span>
+                <span class="wka-todo-goal mono">${t.goalTitle}</span>
                 <span class="wka-todo-m mono">${t.open > 0 ? `${t.open} 미충족` : '검증 대기'}</span>
+                <${WkaEntryMeta} timestamp=${t.timestamp} actor=${t.actor} />
               </button>
             `)}
-            ${blockers.map(t => html`
+            ${visibleBlockers.map(t => html`
               <button
                 key=${t.id}
                 type="button"
@@ -1278,7 +1482,9 @@ function WorkAside({
               >
                 <span class="wka-todo-k">차단</span>
                 <span class="wka-todo-t">${t.title}</span>
+                <span class="wka-todo-goal mono">${t.goalTitle}</span>
                 <span class="wka-todo-m">${t.blocker}</span>
+                <${WkaEntryMeta} timestamp=${t.timestamp} actor=${t.actor} />
               </button>
             `)}
             ${backlog.length > 0 ? (() => {
@@ -1298,6 +1504,7 @@ function WorkAside({
                 </button>
               `
             })() : null}
+            <${WkaMoreDisclosure} hiddenCount=${todoHiddenCount} testId="wka-todo-more" />
             ${needTotal === 0
               ? html`<div class="wka-calm mono" data-testid="wka-todo-calm">대기 중인 작업 없음</div>`
               : null}
@@ -1312,18 +1519,23 @@ function WorkAside({
           <div class="wka-list">
             ${recent.length === 0
               ? html`<div class="wka-calm mono" data-testid="wka-recent-calm">완료된 task 없음</div>`
-              : recent.map(t => html`
-                <button
-                  key=${t.id}
-                  type="button"
-                  class="wka-done"
-                  onClick=${() => onJump(t.goalId)}
-                  data-testid="wka-recent-item"
-                >
-                  <span class="wka-done-mark">✓</span>
-                  <span class="wka-done-t">${t.title}</span>
-                </button>
-              `)}
+              : html`
+                ${recentCapped.visible.map(t => html`
+                  <button
+                    key=${t.id}
+                    type="button"
+                    class="wka-done"
+                    onClick=${() => onJump(t.goalId)}
+                    data-testid="wka-recent-item"
+                  >
+                    <span class="wka-done-mark">✓</span>
+                    <span class="wka-done-t">${t.title}</span>
+                    <span class="wka-done-goal mono">${t.goalTitle}</span>
+                    <${WkaEntryMeta} timestamp=${t.completedAt} actor=${t.actor} />
+                  </button>
+                `)}
+                <${WkaMoreDisclosure} hiddenCount=${recentCapped.hiddenCount} testId="wka-recent-more" />
+              `}
           </div>
         </section>
 
@@ -1449,6 +1661,11 @@ function WorkSurfaceV2() {
         if (list) list.push(t)
       }
     }
+    // Deliberate order (see sortTasksByStatus) — without this, GoalCard renders
+    // tasks in whatever order the store/API returned them, which happened to
+    // read as "paused/unknown/done sink to the bottom with no explanation"
+    // when it was really just incidental server order.
+    for (const list of map.values()) list.sort(sortTasksByStatus)
     return map
   }, [displayGoals, treeGoals, claimedTasks])
 
@@ -1504,6 +1721,7 @@ function WorkSurfaceV2() {
         lbl: goalPhaseFlagLbl(g.phase),
         title: g.title,
         reason: g.last_review_note,
+        timestamp: g.last_review_at ?? g.updated_at ?? null,
       })),
   [goalList])
 
@@ -1514,6 +1732,7 @@ function WorkSurfaceV2() {
         id: g.id,
         title: g.title,
         verifiers: g.verifier_policy?.principals.map(p => p.id) ?? [],
+        timestamp: g.last_review_at ?? g.updated_at ?? null,
       })),
   [goalList])
 
@@ -1524,9 +1743,12 @@ function WorkSurfaceV2() {
         id: t.id,
         title: t.title,
         goalId: t.goal_id ?? '',
+        goalTitle: t.goal_id ? (goalTitleById.get(t.goal_id) ?? WORK_UNLINKED_GOAL_TITLE) : WORK_UNLINKED_GOAL_TITLE,
         open: taskGateRows(t).filter(r => r.outcome !== 'satisfied').length,
+        timestamp: t.updated_at ?? null,
+        actor: t.assignee ?? null,
       })),
-  [claimedTasks])
+  [claimedTasks, goalTitleById])
 
   // Live Task has no freeform `blocker` string field; blockerNoteForTask()
   // reads handoff_context.failure_mode / reason.  We surface tasks where
@@ -1543,8 +1765,11 @@ function WorkSurfaceV2() {
         title: t.title,
         blocker: blockerNoteForTask(t) ?? '',
         goalId: t.goal_id ?? '',
+        goalTitle: t.goal_id ? (goalTitleById.get(t.goal_id) ?? WORK_UNLINKED_GOAL_TITLE) : WORK_UNLINKED_GOAL_TITLE,
+        timestamp: t.updated_at ?? null,
+        actor: t.assignee ?? null,
       })),
-  [claimedTasks])
+  [claimedTasks, goalTitleById])
 
   const wkaBacklog = useMemo((): ReadonlyArray<WkaBacklogTask> =>
     claimedTasks
@@ -1558,6 +1783,8 @@ function WorkSurfaceV2() {
       })),
   [claimedTasks, goalTitleById])
 
+  // Sorted most-recently-completed first — previously unsorted (store order),
+  // which made "최근 한 일" not actually reflect recency.
   const wkaRecent = useMemo((): ReadonlyArray<WkaRecentTask> =>
     claimedTasks
       .filter(t => t.status === 'done')
@@ -1565,8 +1792,12 @@ function WorkSurfaceV2() {
         id: t.id,
         title: t.title,
         goalId: t.goal_id ?? '',
-      })),
-  [claimedTasks])
+        goalTitle: t.goal_id ? (goalTitleById.get(t.goal_id) ?? WORK_UNLINKED_GOAL_TITLE) : WORK_UNLINKED_GOAL_TITLE,
+        completedAt: t.completed_at ?? t.updated_at ?? null,
+        actor: t.assignee ?? null,
+      }))
+      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? '')),
+  [claimedTasks, goalTitleById])
 
   const wkaCounts = useMemo((): WkaCounts => ({
     active: totals.goals,
@@ -1679,6 +1910,8 @@ function WorkSurfaceV2() {
               <div class=${`wk-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
             </div>
           </section>
+
+          <${StatusLegend} />
 
           ${view === 'list' && backlogTasks.length > 0 ? html`
             <section class="wk-backlog" data-testid="work-backlog">

@@ -768,6 +768,94 @@ describe('Work', () => {
       })
     })
 
+    // ── Status legend and deliberate ordering (#45) ──────────────────────────
+    describe('task status legend and ordering', () => {
+      it('hides the status legend body by default and reveals it on toggle click', () => {
+        goals.value = []
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        expect(screen.queryByTestId('status-legend-body')).toBeNull()
+        fireEvent.click(screen.getByTestId('status-legend-toggle'))
+        const body = screen.getByTestId('status-legend-body')
+        expect(body).toBeTruthy()
+        // Every status gets a label + a semantic explanation, not just a dot —
+        // this is the fix for "정지/미확인 상태가 뭘 뜻하는지 알 수 없다".
+        expect(body.textContent).toContain('일시정지')
+        expect(body.textContent).toContain('운영자가 의도적으로 보류함')
+        expect(body.textContent).toContain('상태 미확인')
+        expect(body.textContent).toContain('서버가 인식하지 못한 status 값')
+        // Toggling again hides it
+        fireEvent.click(screen.getByTestId('status-legend-toggle'))
+        expect(screen.queryByTestId('status-legend-body')).toBeNull()
+      })
+
+      it('exposes the same status explanation as a hover tooltip on the task-row status pill', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        // A paused task auto-expands its goal card (any blocked-bucket task
+        // does — see the auto-expand effect in WorkSurfaceV2), so no manual
+        // toggle click is needed here.
+        tasks.value = [
+          { id: 'T-paused', title: 'Paused task', goal_id: 'G-1', status: 'paused' },
+        ]
+
+        render(html`<${Work} />`)
+
+        const pill = screen.getByTestId('job-row').querySelector('.wk-task-state')
+        expect(pill?.textContent).toBe('일시정지')
+        expect(pill?.getAttribute('title')).toBe('운영자가 의도적으로 보류함 (장애 상태 아님)')
+      })
+
+      it('orders a goal task list by status (active work first, then attention states, then terminal) instead of store order', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        // Deliberately fed in an order that is the OPPOSITE of the expected
+        // deliberate ordering, so a passing assertion proves sorting happened
+        // rather than happening to match input order. The paused/unknown
+        // tasks also auto-expand the goal card (blocked-bucket), so no
+        // manual toggle click is needed.
+        tasks.value = [
+          { id: 'T-done', title: 'Done task', goal_id: 'G-1', status: 'done' },
+          { id: 'T-unknown', title: 'Unknown task', goal_id: 'G-1', status: 'unknown' },
+          { id: 'T-paused', title: 'Paused task', goal_id: 'G-1', status: 'paused' },
+          { id: 'T-todo', title: 'Todo task', goal_id: 'G-1', status: 'todo' },
+          { id: 'T-progress', title: 'In progress task', goal_id: 'G-1', status: 'in_progress' },
+        ]
+
+        render(html`<${Work} />`)
+
+        const rowIds = screen.getAllByTestId('job-row').map(row => row.getAttribute('data-job-id'))
+        expect(rowIds).toEqual(['T-todo', 'T-progress', 'T-paused', 'T-unknown', 'T-done'])
+      })
+
+      it('shows the compact kanban column labels (백로그/정지/미확인) distinct from the full task-row labels', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'T-paused', title: 'Paused task', goal_id: 'G-1', status: 'paused' },
+          { id: 'T-unknown', title: 'Unknown task', goal_id: 'G-1', status: 'unknown' },
+        ]
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const pausedCol = screen.getByTestId('kanban-col-paused')
+        const unknownCol = screen.getByTestId('kanban-col-unknown')
+        expect(pausedCol.querySelector('.wk-kcol-title')?.textContent).toBe('정지')
+        expect(pausedCol.querySelector('.wk-kcol-title')?.getAttribute('title')).toContain('운영자가 의도적으로 보류함')
+        expect(unknownCol.querySelector('.wk-kcol-title')?.textContent).toBe('미확인')
+
+        // Return to list view so later tests don't inherit a stale
+        // localStorage('v2.workView'='kanban') on failure.
+        fireEvent.click(screen.getByTestId('work-view-list'))
+      })
+    })
+
     // ── WorkAside operator triage panel ─────────────────────────────────────
     describe('WorkAside operator triage panel', () => {
       // All WorkAside tests use section: 'work' (set in beforeEach above)
@@ -958,6 +1046,130 @@ describe('Work', () => {
         expect(texts.some(t => t.includes('Finished Task'))).toBe(true)
         expect(texts.some(t => t.includes('Another Done'))).toBe(true)
         expect(aside.querySelector('[data-testid="wka-recent-calm"]')).toBeNull()
+      })
+
+      // ── Provenance and section caps (#47) ────────────────────────────────
+
+      it('shows which goal, when, and who for a recent done task instead of a bare title', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          {
+            id: 'J-done1', title: 'Finished Task', goal_id: 'G-1', status: 'done',
+            assignee: 'keeper-x', completed_at: '2026-01-05T00:00:00Z', updated_at: '2026-01-04T00:00:00Z',
+          },
+        ]
+
+        render(html`<${Work} />`)
+
+        const item = screen.getByTestId('wka-recent-item')
+        expect(item.textContent).toContain('Goal One') // which goal
+        expect(item.textContent).toContain('keeper-x') // who (actor)
+        expect(item.querySelector('.wka-meta-time')).toBeTruthy() // when (timestamp)
+      })
+
+      it('does not invent a timestamp or actor when the task has neither', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-done1', title: 'Finished Task', goal_id: 'G-1', status: 'done' },
+        ]
+
+        render(html`<${Work} />`)
+
+        const item = screen.getByTestId('wka-recent-item')
+        expect(item.querySelector('.wka-meta-time')).toBeNull()
+        expect(item.querySelector('.wka-meta-actor')).toBeNull()
+      })
+
+      it('sorts 최근 한 일 most-recently-completed first', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-old', title: 'Old done', goal_id: 'G-1', status: 'done', completed_at: '2026-01-01T00:00:00Z' },
+          { id: 'J-new', title: 'New done', goal_id: 'G-1', status: 'done', completed_at: '2026-01-10T00:00:00Z' },
+          { id: 'J-mid', title: 'Mid done', goal_id: 'G-1', status: 'done', completed_at: '2026-01-05T00:00:00Z' },
+        ]
+
+        render(html`<${Work} />`)
+
+        const ids = screen.getAllByTestId('wka-recent-item').map(el => el.textContent ?? '')
+        expect(ids[0]).toContain('New done')
+        expect(ids[1]).toContain('Mid done')
+        expect(ids[2]).toContain('Old done')
+      })
+
+      it('caps 최근 한 일 at the section max and discloses the remaining count instead of dumping every row', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = Array.from({ length: 11 }, (_, i) => ({
+          id: `J-done-${i}`, title: `Done ${i}`, goal_id: 'G-1', status: 'done' as const,
+          completed_at: `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+        }))
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        expect(screen.getAllByTestId('wka-recent-item').length).toBe(8)
+        expect(aside.querySelector('[data-testid="wka-recent-more"]')?.textContent).toContain('3개 더')
+        // The header count is the true total, not the capped visible count.
+        expect(aside.querySelector('#wka-h-recent')?.textContent).toContain('11')
+      })
+
+      it('caps 지금 상황 at the section max and discloses the remaining count', () => {
+        goals.value = Array.from({ length: 10 }, (_, i) => ({
+          id: `G-blocked-${i}`, title: `Blocked ${i}`, priority: 1, status: 'active', phase: 'blocked' as const,
+          created_at: '2026-01-01', updated_at: '2026-01-01',
+        }))
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        expect(screen.getAllByTestId('wka-flagged-item').length).toBe(8)
+        expect(aside.querySelector('[data-testid="wka-flagged-more"]')?.textContent).toContain('2개 더')
+      })
+
+      it('caps the combined 해야 할 일 entries across approvals/verify/blockers and discloses the remaining count', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        // 5 verify + 5 blocker tasks = 10 combined todo entries, over the cap of 8.
+        tasks.value = [
+          ...Array.from({ length: 5 }, (_, i) => ({
+            id: `J-verify-${i}`, title: `Verify ${i}`, goal_id: 'G-1', status: 'awaiting_verification' as const,
+          })),
+          ...Array.from({ length: 5 }, (_, i) => ({
+            id: `J-blocked-${i}`, title: `Blocked ${i}`, goal_id: 'G-1', status: 'blocked' as const,
+            handoff_context: { summary: '', reason: `reason ${i}` },
+          })),
+        ]
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        const visibleCount = aside.querySelectorAll('[data-testid="wka-verify-item"], [data-testid="wka-blocker-item"]').length
+        expect(visibleCount).toBe(8)
+        expect(aside.querySelector('[data-testid="wka-todo-more"]')?.textContent).toContain('2개 더')
+        // The header badge still reflects the true total (10), not the capped 8.
+        expect(aside.querySelector('#wka-h-todo')?.textContent).toContain('10')
+      })
+
+      it('shows which goal a verify/blocker todo item belongs to', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-verify', title: 'Verify me', goal_id: 'G-1', status: 'awaiting_verification' },
+        ]
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('wka-verify-item').textContent).toContain('Goal One')
       })
 
       it('toggles to collapsed rail on collapse button click and back on railbtn click', () => {

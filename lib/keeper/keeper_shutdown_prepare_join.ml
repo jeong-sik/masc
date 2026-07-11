@@ -66,8 +66,14 @@ let active_turn_of_snapshots reservation current =
     Inflight_effect_unknown
       { lane
       ; admitted_at
-      ; observed_turn_id = Option.map (fun obs -> obs.turn_id) observation
-      ; observation_started_at = Option.map (fun obs -> obs.started_at) observation
+      ; observed_turn_id =
+          Option.map
+            (fun (obs : Keeper_registry.turn_observation) -> obs.turn_id)
+            observation
+      ; observation_started_at =
+          Option.map
+            (fun (obs : Keeper_registry.turn_observation) -> obs.started_at)
+            observation
       }
 ;;
 

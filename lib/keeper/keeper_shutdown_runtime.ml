@@ -195,6 +195,7 @@ let run_worker ~config ~entry operation =
     (match entry with
      | None ->
        persist_unhandled_failure
+         ~now:Masc_domain.now_iso
          ~config
          operation
          (Failure "prepared registered-lane shutdown worker lost its exact entry")

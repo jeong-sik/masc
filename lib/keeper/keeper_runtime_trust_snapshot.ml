@@ -89,8 +89,8 @@ let terminal_reason_from_receipt receipt =
   in
   match terminal_reason_code with
   | Some code when receipt_requires_tool_attention
-                   && (String.equal code "completed"
-                       || String.equal code "success") ->
+                   && Keeper_turn_disposition.is_success
+                        (Keeper_turn_disposition.of_wire code) ->
       Some
         (Keeper_turn_terminal.of_disposition
            ~source:"execution_receipt"

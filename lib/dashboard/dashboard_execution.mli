@@ -44,3 +44,8 @@ val record_render_phase_timings : render_phase_timings_ms -> unit
 (** Emit the render phase breakdown into Otel_metric_store.  This mirrors the
     slow-render log payload so dashboard N+1 / enrichment cost is visible
     even when the render stays below the warning threshold. *)
+
+val terminal_reason_requires_attention : Yojson.Safe.t -> bool
+(** Strict typed projection for a runtime-trust [latest_terminal_reason].
+    Missing reason is non-attention; malformed or non-success dispositions are
+    attention. Exposed for wire-contract regression tests. *)

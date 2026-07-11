@@ -141,13 +141,16 @@ val next_action : t -> string option
     - [Unknown { raw_error }] → [raw_error] (verbatim) *)
 val to_wire : t -> string
 
-(** Best-effort deserialiser. Recognised application strings round-trip
+(** Best-effort deserialiser. Canonical application strings round-trip
     exactly. Unrecognised strings first try
     [Keeper_turn_terminal_code.of_wire]; if that succeeds, the result
     is wrapped via [of_termination_code] (which may itself collapse to
     a non-Provider_error disposition such as [Completion_contract_unsatisfied]).
     Otherwise [Unknown { raw_error = wire }] is returned. *)
 val of_wire : string -> t
+
+(** Typed success predicate for consumers of the strict canonical decoder. *)
+val is_success : t -> bool
 
 (** True iff {!of_wire} classifies [wire] as [Turn_budget_exhausted]. Strict:
     only the single paren grammar is recognised. The pre-fix colon form

@@ -363,13 +363,6 @@ let record_board_cursor_ack
   Dated_jsonl.append (store_for_base_path ~base_path ~keeper_name) json
 ;;
 
-let receipt_reaction_kind ~terminal_reason_code =
-  let trimmed = String.trim terminal_reason_code in
-  if trimmed = "" || String.equal trimmed "completed"
-  then Execution_receipt
-  else Terminal_reason
-;;
-
 let record_execution_receipt_reaction
       config
       ~keeper_name
@@ -378,11 +371,11 @@ let record_execution_receipt_reaction
       ~current_task_id
       ~goal_ids
       ~outcome
+      ~reaction_kind
       ~terminal_reason_code
       ~receipt_json
       ()
   =
-  let reaction_kind = receipt_reaction_kind ~terminal_reason_code in
   let recorded_at = Time_compat.now () in
   let stimulus_id =
     match current_task_id with

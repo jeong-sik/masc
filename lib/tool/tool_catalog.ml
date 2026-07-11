@@ -70,6 +70,7 @@ type metadata = {
   idempotent : bool option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
+  required_permission : Masc_domain.permission option;
 }
 
 (* ================================================================ *)
@@ -91,6 +92,7 @@ let default_metadata =
     idempotent = None;
     effect_domain = None;
     requires_actor_binding = None;
+    required_permission = None;
   }
 
 (* Runtime-readable like MASC_FULL_SURFACE so tests and local admin flows can
@@ -118,10 +120,12 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     idempotent = None;
     effect_domain = None;
     requires_actor_binding = None;
+    required_permission = None;
   }
 
 let with_semantic_flags ?readonly ?mcp_context_required
-    ?destructive ?idempotent ?effect_domain ?requires_actor_binding meta =
+    ?destructive ?idempotent ?effect_domain ?requires_actor_binding
+    ?required_permission meta =
   {
     meta with
     readonly =
@@ -142,6 +146,10 @@ let with_semantic_flags ?readonly ?mcp_context_required
       (match requires_actor_binding with
       | Some value -> Some value
       | None -> meta.requires_actor_binding);
+    required_permission =
+      (match required_permission with
+      | Some value -> Some value
+      | None -> meta.required_permission);
   }
 
 let readonly_tool =
@@ -226,6 +234,7 @@ let explicit_metadata : (string * metadata) list =
        masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
+        ~required_permission:Masc_domain.CanAdmin
         (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
     ( "masc_set_param",
       with_semantic_flags ~destructive:true
@@ -266,7 +275,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
     ( "masc_operator_confirm",
-      with_semantic_flags ~destructive:true actor_broadcast_tool );
+      with_semantic_flags ~destructive:true
+        ~required_permission:Masc_domain.CanAdmin actor_broadcast_tool );
     ("masc_surface_audit", read_state_tool);
     ("masc_persona_list", read_state_tool);
     ("masc_persona_create", broadcast_tool);
@@ -555,7 +565,12 @@ let metadata_to_fields name =
     | Some value -> ("requiresActorBinding", `Bool value) :: with_mcp_context_required
     | None -> with_mcp_context_required
   in
-  with_actor_binding
+  (match meta.required_permission with
+   | Some permission ->
+       ( "requiredPermission",
+         `String (Masc_domain.permission_to_string permission) )
+       :: with_actor_binding
+   | None -> with_actor_binding)
 
 let public_contract_fields name =
   let meta = metadata name in
@@ -582,9 +597,17 @@ let public_contract_fields name =
     | Some value -> ("mcpContextRequired", `Bool value) :: with_actor_binding
     | None -> with_actor_binding
   in
+  let with_required_permission =
+    match meta.required_permission with
+    | Some permission ->
+        ( "requiredPermission",
+          `String (Masc_domain.permission_to_string permission) )
+        :: with_mcp_context_required
+    | None -> with_mcp_context_required
+  in
   match meta.canonical_name with
-  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_mcp_context_required
-  | None -> with_mcp_context_required
+  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_required_permission
+  | None -> with_required_permission
 
 let allow_direct_call name =
   let meta = metadata name in

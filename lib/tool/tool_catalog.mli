@@ -36,6 +36,7 @@ type metadata = {
   idempotent : bool option;
   effect_domain : effect_domain option;
   requires_actor_binding : bool option;
+  required_permission : Masc_domain.permission option;
 }
 
 (** {1 Configuration} *)

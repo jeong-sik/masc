@@ -284,9 +284,8 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
   if is_known_or_internal_tool_name tool_name
   then
     let permission =
-      match (Tool_catalog.metadata tool_name).destructive with
-      | Some true -> CanAdmin
-      | Some false | None -> CanBroadcast
+      (Tool_catalog.metadata tool_name).required_permission
+      |> Option.value ~default:CanBroadcast
     in
     if has_permission role permission
     then Ok ()
@@ -300,10 +299,10 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
 ;;
 
 (** Role-based tool authorization.
-    Resolves the caller role and enforces catalog-owned destructive metadata:
-    destructive tools require [CanAdmin], while other known/internal tools
-    require [CanBroadcast]. Invalid/expired tokens are rejected rather than
-    silently downgraded. *)
+    Resolves the caller role and enforces the catalog-owned permission when
+    present. Destructive metadata remains a risk/HITL signal and does not by
+    itself turn every Keeper tool into an Admin-only operation. Invalid or
+    expired tokens are rejected rather than silently downgraded. *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e
@@ -371,4 +370,3 @@ let is_auth_enabled config : bool =
   let cfg = load_auth_config config in
   cfg.enabled
 ;;
-

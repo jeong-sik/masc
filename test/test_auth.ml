@@ -1080,7 +1080,7 @@ let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
-let test_authorize_tool_v2_destructive_catalog_requires_admin () =
+let test_authorize_tool_v2_explicit_catalog_permission_requires_admin () =
   (* Exercise the production registration order. [Operator_tool] writes the
      canonical Tool_spec metadata after the seed catalog is initialized. *)
   ignore Operator_tool.force_link;
@@ -1094,7 +1094,7 @@ let test_authorize_tool_v2_destructive_catalog_requires_admin () =
      with
      | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
      | Ok () ->
-         failf "Worker must not authorize catalog-destructive %s" tool_name
+         failf "Worker must not authorize catalog-admin tool %s" tool_name
      | Error e ->
          fail
            (Printf.sprintf
@@ -1237,8 +1237,8 @@ let () =
         `Quick test_authorize_tool_v2_unknown_internal_worker_allowed;
       test_case "strict v2 fake keeper prefix denied"
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
-      test_case "strict v2 destructive catalog requires admin"
-        `Quick test_authorize_tool_v2_destructive_catalog_requires_admin;
+      test_case "strict v2 explicit catalog permission requires admin"
+        `Quick test_authorize_tool_v2_explicit_catalog_permission_requires_admin;
       test_case "tool auth strict env cannot disable fail-closed"
         `Quick test_tool_auth_strict_env_cannot_disable_fail_closed;
     ];

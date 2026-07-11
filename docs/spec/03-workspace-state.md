@@ -7,7 +7,6 @@ code_refs:
   - lib/goal/
   - lib/task/tool_task.ml
   - lib/tool_agent.ml
-  - lib/tool_control.ml
   - lib/workspace/workspace_git.ml
   - lib/workspace/workspace_task_claim.ml
   - lib/tool_schemas/tool_schemas_workspace_extra.ml

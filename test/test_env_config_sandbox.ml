@@ -118,9 +118,6 @@ let test_defaults_pinned () =
   (* Runtime *)
   check string "Runtime.docker_image default" "masc-keeper-sandbox:local"
     (S.Runtime.docker_image ());
-  check bool "Runtime.git_dispatch default" true (S.Runtime.git_dispatch ());
-  check bool "Runtime.docker_playground_enabled default" false
-    (S.Runtime.docker_playground_enabled ());
   (* Preflight *)
   check bool "Preflight.enabled default" true (S.Preflight.enabled ());
   check int "Preflight.required_commands count" 19

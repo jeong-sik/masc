@@ -147,7 +147,15 @@ let test_keeper_sandbox_stop_operator_dispatch_is_wired () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
-      let ctx = operator_ctx env sw config "operator" in
+      let ctx =
+        Keeper_tool_boundary.create
+          ~config
+          ~agent_name:"operator"
+          ~sw
+          ~clock:(Eio.Stdenv.clock env)
+          ~proc_mgr:(Some (Eio.Stdenv.process_mgr env))
+          ~net:(Some (Eio.Stdenv.net env))
+      in
       let dispatch_exn args =
         match
           Keeper_tool_boundary.dispatch

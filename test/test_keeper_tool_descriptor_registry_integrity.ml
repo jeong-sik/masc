@@ -1396,7 +1396,7 @@ let test_dead_sandbox_start_is_purged_and_stop_schema_is_closed () =
     "dead managed sandbox start descriptor is absent"
     false
     (all_descriptors ()
-     |> List.exists (fun descriptor ->
+     |> List.exists (fun (descriptor : Descriptor.t) ->
        String.equal descriptor.internal_name "masc_keeper_sandbox_start"));
   let stop = required_internal_descriptor "masc_keeper_sandbox_stop" in
   let properties = stop.input_schema |> member "properties" in

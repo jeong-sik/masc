@@ -44,56 +44,6 @@ let resolve_tool_execute_cwd ~config ~meta ~write_enabled ~args =
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
-(* Docker playground path mapping: host → container.
-   Host:      <base_path>/.masc/playground/<keeper>/repos/X
-   Container: <container_playground_root>/<keeper>/repos/X
-   The container-side root comes from
-   [Env_config_sandbox.Runtime.docker_playground_container_root ()] so the
-   mount point is configurable (default "/home/keeper/playground"). *)
-let _docker_playground_cwd ~(config : Workspace.config) ~(meta : keeper_meta) host_cwd =
-  let root = Keeper_alerting_path.project_root_of_config config in
-  let playground_prefix =
-    Filename.concat root Playground_paths.all_playgrounds_prefix
-  in
-  let container_root =
-    Env_config_sandbox.Runtime.docker_playground_container_root ()
-  in
-  (* Boundary-safe prefix match: require either an exact match or a
-     prefix ending at a path separator. Without this, host paths like
-     "<root>/.masc/playgroundXYZ/..." would match "<root>/.masc/playground"
-     and leak into the container playground. *)
-  let prefix_with_sep = playground_prefix ^ "/" in
-  let starts_at_boundary =
-    host_cwd = playground_prefix
-    || String.starts_with ~prefix:prefix_with_sep host_cwd
-  in
-  if starts_at_boundary then
-    if host_cwd = playground_prefix then container_root
-    else
-      let raw_suffix =
-        String.sub host_cwd (String.length prefix_with_sep)
-          (String.length host_cwd - String.length prefix_with_sep)
-      in
-      (* A [host_cwd] like ".../.masc/playground//cheolsu/..." produces a
-         [raw_suffix] that starts with "/". [Filename.concat] would then
-         treat [raw_suffix] as an absolute path and drop [container_root],
-         silently escaping the mount. Strip any leading slashes so the
-         suffix is always a strict relative segment. *)
-      let suffix =
-        let n = String.length raw_suffix in
-        let i = ref 0 in
-        while !i < n && raw_suffix.[!i] = '/' do incr i done;
-        if !i = 0 then raw_suffix
-        else String.sub raw_suffix !i (n - !i)
-      in
-      if suffix = "" then container_root
-      else Filename.concat container_root suffix
-  else
-    (* meta.name is sanitized through Playground_paths so a poisoned
-       name cannot escape the container_root. *)
-    Filename.concat container_root
-      (Playground_paths.sanitize_keeper_name meta.name)
-
 (* Common wrong path prefixes that keepers use.
    Maps wrong prefix → corrected relative path using the keeper
    playground SSOT ([Playground_paths]). [sanitize_keeper_name] in the

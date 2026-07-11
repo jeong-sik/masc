@@ -1088,7 +1088,7 @@ let handle_tool_execute_typed
                 ~agent_id
                 ~approval_config
                 ~keeper_id:meta.name
-                ~base_path:root
+                ~base_path:config.base_path
                 ~workdir:cwd
                 ~sandbox:dispatch_sandbox
                 ?base_host_env
@@ -1097,7 +1097,7 @@ let handle_tool_execute_typed
             else
               Keeper_tool_execute_shell_ir.dispatch_classified
                 ~keeper_id:meta.name
-                ~base_path:root
+                ~base_path:config.base_path
                 ~workdir:cwd
                 ~sandbox:dispatch_sandbox
                 ?base_host_env
@@ -1147,7 +1147,7 @@ let handle_tool_execute_typed
                let repo_create_contract = repo_create_contract_json_of_ir ir in
                let approval_id =
                  submit_shell_ir_approval_pending
-                   ~base_path:root
+                   ~base_path:config.base_path
                    ~keeper_name:meta.name
                    ?task_id
                    ~goal_ids:meta.active_goal_ids
@@ -1330,7 +1330,7 @@ let handle_tool_execute_typed
             Yojson.Safe.to_string
               (Exec_core.process_result_json
                  ~classification
-                 ~base_path:root
+                 ~base_path:config.base_path
                  ~keeper_name:meta.name
                  ~cmd
                  ~extra:

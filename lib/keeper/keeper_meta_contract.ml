@@ -695,6 +695,7 @@ let effective_meta_of_profile_defaults
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) : (keeper_meta, string) result =
   let open Keeper_types_profile in
+  let has_profile_source = Option.is_some defaults.manifest_path in
   let target_sandbox_profile =
     match defaults.sandbox_profile, defaults.manifest_path with
     | Some profile, _ -> Ok profile

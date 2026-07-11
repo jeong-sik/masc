@@ -288,7 +288,7 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
              active_snapshot.backlog_version)
 ;;
 
-let paused_meta meta =
+let paused_meta (meta : Keeper_meta_contract.keeper_meta) =
   { meta with
     current_task_id = None
   ; paused = true

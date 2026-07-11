@@ -743,7 +743,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         Masc.Workspace.init config ~agent_name:(Some "tester")
       in
       let backlog_version =
-        match Masc.Workspace_backlog.read_backlog_r config with
+        match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
         | Error detail -> fail detail
       in
@@ -973,7 +973,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let backlog_version =
-        match Masc.Workspace_backlog.read_backlog_r config with
+        match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
         | Error detail -> fail detail
       in
@@ -1076,7 +1076,7 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
        | Ok () -> ()
        | Error detail -> fail detail);
       let backlog_version =
-        match Masc.Workspace_backlog.read_backlog_r config with
+        match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
         | Error detail -> fail detail
       in
@@ -1168,7 +1168,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
         | Error detail -> fail detail
       in
       let backlog_version =
-        match Masc.Workspace_backlog.read_backlog_r config with
+        match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
         | Error detail -> fail detail
       in

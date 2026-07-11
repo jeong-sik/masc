@@ -97,11 +97,17 @@ let rollback_reservation ~config ~entry operation_id =
 let persist_blocked ~config operation stage detail =
   let blocked =
     { operation with
-      phase = Blocked { stage; detail }
+      revision = operation.revision + 1
+    ; phase = Blocked { stage; detail }
     ; updated_at = Masc_domain.now_iso ()
     }
   in
-  match Keeper_shutdown_store.replace ~config blocked with
+  match
+    Keeper_shutdown_store.replace
+      ~config
+      ~expected_revision:operation.revision
+      blocked
+  with
   | Ok () -> Ok blocked
   | Error error -> Error error
 ;;
@@ -146,16 +152,18 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
      | Error error -> Error error
      | Ok current ->
        (match
-          Keeper_current_task_reconcile.owned_active_tasks_for_meta_strict
+          Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
             ~config
             ~meta:current.meta
         with
         | Error detail -> Error (Task_discovery_failed detail)
-        | Ok owned_tasks ->
+        | Ok owned_snapshot ->
+          let owned_tasks = owned_snapshot.tasks in
           let now = Masc_domain.now_iso () in
           let turn_disposition = active_turn_of_snapshots reservation current in
           let operation =
             { schema_version
+            ; revision = 0
             ; operation_id
             ; keeper_name = current.name
             ; lane_id = Keeper_lane.id current.lane
@@ -164,6 +172,7 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
             ; actor = request.actor
             ; cleanup_intent = request.cleanup_intent
             ; turn_disposition
+            ; expected_backlog_version = owned_snapshot.backlog_version
             ; owned_task_ids =
                 List.map
                   (fun task -> task.Keeper_current_task_reconcile.task_id)
@@ -235,7 +244,8 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
           in
           let joined =
             { operation with
-              join_evidence = Some evidence
+              revision = operation.revision + 1
+            ; join_evidence = Some evidence
             ; phase
             ; updated_at = Masc_domain.now_iso ()
             }
@@ -246,7 +256,12 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
               | Ok blocked -> Error (Join_failed blocked)
               | Error error -> Error (Join_record_update_failed error))
            | None ->
-             (match Keeper_shutdown_store.replace ~config joined with
+             (match
+                Keeper_shutdown_store.replace
+                  ~config
+                  ~expected_revision:operation.revision
+                  joined
+              with
               | Ok () -> Ok joined
               | Error error -> Error (Join_record_update_failed error)))))
 ;;

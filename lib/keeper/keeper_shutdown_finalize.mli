@@ -11,7 +11,7 @@ val error_to_string : error -> string
 
 val register_remove_pending_confirms_by_target :
   (Workspace.config ->
-   target_type:string ->
+   target_type:Operator_action_constants.target_type ->
    target_id:string option ->
    (int, string) result) ->
   unit
@@ -28,7 +28,7 @@ module For_testing : sig
 
   val remove_pending_confirms_by_target :
     config:Workspace.config ->
-    target_type:string ->
+    target_type:Operator_action_constants.target_type ->
     target_id:string option ->
     (int, string) result
 

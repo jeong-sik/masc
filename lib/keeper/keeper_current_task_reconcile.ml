@@ -46,7 +46,12 @@ type owned_active_task =
   ; task : Masc_domain.task
   }
 
-let owned_active_tasks_for_names ~(config : Workspace.config)
+type owned_active_tasks_snapshot =
+  { tasks : owned_active_task list
+  ; backlog_version : int
+  }
+
+let owned_active_tasks_snapshot_for_names ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) names =
   let matches assignee = List.mem assignee names in
   try
@@ -61,21 +66,23 @@ let owned_active_tasks_for_names ~(config : Workspace.config)
         message;
       Error message
     | Ok backlog ->
-      backlog.tasks
-      |> List.filter_map (fun (task : Masc_domain.task) ->
-           match task.task_status with
-           | Masc_domain.Claimed { assignee; _ }
-           | Masc_domain.InProgress { assignee; _ }
-             when matches assignee ->
-               task_id_of_owned_active_task ~keeper_name:meta.name task
-               |> Option.map (fun task_id -> { task_id; task })
-           | Masc_domain.Claimed _
-           | Masc_domain.InProgress _
-           | Masc_domain.AwaitingVerification _
-           | Masc_domain.Todo
-           | Masc_domain.Done _
-           | Masc_domain.Cancelled _ -> None)
-      |> fun tasks -> Ok tasks
+      let tasks =
+        backlog.tasks
+        |> List.filter_map (fun (task : Masc_domain.task) ->
+          match task.task_status with
+          | Masc_domain.Claimed { assignee; _ }
+          | Masc_domain.InProgress { assignee; _ }
+            when matches assignee ->
+            task_id_of_owned_active_task ~keeper_name:meta.name task
+            |> Option.map (fun task_id -> { task_id; task })
+          | Masc_domain.Claimed _
+          | Masc_domain.InProgress _
+          | Masc_domain.AwaitingVerification _
+          | Masc_domain.Todo
+          | Masc_domain.Done _
+          | Masc_domain.Cancelled _ -> None)
+      in
+      Ok { tasks; backlog_version = backlog.version }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -88,6 +95,10 @@ let owned_active_tasks_for_names ~(config : Workspace.config)
       "owned task reconciliation failed: %s"
       message;
     Error message
+
+let owned_active_tasks_for_names ~config ~meta names =
+  owned_active_tasks_snapshot_for_names ~config ~meta names
+  |> Result.map (fun snapshot -> snapshot.tasks)
 
 let owned_active_tasks_for_meta ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
@@ -109,6 +120,22 @@ let owned_active_tasks_for_meta_strict ~(config : Workspace.config)
       detail;
     Error detail
   | Ok names -> owned_active_tasks_for_names ~config ~meta names
+;;
+
+let owned_active_tasks_snapshot_for_meta_strict ~(config : Workspace.config)
+    ~(meta : Keeper_meta_contract.keeper_meta) =
+  match resolved_agent_names_result ~config ~agent_name:meta.agent_name with
+  | Error detail ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ReconcileFailures)
+      ~labels:[ "keeper", meta.name; "phase", "shutdown_resolve_agent" ]
+      ();
+    Log.Keeper.warn
+      ~keeper_name:meta.name
+      "shutdown task ownership resolution failed: %s"
+      detail;
+    Error detail
+  | Ok names -> owned_active_tasks_snapshot_for_names ~config ~meta names
 ;;
 
 let active_status_rank = function

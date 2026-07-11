@@ -50,6 +50,10 @@ type rollback_shutdown_result =
   | Shutdown_not_reserved
   | Shutdown_reserved_by_other of Keeper_shutdown_types.Operation_id.t
 
+type 'a registration_commit_result =
+  | Registration_committed of 'a
+  | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+
 type slot_snapshot =
   { snapshot_keeper_name : string
   ; snapshot_slot_created : bool
@@ -187,6 +191,15 @@ val rollback_shutdown :
   keeper_name:string ->
   operation_id:Keeper_shutdown_types.Operation_id.t ->
   rollback_shutdown_result
+
+(** Run the non-yielding registry [commit] only while no shutdown operation
+    owns the Keeper admission fence. Shutdown reservation and same-name lane
+    installation are therefore totally ordered. *)
+val commit_registration_if_open :
+  base_path:string ->
+  keeper_name:string ->
+  (unit -> 'a) ->
+  'a registration_commit_result
 
 (** Join the current turn holder after admission has been closed. This waits
     without an invented timeout, then immediately releases the slot. Never

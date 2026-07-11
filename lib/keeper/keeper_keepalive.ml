@@ -888,11 +888,25 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           ~keeper_name:m.name
           ~detail:(Keeper_registry.spawn_slot_denial_reason_to_detail reason)
           ()
-      | Ok () -> (
+      | Ok () ->
       (* Register in Keeper_registry first — single source of truth. *)
-      let reg =
-        Keeper_registry.register_offline ~base_path:ctx.config.base_path m.name m
-      in
+      (match
+         Keeper_registry.register_offline_if_admitted
+           ~base_path:ctx.config.base_path
+           m.name
+           m
+       with
+       | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
+         Log.Keeper.info
+           "start_keepalive: skipped %s because shutdown operation %s owns admission"
+           m.name
+           (Keeper_shutdown_types.Operation_id.to_string operation_id)
+       | Error (Keeper_registry.Registration_invalid validation_error) ->
+         Log.Keeper.error
+           "start_keepalive: registry validation rejected %s: %s"
+           m.name
+           (Keeper_registry.registry_entry_validation_error_to_string validation_error)
+       | Ok reg ->
       (* Restore persisted tool usage stats from previous session *)
       Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
       (* Launch gate FIRST: every launch side effect (gRPC heartbeat fiber,

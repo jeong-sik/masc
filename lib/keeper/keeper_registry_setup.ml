@@ -389,7 +389,12 @@ let refresh_entry_event_queue_from_persistence ~base_path name entry =
   loop ()
 ;;
 
-let register_with_state
+type registration_error =
+  | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_invalid of registry_entry_validation_error
+
+let register_with_state_result
+      ~respect_shutdown_fence
       ~base_path
       name
       meta
@@ -404,15 +409,6 @@ let register_with_state
     (Keeper_state_machine.phase_to_string phase);
   let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
-  (match StringMap.find_opt key (Atomic.get registry) with
-   | Some entry when entry.phase = Running ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string LifecycleDispatchRejections)
-       ~labels:[ "keeper", name; "event", "register_overwrite_running" ]
-       ();
-     Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
-     decr_running_count_clamped ()
-   | _ -> ());
   let initial_event_queue =
     Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
   in
@@ -454,15 +450,64 @@ let register_with_state
     ; compaction_stage = Packed Compaction_accumulating
     }
   in
-  (* fire-and-forget: put_entry validates and logs on failure; the constructed entry is always used. *)
-  ignore (put_entry ~base_path name entry);
-  if phase = Running then Atomic.incr running_count_atomic;
-  Log.Keeper.debug
-    "registry: keeper registered name=%s running_count=%d"
-    name
-    (Atomic.get running_count_atomic);
-  refresh_entry_event_queue_from_persistence ~base_path name entry;
-  entry
+  let commit () =
+    (match StringMap.find_opt key (Atomic.get registry) with
+     | Some prior when prior.phase = Running ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string LifecycleDispatchRejections)
+         ~labels:[ "keeper", name; "event", "register_overwrite_running" ]
+         ();
+       Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
+       decr_running_count_clamped ()
+     | Some _ | None -> ());
+    put_entry ~base_path name entry
+  in
+  let commit_result =
+    if respect_shutdown_fence
+    then
+      match
+        Keeper_turn_admission.commit_registration_if_open
+          ~base_path
+          ~keeper_name:name
+          commit
+      with
+      | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
+        Error (Registration_shutdown_reserved operation_id)
+      | Keeper_turn_admission.Registration_committed (Error validation_error) ->
+        Error (Registration_invalid validation_error)
+      | Keeper_turn_admission.Registration_committed (Ok ()) -> Ok ()
+    else
+      match commit () with
+      | Ok () -> Ok ()
+      | Error validation_error -> Error (Registration_invalid validation_error)
+  in
+  match commit_result with
+  | Error _ as error -> error
+  | Ok () ->
+    if phase = Running then Atomic.incr running_count_atomic;
+    Log.Keeper.debug
+      "registry: keeper registered name=%s running_count=%d"
+      name
+      (Atomic.get running_count_atomic);
+    refresh_entry_event_queue_from_persistence ~base_path name entry;
+    Ok entry
+;;
+
+let register_with_state ~base_path name meta ~phase ~conditions =
+  match
+    register_with_state_result
+      ~respect_shutdown_fence:false
+      ~base_path
+      name
+      meta
+      ~phase
+      ~conditions
+  with
+  | Ok entry -> entry
+  | Error (Registration_invalid error) ->
+    invalid_arg (registry_entry_validation_error_to_string error)
+  | Error (Registration_shutdown_reserved _) ->
+    invalid_arg "unchecked registry registration observed a shutdown fence"
 ;;
 
 let register ~base_path name meta =
@@ -487,8 +532,27 @@ let register_offline ~base_path name meta =
   register_with_state ~base_path name meta ~phase ~conditions
 ;;
 
+let register_offline_if_admitted ~base_path name meta =
+  let conditions =
+    { Keeper_state_machine.default_conditions with
+      launch_pending = true
+    ; restart_budget_remaining = true
+    }
+  in
+  let phase = Keeper_state_machine.derive_phase conditions in
+  register_with_state_result
+    ~respect_shutdown_fence:true
+    ~base_path
+    name
+    meta
+    ~phase
+    ~conditions
+;;
+
 (** R-A-6.a — refuse to revive a keeper whose restart_budget was previously exhausted.  Pairs with TLA+ §S3 BudgetNeverRevives:  []( ~restart_budget_remaining => []( ~restart_budget_remaining ))  Witho... *)
-type register_restarting_error = Budget_already_exhausted of { name : string }
+type register_restarting_error =
+  | Budget_already_exhausted of { name : string }
+  | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 let register_restarting ~base_path name meta
   : (registry_entry, register_restarting_error) result
@@ -559,17 +623,26 @@ let register_restarting ~base_path name meta
     | _ ->
       let updated = StringMap.add key new_entry current in
       if Atomic.compare_and_set registry current updated
-      then (
-        Log.Keeper.info
-          "registry: registering keeper name=%s base_path=%s phase=%s"
-          name
-          base_path
-          (Keeper_state_machine.phase_to_string phase);
-        refresh_entry_event_queue_from_persistence ~base_path name new_entry;
-        Ok new_entry)
+      then Ok new_entry
       else loop ()
   in
-  loop ()
+  match
+    Keeper_turn_admission.commit_registration_if_open
+      ~base_path
+      ~keeper_name:name
+      loop
+  with
+  | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
+    Error (Restart_shutdown_reserved operation_id)
+  | Keeper_turn_admission.Registration_committed (Error _ as error) -> error
+  | Keeper_turn_admission.Registration_committed (Ok registered) ->
+    Log.Keeper.info
+      "registry: registering keeper name=%s base_path=%s phase=%s"
+      name
+      base_path
+      (Keeper_state_machine.phase_to_string phase);
+    refresh_entry_event_queue_from_persistence ~base_path name registered;
+    Ok registered
 ;;
 
 type unregister_exact_result =

@@ -90,6 +90,7 @@ type phase =
 
 type t =
   { schema_version : int
+  ; revision : int
   ; operation_id : Operation_id.t
   ; keeper_name : string
   ; lane_id : Keeper_lane.Id.t
@@ -98,6 +99,7 @@ type t =
   ; actor : string
   ; cleanup_intent : cleanup_intent
   ; turn_disposition : turn_disposition
+  ; expected_backlog_version : int
   ; owned_task_ids : Keeper_id.Task_id.t list
   ; join_evidence : join_evidence option
   ; phase : phase

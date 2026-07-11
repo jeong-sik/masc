@@ -333,6 +333,43 @@ let start_keeper_loops
         Log.Server.error "subsystem %s crashed: %s" name (Printexc.to_string exn))
       f
   in
+  let shutdown_inventory_p, shutdown_inventory_r = Eio.Promise.create () in
+  let config = Mcp_server.workspace_config state in
+  fork_subsystem "keeper_shutdown_recovery" (fun () ->
+    let inventory = Keeper_shutdown_store.list_all ~config in
+    Eio.Promise.resolve shutdown_inventory_r inventory;
+    match inventory with
+    | Error error ->
+      let detail = Keeper_shutdown_store.error_to_string error in
+      Log.Keeper.error "shutdown recovery inventory failed: %s" detail;
+      failwith detail
+    | Ok operations ->
+      Eio.Switch.run (fun recovery_sw ->
+        List.iter
+          (fun operation ->
+             Eio.Fiber.fork ~sw:recovery_sw (fun () ->
+               try
+                 match Keeper_shutdown_runtime.recover_operation ~config operation with
+                 | Ok recovered ->
+                   Log.Keeper.info
+                     "recovered shutdown operation keeper=%s operation=%s"
+                     recovered.Keeper_shutdown_types.keeper_name
+                     (Keeper_shutdown_types.Operation_id.to_string recovered.operation_id)
+                 | Error detail ->
+                   Log.Keeper.error
+                     "shutdown recovery failed keeper=%s operation=%s error=%s"
+                     operation.Keeper_shutdown_types.keeper_name
+                     (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                     detail
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn ->
+                 Log.Keeper.error
+                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
+                   operation.Keeper_shutdown_types.keeper_name
+                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                   (Printexc.to_string exn)))
+          operations));
   let wait_for_lazy_startup () =
     (* Combines #10843 (per-task elapsed diagnostic, merged via #10854) with
        a per-task boot guard.  The diagnostic surface stays as #10854
@@ -845,39 +882,26 @@ let start_keeper_loops
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
-      let config = (Mcp_server.workspace_config state) in
+      let config = Mcp_server.workspace_config state in
       let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
-      let shutdown_recovery = Keeper_shutdown_runtime.recover_at_boot ~config in
-      List.iter
-        (function
-          | Ok operation ->
-            Log.Keeper.info
-              "autoboot: recovered shutdown operation keeper=%s operation=%s"
-              operation.Keeper_shutdown_types.keeper_name
-              (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-          | Error detail ->
-            Log.Keeper.error "autoboot: shutdown recovery failed: %s" detail)
-        shutdown_recovery;
-      let shutdown_blocked_names =
-        match Keeper_shutdown_store.list_all ~config with
-        | Error error ->
-          Log.Keeper.error
-            "autoboot: shutdown operation inventory failed: %s"
-            (Keeper_shutdown_store.error_to_string error);
-          []
+      let shutdown_inventory = Eio.Promise.await shutdown_inventory_p in
+      let shutdown_blocked_names_result =
+        match shutdown_inventory with
+        | Error error -> Error (Keeper_shutdown_store.error_to_string error)
         | Ok operations ->
-          operations
-          |> List.filter_map (fun operation ->
-            match operation.Keeper_shutdown_types.phase with
-            | Keeper_shutdown_types.Finalized _ -> None
-            | Keeper_shutdown_types.Prepared
-            | Keeper_shutdown_types.Joined_idle
-            | Keeper_shutdown_types.Finalizing_tasks _
-            | Keeper_shutdown_types.Cleanup_ready _
-            | Keeper_shutdown_types.Reconciliation_required _
-            | Keeper_shutdown_types.Blocked _ -> Some operation.keeper_name)
-          |> List.sort_uniq String.compare
+          Ok
+            (operations
+             |> List.filter_map (fun operation ->
+               match operation.Keeper_shutdown_types.phase with
+               | Keeper_shutdown_types.Finalized _ -> None
+               | Keeper_shutdown_types.Prepared
+               | Keeper_shutdown_types.Joined_idle
+               | Keeper_shutdown_types.Finalizing_tasks _
+               | Keeper_shutdown_types.Cleanup_ready _
+               | Keeper_shutdown_types.Reconciliation_required _
+               | Keeper_shutdown_types.Blocked _ -> Some operation.keeper_name)
+             |> List.sort_uniq String.compare)
       in
       let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in
@@ -888,8 +912,15 @@ let start_keeper_loops
         keeper_dir
         all_count;
       let names =
-        Keeper_runtime.bootable_keeper_names config
-        |> List.filter (fun name -> not (List.mem name shutdown_blocked_names))
+        match shutdown_blocked_names_result with
+        | Error detail ->
+          Log.Keeper.error
+            "autoboot blocked because shutdown inventory is uncertain: %s"
+            detail;
+          []
+        | Ok shutdown_blocked_names ->
+          Keeper_runtime.bootable_keeper_names config
+          |> List.filter (fun name -> not (List.mem name shutdown_blocked_names))
       in
       let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
       let keeper_boot_ctx : _ Keeper_types_profile.context =

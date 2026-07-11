@@ -93,7 +93,6 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
       in
       (match
          Keeper_shutdown_runtime.submit
-           ~sw:ctx.sw
            ~config:ctx.config
            ~entry
            ~request

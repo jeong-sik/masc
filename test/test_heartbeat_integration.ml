@@ -739,13 +739,21 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
+      let backlog_version =
+        match Masc.Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
       let meta = make_meta "shutdown-store-keeper" in
       let operation_id = Shutdown_types.Operation_id.generate () in
       let lane = Lane.create () in
       let now = Masc_domain.now_iso () in
       let operation : Shutdown_types.t =
         { schema_version = Shutdown_types.schema_version
+        ; revision = 0
         ; operation_id
         ; keeper_name = meta.name
         ; lane_id = Lane.id lane
@@ -754,6 +762,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         ; actor = "tester"
         ; cleanup_intent = { remove_meta = false; remove_session = false }
         ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
         ; owned_task_ids = []
         ; join_evidence = None
         ; phase = Shutdown_types.Prepared
@@ -780,15 +789,31 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         (Lane.Id.equal operation.lane_id loaded.lane_id);
       let joined =
         { loaded with
-          phase = Shutdown_types.Joined_idle
+          revision = loaded.revision + 1
+        ; phase = Shutdown_types.Joined_idle
         ; updated_at = Masc_domain.now_iso ()
         }
       in
-      (match Shutdown_store.replace ~config joined with
+      (match Shutdown_store.replace ~config ~expected_revision:loaded.revision joined with
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
+      let stale =
+        { loaded with
+          revision = loaded.revision + 1
+        ; phase = Shutdown_types.Blocked { stage = Shutdown_types.Record_update; detail = "stale" }
+        }
+      in
+      (match Shutdown_store.replace ~config ~expected_revision:loaded.revision stale with
+       | Error (Shutdown_store.Revision_conflict _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok () -> fail "stale shutdown snapshot overwrote a newer revision");
       let mismatched = { joined with lane_id = Lane.id (Lane.create ()) } in
-      (match Shutdown_store.replace ~config mismatched with
+      (match
+         Shutdown_store.replace
+           ~config
+           ~expected_revision:joined.revision
+           { mismatched with revision = joined.revision + 1 }
+       with
        | Error (Shutdown_store.Identity_mismatch _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "shutdown store accepted a different lane identity");
@@ -944,7 +969,14 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let backlog_version =
+        match Masc.Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
       let meta = make_meta "shutdown-finalize-keeper" in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
@@ -954,6 +986,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       let operation_id = Shutdown_types.Operation_id.generate () in
       let operation : Shutdown_types.t =
         { schema_version = Shutdown_types.schema_version
+        ; revision = 0
         ; operation_id
         ; keeper_name = meta.name
         ; lane_id = Lane.id (Lane.create ())
@@ -962,6 +995,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         ; actor = "operator"
         ; cleanup_intent = { remove_meta = false; remove_session = false }
         ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
         ; owned_task_ids = []
         ; join_evidence = None
         ; phase = Shutdown_types.Joined_idle

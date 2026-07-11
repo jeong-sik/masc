@@ -6,6 +6,10 @@ type error =
   | Io_error of string
   | Decode_error of string
   | Identity_mismatch of string
+  | Revision_conflict of
+      { expected : int
+      ; actual : int
+      }
 
 let error_to_string = function
   | Already_exists path -> Printf.sprintf "shutdown operation already exists: %s" path
@@ -14,6 +18,11 @@ let error_to_string = function
   | Decode_error detail -> Printf.sprintf "shutdown operation decode failed: %s" detail
   | Identity_mismatch detail ->
     Printf.sprintf "shutdown operation identity mismatch: %s" detail
+  | Revision_conflict { expected; actual } ->
+    Printf.sprintf
+      "shutdown operation revision conflict: expected %d, actual %d"
+      expected
+      actual
 ;;
 
 type operation_lock =
@@ -199,6 +208,7 @@ let join_evidence_to_json evidence =
 let to_json operation =
   `Assoc
     [ "schema_version", `Int operation.schema_version
+    ; "revision", `Int operation.revision
     ; "operation_id", `String (Operation_id.to_string operation.operation_id)
     ; "keeper_name", `String operation.keeper_name
     ; "lane_id", `String (Keeper_lane.Id.to_string operation.lane_id)
@@ -211,6 +221,7 @@ let to_json operation =
           ; "remove_session", `Bool operation.cleanup_intent.remove_session
           ] )
     ; "turn_disposition", turn_disposition_to_json operation.turn_disposition
+    ; "expected_backlog_version", `Int operation.expected_backlog_version
     ; "owned_task_ids", task_ids_to_json operation.owned_task_ids
     ; ( "join_evidence"
       , match operation.join_evidence with
@@ -431,6 +442,7 @@ let of_json json =
             decoded_schema_version))
   else
     let* operation_id_wire = string "operation_id" json in
+    let* revision = int "revision" json in
     let* operation_id =
       Operation_id.of_string operation_id_wire
       |> Result.map_error (fun e -> Decode_error e)
@@ -453,6 +465,7 @@ let of_json json =
     let* remove_session = bool "remove_session" cleanup_json in
     let* turn_json = assoc "turn_disposition" json in
     let* turn_disposition = turn_disposition_of_json turn_json in
+    let* expected_backlog_version = int "expected_backlog_version" json in
     let* owned_task_ids = task_ids_field_of_json "owned_task_ids" json in
     let* join_evidence = optional_join_evidence_of_json json in
     let* phase_json = assoc "phase" json in
@@ -461,6 +474,7 @@ let of_json json =
     let* updated_at = string "updated_at" json in
     Ok
       { schema_version = decoded_schema_version
+      ; revision
       ; operation_id
       ; keeper_name
       ; lane_id
@@ -469,6 +483,7 @@ let of_json json =
       ; actor
       ; cleanup_intent = { remove_meta; remove_session }
       ; turn_disposition
+      ; expected_backlog_version
       ; owned_task_ids
       ; join_evidence
       ; phase
@@ -510,11 +525,19 @@ let same_identity left right =
   && Int.equal left.generation right.generation
 ;;
 
-let replace ~config operation =
+let replace ~config ~expected_revision operation =
   let operation_path = path ~config operation.operation_id in
   with_operation_lock ~access:Write operation_path (fun () ->
     match load_unlocked ~config operation.operation_id with
     | Error _ as error -> error
+    | Ok existing when not (Int.equal existing.revision expected_revision) ->
+      Error (Revision_conflict { expected = expected_revision; actual = existing.revision })
+    | Ok _ when not (Int.equal operation.revision (expected_revision + 1)) ->
+      Error
+        (Revision_conflict
+           { expected = expected_revision + 1
+           ; actual = operation.revision
+           })
     | Ok existing when same_identity existing operation ->
       Keeper_fs.save_json_atomic operation_path (to_json operation)
       |> Result.map_error (fun detail -> Io_error detail)

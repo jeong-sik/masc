@@ -9,6 +9,10 @@ type error =
   | Io_error of string
   | Decode_error of string
   | Identity_mismatch of string
+  | Revision_conflict of
+      { expected : int
+      ; actual : int
+      }
 
 val error_to_string : error -> string
 
@@ -27,6 +31,7 @@ val persist_new :
 
 val replace :
   config:Workspace.config ->
+  expected_revision:int ->
   Keeper_shutdown_types.t ->
   (unit, error) result
 

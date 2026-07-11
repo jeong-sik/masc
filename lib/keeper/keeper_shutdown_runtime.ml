@@ -3,10 +3,22 @@ open Keeper_shutdown_types
 type submit_error =
   | Prepare_error of Keeper_shutdown_prepare_join.error
   | Existing_operation_load_error of Keeper_shutdown_store.error
+  | Worker_start_error of worker_start_error
+
+and worker_start_error =
+  | Worker_supervisor_unavailable
+  | Worker_supervisor_stopping of exn
+  | Worker_fork_failed of exn
 
 let submit_error_to_string = function
   | Prepare_error error -> Keeper_shutdown_prepare_join.error_to_string error
   | Existing_operation_load_error error -> Keeper_shutdown_store.error_to_string error
+  | Worker_start_error Worker_supervisor_unavailable ->
+    "Keeper shutdown process supervisor is unavailable"
+  | Worker_start_error (Worker_supervisor_stopping exn) ->
+    Printf.sprintf "Keeper shutdown process supervisor is stopping: %s" (Printexc.to_string exn)
+  | Worker_start_error (Worker_fork_failed exn) ->
+    Printf.sprintf "Keeper shutdown worker fork failed: %s" (Printexc.to_string exn)
 ;;
 
 let worker_mu = Eio.Mutex.create ()
@@ -32,11 +44,17 @@ let release_worker operation =
 let persist_unhandled_failure ~config operation exn =
   let blocked =
     { operation with
-      phase = Blocked { stage = Record_update; detail = Printexc.to_string exn }
+      revision = operation.revision + 1
+    ; phase = Blocked { stage = Record_update; detail = Printexc.to_string exn }
     ; updated_at = Masc_domain.now_iso ()
     }
   in
-  match Keeper_shutdown_store.replace ~config blocked with
+  match
+    Keeper_shutdown_store.replace
+      ~config
+      ~expected_revision:operation.revision
+      blocked
+  with
   | Ok () -> ()
   | Error store_error ->
     Log.Keeper.error
@@ -87,34 +105,62 @@ let run_worker ~config ~entry operation =
   | Blocked _ -> ()
 ;;
 
-let start_worker ~sw ~config ~entry operation =
-  if claim_worker operation
-  then
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      Fun.protect
-        ~finally:(fun () -> release_worker operation)
-        (fun () ->
-           try run_worker ~config ~entry operation with
-           | Eio.Cancel.Cancelled _ ->
-             Log.Keeper.info
-               "Keeper shutdown worker cancelled by server teardown; durable recovery retained: keeper=%s operation=%s"
-               operation.keeper_name
-               (worker_key operation)
-           | exn -> persist_unhandled_failure ~config operation exn);
-      `Stop_daemon)
+type worker_start_result =
+  | Worker_started
+  | Worker_already_active
+  | Worker_start_rejected of worker_start_error
+
+let start_worker ~config ~entry operation =
+  match Keeper_supervisor.get_global_switch () with
+  | None -> Worker_start_rejected Worker_supervisor_unavailable
+  | Some sw ->
+    Eio.Cancel.protect (fun () ->
+      match Eio.Switch.get_error sw with
+      | Some cause -> Worker_start_rejected (Worker_supervisor_stopping cause)
+      | None when not (claim_worker operation) -> Worker_already_active
+      | None ->
+        let started = Atomic.make false in
+        (try
+           Eio.Fiber.fork ~sw (fun () ->
+             Atomic.set started true;
+             Fun.protect
+               ~finally:(fun () -> release_worker operation)
+               (fun () ->
+                  try run_worker ~config ~entry operation with
+                  | Eio.Cancel.Cancelled _ ->
+                    Log.Keeper.info
+                      "Keeper shutdown worker cancelled by server teardown; durable recovery retained: keeper=%s operation=%s"
+                      operation.keeper_name
+                      (worker_key operation)
+                  | exn -> persist_unhandled_failure ~config operation exn));
+           if Atomic.get started
+           then Worker_started
+           else
+             (match Eio.Switch.get_error sw with
+              | None -> Worker_started
+              | Some cause ->
+                release_worker operation;
+                Worker_start_rejected (Worker_supervisor_stopping cause))
+         with
+         | exn ->
+           release_worker operation;
+           Worker_start_rejected (Worker_fork_failed exn)))
 ;;
 
-let submit ~sw ~config ~entry ~request =
+let start_or_error ~config ~entry operation =
+  match start_worker ~config ~entry operation with
+  | Worker_started | Worker_already_active -> Ok operation
+  | Worker_start_rejected error -> Error (Worker_start_error error)
+;;
+
+let submit ~config ~entry ~request =
   match Keeper_shutdown_prepare_join.prepare ~config ~entry ~request with
   | Ok operation ->
-    start_worker ~sw ~config ~entry operation;
-    Ok operation
+    start_or_error ~config ~entry operation
   | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
     (match Keeper_shutdown_store.load ~config operation_id with
      | Error error -> Error (Existing_operation_load_error error)
-     | Ok operation ->
-       start_worker ~sw ~config ~entry operation;
-       Ok operation)
+     | Ok operation -> start_or_error ~config ~entry operation)
   | Error error -> Error (Prepare_error error)
 ;;
 
@@ -131,18 +177,24 @@ let recovered_join_state operation =
     | Inflight_effect_unknown turn -> Reconciliation_required turn
   in
   { operation with
-    join_evidence = Some evidence
+    revision = operation.revision + 1
+  ; join_evidence = Some evidence
   ; phase
   ; updated_at = Masc_domain.now_iso ()
   }
 ;;
 
-let recover_one ~config operation =
+let recover_operation ~config operation =
   let operation_result =
     match operation.phase with
     | Prepared ->
       let recovered = recovered_join_state operation in
-      (match Keeper_shutdown_store.replace ~config recovered with
+      (match
+         Keeper_shutdown_store.replace
+           ~config
+           ~expected_revision:operation.revision
+           recovered
+       with
        | Ok () -> Ok recovered
        | Error error -> Error (Keeper_shutdown_store.error_to_string error))
     | Joined_idle
@@ -170,5 +222,5 @@ let recover_one ~config operation =
 let recover_at_boot ~config =
   match Keeper_shutdown_store.list_all ~config with
   | Error error -> [ Error (Keeper_shutdown_store.error_to_string error) ]
-  | Ok operations -> List.map (recover_one ~config) operations
+  | Ok operations -> List.map (recover_operation ~config) operations
 ;;

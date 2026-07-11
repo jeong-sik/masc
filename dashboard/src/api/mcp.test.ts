@@ -7,6 +7,7 @@ const {
   authHeaders,
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   getStoredToken,
   getStoredTokenMeta,
   isRemoteAccess,
@@ -19,6 +20,7 @@ const {
   authHeaders: vi.fn().mockReturnValue({}),
   clearStoredToken: vi.fn(),
   currentDashboardActor: vi.fn().mockReturnValue('dashboard'),
+  currentStoredTokenRevision: vi.fn().mockReturnValue(0),
   // Default to a non-empty stored token so ensureDevToken() short-circuits
   // without consuming a fetchWithTimeout mock. Individual tests that want
   // to exercise the dev-token bootstrap can override this.
@@ -39,6 +41,7 @@ vi.mock('./core', () => ({
   authHeaders,
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   getStoredToken,
   getStoredTokenMeta,
   isRemoteAccess,
@@ -60,6 +63,7 @@ beforeEach(() => {
   // test (e.g. authHeaders). The dev-token bootstrap must stay inert unless
   // a test explicitly exercises it.
   currentDashboardActor.mockReturnValue('dashboard')
+  currentStoredTokenRevision.mockReturnValue(0)
   getStoredToken.mockReturnValue('test-stored-token')
   getStoredTokenMeta.mockReturnValue({
     source: 'manual',
@@ -90,8 +94,12 @@ function setupMcpSessionMocks(sessionId: string) {
 
 /** Find a fetchWithTimeout call by matching the JSON body's "method" field. */
 function findCallByMethod(method: string) {
+  return callsByMethod(method)[0]
+}
+
+function callsByMethod(method: string) {
   const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit, number]>
-  return calls.find(([, init]) => {
+  return calls.filter(([, init]) => {
     const body = init.body
     if (typeof body !== 'string') return false
     try { return JSON.parse(body).method === method }
@@ -100,6 +108,45 @@ function findCallByMethod(method: string) {
 }
 
 describe('mcpHeaders auth integration', () => {
+  it('reinitializes instead of reusing a session after the stored token changes', async () => {
+    setupMcpSessionMocks('sess-before-token-clear')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    currentStoredTokenRevision.mockReturnValue(1)
+    setupMcpSessionMocks('sess-after-token-clear')
+    await callMcpTool('masc_status', {})
+
+    const initializeCalls = callsByMethod('initialize')
+    const toolCalls = callsByMethod('tools/call')
+    expect(initializeCalls).toHaveLength(2)
+    expect(toolCalls).toHaveLength(2)
+    expect((initializeCalls[1]![1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBeUndefined()
+    expect((toolCalls[0]![1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-before-token-clear')
+    expect((toolCalls[1]![1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-after-token-clear')
+  }, 60_000)
+
+  it('rejects an initialization response created under an older token revision', async () => {
+    fetchWithTimeout.mockImplementationOnce(async () => {
+      currentStoredTokenRevision.mockReturnValue(1)
+      return new Response('{}', {
+        status: 200,
+        headers: { 'Mcp-Session-Id': 'sess-stale-auth' },
+      })
+    })
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_status', {}))
+      .rejects.toThrow('MCP authentication changed during session initialization')
+
+    expect(callsByMethod('notifications/initialized')).toHaveLength(0)
+    expect(callsByMethod('tools/call')).toHaveLength(0)
+  }, 60_000)
+
   it('includes Authorization header from authHeaders in MCP initialize request', async () => {
     authHeaders.mockReturnValue({
       'Authorization': 'Bearer test-token-123',

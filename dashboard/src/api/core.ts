@@ -45,8 +45,10 @@ export interface StoredTokenChange {
 type StoredTokenChangeListener = (change: StoredTokenChange) => void
 
 const storedTokenChangeListeners = new Set<StoredTokenChangeListener>()
+let storedTokenRevision = 0
 
 function notifyStoredTokenChange(change: StoredTokenChange): void {
+  storedTokenRevision += 1
   for (const listener of storedTokenChangeListeners) {
     try {
       listener(change)
@@ -54,6 +56,10 @@ function notifyStoredTokenChange(change: StoredTokenChange): void {
       console.warn('[dashboard-auth] token change listener failed', err)
     }
   }
+}
+
+export function currentStoredTokenRevision(): number {
+  return storedTokenRevision
 }
 
 export function subscribeStoredTokenChanges(

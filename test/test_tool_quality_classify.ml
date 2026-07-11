@@ -89,6 +89,29 @@ let test_timeout_status_is_classified () =
   check string "timeout process classified"
     "bash_timeout" (classify output)
 
+let test_policy_blocked_dune () =
+  let output =
+    {|{"ok":false,"error":"privileged command 'dune' requires explicit approval; no Shell IR approval resolver is configured, so it is blocked"}|}
+  in
+  let code = classify output in
+  check bool "policy blocked dune is command_blocked"
+    true (String.starts_with ~prefix:"command_blocked" code)
+
+let test_policy_blocked_gh_merge () =
+  let output =
+    {|{"ok":false,"error":"policy rule denied: gh_pr_merge_admin_bypass"}|}
+  in
+  let code = classify output in
+  check bool "policy denied merge is command_blocked"
+    true (String.starts_with ~prefix:"command_blocked" code)
+
+let test_sandbox_path_outside () =
+  let output =
+    {|{"ok":false,"error":"path_outside_sandbox","detail":{"path":"/etc/passwd"}}|}
+  in
+  check string "sandbox path error"
+    "path_outside_sandbox" (classify output)
+
 let () =
   run "tool_quality_classify"
     [
@@ -108,5 +131,8 @@ let () =
            test_case "signaled status classified" `Quick test_signaled_status_is_classified;
            test_case "timeout error preserved" `Quick test_timeout_error_is_preserved;
            test_case "timeout status classified" `Quick test_timeout_status_is_classified;
+           test_case "policy blocked dune" `Quick test_policy_blocked_dune;
+           test_case "policy denied gh merge" `Quick test_policy_blocked_gh_merge;
+           test_case "sandbox path outside" `Quick test_sandbox_path_outside;
          ]);
     ]

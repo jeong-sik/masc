@@ -118,7 +118,11 @@ let queue_to_list queue =
   List.rev !values
 
 let increment_count table key =
-  let current = Option.value (Hashtbl.find_opt table key) ~default:0 in
+  let current =
+    match Hashtbl.find_opt table key with
+    | Some count -> count
+    | None -> 0
+  in
   Hashtbl.replace table key (current + 1)
 ;;
 

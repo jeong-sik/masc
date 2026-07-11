@@ -188,6 +188,12 @@
 }
 
 @media (max-width: 640px) {
+  .v2-overview-surface button,
+  .v2-overview-surface summary {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
   .v2-overview-surface.ov {
     min-height: calc(100vh - 17rem);
     border-radius: var(--radius-sm);

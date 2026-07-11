@@ -255,6 +255,7 @@ function renderCategorySection(
         }} />
         <div class="flex justify-center py-3">
           <${CursorPagination}
+            class="bd-category-pagination"
             cursor=${cursorLabel}
             cursorLabel="표시"
             hasPrevious=${limit > PAGE_SIZE}
@@ -467,12 +468,14 @@ function PostCard({ post }: { post: BoardPost }) {
         ` : null}
         ${boardHearthFilter.value === '' && post.hearth ? html`<span class="bd-badge">${post.hearth}</span>` : null}
         <span class="ts"><${TimeAgo} timestamp=${post.created_at} /></span>
-        <${Checkbox}
-          ariaLabel=${`게시글 선택: ${post.id}`}
-          class="!w-3.5 !h-3.5 ml-1"
-          checked=${selectedPostIds.value.has(post.id)}
-          onClick=${(e: Event) => togglePostSelection(post.id, e)}
-        />
+        <label class="bd-post-select-target" onClick=${(e: Event) => e.stopPropagation()}>
+          <${Checkbox}
+            ariaLabel=${`게시글 선택: ${post.id}`}
+            class="!w-4 !h-4"
+            checked=${selectedPostIds.value.has(post.id)}
+            onClick=${(e: Event) => togglePostSelection(post.id, e)}
+          />
+        </label>
       </div>
       <div class="bd-post-title">${stripInlineMarkdown(post.title)}</div>
       <div class="bd-post-body">

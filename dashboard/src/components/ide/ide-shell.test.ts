@@ -209,6 +209,7 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     expect(container.querySelector('.v2-ide-surface')).not.toBeNull()
+    expect(container.querySelector('h1')?.textContent).toBe('MASC IDE')
     expect(container.querySelectorAll('.v2-ide-panel').length).toBeGreaterThanOrEqual(3)
     expect(container.querySelector('.v2-ide-toolbar')).not.toBeNull()
     expect(container.querySelector('[data-testid="ide-readiness-notice"]')?.textContent)

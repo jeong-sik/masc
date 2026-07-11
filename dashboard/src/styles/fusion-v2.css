@@ -932,7 +932,8 @@ button.fus-reconcile-row:hover {
   }
 
   .v2-fusion-surface .fus-list-refresh {
-    width: 32px;
+    width: 40px;
+    height: 40px;
   }
 
   .v2-fusion-surface .fus-run-id-row h1,
@@ -949,6 +950,14 @@ button.fus-reconcile-row:hover {
 
   .v2-fusion-surface .fus-run-by .spacer {
     display: none;
+  }
+
+  .v2-fusion-surface .fus-link,
+  .v2-fusion-surface .fus-rich-more,
+  .v2-fusion-surface .fus-sink-to {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
   }
 }
 

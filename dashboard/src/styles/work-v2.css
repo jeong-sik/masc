@@ -1878,3 +1878,18 @@
   color: var(--color-fg-muted);
   margin-top: 0.25rem;
 }
+
+@media (max-width: 700px) {
+  .wk-viewseg button,
+  .wk-newgoal,
+  .wk-task-claim,
+  .wk-task-kp {
+    min-height: 40px;
+  }
+
+  .wk-metric {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+}

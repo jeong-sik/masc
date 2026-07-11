@@ -66,4 +66,8 @@ describe('keeper-v2 IDE responsive contract', () => {
     expect(popover.right).toBe('12px')
     expect(popover.width).toBe('auto')
   })
+
+  it('does not lay out the advanced toolbar while its disclosure is closed', () => {
+    expect(css).toMatch(/\.ide-toolbar-advanced:not\(\[open\]\) \.ide-toolbar-advanced-popover\s*\{\s*display:\s*none;/)
+  })
 })

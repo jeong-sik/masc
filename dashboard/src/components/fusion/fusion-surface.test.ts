@@ -21,7 +21,7 @@ import { FusionJudgesStrip, FusionSurface } from './fusion-surface'
 describe('Fusion mobile overflow contract', () => {
   it('wraps backend-owned identifiers and keeps the list refresh compact', () => {
     const css = readFileSync(resolve(__dirname, '../../styles/fusion-v2.css'), 'utf8')
-    expect(css).toMatch(/\.v2-fusion-surface \.fus-list-refresh\s*\{\s*width:\s*32px;/)
+    expect(css).toMatch(/\.v2-fusion-surface \.fus-list-refresh\s*\{\s*width:\s*40px;\s*height:\s*40px;/)
     expect(css).toMatch(/\.v2-fusion-surface \.fus-run-id-row h1,[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?white-space:\s*normal;/)
   })
 })

@@ -180,6 +180,13 @@
 
 @media (max-width: 720px) {
   .sch-kv .k { width: 96px; }
+  .sch-surf button,
+  .sch-surf summary,
+  .sch-surf input,
+  .sch-surf select {
+    min-width: 40px;
+    min-height: 40px;
+  }
 }
 
 /* ── cadence tag (예약 종류) — ported from prototype styles/schedule.css ── */

@@ -133,7 +133,8 @@ let handle_completion config operation = function
               { verb = Keeper_lifecycle_events.Paused_pruned; phase = None })
          operation.keeper_name
          (Printf.sprintf
-            "last_updated=%s%s shutdown_operation=%s"
+            "meta_version=%d last_updated=%s%s shutdown_operation=%s"
+            context.meta_version
             context.last_updated
             latched_reason_detail
             operation_id)
@@ -146,6 +147,9 @@ let handle_completion config operation = function
      | Ok (),
        ( Operator_stop_retain_meta
        | Operator_stop_remove_meta
-       | Dead_tombstone_cleanup ) ->
+       | Dead_tombstone_cleanup
+       | Dashboard_keeper_purge _ ) ->
        Error "paused-meta completion does not belong to a stale-prune operation")
+  | Keeper_shutdown_types.Dashboard_keeper_purged ->
+    Error "dashboard Keeper purge completion requires the server artifact boundary"
 ;;

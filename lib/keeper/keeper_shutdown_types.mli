@@ -22,15 +22,35 @@ type stale_paused_context =
   ; latched_reason : Keeper_latched_reason.t option
   }
 
+type dashboard_purge_context =
+  { requested_name : string
+  ; agent_name : string
+  ; meta_version : int
+  }
+
 type cleanup_reason =
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
   | Dead_tombstone_cleanup
   | Stale_paused_prune of stale_paused_context
+  | Dashboard_keeper_purge of dashboard_purge_context
 
 type completion_action =
   | Dead_tombstone_reaped
   | Paused_meta_pruned
+  | Dashboard_keeper_purged
+
+type dashboard_purge_artifact =
+  | Keeper_metrics_artifact
+  | Keeper_memory_bank_artifact
+  | Keeper_generation_index_artifact
+  | Keeper_policy_log_artifact
+  | Keeper_decision_log_artifact
+  | Keeper_feedback_log_artifact
+  | Keeper_dataset_export_artifact
+  | Keeper_runtime_directory_artifact
+  | Keeper_configuration_artifact
+  | Agent_artifact_bundle of string list
 
 type completion_receipt =
   | Completion_not_requested
@@ -163,6 +183,11 @@ val meta_disposition_of_cleanup_reason : cleanup_reason -> meta_disposition
 val completion_action_to_string : completion_action -> string
 val completion_action_of_string : string -> (completion_action, string) result
 val completion_action_of_cleanup_reason : cleanup_reason -> completion_action option
+val cleanup_intent_equal : cleanup_intent -> cleanup_intent -> bool
+val dashboard_purge_artifact_plan :
+  keeper_name:string ->
+  dashboard_purge_context ->
+  dashboard_purge_artifact list
 val invariant_error_to_string : invariant_error -> string
 val validate : t -> (unit, invariant_error) result
 val immutable_fields_equal : t -> t -> bool

@@ -4,6 +4,7 @@ type submit_error =
   | Prepare_error of Keeper_shutdown_prepare_join.error
   | Existing_operation_load_error of Keeper_shutdown_store.error
   | Existing_operation_lane_mismatch of Keeper_shutdown_types.t
+  | Existing_operation_intent_mismatch of Keeper_shutdown_types.t
   | Worker_start_error of worker_start_error
 
 and worker_start_error =
@@ -23,6 +24,11 @@ let submit_error_to_string = function
   | Existing_operation_lane_mismatch operation ->
     Printf.sprintf
       "existing shutdown operation has incompatible lane ownership: keeper=%s operation=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+  | Existing_operation_intent_mismatch operation ->
+    Printf.sprintf
+      "existing shutdown operation has incompatible cleanup intent: keeper=%s operation=%s"
       operation.keeper_name
       (Operation_id.to_string operation.operation_id)
   | Worker_start_error Worker_supervisor_unavailable ->
@@ -274,6 +280,15 @@ let start_or_error ~config ~entry operation =
   | Worker_start_rejected error -> Error (Worker_start_error error)
 ;;
 
+let existing_operation_intent ~request operation =
+  if
+    Keeper_shutdown_types.cleanup_intent_equal
+      request.Keeper_shutdown_prepare_join.cleanup_intent
+      operation.cleanup_intent
+  then Ok operation
+  else Error (Existing_operation_intent_mismatch operation)
+;;
+
 let submit ~config ~entry ~request =
   match Keeper_shutdown_prepare_join.prepare ~config ~entry ~request with
   | Ok operation ->
@@ -281,7 +296,13 @@ let submit ~config ~entry ~request =
   | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
     (match Keeper_shutdown_store.load ~config ~keeper_name:entry.name operation_id with
      | Error error -> Error (Existing_operation_load_error error)
-     | Ok operation -> start_or_error ~config ~entry:(Some entry) operation)
+     | Ok operation ->
+       (match existing_operation_intent ~request operation with
+        | Error _ as error -> error
+        | Ok ({ lane_ownership = Registered_lane lane_id; _ } as operation)
+          when Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane) ->
+          start_or_error ~config ~entry:(Some entry) operation
+        | Ok operation -> Error (Existing_operation_lane_mismatch operation)))
   | Error error -> Error (Prepare_error error)
 ;;
 
@@ -292,7 +313,9 @@ let submit_dormant ~config ~meta ~request =
     (match Keeper_shutdown_store.load ~config ~keeper_name:meta.name operation_id with
      | Error error -> Error (Existing_operation_load_error error)
      | Ok ({ lane_ownership = Dormant_meta; _ } as operation) ->
-       start_or_error ~config ~entry:None operation
+       (match existing_operation_intent ~request operation with
+        | Error _ as error -> error
+        | Ok operation -> start_or_error ~config ~entry:None operation)
      | Ok operation -> Error (Existing_operation_lane_mismatch operation))
   | Error error -> Error (Prepare_error error)
 ;;

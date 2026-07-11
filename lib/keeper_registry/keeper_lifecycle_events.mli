@@ -9,6 +9,7 @@ type t =
   | Dead_cleaned
   | Self_preservation
   | Paused_pruned
+  | Purged
   | Auto_resumed
   | Admission_denied
 

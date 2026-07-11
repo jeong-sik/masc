@@ -59,13 +59,26 @@ export async function claimTask(taskId: string): Promise<void> {
   await callMcpTool('masc_transition', { task_id: taskId, action: 'claim' })
 }
 
-export interface PurgeAgentResponse {
-  ok: boolean
-  target_kind: 'agent' | 'keeper' | string
-  agent_name: string
-  keeper_name?: string
-  removed_keeper_toml?: boolean
-}
+export type PurgeAgentResponse =
+  | {
+      ok: true
+      accepted: true
+      target_kind: 'keeper'
+      agent_name: string
+      keeper_name: string
+      operation_id: string
+    }
+  | {
+      ok: true
+      accepted: false
+      target_kind: 'agent'
+      agent_name: string
+      cleanup_results: Array<{
+        agent_name: string
+        heartbeats_stopped: number
+        workspace_unbound: boolean
+      }>
+    }
 
 export async function purgeAgent(agentName: string): Promise<PurgeAgentResponse> {
   return post<PurgeAgentResponse>('/api/v1/dashboard/agents/purge', {

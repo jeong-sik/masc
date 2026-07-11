@@ -349,6 +349,18 @@ let read_operation_meta ~config operation =
      | Ok _ ->
        Error
          "stale paused Keeper metadata state changed while lifecycle cleanup owned admission")
+  | Dashboard_keeper_purge context ->
+    (match
+       Keeper_meta_store.read_meta_if_exact_identity
+         config
+         ~name:operation.keeper_name
+         ~trace_id:operation.trace_id
+         ~generation:operation.generation
+         ~meta_version:context.meta_version
+     with
+     | Ok meta -> Ok meta
+     | Error error ->
+       Error (Keeper_meta_store.exact_identity_error_to_string error))
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
   | Dead_tombstone_cleanup ->
@@ -415,14 +427,16 @@ let validate_registry_owner_exact ~config operation =
               (Keeper_state_machine.phase_to_string phase))
        | ( Operator_stop_retain_meta
          | Operator_stop_remove_meta
-         | Dead_tombstone_cleanup )
+         | Dead_tombstone_cleanup
+         | Dashboard_keeper_purge _ )
          , _ -> Ok ())
 ;;
 
 let prepare_cleanup ~config ~entry operation settled_task_ids =
   let meta_prepare_result =
     match operation.cleanup_intent.reason with
-    | Stale_paused_prune _ ->
+    | Stale_paused_prune _
+    | Dashboard_keeper_purge _ ->
       (match read_operation_meta ~config operation with
        | Error _ as error -> error
        | Ok _ -> validate_registry_owner_exact ~config operation)
@@ -478,35 +492,38 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
              | Error _ as error -> error)))
 ;;
 
-let rec remove_tree path =
-  if not (Fs_compat.file_exists path)
-  then Ok ()
-  else
-    try
-      match (Unix.lstat path).Unix.st_kind with
-      | Unix.S_DIR ->
-        let entries = Sys.readdir path |> Array.to_list in
-        let rec remove_entries = function
-          | [] ->
-            Unix.rmdir path;
-            Ok ()
-          | entry :: rest ->
-            (match remove_tree (Filename.concat path entry) with
-             | Error _ as error -> error
-             | Ok () -> remove_entries rest)
-        in
-        remove_entries entries
-      | Unix.S_REG
-      | Unix.S_LNK
-      | Unix.S_CHR
-      | Unix.S_BLK
-      | Unix.S_FIFO
-      | Unix.S_SOCK ->
-        Unix.unlink path;
-        Ok ()
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
+let rec remove_tree_blocking path =
+  try
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+      let entries = Sys.readdir path |> Array.to_list |> List.sort String.compare in
+      let rec remove_entries = function
+        | [] ->
+          Unix.rmdir path;
+          Ok ()
+        | entry :: rest ->
+          (match remove_tree_blocking (Filename.concat path entry) with
+           | Error _ as error -> error
+           | Ok () -> remove_entries rest)
+      in
+      remove_entries entries
+    | Unix.S_REG
+    | Unix.S_LNK
+    | Unix.S_CHR
+    | Unix.S_BLK
+    | Unix.S_FIFO
+    | Unix.S_SOCK ->
+      Unix.unlink path;
+      Ok ()
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let remove_tree path =
+  try Eio_guard.run_in_systhread (fun () -> remove_tree_blocking path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
 ;;
 
 let remove_meta_file ~config operation =
@@ -524,6 +541,23 @@ let remove_meta_file ~config operation =
      | Error Keeper_meta_store.Exact_identity_missing ->
        Log.Keeper.warn
          "%s: exact stale-paused metadata already absent during cleanup replay"
+         operation.keeper_name;
+       Ok ()
+     | Error error ->
+       Error (Keeper_meta_store.exact_identity_error_to_string error))
+  | Dashboard_keeper_purge context ->
+    (match
+       Keeper_meta_store.remove_meta_if_exact_identity
+         config
+         ~name:operation.keeper_name
+         ~trace_id:operation.trace_id
+         ~generation:operation.generation
+         ~meta_version:context.meta_version
+     with
+     | Ok () -> Ok ()
+     | Error Keeper_meta_store.Exact_identity_missing ->
+       Log.Keeper.warn
+         "%s: exact dashboard-purge metadata already absent during cleanup replay"
          operation.keeper_name;
        Ok ()
      | Error error ->

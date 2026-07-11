@@ -4,6 +4,7 @@ type submit_error =
   | Prepare_error of Keeper_shutdown_prepare_join.error
   | Existing_operation_load_error of Keeper_shutdown_store.error
   | Existing_operation_lane_mismatch of Keeper_shutdown_types.t
+  | Existing_operation_intent_mismatch of Keeper_shutdown_types.t
   | Worker_start_error of worker_start_error
 
 and worker_start_error =

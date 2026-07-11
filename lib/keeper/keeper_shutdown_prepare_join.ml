@@ -142,6 +142,13 @@ let validate_cleanup_reason reason (meta : Keeper_meta_contract.keeper_meta) =
            context.latched_reason
     then Ok ()
     else Error Stale_prune_meta_changed
+  | Dashboard_keeper_purge context ->
+    if Int.equal meta.meta_version context.meta_version
+    then Ok ()
+    else
+      Error
+        (Meta_snapshot_version_changed
+           { expected = context.meta_version; actual = meta.meta_version })
 ;;
 
 let read_guarded_meta
@@ -232,7 +239,8 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
          | Stale_paused_prune _, phase -> Some (Stale_prune_lane_not_paused phase)
          | ( Operator_stop_retain_meta
            | Operator_stop_remove_meta
-           | Dead_tombstone_cleanup )
+           | Dead_tombstone_cleanup
+           | Dashboard_keeper_purge _ )
            , _ -> None
        in
        (match stale_prune_phase_error with

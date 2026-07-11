@@ -240,7 +240,12 @@ let run_serialized ~base_path ~keeper_name f =
       (fun () -> Eio.Mutex.lock slot.turn_mu);
     (match run_locked slot ~lane:Chat f with
      | `Ran value -> `Ran value
-     | `Shutdown_requested operation_id -> `Rejected (Shutdown_requested operation_id))
+     | `Shutdown_requested operation_id ->
+       `Rejected
+         { waiting = waiting_count slot
+         ; in_flight = peek_info slot
+         ; shutdown_operation_id = Some operation_id
+         })
 ;;
 
 let rejection_snapshot slot =

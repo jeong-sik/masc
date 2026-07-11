@@ -40,7 +40,7 @@ let same_lane left right =
     (Keeper_lane.id right.Keeper_registry.lane)
 ;;
 
-let current_entry ~config observed =
+let current_entry ~config (observed : Keeper_registry.registry_entry) =
   match Keeper_registry.get ~base_path:config.Workspace.base_path observed.name with
   | Some current when same_lane current observed -> Ok current
   | Some _ | None -> Error Registry_lane_replaced

@@ -818,7 +818,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
   let base_dir = temp_dir "shutdown-prepare-join" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_turn_admission.For_testing.reset ();
+      Masc.Keeper_turn_admission.For_testing.reset ();
       R.clear ();
       cleanup_dir base_dir)
     (fun () ->

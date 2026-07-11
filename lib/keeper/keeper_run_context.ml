@@ -84,11 +84,10 @@ let resolve_max_tokens_for_runtime_with_profile ~keeper_name ~profile_defaults
       ?max_tokens ~runtime_id ()
   =
   match max_tokens with
-  | Some t ->
-    Runtime_inference.cap_max_tokens_to_runtime_ceiling
-      ~runtime_id
-      ~source:"caller_override"
-      t
+  (* Caller override passes through unchanged; the OAS backend clamps to the
+     per-model catalog cap (one-shot WARN) if it overshoots. The former
+     [cap_max_tokens_to_runtime_ceiling] here was an identity stub. *)
+  | Some t -> t
   | None ->
     Runtime_inference.resolve_max_tokens
       ~runtime_id

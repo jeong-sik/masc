@@ -5,9 +5,11 @@ val resolve_temperature :
 
 val resolve_max_tokens :
   runtime_id:string -> fallback:(unit -> int) -> int
-
-val cap_max_tokens_to_runtime_ceiling :
-  runtime_id:string -> source:string -> int -> int
+(** Thinking-capable runtime with a catalog-declared [max_output_tokens]:
+    the full declared ceiling (no MASC-side bound — budgets are
+    aggregation-only). Otherwise the caller's [fallback]. Overshoot
+    protection against provider 400s is the OAS backend clamp to the
+    per-model catalog cap. *)
 
 type seed = {
   thinking_budget : int option;

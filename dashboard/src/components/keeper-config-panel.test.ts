@@ -970,6 +970,8 @@ const mocks = vi.hoisted(() => {
       ],
     })),
     patchKeeperConfig: vi.fn(),
+    refreshKeeperRuntimeStatus: vi.fn(async () => undefined),
+    showToast: vi.fn(),
     updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
     setKeeperToolPolicy: vi.fn(async () => makeKeeperConfig()),
     fetchDashboardTools: vi.fn(async () => ({
@@ -1007,6 +1009,14 @@ vi.mock('../api/keeper', () => ({
   resumeKeeper: mocks.resumeKeeper,
   wakeKeeper: mocks.wakeKeeper,
   fetchKeeperComposite: mocks.fetchKeeperComposite,
+}))
+
+vi.mock('../store', () => ({
+  refreshKeeperRuntimeStatus: mocks.refreshKeeperRuntimeStatus,
+}))
+
+vi.mock('./common/toast', () => ({
+  showToast: mocks.showToast,
 }))
 
 import {
@@ -1048,6 +1058,9 @@ describe('KeeperConfigPanel', () => {
     mocks.fetchRuntimeProfiles.mockClear()
     mocks.fetchRuntimeProviders.mockClear()
     mocks.patchKeeperConfig.mockClear()
+    mocks.refreshKeeperRuntimeStatus.mockReset()
+    mocks.refreshKeeperRuntimeStatus.mockResolvedValue(undefined)
+    mocks.showToast.mockClear()
     mocks.updateKeeperRuntime.mockClear()
     mocks.setKeeperToolPolicy.mockClear()
     mocks.fetchDashboardTools.mockClear()
@@ -1493,6 +1506,84 @@ describe('KeeperConfigPanel', () => {
       tool_access: ['tool_read_file', 'masc_status'],
       deny: ['Execute', 'DangerTool'],
     })
+    expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledTimes(1)
+    expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
+  })
+
+  it('refreshes shared keeper surfaces after prompt save', async () => {
+    const updated = makeKeeperConfig({
+      prompt: {
+        ...makeKeeperConfig().prompt,
+        goal: 'Ship refreshed keeper surfaces',
+      },
+    })
+    mocks.patchKeeperConfig.mockResolvedValueOnce(updated)
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '프롬프트')
+    await flush()
+    const editButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('편집하기'),
+    )
+    expect(editButton).toBeDefined()
+    editButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+
+    const goal = container.querySelector('textarea') as HTMLTextAreaElement | null
+    expect(goal).not.toBeNull()
+    goal!.value = 'Ship refreshed keeper surfaces'
+    goal!.dispatchEvent(new Event('input', { bubbles: true }))
+    goal!.dispatchEvent(new FocusEvent('blur', { bubbles: true }))
+    await flush()
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.trim() === '저장',
+    )
+    expect(saveButton).toBeDefined()
+    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      expect.objectContaining({ goal: 'Ship refreshed keeper surfaces' }),
+    )
+    expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledTimes(1)
+    expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
+  })
+
+  it('surfaces post-save refresh failure without turning the save into failure', async () => {
+    mocks.refreshKeeperRuntimeStatus.mockRejectedValueOnce(new Error('runtime projection unavailable'))
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '실행 정책')
+    await flush()
+
+    const toolAccess = container.querySelector(
+      'textarea[aria-label="tool_access"]',
+    ) as HTMLTextAreaElement | null
+    expect(toolAccess).not.toBeNull()
+    toolAccess!.value = 'tool_read_file\nmasc_status'
+    toolAccess!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('정책 저장'),
+    )
+    expect(saveButton).toBeDefined()
+    expect(saveButton!.hasAttribute('disabled')).toBe(false)
+    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledTimes(1)
+    expect(mocks.showToast).toHaveBeenCalledWith('도구 정책 저장 완료', 'success')
+    expect(mocks.showToast).toHaveBeenCalledWith('runtime projection unavailable', 'warning')
   })
 
   it('patches runtime_id from the dashboard panel', async () => {

@@ -11,21 +11,17 @@ let test_board_registry_advertises_cleanup_tool () =
   let names = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Board_tool_registry.tools in
   check_member "board cleanup advertised" "masc_board_cleanup" true names
 
-let test_raw_board_wrappers_filtered_without_hiding_read_tools () =
+let test_board_keeper_projection_is_exhaustive () =
   let names = names_from_board_registry () in
-  check_member "raw board post filtered" "masc_board_post" false names;
-  check_member "raw board comment filtered" "masc_board_comment" false names;
-  check_member "raw board vote filtered" "masc_board_vote" false names;
-  check_member
-    "raw board curation submit filtered"
-    "masc_board_curation_submit"
-    false
-    names;
-  check_member "raw board cleanup filtered" "masc_board_cleanup" false names;
-  check_member "raw board delete filtered" "masc_board_delete" false names;
-  check_member "board list remains visible" "masc_board_list" true names;
-  check_member "board post get remains visible" "masc_board_post_get" true names;
-  check_member "board stats remains visible" "masc_board_stats" true names
+  List.iter
+    (fun board_name ->
+      let raw_name = Tool_name.Board_name.to_string board_name in
+      match Keeper_tool_name.board_projection_of_masc_board_name board_name with
+      | Keeper_tool_name.Direct_masc ->
+        check_member (raw_name ^ " direct Keeper route") raw_name true names
+      | Keeper_tool_name.Keeper_wrapper _ | Keeper_tool_name.External_only ->
+        check_member (raw_name ^ " raw route excluded") raw_name false names)
+    Tool_name.Board_name.all
 
 let () =
   Alcotest.run "keeper_tool_policy_masc_surface"
@@ -35,8 +31,8 @@ let () =
           test_case "advertises board cleanup tool" `Quick
             test_board_registry_advertises_cleanup_tool;
           test_case
-            "filters raw board write tools with keeper wrappers"
+            "projects every Board operation by typed policy"
             `Quick
-            test_raw_board_wrappers_filtered_without_hiding_read_tools;
+            test_board_keeper_projection_is_exhaustive;
         ] );
     ]

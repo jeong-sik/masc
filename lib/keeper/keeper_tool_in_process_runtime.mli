@@ -98,9 +98,9 @@ val handle_board
   -> args:Yojson.Safe.t
   -> string
 
-(** [handle_masc_board] dispatches public MCP [masc_board_*] tools through
-    the existing board dispatcher while binding board write identity to
-    [meta.name]. *)
+(** [handle_masc_board] admits only Board operations whose typed Keeper
+    projection is [Direct_masc], binds runtime-owned identity to [meta.name],
+    and explicitly rejects wrapper-backed, external-only, or unknown routes. *)
 val handle_masc_board : meta:keeper_meta -> name:string -> args:Yojson.Safe.t -> string
 
 (** RFC-0182 §3.1 — [handle_masc_task] is the descriptor-projection

@@ -11,7 +11,7 @@
 (** {1 Inline schemas} *)
 
 let tool_delete : Masc_domain.tool_schema =
-  { name = "masc_board_delete"
+  { name = Tool_name.Board_name.(to_string Board_delete)
   ; description =
       "Delete a board post and its associated comments and votes. Use for cleanup of \
        stale, test, or expired posts."
@@ -40,7 +40,7 @@ let tool_delete : Masc_domain.tool_schema =
 ;;
 
 let board_tool_cleanup : Masc_domain.tool_schema =
-  { name = "masc_board_cleanup"
+  { name = Tool_name.Board_name.(to_string Board_cleanup)
   ; description =
       "Scan board posts matching filter criteria and delete or report them. Defaults to \
        dry_run=true (report only). Set dry_run=false to delete. Safety: never deletes \
@@ -100,7 +100,7 @@ let board_tool_cleanup : Masc_domain.tool_schema =
 
 (** All board tools. *)
 let board_tool_curation_read : Masc_domain.tool_schema =
-  { name = "masc_board_curation_read"
+  { name = Tool_name.Board_name.(to_string Board_curation_read)
   ; description =
       "Read the latest AI curation snapshot for the board: TL;DR summary, post ordering, \
        highlights, tag suggestions, answer matches, rationale, and operator-auditable \
@@ -111,7 +111,7 @@ let board_tool_curation_read : Masc_domain.tool_schema =
 ;;
 
 let board_tool_curation_submit : Masc_domain.tool_schema =
-  { name = "masc_board_curation_submit"
+  { name = Tool_name.Board_name.(to_string Board_curation_submit)
   ; description =
       "Submit an AI curation snapshot for the board. This records summary, recommended \
        ordering, highlights, tag suggestions, answer matches, rationale, and provenance \
@@ -177,40 +177,38 @@ let board_tool_curation_submit : Masc_domain.tool_schema =
   }
 ;;
 
-(** {1 Aggregate list advertised to MCP clients}
-
-    Order preserved from pre-split board_tool.ml. *)
-let tools =
-  [ Board_tool_schemas.tool_post_create
-  ; Board_tool_schemas.tool_post_edit
-  ; Board_tool_schemas.tool_post_list
-  ; Board_tool_schemas.tool_post_get
-  ; Board_tool_schemas.tool_comment_add
-  ; Board_tool_schemas.tool_vote
-  ; Board_tool_schemas.tool_stats
-  ; Board_tool_schemas.tool_search
-  ; Board_tool_schemas.tool_comment_vote
-  ; Board_tool_schemas.tool_reaction
-  ; Board_tool_schemas.tool_profile
-  ; Board_tool_schemas.tool_hearth_list
-  ; board_tool_curation_read
-  ; board_tool_curation_submit
-  ; tool_delete
-  ; board_tool_cleanup
-  ; Board_tool_schemas.tool_sub_board_create
-  ; Board_tool_schemas.tool_sub_board_list
-  ; Board_tool_schemas.tool_sub_board_get
-  ; Board_tool_schemas.tool_sub_board_update
-  ; Board_tool_schemas.tool_sub_board_delete
-  ]
+(** {1 Typed schema projection} *)
+let schema_for_board_name = function
+  | Tool_name.Board_name.Board_post -> Board_tool_schemas.tool_post_create
+  | Tool_name.Board_name.Board_post_update -> Board_tool_schemas.tool_post_edit
+  | Tool_name.Board_name.Board_list -> Board_tool_schemas.tool_post_list
+  | Tool_name.Board_name.Board_post_get -> Board_tool_schemas.tool_post_get
+  | Tool_name.Board_name.Board_comment -> Board_tool_schemas.tool_comment_add
+  | Tool_name.Board_name.Board_vote -> Board_tool_schemas.tool_vote
+  | Tool_name.Board_name.Board_stats -> Board_tool_schemas.tool_stats
+  | Tool_name.Board_name.Board_search -> Board_tool_schemas.tool_search
+  | Tool_name.Board_name.Board_comment_vote -> Board_tool_schemas.tool_comment_vote
+  | Tool_name.Board_name.Board_reaction -> Board_tool_schemas.tool_reaction
+  | Tool_name.Board_name.Board_profile -> Board_tool_schemas.tool_profile
+  | Tool_name.Board_name.Board_hearths -> Board_tool_schemas.tool_hearth_list
+  | Tool_name.Board_name.Board_curation_read -> board_tool_curation_read
+  | Tool_name.Board_name.Board_curation_submit -> board_tool_curation_submit
+  | Tool_name.Board_name.Board_delete -> tool_delete
+  | Tool_name.Board_name.Board_cleanup -> board_tool_cleanup
+  | Tool_name.Board_name.Board_sub_board_create ->
+    Board_tool_schemas.tool_sub_board_create
+  | Tool_name.Board_name.Board_sub_board_list ->
+    Board_tool_schemas.tool_sub_board_list
+  | Tool_name.Board_name.Board_sub_board_get -> Board_tool_schemas.tool_sub_board_get
+  | Tool_name.Board_name.Board_sub_board_update ->
+    Board_tool_schemas.tool_sub_board_update
+  | Tool_name.Board_name.Board_sub_board_delete ->
+    Board_tool_schemas.tool_sub_board_delete
 ;;
 
-let schema_for_board_name board_name =
-  let name = Tool_name.Board_name.to_string board_name in
-  List.find_opt
-    (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
-    tools
-;;
+(** Aggregate list advertised to MCP clients, derived from the closed Board
+    operation vocabulary in its stable advertised order. *)
+let tools = List.map schema_for_board_name Tool_name.Board_name.all
 
 let identity_fields_for_board_name = function
   | Tool_name.Board_name.Board_post
@@ -238,18 +236,7 @@ let identity_fields_for_board_name = function
 ;;
 
 let identity_input_fields =
-  [ Tool_name.Board_name.Board_post
-  ; Tool_name.Board_name.Board_post_update
-  ; Tool_name.Board_name.Board_comment
-  ; Tool_name.Board_name.Board_vote
-  ; Tool_name.Board_name.Board_comment_vote
-  ; Tool_name.Board_name.Board_reaction
-  ; Tool_name.Board_name.Board_delete
-  ; Tool_name.Board_name.Board_sub_board_create
-  ; Tool_name.Board_name.Board_sub_board_delete
-  ; Tool_name.Board_name.Board_sub_board_update
-  ; Tool_name.Board_name.Board_curation_submit
-  ]
+  Tool_name.Board_name.all
   |> List.concat_map identity_fields_for_board_name
   |> List.sort_uniq String.compare
 ;;

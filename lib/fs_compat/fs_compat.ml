@@ -887,6 +887,7 @@ let append_private_jsonl_durable_locked_result path suffix =
                if original_length = 0
                then true
                else (
+                 (* See Unix.lseek: only the file-position side effect is required. *)
                  ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
                  let byte = Bytes.create 1 in
                  let rec read_tail () =
@@ -901,6 +902,7 @@ let append_private_jsonl_durable_locked_result path suffix =
              if not tail_is_complete
              then Error Incomplete_jsonl_tail
              else (
+               (* See Unix.lseek: only the file-position side effect is required. *)
                ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
                append_fd_durable
                  ~io:durable_append_unix_io

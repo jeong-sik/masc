@@ -3,6 +3,7 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DashboardKeeperBackground,
+  DashboardKeeperChatQueue,
   DashboardKeeperWaitingInventory,
   DashboardScheduledAutomation,
 } from '../../api'
@@ -36,6 +37,16 @@ vi.mock('../../api/dashboard-governance', () => ({
 }))
 
 import { ScheduleSurface } from './schedule-surface'
+
+function emptyChatQueue(): DashboardKeeperChatQueue {
+  return {
+    schema: 'keeper_chat_queue.dashboard.v1', revision: 0,
+    pending_count: 0, inflight_count: 0, active_receipts: [], read_errors: [],
+    next_action: null, recent_failed_receipt_count: 0,
+    recent_failed_receipt_limit: 8, recent_failed_receipts_truncated: false,
+    recent_failed_receipts: [],
+  }
+}
 
 function sampleAutomation(): DashboardScheduledAutomation {
   return {
@@ -96,11 +107,18 @@ function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
   return {
     schema: 'masc.dashboard.keeper_waiting_inventory.v2',
     source: 'server_keeper_waiting_inventory',
+    visibility: 'operator',
+    generated_at: '2026-07-04T00:00:00Z',
+    supported_states: ['idle', 'busy', 'waiting', 'deferred'],
     keeper_count_known: true,
     keeper_count: 1,
     waiting_keeper_count: 1,
     row_count: 1,
+    row_count_truncated: false,
+    external_attention_row_limit: 64,
+    external_attention_truncated_keeper_count: 0,
     global_row_count: 1,
+    global_pending_confirm_count_known: true,
     global_pending_confirm_count: 0,
     source_counts: {
       schedule_waiting: 1,
@@ -109,26 +127,46 @@ function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
     keepers: [
       {
         keeper_name: 'sangsu',
+        metadata_status: 'registered',
         state: 'waiting',
         waiting_count: 1,
+        waiting_count_truncated: false,
+        truncated_sources: {},
+        chat_queue: emptyChatQueue(),
         sources: { hitl_pending: 1 },
+        since: 1_783_123_200,
+        since_iso: '2026-07-04T00:00:00Z',
+        due_at: null,
+        due_at_iso: null,
+        next_action: 'operator_resolve_hitl',
         waiting_on: [
           {
             keeper_name: 'sangsu',
             source: 'hitl_pending',
             waiting_on: 'schedule approval',
+            wake_producer: 'hitl_resolution_hook',
+            since: 1_783_123_200,
             since_iso: '2026-07-04T00:00:00Z',
+            due_at: null,
+            due_at_iso: null,
             next_action: 'operator_resolve_hitl',
+            detail: {},
           },
         ],
       },
     ],
     global_waiting_on: [
       {
+        keeper_name: null,
         source: 'schedule_waiting',
         waiting_on: 'masc.board_post',
+        wake_producer: 'schedule_runner',
+        since: null,
+        since_iso: null,
+        due_at: 1_783_126_800,
         due_at_iso: '2026-07-04T01:00:00Z',
         next_action: 'schedule_runner_dispatch',
+        detail: {},
       },
     ],
   }

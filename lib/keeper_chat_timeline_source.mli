@@ -3,6 +3,7 @@
     references the keeper subsystem (RFC-0194 §3). *)
 
 val lines_for :
+  config:Workspace.config ->
   base_dir:string -> keeper_name:string -> Tool_agent_timeline.chat_line list
 (** [lines_for ~base_dir ~keeper_name] reads the keeper's chat store and
     returns its user/assistant lines (tool rows and rows without a timestamp
@@ -10,6 +11,7 @@ val lines_for :
     as [build_timeline]'s [load_chat] reader. *)
 
 val lines_for_self :
+  config:Workspace.config ->
   base_dir:string ->
   caller_keeper_name:string ->
   agent_name:string ->

@@ -39,6 +39,7 @@ type outcome =
 val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> config:Workspace.config
   -> base_dir:string
   -> policy:Fusion_policy.t
   -> topology:Fusion_types.fusion_topology

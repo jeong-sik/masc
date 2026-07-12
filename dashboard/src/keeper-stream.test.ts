@@ -130,6 +130,7 @@ describe('applyKeeperStreamEvent', () => {
       type: 'CUSTOM',
       name: 'KEEPER_CHAT_QUEUED',
       value: {
+        keeper_name: 'sangsu',
         status: 'queued',
         pending_count: 1,
         inflight_count: 0,
@@ -144,6 +145,8 @@ describe('applyKeeperStreamEvent', () => {
       type: 'CUSTOM',
       name: 'KEEPER_CHAT_QUEUED',
       value: {
+        keeper_name: 'sangsu',
+        status: 'queued',
         receipt_id: 'not-a-chat-receipt',
         queue_revision: 1,
         pending_count: 1,
@@ -156,6 +159,8 @@ describe('applyKeeperStreamEvent', () => {
       type: 'CUSTOM',
       name: 'KEEPER_CHAT_QUEUED',
       value: {
+        keeper_name: 'sangsu',
+        status: 'queued',
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
         pending_count: 1,
         inflight_count: 0,
@@ -167,6 +172,8 @@ describe('applyKeeperStreamEvent', () => {
   it('rejects missing, blank, or wrongly typed shutdown operation metadata', () => {
     assistantEntry()
     const baseValue = {
+      keeper_name: 'sangsu',
+      status: 'queued',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
       queue_revision: 1,
       pending_count: 1,
@@ -183,6 +190,71 @@ describe('applyKeeperStreamEvent', () => {
         value,
       })).toBe('Keeper queue acceptance has invalid shutdown operation metadata.')
     }
+  })
+
+  it('rejects queue acceptance for an unknown status or a different Keeper', () => {
+    assistantEntry()
+    const baseValue = {
+      keeper_name: 'sangsu',
+      status: 'queued',
+      receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
+      queue_revision: 1,
+      pending_count: 1,
+      inflight_count: 0,
+      shutdown_operation_id: null,
+    }
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: { ...baseValue, status: 'accepted' },
+    })).toBe('Keeper queue acceptance has an invalid status.')
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: { ...baseValue, keeper_name: 'other-keeper' },
+    })).toBe('Keeper queue acceptance does not match the active Keeper.')
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.details?.queueReceiptId).toBeUndefined()
+  })
+
+  it('keeps a durable busy acceptance queued when its transport request finishes', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        keeper_name: 'sangsu',
+        status: 'queued',
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
+        queue_revision: 1,
+        pending_count: 1,
+        inflight_count: 0,
+        shutdown_operation_id: null,
+      },
+    })).toBeNull()
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: '',
+        status: 'done',
+        ok: true,
+      },
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'RUN_FINISHED',
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('queued')
+    expect(entry?.details?.queueState).toBe('pending')
+    expect(entry?.details?.queueReceiptId).toBe(
+      'chatq_00000000-0000-4000-8000-000000000007',
+    )
   })
 
   it('surfaces failed request terminal events before stream error close', () => {

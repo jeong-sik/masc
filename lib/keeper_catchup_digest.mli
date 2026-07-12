@@ -147,3 +147,12 @@ val build :
     causes so the client can render truncation warnings without inferring them
     from [since_unix]. Failures append to [read_errors]; a missing store is
     zero, not a failure. *)
+
+val build_configured :
+  config:Workspace.config ->
+  keeper_name:string ->
+  since_unix:float ->
+  now_unix:float ->
+  t
+(** Cluster-aware form of {!build}. Every source root, including chat, audit,
+    activity, and Keeper-local runtime stores, derives from [config]. *)

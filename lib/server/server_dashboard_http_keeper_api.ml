@@ -1125,7 +1125,7 @@ let keeper_chat_receipt_state_json = function
     `Assoc
       [ "kind", `String "delivered"
       ; "completed_at", `Float completion.completed_at
-      ; "outcome_ref", json_string_opt completion.outcome_ref
+      ; "outcome_ref", Ids.Turn_ref.to_yojson completion.outcome_ref
       ]
   | Keeper_chat_queue.Failed failure ->
     `Assoc
@@ -1135,7 +1135,9 @@ let keeper_chat_receipt_state_json = function
       ; ( "detail"
         , `String (Observability_redact.redact_text failure.detail) )
       ; "completed_at", `Float failure.completed_at
-      ; "outcome_ref", json_string_opt failure.outcome_ref
+      ; ( "outcome_ref"
+        , Option.fold ~none:`Null ~some:Ids.Turn_ref.to_yojson
+            failure.outcome_ref )
       ]
 ;;
 
@@ -1230,7 +1232,7 @@ let handle_keeper_get_subroutes state req request reqd =
          | Some since_unix ->
            let config = Mcp_server.workspace_config state in
            let digest =
-             Keeper_catchup_digest.build ~base_path:config.base_path
+             Keeper_catchup_digest.build_configured ~config
                ~keeper_name:name ~since_unix ~now_unix:(Time_compat.now ())
            in
            Server_auth.respond_json_value_with_cors ~status:`OK request reqd
@@ -1244,7 +1246,7 @@ let handle_keeper_get_subroutes state req request reqd =
       let config = Mcp_server.workspace_config state in
       let base_dir = config.base_path in
       let messages =
-        Keeper_chat_store.load ~base_dir ~keeper_name:name
+        Keeper_chat_store.load_configured ~config ~base_dir ~keeper_name:name
       in
       let trace_block_by_turn_ref =
         match Keeper_meta_store.read_meta config name with
@@ -1709,8 +1711,11 @@ let handle_keeper_get_subroutes state req request reqd =
                 ])
              reqd
          | Some turn_ref ->
-           let base_dir = (Mcp_server.workspace_config state).base_path in
-           let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
+           let config = Mcp_server.workspace_config state in
+           let base_dir = config.base_path in
+           let messages =
+             Keeper_chat_store.load_configured ~config ~base_dir ~keeper_name:name
+           in
            let transcript =
              Keeper_chat_store.transcript_of_messages messages ~turn_ref
            in

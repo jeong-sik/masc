@@ -26,6 +26,8 @@ let check name cond =
 let contains ~affix text = Astring.String.is_infix ~affix text
 
 let keeper_name = "busy-connector-keeper"
+let turn_ref trace_id absolute_turn =
+  Ids.Turn_ref.make ~trace_id ~absolute_turn
 
 (* Hold the keeper's admission slot busy in a forked fiber (the proven pattern
    from test_keeper_turn_admission): the body resolves [started] then blocks on
@@ -57,7 +59,7 @@ let with_unpublished_busy_slot ~base ~sw f =
   Eio.Promise.resolve set_release ();
   result
 
-let count_user_lines ~base =
+let count_user_lines ?config ~base () =
   (* The gate inbound boundary records the connector user line as a pending
      (assistant-less) row. Count those rows for the keeper to assert exactly-once
      recording. *)
@@ -65,11 +67,14 @@ let count_user_lines ~base =
     (List.filter
        (fun (m : Keeper_chat_store.chat_message) ->
           match m.role with Keeper_chat_store.Role.User -> true | _ -> false)
-       (Keeper_chat_store.load ~base_dir:base ~keeper_name))
+       (match config with
+        | Some config ->
+          Keeper_chat_store.load_configured ~config ~base_dir:base ~keeper_name
+        | None -> Keeper_chat_store.load ~base_dir:base ~keeper_name))
 
-let configure_queue ~base =
+let configure_queue ~config =
   Keeper_chat_queue.For_testing.reset ();
-  let report = Keeper_chat_queue.configure_persistence ~base_path:base in
+  let report = Keeper_chat_queue.configure_persistence ~config in
   check "chat queue persistence configured without load errors"
     (report.load_errors = [])
 
@@ -92,7 +97,7 @@ let test_busy_discord_enqueues () =
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
-      configure_queue ~base;
+      configure_queue ~config;
       Eio.Switch.run (fun sw ->
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
@@ -125,6 +130,8 @@ let test_busy_discord_enqueues () =
          | Gate_protocol.Reply { message_request = None; _ } ->
              check "busy connector ACK carries durable receipt" false
          | Gate_protocol.Keeper_error_result _
+         | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
          | Gate_protocol.Unavailable_result ->
              check "busy Discord dispatch returns a Reply (not error/unavailable)"
                false);
@@ -141,6 +148,7 @@ let test_busy_discord_enqueues () =
                  { Keeper_chat_queue.source =
                      Keeper_chat_queue.Discord { channel_id; user_id }
                  ; content
+                 ; transcript_context
                  ; _
                  }
              ; _
@@ -152,7 +160,24 @@ let test_busy_discord_enqueues () =
                (channel_id = "chan-777");
              check "queued source carries the user_id" (user_id = "user-42");
              check "queued content is the user's message"
-               (content = "are you there?")
+               (content = "are you there?");
+             check "Discord transcript provenance is exact"
+               (match transcript_context with
+                | Some context ->
+                  context.conversation_id = Some "discord:dm:channel:chan-777"
+                  && context.external_message_id = Some "discord-msg-777"
+                  && context.speaker.speaker_id = Some "user-42"
+                  && context.speaker.speaker_name = Some "Tester"
+                  && context.speaker.speaker_authority
+                     = Keeper_chat_store.External
+                  && (match context.surface with
+                      | Surface_ref.Discord surface ->
+                        surface.guild_id = None
+                        && surface.channel_id = "chan-777"
+                        && surface.parent_channel_id = None
+                        && surface.thread_id = None
+                      | _ -> false)
+                | None -> false)
          | _ -> check "queue holds one Discord receipt" false);
         (match Keeper_chat_queue.lease_batch ~keeper_name with
          | `Leased lease ->
@@ -163,7 +188,9 @@ let test_busy_discord_enqueues () =
                   ~lease_id:lease.lease_id
                   ~outcome:
                     (Keeper_chat_queue.Mark_delivered
-                       { completed_at = Time_compat.now (); outcome_ref = None })
+                       { completed_at = Time_compat.now ()
+                       ; outcome_ref = turn_ref "busy-connector" 1
+                       })
               with
               | `Finalized receipt_ids ->
                   check "finalize records the delivered receipt"
@@ -172,11 +199,85 @@ let test_busy_discord_enqueues () =
                   check "leased receipt finalizes" false)
          | `Empty | `Already_leased _ | `Error _ ->
              check "pending receipt leases" false);
-        (* Ownership invariant (RFC §3.4): the gate inbound boundary recorded the
-           user line exactly once; no paired assistant row exists yet because the
-           turn has not been drained. *)
-        check "gate inbound recorded the connector user line exactly once"
-          (count_user_lines ~base = 1)))
+        (* Ownership invariant: a Busy connector branch commits only the queue
+           receipt. The consumer writes the user+terminal transcript together;
+           Gate must not leave an assistant-less ghost row before drain. *)
+        check "busy gate leaves transcript ownership to the queue consumer"
+          (count_user_lines ~base () = 0)))
+
+let test_nondefault_cluster_keeps_queue_and_transcript_together () =
+  Printf.printf
+    "Test: non-default cluster keeps busy receipt and transcript in one boundary\n%!";
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-busy-cluster-%d-%d" (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock = Eio.Stdenv.clock env in
+      let default_config : Workspace.config = Workspace.default_config base in
+      let config =
+        { default_config with
+          backend_config =
+            { default_config.backend_config with
+              Backend_types.cluster_name = "connector-team"
+            }
+        }
+      in
+      ignore (Workspace.init config ~agent_name:None);
+      Keeper_turn_admission.For_testing.reset ();
+      configure_queue ~config;
+      Eio.Switch.run (fun sw ->
+        Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
+        let reply =
+          with_busy_slot ~base ~sw (fun () ->
+            Gate_keeper_backend.dispatch
+              ~connector_kind:Gate_keeper_backend.Discord
+              ~submission_owner:Gate_keeper_backend.Channel_actor
+              ~sw ~clock ~proc_mgr:None ~net:None ~config
+              ~channel:"discord" ~channel_user_id:"cluster-user"
+              ~channel_user_name:"Cluster User"
+              ~channel_workspace_id:"cluster-channel" ~keeper_name
+              ~idempotency_key:"discord-cluster-message"
+              ~metadata:[] ~content:"cluster-bound question")
+        in
+        (match reply with
+         | Gate_protocol.Reply { message_request = Some request; _ } ->
+           check "non-default connector input receives a durable queue receipt"
+             (request.status = Gate_protocol.Queued)
+         | Gate_protocol.Reply { message_request = None; _ }
+         | Gate_protocol.Keeper_error_result _
+         | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
+         | Gate_protocol.Unavailable_result ->
+           check "non-default connector input receives a durable queue receipt"
+             false);
+        check "non-default queue has one pending receipt"
+          (List.length (Keeper_chat_queue.snapshot ~keeper_name).pending = 1);
+        check "queued input is not duplicated into the cluster transcript"
+          (count_user_lines ~config ~base () = 0);
+        check "default transcript path stays empty"
+          (count_user_lines ~config:default_config ~base () = 0);
+        let queue_path =
+          Filename.concat
+            (Filename.concat (Workspace.keepers_runtime_dir config) keeper_name)
+            "chat-queue.json"
+        in
+        let transcript_path =
+          Filename.concat
+            (Filename.concat (Workspace.masc_root_dir config) "keeper_chat")
+            (keeper_name ^ ".jsonl")
+        in
+        check "queue snapshot is under the cluster root"
+          (Sys.file_exists queue_path);
+        check "consumer has not yet created a transcript"
+          (not (Sys.file_exists transcript_path))))
 
 let test_unpublished_busy_slot_queues_without_resolved_meta () =
   Printf.printf
@@ -197,7 +298,7 @@ let test_unpublished_busy_slot_queues_without_resolved_meta () =
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
-      configure_queue ~base;
+      configure_queue ~config;
       Eio.Switch.run (fun sw ->
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
@@ -219,6 +320,8 @@ let test_unpublished_busy_slot_queues_without_resolved_meta () =
              (request.status = Gate_protocol.Queued)
          | Gate_protocol.Reply { message_request = None; _ }
          | Gate_protocol.Keeper_error_result _
+         | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
          | Gate_protocol.Unavailable_result ->
            check "unpublished busy slot returns a queued ACK" false);
         let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
@@ -244,7 +347,7 @@ let test_busy_discord_persist_failure_is_explicit () =
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
-      configure_queue ~base;
+      configure_queue ~config;
       Eio.Switch.run (fun sw ->
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
@@ -263,13 +366,18 @@ let test_busy_discord_persist_failure_is_explicit () =
          | Gate_protocol.Keeper_error_result message ->
              check "persistence failure is returned explicitly"
                (String.length message > 0)
-         | Gate_protocol.Reply _ | Gate_protocol.Unavailable_result ->
+         | Gate_protocol.Reply _
+         | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
+         | Gate_protocol.Unavailable_result ->
              check "persistence failure never claims queued" false);
         let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
         check "failed enqueue leaves no pending receipt"
           (snapshot.pending = []);
         check "failed enqueue does not advance queue revision"
-          (snapshot.revision = 0L)))
+          (snapshot.revision = 0L);
+        check "failed enqueue leaves no ghost transcript row"
+          (count_user_lines ~config ~base () = 0)))
 
 let test_pending_receipt_prevents_direct_overtake () =
   Printf.printf "Test: active receipt queues a later connector turn without a live slot\n%!";
@@ -289,7 +397,7 @@ let test_pending_receipt_prevents_direct_overtake () =
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
-      configure_queue ~base;
+      configure_queue ~config;
       ignore
         (Keeper_chat_queue.enqueue ~keeper_name
            { content = "first"
@@ -299,6 +407,24 @@ let test_pending_receipt_prevents_direct_overtake () =
            ; source =
                Keeper_chat_queue.Discord
                  { channel_id = "chan-777"; user_id = "user-42" }
+           ; transcript_context =
+               Some
+                 { surface =
+                     Surface_ref.Discord
+                       { guild_id = None
+                       ; channel_id = "chan-777"
+                       ; parent_channel_id = None
+                       ; thread_id = None
+                       }
+                 ; conversation_id = None
+                 ; external_message_id = None
+                 ; speaker =
+                     { Keeper_chat_store.speaker_id = Some "user-42"
+                     ; speaker_name = Some "Tester"
+                     ; speaker_authority = Keeper_chat_store.External
+                     }
+                 ; extra_mentions = []
+                 }
            });
       Eio.Switch.run @@ fun sw ->
       let reply =
@@ -338,7 +464,7 @@ let test_busy_slack_preserves_thread_context () =
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
-      configure_queue ~base;
+      configure_queue ~config;
       Eio.Switch.run @@ fun sw ->
       let reply =
         with_busy_slot ~base ~sw (fun () ->
@@ -364,6 +490,7 @@ let test_busy_slack_preserves_thread_context () =
               { source =
                   Keeper_chat_queue.Slack
                     { channel_id; user_id; user_name; team_id; thread_ts }
+              ; transcript_context
               ; _
               }
           ; _
@@ -372,8 +499,93 @@ let test_busy_slack_preserves_thread_context () =
         check "Slack user retained" (user_id = "U-42" && user_name = "Slack User");
         check "Slack team retained" (team_id = Some "T-777");
         check "top-level message roots deferred reply thread"
-          (thread_ts = Some "171.001")
+          (thread_ts = Some "171.001");
+        check "Slack transcript provenance is exact"
+          (match transcript_context with
+           | Some context ->
+             context.conversation_id = Some "slack:channel:C-777"
+             && context.external_message_id = Some "slack-msg-171.001"
+             && context.speaker.speaker_id = Some "U-42"
+             && context.speaker.speaker_name = Some "Slack User"
+             && context.speaker.speaker_authority
+                = Keeper_chat_store.External
+             && (match context.surface with
+                 | Surface_ref.Slack surface ->
+                   surface.team_id = Some "T-777"
+                   && surface.channel_id = "C-777"
+                   && surface.thread_ts = Some "171.001"
+                 | _ -> false)
+           | None -> false)
       | _ -> check "one typed Slack receipt is pending" false)
+
+let test_connector_transcript_failure_rejects_before_queue
+    ~label ~connector_kind ~channel ~channel_user_id ~channel_user_name
+    ~channel_workspace_id =
+  Printf.printf
+    "Test: %s transcript failure rejects before durable queue ACK\n%!" label;
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-transcript-fail-%s-%d-%d"
+         (String.lowercase_ascii label)
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock = Eio.Stdenv.clock env in
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:(Some keeper_name));
+      Keeper_turn_admission.For_testing.reset ();
+      configure_queue ~config;
+      let chat_dir =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path:base)
+          "keeper_chat"
+      in
+      ignore (Keeper_fs.ensure_dir chat_dir);
+      let transcript_path = Filename.concat chat_dir (keeper_name ^ ".jsonl") in
+      Unix.mkdir transcript_path 0o755;
+      Eio.Switch.run (fun sw ->
+        Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
+        let reply =
+          Gate_keeper_backend.dispatch ~connector_kind ~sw ~clock
+            ~submission_owner:Gate_keeper_backend.Channel_actor
+            ~proc_mgr:None ~net:None ~config ~channel ~channel_user_id
+            ~channel_user_name ~channel_workspace_id ~keeper_name
+            ~idempotency_key:("transcript-fail-" ^ String.lowercase_ascii label)
+            ~metadata:[] ~content:"must not be acknowledged"
+        in
+        (match reply with
+         | Gate_protocol.Keeper_error_result message ->
+           check (label ^ " persistence failure is explicit")
+             (String.trim message <> "")
+         | Gate_protocol.Reply _
+         | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
+         | Gate_protocol.Unavailable_result ->
+           check (label ^ " never receives a queue ACK") false);
+        let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+        check (label ^ " has no accepted queue receipt")
+          (snapshot.pending = [] && snapshot.inflight = []);
+        check (label ^ " queue revision remains zero")
+          (snapshot.revision = 0L)))
+
+let test_discord_transcript_failure_rejects_before_queue () =
+  test_connector_transcript_failure_rejects_before_queue
+    ~label:"Discord" ~connector_kind:Gate_keeper_backend.Discord
+    ~channel:"discord" ~channel_user_id:"discord-user"
+    ~channel_user_name:"Discord User" ~channel_workspace_id:"discord-channel"
+
+let test_slack_transcript_failure_rejects_before_queue () =
+  test_connector_transcript_failure_rejects_before_queue
+    ~label:"Slack" ~connector_kind:Gate_keeper_backend.Slack
+    ~channel:"slack" ~channel_user_id:"U-FAIL"
+    ~channel_user_name:"Slack User" ~channel_workspace_id:"C-FAIL"
 
 let test_shutdown_fenced_connector_ack
     ~label ~connector_kind ~channel ~channel_user_id ~channel_user_name
@@ -399,7 +611,7 @@ let test_shutdown_fenced_connector_ack
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
-      configure_queue ~base;
+      configure_queue ~config;
       let operation_id = Keeper_shutdown_types.Operation_id.generate () in
       let operation_id_text =
         Keeper_shutdown_types.Operation_id.to_string operation_id
@@ -445,6 +657,8 @@ let test_shutdown_fenced_connector_ack
              (not (contains ~affix:"current turn finishes" ack_text))
          | Gate_protocol.Reply { message_request = None; _ }
          | Gate_protocol.Keeper_error_result _
+         | Gate_protocol.Accepted_keeper_error_result _
+         | Gate_protocol.Duplicate_accepted_result _
          | Gate_protocol.Unavailable_result ->
            check (label ^ " shutdown-fenced input returns a queued ACK") false);
         (match (Keeper_chat_queue.snapshot ~keeper_name).pending with
@@ -494,10 +708,13 @@ let test_shutdown_fenced_slack_ack () =
 
 let () =
   test_busy_discord_enqueues ();
+  test_nondefault_cluster_keeps_queue_and_transcript_together ();
   test_unpublished_busy_slot_queues_without_resolved_meta ();
   test_busy_discord_persist_failure_is_explicit ();
   test_pending_receipt_prevents_direct_overtake ();
   test_busy_slack_preserves_thread_context ();
+  test_discord_transcript_failure_rejects_before_queue ();
+  test_slack_transcript_failure_rejects_before_queue ();
   test_shutdown_fenced_discord_ack ();
   test_shutdown_fenced_slack_ack ();
   if !failures > 0 then (

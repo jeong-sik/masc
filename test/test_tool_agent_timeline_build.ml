@@ -117,7 +117,7 @@ let append_chat_for dir ~keeper_name ~user ~assistant =
 let build_with_chat dir config ~agent_name =
   Lib.Tool_agent_timeline.build_timeline
     ~load_chat:(fun ~agent_name ->
-      Lib.Keeper_chat_timeline_source.lines_for ~base_dir:dir
+      Lib.Keeper_chat_timeline_source.lines_for ~config ~base_dir:dir
         ~keeper_name:agent_name)
     config ~agent_name ~since_hours:24.0 ~limit:50 ~include_tasks:true
     ~include_board:false ~include_tool_calls:true
@@ -197,7 +197,7 @@ let test_self_scoped_chat_reader_blocks_cross_keeper () =
       let build_for requested =
         Lib.Tool_agent_timeline.build_timeline
           ~load_chat:(fun ~agent_name ->
-            Lib.Keeper_chat_timeline_source.lines_for_self ~base_dir:dir
+            Lib.Keeper_chat_timeline_source.lines_for_self ~config ~base_dir:dir
               ~caller_keeper_name:"testkeeper" ~agent_name)
           config ~agent_name:requested ~since_hours:24.0 ~limit:50
           ~include_tasks:true ~include_board:false ~include_tool_calls:true

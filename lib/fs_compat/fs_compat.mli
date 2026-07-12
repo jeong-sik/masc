@@ -38,6 +38,11 @@ val save_file : string -> string -> unit
     Returns [Error msg] on I/O failure instead of raising. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
+(** Atomic owner-only write for sensitive snapshots.  The final file is
+    replaced with exact mode [0o600]; the generic {!save_file_atomic} contract
+    and permissions remain unchanged. *)
+val save_file_atomic_private : string -> string -> (unit, string) Result.t
+
 (** [true] iff [name] matches the [.atomic_*.tmp] pattern produced
     by [Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp"] inside
     {!save_file_atomic}.  Exposed for tests and for a potential
@@ -176,6 +181,65 @@ val fold_appended_lines
   -> init:'acc
   -> f:('acc -> string -> 'acc)
   -> 'acc * int
+
+type durable_append_operation =
+  | Write
+  | Append_fsync
+  | Rollback_truncate
+  | Rollback_fsync
+
+type durable_append_failure =
+  | Unix_error of
+      { operation : durable_append_operation
+      ; error : Unix.error
+      ; function_name : string
+      ; argument : string
+      }
+  | No_write_progress
+
+type durable_append_error =
+  { append_failure : durable_append_failure
+  ; rollback_failures : durable_append_failure list
+  }
+
+exception Durable_append_failed of durable_append_error
+
+(** Render a structured durable-append failure without discarding the original
+    [Unix.error] or rollback failures. *)
+val durable_append_error_to_string : durable_append_error -> string
+
+(** [update_private_file_durable_locked_result path decide] serializes in-process
+    callers with the shared per-path append mutex, takes a cross-process file
+    lock, reads the exact existing bytes, and calls [decide]. [Some suffix]
+    appends the complete suffix and fsyncs it before returning [Ok]; [None]
+    performs no write. If writing or the append fsync fails, the file is
+    truncated to its original length and that rollback is fsynced. [Error]
+    preserves the append failure and every rollback failure. Setup, read, and
+    [decide] exceptions still propagate. The file is created with mode [0600]
+    and any cached JSONL writer for the path is invalidated while the lock is
+    held. *)
+val update_private_file_durable_locked_result :
+  string -> (string -> string option * 'a) -> ('a, durable_append_error) result
+
+(** Compatibility wrapper over {!update_private_file_durable_locked_result}.
+    Raises [Durable_append_failed] when the typed result is [Error]. *)
+val update_private_file_durable_locked :
+  string -> (string -> string option * 'a) -> 'a
+
+type durable_append_io_for_testing =
+  { write : Unix.file_descr -> bytes -> int -> int -> int
+  ; ftruncate : Unix.file_descr -> int -> unit
+  ; fsync : Unix.file_descr -> unit
+  }
+
+(** Direct fd-level seam for deterministic partial-write and rollback tests.
+    Production code uses the same implementation with [Unix] operations. *)
+val append_fd_durable_for_testing :
+  io:durable_append_io_for_testing ->
+  fd:Unix.file_descr ->
+  original_length:int ->
+  string ->
+  (unit, durable_append_error) result
 
 (** Append JSON value as line to JSONL file.
 

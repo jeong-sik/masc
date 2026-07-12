@@ -60,6 +60,7 @@ let dummy_pending_approval
     ?(goal_id = "goal-1")
     ?(turn_id = 42)
     ?(audit_base_path = "")
+    ?(audit_cluster_name = "default")
     ?(input = `Assoc [ "arg", `String "value" ])
     ()
     : Q.pending_approval
@@ -87,6 +88,7 @@ let dummy_pending_approval
   ; lane_policy = Q.Nonblocking
   ; continuation_channel = Keeper_continuation_channel.unrouted "test fixture"
   ; audit_base_path
+  ; audit_cluster_name
   ; resolver = None
   ; on_resolution = None
   ; context_summary = None
@@ -321,6 +323,7 @@ let test_build_context_bundle_with_real_workspace () =
         ~goal_id:goal.id
         ~turn_id:7
         ~audit_base_path:base
+        ~audit_cluster_name:config.backend_config.cluster_name
         ()
     in
     let bundle = H.For_testing.build_context_bundle ~entry in
@@ -340,6 +343,37 @@ let test_build_context_bundle_with_real_workspace () =
       (match chat with
        | `List (_ :: _) -> true
        | _ -> false))
+;;
+
+let test_build_context_bundle_reads_captured_cluster_chat () =
+  let base = temp_dir "hitl_summary_cluster_" in
+  Fun.protect ~finally:(fun () -> rm_rf base) (fun () ->
+    let default_config = workspace_config base in
+    let cluster_name = "hitl-cluster-b" in
+    let cluster_config =
+      { default_config with
+        Workspace.backend_config =
+          { default_config.backend_config with Backend_types.cluster_name }
+      }
+    in
+    let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-cluster" ~absolute_turn:11 in
+    Keeper_chat_store.append_turn ~config:default_config ~base_dir:base
+      ~keeper_name:"test-keeper" ~user_content:"wrong default cluster"
+      ~user_attachments:[] ~turn_ref ~assistant_content:"default reply" ();
+    Keeper_chat_store.append_turn ~config:cluster_config ~base_dir:base
+      ~keeper_name:"test-keeper" ~user_content:"captured named cluster"
+      ~user_attachments:[] ~turn_ref ~assistant_content:"named reply" ();
+    let entry =
+      dummy_pending_approval ~task_id:"" ~goal_id:"" ~turn_id:11
+        ~audit_base_path:base ~audit_cluster_name:cluster_name ()
+    in
+    let bundle = H.For_testing.build_context_bundle ~entry in
+    let chat = Yojson.Safe.Util.member "chat_messages" bundle in
+    let serialized = Yojson.Safe.to_string chat in
+    check bool "captured cluster chat is included" true
+      (Astring.String.is_infix ~affix:"captured named cluster" serialized);
+    check bool "default cluster chat is excluded" false
+      (Astring.String.is_infix ~affix:"wrong default cluster" serialized))
 ;;
 
 (* ── Provider cost/token guard tests ────────────── *)
@@ -563,6 +597,8 @@ let () =
             test_build_context_bundle_includes_ids_and_partial_context
         ; test_case "build_context_bundle with real workspace is not partial" `Quick
             test_build_context_bundle_with_real_workspace
+        ; test_case "build_context_bundle reads captured cluster chat" `Quick
+            test_build_context_bundle_reads_captured_cluster_chat
         ; test_case "provider_config_for_summary uses fallback without runtime override" `Quick
             test_provider_config_for_summary_caps_tokens_and_uses_fallback_temperature
         ] )

@@ -620,6 +620,7 @@ let to_oas_approval_callback
                     ~tool_name
                     ~input
                     ~base_path
+                    ~workspace_config:config
                     ?turn_id
                     ?task_id
                     ?goal_id
@@ -652,6 +653,7 @@ let to_oas_approval_callback
                   ~tool_name
                   ~input
                   ~base_path
+                  ~workspace_config:config
                   ?turn_id
                   ?task_id
                   ?goal_id

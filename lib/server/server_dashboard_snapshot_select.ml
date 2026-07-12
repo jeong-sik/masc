@@ -49,8 +49,26 @@ let select_shell_json
       Server_dashboard_http_core.dashboard_shell_http_json
         ?clock ?request ~timing:timing_obj ~light config)
 ;;
+let replace_assoc_field name value = function
+  | `Assoc fields ->
+    `Assoc ((name, value) :: List.remove_assoc name fields)
+  | other -> other
+;;
+
+let waiting_inventory_visibility = function
+  | `Assoc fields ->
+    (match List.assoc_opt "keeper_waiting_inventory" fields with
+     | Some (`Assoc inventory_fields) ->
+       (match List.assoc_opt "visibility" inventory_fields with
+        | Some (`String visibility) -> Some visibility
+        | Some _ | None -> None)
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
 let select_tools_json
-      ?actor ?timing (config : Workspace.config)
+      ?actor ?timing ?(include_sensitive = false)
+      ?(fresh_keeper_waiting_inventory = false) (config : Workspace.config)
   : Yojson.Safe.t
   =
   let timing_obj =
@@ -58,15 +76,37 @@ let select_tools_json
     | Some t -> t
     | None -> Server_timing.create ()
   in
-  match actor, Dashboard_snapshot.current () with
-  | None, Some snap ->
-    Server_timing.measure
-      timing_obj
-      (Server_timing.Custom "snapshot_read")
-      (fun () -> snap.tools)
-  | _ ->
-    Server_dashboard_http_runtime_info.dashboard_tools_http_json
-      ?actor ~timing:timing_obj config
+  let base, used_snapshot =
+    match actor, Dashboard_snapshot.current () with
+    | None, Some snap ->
+      ( Server_timing.measure
+          timing_obj
+          (Server_timing.Custom "snapshot_read")
+          (fun () -> snap.tools)
+      , true )
+    | _ ->
+      ( Server_dashboard_http_runtime_info.dashboard_tools_http_json
+          ?actor ~timing:timing_obj ~include_sensitive config
+      , false )
+  in
+  let expected_visibility = if include_sensitive then "operator" else "redacted" in
+  let snapshot_projection_matches_request =
+    (not used_snapshot)
+    || waiting_inventory_visibility base = Some expected_visibility
+  in
+  if not fresh_keeper_waiting_inventory && snapshot_projection_matches_request
+  then base
+  else
+    let keeper_waiting_inventory =
+      Server_timing.measure
+        timing_obj
+        (Server_timing.Custom "fresh_keeper_waiting_inventory")
+        (fun () ->
+          if include_sensitive
+          then Server_keeper_waiting_inventory.dashboard_json config
+          else Server_keeper_waiting_inventory.tool_json config)
+    in
+    replace_assoc_field "keeper_waiting_inventory" keeper_waiting_inventory base
 ;;
 
 let select_telemetry_summary_json

@@ -2,8 +2,10 @@
 
     Every accepted message receives a stable receipt before the first durable
     write.  The receipt then follows exactly one closed lifecycle:
-    [Pending -> Inflight -> Delivered | Failed].  A process restart moves an
-    unfinalized [Inflight] receipt back to [Pending] without changing its id.
+    [Pending -> Inflight -> Delivered | Failed].  A process restart converts an
+    unfinalized [Inflight] receipt to a retained [Ambiguous_delivery] failure:
+    transcript or connector effects may already have committed, so startup must
+    not replay it without an external idempotency guarantee.
 
     Queue delivery is at-least-once.  Same-source receipts may share one turn,
     but their identities are never merged: a lease and its terminal transition
@@ -22,19 +24,34 @@ type message_source =
       thread_ts : string option;
     }
 
+type transcript_context =
+  { surface : Surface_ref.t
+  ; conversation_id : string option
+  ; external_message_id : string option
+  ; speaker : Keeper_chat_store.speaker
+  ; extra_mentions : Keeper_identity.Keeper_id.t list
+  }
+
 type queued_message = {
   content : string;
   user_blocks : Keeper_multimodal_input.user_input_block list;
   attachments : Keeper_chat_store.attachment list;
   timestamp : float;
   source : message_source;
+  transcript_context : transcript_context option;
 }
 
-module Receipt_id = Keeper_chat_delivery_identity.Receipt_id
+module Receipt_id : sig
+  type t
+
+  val of_string : string -> (t, string) result
+  val to_string : t -> string
+  val equal : t -> t -> bool
+end
 
 type completion = {
   completed_at : float;
-  outcome_ref : string option;
+  outcome_ref : Ids.Turn_ref.t;
 }
 
 type failure_kind =
@@ -44,9 +61,9 @@ type failure_kind =
   | Transcript_persist_failed
   | Connector_unavailable
   | Delivery_failed
+  | Ambiguous_delivery
   | Cancelled
   | Internal_error
-  | Recovery_interrupted
 
 val failure_kind_to_string : failure_kind -> string
 
@@ -54,7 +71,7 @@ type failure = {
   completed_at : float;
   kind : failure_kind;
   detail : string;
-  outcome_ref : string option;
+  outcome_ref : Ids.Turn_ref.t option;
 }
 
 type receipt_state =
@@ -81,7 +98,6 @@ type snapshot_load_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
-  | Migration_failed
   | Recovery_failed
 
 type snapshot_load_error = {
@@ -129,11 +145,11 @@ type enqueue_receipt = {
   revision : int64;
   pending_count : int;
   inflight_count : int;
+  reused : bool;
 }
 
 type configure_report = {
   restored_keeper_count : int;
-  migrated_keeper_count : int;
   recovered_receipt_count : int;
   load_errors : (string option * snapshot_load_error) list;
 }
@@ -148,19 +164,32 @@ val set_transition_observer : transition_observer option -> unit
 val continuation_channel_of_message_source :
   ?dashboard_thread_id:string -> message_source -> Keeper_continuation_channel.t
 
-(** Enable persistence and restore every per-Keeper snapshot.  Version-1 files
-    are decoded only by the explicit one-time migration, atomically rewritten
-    as strict version 2, and never treated as a version-2 fallback.  A malformed
-    snapshot is retained, registered as unavailable, and reported here; it is
-    never replaced by an empty queue. Reconfiguration clears the prior
-    in-memory registry before loading the new BasePath ownership boundary. *)
-val configure_persistence : base_path:string -> configure_report
+(** Enable persistence in the canonical cluster-aware Keeper runtime directory
+    resolved from [config], and restore strict version-3 per-Keeper snapshots.
+    Any other schema or malformed snapshot is retained, registered as
+    unavailable, and reported here; it is never migrated or replaced by an
+    empty queue. Reconfiguration clears the prior in-memory registry before
+    loading the new workspace/cluster ownership boundary. *)
+val configure_persistence : config:Workspace.config -> configure_report
 
 val persistence_configured : unit -> bool
 
-(** Enqueue only after the receipt-bearing version-2 snapshot commits. *)
+val persistence_matches_config : config:Workspace.config -> bool
+(** [persistence_matches_config ~config] is [true] only when persistence is
+    configured for the exact Keeper storage root resolved by [config]. An
+    unconfigured queue is not a match: ingress must not accept work before the
+    durable owner boundary has been installed. A process-lifetime consumer
+    must reject live workspace/root switches when this returns [false]. *)
+
+(** Enqueue only after the receipt-bearing version-3 snapshot commits.
+    [idempotency_key], when present, is canonicalized into a private durable
+    fingerprint scoped to the Keeper and typed message source. Replays return
+    the original receipt with [reused=true] without changing the revision. *)
 val enqueue :
-  keeper_name:string -> queued_message -> (enqueue_receipt, mutation_error) result
+  ?idempotency_key:string ->
+  keeper_name:string ->
+  queued_message ->
+  (enqueue_receipt, mutation_error) result
 
 val same_source : message_source -> message_source -> bool
 
@@ -172,8 +201,11 @@ val lease_batch :
   | `Error of mutation_error
   ]
 
-(** Atomically finalize every receipt in the matching lease.  Terminal records
-    retain correlation metadata but discard message bodies and attachments. *)
+(** Atomically finalize every receipt in the matching lease. Delivered records
+    discard message bodies and attachments. Failed records conservatively
+    retain the queued message in the owner-only snapshot so an exception or
+    unproven transcript write cannot erase its only durable copy; diagnostic
+    projections do not expose that body. *)
 val finalize :
   keeper_name:string ->
   lease_id:string ->
@@ -211,7 +243,13 @@ val lookup_receipt :
 
 val all_keeper_names : unit -> string list
 
+val configuration_errors : unit -> snapshot_load_error list
+(** Queue-registry errors that are not owned by one valid Keeper entry, such
+    as a failed storage-root decision or an invalid snapshot-bearing
+    directory name. Per-Keeper snapshot errors remain on {!snapshot}. *)
+
 module For_testing : sig
   val reset : unit -> unit
   val fail_next_persist : unit -> unit
+  val set_before_persist : (path:string -> unit) option -> unit
 end

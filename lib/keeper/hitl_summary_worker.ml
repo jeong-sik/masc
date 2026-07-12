@@ -138,9 +138,11 @@ let goal_context config ~goal_id acc =
     `Assoc [ "goal_id", `String goal_id; "found", `Bool false ], acc
 ;;
 
-let chat_context ~base_dir ~keeper_name ~turn_id acc =
+let chat_context ~config ~base_dir ~keeper_name ~turn_id acc =
   try
-    let messages = Keeper_chat_store.load ~base_dir ~keeper_name in
+    let messages =
+      Keeper_chat_store.load_configured ~config ~base_dir ~keeper_name
+    in
     let filtered =
       List.filter
         (fun (m : Keeper_chat_store.chat_message) ->
@@ -166,7 +168,15 @@ let chat_context ~base_dir ~keeper_name ~turn_id acc =
 let collect_context_parts entry =
   let acc0 = { partial = false; notes = [] } in
   let config_opt, acc =
-    try Some (Workspace_utils.default_config entry.audit_base_path), acc0 with
+    try
+      let config = Workspace_utils.default_config entry.audit_base_path in
+      let backend_config =
+        { config.Workspace.backend_config with
+          Backend_types.cluster_name = entry.audit_cluster_name
+        }
+      in
+      Some { config with Workspace.backend_config }, acc0
+    with
     | exn ->
       ( None
       , note acc0 (Printf.sprintf "workspace config unavailable: %s" (Printexc.to_string exn)) )
@@ -206,10 +216,17 @@ let collect_context_parts entry =
       `List [], acc
   in
   let chat_json, acc =
-    match entry.turn_id with
-    | Some turn_id ->
-      chat_context ~base_dir:entry.audit_base_path ~keeper_name:entry.keeper_name ~turn_id acc
-    | None -> `Null, acc
+    match entry.turn_id, config_opt with
+    | Some turn_id, Some config ->
+      chat_context ~config ~base_dir:entry.audit_base_path
+        ~keeper_name:entry.keeper_name ~turn_id acc
+    | Some turn_id, None ->
+      ( `List []
+      , note acc
+          (Printf.sprintf
+             "chat turn %d skipped because workspace config is unavailable"
+             turn_id) )
+    | None, _ -> `Null, acc
   in
   (* Board signals are not collected yet; we intentionally do NOT mark the
      context partial just because this optional dimension is absent. partial

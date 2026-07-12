@@ -305,7 +305,8 @@ let wake_keeper_on_fusion_completion
       run_id
       (Printexc.to_string exn)
 
-let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage :
+let emit ~config ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges
+    ~judge_usage :
     (unit, string) result =
   try
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
@@ -434,7 +435,7 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
          실패를 삼켜 emit이 Ok를 반환했었다(silent drop). [_result] 변형으로 실패를
          surface한다. 성공한 경우에만 broadcast한다. *)
       match
-        Keeper_chat_store.append_assistant_message_result ~base_dir
+        Keeper_chat_store.append_assistant_message_result ~config ~base_dir
           ~keeper_name:keeper ~content ?blocks ()
       with
       | Ok () ->

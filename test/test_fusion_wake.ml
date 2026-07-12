@@ -413,6 +413,7 @@ let test_missing_board_post_id_fallback () =
 
 let test_emit_success_projects_board_chat_and_registry () =
   with_isolated_base_path "fusion-success-sink" (fun base_dir ->
+    let config = Workspace.default_config base_dir in
     let keeper = "fusion-keeper" in
     let run_id = Printf.sprintf "fus-success-%d" (Random.bits ()) in
     let question = "Which implementation should ship?" in
@@ -436,7 +437,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
       ~preset:"unit-test" ~started_at:2.0;
     let result =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~question ~panel
+      Fusion_sink.emit ~config ~base_dir ~keeper ~run_id ~question ~panel
         ~judge:(Ok synthesis) ~judges ~judge_usage
     in
     check bool "emit succeeds" true (Result.is_ok result);
@@ -561,11 +562,14 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     in
     let release_promise, resolve_release = Eio.Promise.create () in
     let completed_promise, resolve_completed = Eio.Promise.create () in
-    let run_orchestrator ~sw:_ ~net:_ ~base_dir ~policy:_ ~topology:_ ~request () =
+    let config = Workspace.default_config base_dir in
+    let run_orchestrator ~sw:_ ~net:_ ~config ~base_dir ~policy:_ ~topology:_
+        ~request () =
       Eio.Promise.await release_promise;
       let outcome =
         match
-          Fusion_sink.emit ~base_dir ~keeper:request.Fusion_types.keeper
+          Fusion_sink.emit ~config ~base_dir
+            ~keeper:request.Fusion_types.keeper
             ~run_id:request.Fusion_types.run_id ~question:request.Fusion_types.prompt
             ~panel ~judge:(Ok synthesis) ~judges ~judge_usage
         with
@@ -577,7 +581,8 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     in
     let response =
       Fusion_tool.For_test.handle_with_runner ~run_orchestrator ~sw
-        ~net:(Eio.Stdenv.net env) ~base_dir ~keeper ~now_unix:4.0 ~run_id
+        ~net:(Eio.Stdenv.net env) ~config ~base_dir ~keeper ~now_unix:4.0
+        ~run_id
         ~policy:(fusion_tool_policy ())
         ~args:(`Assoc [ ("prompt", `String question) ])
     in
@@ -667,13 +672,14 @@ let test_tool_handle_async_success_projects_running_then_completed () =
 ;;
 let test_emit_board_failure_is_best_effort () =
   with_isolated_base_path "fusion-board-best-effort" (fun base_dir ->
+    let config = Workspace.default_config base_dir in
     let keeper = "bad/keeper" in
     let run_id = Printf.sprintf "fus-board-fail-%d" (Random.bits ()) in
     let resolved_answer = "BOARD-BEST-EFFORT-ANSWER" in
     Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
       ~preset:"unit-test" ~started_at:1.0;
     let result =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~question:"q" ~panel:[]
+      Fusion_sink.emit ~config ~base_dir ~keeper ~run_id ~question:"q" ~panel:[]
         ~judge:(Ok (judge_synthesis resolved_answer)) ~judges:[]
         ~judge_usage:Fusion_types.zero_usage
     in

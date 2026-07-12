@@ -173,7 +173,8 @@ let handle_speak
              | None -> None
            in
            Keeper_chat_store.append_assistant_message
-             ~base_dir ~keeper_name:meta.name ~content:message ~surface ?audio:clip ();
+             ~config ~base_dir ~keeper_name:meta.name ~content:message ~surface
+             ?audio:clip ();
            (match clip with
             | Some c ->
               Keeper_chat_broadcast.chat_appended_with_audio

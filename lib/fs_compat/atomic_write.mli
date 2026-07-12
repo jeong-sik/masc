@@ -16,16 +16,22 @@
     this module stays free of [Fs_compat]'s Eio bridge — same
     cycle-free placement pattern as [Mkdir_memo] and [Fd_cache]. *)
 
-(** [save_file_atomic ~save_file path content] writes [content] to
+(** [save_file_atomic ?mode ~save_file path content] writes [content] to
     a temp file in [path]'s directory, fsyncs the tmp, renames it
     over [path], and best-effort fsyncs the parent directory.
+
+    When [mode] is present, the temporary file is set to that exact mode before
+    content is written and rechecked before it is fsynced and renamed. This lets
+    sensitive stores request an explicit owner-only final file without changing
+    the default contract for other callers.
 
     Returns [Ok ()] on success or [Error msg] when the write or
     rename fails (the tmp is cleaned up). Re-raises
     [Eio.Cancel.Cancelled] after cleaning up the tmp — cancellation
     must not be swallowed (RFC-0143). *)
 val save_file_atomic
-  :  save_file:(string -> string -> unit)
+  :  ?mode:int
+  -> save_file:(string -> string -> unit)
   -> string
   -> string
   -> (unit, string) Result.t

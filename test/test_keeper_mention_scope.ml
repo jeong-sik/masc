@@ -59,6 +59,7 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
   ; surface = None
   ; conversation_id = None
   ; external_message_id = None
+  ; queue_receipt_ids = []
   ; speaker
   ; audio
   ; blocks = None
@@ -200,6 +201,7 @@ let tool_line : Store.chat_message =
   ; surface = None
   ; conversation_id = None
   ; external_message_id = None
+  ; queue_receipt_ids = []
   ; speaker = None
   ; audio = None
   ; blocks = None

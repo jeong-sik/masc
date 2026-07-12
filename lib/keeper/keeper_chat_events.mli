@@ -40,6 +40,7 @@ type keeper_chat_event =
   | Text_delta of string
   | Text_message_end
   | Run_finished of { run_id : string }
+  | Run_cancelled of { run_id : string; message : string }
   | Event_error of { message : string }
   | Custom of { name : string; value : Yojson.Safe.t }
   | Oas_stream_connected

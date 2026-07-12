@@ -21,11 +21,21 @@
 let sanitize_name name =
   Workspace_utils_backend_setup.sanitize_namespace_segment name
 
-let chat_dir base_dir =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "keeper_chat"
+let effective_base_dir ?config base_dir =
+  match config with
+  | Some config -> config.Workspace.base_path
+  | None -> base_dir
 
-let chat_path ~base_dir ~keeper_name =
-  Filename.concat (chat_dir base_dir) (sanitize_name keeper_name ^ ".jsonl")
+let chat_dir ?config base_dir =
+  let masc_root =
+    match config with
+    | Some config -> Workspace.masc_root_dir config
+    | None -> Common.masc_dir_from_base_path ~base_path:base_dir
+  in
+  Filename.concat masc_root "keeper_chat"
+
+let chat_path ?config ~base_dir ~keeper_name () =
+  Filename.concat (chat_dir ?config base_dir) (sanitize_name keeper_name ^ ".jsonl")
 
 let persistence_surface = "keeper_chat_store"
 
@@ -43,8 +53,9 @@ let report_persistence_read_drop ~reason ~path ~detail =
     ~path
     ~detail
 
-let ensure_dir_once ~base_dir =
-  ignore (Keeper_fs.ensure_dir (chat_dir base_dir))
+let ensure_dir_once ?config ~base_dir () =
+  let _chat_dir = Keeper_fs.ensure_dir (chat_dir ?config base_dir) in
+  ()
 
 type attachment = {
   id : string;
@@ -123,10 +134,6 @@ type stream_lifecycle_event =
   | Run_finished
   | Run_error
 
-type append_once_result =
-  | Appended of { row_id : string }
-  | Already_present of { row_id : string }
-
 let stream_lifecycle_event_to_label = function
   | Run_started -> "RUN_STARTED"
   | Text_message_start -> "TEXT_MESSAGE_START"
@@ -173,6 +180,22 @@ type speaker = {
   speaker_authority : speaker_authority;
 }
 
+type user_message_input =
+  { content : string
+  ; attachments : attachment list
+  ; timestamp : float
+  ; queue_receipt_id : string option
+  ; surface : Surface_ref.t option
+  ; conversation_id : string option
+  ; external_message_id : string option
+  ; speaker : speaker option
+  ; extra_mentions : Keeper_identity.Keeper_id.t list
+  }
+
+type append_once_result =
+  | Appended
+  | Already_present
+
 type chat_message = {
   id : string;
       (* R3: producer-assigned stable message id.  Minted once at append
@@ -196,6 +219,7 @@ type chat_message = {
          [surface] field.  [None] on rows written before P5. *)
   conversation_id : string option;
   external_message_id : string option;
+  queue_receipt_ids : string list;
   speaker : speaker option;
   audio : audio_clip option;
   blocks : Keeper_chat_blocks.chat_block list option;
@@ -511,10 +535,11 @@ let legacy_message_id ~ts ~content =
   Printf.sprintf "legacy-%s-%s" ts_part
     (String.sub (Digest.to_hex (Digest.string content)) 0 12)
 
-let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_call_id
+let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
-    ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
-    ?stream_lifecycle ?delivery_key ?transcript_slot ()
+    ?(queue_receipt_ids = []) ?audio ?blocks ?(mentions = [])
+    ?(kind = Row_kind.Utterance) ?turn_ref
+    ?stream_lifecycle ()
     : string =
   (* RFC-0232 P5: the label is a derivation of the typed surface — the
      single site that turns a [Surface_ref.t] into the legacy [source]
@@ -525,13 +550,8 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     | None -> []
     | Some s -> [ ("surface", Surface_ref.to_json s) ]
   in
-  let message_id =
-    match message_id with
-    | Some value -> value
-    | None -> mint_message_id ~ts
-  in
   let base_fields = [
-    ("id", `String message_id);
+    ("id", `String (mint_message_id ~ts));
     ("role", `String (Role.to_label role));
     ("content", `String content);
     ("ts", `Float ts);
@@ -558,6 +578,14 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
                    `String (Keeper_identity.Keeper_id.to_string id))
                  ids) )
         ]
+  in
+  let queue_receipt_fields =
+    match queue_receipt_ids with
+    | [] -> []
+    | values ->
+      [ ( "queue_receipt_ids"
+        , `List (List.map (fun value -> `String value) values) )
+      ]
   in
   let attachment_fields =
     match attachments with
@@ -587,6 +615,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     base_fields
     @ attachment_fields
     @ mention_fields
+    @ queue_receipt_fields
     @ kind_field
     @ opt_string_field "tool_call_id" tool_call_id
     @ opt_string_field "tool_call_name" tool_call_name
@@ -599,148 +628,8 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     @ blocks_fields blocks
     @ opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
     @ stream_lifecycle_fields stream_lifecycle
-    @ (match delivery_key with
-       | None -> []
-       | Some value ->
-         [ ( "delivery_key"
-           , Keeper_chat_delivery_identity.delivery_key_to_yojson value ) ])
-    @ (match transcript_slot with
-       | None -> []
-       | Some value ->
-         [ ( "transcript_slot"
-           , Keeper_chat_delivery_identity.transcript_slot_to_yojson value ) ])
   in
   Yojson.Safe.to_string (`Assoc all_fields)
-
-type writer_lock =
-  { mutex : Stdlib.Mutex.t
-  ; mutable users : int
-  }
-
-let writer_locks : (string, writer_lock) Hashtbl.t = Hashtbl.create 16
-let writer_locks_mutex = Stdlib.Mutex.create ()
-
-let acquire_writer_lock path =
-  Stdlib.Mutex.protect writer_locks_mutex (fun () ->
-    match Hashtbl.find_opt writer_locks path with
-    | Some lock ->
-      lock.users <- lock.users + 1;
-      lock
-    | None ->
-      let lock = { mutex = Stdlib.Mutex.create (); users = 1 } in
-      Hashtbl.add writer_locks path lock;
-      lock)
-;;
-
-let release_writer_lock path lock =
-  Stdlib.Mutex.protect writer_locks_mutex (fun () ->
-    lock.users <- lock.users - 1;
-    if lock.users = 0
-    then
-      match Hashtbl.find_opt writer_locks path with
-      | Some current when current == lock -> Hashtbl.remove writer_locks path
-      | Some _ | None -> ())
-;;
-
-let with_writer_lock path f =
-  let lock = acquire_writer_lock path in
-  Fun.protect
-    ~finally:(fun () -> release_writer_lock path lock)
-    (fun () -> Stdlib.Mutex.protect lock.mutex f)
-;;
-
-let provenance_of_line ~line_number line =
-  let fail detail =
-    Error
-      (Printf.sprintf
-         "keeper chat provenance decode failed at line %d: %s"
-         line_number
-         detail)
-  in
-  try
-    match Yojson.Safe.from_string line with
-    | `Assoc fields ->
-      (match
-         List.assoc_opt "delivery_key" fields,
-         List.assoc_opt "transcript_slot" fields
-       with
-       | None, None -> Ok None
-       | Some _, None | None, Some _ ->
-         fail "delivery_key and transcript_slot must appear together"
-       | Some delivery_key_json, Some transcript_slot_json ->
-         (match
-            Keeper_chat_delivery_identity.delivery_key_of_yojson
-              delivery_key_json,
-            Keeper_chat_delivery_identity.transcript_slot_of_yojson
-              transcript_slot_json,
-            List.assoc_opt "id" fields
-          with
-          | Ok delivery_key, Ok transcript_slot, Some (`String row_id)
-            when not (String.equal (String.trim row_id) "") ->
-            Ok (Some (delivery_key, transcript_slot, row_id))
-          | Error detail, _, _ | _, Error detail, _ -> fail detail
-          | _, _, _ -> fail "provenance row requires a nonblank id"))
-    | _ -> fail "row must be a JSON object"
-  with
-  | Yojson.Json_error detail -> fail detail
-;;
-
-let find_provenance_unlocked path ~delivery_key ~transcript_slot =
-  if not (Fs_compat.file_exists path)
-  then Ok None
-  else
-    try
-      let lines =
-        Fs_compat.load_file path
-        |> String.split_on_char '\n'
-        |> List.mapi (fun index line -> index + 1, line)
-      in
-      List.fold_left
-           (fun result (line_number, line) ->
-              let ( let* ) = Result.bind in
-              let* found = result in
-              if String.equal line ""
-              then Ok found
-              else
-                let* provenance = provenance_of_line ~line_number line in
-                match provenance, found with
-                | None, _ -> Ok found
-                | Some (candidate_key, candidate_slot, row_id), None
-                  when
-                    Keeper_chat_delivery_identity.delivery_key_equal
-                      delivery_key
-                      candidate_key
-                    && Keeper_chat_delivery_identity.transcript_slot_equal
-                         transcript_slot
-                         candidate_slot ->
-                  Ok (Some row_id)
-                | Some (candidate_key, candidate_slot, _), Some _
-                  when
-                    Keeper_chat_delivery_identity.delivery_key_equal
-                      delivery_key
-                      candidate_key
-                    && Keeper_chat_delivery_identity.transcript_slot_equal
-                         transcript_slot
-                         candidate_slot ->
-                  Error "duplicate Keeper chat delivery provenance rows"
-                | Some _, _ -> Ok found)
-           (Ok None)
-           lines
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
-;;
-
-let append_line_once path ~delivery_key ~transcript_slot ~row_id line =
-  with_writer_lock path (fun () ->
-    match find_provenance_unlocked path ~delivery_key ~transcript_slot with
-    | Error _ as error -> error
-    | Ok (Some existing_row_id) ->
-      Ok (Already_present { row_id = existing_row_id })
-    | Ok None ->
-      Fs_compat.append_file path (line ^ "\n");
-      Ok (Appended { row_id }))
-;;
 
 (* Tool calls with empty accumulated arguments are normalised to "{}" so
    every persisted line keeps a non-empty [content] (the read-side
@@ -759,41 +648,65 @@ let user_line_mentions ~extra_mentions content =
   Keeper_lane_mentions.mention_ids_of_content content @ extra_mentions
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 
-let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
-    ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
-    ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+let require_complete_jsonl_tail path existing =
+  let length = String.length existing in
+  if length > 0 && not (Char.equal existing.[length - 1] '\n') then
+    raise
+      (Sys_error
+         (Printf.sprintf
+            "%s has an incomplete JSONL tail; refusing to append until it is reconciled"
+            path))
+
+let append_chat_payload_durable path payload =
+  Fs_compat.update_private_file_durable_locked path (fun existing ->
+      require_complete_jsonl_tail path existing;
+      Some payload, ())
+
+let append_user_messages_and_assistant_result ?config ~base_dir ~keeper_name
+    ~(user_messages : user_message_input list) ?(tool_calls = []) ?surface
+    ?conversation_id
     ?(assistant_kind = Row_kind.Utterance)
     ?blocks
     ?turn_ref
     ?stream_lifecycle
     ~(assistant_content : string)
     () =
+  let base_dir = effective_base_dir ?config base_dir in
   try
-    ensure_dir_once ~base_dir;
+    if user_messages = []
+    then invalid_arg "queued transcript append requires at least one user message";
+    ensure_dir_once ?config ~base_dir ();
     let redaction = redaction_for ~base_dir ~keeper_name in
-    let user_content =
-      Keeper_secret_redaction.redact_text redaction user_content
-    in
-    let user_attachments =
-      List.map (redact_attachment redaction) user_attachments
-    in
-    let persisted_user_attachments =
-      List.map persisted_attachment user_attachments
-    in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let assistant_content =
       Keeper_secret_redaction.redact_text redaction assistant_content
     in
     let blocks = redact_blocks redaction blocks in
-    let path = chat_path ~base_dir ~keeper_name in
+    let path = chat_path ?config ~base_dir ~keeper_name () in
     let ts = Time_compat.now () in
-    (* Speaker identity belongs to the user line only: tool and
-       assistant lines are the keeper's own output. *)
-    let user_line =
-      encode_line ~role:Role.User ~content:user_content ~ts
-        ~attachments:persisted_user_attachments ?surface ?conversation_id
-        ?external_message_id ?speaker ?turn_ref
-        ~mentions:(user_line_mentions ~extra_mentions user_content) ()
+    (* Each accepted queue receipt keeps its own user-row identity even when
+       the LLM input is coalesced into one turn. The whole batch plus terminal
+       assistant/failure row is one append operation. *)
+    let user_lines =
+      List.map
+        (fun (message : user_message_input) ->
+           let content = redact_string redaction message.content in
+           let attachments =
+             message.attachments
+             |> List.map (redact_attachment redaction)
+             |> List.map persisted_attachment
+           in
+           encode_line ~role:Role.User ~content ~ts:message.timestamp ~attachments
+             ~queue_receipt_ids:(Option.to_list message.queue_receipt_id)
+             ?surface:message.surface
+             ?conversation_id:message.conversation_id
+             ?external_message_id:message.external_message_id
+             ?speaker:message.speaker ?turn_ref
+             ~mentions:
+               (user_line_mentions ~extra_mentions:message.extra_mentions
+                  content)
+             ())
+        user_messages
     in
     let tool_lines =
       List.mapi
@@ -807,14 +720,19 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
         tool_calls
     in
     let asst_line =
+      let queue_receipt_ids =
+        List.filter_map
+          (fun (message : user_message_input) -> message.queue_receipt_id)
+          user_messages
+      in
       encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?surface
-        ?conversation_id ~kind:assistant_kind ?blocks ?turn_ref
+        ?conversation_id ~queue_receipt_ids ~kind:assistant_kind ?blocks ?turn_ref
         ?stream_lifecycle ()
     in
     let payload =
-      String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
+      String.concat "\n" (user_lines @ tool_lines @ [ asst_line ]) ^ "\n"
     in
-    Fs_compat.append_file path payload;
+    append_chat_payload_durable path payload;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -828,13 +746,34 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
       (sanitize_name keeper_name) message;
     Error message
 
-let append_turn ~base_dir ~keeper_name ~(user_content : string)
+let append_turn_result ?config ~base_dir ~keeper_name ~(user_content : string)
+    ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
+    ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+    ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
+    ~(assistant_content : string) () =
+  let user_message : user_message_input =
+    { content = user_content
+    ; attachments = user_attachments
+    ; timestamp = Time_compat.now ()
+    ; queue_receipt_id = None
+    ; surface
+    ; conversation_id
+    ; external_message_id
+    ; speaker
+    ; extra_mentions
+    }
+  in
+  append_user_messages_and_assistant_result ?config ~base_dir ~keeper_name
+    ~user_messages:[ user_message ] ~tool_calls ?surface ?conversation_id
+    ~assistant_kind ?blocks ?turn_ref ?stream_lifecycle ~assistant_content ()
+
+let append_turn ?config ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
     ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
     ~(assistant_content : string) () =
   ignore
-    (append_turn_result ~base_dir ~keeper_name ~user_content ~user_attachments
+    (append_turn_result ?config ~base_dir ~keeper_name ~user_content ~user_attachments
        ~tool_calls ?surface ?conversation_id ?external_message_id ?speaker
        ~extra_mentions ~assistant_kind ?blocks ?turn_ref ?stream_lifecycle
        ~assistant_content ()
@@ -847,22 +786,24 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
    a caller bound by a no-silent-loss contract (e.g. {!Fusion_sink.emit}) can
    propagate it. The failure is still counted + warn-logged here so callers that
    use the unit wrapper below keep the existing swallow-and-count telemetry. *)
-let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () :
+let append_assistant_message_result ?config ~base_dir ~keeper_name ~(content : string)
+    ?(kind = Row_kind.Utterance) ?surface ?conversation_id ?audio ?blocks
+    ?turn_ref ?stream_lifecycle () :
     (unit, string) result =
+  let base_dir = effective_base_dir ?config base_dir in
   try
-    ensure_dir_once ~base_dir;
+    ensure_dir_once ?config ~base_dir ();
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let blocks = redact_blocks redaction blocks in
     let audio = Option.map (redact_audio redaction) audio in
-    let path = chat_path ~base_dir ~keeper_name in
+    let path = chat_path ?config ~base_dir ~keeper_name () in
     let ts = Time_compat.now () in
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
-        ?audio ?blocks ?turn_ref ?stream_lifecycle ()
+        ~kind ?audio ?blocks ?turn_ref ?stream_lifecycle ()
     in
-    Fs_compat.append_file path (line ^ "\n");
+    append_chat_payload_durable path (line ^ "\n");
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -875,93 +816,73 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
       (sanitize_name keeper_name) (Printexc.to_string exn);
     Error (Printexc.to_string exn)
 
-let append_assistant_message_once
-      ~base_dir
-      ~keeper_name
-      ~delivery_key
-      ~(content : string)
-      ?surface
-      ?conversation_id
-      ?(assistant_kind = Row_kind.Utterance)
-      ?blocks
-      ?turn_ref
-      ?stream_lifecycle
-      ()
-  =
-  try
-    ensure_dir_once ~base_dir;
-    let redaction = redaction_for ~base_dir ~keeper_name in
-    let content = Keeper_secret_redaction.redact_text redaction content in
-    let blocks = redact_blocks redaction blocks in
-    let path = chat_path ~base_dir ~keeper_name in
-    let ts = Time_compat.now () in
-    let row_id = mint_message_id ~ts in
-    let transcript_slot =
-      Keeper_chat_delivery_identity.Terminal_assistant
-    in
-    let line =
-      encode_line
-        ~role:Role.Assistant
-        ~content
-        ~ts
-        ~message_id:row_id
-        ?surface
-        ?conversation_id
-        ~kind:assistant_kind
-        ?blocks
-        ?turn_ref
-        ?stream_lifecycle
-        ~delivery_key
-        ~transcript_slot
-        ()
-    in
-    append_line_once path ~delivery_key ~transcript_slot ~row_id line
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatStoreFailures)
-      ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
-      ();
-    let detail = Printexc.to_string exn in
-    Log.Keeper.warn
-      "keeper_chat_store: assistant append-once failed for %s: %s"
-      (sanitize_name keeper_name)
-      detail;
-    Error detail
-;;
-
 (* Unit wrapper: existing callers keep the prior swallow-and-count behavior (the
    failure is already counted + logged inside the [_result] variant). New callers
    that must surface the failure call [append_assistant_message_result] directly. *)
-let append_assistant_message ~base_dir ~keeper_name ~(content : string)
+let append_assistant_message ?config ~base_dir ~keeper_name ~(content : string)
     ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () =
   ignore
-    (append_assistant_message_result ~base_dir ~keeper_name ~content ?surface
+    (append_assistant_message_result ?config ~base_dir ~keeper_name ~content ?surface
        ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle ()
       : (unit, string) result)
 
 (* RFC-0226: inbound user line recorded at delivery time, before (and
    independent of) any turn. A single user line — the assistant reply,
    if one ever comes, is appended separately by the reply path. *)
-let append_user_message ~base_dir ~keeper_name ~(content : string)
-    ?(attachments = []) ?surface ?conversation_id ?external_message_id ?speaker
-    ?(extra_mentions = []) () =
+let existing_has_user_identity ~path ~surface ~external_message_id existing =
+  require_complete_jsonl_tail path existing;
+  existing
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+  |> List.exists (fun line ->
+         let json = Yojson.Safe.from_string line in
+         match
+           Json_util.get_string json "role",
+           Json_util.get_string json "external_message_id",
+           Json_util.assoc_member_opt "surface" json
+         with
+         | Some "user", Some persisted_id, Some surface_json
+           when String.equal persisted_id external_message_id ->
+           (match Surface_ref.of_json surface_json with
+            | Ok persisted_surface -> Surface_ref.equal persisted_surface surface
+            | Error detail ->
+              raise
+                (Sys_error
+                   (Printf.sprintf
+                      "%s contains an invalid surface for external message %s: %s"
+                      path external_message_id detail)))
+         | Some _, Some _, (None | Some _)
+         | Some _, None, (None | Some _)
+         | None, _, _ -> false)
+
+let append_user_message_once_result ?config ~base_dir ~keeper_name
+    ~(content : string) ?(attachments = []) ~surface ?conversation_id
+    ~external_message_id ?speaker ?(extra_mentions = []) () :
+    (append_once_result, string) result =
+  let base_dir = effective_base_dir ?config base_dir in
   try
-    ensure_dir_once ~base_dir;
+    ensure_dir_once ?config ~base_dir ();
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let attachments = List.map (redact_attachment redaction) attachments in
     let persisted_attachments = List.map persisted_attachment attachments in
-    let path = chat_path ~base_dir ~keeper_name in
+    let path = chat_path ?config ~base_dir ~keeper_name () in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:Role.User ~content ~ts ?surface ?conversation_id
+      encode_line ~role:Role.User ~content ~ts ~surface ?conversation_id
         ~attachments:persisted_attachments
-        ?external_message_id ?speaker
+        ~external_message_id ?speaker
         ~mentions:(user_line_mentions ~extra_mentions content) ()
     in
-    Fs_compat.append_file path (line ^ "\n")
+    let result =
+      Fs_compat.update_private_file_durable_locked path (fun existing ->
+          if
+            existing_has_user_identity ~path ~surface ~external_message_id
+              existing
+          then None, Already_present
+          else Some (line ^ "\n"), Appended)
+    in
+    Ok result
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -969,63 +890,57 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
       Keeper_metrics.(to_string ChatStoreFailures)
       ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
       ();
+    let message = Printexc.to_string exn in
     Log.Keeper.warn "keeper_chat_store: user append failed for %s: %s"
-      (sanitize_name keeper_name) (Printexc.to_string exn)
+      (sanitize_name keeper_name) message;
+    Error message
 
-let append_user_message_once
-      ~base_dir
-      ~keeper_name
-      ~delivery_key
-      ~(content : string)
-      ?(attachments = [])
-      ?surface
-      ?conversation_id
-      ?external_message_id
-      ?speaker
-      ?(extra_mentions = [])
-      ()
-  =
-  try
-    ensure_dir_once ~base_dir;
-    let redaction = redaction_for ~base_dir ~keeper_name in
-    let content = Keeper_secret_redaction.redact_text redaction content in
-    let attachments = List.map (redact_attachment redaction) attachments in
-    let persisted_attachments = List.map persisted_attachment attachments in
-    let path = chat_path ~base_dir ~keeper_name in
-    let ts = Time_compat.now () in
-    let row_id = mint_message_id ~ts in
-    let transcript_slot = Keeper_chat_delivery_identity.Accepted_user in
-    let line =
-      encode_line
-        ~role:Role.User
-        ~content
-        ~ts
-        ~message_id:row_id
-        ~attachments:persisted_attachments
-        ?surface
-        ?conversation_id
-        ?external_message_id
-        ?speaker
-        ~mentions:(user_line_mentions ~extra_mentions content)
-        ~delivery_key
-        ~transcript_slot
-        ()
-    in
-    append_line_once path ~delivery_key ~transcript_slot ~row_id line
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatStoreFailures)
-      ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
-      ();
-    let detail = Printexc.to_string exn in
-    Log.Keeper.warn
-      "keeper_chat_store: user append-once failed for %s: %s"
-      (sanitize_name keeper_name)
-      detail;
-    Error detail
-;;
+let append_user_message_result ?config ~base_dir ~keeper_name ~(content : string)
+    ?(attachments = []) ?surface ?conversation_id ?external_message_id ?speaker
+    ?(extra_mentions = []) () : (unit, string) result =
+  match surface, external_message_id with
+  | Some surface, Some external_message_id ->
+    Result.map
+      (fun (_ : append_once_result) -> ())
+      (append_user_message_once_result ?config ~base_dir ~keeper_name ~content
+         ~attachments ~surface ?conversation_id ~external_message_id ?speaker
+         ~extra_mentions ())
+  | (None | Some _), (None | Some _) ->
+    let base_dir = effective_base_dir ?config base_dir in
+    (try
+       ensure_dir_once ?config ~base_dir ();
+       let redaction = redaction_for ~base_dir ~keeper_name in
+       let content = Keeper_secret_redaction.redact_text redaction content in
+       let attachments = List.map (redact_attachment redaction) attachments in
+       let persisted_attachments = List.map persisted_attachment attachments in
+       let path = chat_path ?config ~base_dir ~keeper_name () in
+       let ts = Time_compat.now () in
+       let line =
+         encode_line ~role:Role.User ~content ~ts ?surface ?conversation_id
+           ~attachments:persisted_attachments ?external_message_id ?speaker
+           ~mentions:(user_line_mentions ~extra_mentions content) ()
+       in
+       append_chat_payload_durable path (line ^ "\n");
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string ChatStoreFailures)
+         ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
+         ();
+       let message = Printexc.to_string exn in
+       Log.Keeper.warn "keeper_chat_store: user append failed for %s: %s"
+         (sanitize_name keeper_name) message;
+       Error message)
+
+let append_user_message ?config ~base_dir ~keeper_name ~(content : string)
+    ?(attachments = []) ?surface ?conversation_id ?external_message_id ?speaker
+    ?(extra_mentions = []) () =
+  ignore
+    (append_user_message_result ?config ~base_dir ~keeper_name ~content ~attachments
+       ?surface ?conversation_id ?external_message_id ?speaker ~extra_mentions ()
+      : (unit, string) result)
 
 let parse_line ~file_path (line : string) : chat_message option =
   try
@@ -1062,6 +977,17 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     let conversation_id = opt_string "conversation_id" in
     let external_message_id = opt_string "external_message_id" in
+    let queue_receipt_ids =
+      match Json_util.assoc_member_opt "queue_receipt_ids" json with
+      | None -> []
+      | Some (`List values) ->
+        List.filter_map
+          (function
+            | `String value when String.trim value <> "" -> Some value
+            | _ -> None)
+          values
+      | Some _ -> []
+    in
     let speaker =
       let speaker_id = opt_string "speaker_id" in
       let speaker_name = opt_string "speaker_name" in
@@ -1267,7 +1193,8 @@ let parse_line ~file_path (line : string) : chat_message option =
           in
           Some
             { id; role; content; ts; attachments; tool_call_id; tool_call_name;
-              source; surface; conversation_id; external_message_id; speaker;
+              source; surface; conversation_id; external_message_id;
+              queue_receipt_ids; speaker;
               audio; blocks; mentions; kind; turn_ref; stream_lifecycle }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
@@ -1362,8 +1289,9 @@ let find_cut ~path ~size ~before : int =
   done;
   !hi
 
-let load_page ~base_dir ~keeper_name ?before () : page =
-  let path = chat_path ~base_dir ~keeper_name in
+let load_page ?config ~base_dir ~keeper_name ?before () : page =
+  let base_dir = effective_base_dir ?config base_dir in
+  let path = chat_path ?config ~base_dir ~keeper_name () in
   if not (Sys.file_exists path) then { messages = []; has_more = false }
   else
   try
@@ -1430,8 +1358,14 @@ let load_page ~base_dir ~keeper_name ?before () : page =
         (sanitize_name keeper_name) (Printexc.to_string exn);
       { messages = []; has_more = false }
 
-let load ~base_dir ~keeper_name : chat_message list =
-  (load_page ~base_dir ~keeper_name ()).messages
+let load_internal ?config ~base_dir ~keeper_name () : chat_message list =
+  (load_page ?config ~base_dir ~keeper_name ()).messages
+
+let load ~base_dir ~keeper_name =
+  load_internal ~base_dir ~keeper_name ()
+
+let load_configured ~config ~base_dir ~keeper_name =
+  load_internal ~config ~base_dir ~keeper_name ()
 
 (* RFC-0235 P3: the history endpoint can tell the dashboard that a clip
    has been reaped by checking the same audio directory the synthesis side

@@ -42,6 +42,7 @@ type keeper_chat_stream_request = {
   channel_user_id : string;
   channel_user_name : string;
   channel_workspace_id : string;
+  channel_metadata : (string * string) list;
   attachments : Keeper_chat_store.attachment list;
 }
 
@@ -87,7 +88,7 @@ let message_for_request payload =
       ~channel_user_id:payload.channel_user_id
       ~channel_user_name:payload.channel_user_name
       ~channel_workspace_id:payload.channel_workspace_id
-      ~metadata:[]
+      ~metadata:payload.channel_metadata
       ~content:payload.message
   else
     payload.message
@@ -151,6 +152,15 @@ let args_of_request payload : Yojson.Safe.t =
     (if payload.channel_user_name <> "" then
        [ ("channel_user_name", `String payload.channel_user_name) ]
      else [])
+    @ (if payload.channel_metadata = []
+       then []
+       else
+         [ ( "channel_metadata"
+           , `Assoc
+               (List.map
+                  (fun (key, value) -> key, `String value)
+                  payload.channel_metadata) )
+         ])
   in
   let fields = base_fields @ connector_fields in
   let fields =
@@ -194,9 +204,13 @@ let dashboard_busy_queue_state ~base_path ~keeper_name =
       || snapshot.pending <> []
       || snapshot.inflight <> []
   in
-  match in_flight, chat_waiting, queue_waiting, shutdown_operation_id with
-  | None, false, false, None -> None
-  | _ -> Some (in_flight, chat_waiting, shutdown_operation_id)
+  if
+    Option.is_none in_flight
+    && not chat_waiting
+    && not queue_waiting
+    && Option.is_none shutdown_operation_id
+  then None
+  else Some (in_flight, chat_waiting, shutdown_operation_id)
 
 let dashboard_deferred_ack_text ~keeper_name deferred =
   match deferred.shutdown_operation_id with
@@ -271,6 +285,7 @@ let enqueue_dashboard_payload
       ; attachments = payload.attachments
       ; timestamp = Eio.Time.now clock
       ; source = Keeper_chat_queue.Dashboard
+      ; transcript_context = None
       }
   with
   | Error error -> Error (Keeper_chat_queue.mutation_error_to_string error)
@@ -691,6 +706,7 @@ let parse_keeper_chat_stream_request body_str =
                   channel_user_id;
                   channel_user_name;
                   channel_workspace_id;
+                  channel_metadata = [];
                   attachments;
                 }
           )
@@ -790,7 +806,6 @@ let execute_keeper_stream_tool_streaming
       ~clock
       ?auth_token:_
       ?on_event
-      ?on_admitted
       state
       ~agent_name
       ~arguments
@@ -815,7 +830,6 @@ let execute_keeper_stream_tool_streaming
         Keeper_tool_surface.dispatch_stream ~on_text_delta ?on_event
           ~on_admission_rejected:(fun rejection ->
             admission_rejection := Some rejection)
-          ?on_admitted
           keeper_ctx
           ~continuation_channel
           ~name:"masc_keeper_msg"
@@ -1173,7 +1187,7 @@ and queued_turn_failure_kind =
   | Stream_projection_failed
 
 and queued_turn_outcome =
-  | Delivered of { outcome_ref : string }
+  | Delivered of { outcome_ref : Ids.Turn_ref.t }
   | Failed of
       { kind : queued_turn_failure_kind
       ; detail : string
@@ -1215,8 +1229,7 @@ let queued_turn_failure_kind_to_string = function
   | Stream_projection_failed -> "stream_projection_failed"
 
 let queued_delivery_outcome_of_turn_ref = function
-  | Some turn_ref ->
-      Delivered { outcome_ref = Ids.Turn_ref.to_string turn_ref }
+  | Some turn_ref -> Delivered { outcome_ref = turn_ref }
   | None ->
       Failed
         { kind = Missing_turn_ref
@@ -1235,20 +1248,16 @@ type translated_keeper_stream_event =
 let empty_keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.empty_state
 let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
 
-(* [connector_user_line_recorded_upstream] and [queued_turn] are required
-   labelled arguments, not optional with the "default" their .mli doc
-   comments describe: the function ends in labelled args with no positional
-   terminator, so a leading optional could not be erased (warning 16). Every
-   caller states explicitly whether the gate inbound boundary already owns
-   the user line, and whether this turn was dispatched from the queue
-   consumer. *)
-let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
-    ~delivery_key
-    ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
+(* [queued_turn] is required: every caller states explicitly whether this
+   turn was dispatched from the durable queue consumer. *)
+let process_single_turn ~queued_turn
+    ~queued_user_messages ~queued_assistant_context ~state ~clock ~auth_token
+    ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name ~submitted_by
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
-  let base_path = (Mcp_server.workspace_config state).base_path in
+  let workspace_config = Mcp_server.workspace_config state in
+  let base_path = workspace_config.base_path in
   let redaction =
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
@@ -1321,7 +1330,15 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
   in
   (* RFC-0232 P5: the typed surface is the write-side truth; the label
      [chat_source] is its derivation, used for broadcast metadata. *)
-  let chat_surface = chat_surface_of_request payload in
+  let chat_surface =
+    match queued_assistant_context with
+    | Some context -> context.Keeper_chat_queue.surface
+    | None -> chat_surface_of_request payload
+  in
+  let chat_conversation_id =
+    Option.bind queued_assistant_context (fun context ->
+      context.Keeper_chat_queue.conversation_id)
+  in
   let chat_source = Surface_ref.lane_label chat_surface in
   (* RFC-0223 P1: authority derives from the arrival route. A non-empty
      [channel_user_id] means an arbitrary external person on that channel;
@@ -1329,253 +1346,6 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
      still an authenticated dashboard operator, so it keeps Owner authority
      while recording the Gate surface label. *)
   let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
-  let dashboard_direct_stream =
-    (not queued_turn)
-    && (not connector_user_line_recorded_upstream)
-    && not (has_external_speaker payload)
-  in
-  let direct_delivery_journal = ref None in
-  let journal_error error =
-    Keeper_chat_delivery_journal.error_to_string error
-  in
-  let row_id_of_append_once = function
-    | Keeper_chat_store.Appended { row_id }
-    | Keeper_chat_store.Already_present { row_id } -> row_id
-  in
-  let set_direct_delivery_journal journal =
-    direct_delivery_journal := Some journal
-  in
-  let on_direct_request_accepted request_id =
-    let ( let* ) = Result.bind in
-    let* request_id =
-      Keeper_chat_delivery_identity.Request_id.of_string request_id
-    in
-    let delivery_key =
-      Keeper_chat_delivery_identity.Direct_request request_id
-    in
-    let accepted_payload : Keeper_chat_delivery_journal.accepted_payload =
-      { keeper_name = payload.name
-      ; submitted_by
-      ; user_content = payload.message
-      ; user_attachments = payload.attachments
-      ; surface = chat_surface
-      ; conversation_id = None
-      ; external_message_id = None
-      ; speaker = chat_speaker
-      ; user_row_origin = Keeper_chat_delivery_journal.Needs_append
-      }
-    in
-    let* prepared =
-      Keeper_chat_delivery_journal.prepare
-        ~base_path
-        ~delivery_key
-        ~payload:accepted_payload
-        ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
-    in
-    set_direct_delivery_journal prepared;
-    let* user_row =
-      Keeper_chat_store.append_user_message_once
-        ~base_dir:base_path
-        ~keeper_name:payload.name
-        ~delivery_key
-        ~content:payload.message
-        ~attachments:payload.attachments
-        ~surface:chat_surface
-        ~speaker:chat_speaker
-        ()
-    in
-    let* accepted =
-      Keeper_chat_delivery_journal.mark_accepted
-        ~base_path
-        ~expected_revision:prepared.revision
-        ~identity:prepared
-        ~user_row_id:(Some (row_id_of_append_once user_row))
-        ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
-    in
-    set_direct_delivery_journal accepted;
-    let* running =
-      Keeper_chat_delivery_journal.mark_running
-        ~base_path
-        ~expected_revision:accepted.revision
-        ~identity:accepted
-        ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
-    in
-    set_direct_delivery_journal running;
-    Ok ()
-  in
-  let on_queue_turn_admitted () =
-    let ( let* ) = Result.bind in
-    let* delivery_key, receipt_ids =
-      match delivery_key with
-      | Some (Keeper_chat_delivery_identity.Queue_receipts receipt_ids as key) ->
-        Ok (key, receipt_ids)
-      | Some (Keeper_chat_delivery_identity.Direct_request _) ->
-        Error "queued Keeper turn received a direct-request delivery identity"
-      | None -> Error "queued Keeper turn is missing its receipt delivery identity"
-    in
-    let user_row_origin =
-      if connector_user_line_recorded_upstream
-      then Ok Keeper_chat_delivery_journal.Already_persisted_upstream
-      else
-        Keeper_chat_delivery_journal.dashboard_queue_user_row_origin
-          ~base_path
-          ~keeper_name:payload.name
-          receipt_ids
-        |> Result.map_error journal_error
-    in
-    let* user_row_origin = user_row_origin in
-    let accepted_payload : Keeper_chat_delivery_journal.accepted_payload =
-      { keeper_name = payload.name
-      ; submitted_by
-      ; user_content = payload.message
-      ; user_attachments = payload.attachments
-      ; surface = chat_surface
-      ; conversation_id = None
-      ; external_message_id = None
-      ; speaker = chat_speaker
-      ; user_row_origin
-      }
-    in
-    let* prepared =
-      Keeper_chat_delivery_journal.prepare
-        ~base_path
-        ~delivery_key
-        ~payload:accepted_payload
-        ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
-    in
-    set_direct_delivery_journal prepared;
-    let* user_row_id =
-      match user_row_origin with
-      | Keeper_chat_delivery_journal.Already_persisted_upstream -> Ok None
-      | Keeper_chat_delivery_journal.Already_persisted { row_id } ->
-        Ok (Some row_id)
-      | Keeper_chat_delivery_journal.Needs_append ->
-        Keeper_chat_store.append_user_message_once
-          ~base_dir:base_path
-          ~keeper_name:payload.name
-          ~delivery_key
-          ~content:payload.message
-          ~attachments:payload.attachments
-          ~surface:chat_surface
-          ~speaker:chat_speaker
-          ()
-        |> Result.map (fun result -> Some (row_id_of_append_once result))
-    in
-    let* accepted =
-      Keeper_chat_delivery_journal.mark_accepted
-        ~base_path
-        ~expected_revision:prepared.revision
-        ~identity:prepared
-        ~user_row_id
-        ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
-    in
-    set_direct_delivery_journal accepted;
-    let* running =
-      Keeper_chat_delivery_journal.mark_running
-        ~base_path
-        ~expected_revision:accepted.revision
-        ~identity:accepted
-        ~now:(Time_compat.now ())
-      |> Result.map_error journal_error
-    in
-    set_direct_delivery_journal running;
-    Ok ()
-  in
-  let commit_direct_terminal terminal =
-    let ( let* ) = Result.bind in
-    let rec drive journal =
-      match journal.Keeper_chat_delivery_journal.phase with
-      | Keeper_chat_delivery_journal.Running _ ->
-        let* pending =
-          Keeper_chat_delivery_journal.mark_terminal_pending
-            ~base_path
-            ~expected_revision:journal.revision
-            ~identity:journal
-            ~terminal
-            ~now:(Time_compat.now ())
-          |> Result.map_error journal_error
-        in
-        set_direct_delivery_journal pending;
-        drive pending
-      | Keeper_chat_delivery_journal.Terminal_pending
-          { terminal = persisted_terminal; user_row_id } ->
-        let delivery_key = journal.delivery_key in
-        let* transcript_row_id =
-          match persisted_terminal.delivery with
-          | Keeper_chat_delivery_journal.Assistant_reply
-              { content; blocks; turn_ref } ->
-            Keeper_chat_store.append_assistant_message_once
-              ~base_dir:base_path
-              ~keeper_name:payload.name
-              ~delivery_key
-              ~content
-              ~surface:chat_surface
-              ?blocks
-              ?turn_ref
-              ~stream_lifecycle:completed_stream_lifecycle
-              ()
-            |> Result.map row_id_of_append_once
-          | Keeper_chat_delivery_journal.Transport_failure { content } ->
-            Keeper_chat_store.append_assistant_message_once
-              ~base_dir:base_path
-              ~keeper_name:payload.name
-              ~delivery_key
-              ~content
-              ~surface:chat_surface
-              ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
-              ~stream_lifecycle:errored_stream_lifecycle
-              ()
-            |> Result.map row_id_of_append_once
-          | Keeper_chat_delivery_journal.No_assistant_reply
-              { reason =
-                  ( Keeper_chat_delivery_journal.Continuation_checkpoint
-                  | Keeper_chat_delivery_journal.Queued_for_later _ )
-              } ->
-            (match user_row_id with
-             | Some user_row_id -> Ok user_row_id
-             | None ->
-               Error
-                 "continuation checkpoint requires an accepted user transcript row")
-        in
-        let* committed =
-          Keeper_chat_delivery_journal.mark_transcript_committed
-            ~base_path
-            ~expected_revision:journal.revision
-            ~identity:journal
-            ~transcript_row_id
-            ~now:(Time_compat.now ())
-          |> Result.map_error journal_error
-        in
-        set_direct_delivery_journal committed;
-        drive committed
-      | Keeper_chat_delivery_journal.Transcript_committed _ ->
-        let* final =
-          Keeper_chat_delivery_journal.mark_final
-            ~base_path
-            ~expected_revision:journal.revision
-            ~identity:journal
-            ~now:(Time_compat.now ())
-          |> Result.map_error journal_error
-        in
-        set_direct_delivery_journal final;
-        Ok ()
-      | Keeper_chat_delivery_journal.Final _ -> Ok ()
-      | Keeper_chat_delivery_journal.Prepared
-      | Keeper_chat_delivery_journal.Accepted _ ->
-        Error
-          (Printf.sprintf
-             "direct Keeper delivery reached terminal commit from phase=%s"
-             (Keeper_chat_delivery_journal.phase_to_string journal.phase))
-    in
-    match !direct_delivery_journal with
-    | None -> Error "direct Keeper delivery journal is unavailable"
-    | Some journal -> drive journal
-  in
   let worker_text_accum = Keeper_stream_text_accum.create () in
   (* RFC-0301 item 6: collect generated media from the same stream so the assistant
      turn can persist it as reload-visible chat blocks. The bridge surfaces this
@@ -1594,20 +1364,15 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
-    (* RFC-connector-deferred-reply-via-chat-queue §3.4: when the gate inbound boundary already recorded this
-       connector user line (Discord/Slack busy message enqueued onto the chat
-       queue), re-recording it here would double-write. The gate inbound line is
-       assistant-less, so the message is already "pending" — nothing to add. *)
-    if Option.is_some !direct_delivery_journal then ()
-    else if not connector_user_line_recorded_upstream then
-      Keeper_chat_store.append_user_message
-        ~base_dir:base_path
-        ~keeper_name:payload.name
-        ~content:payload.message
-        ~attachments:payload.attachments
-        ~surface:chat_surface
-        ~speaker:chat_speaker
-        ()
+    Keeper_chat_store.append_user_message
+      ~config:workspace_config
+      ~base_dir:base_path
+      ~keeper_name:payload.name
+      ~content:payload.message
+      ~attachments:payload.attachments
+      ~surface:chat_surface
+      ~speaker:chat_speaker
+      ()
   in
   let persist_failure_reply err =
     (* The failure marker is typed, not an utterance: it renders for the
@@ -1622,37 +1387,31 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
        DURABLE on both paths — a post-ACK deferred turn that fails must not
        vanish on restart/replay (counter + live broadcast alone is silent
        failure under this feature's "queued, will answer" contract).
-       - Dashboard route ([recorded_upstream = false]): the turn owns the user
-         line, so record the paired [Transport_failure] row (user message stays
-         pending for the next turn; keeper never reads the error as its words).
-       - Connector route ([recorded_upstream = true]): the gate inbound boundary
-         already persisted the user line (assistant-less). The paired
-         [append_turn] would double-record that user line, so persist an
-         assistant-only durable failure marker instead — the failure survives a
-         restart and stays joined to the already-pending user line. *)
+       - Queue-owned receipts: atomically append every constituent user row and
+         one [Transport_failure] terminal row.
+       - Direct Dashboard turns: append the ordinary paired user/failure rows. *)
     let persisted =
-      if Option.is_some !direct_delivery_journal
-      then
-        commit_direct_terminal
-          { ok = false
-          ; poll_body = err
-          ; delivery = Keeper_chat_delivery_journal.Transport_failure { content = persisted_error_reply err }
-          }
-      else if connector_user_line_recorded_upstream then
-       Keeper_chat_store.append_assistant_message_result
+      if queued_user_messages <> [] then
+       Keeper_chat_store.append_user_messages_and_assistant_result
+         ~config:workspace_config
          ~base_dir:base_path
          ~keeper_name:payload.name
-         ~content:(persisted_error_reply err)
+         ~user_messages:queued_user_messages
          ~surface:chat_surface
+         ?conversation_id:chat_conversation_id
+         ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+         ~assistant_content:(persisted_error_reply err)
          ~stream_lifecycle:errored_stream_lifecycle
          ()
       else
        Keeper_chat_store.append_turn_result
+         ~config:workspace_config
          ~base_dir:base_path
          ~keeper_name:payload.name
          ~user_content:payload.message
          ~user_attachments:payload.attachments
          ~surface:chat_surface
+         ?conversation_id:chat_conversation_id
          ~speaker:chat_speaker
          ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
          ~assistant_content:(persisted_error_reply err)
@@ -1669,6 +1428,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     persisted
   in
   let timeout_sec = payload.timeout_sec in
+  let dashboard_direct_stream =
+    (not queued_turn) && not (has_external_speaker payload)
+  in
   (* masc#23924: [f] below pushes its own [Stream_terminal] once it reaches a
      completion arm, but a timeout/cancellation cuts [f] off before any of
      those arms run — nothing would ever push to [worker_events], and
@@ -1693,11 +1455,10 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           , Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
           , Turn_cancelled )
     in
-    let persisted = persist_failure_reply body in
     let queued_outcome =
       if not queued_turn then None
       else
-        match persisted with
+        match persist_failure_reply body with
         | Ok () -> Some (Failed { kind = failure_kind; detail = body })
         | Error persist_error ->
             Some
@@ -1706,8 +1467,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  ; detail = persist_error
                  })
     in
-    push_worker_event (Stream_terminal { status; body; queued_outcome });
-    persisted
+    push_worker_event (Stream_terminal { status; body; queued_outcome })
   in
   let submit_result =
     match Keeper_msg_async.server_background_switch () with
@@ -1715,14 +1475,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         Error
           (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
     | Ok background_sw ->
-      let on_accepted =
-        if dashboard_direct_stream
-        then Some on_direct_request_accepted
-        else None
-      in
       Keeper_msg_async.submit
         ?timeout_sec
-        ?on_accepted
         ~clock
         ~background_sw
         ~on_worker_aborted
@@ -1731,9 +1485,6 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~keeper_name:payload.name
         ~f:(fun request_sw ->
         let start_time = Time_compat.now () in
-        let on_admitted =
-          if queued_turn then Some on_queue_turn_admitted else None
-        in
         let dispatch_result =
           try
             if dashboard_direct_stream then
@@ -1747,9 +1498,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               | `Ran result -> Ok (`Ran result)
               | `Busy rejection ->
                   (match
-                   dashboard_deferred_chat_of_rejection ~clock payload rejection
+                     dashboard_deferred_chat_of_rejection ~clock payload rejection
                    with
-                   | Ok queued -> Ok (`Queued queued)
+                   | Ok queued ->
+                       push_worker_event (Stream_dashboard_queued queued);
+                       Ok (`Queued queued)
                    | Error message -> Error message)
             else
               (match
@@ -1759,7 +1512,6 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                    ?auth_token
                    state ~agent_name ~arguments:args ~on_event
                    ~continuation_channel ~on_text_delta:(fun _ -> ())
-                   ?on_admitted
                with
                | `Ran result -> Ok (`Ran result)
                | `Deferred rejection -> Ok (`Deferred rejection))
@@ -1769,8 +1521,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               Log.Keeper.warn
                 "keeper_stream: streaming dispatch raised: %s"
                 (Printexc.to_string exn);
-              if dashboard_direct_stream || queued_turn
-              then Error (Printexc.to_string exn)
+              if dashboard_direct_stream then Error (Printexc.to_string exn)
               else
                 (try
                    Ok
@@ -1795,39 +1546,11 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                     ; ("admission", admission_rejection_to_json rejection)
                     ]))
         | Ok (`Queued queued) ->
-            let body =
-              Yojson.Safe.to_string
-                (dashboard_deferred_chat_to_json ~keeper_name:payload.name queued)
-            in
-            let committed =
-              let ( let* ) = Result.bind in
-              let* receipt_id =
-                Keeper_chat_delivery_identity.Receipt_id.of_string
-                  queued.receipt_id
-              in
-              commit_direct_terminal
-                { ok = true
-                ; poll_body = body
-                ; delivery =
-                    Keeper_chat_delivery_journal.No_assistant_reply
-                      { reason =
-                          Keeper_chat_delivery_journal.Queued_for_later
-                            { receipt_id }
-                      }
-                }
-            in
-            (match committed with
-             | Ok () ->
-               push_worker_event (Stream_dashboard_queued queued);
-               Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
-             | Error detail ->
-               push_worker_event
-                 (Stream_terminal
-                    { status = Stream_error
-                    ; body = detail
-                    ; queued_outcome = None
-                    });
-               Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail)
+            Tool_result.ok
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              (Yojson.Safe.to_string
+                 (dashboard_deferred_chat_to_json ~keeper_name:payload.name queued))
         | Ok (`Ran (true, body)) ->
             let payload_json_opt, visible_reply = extract_visible_reply body in
             let streamed_text =
@@ -1906,35 +1629,28 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
              | None ->
                  let persist_assistant_reply ~assistant_content =
-                   if Option.is_some !direct_delivery_journal
-                   then
-                     commit_direct_terminal
-                       { ok = true
-                       ; poll_body = body
-                       ; delivery =
-                           Keeper_chat_delivery_journal.Assistant_reply
-                             { content = assistant_content
-                             ; blocks
-                             ; turn_ref
-                             }
-                       }
-                   else if connector_user_line_recorded_upstream then
-                     Keeper_chat_store.append_assistant_message_result
+                   if queued_user_messages <> [] then
+                     Keeper_chat_store.append_user_messages_and_assistant_result
+                       ~config:workspace_config
                        ~base_dir:base_path
                        ~keeper_name:payload.name
-                       ~content:assistant_content
+                       ~user_messages:queued_user_messages
                        ~surface:chat_surface
+                       ?conversation_id:chat_conversation_id
+                       ~assistant_content
                        ?blocks
                        ?turn_ref
                        ~stream_lifecycle:completed_stream_lifecycle
                        ()
                    else
                      Keeper_chat_store.append_turn_result
+                       ~config:workspace_config
                        ~base_dir:base_path
                        ~keeper_name:payload.name
                        ~user_content:payload.message
                        ~user_attachments:payload.attachments
                        ~surface:chat_surface
+                       ?conversation_id:chat_conversation_id
                        ~speaker:chat_speaker
                        ~assistant_content
                        ?blocks
@@ -1984,27 +1700,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                                  ; detail = persist_error
                                  }))
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
-                       (match !direct_delivery_journal with
-                        | Some _ ->
-                          (match
-                             commit_direct_terminal
-                               { ok = true
-                               ; poll_body = body
-                               ; delivery =
-                                   Keeper_chat_delivery_journal.No_assistant_reply
-                                     { reason =
-                                         Keeper_chat_delivery_journal.Continuation_checkpoint
-                                     }
-                               }
-                           with
-                           | Ok () -> None
-                           | Error detail ->
-                             Some
-                               (Failed
-                                  { kind = Transcript_persist_failed; detail }))
-                        | None ->
-                          persist_user_message_only ();
-                          None)
+                       persist_user_message_only ();
+                       None
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
                        if has_visible_blocks
@@ -2263,14 +1960,22 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         let message = redact_text message in
         publish_terminal ~status:(Request_stream Stream_cancelled) ~message ();
         Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Run_finished { run_id });
+        Keeper_chat_events.publish events (Run_cancelled { run_id; message });
         queued_outcome
     | Stream_terminal
         { status = ((Stream_error | Stream_timeout | Stream_rejected) as status)
         ; body = err
         ; queued_outcome
         } ->
-        let err = redact_text err in
+        let err =
+          match queued_outcome with
+          | Some (Failed { kind = Transcript_persist_failed; _ }) ->
+            "The queued response could not be durably recorded. Check the Keeper queue receipt in the Dashboard; internal storage detail is available to operators only."
+          | Some (Failed { kind = Stream_projection_failed; _ }) ->
+            "The queued response reached an internal projection failure. Check the Keeper queue receipt in the Dashboard."
+          | Some (Failed _ | Delivered _ | Deferred _) | None ->
+            redact_text err
+        in
         publish_terminal ~status:(Request_stream status) ~message:err ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Event_error { message = err });
@@ -2612,6 +2317,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                the SSE stream already receives the underlying text/audio
                through other events. *)
             loop ()
+        | Run_cancelled { run_id; message } ->
+            current_run_id := Some run_id;
+            send_error message
         | Event_error { message } -> send_error message
         | Run_finished { run_id } ->
             current_run_id := Some run_id;
@@ -2665,10 +2373,10 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            let run_now () =
              (* Dashboard stream route: no gate inbound boundary recorded this
                 user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
-             ignore
-               (process_single_turn ~connector_user_line_recorded_upstream:false
-                  ~queued_turn:false ~delivery_key:None
-                  ~state ~clock
+              ignore
+                (process_single_turn ~queued_turn:false
+                   ~queued_user_messages:[] ~queued_assistant_context:None
+                   ~state ~clock
                   ~auth_token:(auth_token_from_request request)
                   ~thread_id ~continuation_channel ~closed
                   ~client_disconnects:(Some (stream_sw, client_disconnects))

@@ -5,7 +5,8 @@ module D = Masc.Keeper_chat_discord.For_testing
 let contains haystack needle =
   String_util.contains_substring haystack needle
 
-let run_adapter events ~post_message ~edit_message ~send_message =
+let run_adapter ?send_rich_embeds ?(on_outcome = fun _ -> ()) events
+    ~post_message ~edit_message ~send_message =
   Eio_main.run
   @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
@@ -13,7 +14,11 @@ let run_adapter events ~post_message ~edit_message ~send_message =
   let outcomes = ref [] in
   D.adapter_loop ~token:"test-token" ~channel_id:"test-channel"
     ~events:stream ~post_message ~edit_message ~send_message
-    ~on_send_result:(fun result -> outcomes := result :: !outcomes) ();
+    ?send_rich_embeds
+    ~on_send_result:(fun result ->
+      on_outcome result;
+      outcomes := result :: !outcomes)
+    ();
   List.rev !outcomes
 
 let check_single_ok label = function
@@ -148,6 +153,31 @@ let test_rich_embeds_includes_code_and_mermaid () =
   check bool "mermaid body" true
     (contains mermaid_json "```mermaid\\nflowchart TD\\nA-->B\\n```")
 
+let test_rich_embed_delivery_plan_is_bounded_and_ordered () =
+  let requested = D.max_rich_embeds_per_turn + 4 in
+  let text =
+    List.init requested (fun index ->
+      Printf.sprintf "![image-%02d](https://example.com/image-%02d.png)"
+        index index)
+    |> String.concat "\n"
+  in
+  let embeds, dropped = D.rich_embed_delivery_plan text in
+  check int "rich delivery plan obeys the named cap"
+    D.max_rich_embeds_per_turn (List.length embeds);
+  check int "rich delivery plan reports exact omissions" 4 dropped;
+  let first =
+    List.hd embeds |> Discord_rest_client.embed_to_json |> Yojson.Safe.to_string
+  in
+  let last =
+    List.nth embeds (D.max_rich_embeds_per_turn - 1)
+    |> Discord_rest_client.embed_to_json |> Yojson.Safe.to_string
+  in
+  check bool "bounded plan preserves first embed" true
+    (contains first "image-00.png");
+  check bool "bounded plan preserves source order" true
+    (contains last
+       (Printf.sprintf "image-%02d.png" (D.max_rich_embeds_per_turn - 1)))
+
 let test_terminal_callback_once_for_fallback_post () =
   let final_posts = ref [] in
   let outcomes =
@@ -235,6 +265,47 @@ let test_error_reply_callback_once () =
   check int "one error POST" 1 !sends;
   check_single_network_error "error POST failure" "error post failed" outcomes
 
+let test_typed_cancellation_sends_notice () =
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_cancelled
+          { run_id = "run-cancel"; message = "operator stopped the turn" }
+      ]
+      ~post_message:(fun ~content:_ -> fail "cancellation must use final sender")
+      ~edit_message:(fun ~message_id:_ ~content:_ ->
+        fail "cancellation must not PATCH")
+      ~send_message:(fun ~content ->
+        sends := content :: !sends;
+        Ok ())
+  in
+  check (list string) "one explicit cancellation notice"
+    [ "Keeper request cancelled: operator stopped the turn" ]
+    (List.rev !sends);
+  check_single_ok "cancellation notice delivery" outcomes
+
+let test_terminal_callback_waits_for_rich_embed_join () =
+  let order = ref [] in
+  let record label = order := label :: !order in
+  let outcomes =
+    run_adapter
+      ~send_rich_embeds:(fun _content -> record "rich")
+      ~on_outcome:(fun _ -> record "callback")
+      [ Masc.Keeper_chat_events.Text_delta "final"
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-rich-join" }
+      ]
+      ~post_message:(fun ~content:_ -> fail "terminal fallback must use final sender")
+      ~edit_message:(fun ~message_id:_ ~content:_ ->
+        fail "terminal fallback must not PATCH")
+      ~send_message:(fun ~content ->
+        check string "primary terminal content" "final" content;
+        record "primary";
+        Ok ())
+  in
+  check_single_ok "joined rich projection terminal result" outcomes;
+  check (list string) "primary, rich projection, then terminal callback"
+    [ "primary"; "rich"; "callback" ] (List.rev !order)
+
 let () =
   run "keeper_chat_discord"
     [ ( "streaming-redaction"
@@ -258,6 +329,10 @@ let () =
             test_terminal_callback_reports_overflow_failure
         ; test_case "error reply callback exactly once" `Quick
             test_error_reply_callback_once
+        ; test_case "typed cancellation sends a terminal notice" `Quick
+            test_typed_cancellation_sends_notice
+        ; test_case "terminal callback waits for rich embed join" `Quick
+            test_terminal_callback_waits_for_rich_embed_join
         ] )
     ; ( "rich-blocks"
       , [ test_case "audio URL uses base URL" `Quick
@@ -268,6 +343,8 @@ let () =
             test_rich_embeds_of_text_projects_links_and_images
         ; test_case "supports code and mermaid as embeds" `Quick
             test_rich_embeds_includes_code_and_mermaid
+        ; test_case "rich embed delivery is bounded and ordered" `Quick
+            test_rich_embed_delivery_plan_is_bounded_and_ordered
         ; test_case "redacts text-derived image secrets" `Quick
             test_rich_embeds_redacts_text_derived_image_secrets
         ; test_case "suppresses credential URL embeds" `Quick

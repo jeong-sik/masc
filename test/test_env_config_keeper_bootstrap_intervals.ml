@@ -26,8 +26,69 @@ open Alcotest
 module KB = Env_config_keeper.KeeperBootstrap
 module Boot = Server_bootstrap_loops.For_testing
 module Chat_queue = Masc.Keeper_chat_queue
+module Workspace = Masc.Workspace
+module Surface_ref = Masc.Surface_ref
+module Keeper_chat_store = Masc.Keeper_chat_store
 
 let approx = float 0.001
+
+let contains_substring text fragment =
+  let text_len = String.length text in
+  let fragment_len = String.length fragment in
+  let rec loop index =
+    if fragment_len = 0
+    then true
+    else if index + fragment_len > text_len
+    then false
+    else if String.sub text index fragment_len = fragment
+    then true
+    else loop (index + 1)
+  in
+  loop 0
+
+let substring_index text fragment =
+  let text_len = String.length text in
+  let fragment_len = String.length fragment in
+  let rec loop index =
+    if fragment_len = 0
+    then Some 0
+    else if index + fragment_len > text_len
+    then None
+    else if String.sub text index fragment_len = fragment
+    then Some index
+    else loop (index + 1)
+  in
+  loop 0
+
+let required_index ~label text fragment =
+  match substring_index text fragment with
+  | Some index -> index
+  | None -> failf "%s: expected source marker %S" label fragment
+
+let load_source relative_path =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when String.trim root <> "" -> root
+    | Some _ | None -> Sys.getcwd ()
+  in
+  let path = Filename.concat source_root relative_path in
+  In_channel.with_open_bin path In_channel.input_all
+
+let workspace_config ~cluster_name base_path =
+  let config : Workspace.config = Workspace.default_config base_path in
+  let backend_config =
+    { config.backend_config with Backend_types.cluster_name = cluster_name }
+  in
+  { config with backend_config }
+
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
 
 let test_default_lazy_startup_poll () =
   check approx
@@ -172,6 +233,24 @@ let test_discord_queue_projection_matches_gateway_context () =
       source =
         Chat_queue.Discord
           { channel_id = "discord-channel-1"; user_id = "discord-user-9" };
+      transcript_context =
+        Some
+          { surface =
+              Surface_ref.Discord
+                { guild_id = None
+                ; channel_id = "discord-channel-1"
+                ; parent_channel_id = None
+                ; thread_id = None
+                }
+          ; conversation_id = None
+          ; external_message_id = None
+          ; speaker =
+              { Keeper_chat_store.speaker_id = Some "discord-user-9"
+              ; speaker_name = Some "Discord User"
+              ; speaker_authority = Keeper_chat_store.External
+              }
+          ; extra_mentions = []
+          };
     }
   in
   let projection = Boot.queued_chat_projection queued in
@@ -197,6 +276,23 @@ let test_slack_queue_projection_matches_gateway_context () =
           ; team_id = Some "T-SLACK"
           ; thread_ts = Some "171.001"
           }
+    ; transcript_context =
+        Some
+          { surface =
+              Surface_ref.Slack
+                { team_id = Some "T-SLACK"
+                ; channel_id = "C-SLACK"
+                ; thread_ts = Some "171.001"
+                }
+          ; conversation_id = None
+          ; external_message_id = None
+          ; speaker =
+              { Keeper_chat_store.speaker_id = Some "U-SLACK"
+              ; speaker_name = Some "Slack User"
+              ; speaker_authority = Keeper_chat_store.External
+              }
+          ; extra_mentions = []
+          }
     }
   in
   let projection = Boot.queued_chat_projection queued in
@@ -214,6 +310,90 @@ let test_slack_queue_projection_matches_gateway_context () =
     check (option string) "thread retained" (Some "171.001") thread_ts;
     check string "user retained" "U-SLACK" user_id
   | _ -> fail "Slack source must project to a Slack continuation"
+
+let test_queue_bootstrap_precedes_state_publish_and_is_autoboot_independent () =
+  let runtime_source =
+    load_source "lib/server/server_runtime_bootstrap.ml"
+  in
+  let queue_start =
+    required_index ~label:"queue startup" runtime_source
+      "Server_bootstrap_loops.start_keeper_chat_queue"
+  in
+  let state_publish =
+    required_index ~label:"state publication" runtime_source
+      "server_state := Some state;"
+  in
+  let state_ready =
+    required_index ~label:"readiness" runtime_source
+      "Server_startup_state.mark_state_ready"
+  in
+  let discord_ingress =
+    required_index ~label:"Discord ingress" runtime_source
+      "Server_discord_in_process_gateway.start"
+  in
+  let slack_ingress =
+    required_index ~label:"Slack ingress" runtime_source
+      "Server_slack_in_process_gateway.start"
+  in
+  check bool "queue starts before state publication" true
+    (queue_start < state_publish);
+  check bool "queue starts before readiness" true (queue_start < state_ready);
+  check bool "queue starts before Discord ingress" true
+    (queue_start < discord_ingress);
+  check bool "queue starts before Slack ingress" true
+    (queue_start < slack_ingress);
+  let loops_source = load_source "lib/server/server_bootstrap_loops.ml" in
+  let queue_helper_start =
+    required_index ~label:"queue helper" loops_source
+      "let start_keeper_chat_queue"
+  in
+  let keeper_loops_start =
+    required_index ~label:"keeper loops" loops_source
+      "let start_keeper_loops"
+  in
+  let queue_helper_source =
+    String.sub loops_source queue_helper_start
+      (keeper_loops_start - queue_helper_start)
+  in
+  let keeper_loops_source =
+    String.sub loops_source keeper_loops_start
+      (String.length loops_source - keeper_loops_start)
+  in
+  check bool "queue helper configures the immutable bootstrap snapshot" true
+    (contains_substring queue_helper_source
+       "configure_persistence ~config:workspace_config");
+  check bool "consumer uses the same snapshot base_path" true
+    (contains_substring queue_helper_source
+       "let base_path = workspace_config.base_path");
+  check bool "queue ownership is not nested under Keeper autoboot" false
+    (contains_substring keeper_loops_source
+       "Keeper_chat_queue.configure_persistence");
+  check bool "queue consumer is not nested under Keeper autoboot" false
+    (contains_substring keeper_loops_source "Keeper_chat_consumer.start");
+  check bool "Keeper autoboot can still be disabled independently" true
+    (contains_substring keeper_loops_source
+       "MASC_KEEPER_BOOTSTRAP_ENABLED=false")
+
+let test_queue_bootstrap_ownership_rejects_live_config_drift () =
+  Eio_main.run @@ fun _environment ->
+  let base_path = Filename.temp_file "keeper-chat-bootstrap" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o755;
+  let configured = workspace_config ~cluster_name:"configured" base_path in
+  let drifted = workspace_config ~cluster_name:"drifted" base_path in
+  Fun.protect
+    ~finally:(fun () ->
+      Chat_queue.For_testing.reset ();
+      remove_tree base_path)
+    (fun () ->
+      Chat_queue.For_testing.reset ();
+      ignore
+        (Chat_queue.configure_persistence ~config:configured
+          : Chat_queue.configure_report);
+      check bool "configured snapshot remains accepted" true
+        (Chat_queue.persistence_matches_config ~config:configured);
+      check bool "live cluster/root drift is rejected" false
+        (Chat_queue.persistence_matches_config ~config:drifted))
 
 let () =
   run "env_config_keeper_bootstrap_intervals"
@@ -252,5 +432,14 @@ let () =
             test_discord_queue_projection_matches_gateway_context;
           test_case "Slack queue source keeps connector context" `Quick
             test_slack_queue_projection_matches_gateway_context;
+        ] );
+      ( "queue bootstrap ownership",
+        [
+          test_case
+            "queue starts before readiness even when Keeper autoboot is disabled"
+            `Quick
+            test_queue_bootstrap_precedes_state_publish_and_is_autoboot_independent;
+          test_case "live workspace config drift is rejected" `Quick
+            test_queue_bootstrap_ownership_rejects_live_config_drift;
         ] );
     ]

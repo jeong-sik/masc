@@ -608,6 +608,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
         let channel = String.trim (get_string args "channel" "") in
         if channel = "" then begin
           Keeper_chat_store.append_turn
+            ~config
             ~base_dir:config.base_path
             ~keeper_name:name
             ~user_content
@@ -622,6 +623,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
         end
         else begin
           Keeper_chat_store.append_assistant_message
+            ~config
             ~base_dir:config.base_path
             ~keeper_name:name
             ~content:assistant_content
@@ -899,6 +901,7 @@ let handle_keeper_msg_stream_if_free
       ?on_text_delta
       ?on_event
       ?continuation_channel
+      ?before_run
       ctx
       args
   =
@@ -927,6 +930,7 @@ let handle_keeper_msg_stream_if_free
          ?on_event
          ?event_bus
          ?continuation_channel
+         ?before_run
          ctx
          resolved_args
      with

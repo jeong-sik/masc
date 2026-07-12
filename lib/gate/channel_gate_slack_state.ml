@@ -114,6 +114,11 @@ let record_ready ~bot_user_id =
        ; (* NDT-OK: hello wall-clock is operator-facing telemetry only. *)
          ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) })
 
+let team_provenance_metadata = function
+  | Some team_id when String.trim team_id <> "" ->
+    [ ("slack.team_id", String.trim team_id) ]
+  | Some _ | None -> []
+
 let status_json ?(audit_limit = 10) () =
   let gateway_state = Slack_socket_client.connection_state () in
   let startup_error = Atomic.get startup_error in

@@ -4,7 +4,7 @@
 let status_json ~ok fields =
   Yojson.Safe.to_string (`Assoc (("ok", `Bool ok) :: fields))
 
-let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
+let append_chat_failure ~config ~base_dir ~keeper ~run_id ~failure_code content =
   (* 실패 알림도 성공 결론(fusion_sink.emit)과 동일하게 키퍼 *메인* conversation에
      남긴다(conversation_id 생략). recent_direct_conversation observation 필터는
      conversation_id를 보지 않고 role/kind만 보므로
@@ -25,7 +25,8 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
   Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
     ~failure:content ~failure_code ~ok:false ();
   (try
-     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content ();
+     Keeper_chat_store.append_assistant_message ~config ~base_dir
+       ~keeper_name:keeper ~content ();
      Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
        ~content
        ()
@@ -49,6 +50,7 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
 type orchestrator_runner =
   sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> config:Workspace.config
   -> base_dir:string
   -> policy:Fusion_policy.t
   -> topology:Fusion_types.fusion_topology
@@ -56,8 +58,8 @@ type orchestrator_runner =
   -> unit
   -> Fusion_orchestrator.outcome
 
-let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~run_id
-      ~policy ~args : string =
+let handle_with_runner ~run_orchestrator ~sw ~net ~config ~base_dir ~keeper
+    ~now_unix ~run_id ~policy ~args : string =
   let prompt = Tool_args.get_string args "prompt" "" in
   let preset = Tool_args.get_string args "preset" policy.Fusion_policy.default_preset in
   let web_tools = Tool_args.get_bool args "web_tools" false in
@@ -114,15 +116,18 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
          switch를 sw로 넘긴다 (turn switch면 턴 종료 시 심의가 취소됨). *)
       Eio.Fiber.fork ~sw (fun () ->
         match
-          run_orchestrator ~sw ~net ~base_dir ~policy ~topology ~request:allowed ()
+          run_orchestrator ~sw ~net ~config ~base_dir ~policy ~topology
+            ~request:allowed ()
         with
         | Fusion_orchestrator.Completed _ -> ()
         | Fusion_orchestrator.Denied reason ->
-          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"denied"
+          append_chat_failure ~config ~base_dir ~keeper ~run_id
+            ~failure_code:"denied"
             (Printf.sprintf "**Fusion run `%s`** _(denied after start: %s)_" run_id
                (Fusion_types.deny_reason_label reason))
         | Fusion_orchestrator.Sink_failed msg ->
-          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
+          append_chat_failure ~config ~base_dir ~keeper ~run_id
+            ~failure_code:"sink_failed"
             (Printf.sprintf "**Fusion run `%s`** _(sink failed: %s)_" run_id msg)
         | exception (Eio.Cancel.Cancelled _ as exn) ->
           (* RFC-0266 §7: 취소도 종료 상태다. register_running(위 line 73)으로 [Running]
@@ -141,7 +146,8 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
             ~failure_code:"cancelled" ~ok:false ();
           raise exn
         | exception exn ->
-          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"
+          append_chat_failure ~config ~base_dir ~keeper ~run_id
+            ~failure_code:"aborted"
             (Printf.sprintf "**Fusion run `%s`** _(aborted: %s)_" run_id
                (Printexc.to_string exn)));
       (* [delivery] 필드는 도구 결과의 async 계약을 명시한다: 완료 시 키퍼는
@@ -158,9 +164,9 @@ let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~r
                your chat lane. No need to poll masc_fusion_status." )
         ]
 
-let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
-  handle_with_runner ~run_orchestrator:Fusion_orchestrator.run ~sw ~net ~base_dir
-    ~keeper ~now_unix ~run_id ~policy ~args
+let handle ~sw ~net ~config ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
+  handle_with_runner ~run_orchestrator:Fusion_orchestrator.run ~sw ~net ~config
+    ~base_dir ~keeper ~now_unix ~run_id ~policy ~args
 
 module For_test = struct
   type nonrec orchestrator_runner = orchestrator_runner

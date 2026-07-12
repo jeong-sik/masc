@@ -10,6 +10,7 @@ import { linkifyHtmlReferences } from './chat-linkify'
 import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
+import { CopyIdButton } from '../common/copy-id-button'
 import { ExternalLink, Mic, Square } from 'lucide-preact'
 import { prettyJsonDeep } from '../tool-call-shared'
 import { useVoiceInput } from './voice-input'
@@ -470,20 +471,36 @@ function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
     }
   })()
   const shutdownLabel = shutdownOperationId ? ' · 종료 후 처리' : ''
-  const title = [
-    `receipt ${receiptId}`,
-    label,
-    shutdownOperationId ? `shutdown operation ${shutdownOperationId}` : null,
-  ].filter((value): value is string => value !== null).join(' · ')
   return html`
     <span
-      class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
-      title=${title}
+      class="inline-flex min-w-0 flex-wrap items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
       data-chat-queue-state-badge=${queueState}
       data-chat-queue-receipt=${receiptId}
       data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
     >
-      ${label}${shutdownLabel}
+      <span>${label}${shutdownLabel}</span>
+      <span class="min-w-0 break-all font-mono font-normal" data-chat-queue-receipt-visible>
+        receipt ${receiptId}
+      </span>
+      <${CopyIdButton}
+        value=${receiptId}
+        label="queue receipt ID"
+        ariaLabel=${`큐 receipt ${receiptId} 복사`}
+        size=${11}
+      />
+      ${shutdownOperationId
+        ? html`
+            <span class="min-w-0 break-all font-mono font-normal" data-chat-queue-shutdown-operation-visible>
+              shutdown ${shutdownOperationId}
+            </span>
+            <${CopyIdButton}
+              value=${shutdownOperationId}
+              label="shutdown operation ID"
+              ariaLabel=${`종료 작업 ID ${shutdownOperationId} 복사`}
+              size=${11}
+            />
+          `
+        : null}
     </span>
   `
 }

@@ -82,7 +82,7 @@ let add_agent_api_routes router =
              Tool_agent_timeline.build_timeline
                ~load_chat:(fun ~agent_name ->
                  Keeper_chat_timeline_source.lines_for
-                   ~base_dir:config.base_path ~keeper_name:agent_name)
+                   ~config ~base_dir:config.base_path ~keeper_name:agent_name)
                config
                ~agent_name ~since_hours ~limit
                ~include_tasks:true ~include_board:false

@@ -231,6 +231,17 @@ let finish_discord_stream_reply state ~final_content =
                  log_stream_error "overflow send" state error;
                  Stream_overflow_send_failed error)
 
+let replace_discord_stream_with_terminal state ~content =
+  match finish_discord_stream_reply state ~final_content:content with
+  | Stream_completed -> Ok ()
+  | Stream_not_started ->
+    Result.map
+      (fun (_ : string) -> ())
+      (State.send_message ~channel_id:state.channel_id ~content
+         ~reply_to_message_id:state.reply_to_message_id ())
+  | Stream_final_edit_failed error | Stream_overflow_send_failed error ->
+    Error error
+
 let metadata_opt key = function
   | None -> []
   | Some value ->
@@ -343,6 +354,10 @@ let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
                     },
                     [ ("discord.binding_reference_channel_id", reference_channel_id) ] ))
 
+let discord_thread_provenance_metadata ~channel_id
+    (resolution : State.keeper_binding_resolution) =
+  State.thread_provenance_metadata ~channel_id resolution
+
 let handle_message_create ~dispatch
       ~clock
       ~(channel_id : string) ~(message_id : string)
@@ -373,6 +388,7 @@ let handle_message_create ~dispatch
       ]
       @ resolution_metadata
       @ metadata_opt "discord.guild_id" guild_id
+      @ discord_thread_provenance_metadata ~channel_id resolution
       @ metadata_bool "discord.mentions_bot" mentions_bot
       @ metadata_bool "discord.explicit_mentions_bot" explicit_mentions_bot
       (* Connector-neutral key consumed by the gate recorder: the
@@ -427,8 +443,8 @@ let handle_message_create ~dispatch
          Channel_gate.handle_inbound_streaming ~dispatch ~on_text_snapshot msg)
      with
      | Error gate_err ->
-       (match gate_err with
-        | Channel_gate.Dispatch_unavailable ->
+       (match Channel_gate.inbound_error_notice gate_err with
+        | Channel_gate.Offline_notice ->
           let notice =
             Printf.sprintf "⚠️ `%s` 오프라인" keeper_name
           in
@@ -451,9 +467,58 @@ let handle_message_create ~dispatch
          Log.Server.info
            "discord inbound -> keeper unavailable, notice sent (channel=%s keeper=%s)"
            channel_id keeper_name
-        | Channel_gate.Validation _
-        | Channel_gate.Keeper_error _
-        | Channel_gate.Internal _ ->
+        | Channel_gate.Retry_notice ->
+          let notice =
+            Printf.sprintf
+              "⚠️ `%s` 메시지를 처리하지 못했습니다. 잠시 후 다시 보내 주세요."
+              keeper_name
+          in
+          Discord_observability.record_inbound_dispatch
+            Discord_observability.Gate_error;
+          (match
+             State.send_message ~channel_id ~content:notice
+               ~reply_to_message_id:message_id ()
+           with
+           | Ok _ ->
+             Discord_observability.record_reply
+               Discord_observability.Reply_send_ok
+           | Error e ->
+             Discord_observability.record_reply
+               Discord_observability.Reply_send_failed;
+             Log.Server.error
+               "discord send retry notice failed (channel=%s keeper=%s): %s"
+               channel_id keeper_name
+               (Format.asprintf "%a" State.pp_send_error e));
+          Log.Server.warn
+            "discord inbound -> keeper failed, retry notice attempted (channel=%s keeper=%s): %s"
+            channel_id keeper_name
+            (Channel_gate.gate_error_to_string gate_err)
+        | Channel_gate.Accepted_failure_notice ->
+          let notice =
+            Printf.sprintf
+              "⚠️ `%s` 메시지는 기록됐지만 이번 턴이 실패했습니다. 같은 메시지를 다시 보내지 말고 대시보드 상태를 확인해 주세요."
+              keeper_name
+          in
+          Discord_observability.record_inbound_dispatch
+            Discord_observability.Gate_error;
+          (match
+             replace_discord_stream_with_terminal stream_reply ~content:notice
+           with
+           | Ok () ->
+             Discord_observability.record_reply
+               Discord_observability.Reply_send_ok
+           | Error e ->
+             Discord_observability.record_reply
+               Discord_observability.Reply_send_failed;
+             Log.Server.error
+               "discord replace stream with accepted-failure notice failed (channel=%s keeper=%s): %s"
+               channel_id keeper_name
+               (Format.asprintf "%a" State.pp_send_error e));
+          Log.Server.warn
+            "discord inbound -> accepted Keeper turn failed; dashboard notice attempted (channel=%s keeper=%s): %s"
+            channel_id keeper_name
+            (Channel_gate.gate_error_to_string gate_err)
+        | Channel_gate.No_notice ->
           Discord_observability.record_inbound_dispatch
             Discord_observability.Gate_error;
           Log.Server.warn
@@ -544,6 +609,7 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
        trigger to drain pending messages. That feature is dropped in
        the in-process gateway; re-add as a follow-up if needed. *)
     ()
+
   | Gw.Thread_tracked { thread_id; parent_channel_id } ->
     State.register_thread ~thread_id ~parent_channel_id;
     Log.Server.info
@@ -569,7 +635,7 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
    the trigger policy is still conversation the keeper sits in. Persist
    a single user line — no dispatch, no turn. Unbound channels drop, as
    on the dispatch path. *)
-let handle_ambient ~base_dir
+let handle_ambient ~config ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
       ~(author_id : string) ~(author_name : string option) ~(content : string) =
   match State.keeper_for_channel ~channel_id with
@@ -598,7 +664,7 @@ let handle_ambient ~base_dir
           ~urgency:Keeper_external_attention.Ambient
       in
       Keeper_chat_store.append_user_message
-        ~base_dir ~keeper_name ~content:trimmed
+        ~config ~base_dir ~keeper_name ~content:trimmed
         ~surface:
           (Surface_ref.Discord
              {
@@ -661,12 +727,12 @@ let handle_ambient ~base_dir
         Discord_observability.Ambient_recorded
     end
 
-let on_ambient ~base_dir (ev : Gw.gateway_event) =
+let on_ambient ~config ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create
       { channel_id; guild_id; message_id; author_id; author_name; content; _ }
     ->
-    handle_ambient ~base_dir ~channel_id ~guild_id ~message_id ~author_id
+    handle_ambient ~config ~base_dir ~channel_id ~guild_id ~message_id ~author_id
       ~author_name ~content
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 
@@ -718,8 +784,8 @@ let start ~sw ~env ~clock ~state =
           ~on_ambient:(fun ev ->
             (* Read base_path per event: [workspace_config] is mutable
                (workspace-switch tools swap it). *)
-            on_ambient
-              ~base_dir:(Mcp_server.workspace_config state).base_path ev)
+            let config = Mcp_server.workspace_config state in
+            on_ambient ~config ~base_dir:config.base_path ev)
           ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

@@ -110,9 +110,25 @@ val validate :
 
 (** {1 Errors} *)
 
+type accepted_failure =
+  { detail : string
+  ; message_id : string
+  ; receipt_id : string option
+  }
+(** Internal typed evidence for a failure after durable inbound acceptance.
+    [detail] is operator-only; public envelopes expose a fixed safe message plus
+    [message_id]/[receipt_id] correlation. *)
+
+type accepted_replay =
+  { message_id : string
+  ; receipt_id : string option
+  }
+
 type gate_error =
   | Validation of validation_error
   | Keeper_error of string
+  | Accepted_keeper_error of accepted_failure
+  | Accepted_replay of accepted_replay
   | Dispatch_unavailable
   | Internal of string
 
@@ -131,6 +147,8 @@ type dispatch_result =
       ; message_request : message_request option
       }
   | Keeper_error_result of string
+  | Accepted_keeper_error_result of accepted_failure
+  | Duplicate_accepted_result of accepted_replay
   | Unavailable_result
 
 (** {1 JSON Codecs} *)

@@ -56,6 +56,7 @@ val dispatch_stream_if_free :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?before_run:(unit -> (unit, string) result) ->
   _ context ->
   name:string ->
   args:Yojson.Safe.t ->

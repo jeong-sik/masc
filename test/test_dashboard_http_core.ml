@@ -177,7 +177,8 @@ let test_keeper_chat_receipt_route_and_json () =
             { completed_at = 42.0
             ; kind = Keeper_chat_queue.Delivery_failed
             ; detail = "Slack rejected sk-proj-abcdefghijklmnopqrstuvwxyz"
-            ; outcome_ref = Some "chat-row-7"
+            ; outcome_ref =
+                Some (Ids.Turn_ref.make ~trace_id:"chat-row" ~absolute_turn:7)
             }
       }
   in
@@ -1530,6 +1531,77 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
      Re.execp re header);
   Dashboard_snapshot.reset_for_test ()
 
+let test_tools_snapshot_wire_refreshes_only_waiting_inventory () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_snapshot.reset_for_test ();
+  let marker = `String "from-snapshot" in
+  let stale_waiting_inventory =
+    `Assoc
+      [ "visibility", `String "operator"
+      ; "stale_marker", `Bool true
+      ]
+  in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test
+       ~shell:`Null
+       ~tools:
+         (`Assoc
+           [ "tools_marker", marker
+           ; "keeper_waiting_inventory", stale_waiting_inventory
+           ])
+       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+  let anonymous_json =
+    Server_dashboard_snapshot_select.select_tools_json config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "anonymous read replaces a mismatched operator snapshot projection"
+    "redacted"
+    (anonymous_json
+     |> member "keeper_waiting_inventory"
+     |> member "visibility"
+     |> to_string);
+  let timing = Server_timing.create () in
+  let json =
+    Server_dashboard_snapshot_select.select_tools_json
+      ~timing ~fresh_keeper_waiting_inventory:true config
+  in
+  Alcotest.(check string)
+    "fresh queue read preserves the snapshot tools payload"
+    "from-snapshot"
+    (json |> member "tools_marker" |> to_string);
+  let inventory = json |> member "keeper_waiting_inventory" in
+  Alcotest.(check string)
+    "anonymous fresh queue read replaces the stale operator projection"
+    "redacted"
+    (inventory |> member "visibility" |> to_string);
+  Alcotest.(check bool)
+    "fresh queue read removes the stale snapshot field"
+    true
+    (inventory |> member "stale_marker" = `Null);
+  Alcotest.(check bool)
+    "Server-Timing records the focused fresh inventory phase"
+    true
+    (let header = Server_timing.to_header_value timing in
+     let re = Re.compile (Re.Perl.re "fresh_keeper_waiting_inventory") in
+     Re.execp re header);
+  let operator_json =
+    Server_dashboard_snapshot_select.select_tools_json
+      ~include_sensitive:true config
+  in
+  Alcotest.(check string)
+    "authenticated operator read replaces the redacted snapshot projection"
+    "operator"
+    (operator_json
+     |> member "keeper_waiting_inventory"
+     |> member "visibility"
+     |> to_string);
+  Alcotest.(check string)
+    "authenticated operator read still preserves the snapshot tools payload"
+    "from-snapshot"
+    (operator_json |> member "tools_marker" |> to_string);
+  Dashboard_snapshot.reset_for_test ()
+
 (* [test_tools_snapshot_wire_bypasses_snapshot_when_actor_given]
    intentionally omitted from the unit suite.  The selector's
    actor=Some branch routes to
@@ -1842,6 +1914,8 @@ let () =
             test_dashboard_shell_light_counts_agents_from_summary_fields;
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
             test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
+          test_case "tools wire refreshes only waiting inventory" `Quick
+            test_tools_snapshot_wire_refreshes_only_waiting_inventory;
           test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick
             test_telemetry_summary_snapshot_wire_returns_snapshot;
           test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick

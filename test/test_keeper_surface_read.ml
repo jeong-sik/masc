@@ -23,6 +23,7 @@ let msg ?ts ?source ?speaker ~role content : Store.chat_message =
     surface = None;
     conversation_id = None;
     external_message_id = None;
+    queue_receipt_ids = [];
     speaker;
     audio = None;
     blocks = None;

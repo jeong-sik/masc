@@ -145,7 +145,8 @@ let collect_recent_direct_conversation
       ()
   : recent_direct_line list
   =
-  Keeper_chat_store.load ~base_dir:config.base_path ~keeper_name:meta.name
+  Keeper_chat_store.load_configured ~config ~base_dir:config.base_path
+    ~keeper_name:meta.name
   |> recent_direct_conversation_of_messages ?limit
 ;;
 
@@ -260,7 +261,8 @@ let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
   : (string * string) list * (string * string) list
   =
   let messages =
-    Keeper_chat_store.load ~base_dir:config.base_path ~keeper_name:meta.name
+    Keeper_chat_store.load_configured ~config ~base_dir:config.base_path
+      ~keeper_name:meta.name
   in
   let targets = message_feed_targets meta in
   ( pending_mentions_of_messages ~targets messages

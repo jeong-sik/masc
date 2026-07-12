@@ -89,6 +89,7 @@ let handle_surface_read ~config ~(meta : keeper_meta) ~args =
   let before = Safe_ops.json_float_opt "before" args in
   let page =
     Keeper_chat_store.load_page
+      ~config
       ~base_dir:config.Workspace.base_path
       ~keeper_name:meta.name
       ?before
@@ -190,6 +191,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
     | Error message -> Keeper_surface_post.error_json message
     | Ok Keeper_surface_post.To_dashboard ->
         Keeper_chat_store.append_assistant_message
+          ~config
           ~base_dir:config.Workspace.base_path
           ~keeper_name:meta.name
           ~content:safe_content
@@ -208,6 +210,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
                  Channel_gate_discord_state.pp_send_error send_error)
         | Ok message_id ->
             Keeper_chat_store.append_assistant_message
+              ~config
               ~base_dir:config.Workspace.base_path
               ~keeper_name:meta.name
               ~content:safe_content
@@ -249,6 +252,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
                      Keeper_chat_slack.pp_error err)
             | Ok () ->
                 Keeper_chat_store.append_assistant_message
+                  ~config
                   ~base_dir:config.Workspace.base_path
                   ~keeper_name:meta.name
                   ~content:safe_content
@@ -451,7 +455,8 @@ let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta
   Tool_agent_timeline.dispatch
     ~load_chat:(fun ~agent_name ->
       Keeper_chat_timeline_source.lines_for_self
-        ~base_dir:config.base_path ~caller_keeper_name:meta.name ~agent_name)
+        ~config ~base_dir:config.base_path ~caller_keeper_name:meta.name
+        ~agent_name)
     ctx ~name ~args
   |> dispatch_option_to_string ~name
 ;;
@@ -486,6 +491,7 @@ let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
        Fusion_tool.handle
          ~sw
          ~net
+         ~config
          ~base_dir:config.Workspace.base_path
          ~keeper:meta.name
          ~now_unix

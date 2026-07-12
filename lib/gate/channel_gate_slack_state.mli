@@ -37,6 +37,9 @@ val record_ready : bot_user_id:string -> unit
 (** Called by the in-process gateway's hello handler. Stores the bot identity
     that {!status_json} reports as [bot_user_id] / [last_ready_at]. *)
 
+val team_provenance_metadata : string option -> (string * string) list
+(** Emit the authenticated Slack workspace id when auth.test returned one. *)
+
 val record_startup_error : string -> unit
 val clear_startup_error : unit -> unit
 (** Record/clear a fail-closed gateway bootstrap error. [status_json] exposes a

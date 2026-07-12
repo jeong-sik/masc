@@ -67,9 +67,11 @@ val adapter_loop :
     configured {!Env_config_core.masc_http_base_url} is used.
 
     [on_send_result] is invoked exactly once for the terminal
-    [Run_finished]/[Event_error] delivery. Interim protocol diagnostics do not
-    settle the callback, so an earlier diagnostic cannot hide a later final
-    send failure. Empty terminal output reports a typed [Other] error. The
+    [Run_finished]/[Run_cancelled]/[Event_error] delivery. [Run_cancelled]
+    sends an explicit cancellation notice instead of treating an empty normal
+    terminal as a delivery failure. Interim protocol diagnostics do not settle
+    the callback, so an earlier diagnostic cannot hide a later final send
+    failure. Empty normal terminal output reports a typed [Other] error. The
     callback defaults to a no-op.
 
     The loop exits after one turn. *)

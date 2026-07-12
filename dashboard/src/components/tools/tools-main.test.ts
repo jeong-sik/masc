@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
+import type { DashboardKeeperChatQueue, DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -61,27 +61,61 @@ vi.mock('../tool-executor/tool-executor', () => ({
 
 import { Tools } from './tools-main'
 
+function emptyChatQueue(): DashboardKeeperChatQueue {
+  return {
+    schema: 'keeper_chat_queue.dashboard.v1', revision: 0,
+    pending_count: 0, inflight_count: 0, active_receipts: [], read_errors: [],
+    next_action: null, recent_failed_receipt_count: 0,
+    recent_failed_receipt_limit: 8, recent_failed_receipts_truncated: false,
+    recent_failed_receipts: [],
+  }
+}
+
 function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
   return {
     schema: 'masc.dashboard.keeper_waiting_inventory.v2',
     source: 'server_keeper_waiting_inventory',
+    visibility: 'operator',
+    generated_at: '2026-07-04T00:00:00Z',
+    supported_states: ['idle', 'busy', 'waiting', 'deferred'],
     keeper_count_known: true,
     keeper_count: 1,
     waiting_keeper_count: 1,
     row_count: 1,
+    row_count_truncated: false,
+    external_attention_row_limit: 64,
+    external_attention_truncated_keeper_count: 0,
     global_row_count: 0,
+    global_pending_confirm_count_known: true,
+    global_pending_confirm_count: 0,
+    source_counts: { event_queue_pending: 1 },
     keepers: [
       {
         keeper_name: 'sangsu',
+        metadata_status: 'registered',
         state: 'waiting',
         waiting_count: 1,
+        waiting_count_truncated: false,
+        truncated_sources: {},
+        sources: { event_queue_pending: 1 },
+        since: null,
+        since_iso: null,
+        due_at: null,
+        due_at_iso: null,
+        next_action: 'keeper_drain_event_queue',
+        chat_queue: emptyChatQueue(),
         waiting_on: [
           {
             keeper_name: 'sangsu',
             source: 'event_queue_pending',
             waiting_on: 'bootstrap',
             wake_producer: 'keeper_supervisor',
+            since: null,
+            since_iso: null,
+            due_at: null,
+            due_at_iso: null,
             next_action: 'keeper_drain_event_queue',
+            detail: {},
           },
         ],
       },

@@ -3423,7 +3423,8 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          ])
 ;;
 
-let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
+let dashboard_tools_http_json ?actor ?timing ?(include_sensitive = false)
+    (config : Workspace.config) : Yojson.Safe.t =
   let actor_name = dashboard_actor_name actor in
   let ctx : Tool_misc.context =
     { config; agent_name = actor_name }
@@ -3472,7 +3473,10 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
       run Tools_compute (fun () -> scheduled_automation_dashboard_json config)
     in
     let keeper_waiting_inventory =
-      run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
+      run Tools_compute (fun () ->
+        if include_sensitive
+        then Server_keeper_waiting_inventory.dashboard_json config
+        else Server_keeper_waiting_inventory.tool_json config)
     in
     let keeper_background =
       run Tools_compute (fun () -> Server_keeper_background.dashboard_json config)

@@ -16,9 +16,9 @@ let chat_store_keeper_name raw =
   | Some keeper_name -> keeper_name
   | None -> String.trim raw
 
-let lines_for ~base_dir ~keeper_name : Tool_agent_timeline.chat_line list =
+let lines_for ~config ~base_dir ~keeper_name : Tool_agent_timeline.chat_line list =
   let keeper_name = chat_store_keeper_name keeper_name in
-  Keeper_chat_store.load ~base_dir ~keeper_name
+  Keeper_chat_store.load_configured ~config ~base_dir ~keeper_name
   |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
          match (m.role, m.ts) with
          | Keeper_chat_store.Role.Tool, _ | _, None -> None
@@ -40,7 +40,7 @@ let same_keeper_identity left right =
   | Some l, Some r -> String.equal l r
   | _ -> String.equal (String.trim left) (String.trim right)
 
-let lines_for_self ~base_dir ~caller_keeper_name ~agent_name =
+let lines_for_self ~config ~base_dir ~caller_keeper_name ~agent_name =
   if same_keeper_identity caller_keeper_name agent_name then
-    lines_for ~base_dir ~keeper_name:agent_name
+    lines_for ~config ~base_dir ~keeper_name:agent_name
   else []

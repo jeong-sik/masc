@@ -119,6 +119,9 @@ type embed =
 val embed_to_json : embed -> Yojson.Safe.t
 (** Convert an embed to its JSON representation. Exposed for testing. *)
 
+val embed_count_limit : int
+(** Maximum number of embeds accepted in one Discord message. *)
+
 val embed_field_value_limit : int
 (** Discord embed field value limit, in characters. *)
 

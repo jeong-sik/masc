@@ -756,6 +756,7 @@ let dispatch_stream_if_free
       ?on_text_delta
       ?on_event
       ?continuation_channel
+      ?before_run
       ctx
       ~name
       ~args
@@ -769,6 +770,7 @@ let dispatch_stream_if_free
            ?on_text_delta
            ?on_event
            ?continuation_channel
+           ?before_run
            ctx
            args
        with

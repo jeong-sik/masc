@@ -30,7 +30,7 @@ let outcome_metric_label = function
 
 let deliver_dashboard ~config ~keeper_name ~thread_id ~content =
   Keeper_chat_store.append_assistant_message
-    ~base_dir:config.Workspace.base_path ~keeper_name ~content
+    ~config ~base_dir:config.Workspace.base_path ~keeper_name ~content
     ~surface:(Surface_ref.Dashboard { session_id = Some thread_id }) ();
   Keeper_chat_broadcast.chat_appended ~keeper_name ~source:"dashboard" ~content ();
   Delivered { kind = "dashboard" }
@@ -51,7 +51,7 @@ let deliver_discord ~config ~keeper_name ~guild_id ~channel_id
         }
   | Ok _message_id ->
       Keeper_chat_store.append_assistant_message
-        ~base_dir:config.Workspace.base_path ~keeper_name ~content
+        ~config ~base_dir:config.Workspace.base_path ~keeper_name ~content
         ~surface:
           (Surface_ref.Discord
              { guild_id; channel_id; parent_channel_id; thread_id })
@@ -80,7 +80,7 @@ let deliver_slack ~config ~keeper_name ~team_id ~channel_id ~thread_ts ~content 
         }
   | Ok _ts ->
       Keeper_chat_store.append_assistant_message
-        ~base_dir:config.Workspace.base_path ~keeper_name ~content
+        ~config ~base_dir:config.Workspace.base_path ~keeper_name ~content
         ~surface:(Surface_ref.Slack { team_id; channel_id; thread_ts })
         ();
       Keeper_chat_broadcast.chat_appended ~keeper_name ~source:"slack"

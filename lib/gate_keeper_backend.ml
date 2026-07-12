@@ -387,6 +387,11 @@ let slack_team_id metadata =
 let slack_thread_ts metadata =
   metadata_value_any [ "slack.thread_ts"; "slack_thread_ts" ] metadata
 
+let slack_reply_thread_ts metadata =
+  match slack_thread_ts metadata with
+  | Some thread_ts -> Some thread_ts
+  | None -> metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
+
 let surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
     ~metadata ?conversation_id ?external_message_id () =
   match connector_kind with
@@ -407,7 +412,7 @@ let surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
         {
           team_id = slack_team_id metadata;
           channel_id = slack_channel_id ~channel_workspace_id ~metadata;
-          thread_ts = slack_thread_ts metadata;
+          thread_ts = slack_reply_thread_ts metadata;
         }
   | Generic ->
       let label =
@@ -466,10 +471,11 @@ let ensure_metadata key value metadata =
       if Option.is_some (List.assoc_opt key metadata) then metadata
       else metadata @ [ (key, value) ]
 
-let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
-    ?conversation_id ?turn_ref ~reply () =
+let persist_connector_assistant_reply ~config ~base_dir ~keeper_name ~source
+    ?surface ?conversation_id ?turn_ref ~reply () =
   let content = String.trim reply in
-  if content <> "" then begin
+  if content = "" then Ok ()
+  else begin
     let surface =
       match surface with
       | Some surface -> surface
@@ -477,9 +483,14 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
     in
     (* RFC-0233 §7: [turn_ref] is the join key the keeper minted into the
        reply payload, carried onto this connector turn's assistant row. *)
-    Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
-      ~content ~surface ?conversation_id ?turn_ref ();
-    Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ()
+    match
+      Keeper_chat_store.append_assistant_message_result ~config ~base_dir
+        ~keeper_name ~content ~surface ?conversation_id ?turn_ref ()
+    with
+    | Error _ as error -> error
+    | Ok () ->
+      Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ();
+      Ok ()
   end
 
 (* Trailing [()] keeps [?on_text_snapshot] erasable (warning 16): the wrappers
@@ -552,22 +563,100 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
         Option.to_list (Keeper_identity.Keeper_id.of_string keeper_name)
     | Some _ | None -> []
   in
-  Keeper_chat_store.append_user_message
-    ~base_dir:config.Workspace.base_path
-    ~keeper_name
-    ~content:(String.trim content)
-    ~surface
-    ?conversation_id
-    ?external_message_id
-    ~speaker:
-      { Keeper_chat_store.speaker_id = opt channel_user_id
-      ; speaker_name = opt channel_user_name
-      ; speaker_authority = Keeper_chat_store.External
-      }
-    ~extra_mentions
-    ();
-  Keeper_chat_broadcast.chat_appended
-    ~keeper_name ~source:lane ();
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = opt channel_user_id
+    ; speaker_name = opt channel_user_name
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  let transcript_context : Keeper_chat_queue.transcript_context =
+    { surface
+    ; conversation_id
+    ; external_message_id
+    ; speaker
+    ; extra_mentions
+    }
+  in
+  let inbound_transcript_committed = ref false in
+  let inbound_transcript_already_present = ref false in
+  let accepted_failure_marker_written = ref false in
+  let persist_inbound_transcript () =
+    match external_message_id with
+    | None ->
+      Error
+        "validated connector message has no durable external_message_id"
+    | Some external_message_id ->
+      (match
+         Keeper_chat_store.append_user_message_once_result
+           ~config
+           ~base_dir:config.Workspace.base_path
+           ~keeper_name
+           ~content:(String.trim content)
+           ~surface
+           ?conversation_id
+           ~external_message_id
+           ~speaker
+           ~extra_mentions
+           ()
+       with
+       | Ok Keeper_chat_store.Appended ->
+         inbound_transcript_committed := true;
+         Keeper_chat_broadcast.chat_appended ~keeper_name ~source:lane ();
+         Ok ()
+       | Ok Keeper_chat_store.Already_present ->
+         inbound_transcript_committed := true;
+         inbound_transcript_already_present := true;
+         Error "connector message was already durably accepted"
+       | Error error ->
+         Log.Server.error
+           "channel gate inbound transcript append failed (keeper=%s, lane=%s): %s"
+           keeper_name lane error;
+         Error
+           (redact_text
+              (Printf.sprintf
+                 "The %s message was not accepted because its inbound transcript could not be persisted. Retry after storage health is restored."
+                 lane)))
+  in
+  let keeper_error_result message =
+    if !inbound_transcript_committed
+    then begin
+      if
+        (not !inbound_transcript_already_present)
+        && not !accepted_failure_marker_written
+      then begin
+        accepted_failure_marker_written := true;
+        let public_marker =
+          "This accepted connector turn failed before a durable reply completed. Check the Dashboard receipt before retrying."
+        in
+        (match
+           Keeper_chat_store.append_assistant_message_result ~config
+             ~base_dir:config.Workspace.base_path ~keeper_name
+             ~content:public_marker
+             ~kind:Keeper_chat_store.Row_kind.Transport_failure ~surface
+             ?conversation_id
+             ~stream_lifecycle:
+               [ Keeper_chat_store.Run_started
+               ; Keeper_chat_store.Run_error
+               ]
+             ()
+         with
+         | Ok () ->
+           Keeper_chat_broadcast.chat_appended ~keeper_name ~source:lane
+             ~content:public_marker ()
+         | Error persist_error ->
+           Log.Server.error
+             "channel gate accepted-failure marker append failed (keeper=%s lane=%s): %s"
+             keeper_name lane persist_error)
+      end;
+      Gate_protocol.Accepted_keeper_error_result
+        { detail = message
+        ; message_id = idempotency_key
+        ; receipt_id = None
+        }
+    end
+    else Gate_protocol.Keeper_error_result message
+  in
+  try
   let args =
     `Assoc [
       ("name", `String keeper_name);
@@ -613,11 +702,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
                  "channel gate text snapshot callback failed (keeper=%s): %s"
                  keeper_name (Printexc.to_string exn))
   in
-  let slack_reply_thread_ts =
-    match slack_thread_ts metadata with
-    | Some thread_ts -> Some thread_ts
-    | None -> metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
-  in
+  let slack_reply_thread_ts = slack_reply_thread_ts metadata in
   let defer_to_existing_work
       (admission_rejection : Keeper_turn_admission.rejection) =
     match
@@ -632,14 +717,17 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
          admission reports Busy. This includes a receipt committed or leased
          after any outer observation but before the turn slot was acquired. *)
       (match
-         Keeper_chat_queue.enqueue ~keeper_name
+         Keeper_chat_queue.enqueue ~idempotency_key ~keeper_name
            { Keeper_chat_queue.content = String.trim content
            ; user_blocks = []
            ; attachments = []
            ; timestamp = Eio.Time.now clock
            ; source
+           ; transcript_context = Some transcript_context
            }
        with
+       | Ok receipt when receipt.reused ->
+         `Already_accepted receipt
        | Ok receipt -> `Queued_to_chat_lane (admission_rejection, receipt)
        | Error error ->
          Log.Server.error
@@ -648,26 +736,35 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
            (Keeper_chat_queue.mutation_error_to_string error);
          `Chat_queue_error error)
     | `Async_poll ->
-      `Async_ack
-        ( admission_rejection.in_flight
-        , Some
-            (Keeper_tool_surface.dispatch_keeper_msg
-               ~submitted_by
-               keeper_ctx
-               ~args) )
+      (match persist_inbound_transcript () with
+       | Error message -> `Inbound_transcript_error message
+       | Ok () ->
+         `Async_ack
+           ( admission_rejection.in_flight
+           , Some
+               (Keeper_tool_surface.dispatch_keeper_msg
+                  ~submitted_by
+                  keeper_ctx
+                  ~args) ))
   in
   let dispatch_result =
     (* The admission boundary, not a route-level peek, owns the FIFO decision.
        It rechecks the durable queue after acquiring the Keeper turn slot. *)
     match
       Keeper_tool_surface.dispatch_stream_if_free ~on_text_delta keeper_ctx
-        ~name:"masc_keeper_msg" ~args
+        ~before_run:persist_inbound_transcript ~name:"masc_keeper_msg" ~args
     with
     | `Ran result -> `Streaming result
     | `Busy admission_rejection ->
       defer_to_existing_work admission_rejection
   in
-  match dispatch_result with
+  if !inbound_transcript_already_present
+  then
+    Gate_protocol.Duplicate_accepted_result
+      { message_id = idempotency_key; receipt_id = None }
+  else match dispatch_result with
+  | `Inbound_transcript_error message ->
+    keeper_error_result message
   | `Async_ack (in_flight, Some result) when Tool_result.is_success result ->
       let body = Tool_result.message result in
       let duration_ms =
@@ -750,8 +847,15 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
         ; stats
         ; message_request = Some message_request
         }
+  | `Already_accepted receipt ->
+      Gate_protocol.Duplicate_accepted_result
+        { message_id = idempotency_key
+        ; receipt_id =
+            Some
+              (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id)
+        }
   | `Chat_queue_error error ->
-      Gate_protocol.Keeper_error_result
+      keeper_error_result
         (redact_text
            (Printf.sprintf
               "%s is busy; your message was not queued because the durable chat queue rejected it: %s"
@@ -778,14 +882,39 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
           (try Some (Yojson.Safe.from_string body)
            with Yojson.Json_error _ -> None)
       in
-      persist_connector_assistant_reply
-        ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
-        ~surface ?conversation_id ?turn_ref ~reply ();
-      Gate_protocol.Reply { content = reply; structured; stats; message_request = None }
+      (match
+         persist_connector_assistant_reply
+           ~config ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
+           ~surface ?conversation_id ?turn_ref ~reply ()
+       with
+       | Ok () ->
+         Gate_protocol.Reply
+           { content = reply; structured; stats; message_request = None }
+       | Error _ ->
+         keeper_error_result
+           (redact_text
+              "The inbound message was recorded and the Keeper produced a reply, but the assistant transcript could not be durably recorded. The reply was withheld; check Keeper chat-store health and the dashboard before taking further action."))
   | `Async_ack (_, Some result) | `Streaming (Some result) ->
-      Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))
+      keeper_error_result (redact_text (Tool_result.message result))
   | `Async_ack (_, None) | `Streaming None ->
-      Gate_protocol.Unavailable_result
+      if !inbound_transcript_committed
+      then
+        Gate_protocol.Accepted_keeper_error_result
+          { detail =
+              "The inbound message was recorded, but no Keeper turn result was produced. Check the Keeper dashboard before sending another message."
+          ; message_id = idempotency_key
+          ; receipt_id = None
+          }
+      else Gate_protocol.Unavailable_result
+  with
+  | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+  | exception_ ->
+    Log.Server.error
+      "channel gate dispatch crashed after acceptance boundary (keeper=%s lane=%s accepted=%b): %s"
+      keeper_name lane !inbound_transcript_committed
+      (Printexc.to_string exception_);
+    keeper_error_result
+      "The Keeper dispatch failed unexpectedly. Check the Keeper dashboard before taking further action."
 
 (* [connector_kind] is a required labelled argument (not optional): these
    wrappers are partially applied to produce a [Channel_gate.dispatch_fn] /

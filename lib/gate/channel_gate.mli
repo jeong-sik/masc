@@ -52,18 +52,42 @@ type validation_error = Gate_protocol.validation_error =
   | Empty_idempotency_key
   | Duplicate_message of string
 
-val validate : inbound_message -> (unit, validation_error) result
+type admission_source =
+  | External_channel of { channel : string; workspace_id : string }
+  | Slack of { team_id : string; channel_id : string }
+(** Typed source scope for the gate's short-lived admission reservation.
+    The raw [idempotency_key] remains the single external message identity sent
+    to the durable dispatch backend; this source is combined with it only in
+    the in-memory admission table. *)
+
+type accepted_failure = Gate_protocol.accepted_failure =
+  { detail : string
+  ; message_id : string
+  ; receipt_id : string option
+  }
+
+type accepted_replay = Gate_protocol.accepted_replay =
+  { message_id : string
+  ; receipt_id : string option
+  }
+
+val validate :
+  ?admission_source:admission_source ->
+  inbound_message ->
+  (unit, validation_error) result
 (** Validation plus idempotency gate.  Returns [Ok ()] when the message can proceed.
-    Duplicate detection consumes the idempotency key on first success. *)
+    Duplicate detection consumes the source-scoped idempotency identity on
+    first success. When [admission_source] is omitted, [channel] and
+    [channel_workspace_id] form the typed external-channel scope. *)
 
 val validation_error_to_string : validation_error -> string
 
 (** {1 Deduplication} *)
 
-val dedup_check : string -> bool
-(** [dedup_check key] returns [true] if [key] was already seen
-    within the TTL window ([MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default
-    3600 s).  Thread-safe. *)
+val dedup_check : source:admission_source -> string -> bool
+(** [dedup_check ~source key] returns [true] if the source-scoped [key] was
+    already seen within the TTL window
+    ([MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default 3600 s). Thread-safe. *)
 
 val dedup_cleanup : now:float -> unit
 (** Evict expired entries.  Called periodically by the Pulse consumer
@@ -84,8 +108,23 @@ val make_dedup_cleanup_consumer : unit -> (module Pulse.Consumer)
 type gate_error = Gate_protocol.gate_error =
   | Validation of validation_error
   | Keeper_error of string
+  | Accepted_keeper_error of accepted_failure
+  | Accepted_replay of accepted_replay
   | Dispatch_unavailable
   | Internal of string
+
+type inbound_error_notice =
+  | Offline_notice
+  | Retry_notice
+  | Accepted_failure_notice
+  | No_notice
+
+val inbound_error_notice : gate_error -> inbound_error_notice
+(** Closed connector policy for user-visible gate failures. Keeper failures
+    require a generic retry notice; a failure after durable inbound acceptance
+    gets a non-retry accepted-failure notice; dispatch unavailability requires
+    an offline notice. Validation/internal failures remain log-only because
+    their safe message is owned by the ingress boundary. *)
 
 val gate_error_to_string : gate_error -> string
 
@@ -119,6 +158,7 @@ type streaming_dispatch_fn =
     redacts provider deltas before invoking it. *)
 
 val handle_inbound :
+  ?admission_source:admission_source ->
   dispatch:dispatch_fn ->
   inbound_message ->
   (outbound_message, gate_error) result
@@ -127,11 +167,12 @@ val handle_inbound :
     (which is on the other side of the [dispatch] boundary). *)
 
 val handle_inbound_streaming :
+  ?admission_source:admission_source ->
   dispatch:streaming_dispatch_fn ->
   on_text_snapshot:(string -> unit) ->
   inbound_message ->
   (outbound_message, gate_error) result
-(** Streaming variant of {!handle_inbound}. Validation, deduplication,
+(** Streaming variant of {!handle_inbound}. Validation, source-scoped deduplication,
     metrics, and result mapping are identical; only the injected dispatch
     receives [on_text_snapshot]. Validation failures never invoke the
     streaming callback. *)
@@ -146,6 +187,11 @@ val outbound_to_json : outbound_message -> Yojson.Safe.t
 
 val error_json : string -> Yojson.Safe.t
 (** [{ok: false, error: "<msg>"}] *)
+
+val gate_error_json : gate_error -> Yojson.Safe.t
+(** Typed public failure envelope. It always states whether the inbound was
+    durably accepted and whether replay is safe. Operator-only failure detail is
+    never copied into this projection. *)
 
 (** {1 Configuration} *)
 

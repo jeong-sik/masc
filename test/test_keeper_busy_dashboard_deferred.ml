@@ -31,6 +31,7 @@ let payload ?(name = keeper_name) ?(content = "are you there?") ()
   ; channel_user_id = ""
   ; channel_user_name = ""
   ; channel_workspace_id = ""
+  ; channel_metadata = []
   ; attachments = []
   }
 ;;
@@ -56,7 +57,7 @@ let with_env body =
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       Keeper_turn_admission.For_testing.reset ();
       Keeper_chat_queue.For_testing.reset ();
-      let report = Keeper_chat_queue.configure_persistence ~base_path:base in
+      let report = Keeper_chat_queue.configure_persistence ~config in
       check "chat queue persistence configured without load errors"
         (report.load_errors = []);
       Eio.Switch.run (fun sw ->
@@ -157,6 +158,7 @@ let test_existing_backlog_defers_new_dashboard_message () =
        ; attachments = []
        ; timestamp = Eio.Time.now clock
        ; source = Dashboard
+       ; transcript_context = None
        }
    with
    | Ok receipt ->

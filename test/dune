@@ -47,8 +47,6 @@
   test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
-  test_keeper_chat_delivery_identity
-  test_keeper_chat_delivery_journal
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate
@@ -413,8 +411,6 @@
   test_policy_source_of_status
   test_keeper_mention_scope
   test_keeper_lane_mentions
-  test_keeper_chat_delivery_identity
-  test_keeper_chat_delivery_journal
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate
@@ -1978,6 +1974,8 @@
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)
+
+(include stanzas/test_fs_compat_durable_append.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
 

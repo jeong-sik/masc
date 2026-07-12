@@ -26,6 +26,18 @@ val start_keeper_loops :
     fibers under [sw].  Each fiber is bound to the switch so a graceful
     shutdown cancels them in order. *)
 
+val start_keeper_chat_queue :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  workspace_config:Workspace.config ->
+  Mcp_server.server_state ->
+  (unit, string) result
+(** Install the durable queue ownership boundary and transition observer, then
+    start the queue consumer under [sw]. [workspace_config] is the immutable
+    bootstrap snapshot shared by persistence and the consumer. This must
+    succeed before the server publishes request state or starts connector
+    ingress; it is deliberately independent of Keeper autoboot policy. *)
+
 module For_testing : sig
   type queued_chat_projection = {
     payload_channel : string;
@@ -45,6 +57,19 @@ module For_testing : sig
 
   val queued_chat_projection :
     Keeper_chat_queue.queued_message -> queued_chat_projection
+
+  val queued_transcript_batch :
+    Keeper_chat_queue.leased_message list ->
+    Keeper_chat_store.user_message_input list
+    * Keeper_chat_queue.transcript_context option
+  (** Exact queue-consumer transcript projection: one user input per
+      receipt and the typed assistant context. *)
+
+  val keeper_chat_consumer_outcome :
+    turn_outcome:Server_routes_http_keeper_stream.queued_turn_outcome option ->
+    delivery_outcome:
+      (unit, Keeper_chat_queue.failure_kind * string) result ->
+    Keeper_chat_consumer.turn_outcome
 end
 
 val start_background_maintenance :

@@ -32,6 +32,7 @@ let atomic_tmp_prefix = ".atomic_"
 let atomic_tmp_suffix = ".tmp"
 
 let save_file_atomic
+  ?mode
   ~(save_file : string -> string -> unit)
   (path : string)
   (content : string)
@@ -42,7 +43,11 @@ let save_file_atomic
     Stdlib.Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
   in
   try
+    Option.iter (Unix.chmod tmp) mode;
     save_file tmp content;
+    (* Re-assert after the injected writer in case its implementation replaced
+       the temp inode instead of truncating it in place. *)
+    Option.iter (Unix.chmod tmp) mode;
     fsync_path tmp;
     Stdlib.Sys.rename tmp path;
     (try fsync_path dir with

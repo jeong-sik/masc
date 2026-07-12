@@ -684,6 +684,14 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_CHAT_QUEUED') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const queued = isRecord(event.value) ? event.value : null
+        const acceptedKeeperName = queued?.keeper_name
+        const acceptedStatus = queued?.status
+        if (acceptedStatus !== 'queued') {
+          return 'Keeper queue acceptance has an invalid status.'
+        }
+        if (acceptedKeeperName !== keeperName) {
+          return 'Keeper queue acceptance does not match the active Keeper.'
+        }
         const receiptId = asString(queued?.receipt_id, '').trim()
         const revision = asNumber(queued?.queue_revision)
         const pendingCount = asNumber(queued?.pending_count)
@@ -810,6 +818,7 @@ export function applyKeeperStreamEvent(
           updateThreadEntry(keeperName, assistantEntryId, entry => {
             const delivery =
               entry.delivery === 'no_reply'
+                || (entry.delivery === 'queued' && Boolean(entry.details?.queueReceiptId))
                 || (entry.delivery === 'queued'
                   && keeperTurnOutcomeSuppressesReply(entry.details?.turnOutcome))
                 ? entry.delivery

@@ -25,6 +25,21 @@ let dashboard_actor_cache_segment state req =
     req
 ;;
 
+let include_sensitive_keeper_waiting_inventory state request =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match auth_token_from_request request with
+  | None -> false
+  | Some _ ->
+    (match
+       authorize_token_bound_permission_request
+         ~base_path
+         ~permission:Masc_domain.CanReadState
+         request
+     with
+     | Ok _ -> true
+     | Error _ -> false)
+;;
+
 let dashboard_error_json ?ok message =
   let fields = [ ("error", `String message) ] in
   let fields =
@@ -1400,6 +1415,14 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/tools" (fun request reqd ->
        with_public_read (fun state req reqd ->
            let timing = Server_timing.create () in
+           let config = Mcp_server.workspace_config state in
+           let include_sensitive =
+             include_sensitive_keeper_waiting_inventory state req
+           in
+           let fresh_keeper_waiting_inventory =
+             Server_utils.bool_query_param req "fresh_keeper_chat_queue"
+               ~default:false
+           in
            (* RFC-0138 Phase 3 Step 2: wait-free read via
               [Dashboard_snapshot.current ()] when an actor filter is
               not requested.  Per-actor variant continues through
@@ -1410,8 +1433,10 @@ let add_routes ~sw ~clock router =
                ~timing
                ?actor:
                  (dashboard_actor_for_request
-                    ~base_path:(Mcp_server.workspace_config state).base_path request)
-               (Mcp_server.workspace_config state)
+                    ~base_path:config.base_path request)
+               ~include_sensitive
+               ~fresh_keeper_waiting_inventory
+               config
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)

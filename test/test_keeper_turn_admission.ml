@@ -21,11 +21,15 @@ let check name cond =
 
 let base_path = "/tmp/masc_test_turn_admission"
 let keeper_name = "admission-keeper"
+let turn_ref trace_id absolute_turn =
+  Ids.Turn_ref.make ~trace_id ~absolute_turn
+
 let reset () =
   Keeper_turn_admission.For_testing.reset ();
   Keeper_chat_queue.For_testing.reset ();
   ignore
-    (Keeper_chat_queue.configure_persistence ~base_path
+    (Keeper_chat_queue.configure_persistence
+       ~config:(Workspace.default_config base_path)
       : Keeper_chat_queue.configure_report)
 
 let test_free_slot_admits () =
@@ -89,6 +93,7 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
     ; attachments = []
     ; timestamp = Time_compat.now ()
     ; source = Keeper_chat_queue.Dashboard
+    ; transcript_context = None
     }
   in
   let receipt = Keeper_chat_queue.enqueue ~keeper_name message in
@@ -119,7 +124,7 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
      Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
        ~outcome:
          (Keeper_chat_queue.Mark_delivered
-            { completed_at = Time_compat.now (); outcome_ref = Some "turn#1" })
+            { completed_at = Time_compat.now (); outcome_ref = turn_ref "turn" 1 })
    with
    | `Finalized _ -> ()
    | `Unknown_lease | `Error _ -> failwith "expected the lease to finalize");
@@ -488,6 +493,23 @@ let test_autonomous_yields_to_queued_connector_message () =
              ; team_id = Some "T-test"
              ; thread_ts = Some "171.001"
              }
+       ; transcript_context =
+           Some
+             { surface =
+                 Surface_ref.Slack
+                   { team_id = Some "T-test"
+                   ; channel_id = "C-test"
+                   ; thread_ts = Some "171.001"
+                   }
+             ; conversation_id = None
+             ; external_message_id = None
+             ; speaker =
+                 { Keeper_chat_store.speaker_id = Some "U-test"
+                 ; speaker_name = Some "slack-user"
+                 ; speaker_authority = Keeper_chat_store.External
+                 }
+             ; extra_mentions = []
+             }
        }
    with
    | Ok _ -> ()
@@ -526,7 +548,7 @@ let test_autonomous_yields_to_queued_connector_message () =
         Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
           ~outcome:
             (Keeper_chat_queue.Mark_delivered
-               { completed_at = 2.0; outcome_ref = None })
+               { completed_at = 2.0; outcome_ref = turn_ref "autonomous" 1 })
       with
       | `Finalized _ -> ()
       | `Unknown_lease | `Error _ ->

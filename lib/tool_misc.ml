@@ -157,7 +157,7 @@ let handle_keeper_waiting_inventory ~tool_name ~start_time ctx args : Tool_resul
       Tool_result.make_ok
         ~tool_name
         ~start_time
-        ~data:(Server_keeper_waiting_inventory.dashboard_json ctx.config)
+        ~data:(Server_keeper_waiting_inventory.tool_json ctx.config)
         ()
 
 let strip_mcp_prefix name =

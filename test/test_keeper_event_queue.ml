@@ -84,6 +84,51 @@ let restored_log_messages_since before_seq =
     then Some entry.message
     else None)
 
+let claim_single ~base_path ~keeper_name ~claimed_at ~ready =
+  match
+    Masc.Keeper_registry_event_queue.claim_when_result
+      ~base_path
+      keeper_name
+      ~claimed_at
+      ~ready
+  with
+  | Error error -> Alcotest.fail ("event queue claim failed: " ^ error)
+  | Ok None -> Alcotest.fail "expected an event queue lease"
+  | Ok (Some lease) ->
+    (match Masc.Keeper_registry_event_queue.lease_stimuli lease with
+     | [ stimulus ] -> lease, stimulus
+     | [] | _ :: _ :: _ ->
+       Alcotest.fail "single event queue lease changed cardinality")
+
+let settle_and_project
+    ~base_path
+    ~keeper_name
+    ~settled_at
+    ~lease
+    ~settlement
+  =
+  let receipt =
+    match
+      Masc.Keeper_registry_event_queue.settle_result
+        ~base_path
+        keeper_name
+        ~settled_at
+        ~lease
+        ~settlement
+    with
+    | Error error -> Alcotest.fail ("event queue settlement failed: " ^ error)
+    | Ok (Masc.Keeper_registry_event_queue.Settled receipt)
+    | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt) -> receipt
+  in
+  match
+    Masc.Keeper_registry_event_queue.mark_transition_projected_result
+      ~base_path
+      keeper_name
+      ~transition_id:receipt.transition_id
+  with
+  | Ok () -> receipt
+  | Error error -> Alcotest.fail ("event queue projection failed: " ^ error)
+
 let () =
   let open Keeper_event_queue in
   let board_payload () =
@@ -774,8 +819,14 @@ let () =
         ~base_path ~keeper_name (enqueue empty bootstrap_stim);
       assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 1);
       (* Genuine-ack path: ack_consumed drains inflight AND pending snapshot. *)
-      Masc.Keeper_registry_event_queue.ack_consumed
-        ~base_path keeper_name [ bootstrap_stim ];
+      (match
+         Keeper_event_queue_persistence.ack_consumed
+           ~base_path
+           ~keeper_name
+           [ bootstrap_stim ]
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail ("pending acknowledgement failed: " ^ error));
       (* Before the A-fix this returned length 1 (pending snapshot untouched);
          after the fix the pending snapshot is drained. *)
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
@@ -801,10 +852,14 @@ let () =
         ~base_path
         ~keeper_name
         [ board_stim; bootstrap_stim ];
-      Masc.Keeper_registry_event_queue.ack_consumed
-        ~base_path
-        keeper_name
-        [ board_stim; ghost_stim ];
+      (match
+         Keeper_event_queue_persistence.ack_consumed
+           ~base_path
+           ~keeper_name
+           [ board_stim; ghost_stim ]
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail ("mixed acknowledgement failed: " ^ error));
       let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
       assert (length restored = 1);
       let remaining, rest =
@@ -954,22 +1009,32 @@ let () =
       let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length restored = 1);
       (match
-         Masc.Keeper_registry_event_queue.dequeue_when
+         Masc.Keeper_registry_event_queue.claim_when_result
            ~base_path
            keeper_name
+           ~claimed_at:1.0
            ~ready:(fun _ -> false)
        with
-       | None -> ()
-       | Some _ -> Alcotest.fail "unready stimulus must remain queued");
+       | Ok None -> ()
+       | Ok (Some _) -> Alcotest.fail "unready stimulus must remain queued"
+       | Error error -> Alcotest.fail ("readiness claim failed: " ^ error));
       assert (
         length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
-      let replayed =
-        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
-        | Some stim -> stim
-        | None -> Alcotest.fail "registry reload should replay pending stimulus"
+      let replay_lease, replayed =
+        claim_single
+          ~base_path
+          ~keeper_name
+          ~claimed_at:2.0
+          ~ready:(fun _ -> true)
       in
       assert (String.equal replayed.post_id "p1");
-      Masc.Keeper_registry_event_queue.ack_consumed ~base_path keeper_name [ replayed ];
+      ignore
+        (settle_and_project
+           ~base_path
+           ~keeper_name
+           ~settled_at:3.0
+           ~lease:replay_lease
+           ~settlement:Masc.Keeper_registry_event_queue.Ack);
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
   (* --- registry identity barrier: [base] and [base/.masc] must address one
@@ -1312,9 +1377,14 @@ let () =
        | Error msg -> Alcotest.fail ("durable enqueue failed: " ^ msg));
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
-      match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
-      | Some stimulus -> assert (String.equal stimulus.post_id board_stim.post_id)
-      | None -> Alcotest.fail "durable pre-registration stimulus was not replayed");
+      let _lease, stimulus =
+        claim_single
+          ~base_path
+          ~keeper_name
+          ~claimed_at:1.0
+          ~ready:(fun _ -> true)
+      in
+      assert (String.equal stimulus.post_id board_stim.post_id));
 
   (* --- critical delivery: one approval id cannot commit contradictory
      decisions across an acknowledgement retry. --- *)
@@ -1420,10 +1490,12 @@ let () =
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
-      let consumed =
-        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
-        | Some stim -> stim
-        | None -> Alcotest.fail "dequeue should consume the first queued stimulus"
+      let consumed_lease, consumed =
+        claim_single
+          ~base_path
+          ~keeper_name
+          ~claimed_at:1.0
+          ~ready:(fun _ -> true)
       in
       assert (String.equal consumed.post_id "p1");
       let restart_replay = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
@@ -1434,26 +1506,69 @@ let () =
         | None -> Alcotest.fail "restart replay should keep consumed stimulus before ack"
       in
       assert (String.equal replay_head.post_id "p1");
-      Masc.Keeper_registry_event_queue.requeue_front
-        ~base_path
-        keeper_name
-        [ consumed ];
+      let requeue_receipt =
+        match
+          Masc.Keeper_registry_event_queue.settle_result
+            ~base_path
+            keeper_name
+            ~settled_at:2.0
+            ~lease:consumed_lease
+            ~settlement:
+              (Masc.Keeper_registry_event_queue.Requeue
+                 Masc.Keeper_registry_event_queue.Cycle_crashed)
+        with
+        | Ok (Masc.Keeper_registry_event_queue.Settled receipt) -> receipt
+        | Ok (Masc.Keeper_registry_event_queue.Already_settled _) ->
+          Alcotest.fail "first requeue unexpectedly reused a prior receipt"
+        | Error error -> Alcotest.fail ("typed requeue failed: " ^ error)
+      in
       assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
-      Masc.Keeper_registry_event_queue.requeue_front
-        ~base_path
-        keeper_name
-        [ consumed ];
+      (match
+         Masc.Keeper_registry_event_queue.settle_result
+           ~base_path
+           keeper_name
+           ~settled_at:3.0
+           ~lease:consumed_lease
+           ~settlement:
+             (Masc.Keeper_registry_event_queue.Requeue
+                Masc.Keeper_registry_event_queue.Cycle_crashed)
+       with
+       | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt)
+         when String.equal receipt.transition_id requeue_receipt.transition_id -> ()
+       | Ok (Masc.Keeper_registry_event_queue.Already_settled _)
+       | Ok (Masc.Keeper_registry_event_queue.Settled _) ->
+         Alcotest.fail "repeated requeue changed the durable receipt"
+       | Error error -> Alcotest.fail ("idempotent requeue failed: " ^ error));
       assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
-      let replayed =
-        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
-        | Some stim -> stim
-        | None -> Alcotest.fail "requeued stimulus should replay first"
+      (match
+         Masc.Keeper_registry_event_queue.mark_transition_projected_result
+           ~base_path
+           keeper_name
+           ~transition_id:requeue_receipt.transition_id
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail ("requeue projection failed: " ^ error));
+      let replayed_lease, replayed =
+        claim_single
+          ~base_path
+          ~keeper_name
+          ~claimed_at:4.0
+          ~ready:(fun _ -> true)
       in
       assert (String.equal replayed.post_id "p1");
-      let second =
-        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
-        | Some stim -> stim
-        | None -> Alcotest.fail "original second stimulus should remain queued"
+      ignore
+        (settle_and_project
+           ~base_path
+           ~keeper_name
+           ~settled_at:5.0
+           ~lease:replayed_lease
+           ~settlement:Masc.Keeper_registry_event_queue.Ack);
+      let _second_lease, second =
+        claim_single
+          ~base_path
+          ~keeper_name
+          ~claimed_at:6.0
+          ~ready:(fun _ -> true)
       in
       assert (String.equal second.post_id "bootstrap"));
 

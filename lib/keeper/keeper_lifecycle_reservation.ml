@@ -23,7 +23,26 @@ type release_outcome =
   | Release_not_owner of snapshot
 
 let reservations : snapshot StringMap.t Atomic.t = Atomic.make StringMap.empty
-let key_locks : Mutex.t StringMap.t Atomic.t = Atomic.make StringMap.empty
+
+module Lock_key = struct
+  type t = string
+
+  let equal = String.equal
+  let hash = Hashtbl.hash
+end
+
+module Lock_table = Ephemeron.K1.Make (Lock_key)
+
+type lock_entry =
+  { key : string
+  ; mutex : Mutex.t
+  }
+
+(* No fleet-size guess or TTL belongs at this boundary. The entry keeps its
+   ephemeron key reachable while a holder or waiter owns [lock_entry]; once no
+   caller references it, the table no longer retains an inactive Keeper key. *)
+let key_locks : lock_entry Lock_table.t = Lock_table.create 0
+let key_locks_mutex = Mutex.create ()
 
 let purpose_to_string = function
   | Dead_revival -> "dead_revival"
@@ -42,21 +61,22 @@ let canonical_key ~base_path ~keeper_name =
 ;;
 
 let lock_for_key key =
-  let rec loop () =
-    let current = Atomic.get key_locks in
-    match StringMap.find_opt key current with
-    | Some lock -> lock
+  Mutex.protect key_locks_mutex (fun () ->
+    Lock_table.clean key_locks;
+    match Lock_table.find_opt key_locks key with
+    | Some entry -> entry
     | None ->
-      let lock = Mutex.create () in
-      let updated = StringMap.add key lock current in
-      if Atomic.compare_and_set key_locks current updated then lock else loop ()
-  in
-  loop ()
+      let entry = { key; mutex = Mutex.create () } in
+      Lock_table.add key_locks key entry;
+      entry)
 ;;
 
 let with_key_lock ~base_path ~keeper_name f =
   let key = canonical_key ~base_path ~keeper_name in
-  Mutex.protect (lock_for_key key) f
+  let entry = lock_for_key key in
+  Mutex.protect entry.mutex (fun () ->
+    ignore entry.key;
+    f ())
 ;;
 
 let acquire ~base_path ~keeper_name ~expected_generation ~purpose =

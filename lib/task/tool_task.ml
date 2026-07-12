@@ -430,6 +430,26 @@ let evidence_refs =
         | Some h -> h.evidence_refs
         | None -> []
       in
+      (* Gate 0: Done_action requires at least one evidence_ref.
+         RFC-0323: bare result text without a locally-validatable artifact
+         (file path, commit hash, or trace ref) is insufficient. *)
+      let evidence_refs_gate =
+        if (=) action Masc_domain.Done_action && not force
+        && Stdlib.List.length evidence_refs = 0
+        then
+          Some
+            "Done action requires at least one evidence_ref \
+             (file path, commit hash, or trace ref). Result text, \
+             URLs, and PR numbers alone do not satisfy the gate."
+        else
+          None
+      in
+      match evidence_refs_gate with
+      | Some reason ->
+        Tool_result.error
+          ~failure_class:(Some Tool_result.Workflow_rejection)
+          ~tool_name ~start_time reason
+      | None ->
       let review_gate_rejection =
     if (=) action Masc_domain.Done_action && not force then
       if not completion_owned_by_caller then

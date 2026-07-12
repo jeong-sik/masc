@@ -108,6 +108,11 @@ and fusion_completion = {
   (* judge resolved answer; a failure label when [ok = false]. *)
   board_post_id : string;
   (* correlates to the sink's board evidence post; "" if none was created. *)
+  channel : Keeper_continuation_channel.t;
+  (* RFC-0320 pattern: the connector conversation the deliberation was started
+     from, captured at masc_fusion call time, so the woken keeper can deliver
+     the resolved answer back into the originating channel.  [Unrouted] when
+     the run was not started from a connector conversation. *)
 }
 
 and bg_job_completion = {
@@ -558,6 +563,7 @@ let payload_to_yojson = function
       ; "ok", `Bool fusion.ok
       ; "resolved_answer", `String fusion.resolved_answer
       ; "board_post_id", `String fusion.board_post_id
+      ; "channel", Keeper_continuation_channel.to_yojson fusion.channel
       ]
   | Bg_completed c ->
     let ok, payload =
@@ -682,7 +688,13 @@ let payload_of_yojson json =
     let* ok = bool_field ~context "ok" fields in
     let* resolved_answer = string_field ~context "resolved_answer" fields in
     let* board_post_id = string_field ~context "board_post_id" fields in
-    Ok (Fusion_completed { run_id; ok; resolved_answer; board_post_id })
+    (* [Fusion_completed] predates the reply-channel field and was persisted
+       without it, so a legacy snapshot row must replay as [Unrouted] rather
+       than failing the whole snapshot parse (which recovers to an empty queue,
+       dropping every co-resident stimulus). Same lenient contract as the
+       sibling [Connector_attention]/[Hitl_resolved] rows. *)
+    let* channel = continuation_channel_field fields in
+    Ok (Fusion_completed { run_id; ok; resolved_answer; board_post_id; channel })
   | "bg_completed" ->
     let* run_id = string_field ~context "run_id" fields in
     let* job_kind_s = string_field ~context "job_kind" fields in

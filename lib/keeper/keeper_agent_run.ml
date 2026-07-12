@@ -254,7 +254,7 @@ let run_turn
       ?event_bus
       ?trace_link
       ?continuation_channel
-      ?hitl_delivery_channel
+      ?continuation_delivery_channel
       ?hitl_approval_grant
       ?autonomous_yield_requested
       ()
@@ -500,6 +500,7 @@ let run_turn
     Keeper_run_tools.prepare_agent_setup
       ~config
       ~meta
+      ?continuation_channel
       ~turn_ctx_cell
       ~ctx_work
       ~session
@@ -944,7 +945,7 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
-                          ?hitl_delivery_channel
+                          ?continuation_delivery_channel
                           ~capture_replay_response:
                             (fun ~response_text ->
                               (* Phase O observability: capture the exact

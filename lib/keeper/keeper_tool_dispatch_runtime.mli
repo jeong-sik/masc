@@ -179,6 +179,7 @@ val execute_keeper_tool_call_with_outcome
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?mcp_session_id:string
+  -> ?continuation_channel:Keeper_continuation_channel.t
   -> name:string
   -> input:Yojson.Safe.t
   -> unit

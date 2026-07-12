@@ -122,12 +122,13 @@ val interruptible_sleep :
 
 (** Wake up a specific keeper immediately.
 
-    When [?stimulus] is given, the stimulus is appended to the keeper's
-    Event Layer queue ([Keeper_registry_event_queue.enqueue]) before the wakeup
-    flag flips. Callers that have a real payload (board post, mention,
-    operator directive) should pass it; callers that only need to break
-    the keeper out of [interruptible_sleep] may omit it and the call
-    behaves as before. See RFC-0020 §3 (data channel vs hint signal). *)
+    When [?stimulus] is given, the stimulus is durably appended to the keeper's
+    Event Layer queue ([Keeper_registry_event_queue.enqueue]) independently of
+    lifecycle phase. Only the wake hint is restricted to [Running]. If no live
+    registry entry exists, callers must supply [base_path] so the payload can
+    be persisted for replay. Callers that only need to break the keeper out of
+    [interruptible_sleep] may omit the stimulus. See RFC-0020 §3 (data channel
+    vs hint signal). *)
 val wakeup_keeper :
   ?base_path:string ->
   ?stimulus:Keeper_event_queue.stimulus ->

@@ -546,6 +546,7 @@ let execute_keeper_tool_call_with_outcome
       ?proc_mgr
       ?net
       ?mcp_session_id
+      ?continuation_channel
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -690,6 +691,7 @@ let execute_keeper_tool_call_with_outcome
            ; proc_mgr
            ; net
            ; mcp_session_id
+           ; continuation_channel
            }
        in
        let descriptor_dispatch =

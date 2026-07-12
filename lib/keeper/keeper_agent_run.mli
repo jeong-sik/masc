@@ -186,7 +186,7 @@ val run_turn
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?hitl_delivery_channel:Keeper_continuation_channel.t
+  -> ?continuation_delivery_channel:Keeper_continuation_channel.t
   -> ?hitl_approval_grant:Governance_pipeline.hitl_approval_grant
   -> ?autonomous_yield_requested:(unit -> autonomous_yield_request option)
        (* Autonomous-lane hook: evaluated at each OAS agent-loop turn boundary

@@ -206,19 +206,105 @@ let () =
   (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
   let fusion_payload () =
     Fusion_completed
-      { run_id = "fus-1"; ok = true; resolved_answer = "ok"; board_post_id = "post-1" }
+      { run_id = "fus-1"
+      ; ok = true
+      ; resolved_answer = "ok"
+      ; board_post_id = "post-1"
+      ; channel = Keeper_continuation_channel.unrouted "test fixture"
+      }
   in
   assert (not (is_board_signal (fusion_payload ())));
   assert (String.equal (payload_kind_label (fusion_payload ())) "fusion_completed");
   assert (
     String.equal
       (fusion_completion_post_id
-         { run_id = "fus-1"; ok = true; resolved_answer = "ok"; board_post_id = "post-1" })
+         { run_id = "fus-1"
+         ; ok = true
+         ; resolved_answer = "ok"
+         ; board_post_id = "post-1"
+         ; channel = Keeper_continuation_channel.unrouted "test fixture"
+         })
       "post-1");
+  (* Reply-route parity: the fusion wake serializes its originating channel,
+     and — like the sibling Connector_attention/Hitl_resolved rows — a legacy
+     Fusion_completed row persisted before the channel field existed replays as
+     [Unrouted] rather than failing the snapshot parse (a parse failure recovers
+     to an empty queue, dropping every co-resident stimulus). *)
+  (let routed : Keeper_event_queue.fusion_completion =
+     { run_id = "fus-routed"
+     ; ok = true
+     ; resolved_answer = "answer"
+     ; board_post_id = "post-9"
+     ; channel =
+         Keeper_continuation_channel.Discord
+           { guild_id = None
+           ; channel_id = "chan-42"
+           ; parent_channel_id = None
+           ; thread_id = Some "th-1"
+           ; user_id = "u-7"
+           }
+     }
+   in
+   let stim : Keeper_event_queue.stimulus =
+     { post_id = "post-9"
+     ; urgency = Normal
+     ; arrived_at = 42.0
+     ; payload = Fusion_completed routed
+     }
+   in
+   (match stimulus_of_yojson (stimulus_to_yojson stim) with
+    | Ok { payload = Fusion_completed fc; _ } ->
+      assert (
+        match fc.channel with
+        | Keeper_continuation_channel.Discord
+            { channel_id = "chan-42"; thread_id = Some "th-1"; user_id = "u-7"; _ } ->
+          true
+        | _ -> false)
+    | Ok _ -> assert false
+    | Error e -> failwith e);
+   let missing_channel_json =
+     match stimulus_to_yojson stim with
+     | `Assoc fields ->
+       `Assoc
+         (List.map
+            (fun (k, v) ->
+               if String.equal k "payload"
+               then
+                 ( k
+                 , match v with
+                   | `Assoc payload_fields ->
+                     `Assoc
+                       (List.filter
+                          (fun (pk, _) -> not (String.equal pk "channel"))
+                          payload_fields)
+                   | other -> other )
+               else (k, v))
+            fields)
+     | other -> other
+   in
+   match stimulus_of_yojson missing_channel_json with
+   | Ok { payload = Fusion_completed fc; _ } ->
+     assert (
+       match fc.channel with
+       | Keeper_continuation_channel.Unrouted { reason } ->
+         String.equal reason "legacy: channel not captured"
+       | _ -> false)
+   | Ok _ -> failwith "legacy fusion row must decode as Fusion_completed"
+   | Error e ->
+     failwith
+       (Printf.sprintf
+          "legacy fusion row without a channel key must replay Unrouted, not \
+           fail closed: %s"
+          e));
   assert (
     String.equal
       (fusion_completion_post_id
-         { run_id = "fus-2"; ok = false; resolved_answer = "sink_failed"; board_post_id = "" })
+         { run_id = "fus-2"
+         ; ok = false
+         ; resolved_answer = "sink_failed"
+         ; board_post_id = ""
+         ; channel = Keeper_continuation_channel.unrouted "test fixture"
+         })
       "fusion-run:fus-2");
 
   (* RFC-0290: Bg_completed is a non-board stimulus with its own label; its
@@ -632,6 +718,7 @@ let () =
                ; ok = false
                ; resolved_answer = "denied"
                ; board_post_id = ""
+               ; channel = Keeper_continuation_channel.unrouted "test fixture"
                }
          }
   in

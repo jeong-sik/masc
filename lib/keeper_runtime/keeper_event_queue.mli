@@ -112,6 +112,7 @@ and fusion_completion = {
   ok : bool;
   resolved_answer : string;
   board_post_id : string;
+  channel : Keeper_continuation_channel.t;
 }
 (** RFC-0266 payload for [Fusion_completed]: [ok] distinguishes a synthesized
     judge result from denied/sink_failed/aborted; [resolved_answer] carries the

@@ -34,6 +34,7 @@ let make_tool_bundle
       ?search_fn
       ?on_tool_called
       ?clock
+      ?continuation_channel
       ()
   : tool_bundle
   =
@@ -81,6 +82,7 @@ let make_tool_bundle
                  ?search_fn
                  ?on_tool_called
                  ?clock
+                 ?continuation_channel
                  ~pre_validate_input:(fun input ->
                    match
                      Keeper_tool_descriptor_resolution.validate_public_input_for_tool_call

@@ -773,6 +773,20 @@ let run_keepalive_unified_turn
                 | _ -> None)
               !consumed_stimuli
           in
+          (* Non-board intake consumes exactly one stimulus per turn. Project
+             its exact reply route without choosing between wake families or
+             coalescing unrelated connector conversations. Board batches carry
+             no continuation channel and therefore leave this [None]. *)
+          let continuation_delivery_channel =
+            match !consumed_stimuli with
+            | [ { Keeper_event_queue.payload = Hitl_resolved resolution; _ } ]
+              when Keeper_continuation_channel.is_routable resolution.channel ->
+              Some resolution.channel
+            | [ { Keeper_event_queue.payload = Fusion_completed completion; _ } ]
+              when Keeper_continuation_channel.is_routable completion.channel ->
+              Some completion.channel
+            | [] | [ _ ] | _ :: _ :: _ -> None
+          in
           (* #16 (38-bug campaign PR-5): [reactive_wake] tells us this cycle
              was triggered by an external signal rather than the proactive
              cadence tick, but by itself does not say *which* stimulus (or
@@ -795,6 +809,7 @@ let run_keepalive_unified_turn
             run_keeper_cycle
               ?event_bus
               ?hitl_resolution
+              ?continuation_delivery_channel
               ~ctx
               ~meta_after_triage
               ~stop

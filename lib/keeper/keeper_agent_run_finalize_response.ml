@@ -325,7 +325,7 @@ let finalize
     ~pre_dispatch_compaction_after_tokens
     ~raw_response_text
     ~capture_replay_response
-    ?hitl_delivery_channel
+    ?continuation_delivery_channel
     () =
   let budget_exhausted =
     Keeper_agent_run_response_text.stop_reason_is_turn_budget_exhausted
@@ -390,13 +390,12 @@ let finalize
        assistant_msg;
      capture_replay_response ~response_text
    | _ -> ());
-  (* RFC-0320 W3c: deterministic HITL continuation delivery. When this turn was
-     opened by a Hitl_resolved wake carrying a routable originating channel, and
-     the keeper did not itself post a reply this turn (the W3b prompt steer is
-     best-effort), deliver the visible response to that channel so the
-     conversation is always answered. Routing is deterministic (the captured
-     channel); [Keeper_continuation_delivery] fails closed on [Unrouted]. *)
-  (match hitl_delivery_channel, replay_response_text with
+  (* Deterministic continuation delivery for a turn opened by a typed wake
+     carrying an originating channel. If the keeper did not itself post a
+     reply, deliver the visible response to that exact channel. Routing never
+     infers a destination; [Keeper_continuation_delivery] fails closed on
+     [Unrouted]. *)
+  (match continuation_delivery_channel, replay_response_text with
    | Some channel, Some content ->
      let already_replied = has_reply_delivery_effect acc.tool_calls in
      let outcome =

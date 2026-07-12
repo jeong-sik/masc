@@ -15,6 +15,7 @@
 open Alcotest
 
 module R = Masc.Keeper_registry
+module Workspace = Masc.Workspace
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Sup = Masc.Keeper_supervisor
 module KT = Keeper_types

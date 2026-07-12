@@ -1009,7 +1009,21 @@ let start_keeper_loops
                 ; net = state.net
                 }
               in
-              Keeper_keepalive.start_keepalive ~proactive_warmup_sec:warmup ctx m;
+              let launch_outcome =
+                Keeper_keepalive.start_keepalive
+                  ~proactive_warmup_sec:warmup
+                  ctx
+                  m
+              in
+              (match launch_outcome with
+               | Keeper_keepalive.Keepalive_started _
+               | Keeper_keepalive.Keepalive_already_registered _ -> ()
+               | outcome ->
+                 Log.Keeper.warn
+                   "%s: start_keepalive rejected %s: %s"
+                   log_prefix
+                   m.name
+                   (Keeper_keepalive.start_keepalive_outcome_to_string outcome));
               (* start_keepalive registers the keeper synchronously via
                  register_offline and then forks the keepalive fiber.  The
                  fiber flips the registry to running asynchronously on the

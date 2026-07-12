@@ -3,6 +3,7 @@ open Alcotest
 module Identity = Masc.Keeper_chat_delivery_identity
 module Journal = Masc.Keeper_chat_delivery_journal
 module Keeper_chat_store = Masc.Keeper_chat_store
+module Keeper_chat_queue = Masc.Keeper_chat_queue
 module Surface_ref = Masc.Surface_ref
 
 let expect_ok = function
@@ -78,7 +79,7 @@ let test_full_transition_and_reload () =
         ~base_path
         ~expected_revision:prepared.revision
         ~identity:prepared
-        ~user_row_id:"msg-user"
+        ~user_row_id:(Some "msg-user")
         ~now:2.0
       |> expect_ok
     in
@@ -148,7 +149,7 @@ let test_stale_revision_and_phase_fail_closed () =
         ~base_path
         ~expected_revision:0
         ~identity:prepared
-        ~user_row_id:"msg-user"
+        ~user_row_id:(Some "msg-user")
         ~now:2.0
       |> expect_ok
     in
@@ -342,7 +343,7 @@ let test_checkpoint_commits_without_fake_assistant_row () =
         ~base_path
         ~expected_revision:prepared.revision
         ~identity:prepared
-        ~user_row_id
+        ~user_row_id:(Some user_row_id)
         ~now:2.0
       |> expect_ok
     in
@@ -382,6 +383,192 @@ let test_checkpoint_commits_without_fake_assistant_row () =
     check int "checkpoint adds no fake assistant row" 1 (List.length history))
 ;;
 
+let test_queue_restart_finalizes_receipt_without_redispatch () =
+  Eio_main.run @@ fun _env ->
+  with_temp_dir (fun base_path ->
+    Keeper_chat_queue.For_testing.reset ();
+    ignore
+      (Keeper_chat_queue.configure_persistence ~base_path
+        : Keeper_chat_queue.configure_report);
+    let queued_message : Keeper_chat_queue.queued_message =
+      { content = "queued source check"
+      ; user_blocks = []
+      ; attachments = []
+      ; timestamp = 1.0
+      ; source = Keeper_chat_queue.Dashboard
+      }
+    in
+    let receipt =
+      match Keeper_chat_queue.enqueue ~keeper_name:"sangsu" queued_message with
+      | Ok receipt -> receipt
+      | Error error -> fail (Keeper_chat_queue.mutation_error_to_string error)
+    in
+    let delivery_key =
+      match Keeper_chat_queue.lease_batch ~keeper_name:"sangsu" with
+      | `Leased { items; _ } ->
+        let receipt_ids =
+          List.map
+            (fun (item : Keeper_chat_queue.leased_message) -> item.receipt_id)
+            items
+          |> Identity.Receipt_ids.of_list
+          |> function
+          | Ok receipt_ids -> receipt_ids
+          | Error error -> fail (Identity.Receipt_ids.error_to_string error)
+        in
+        Identity.Queue_receipts receipt_ids
+      | `Empty -> fail "queue was empty after enqueue"
+      | `Already_leased lease_id -> failf "unexpected existing lease %s" lease_id
+      | `Error error -> fail (Keeper_chat_queue.mutation_error_to_string error)
+    in
+    ignore
+      (Journal.prepare
+         ~base_path
+         ~delivery_key
+         ~payload:
+           { (payload ()) with
+             user_content = queued_message.content
+           ; user_row_origin = Journal.Needs_append
+           }
+         ~now:2.0
+       |> expect_ok
+        : Journal.t);
+    Keeper_chat_queue.For_testing.reset ();
+    let recovery = Journal.recover_all ~base_path ~now:3.0 in
+    check int "queue journal recovered" 1 recovery.recovered;
+    let queue_recovery = Keeper_chat_queue.configure_persistence ~base_path in
+    check int "one inflight receipt reconciled" 1 queue_recovery.recovered_receipt_count;
+    (match
+       Keeper_chat_queue.lookup_receipt
+         ~keeper_name:"sangsu"
+         ~receipt_id:receipt.receipt_id
+     with
+     | Ok
+         { receipt =
+             Some
+               { state =
+                   Keeper_chat_queue.Failed
+                     { kind = Keeper_chat_queue.Recovery_interrupted; _ }
+               ; _
+               }
+         ; _
+         } -> ()
+     | Ok _ -> fail "recovered receipt was not terminal Recovery_interrupted"
+     | Error error -> fail (Keeper_chat_queue.mutation_error_to_string error));
+    let history = Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu" in
+    check int "queue restart writes one user and one failure row" 2 (List.length history);
+    Keeper_chat_queue.For_testing.reset ())
+;;
+
+let test_dashboard_queue_origin_uses_typed_handoff_journal () =
+  with_temp_dir (fun base_path ->
+    let receipt_id =
+      Identity.Receipt_id.of_string
+        "chatq_123e4567-e89b-12d3-a456-426614174000"
+      |> function
+      | Ok receipt_id -> receipt_id
+      | Error detail -> fail detail
+    in
+    let unknown_receipt_id =
+      Identity.Receipt_id.of_string
+        "chatq_123e4567-e89b-12d3-a456-426614174001"
+      |> function
+      | Ok receipt_id -> receipt_id
+      | Error detail -> fail detail
+    in
+    let key = direct_key () in
+    let prepared =
+      Journal.prepare
+        ~base_path
+        ~delivery_key:key
+        ~payload:(payload ())
+        ~now:1.0
+      |> expect_ok
+    in
+    let user_row =
+      Keeper_chat_store.append_user_message_once
+        ~base_dir:base_path
+        ~keeper_name:"sangsu"
+        ~delivery_key:key
+        ~content:prepared.payload.user_content
+        ~surface:prepared.payload.surface
+        ~speaker:prepared.payload.speaker
+        ()
+      |> expect_chat_ok
+    in
+    let user_row_id = row_id user_row in
+    let accepted =
+      Journal.mark_accepted
+        ~base_path
+        ~expected_revision:prepared.revision
+        ~identity:prepared
+        ~user_row_id:(Some user_row_id)
+        ~now:2.0
+      |> expect_ok
+    in
+    let running =
+      Journal.mark_running
+        ~base_path
+        ~expected_revision:accepted.revision
+        ~identity:accepted
+        ~now:3.0
+      |> expect_ok
+    in
+    let pending =
+      Journal.mark_terminal_pending
+        ~base_path
+        ~expected_revision:running.revision
+        ~identity:running
+        ~terminal:
+          { ok = true
+          ; poll_body = "queued"
+          ; delivery =
+              Journal.No_assistant_reply
+                { reason = Journal.Queued_for_later { receipt_id } }
+          }
+        ~now:4.0
+      |> expect_ok
+    in
+    let committed =
+      Journal.mark_transcript_committed
+        ~base_path
+        ~expected_revision:pending.revision
+        ~identity:pending
+        ~transcript_row_id:user_row_id
+        ~now:5.0
+      |> expect_ok
+    in
+    ignore
+      (Journal.mark_final
+         ~base_path
+         ~expected_revision:committed.revision
+         ~identity:committed
+         ~now:6.0
+       |> expect_ok
+        : Journal.t);
+    let origin receipt_ids =
+      Identity.Receipt_ids.of_list receipt_ids
+      |> function
+      | Error error -> fail (Identity.Receipt_ids.error_to_string error)
+      | Ok receipt_ids ->
+        Journal.dashboard_queue_user_row_origin
+          ~base_path
+          ~keeper_name:"sangsu"
+          receipt_ids
+    in
+    (match origin [ receipt_id ] with
+     | Ok Journal.Already_persisted_upstream -> ()
+     | Ok _ -> fail "journaled Dashboard receipt was treated as legacy"
+     | Error error -> fail (Journal.error_to_string error));
+    (match origin [ unknown_receipt_id ] with
+     | Ok Journal.Needs_append -> ()
+     | Ok _ -> fail "legacy Dashboard receipt did not request a user append"
+     | Error error -> fail (Journal.error_to_string error));
+    match origin [ receipt_id; unknown_receipt_id ] with
+    | Error (Journal.Transcript_error _) -> ()
+    | Error error -> fail (Journal.error_to_string error)
+    | Ok _ -> fail "mixed Dashboard provenance was accepted")
+;;
+
 let () =
   run
     "keeper chat delivery journal"
@@ -411,6 +598,14 @@ let () =
             "checkpoint has no fake reply"
             `Quick
             test_checkpoint_commits_without_fake_assistant_row
+        ; test_case
+            "queue restart finalizes without redispatch"
+            `Quick
+            test_queue_restart_finalizes_receipt_without_redispatch
+        ; test_case
+            "Dashboard queue origin is typed"
+            `Quick
+            test_dashboard_queue_origin_uses_typed_handoff_journal
         ] )
     ]
 ;;

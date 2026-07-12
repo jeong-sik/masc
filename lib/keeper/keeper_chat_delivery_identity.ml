@@ -65,10 +65,15 @@ end
 
 module Receipt_ids = struct
   type t = Receipt_id.t * Receipt_id.t list
+  type error = Empty
 
   let of_list = function
-    | [] -> Error "queue delivery identity requires at least one receipt id"
+    | [] -> Error Empty
     | first :: rest -> Ok (first, rest)
+  ;;
+
+  let error_to_string = function
+    | Empty -> "queue delivery identity requires at least one receipt id"
   ;;
 
   let to_list (first, rest) = first :: rest
@@ -171,7 +176,11 @@ let delivery_key_of_yojson = function
              (Ok [])
          | _ -> Error "delivery identity receipt_ids must be a list"
        in
-       let* receipt_ids = Receipt_ids.of_list receipt_ids in
+       let* receipt_ids =
+         match Receipt_ids.of_list receipt_ids with
+         | Ok receipt_ids -> Ok receipt_ids
+         | Error error -> Error (Receipt_ids.error_to_string error)
+       in
        Ok (Queue_receipts receipt_ids)
      | _ -> Error (Printf.sprintf "unsupported delivery identity kind %S" kind))
   | _ -> Error "delivery identity must be an object"

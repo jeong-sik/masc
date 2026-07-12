@@ -27,14 +27,18 @@ let test_direct_roundtrip () =
 
 let test_queue_requires_nonempty_receipts () =
   (match Identity.Receipt_ids.of_list [] with
-   | Error _ -> ()
+   | Error Identity.Receipt_ids.Empty -> ()
    | Ok _ -> fail "empty receipt list was accepted");
   let receipt_id =
     Identity.Receipt_id.of_string
       "chatq_123e4567-e89b-12d3-a456-426614174000"
     |> expect_ok
   in
-  let receipt_ids = Identity.Receipt_ids.of_list [ receipt_id ] |> expect_ok in
+  let receipt_ids =
+    Identity.Receipt_ids.of_list [ receipt_id ]
+    |> Result.map_error Identity.Receipt_ids.error_to_string
+    |> expect_ok
+  in
   let key = Identity.Queue_receipts receipt_ids in
   let decoded =
     Identity.delivery_key_to_yojson key

@@ -3,6 +3,7 @@ module Identity = Keeper_chat_delivery_identity
 type user_row_origin =
   | Needs_append
   | Already_persisted of { row_id : string }
+  | Already_persisted_upstream
 
 type accepted_payload =
   { keeper_name : string
@@ -25,7 +26,9 @@ type terminal_delivery =
   | Transport_failure of { content : string }
   | No_assistant_reply of { reason : no_assistant_reply_reason }
 
-and no_assistant_reply_reason = Continuation_checkpoint
+and no_assistant_reply_reason =
+  | Continuation_checkpoint
+  | Queued_for_later of { receipt_id : Identity.Receipt_id.t }
 
 type terminal_result =
   { ok : bool
@@ -35,11 +38,11 @@ type terminal_result =
 
 type phase =
   | Prepared
-  | Accepted of { user_row_id : string }
-  | Running of { user_row_id : string }
+  | Accepted of { user_row_id : string option }
+  | Running of { user_row_id : string option }
   | Terminal_pending of
       { terminal : terminal_result
-      ; user_row_id : string
+      ; user_row_id : string option
       }
   | Transcript_committed of
       { terminal : terminal_result
@@ -76,6 +79,7 @@ type error =
       ; actual : string
       }
   | Transcript_error of string
+  | Invalid_terminal of string
 
 let schema_version = 1
 let ( let* ) = Result.bind
@@ -109,6 +113,17 @@ let error_to_string = function
       actual
   | Transcript_error detail ->
     "chat delivery transcript persistence failed: " ^ detail
+  | Invalid_terminal detail -> "chat delivery terminal is invalid: " ^ detail
+;;
+
+let validate_terminal terminal =
+  match terminal.ok, terminal.delivery with
+  | true, (Assistant_reply _ | No_assistant_reply _) -> Ok ()
+  | false, Transport_failure _ -> Ok ()
+  | true, Transport_failure _ ->
+    Error (Invalid_terminal "successful status cannot carry a transport failure")
+  | false, (Assistant_reply _ | No_assistant_reply _) ->
+    Error (Invalid_terminal "failed status cannot carry a successful delivery")
 ;;
 
 type operation_lock =
@@ -205,6 +220,8 @@ let user_row_origin_to_yojson = function
   | Already_persisted { row_id } ->
     `Assoc
       [ "kind", `String "already_persisted"; "row_id", `String row_id ]
+  | Already_persisted_upstream ->
+    `Assoc [ "kind", `String "already_persisted_upstream" ]
 ;;
 
 let payload_to_yojson payload =
@@ -242,6 +259,12 @@ let terminal_delivery_to_yojson = function
       [ "kind", `String "no_assistant_reply"
       ; "reason", `String "continuation_checkpoint"
       ]
+  | No_assistant_reply { reason = Queued_for_later { receipt_id } } ->
+    `Assoc
+      [ "kind", `String "no_assistant_reply"
+      ; "reason", `String "queued_for_later"
+      ; "receipt_id", `String (Identity.Receipt_id.to_string receipt_id)
+      ]
 ;;
 
 let terminal_to_yojson terminal =
@@ -256,15 +279,19 @@ let phase_to_yojson = function
   | Prepared -> `Assoc [ "kind", `String "prepared" ]
   | Accepted { user_row_id } ->
     `Assoc
-      [ "kind", `String "accepted"; "user_row_id", `String user_row_id ]
+      [ "kind", `String "accepted"
+      ; "user_row_id", string_option_to_yojson user_row_id
+      ]
   | Running { user_row_id } ->
     `Assoc
-      [ "kind", `String "running"; "user_row_id", `String user_row_id ]
+      [ "kind", `String "running"
+      ; "user_row_id", string_option_to_yojson user_row_id
+      ]
   | Terminal_pending { terminal; user_row_id } ->
     `Assoc
       [ "kind", `String "terminal_pending"
       ; "terminal", terminal_to_yojson terminal
-      ; "user_row_id", `String user_row_id
+      ; "user_row_id", string_option_to_yojson user_row_id
       ]
   | Transcript_committed { terminal; transcript_row_id } ->
     `Assoc
@@ -427,6 +454,14 @@ let user_row_origin_of_yojson = function
        in
        let* row_id = string "row_id" fields in
        Ok (Already_persisted { row_id })
+     | "already_persisted_upstream" ->
+       let* () =
+         validate_fields
+           ~context:"upstream persisted user row origin"
+           ~expected:[ "kind" ]
+           fields
+       in
+       Ok Already_persisted_upstream
      | _ -> Error (Decode_error (Printf.sprintf "unknown user row origin %S" kind)))
   | _ -> Error (Decode_error "user_row_origin must be an object")
 ;;
@@ -519,16 +554,29 @@ let terminal_delivery_of_yojson = function
        let* content = string "content" fields in
        Ok (Transport_failure { content })
      | "no_assistant_reply" ->
-       let* () =
-         validate_fields
-           ~context:"no-assistant terminal delivery"
-           ~expected:[ "kind"; "reason" ]
-           fields
-       in
        let* reason = string "reason" fields in
        (match reason with
         | "continuation_checkpoint" ->
+          let* () =
+            validate_fields
+              ~context:"checkpoint no-assistant terminal delivery"
+              ~expected:[ "kind"; "reason" ]
+              fields
+          in
           Ok (No_assistant_reply { reason = Continuation_checkpoint })
+        | "queued_for_later" ->
+          let* () =
+            validate_fields
+              ~context:"queued no-assistant terminal delivery"
+              ~expected:[ "kind"; "reason"; "receipt_id" ]
+              fields
+          in
+          let* receipt_id = string "receipt_id" fields in
+          let* receipt_id =
+            Identity.Receipt_id.of_string receipt_id
+            |> Result.map_error (fun detail -> Decode_error detail)
+          in
+          Ok (No_assistant_reply { reason = Queued_for_later { receipt_id } })
         | _ ->
           Error
             (Decode_error
@@ -549,7 +597,9 @@ let terminal_of_yojson = function
     let* poll_body = string "poll_body" fields in
     let* delivery_json = assoc "delivery" fields in
     let* delivery = terminal_delivery_of_yojson delivery_json in
-    Ok { ok; poll_body; delivery }
+    let terminal = { ok; poll_body; delivery } in
+    let* () = validate_terminal terminal in
+    Ok terminal
   | _ -> Error (Decode_error "terminal result must be an object")
 ;;
 
@@ -569,7 +619,7 @@ let phase_of_yojson = function
            ~expected:[ "kind"; "user_row_id" ]
            fields
        in
-       let* user_row_id = string "user_row_id" fields in
+       let* user_row_id = string_option "user_row_id" fields in
        Ok (Accepted { user_row_id })
      | "running" ->
        let* () =
@@ -578,7 +628,7 @@ let phase_of_yojson = function
            ~expected:[ "kind"; "user_row_id" ]
            fields
        in
-       let* user_row_id = string "user_row_id" fields in
+       let* user_row_id = string_option "user_row_id" fields in
        Ok (Running { user_row_id })
      | "terminal_pending" ->
        let* () =
@@ -589,7 +639,7 @@ let phase_of_yojson = function
        in
        let* terminal_json = assoc "terminal" fields in
        let* terminal = terminal_of_yojson terminal_json in
-       let* user_row_id = string "user_row_id" fields in
+       let* user_row_id = string_option "user_row_id" fields in
        Ok (Terminal_pending { terminal; user_row_id })
      | "transcript_committed" | "final" ->
        let* () =
@@ -798,6 +848,7 @@ let mark_terminal_pending
       ~terminal
       ~now
   =
+  let* () = validate_terminal terminal in
   replace
     ~base_path
     ~expected_revision
@@ -857,6 +908,7 @@ let mark_recovery_terminal_pending
       ~terminal
       ~now
   =
+  let* () = validate_terminal terminal in
   replace
     ~base_path
     ~expected_revision
@@ -879,7 +931,8 @@ let row_id_of_append_once = function
 
 let append_accepted_user ~base_path journal =
   match journal.payload.user_row_origin with
-  | Already_persisted { row_id } -> Ok row_id
+  | Already_persisted { row_id } -> Ok (Some row_id)
+  | Already_persisted_upstream -> Ok None
   | Needs_append ->
     Keeper_chat_store.append_user_message_once
       ~base_dir:base_path
@@ -892,7 +945,7 @@ let append_accepted_user ~base_path journal =
       ?external_message_id:journal.payload.external_message_id
       ~speaker:journal.payload.speaker
       ()
-    |> Result.map row_id_of_append_once
+    |> Result.map (fun result -> Some (row_id_of_append_once result))
     |> Result.map_error (fun detail -> Transcript_error detail)
 ;;
 
@@ -935,7 +988,14 @@ let append_terminal ~base_path journal ~user_row_id terminal =
       ()
     |> Result.map row_id_of_append_once
     |> Result.map_error (fun detail -> Transcript_error detail)
-  | No_assistant_reply { reason = Continuation_checkpoint } -> Ok user_row_id
+  | No_assistant_reply
+      { reason = Continuation_checkpoint | Queued_for_later _ } ->
+    (match user_row_id with
+     | Some user_row_id -> Ok user_row_id
+     | None ->
+       Error
+         (Transcript_error
+            "continuation checkpoint requires an accepted user transcript row"))
 ;;
 
 let interrupted_terminal journal =
@@ -1057,6 +1117,46 @@ let list_for_keeper ~base_path ~keeper_name =
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Io_error (Printexc.to_string exn))
+;;
+
+let dashboard_queue_user_row_origin ~base_path ~keeper_name receipt_ids =
+  let* records = list_for_keeper ~base_path ~keeper_name in
+  let handed_off_receipts =
+    List.filter_map
+      (fun journal ->
+         match journal.phase with
+         | Final
+             { terminal =
+                 { delivery =
+                     No_assistant_reply
+                       { reason = Queued_for_later { receipt_id } }
+                 ; _
+                 }
+             ; _
+             } -> Some receipt_id
+         | Prepared
+         | Accepted _
+         | Running _
+         | Terminal_pending _
+         | Transcript_committed _
+         | Final _ -> None)
+      records
+  in
+  let provenance =
+    Identity.Receipt_ids.to_list receipt_ids
+    |> List.map (fun receipt_id ->
+      List.exists
+        (fun candidate -> Identity.Receipt_id.equal receipt_id candidate)
+        handed_off_receipts)
+  in
+  if List.for_all Fun.id provenance
+  then Ok Already_persisted_upstream
+  else if List.for_all (fun present -> not present) provenance
+  then Ok Needs_append
+  else
+    Error
+      (Transcript_error
+         "dashboard queue batch mixes journaled and legacy user-row provenance")
 ;;
 
 let recover_all ~base_path ~now =

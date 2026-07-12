@@ -230,8 +230,9 @@ let connector_user_line_recorded_upstream_of_source
   (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
      line recorded at the gate inbound boundary before the message was
      enqueued, so the turn records the assistant reply only and does not
-     re-write the user line. Dashboard-source queue messages have no
-     upstream recorder, so the turn records both sides. *)
+     re-write the user line. Dashboard ownership is resolved later from exact
+     direct-request handoff journals, allowing legacy receipts to append their
+     missing user row without duplicating current receipts. *)
   match source with
   | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
   | Keeper_chat_queue.Dashboard -> false
@@ -1168,7 +1169,7 @@ let start_keeper_loops
            queue_report.load_errors;
          Keeper_chat_consumer.start ~sw ~clock
            ~base_path
-           ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
+           ~handle_turn:(fun ~sw ~keeper_name ~delivery_key ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
              let run_id =
@@ -1329,6 +1330,7 @@ let start_keeper_loops
                match
                  process_single_turn ~connector_user_line_recorded_upstream
                    ~queued_turn:true
+                   ~delivery_key:(Some delivery_key)
                    ~state ~clock ~auth_token:None
                    ~thread_id ~continuation_channel ~closed
                    ~client_disconnects:None

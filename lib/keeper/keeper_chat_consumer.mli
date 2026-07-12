@@ -62,7 +62,7 @@ val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   base_path:string ->
-  handle_turn:(sw:Eio.Switch.t -> keeper_name:string -> queued_message:Keeper_chat_queue.queued_message -> turn_outcome) ->
+  handle_turn:(sw:Eio.Switch.t -> keeper_name:string -> delivery_key:Keeper_chat_delivery_identity.delivery_key -> queued_message:Keeper_chat_queue.queued_message -> turn_outcome) ->
   unit
 
 module For_testing : sig

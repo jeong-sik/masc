@@ -790,6 +790,7 @@ let execute_keeper_stream_tool_streaming
       ~clock
       ?auth_token:_
       ?on_event
+      ?on_admitted
       state
       ~agent_name
       ~arguments
@@ -814,6 +815,7 @@ let execute_keeper_stream_tool_streaming
         Keeper_tool_surface.dispatch_stream ~on_text_delta ?on_event
           ~on_admission_rejected:(fun rejection ->
             admission_rejection := Some rejection)
+          ?on_admitted
           keeper_ctx
           ~continuation_channel
           ~name:"masc_keeper_msg"
@@ -1241,6 +1243,7 @@ let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
    the user line, and whether this turn was dispatched from the queue
    consumer. *)
 let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
+    ~delivery_key
     ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name ~submitted_by
@@ -1388,7 +1391,87 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~base_path
         ~expected_revision:prepared.revision
         ~identity:prepared
-        ~user_row_id:(row_id_of_append_once user_row)
+        ~user_row_id:(Some (row_id_of_append_once user_row))
+        ~now:(Time_compat.now ())
+      |> Result.map_error journal_error
+    in
+    ignore (set_direct_delivery_journal accepted : Keeper_chat_delivery_journal.t);
+    let* running =
+      Keeper_chat_delivery_journal.mark_running
+        ~base_path
+        ~expected_revision:accepted.revision
+        ~identity:accepted
+        ~now:(Time_compat.now ())
+      |> Result.map_error journal_error
+    in
+    ignore (set_direct_delivery_journal running : Keeper_chat_delivery_journal.t);
+    Ok ()
+  in
+  let on_queue_turn_admitted () =
+    let ( let* ) = Result.bind in
+    let* delivery_key, receipt_ids =
+      match delivery_key with
+      | Some (Keeper_chat_delivery_identity.Queue_receipts receipt_ids as key) ->
+        Ok (key, receipt_ids)
+      | Some (Keeper_chat_delivery_identity.Direct_request _) ->
+        Error "queued Keeper turn received a direct-request delivery identity"
+      | None -> Error "queued Keeper turn is missing its receipt delivery identity"
+    in
+    let user_row_origin =
+      if connector_user_line_recorded_upstream
+      then Ok Keeper_chat_delivery_journal.Already_persisted_upstream
+      else
+        Keeper_chat_delivery_journal.dashboard_queue_user_row_origin
+          ~base_path
+          ~keeper_name:payload.name
+          receipt_ids
+        |> Result.map_error journal_error
+    in
+    let* user_row_origin = user_row_origin in
+    let accepted_payload : Keeper_chat_delivery_journal.accepted_payload =
+      { keeper_name = payload.name
+      ; submitted_by
+      ; user_content = payload.message
+      ; user_attachments = payload.attachments
+      ; surface = chat_surface
+      ; conversation_id = None
+      ; external_message_id = None
+      ; speaker = chat_speaker
+      ; user_row_origin
+      }
+    in
+    let* prepared =
+      Keeper_chat_delivery_journal.prepare
+        ~base_path
+        ~delivery_key
+        ~payload:accepted_payload
+        ~now:(Time_compat.now ())
+      |> Result.map_error journal_error
+    in
+    ignore (set_direct_delivery_journal prepared : Keeper_chat_delivery_journal.t);
+    let* user_row_id =
+      match user_row_origin with
+      | Keeper_chat_delivery_journal.Already_persisted_upstream -> Ok None
+      | Keeper_chat_delivery_journal.Already_persisted { row_id } ->
+        Ok (Some row_id)
+      | Keeper_chat_delivery_journal.Needs_append ->
+        Keeper_chat_store.append_user_message_once
+          ~base_dir:base_path
+          ~keeper_name:payload.name
+          ~delivery_key
+          ~content:payload.message
+          ~attachments:payload.attachments
+          ~surface:chat_surface
+          ~speaker:chat_speaker
+          ()
+        |> Result.map (fun result -> Some (row_id_of_append_once result))
+    in
+    let* accepted =
+      Keeper_chat_delivery_journal.mark_accepted
+        ~base_path
+        ~expected_revision:prepared.revision
+        ~identity:prepared
+        ~user_row_id
         ~now:(Time_compat.now ())
       |> Result.map_error journal_error
     in
@@ -1451,8 +1534,15 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               ()
             |> Result.map row_id_of_append_once
           | Keeper_chat_delivery_journal.No_assistant_reply
-              { reason = Keeper_chat_delivery_journal.Continuation_checkpoint } ->
-            Ok user_row_id
+              { reason =
+                  ( Keeper_chat_delivery_journal.Continuation_checkpoint
+                  | Keeper_chat_delivery_journal.Queued_for_later _ )
+              } ->
+            (match user_row_id with
+             | Some user_row_id -> Ok user_row_id
+             | None ->
+               Error
+                 "continuation checkpoint requires an accepted user transcript row")
         in
         let* committed =
           Keeper_chat_delivery_journal.mark_transcript_committed
@@ -1645,6 +1735,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         ~keeper_name:payload.name
         ~f:(fun request_sw ->
         let start_time = Time_compat.now () in
+        let on_admitted =
+          if queued_turn then Some on_queue_turn_admitted else None
+        in
         let dispatch_result =
           try
             if dashboard_direct_stream then
@@ -1658,11 +1751,9 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               | `Ran result -> Ok (`Ran result)
               | `Busy rejection ->
                   (match
-                     dashboard_deferred_chat_of_rejection ~clock payload rejection
+                   dashboard_deferred_chat_of_rejection ~clock payload rejection
                    with
-                   | Ok queued ->
-                       push_worker_event (Stream_dashboard_queued queued);
-                       Ok (`Queued queued)
+                   | Ok queued -> Ok (`Queued queued)
                    | Error message -> Error message)
             else
               (match
@@ -1672,6 +1763,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                    ?auth_token
                    state ~agent_name ~arguments:args ~on_event
                    ~continuation_channel ~on_text_delta:(fun _ -> ())
+                   ?on_admitted
                with
                | `Ran result -> Ok (`Ran result)
                | `Deferred rejection -> Ok (`Deferred rejection))
@@ -1681,7 +1773,8 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
               Log.Keeper.warn
                 "keeper_stream: streaming dispatch raised: %s"
                 (Printexc.to_string exn);
-              if dashboard_direct_stream then Error (Printexc.to_string exn)
+              if dashboard_direct_stream || queued_turn
+              then Error (Printexc.to_string exn)
               else
                 (try
                    Ok
@@ -1706,11 +1799,39 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                     ; ("admission", admission_rejection_to_json rejection)
                     ]))
         | Ok (`Queued queued) ->
-            Tool_result.ok
-              ~tool_name:"masc_keeper_msg"
-              ~start_time
-              (Yojson.Safe.to_string
-                 (dashboard_deferred_chat_to_json ~keeper_name:payload.name queued))
+            let body =
+              Yojson.Safe.to_string
+                (dashboard_deferred_chat_to_json ~keeper_name:payload.name queued)
+            in
+            let committed =
+              let ( let* ) = Result.bind in
+              let* receipt_id =
+                Keeper_chat_delivery_identity.Receipt_id.of_string
+                  queued.receipt_id
+              in
+              commit_direct_terminal
+                { ok = true
+                ; poll_body = body
+                ; delivery =
+                    Keeper_chat_delivery_journal.No_assistant_reply
+                      { reason =
+                          Keeper_chat_delivery_journal.Queued_for_later
+                            { receipt_id }
+                      }
+                }
+            in
+            (match committed with
+             | Ok () ->
+               push_worker_event (Stream_dashboard_queued queued);
+               Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
+             | Error detail ->
+               push_worker_event
+                 (Stream_terminal
+                    { status = Stream_error
+                    ; body = detail
+                    ; queued_outcome = None
+                    });
+               Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail)
         | Ok (`Ran (true, body)) ->
             let payload_json_opt, visible_reply = extract_visible_reply body in
             let streamed_text =
@@ -2550,7 +2671,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                 user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
              ignore
                (process_single_turn ~connector_user_line_recorded_upstream:false
-                  ~queued_turn:false
+                  ~queued_turn:false ~delivery_key:None
                   ~state ~clock
                   ~auth_token:(auth_token_from_request request)
                   ~thread_id ~continuation_channel ~closed

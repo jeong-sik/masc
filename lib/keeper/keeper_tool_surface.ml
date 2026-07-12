@@ -688,7 +688,11 @@ let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (handle_keeper_msg ?continuation_channel ctx args))
+           (handle_keeper_msg
+              ?continuation_channel
+              ~submitted_by:ctx.agent_name
+              ctx
+              args))
   | "masc_keeper_msg_result" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_result ctx args))
   | "masc_keeper_msg_cancel" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_cancel ctx args))
   | "masc_keeper_msg_queue" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_queue ctx args))
@@ -706,6 +710,15 @@ let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
   | "masc_keeper_compact" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_compact ctx args))
   | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
   | _ -> None
+
+let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~args : tool_result =
+  let name = "masc_keeper_msg" in
+  maybe_bootstrap_existing_keepalives ctx ~name ~args;
+  let ctx = resolve_ctx ctx ~name args in
+  tool_result_with_tool_name
+    ~tool_name:name
+    (handle_keeper_msg ?continuation_channel ~submitted_by ctx args)
+;;
 
 (** Streaming dispatch: only handles keeper_msg with text delta forwarding.
     Returns None for all other tool names.
@@ -817,17 +830,26 @@ let () =
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_msg_result_body ~config args))
+           (Keeper_tool_surface_ops.keeper_msg_result_body
+              ~config
+              ~caller:agent_name
+              args))
     | "masc_keeper_msg_cancel" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_msg_cancel_body ~config args))
+           (Keeper_tool_surface_ops.keeper_msg_cancel_body
+              ~config
+              ~caller:agent_name
+              args))
     | "masc_keeper_msg_queue" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_msg_queue_body ~config args))
+           (Keeper_tool_surface_ops.keeper_msg_queue_body
+              ~config
+              ~caller:agent_name
+              args))
     | "masc_keeper_compact" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_compact_body ~config args))
     | "masc_keeper_clear" ->

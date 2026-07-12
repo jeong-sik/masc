@@ -1306,10 +1306,12 @@ let start_keeper_loops
                match
                  process_single_turn ~connector_user_line_recorded_upstream
                    ~queued_turn:true
-                   ~state ~clock ~sw ~auth_token:None
+                   ~state ~clock ~auth_token:None
                    ~thread_id ~continuation_channel ~closed
                    ~client_disconnects:None
-                   ~payload ~run_id ~message_id ~agent_name ~events
+                   ~payload ~run_id ~message_id ~agent_name
+                   ~submitted_by:agent_name
+                   ~events
                with
                | outcome -> outcome
                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

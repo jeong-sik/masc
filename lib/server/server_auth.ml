@@ -843,8 +843,8 @@ let authorize_permission_request ~base_path ~permission request :
 let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
 
-let authorize_tool_request ~base_path ~tool_name ~request_authority request :
-    (unit, Masc_domain.masc_error) result =
+let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority request :
+    (string, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   let* () =
@@ -875,8 +875,18 @@ let authorize_tool_request ~base_path ~tool_name ~request_authority request :
                 "Agent name required (X-Gate-Agent / X-MASC-Agent or \
                  token-bound credential)"
             }))
-  else
-    Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name
+  else (
+    let* () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
+    Ok agent_name)
+
+let authorize_tool_request ~base_path ~tool_name ~request_authority request :
+    (unit, Masc_domain.masc_error) result =
+  authorize_tool_request_with_actor
+    ~base_path
+    ~tool_name
+    ~request_authority
+    request
+  |> Result.map (fun _agent_name -> ())
 
 let authorize_token_bound_permission_request ~base_path ~permission request :
     (string, Masc_domain.masc_error) result =
@@ -1009,6 +1019,25 @@ and with_tool_auth ~tool_name handler request reqd =
           | Ok () -> handler state request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
+
+and with_tool_actor_auth ~tool_name handler request reqd =
+  match !server_state with
+  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let request_authority = Server_request_authority.current_exn () in
+    (match
+       authorize_tool_request_with_actor
+         ~base_path
+         ~tool_name
+         ~request_authority
+         request
+     with
+     | Ok agent_name ->
+       (match check_agent_rate_limit request reqd with
+        | Ok () -> handler state agent_name request reqd
+        | Error () -> ())
+     | Error err -> respond_auth_error request reqd err)
 
 and with_token_permission_auth ~permission handler request reqd =
   match !server_state with

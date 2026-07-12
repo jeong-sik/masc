@@ -74,7 +74,7 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   user_blocks : user_input_block list;
-  timeout_sec : int option;
+  timeout_sec : float option;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
   channel : string;
@@ -86,8 +86,9 @@ type keeper_chat_stream_request = {
 (** Parsed payload of a keeper chat-stream HTTP request.
     [message] is the text fallback used by the existing direct keeper
     path; [user_blocks] preserves semantic text/media input for the
-    block-aware runtime path.  [timeout_sec] is clamped to [\[5, 300\]] when
-    present.  [turn_instructions] and [surface_context]
+    block-aware runtime path. [timeout_sec] is an optional caller-owned
+    positive finite deadline; it is never synthesized or clamped by this
+    boundary. [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]
     is present, the surface context is formatted and
@@ -103,8 +104,8 @@ val parse_keeper_chat_stream_request :
 (** Parses the HTTP body string into a
     {!keeper_chat_stream_request}.  Returns
     [Error reason] on JSON shape mismatches, missing
-    [name] / content, malformed [user_blocks], partial connector context, or
-    presence of legacy keeper model args removed by the
+    [name] / content, malformed [user_blocks], an invalid explicit timeout,
+    partial connector context, or presence of legacy keeper model args removed by the
     runtime rewrite. *)
 
 (** {1 Error envelope} *)
@@ -116,12 +117,14 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** {1 Queue request handlers} *)
 
 val handle_keeper_chat_request_result :
+  caller:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [GET /api/v1/keepers/chat/requests/<request_id>].
     Reads the async keeper message request state directly from
     {!Keeper_msg_async} without requiring an MCP session. *)
 
 val handle_keeper_chat_request_cancel :
+  caller:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/chat/requests/<request_id>/cancel].
     Cancels a live async keeper message request when it is still
@@ -141,6 +144,7 @@ val handle_keeper_turn_interrupt :
 val handle_keeper_chat_stream :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  submitted_by:string ->
   Mcp_server.server_state ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
@@ -182,7 +186,6 @@ val process_single_turn :
   queued_turn:bool ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  sw:Eio.Switch.t ->
   auth_token:string option ->
   thread_id:string ->
   continuation_channel:Keeper_continuation_channel.t ->
@@ -192,11 +195,12 @@ val process_single_turn :
   run_id:string ->
   message_id:string ->
   agent_name:string ->
+  submitted_by:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   queued_turn_outcome option
 (** Execute a single keeper turn, publishing events to the provided
-    event stream. [sw] owns the async keeper_msg worker and must outlive
-    a single HTTP stream when resumable dashboard requests are used.
+    event stream. The async keeper_msg worker is always forked under the
+    server root switch and owns a separate per-request cancellation switch.
     [closed] is a mutable flag that suppresses worker event pushes when
     set to [true] (used by the SSE adapter when the HTTP stream is
     closed). [client_disconnects] carries the HTTP stream switch and

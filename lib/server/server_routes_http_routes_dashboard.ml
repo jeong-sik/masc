@@ -1662,11 +1662,18 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_msg" (fun state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_keeper_msg" (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match parse_keeper_chat_stream_request body_str with
            | Ok payload ->
-               handle_keeper_chat_stream ~sw ~clock state request reqd payload
+               handle_keeper_chat_stream
+                 ~sw
+                 ~clock
+                 ~submitted_by
+                 state
+                 request
+                 reqd
+                 payload
            | Error message ->
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (keeper_chat_stream_error_json message)
@@ -1674,15 +1681,15 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.prefix_get "/api/v1/keepers/chat/requests/" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_msg_result"
-         (fun state _req reqd ->
-           handle_keeper_chat_request_result state request reqd)
+       with_tool_actor_auth ~tool_name:"masc_keeper_msg_result"
+         (fun state caller _req reqd ->
+           handle_keeper_chat_request_result ~caller state request reqd)
          request reqd)
 
   |> Http.Router.prefix_post "/api/v1/keepers/chat/requests/" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_msg_cancel"
-         (fun state _req reqd ->
-           handle_keeper_chat_request_cancel state request reqd)
+       with_tool_actor_auth ~tool_name:"masc_keeper_msg_cancel"
+         (fun state caller _req reqd ->
+           handle_keeper_chat_request_cancel ~caller state request reqd)
          request reqd)
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)

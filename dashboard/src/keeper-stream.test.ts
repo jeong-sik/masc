@@ -896,7 +896,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START' })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_CONTENT',
-      delta: 'PR 목록을 확인하겠다.',
+      delta: '  PR 목록을 확인하겠다.\n',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_END' })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -925,7 +925,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(reply?.traceSteps).toEqual([
       {
         kind: 'progress',
-        text: 'PR 목록을 확인하겠다.',
+        text: '  PR 목록을 확인하겠다.\n',
         ts: expect.any(String),
         oasBlockIndex: 2,
       },

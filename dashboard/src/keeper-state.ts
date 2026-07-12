@@ -1040,8 +1040,8 @@ export function promoteAssistantTextToProgress(
   meta: { oasBlockIndex?: number } = {},
 ): void {
   updateThreadEntry(name, entryId, entry => {
-    const text = entry.text.trim()
-    if (!text) return entry
+    const text = entry.rawText ?? entry.text
+    if (!text.trim()) return entry
     const progress = withoutUndefined({
       kind: 'progress' as const,
       text,

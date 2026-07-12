@@ -54,7 +54,8 @@ let report_persistence_read_drop ~reason ~path ~detail =
     ~detail
 
 let ensure_dir_once ?config ~base_dir () =
-  ignore (Keeper_fs.ensure_dir (chat_dir ?config base_dir))
+  let _chat_dir = Keeper_fs.ensure_dir (chat_dir ?config base_dir) in
+  ()
 
 type attachment = {
   id : string;

@@ -295,6 +295,29 @@ let start_keeper_loops
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
   let base_path = (Mcp_server.workspace_config state).base_path in
+  let delivery_recovery =
+    Keeper_chat_delivery_journal.recover_all
+      ~base_path
+      ~now:(Time_compat.now ())
+  in
+  List.iter
+    (fun (failure : Keeper_chat_delivery_journal.recovery_failure) ->
+       Log.Keeper.error
+         "keeper_chat_delivery_journal: recovery failed keeper=%s delivery_ref=%s error=%s"
+         failure.keeper_name
+         failure.delivery_ref
+         (Keeper_chat_delivery_journal.error_to_string failure.error))
+    delivery_recovery.failures;
+  if delivery_recovery.recovered > 0 || delivery_recovery.failures <> []
+  then
+    Log.Keeper.warn
+      "keeper_chat_delivery_journal: recovery completed recovered=%d already_final=%d failures=%d"
+      delivery_recovery.recovered
+      delivery_recovery.already_final
+      (List.length delivery_recovery.failures);
+  (* Request status is recovered only after transcript journals converge: a
+     poller must never observe a final Lost status while its durable terminal
+     row is still absent. *)
   let recovered_keeper_msg_requests =
     Keeper_msg_async.recover_lost_disk_records ~base_path
   in

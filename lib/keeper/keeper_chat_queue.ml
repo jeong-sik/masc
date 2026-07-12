@@ -19,36 +19,7 @@ type queued_message = {
   source : message_source;
 }
 
-module Receipt_id = struct
-  type t = string
-
-  let prefix = "chatq_"
-  (* Random UUID bits are an opaque durable identity salt. They are persisted
-     before acceptance and never choose lifecycle policy or control flow. *)
-  (* NDT-OK: identity entropy only; never a lifecycle decision input. *)
-  let rng = Random.State.make_self_init ()
-  let rng_mutex = Stdlib.Mutex.create ()
-
-  let generate () =
-    let uuid =
-      Stdlib.Mutex.protect rng_mutex (fun () -> Uuidm.v4_gen rng ())
-    in
-    prefix ^ Uuidm.to_string uuid
-
-  let of_string raw =
-    let prefix_len = String.length prefix in
-    if String.length raw <= prefix_len
-       || not (String.equal (String.sub raw 0 prefix_len) prefix)
-    then Error "chat queue receipt id must start with chatq_"
-    else
-      let uuid = String.sub raw prefix_len (String.length raw - prefix_len) in
-      match Uuidm.of_string uuid with
-      | Some _ -> Ok raw
-      | None -> Error "chat queue receipt id must contain a UUID"
-
-  let to_string id = id
-  let equal = String.equal
-end
+module Receipt_id = Keeper_chat_delivery_identity.Receipt_id
 
 type completion = {
   completed_at : float;
@@ -967,11 +938,7 @@ let enqueue ~keeper_name message =
        Ok receipt
      | Error _ as error -> error)
 
-let lease_id () =
-  "lease_"
-  ^ Uuidm.to_string
-      (Stdlib.Mutex.protect Receipt_id.rng_mutex (fun () ->
-           Uuidm.v4_gen Receipt_id.rng ()))
+let lease_id () = Random_id.prefixed ~prefix:"lease_" ~bytes:16
 
 let take_same_source_run (items : leased_message list) =
   match items with

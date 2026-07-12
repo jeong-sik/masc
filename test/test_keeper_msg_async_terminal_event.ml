@@ -78,7 +78,9 @@ let test_timeout_invokes_on_worker_aborted_exactly_once () =
           Keeper_msg_async.submit
             ~clock
             ~timeout_sec:0.01
-            ~on_worker_aborted:(fun reason -> aborted := reason :: !aborted)
+            ~on_worker_aborted:(fun reason ->
+              aborted := reason :: !aborted;
+              Ok ())
             ~background_sw:sw
             ~base_path
             ~caller
@@ -136,7 +138,9 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
           Keeper_msg_async.submit
             ~clock
             ~timeout_sec:5.0
-            ~on_worker_aborted:(fun reason -> aborted := reason :: !aborted)
+            ~on_worker_aborted:(fun reason ->
+              aborted := reason :: !aborted;
+              Ok ())
             ~background_sw:sw
             ~base_path
             ~caller
@@ -201,17 +205,17 @@ let test_abort_callback_failure_does_not_fail_server_switch () =
           true
           (Keeper_msg_async.cancel ~base_path ~caller request_id
            = Keeper_msg_async.Cancelled_request);
-        let reached_cancelled =
+        let reached_persistence_failure =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
             match Keeper_msg_async.poll ~base_path ~caller request_id with
             | Keeper_msg_async.Found
-                { status = Keeper_msg_async.Cancelled _; _ } -> true
+                { status = Keeper_msg_async.Persistence_failed _; _ } -> true
             | _ -> false)
         in
         check bool
-          "callback failure preserves the durable cancelled result"
+          "callback failure becomes durable persistence failure"
           true
-          reached_cancelled;
+          reached_persistence_failure;
         let released =
           wait_until ~clock ~max_iterations:300 ~interval_sec:0.01 (fun () ->
             Keeper_msg_async.For_testing.active_switch_count () = 0)
@@ -232,7 +236,9 @@ let test_normal_completion_never_invokes_on_worker_aborted () =
           Keeper_msg_async.submit
             ~clock
             ~timeout_sec:5.0
-            ~on_worker_aborted:(fun reason -> aborted := reason :: !aborted)
+            ~on_worker_aborted:(fun reason ->
+              aborted := reason :: !aborted;
+              Ok ())
             ~background_sw:sw
             ~base_path
             ~caller
@@ -254,6 +260,46 @@ let test_normal_completion_never_invokes_on_worker_aborted () =
           (List.length !aborted))))
 ;;
 
+let test_acceptance_failure_prevents_worker_start () =
+  with_temp_base (fun base_path ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let worker_called = ref false in
+        match
+          Keeper_msg_async.submit
+            ~clock:(Eio.Stdenv.clock env)
+            ~on_accepted:(fun _request_id -> Error "chat user append failed")
+            ~background_sw:sw
+            ~base_path
+            ~caller
+            ~keeper_name:"terminal-event-acceptance-failure"
+            ~f:(fun _request_sw ->
+              worker_called := true;
+              Keeper_types_profile.tool_result_ok "unreachable")
+            ()
+        with
+        | Error
+            (Keeper_msg_async.Acceptance_persistence_failed
+               { request_id; reason }) ->
+          check string "typed acceptance failure" "chat user append failed" reason;
+          check bool "worker never starts" false !worker_called;
+          (match Keeper_msg_async.poll ~base_path ~caller request_id with
+           | Keeper_msg_async.Found
+               { status = Keeper_msg_async.Persistence_failed _; _ } -> ()
+           | Keeper_msg_async.Found { status; _ } ->
+             failf
+               "expected persistence_failed, got %s"
+               (Keeper_msg_async.status_to_string status)
+           | Keeper_msg_async.Absent -> fail "accepted record disappeared"
+           | Keeper_msg_async.Unreadable reason -> fail reason
+           | Keeper_msg_async.Rejected _ -> fail "request ownership rejected")
+        | Error error ->
+          fail
+            (Keeper_msg_async.submit_error_to_json error
+             |> Yojson.Safe.to_string)
+        | Ok _ -> fail "acceptance failure returned a successful request id")))
+;;
+
 let () =
   run
     "keeper_msg_async_terminal_event"
@@ -266,6 +312,10 @@ let () =
             test_abort_callback_failure_does_not_fail_server_switch
         ; test_case "normal completion never invokes on_worker_aborted" `Quick
             test_normal_completion_never_invokes_on_worker_aborted
+        ; test_case
+            "acceptance failure prevents worker start"
+            `Quick
+            test_acceptance_failure_prevents_worker_start
         ] )
     ]
 ;;

@@ -48,9 +48,10 @@ type gh_family =
 type t =
   { family : gh_family
   ; action : string option
-      (** First non-flag token after the family (e.g. ["create"] in
-          [gh repo create]). [None] when the command is bare
-          ([gh repo]). Kept as a string: see the module note. *)
+      (** First non-flag token after a family with positional actions (e.g.
+          ["create"] in [gh repo create]). [None] when the command is bare
+          ([gh repo]) or the family has no positional action grammar
+          ([gh graphql]). Kept as a string: see the module note. *)
   }
 
 val of_fields : subcommand:string -> action:string option -> t
@@ -64,7 +65,8 @@ val of_fields : subcommand:string -> action:string option -> t
 val classify : string list -> t
 (** [classify words] parses raw [gh]-style argv (["gh" :: subcommand :: rest]
     or [subcommand :: rest]) into a typed family plus its first non-flag
-    action. Flags ([-x], [--long]) are skipped with a value-less (boolean)
+    action. [Graphql] has no positional action grammar, so its action is
+    always [None]. Flags ([-x], [--long]) are skipped with a value-less (boolean)
     default, mirroring [Shell_ir_risk.classify_repo_hosting_cli]'s extraction
     so the two agree on which token is the subcommand — including agreeing on
     the known limitation that a leading {e value-taking} global flag

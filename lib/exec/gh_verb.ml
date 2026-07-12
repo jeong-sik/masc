@@ -110,9 +110,14 @@ let classify (words : string list) : t =
   | subcommand :: after ->
     let family = family_of_token subcommand in
     let action =
-      match drop_flags after with
-      | [] -> None
-      | act :: _ -> Some act
+      match family with
+      | Graphql -> None
+      | ( Pr | Issue | Repo | Discussion | Release | Secret | Ssh_key
+        | Workflow | Auth | Gist | Ruleset | Label | Run | Cache | Project
+        | Api | Other _ ) ->
+        (match drop_flags after with
+         | [] -> None
+         | act :: _ -> Some act)
     in
     { family; action }
 ;;

@@ -909,9 +909,10 @@ let test_dashboard_failure_concentration () =
       Dashboard_http_tool_quality.aggregate ~n:10 ()
       |> Yojson.Safe.Util.member "failure_concentration"
     in
-    Alcotest.(check (option float)) "top two failure percentage"
-      (Some 90.0)
-      (Safe_ops.json_float_opt "top2_pct" concentration);
+    (match Safe_ops.json_float_opt "top2_pct" concentration with
+    | Some percentage ->
+      Alcotest.(check (float 0.01)) "top two failure percentage" 90.0 percentage
+    | None -> Alcotest.fail "missing top two failure percentage");
     Alcotest.(check (list string)) "top two keepers"
       [ "alpha"; "beta" ]
       (Safe_ops.json_string_list "top2_keepers" concentration))

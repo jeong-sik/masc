@@ -1104,12 +1104,52 @@ let body_with_rewritten_payload ~fallback payload_json_opt =
   | Some (`Assoc _ as payload_json) -> Yojson.Safe.to_string payload_json
   | Some _ | None -> fallback
 
-let keeper_request_terminal_payload ?request_id ~keeper_name ~status ~ok
+type keeper_stream_terminal_status =
+  | Stream_done
+  | Stream_error
+  | Stream_cancelled
+  | Stream_timeout
+  | Stream_rejected
+
+type keeper_request_terminal_status =
+  | Request_deferred
+  | Request_queued
+  | Request_stream of keeper_stream_terminal_status
+
+let keeper_stream_terminal_status_to_string = function
+  | Stream_done -> "done"
+  | Stream_error -> "error"
+  | Stream_cancelled -> "cancelled"
+  | Stream_timeout -> "timeout"
+  | Stream_rejected -> "rejected"
+;;
+
+let keeper_request_terminal_status_to_string = function
+  | Request_deferred -> "deferred"
+  | Request_queued -> "queued"
+  | Request_stream status -> keeper_stream_terminal_status_to_string status
+;;
+
+let keeper_request_terminal_status_ok = function
+  | Request_deferred | Request_queued | Request_stream Stream_done -> true
+  | Request_stream (Stream_error | Stream_cancelled | Stream_timeout | Stream_rejected) ->
+    false
+;;
+
+let keeper_request_terminal_status_is_routine = function
+  | Request_deferred
+  | Request_queued
+  | Request_stream (Stream_done | Stream_cancelled) -> true
+  | Request_stream (Stream_error | Stream_timeout | Stream_rejected) -> false
+;;
+
+let keeper_request_terminal_payload ?request_id ~keeper_name ~status
     ?(message = "") () =
+  let status_label = keeper_request_terminal_status_to_string status in
   let fields =
     [ ("keeper_name", `String keeper_name)
-    ; ("status", `String status)
-    ; ("ok", `Bool ok)
+    ; ("status", `String status_label)
+    ; ("ok", `Bool (keeper_request_terminal_status_ok status))
     ]
   in
   let fields =
@@ -1129,8 +1169,7 @@ type keeper_stream_worker_event =
   | Stream_dashboard_queued of dashboard_deferred_chat
   | Stream_queued_turn_deferred of Keeper_turn_admission.rejection
   | Stream_terminal of
-      { ok : bool
-      ; status : string
+      { status : keeper_stream_terminal_status
       ; body : string
       ; queued_outcome : queued_turn_outcome option
       }
@@ -1402,7 +1441,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
     let status, body, failure_kind =
       match reason with
       | Keeper_msg_async.Timeout { timeout_sec } ->
-          ( "timeout"
+          ( Stream_timeout
           , Printf.sprintf
               "keeper_msg request exceeded timeout_sec=%.3f before completion"
               timeout_sec
@@ -1411,7 +1450,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
           let cancelled_by =
             Keeper_msg_async.worker_cancel_source_to_string cancelled_by
           in
-          ( "cancelled"
+          ( Stream_cancelled
           , Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
           , Turn_cancelled )
     in
@@ -1427,7 +1466,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  ; detail = persist_error
                  })
     in
-    push_worker_event (Stream_terminal { ok = false; status; body; queued_outcome })
+    push_worker_event (Stream_terminal { status; body; queued_outcome })
   in
   let submit_result =
     match Keeper_msg_async.server_background_switch () with
@@ -1571,11 +1610,18 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                               ; detail = persist_error
                               })
                  in
-                 if not queued_turn then ignore (persist_failure_reply err : (unit, string) result);
+                 if not queued_turn
+                 then
+                   (match persist_failure_reply err with
+                    | Ok () -> ()
+                    | Error persist_error ->
+                      Log.Keeper.error
+                        "keeper_stream: failed to persist direct-turn failure keeper=%s error=%s"
+                        payload.name
+                        persist_error);
                  push_worker_event
                    (Stream_terminal
-                      { ok = false
-                      ; status = "error"
+                      { status = Stream_error
                       ; body = err
                       ; queued_outcome
                       });
@@ -1680,8 +1726,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                   | Some (Failed { detail; _ }) ->
                       push_worker_event
                         (Stream_terminal
-                           { ok = false
-                           ; status = "error"
+                           { status = Stream_error
                            ; body = detail
                            ; queued_outcome
                       });
@@ -1700,8 +1745,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                   | Some (Delivered _) | None ->
                       push_worker_event
                         (Stream_terminal
-                           { ok = true
-                           ; status = "done"
+                           { status = Stream_done
                            ; body
                            ; queued_outcome
                            });
@@ -1722,7 +1766,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             in
             push_worker_event
               (Stream_terminal
-                 { ok = false; status = "error"; body = err; queued_outcome });
+                 { status = Stream_error; body = err; queued_outcome });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
         | Error err ->
             let persisted = persist_failure_reply err in
@@ -1740,7 +1784,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
             in
             push_worker_event
               (Stream_terminal
-                 { ok = false; status = "error"; body = err; queued_outcome });
+                 { status = Stream_error; body = err; queued_outcome });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
         ()
       |> Result.map_error (fun error ->
@@ -1765,8 +1809,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         in
         push_worker_event
           (Stream_terminal
-             { ok = false
-             ; status = "rejected"
+             { status = Stream_rejected
              ; body
              ; queued_outcome
              });
@@ -1822,21 +1865,34 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                   }
             }))
     request_id;
-  let publish_terminal ~status ~ok ?(message = "") () =
+  let publish_terminal ~status ?(message = "") () =
     let message = redact_text message in
+    let status_label = keeper_request_terminal_status_to_string status in
     let payload_json =
       keeper_request_terminal_payload ?request_id ~keeper_name:payload.name
-        ~status ~ok ~message ()
+        ~status ~message ()
     in
-    let request_label = Option.value ~default:"not-accepted" request_id in
-    if ok || String.equal status "cancelled" then
-      Log.Keeper.info
-        "keeper_stream: request terminal keeper=%s request_id=%s status=%s"
-        payload.name request_label status
+    if keeper_request_terminal_status_is_routine status
+    then
+      (match request_id with
+       | Some request_id ->
+         Log.Keeper.info
+           "keeper_stream: request terminal keeper=%s request_id=%s status=%s"
+           payload.name request_id status_label
+       | None ->
+         Log.Keeper.info
+           "keeper_stream: request terminal before acceptance keeper=%s status=%s"
+           payload.name status_label)
     else
-      Log.Keeper.warn
-        "keeper_stream: request terminal keeper=%s request_id=%s status=%s message=%s"
-        payload.name request_label status message;
+      (match request_id with
+       | Some request_id ->
+         Log.Keeper.warn
+           "keeper_stream: request terminal keeper=%s request_id=%s status=%s message=%s"
+           payload.name request_id status_label message
+       | None ->
+         Log.Keeper.warn
+           "keeper_stream: request rejected before acceptance keeper=%s status=%s message=%s"
+           payload.name status_label message);
       Keeper_chat_events.publish events
         (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
   in
@@ -1867,7 +1923,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                  deferred with %d waiting chat requests"
                 rejection.waiting
         in
-        publish_terminal ~status:"deferred" ~ok:true ~message ();
+        publish_terminal ~status:Request_deferred ~message ();
         Keeper_chat_events.publish events
           (Custom
              { name = "KEEPER_QUEUED_TURN_DEFERRED"
@@ -1880,7 +1936,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         let message =
           dashboard_deferred_ack_text ~keeper_name:payload.name queued
         in
-        publish_terminal ~status:"queued" ~ok:true ~message ();
+        publish_terminal ~status:Request_queued ~message ();
         Keeper_chat_events.publish events (Text_delta message);
         Keeper_chat_events.publish events
           (Custom
@@ -1891,23 +1947,26 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         Keeper_chat_events.publish events (Run_finished { run_id });
         None
     | Stream_terminal
-        { ok = false
-        ; status = "cancelled"
+        { status = Stream_cancelled
         ; body = message
         ; queued_outcome
         } ->
         let message = redact_text message in
-        publish_terminal ~status:"cancelled" ~ok:false ~message ();
+        publish_terminal ~status:(Request_stream Stream_cancelled) ~message ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         queued_outcome
-    | Stream_terminal { ok = false; status; body = err; queued_outcome } ->
+    | Stream_terminal
+        { status = ((Stream_error | Stream_timeout | Stream_rejected) as status)
+        ; body = err
+        ; queued_outcome
+        } ->
         let err = redact_text err in
-        publish_terminal ~status ~ok:false ~message:err ();
+        publish_terminal ~status:(Request_stream status) ~message:err ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Event_error { message = err });
         queued_outcome
-    | Stream_terminal { ok = true; body; queued_outcome; _ } -> (
+    | Stream_terminal { status = Stream_done; body; queued_outcome } -> (
         try
           let payload_json_opt, visible_reply = extract_visible_reply body in
           let visible_reply =
@@ -1959,7 +2018,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
                                 [ ("request_id", `String request_id) ]
                             | None -> []))
                  });
-          publish_terminal ~status:"done" ~ok:true ();
+          publish_terminal ~status:(Request_stream Stream_done) ();
           Keeper_chat_events.publish events Text_message_end;
           Keeper_chat_events.publish events (Run_finished { run_id });
           queued_outcome
@@ -1967,7 +2026,7 @@ let process_single_turn ~connector_user_line_recorded_upstream ~queued_turn
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
             let message = redact_text (Printexc.to_string exn) in
-            publish_terminal ~status:"error" ~ok:false ~message ();
+            publish_terminal ~status:(Request_stream Stream_error) ~message ();
             Keeper_chat_events.publish events Text_message_end;
             Keeper_chat_events.publish events
               (Event_error { message });

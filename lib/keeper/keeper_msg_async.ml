@@ -12,6 +12,8 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+let ( let* ) = Result.bind
+
 type request_status =
   | Queued
   | Running
@@ -617,7 +619,7 @@ let remove_record_file path =
 
 let gc_stale_disk_canonical ~base_path =
   let dir = request_dir ~base_path in
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   try
     if (not (Sys.file_exists dir)) || not (Sys.is_directory dir)
     then 0
@@ -650,6 +652,16 @@ let gc_stale_disk_canonical ~base_path =
     0
 ;;
 
+let gc_stale_disk_canonical_observed ~base_path =
+  let removed = gc_stale_disk_canonical ~base_path in
+  if removed > 0
+  then
+    Log.Keeper.info
+      "keeper_msg_async: removed stale persisted requests base_path=%s count=%d"
+      base_path
+      removed
+;;
+
 let gc_stale_disk ~base_path =
   match canonical_base_path base_path with
   | Ok base_path -> gc_stale_disk_canonical ~base_path
@@ -666,7 +678,7 @@ let mark_lost_after_recovery (entry : entry) =
      restarted or evicted the request before terminal result"
   in
   let lost =
-    { entry with status = Lost { reason }; completed_at = Some (Unix.gettimeofday ()) }
+    { entry with status = Lost { reason }; completed_at = Some (Time_compat.now ()) }
   in
   match persist_entry lost |> observe_persist_error ~operation:"recovery" lost with
   | Ok () -> Ok lost
@@ -735,7 +747,7 @@ let generate_request_id () = Random_id.prefixed ~prefix:"kmsg-" ~bytes:16
 let with_lock f = Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
 
 let gc_stale () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   with_lock (fun () ->
     Request_table.fold
       (fun key entry acc ->
@@ -759,7 +771,7 @@ let install_persistence_failure_if_current key (attempted_entry : entry) reason 
       status =
         Persistence_failed
           { attempted_status = status_to_string attempted_entry.status; reason }
-    ; completed_at = Some (Unix.gettimeofday ())
+    ; completed_at = Some (Time_compat.now ())
     }
   in
   let installed =
@@ -772,10 +784,12 @@ let install_persistence_failure_if_current key (attempted_entry : entry) reason 
   in
   if installed
   then
-    ignore
-      (persist_entry failure_entry
-       |> observe_persist_error ~operation:"persistence_failure_marker" failure_entry
-        : (unit, string) result)
+    match
+      persist_entry failure_entry
+      |> observe_persist_error ~operation:"persistence_failure_marker" failure_entry
+    with
+    | Ok () -> ()
+    | Error _ -> ()
 ;;
 
 let set_status ?(preserve_terminal = false) key status =
@@ -789,7 +803,7 @@ let set_status ?(preserve_terminal = false) key status =
           | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
             (* NDT-OK: completed_at is observational wall-clock metadata for
                terminal request records; state transitions are status-derived. *)
-            Some (Unix.gettimeofday ())
+            Some (Time_compat.now ())
           | _ -> None
         in
         let updated = { entry with status; completed_at } in
@@ -853,7 +867,7 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
   | Ok (base_path, submitted_by) ->
     let* worker_timeout_sec = resolve_timeout_sec ?timeout_sec () in
     gc_stale ();
-    ignore (gc_stale_disk_canonical ~base_path);
+    gc_stale_disk_canonical_observed ~base_path;
     let request_id = generate_request_id () in
     let entry =
       { request_id
@@ -861,7 +875,7 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
       ; base_path
       ; submitted_by
       ; status = Queued
-      ; submitted_at = Unix.gettimeofday ()
+      ; submitted_at = Time_compat.now ()
       ; completed_at = None
       }
     in
@@ -872,7 +886,12 @@ let submit ?clock ?timeout_sec ?on_worker_aborted ~background_sw ~base_path ~cal
        with_lock (fun () -> Request_table.remove pending key);
        (match record_path ~base_path ~request_id with
         | Some path when Fs_compat.file_exists path ->
-          ignore (remove_record_file path : bool)
+          if not (remove_record_file path)
+          then
+            Log.Keeper.error
+              "keeper_msg_async: failed to remove rejected request record request_id=%s path=%s"
+              request_id
+              path
         | Some _ | None -> ());
        Error (Initial_persistence_failed { reason })
      | Ok () ->
@@ -1016,7 +1035,7 @@ let poll ~base_path ~caller request_id : load_result =
          | Some rejection -> Rejected rejection
          | None -> Found entry)
       | None ->
-        ignore (gc_stale_disk_canonical ~base_path);
+        gc_stale_disk_canonical_observed ~base_path;
         (match load_record_canonical ~base_path ~request_id with
          | Found entry ->
            (match owner_rejection ~caller entry with
@@ -1065,7 +1084,7 @@ let entry_to_json (e : entry) : Yojson.Safe.t =
     match e.completed_at with
     | Some t -> fields @ [ "completed_at", `Float t ]
     | None ->
-      let elapsed = Unix.gettimeofday () -. e.submitted_at in
+      let elapsed = Time_compat.now () -. e.submitted_at in
       fields @ [ "elapsed_sec", `Float elapsed ]
   in
   let fields =
@@ -1111,7 +1130,7 @@ let entry_to_json (e : entry) : Yojson.Safe.t =
 let cancelled_entry (entry : entry) =
   { entry with
     status = operator_cancelled_status ()
-  ; completed_at = Some (Unix.gettimeofday ())
+  ; completed_at = Some (Time_compat.now ())
   }
 ;;
 

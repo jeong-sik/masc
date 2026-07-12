@@ -166,7 +166,8 @@ val fallback_runtime_for_unavailable_profile :
     - [RateLimited] soft provider throttles → ["rate_limit"] (rotation filters
       candidates sharing the same credential pool)
     - [Overloaded] and Cloudflare 524 → ["capacity_backpressure"]
-    - [NotFound] → ["model_unavailable"]
+    - authoritative [Keeper_runtime_failure_route.Model_unavailable] →
+      ["model_unavailable"]
     - [ServerError] with status >= 500 → ["server_error"]
     - [AuthError] → ["auth_error"]
 

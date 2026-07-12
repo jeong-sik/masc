@@ -494,10 +494,20 @@ let degraded_retry_after_recoverable_error
         None
 
 let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
-  if Keeper_turn_driver.sdk_error_is_hard_quota err then
-    Some Hard_quota
-  else
-    match Keeper_turn_driver.classify_masc_internal_error err with
+  (* RFC-0313 keeps the broader legacy rotation ladder until its W3 flip, but
+     model availability already has an authoritative closed route. Consume
+     that route here instead of independently matching OAS [NotFound] again. *)
+  match Keeper_runtime_failure_route.route_of_error err with
+  | Keeper_runtime_failure_route.Rotate_now
+      { rotate = Keeper_runtime_failure_route.Model_unavailable } ->
+    Some Model_unavailable
+  | Keeper_runtime_failure_route.Retry_after_pacing _
+  | Keeper_runtime_failure_route.Rotate_now _
+  | Keeper_runtime_failure_route.Escalate_judgment _ ->
+    if Keeper_turn_driver.sdk_error_is_hard_quota err then
+      Some Hard_quota
+    else
+      match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
         Some Resumable_cli_session
     | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
@@ -564,8 +574,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Rate_limit
          | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _) ->
              Some Capacity_backpressure
-         | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _) ->
-             Some Model_unavailable
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
            when is_gateway_backpressure_status status ->
              Some Capacity_backpressure
@@ -579,8 +587,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Rate_limit
          | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
              Some Capacity_backpressure
-         | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) ->
-             Some Model_unavailable
          | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
          | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
@@ -598,6 +604,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              (Llm_provider.Error.ServerError _
              | Llm_provider.Error.InvalidConfig _
              | Llm_provider.Error.InvalidRequest _
+             | Llm_provider.Error.NotFound _
              | Llm_provider.Error.NetworkError _
              | Llm_provider.Error.Timeout _
              | Llm_provider.Error.ParseError _
@@ -609,6 +616,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
+         | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) -> None

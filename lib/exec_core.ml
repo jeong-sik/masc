@@ -443,6 +443,29 @@ let semantic_status_is_success = function
   | Partial -> false
 ;;
 
+(* Declared projection onto the shared tool-failure taxonomy
+   (Tool_result.tool_failure_class), emitted on the wire as the
+   "failure_class" field that Keeper_tools_oas_failure_boundary reads as a
+   closed enum. Without this declaration every Execute failure fell back to
+   Runtime_failure at that boundary, collapsing timeouts (retryable) and
+   policy blocks (deterministic) into one unknown, non-retryable signature
+   (sangsu keeper incident, 2026-07-12). [None] exactly when
+   [semantic_status_is_success] holds, so success payloads never carry a
+   failure class. *)
+let failure_class_of_semantic_status = function
+  | Ok | No_match -> None
+  | Timeout -> Some Tool_result.Transient_error
+  | Blocked -> Some Tool_result.Policy_rejection
+  | Partial | Runtime_error -> Some Tool_result.Runtime_failure
+;;
+
+let failure_class_field semantic_status =
+  match failure_class_of_semantic_status semantic_status with
+  | None -> []
+  | Some failure_class ->
+    [ "failure_class", `String (Tool_result.tool_failure_class_to_string failure_class) ]
+;;
+
 let family_label = function
   | Read -> "read"
   | Search -> "search"
@@ -779,6 +802,7 @@ let outcome_to_json ?(extra = []) ?(env_snapshot = None) = function
          ; "summary", `String result.summary
          ; "artifact_refs", `List (List.map artifact_ref_to_json result.artifact_refs)
          ]
+       @ failure_class_field result.semantic_status
        @ hint_fields
        @ semantic_fields_of_executed result
        @ (match
@@ -835,6 +859,7 @@ let outcome_to_json ?(extra = []) ?(env_snapshot = None) = function
          ; "hint", `String result.hint
          ; "recovery_hint", `String result.hint
          ]
+       @ failure_class_field Blocked
        @ diagnosis_field
        @ alternatives_field
        @ env_field)

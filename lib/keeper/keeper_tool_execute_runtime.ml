@@ -11,6 +11,16 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
 
+(* Typed declaration for pre-dispatch rejections (input parse/validation,
+   Shell IR gate, path policy, approvals): caller-input and policy denials
+   are Policy_rejection in the shared taxonomy (RFC-0062 §3.2). The OAS
+   failure boundary reads this field; leaving it undeclared collapses these
+   deterministic rejections into Runtime_failure -> error_class Unknown. *)
+let policy_rejection_failure_class_fields =
+  [ ( "failure_class"
+    , `String (Tool_result.tool_failure_class_to_string Tool_result.Policy_rejection) )
+  ]
+
 type path_probe =
   { path_argument : string
   ; resolved_path : string
@@ -758,6 +768,7 @@ let handle_tool_execute_typed
         error_json
           ~fields:
             ([ "typed", `Bool true; "cwd", `String cwd ]
+             @ policy_rejection_failure_class_fields
              @ execution_location_fields cwd)
           e
       | Ok input ->
@@ -768,6 +779,7 @@ let handle_tool_execute_typed
            in
            let fields =
              [ "typed", `Bool true; "cwd", `String cwd ]
+             @ policy_rejection_failure_class_fields
              @ execution_location_fields cwd
              @ typed_validation_deterministic_retry_fields e
              @ typed_validation_recovery_fields e
@@ -964,7 +976,11 @@ let handle_tool_execute_typed
             | None -> []
           in
           error_json
-            ~fields:(typed_error_fields @ deterministic_retry_fields @ extra_fields)
+            ~fields:
+              (typed_error_fields
+               @ policy_rejection_failure_class_fields
+               @ deterministic_retry_fields
+               @ extra_fields)
             msg
         in
         if Masc_exec.Shell_ir_risk.is_destructive envelope

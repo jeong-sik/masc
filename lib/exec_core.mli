@@ -114,6 +114,18 @@ val classify_command_of_ir : Masc_exec.Shell_ir.t -> classification
 val classification_to_json : classification -> Yojson.Safe.t
 
 val string_of_semantic_status : semantic_status -> string
+
+val failure_class_of_semantic_status :
+  semantic_status ->
+  Tool_result.tool_failure_class option
+(** Declared projection onto the shared tool-failure taxonomy, emitted on the
+    wire as the ["failure_class"] field of every failed outcome JSON. [None]
+    exactly when {!semantic_status_is_success} holds. Timeout declares
+    [Transient_error] (retryable), Blocked declares [Policy_rejection];
+    Partial/Runtime_error declare [Runtime_failure]. *)
+
+val semantic_status_is_success : semantic_status -> bool
+
 val semantic_status_of_process :
   cmd:string ->
   output:string ->

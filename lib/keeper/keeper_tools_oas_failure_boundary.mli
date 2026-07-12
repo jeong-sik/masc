@@ -6,6 +6,12 @@
 
 type t =
   { failure_class : Tool_result.tool_failure_class
+  ; failure_class_declared : bool
+    (** [true] when the payload itself declared a parseable
+        ["failure_class"]; [false] when the boundary resolved the missing or
+        malformed declaration to [Runtime_failure]. Execute failure payloads
+        (outcome, blocked, input validation, Shell IR policy rejects) always
+        declare since the sangsu signature-collapse fix (2026-07-12). *)
   ; is_workflow_rejection : bool
   ; deterministic_classification :
       Keeper_tool_deterministic_error.classification option

@@ -677,6 +677,101 @@ let test_history_compaction_triggers () =
      through the Eio_guard.protect wrapper and produced a valid file. *)
   check int "compacted to compact_to" 1_000 (List.length results)
 
+(* failure_class wire declaration (sangsu incident, 2026-07-12): every failed
+   Execute payload must declare its Tool_result class so the OAS failure
+   boundary stops collapsing timeouts, policy blocks, and runtime errors into
+   one Runtime_failure/Unknown signature. *)
+
+let process_json ?classification ~cmd ~status ~output () =
+  Masc.Exec_core.process_result_json
+    ?classification
+    ~base_path:"/tmp"
+    ~keeper_name:"exec-core"
+    ~cmd
+    ~status
+    ~output
+    ()
+
+let boundary_of_json json =
+  Masc.Keeper_tools_oas_failure_boundary.classify_raw_failure
+    (Yojson.Safe.to_string json)
+
+let test_timeout_declares_transient_failure_class () =
+  let json = process_json ~cmd:"sleep 999" ~status:(Unix.WEXITED 124) ~output:"" () in
+  check bool "ok" false (json |> member "ok" |> to_bool);
+  check string "semantic_status" "timeout" (get_string_field json "semantic_status");
+  check string "failure_class" "transient_error" (get_string_field json "failure_class");
+  let boundary = boundary_of_json json in
+  check bool "declared" true
+    boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class_declared;
+  check bool "boundary transient" true
+    (boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class
+     = Tool_result.Transient_error)
+
+let test_runtime_error_declares_runtime_failure_class () =
+  (* Incident shape: `ls ls lib` exits non-zero immediately. *)
+  let json =
+    process_json
+      ~cmd:"ls ls lib"
+      ~status:(Unix.WEXITED 2)
+      ~output:"ls: cannot access 'ls': No such file or directory"
+      ()
+  in
+  check string "semantic_status" "runtime_error"
+    (get_string_field json "semantic_status");
+  check string "failure_class" "runtime_failure" (get_string_field json "failure_class");
+  let boundary = boundary_of_json json in
+  check bool "declared" true
+    boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class_declared;
+  check bool "boundary runtime_failure" true
+    (boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class
+     = Tool_result.Runtime_failure)
+
+let test_blocked_declares_policy_rejection_failure_class () =
+  let json =
+    Masc.Exec_core.blocked_result_json
+      ~cmd:"rm -rf /"
+      ~error:"destructive_operation_blocked"
+      ~reason:"blocked by policy"
+      ()
+  in
+  check bool "ok" false (json |> member "ok" |> to_bool);
+  check string "failure_class" "policy_rejection"
+    (get_string_field json "failure_class");
+  let boundary = boundary_of_json json in
+  check bool "declared" true
+    boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class_declared;
+  check bool "boundary policy_rejection" true
+    (boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class
+     = Tool_result.Policy_rejection)
+
+let test_success_carries_no_failure_class () =
+  let json = process_json ~cmd:"ls lib" ~status:(Unix.WEXITED 0) ~output:"a.ml" () in
+  check bool "ok" true (json |> member "ok" |> to_bool);
+  check bool "failure_class absent" true (json |> member "failure_class" = `Null)
+
+let test_semantic_no_match_carries_no_failure_class () =
+  let cmd = "rg missing_pattern lib/" in
+  let json =
+    process_json
+      ~classification:(classification_of_cmd cmd)
+      ~cmd
+      ~status:(Unix.WEXITED 1)
+      ~output:""
+      ()
+  in
+  check bool "ok" true (json |> member "ok" |> to_bool);
+  check bool "failure_class absent" true (json |> member "failure_class" = `Null)
+
+let test_undeclared_payload_resolves_to_runtime_failure_undeclared () =
+  let boundary =
+    Masc.Keeper_tools_oas_failure_boundary.classify_raw_failure {|{"error":"boom"}|}
+  in
+  check bool "resolved runtime_failure" true
+    (boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class
+     = Tool_result.Runtime_failure);
+  check bool "undeclared" false
+    boundary.Masc.Keeper_tools_oas_failure_boundary.failure_class_declared
 
 let () =
   run "exec_core"
@@ -775,5 +870,20 @@ let () =
             `Quick test_history_compaction;
           test_case "compaction above threshold rewrites to compact_to"
             `Slow test_history_compaction_triggers;
+        ] );
+      ( "failure_class",
+        [
+          test_case "timeout declares transient_error" `Quick
+            test_timeout_declares_transient_failure_class;
+          test_case "runtime error declares runtime_failure" `Quick
+            test_runtime_error_declares_runtime_failure_class;
+          test_case "blocked declares policy_rejection" `Quick
+            test_blocked_declares_policy_rejection_failure_class;
+          test_case "success carries no failure_class" `Quick
+            test_success_carries_no_failure_class;
+          test_case "semantic no-match carries no failure_class" `Quick
+            test_semantic_no_match_carries_no_failure_class;
+          test_case "undeclared payload resolves to runtime_failure, undeclared"
+            `Quick test_undeclared_payload_resolves_to_runtime_failure_undeclared;
         ] );
     ]

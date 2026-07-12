@@ -26,7 +26,7 @@ let keeper_name = "chat-store-append-keeper"
 let persisted_path base_dir =
   Filename.concat
     (Filename.concat
-       (Masc.Common.masc_dir_from_base_path ~base_path:base_dir)
+       (Common.masc_dir_from_base_path ~base_path:base_dir)
        "keeper_chat")
     (keeper_name ^ ".jsonl")
 
